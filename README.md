@@ -138,7 +138,7 @@ The GitHub Actions CI workflow ([`.github/workflows/ci.yml`](file:///.github/wor
 
 1. **`frontend-build` (Frontend Build & Test)**: Installs Node.js dependencies, runs the Vitest unit test suite (`npm test`), and builds the Vite production bundle (`npm run build`).
 2. **`edge-function-auth-test` (Edge Function Authorization Unit Tests)**: Runs `python supabase/functions/approve-quarantine/test_approve_quarantine.py` to verify fail-closed role authorization for missing claims and non-privileged roles.
-3. **`e2e-validation` (End-to-End Ingestion Validation)**: Installs the Supabase CLI, launches the local Supabase stack (`supabase start`), resets database migrations (`supabase db reset`), configures `.env`, launches the Docker Compose stack, polls service health (`timescaledb` & `mosquitto`), and executes `python ingestion/validate.py`.
+3. **`e2e-validation` (End-to-End Ingestion Validation)**: Runs `npm run setup`, launches the unified Docker Compose stack (`docker compose up --build -d`), polls service health, and executes `python ingestion/validate.py`.
 
 ---
 

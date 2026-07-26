@@ -53,6 +53,8 @@ services:
       - ./supabase/seed.sql:/seed.sql:ro
     entrypoint: >
       /bin/sh -c "
+      echo 'Configuring PostgreSQL search_path...';
+      psql -h supabase-db -U postgres -d postgres -c 'ALTER ROLE postgres SET search_path TO auth, public, extensions;';
       echo 'Applying Supabase database migrations and seeds...';
       for f in /migrations/*.sql; do
         if [ -f \"$$f\" ]; then
@@ -69,9 +71,11 @@ services:
     depends_on:
       supabase-db:
         condition: service_healthy
+      supabase-auth:
+        condition: service_healthy
 
   supabase-auth:
-    image: supabase/gotrue:v2.143.0
+    image: supabase/gotrue:v2.189.0
     restart: always
     environment:
       GOTRUE_API_HOST: 0.0.0.0
@@ -85,6 +89,11 @@ services:
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
       GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
       GOTRUE_MAILER_AUTOCONFIRM: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9999/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     depends_on:
       supabase-db:
         condition: service_healthy
@@ -119,6 +128,27 @@ services:
         condition: service_started
       supabase-rest:
         condition: service_started
+      supabase-functions:
+        condition: service_started
+
+  supabase-functions:
+    image: supabase/edge-runtime:v1.74.2
+    restart: always
+    environment:
+      SUPABASE_URL: http://supabase-kong:8000
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      JWT_SECRET: ${SUPABASE_JWT_SECRET}
+      VERIFY_JWT: "false"
+    volumes:
+      - ./supabase/functions:/home/deno/functions:ro
+    command:
+      - start
+      - --main-service
+      - /home/deno/functions/main
+    depends_on:
+      supabase-db-init:
+        condition: service_completed_successfully
 
   supabase-studio:
     image: supabase/studio:latest
@@ -269,7 +299,11 @@ services:
       - "3002:3000"
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/provisioning/alerting:/etc/grafana/provisioning/alerting:ro
+      - ./grafana/provisioning/datasources:/tmp/datasources-template:ro
+      - grafana_provisioning_datasources:/etc/grafana/provisioning/datasources
+    entrypoint: ["/bin/sh", "-c", "sed \"s/\\$${DB_PASSWORD}/$$DB_PASSWORD/g\" /tmp/datasources-template/datasources.template.yml > /etc/grafana/provisioning/datasources/datasources.yml && exec /run.sh"]
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -278,5 +312,6 @@ volumes:
   pgdata:
   nodered_data:
   grafana_data:
+  grafana_provisioning_datasources:
   mosquitto_data:
   supabase_db_data:

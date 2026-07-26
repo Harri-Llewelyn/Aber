@@ -17,6 +17,14 @@ services:
         paths:
           - /rest/v1/
 
+  - name: functions-v1
+    url: http://supabase-functions:9000/
+    routes:
+      - name: functions-v1-routes
+        strip_path: true
+        paths:
+          - /functions/v1/
+
 plugins:
   - name: cors
     config:
