@@ -48,26 +48,17 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Run Edge Function Auth Unit Tests
+      - name: Run Edge Function Auth & RLS Policy Unit Tests
         run: |
           python supabase/functions/approve-quarantine/test_approve_quarantine.py
+          python supabase/migrations/test_user_roles_rls.py
 
   e2e-validation:
-    name: End-to-End Supabase & TimescaleDB Ingestion Validation
+    name: End-to-End Unified Stack Ingestion Validation
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Setup Supabase CLI
-        uses: supabase/setup-cli@v1
-        with:
-          version: latest
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -79,39 +70,26 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r ingestion/requirements.txt
 
-      - name: Start Local Supabase
-        run: |
-          supabase start
-          supabase db reset
-
       - name: Prepare Environment File
         run: |
           cp .env.example .env
-          eval $(supabase status -o env)
-          sed -i "s|^SUPABASE_URL=.*|SUPABASE_URL=${API_URL:-http://127.0.0.1:54321}|" .env
-          sed -i "s|^SUPABASE_ANON_KEY=.*|SUPABASE_ANON_KEY=${ANON_KEY}|" .env
-          sed -i "s|^SUPABASE_SERVICE_ROLE_KEY=.*|SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}|" .env
-          echo "SUPABASE_URL=${API_URL:-http://127.0.0.1:54321}" >> $GITHUB_ENV
-          echo "SUPABASE_ANON_KEY=${ANON_KEY}" >> $GITHUB_ENV
-          echo "SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}" >> $GITHUB_ENV
 
-      # Note: Supabase BaaS services (Auth, PostgREST, Studio, Kong) are provided exclusively by 'supabase start'.
-      # docker compose up -d launches the remaining application services (timescaledb, mosquitto, frontend, ingestion, node-red, grafana).
-      - name: Start Docker Compose Services
+      - name: Launch Unified Docker Compose Stack
         run: |
           docker compose up -d
 
       - name: Wait for Services Health
         run: |
           echo "Polling Docker Compose service health..."
-          timeout 60s bash -c '
+          timeout 90s bash -c '
             until docker compose exec -T timescaledb pg_isready -U postgres >/dev/null 2>&1 && \
+                  docker compose exec -T supabase-db pg_isready -U postgres >/dev/null 2>&1 && \
                   docker compose exec -T mosquitto mosquitto_sub -u factoryplus -P factoryplus123 -t "\$SYS/broker/version" -C 1 >/dev/null 2>&1; do
-              echo "Waiting for TimescaleDB and Mosquitto to become ready..."
+              echo "Waiting for TimescaleDB, Supabase DB, and Mosquitto to become ready..."
               sleep 2
             done
           '
-          echo "All services report healthy!"
+          echo "All core services report healthy!"
 
       - name: Run End-to-End Validation Script
         run: |

@@ -58,13 +58,10 @@ ON CONFLICT (schema_name) DO NOTHING;
 
 -- Seed Stack Service Directory
 INSERT INTO public.directory_services (id, service_name, service_type, endpoint_url, status) VALUES
-  ('f1111111-0000-0000-0000-000000000002', 'Factory+ Web Dashboard', 'GRAPHICAL_UI', 'http://localhost:3001', 'ACTIVE'),
+  ('f1111111-0000-0000-0000-000000000002', 'Factory+ Web Dashboard', 'GRAPHICAL_UI', 'http://localhost:3000', 'ACTIVE'),
   ('f1111111-0000-0000-0000-000000000003', 'Node-RED Edge Gateway', 'EDGE_NODE', 'http://localhost:1880', 'ACTIVE'),
   ('f1111111-0000-0000-0000-000000000004', 'Mosquitto MQTT Broker', 'MQTT_BROKER', 'mqtt://localhost:1883', 'ACTIVE'),
-  ('f1111111-0000-0000-0000-000000000005', 'PGWeb Database Explorer', 'DATABASE_EXPLORER', 'http://localhost:8082', 'ACTIVE'),
-  ('f1111111-0000-0000-0000-000000000006', 'Grafana Dashboards', 'MONITORING', 'http://localhost:3002', 'ACTIVE'),
-  ('f1111111-0000-0000-0000-000000000007', 'Prometheus Metrics Engine', 'METRIC_EXPORTER', 'http://localhost:9090', 'ACTIVE'),
-  ('f1111111-0000-0000-0000-000000000009', 'MQTTX Web Client', 'MQTT_CLIENT_UI', 'http://localhost:8081', 'ACTIVE')
+  ('f1111111-0000-0000-0000-000000000006', 'Grafana Dashboards', 'MONITORING', 'http://localhost:3002', 'ACTIVE')
 ON CONFLICT (service_name) DO NOTHING;
 
 -- Enable RLS

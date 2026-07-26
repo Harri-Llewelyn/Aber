@@ -1,0 +1,34 @@
+_format_version: "2.1"
+
+services:
+  - name: auth-v1
+    url: http://supabase-auth:9999/
+    routes:
+      - name: auth-v1-routes
+        strip_path: true
+        paths:
+          - /auth/v1/
+
+  - name: rest-v1
+    url: http://supabase-rest:3000/
+    routes:
+      - name: rest-v1-routes
+        strip_path: true
+        paths:
+          - /rest/v1/
+
+plugins:
+  - name: cors
+    config:
+      origins:
+        - "*"
+      methods:
+        - GET
+        - POST
+        - PUT
+        - PATCH
+        - DELETE
+        - OPTIONS
+      headers:
+        - "*"
+      credentials: true

@@ -13,7 +13,7 @@ This application provides real-time telemetry streaming, shopfloor spatial mappi
 The platform uses a decoupled architecture combining **Supabase Backend-as-a-Service (BaaS)** with **Standalone TimescaleDB**:
 
 * **Supabase BaaS**: Manages asset metadata (`cells`, `gateways`, `devices`), Supabase Auth, Row-Level Security (RLS) policies, PostgreSQL triggers for automated `digital_thread` audit logging, and TypeScript Supabase Edge Functions.
-* **Standalone TimescaleDB**: High-performance time-series database running `timescale/timescaledb:latest-pg15` exposed on port `5433` for `telemetry` hypertable metric storage.
+* **Standalone TimescaleDB**: High-performance time-series database running `timescale/timescaledb:latest-pg15` exposed on port `5433` for `telemetry` hypertable metric storage (schema auto-provisioned via `timescaledb/init/`).
 * **Python Ingestion Engine**: Consumes Sparkplug B industrial MQTT messages (`DBIRTH`, `DDATA`), verifying asset registration in Supabase (auto-quarantining unregistered devices) and streaming telemetry metrics directly to TimescaleDB.
 * **React Web Dashboard**: React 18 SPA powered by Supabase JS SDK, utilizing direct PostgREST queries, real-time database change channels (`supabase.channel`), and Supabase Auth session management.
 
@@ -65,30 +65,24 @@ flowchart TB
 
 ### Service Port Directory
 
-### 1. Application Runtime Services (Docker Compose)
-
-Running `docker compose up -d` starts 7 application container services:
+Running `docker compose up -d` launches the entire unified application stack:
 
 | Service | Container Name | Image / Build Target | Port | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| **`timescaledb`** | `tsdb_postgres` | `timescale/timescaledb:latest-pg15` | `5433:5432` | Standalone TimescaleDB instance for `telemetry` hypertable |
-| **`mosquitto`** | `mqtt_broker` | `eclipse-mosquitto:latest` | `1883:1883`, `9001:9001` | Eclipse Mosquitto MQTT broker for Sparkplug B traffic |
-| **`frontend`** | `iot_frontend` | `./frontend/Dockerfile` | `3000:3000` | React Web Dashboard UI |
+| **`supabase-db`** | `iot_supabase_db` | `supabase/postgres:15.6.1.143` | `54322:5432` | Authoritative Supabase PostgreSQL BaaS engine |
+| **`supabase-db-init`** | `iot_supabase_db_init` | `supabase/postgres:15.6.1.143` | — | One-shot init container applying migrations and seeding `seed.sql` |
+| **`supabase-auth`** | `iot_supabase_auth` | `supabase/gotrue:v2.158.1` | — | GoTrue Auth server (routes via Kong API Gateway) |
+| **`supabase-rest`** | `iot_supabase_rest` | `postgrest/postgrest:v12.2.0` | — | PostgREST API engine (routes via Kong API Gateway) |
+| **`supabase-kong`** | `iot_supabase_kong` | `kong:2.8.1-alpine` | `54321:8000` | Kong API Gateway (`http://127.0.0.1:54321`) |
+| **`supabase-studio`** | `iot_supabase_studio` | `supabase/studio:20240729-fa3d9bf` | `54323:3000` | Supabase Studio administrative Web UI (`http://127.0.0.1:54323`) |
+| **`timescaledb`** | `tsdb_postgres` | `timescale/timescaledb:latest-pg15` | `5433:5432` | Standalone TimescaleDB instance for `telemetry` hypertable (schema auto-provisioned via `timescaledb/init/`) |
+| **`mosquitto-init`** | `iot_mosquitto_init` | `eclipse-mosquitto:latest` | — | One-shot init container generating Mosquitto password file from environment variables |
+| **`mosquitto`** | `mqtt_broker` | `eclipse-mosquitto:latest` | `1883:1883`, `9001:9001` | Eclipse Mosquitto MQTT broker for Sparkplug B traffic (credentials auto-generated via `mosquitto-init` from `.env`) |
+| **`frontend`** | `iot_frontend` | `./frontend/Dockerfile` | `3000:3000` | React Web Dashboard UI (served via NGINX static file server) |
 | **`ingestion`** | `iot_ingestion` | `./Dockerfile` | — | Python daemon routing metadata to Supabase & telemetry to TimescaleDB |
 | **`node-red-init`** | `iot_node_red_init` | `nodered/node-red:latest` | — | One-shot init container configuring Node-RED flows & credentials |
 | **`node-red`** | `iot_node_red` | `nodered/node-red:latest` | `1880:1880` | Edge flow automation runtime |
 | **`grafana`** | `iot_grafana` | `grafana/grafana:latest` | `3002:3000` | Analytics dashboards connected to TimescaleDB |
-
-### 2. Supabase Backend-as-a-Service (Supabase CLI)
-
-Executing `npx supabase start` manages the authoritative Supabase BaaS stack:
-
-| Component | Service | Port | Description |
-| :--- | :--- | :--- | :--- |
-| **Kong API Gateway** | API / Auth / REST | `54321` | Authoritative API gateway (`http://127.0.0.1:54321`) |
-| **PostgreSQL Database** | Database | `54322` | Supabase Postgres database engine (`127.0.0.1:54322`) |
-| **Supabase Studio** | Web UI | `54323` | Database management UI (`http://127.0.0.1:54323`) |
-| **Inbucket** | Mail Server | `54324` | Local email testing web console (`http://127.0.0.1:54324`) |
 
 ---
 
@@ -120,7 +114,9 @@ All database migrations are stored in `supabase/migrations/`:
   - **RLS Policies**: Enforces RLS permissions for entity document links, asset parameter configurations, schema registry definitions, and directory services.
 - **`20260101000003_add_rbac_permissions.sql`**:
   - **Tables**: `roles`, `permissions`, `role_permissions`, `user_roles`.
-  - **Permissions System**: Authoritative source of truth for user roles and fine-grained permission UUIDs, queried dynamically by `usePermissions.js` for `Administrator`, `Shopfloor_Manager`, `Operator`, and `Auditor` personas.
+  - **Permissions System**: Defines role definitions and fine-grained permission UUIDs. This schema currently drives frontend UI permission gating (`usePermissions.js`), whereas server-side authorization enforcement is driven directly by the `app_metadata.role` JWT claim in RLS policies and Edge Functions.
+- **`20260101000004_fix_user_roles_rls.sql`**:
+  - **RLS Policy Fix**: Replaces overly-broad `user_roles` SELECT policy with `user_roles_select_own_or_privileged`, restricting visibility of `user_roles` records strictly to the record owner (`auth.uid()`) or administrative roles (`Administrator` / `Shopfloor_Manager`).
 
 ---
 
@@ -165,43 +161,31 @@ The validation script verifies:
 
 ## Quick Start & Installation Guide
 
-1. **Clone repository and create environment file**:
+1. **Environment Setup (Cross-Platform)**:
    ```bash
-   cp .env.example .env
+   npm run setup
    ```
+   > [!NOTE]
+   > `npm run setup` initializes `.env` from `.env.example` using plain Node.js (`scripts/setup.mjs`). This operates identically across Windows (PowerShell/CMD), macOS, and Linux without requiring POSIX shell commands (`eval` / `sed`).
 
-2. **Start Local Supabase Stack**:
-   ```bash
-   npx supabase start
-   npx supabase db reset
-   ```
-
-3. **Synchronize Environment Keys**:
-   Populate `.env` with the active Supabase API keys generated by `supabase status`:
-   ```bash
-   eval $(npx supabase status -o env)
-   sed -i "s|^SUPABASE_URL=.*|SUPABASE_URL=${API_URL:-http://127.0.0.1:54321}|" .env
-   sed -i "s|^SUPABASE_ANON_KEY=.*|SUPABASE_ANON_KEY=${ANON_KEY}|" .env
-   sed -i "s|^SUPABASE_SERVICE_ROLE_KEY=.*|SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}|" .env
-   ```
-
-4. **Start Application Services (Docker Compose)**:
+2. **Start Full Unified Application Stack (Docker Compose)**:
    ```bash
    docker compose up --build -d
    ```
+   > [!NOTE]
+   > All services — including the Supabase BaaS stack, TimescaleDB, MQTT broker, and web UI — launch automatically. Database migrations (`supabase/migrations/`) and seeds (`supabase/seed.sql`) are applied on initial container startup by `supabase-db-init`.
 
-5. **Access Web Interfaces**:
+3. **Access Web Interfaces**:
    - **React Dashboard**: `http://localhost:3000`
    - **Supabase Studio**: `http://127.0.0.1:54323`
    - **Node-RED Console**: `http://localhost:1880`
    - **Grafana Dashboards**: `http://localhost:3002`
-   - **Inbucket Mail Console**: `http://127.0.0.1:54324`
 
-6. **Authentication Credentials**:
+4. **Authentication Credentials**:
    - **Default Sign In**: The login screen (`http://localhost:3000`) is pre-filled with the local admin seed persona:
      - **Email**: `admin@factoryplus.local`
      - **Password**: `factoryplus123`
-   - **Local Dev Seed Accounts**: Demo accounts (`admin@factoryplus.local`, `manager@factoryplus.local`, `operator@factoryplus.local`, `auditor@factoryplus.local` with password `factoryplus123`) are populated automatically during `supabase db reset` via `supabase/seed.sql` for local development.
+   - **Local Dev Seed Accounts**: Demo accounts (`admin@factoryplus.local`, `manager@factoryplus.local`, `operator@factoryplus.local`, `auditor@factoryplus.local` with password `factoryplus123`) are populated automatically during database initialization via `supabase/seed.sql` for local development.
    - **Self-Registration**: Click **"Need an account? Sign Up"** on the Portal to create a new user account instantly.
 
 7. **Repository Hand-off & Packaging Best Practices**:

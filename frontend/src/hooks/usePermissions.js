@@ -59,13 +59,19 @@ export function usePermissions(session, showToast) {
               .map(rp => rp.permission_id || rp.permissions?.id)
               .filter(Boolean);
           }
+        } else if (error) {
+          console.warn('[usePermissions] DB user_roles query error:', error.message);
         }
       } catch (err) {
-        // Fallback handled below
+        console.warn('[usePermissions] DB user_roles query exception:', err.message);
       }
 
       // Fallback: If DB permissions query returned no rows but appRole is known
       if (permUuids.length === 0 && appRole && DEFAULT_ROLE_PERMISSIONS_MAP[appRole]) {
+        console.warn(`[usePermissions] DB user_roles query returned zero rows for user ${session.user.id}; static permission fallback in use for role '${appRole}'.`);
+        if (typeof showToast === 'function') {
+          showToast('warning', `DB user_roles query empty; static permission fallback in use for role '${appRole}'`);
+        }
         permUuids = DEFAULT_ROLE_PERMISSIONS_MAP[appRole];
       }
 

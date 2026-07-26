@@ -19,6 +19,9 @@ dist/
 build/
 .cache/
 
+# Mosquitto generated credentials
+mosquitto/password_file
+
 # OS / IDE
 .DS_Store
 Thumbs.db

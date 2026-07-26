@@ -298,6 +298,11 @@ def on_message(client, userdata, msg):
 
 def main():
     logger.info("Initializing Supabase + TimescaleDB Ingestion Daemon...")
+    if supabase_client is None:
+        logger.error(
+            "CRITICAL: Supabase client is uninitialized! SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing or invalid. "
+            "Quarantine gating is DISABLED and device registration checks will fail."
+        )
 
     # Note: Intentionally using paho-mqtt==1.6.1 v1 callback signatures.
     # If upgrading to paho-mqtt 2.x+, callbacks must be migrated to CallbackAPIVersion.VERSION2

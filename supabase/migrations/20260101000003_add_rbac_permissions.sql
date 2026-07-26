@@ -1,5 +1,10 @@
 -- Migration: 20260101000003_add_rbac_permissions.sql
 -- Description: Port roles, permissions, role_permissions, and user_roles tables to Supabase with RLS and seeds.
+--
+-- TODO: Future Architecture Enhancement:
+-- A stronger authorization design would have RLS policies call a `has_permission(uuid, text)` SQL function
+-- that joins `user_roles` -> `role_permissions` -> `permissions`, making the DB permission schema the active
+-- server-side enforcement mechanism instead of relying strictly on `auth.jwt() -> 'app_metadata' ->> 'role'`.
 
 CREATE TABLE IF NOT EXISTS public.roles (
     id SERIAL PRIMARY KEY,

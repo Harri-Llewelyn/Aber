@@ -1,4 +1,7 @@
 services:
+  # ---------------------------------------------------------------------------
+  # Standalone TimescaleDB (Telemetry Hypertable Storage)
+  # ---------------------------------------------------------------------------
   timescaledb:
     image: timescale/timescaledb:latest-pg15
     restart: always
@@ -9,12 +12,147 @@ services:
     ports:
       - "5433:5432"
     volumes:
+      # Note: Initialization scripts in /docker-entrypoint-initdb.d only run on an empty data directory.
+      # Existing pgdata volumes must be recreated (docker compose down -v) to pick up schema changes.
+      - ./timescaledb/init:/docker-entrypoint-initdb.d:ro
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Self-Hosted Supabase Stack (Postgres, GoTrue Auth, PostgREST, Kong, Studio)
+  # ---------------------------------------------------------------------------
+  supabase-db:
+    image: supabase/postgres:15.6.1.143
+    restart: always
+    ports:
+      - "${SUPABASE_DB_PORT:-54322}:5432"
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      JWT_SECRET: ${SUPABASE_JWT_SECRET}
+      ANON_KEY: ${SUPABASE_ANON_KEY}
+      SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+    volumes:
+      - supabase_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  supabase-db-init:
+    image: supabase/postgres:15.6.1.143
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - ./supabase/migrations:/migrations:ro
+      - ./supabase/seed.sql:/seed.sql:ro
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Applying Supabase database migrations and seeds...';
+      for f in /migrations/*.sql; do
+        if [ -f \"$$f\" ]; then
+          echo \"Executing migration $$f...\";
+          psql -h supabase-db -U postgres -d postgres -f \"$$f\";
+        fi
+      done;
+      if [ -f /seed.sql ]; then
+        echo 'Executing seed.sql...';
+        psql -h supabase-db -U postgres -d postgres -f /seed.sql;
+      fi;
+      echo 'Supabase database initialized successfully.';
+      "
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+
+  supabase-auth:
+    image: supabase/gotrue:v2.143.0
+    restart: always
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@supabase-db:5432/postgres?sslmode=disable
+      GOTRUE_SITE_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
+      API_EXTERNAL_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
+      GOTRUE_JWT_SECRET: ${SUPABASE_JWT_SECRET}
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+
+  supabase-rest:
+    image: postgrest/postgrest:v12.2.0
+    restart: always
+    environment:
+      PGRST_DB_URI: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@supabase-db:5432/postgres
+      PGRST_DB_SCHEMAS: public,storage,graphql_public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${SUPABASE_JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+
+  supabase-kong:
+    image: kong:2.8.1-alpine
+    restart: always
+    ports:
+      - "${KONG_HTTP_PORT:-54321}:8000"
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /usr/local/kong/declarative/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors
+    volumes:
+      - ./supabase/kong.yml:/usr/local/kong/declarative/kong.yml:ro
+    depends_on:
+      supabase-auth:
+        condition: service_started
+      supabase-rest:
+        condition: service_started
+
+  supabase-studio:
+    image: supabase/studio:latest
+    restart: always
+    ports:
+      - "${STUDIO_PORT:-54323}:3000"
+    environment:
+      STUDIO_PG_META_URL: http://supabase-rest:3000
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      SUPABASE_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
+      SUPABASE_PUBLIC_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+    depends_on:
+      supabase-kong:
+        condition: service_started
+
+  # ---------------------------------------------------------------------------
+  # Messaging & Edge Infrastructure
+  # ---------------------------------------------------------------------------
+  mosquitto-init:
+    image: eclipse-mosquitto:latest
+    user: "0"
+    environment:
+      MQTT_USER: ${MQTT_USER:-factoryplus}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+    volumes:
+      - mosquitto_data:/mosquitto/config
+    entrypoint: >
+      /bin/sh -c "
+      mosquitto_passwd -b -c /mosquitto/config/password_file \"$MQTT_USER\" \"$MQTT_PASSWORD\";
+      chmod 644 /mosquitto/config/password_file;
+      echo 'Mosquitto password file initialized';
+      "
 
   mosquitto:
     image: eclipse-mosquitto:latest
@@ -26,15 +164,22 @@ services:
       MQTT_USER: ${MQTT_USER:-factoryplus}
       MQTT_PASSWORD: ${MQTT_PASSWORD}
     volumes:
-      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
-      - ./mosquitto/password_file:/mosquitto/config/password_file:ro
+      - mosquitto_data:/mosquitto/config
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
     healthcheck:
       test: ["CMD-SHELL", "mosquitto_sub -u $${MQTT_USER:-factoryplus} -P $${MQTT_PASSWORD} -t '$$SYS/broker/version' -C 1 || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5
       start_period: 5s
+    depends_on:
+      mosquitto-init:
+        condition: service_completed_successfully
 
+  # ---------------------------------------------------------------------------
+  # Application Runtimes & Ingestion
+  # ---------------------------------------------------------------------------
+  # React Web Dashboard (multi-stage build serving static assets via NGINX on port 3000)
   frontend:
     build:
       context: ./frontend
@@ -61,12 +206,16 @@ services:
       MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-factoryplus}
       MQTT_PASSWORD: ${MQTT_PASSWORD}
+      SUPABASE_URL: http://supabase-kong:8000
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
       PYTHONUNBUFFERED: "1"
     depends_on:
       timescaledb:
         condition: service_healthy
       mosquitto:
         condition: service_healthy
+      supabase-db-init:
+        condition: service_completed_successfully
 
   node-red-init:
     image: nodered/node-red:latest
@@ -115,6 +264,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
       GF_SERVER_ROOT_URL: "http://localhost:3002/"
       GF_INSTALL_PLUGINS: ""
+      DB_PASSWORD: ${DB_PASSWORD}
     ports:
       - "3002:3000"
     volumes:
@@ -128,3 +278,5 @@ volumes:
   pgdata:
   nodered_data:
   grafana_data:
+  mosquitto_data:
+  supabase_db_data:
