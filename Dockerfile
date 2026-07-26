@@ -1,6 +1,6 @@
 FROM python:3.10-slim
 
-# Install system dependencies (protobuf-compiler for compiling .proto files)
+# Install system dependencies (protobuf-compiler for compiling .proto files, compatible with protobuf==4.25.3)
 RUN apt-get update && apt-get install -y \
     protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*

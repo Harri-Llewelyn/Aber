@@ -69,20 +69,21 @@ Running `docker compose up -d` launches the entire unified application stack:
 
 | Service | Container Name | Image / Build Target | Port | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| **`supabase-db`** | `iot_supabase_db` | `supabase/postgres:15.6.1.143` | `54322:5432` | Authoritative Supabase PostgreSQL BaaS engine |
-| **`supabase-db-init`** | `iot_supabase_db_init` | `supabase/postgres:15.6.1.143` | — | One-shot init container applying migrations and seeding `seed.sql` |
-| **`supabase-auth`** | `iot_supabase_auth` | `supabase/gotrue:v2.158.1` | — | GoTrue Auth server (routes via Kong API Gateway) |
-| **`supabase-rest`** | `iot_supabase_rest` | `postgrest/postgrest:v12.2.0` | — | PostgREST API engine (routes via Kong API Gateway) |
-| **`supabase-kong`** | `iot_supabase_kong` | `kong:2.8.1-alpine` | `54321:8000` | Kong API Gateway (`http://127.0.0.1:54321`) |
-| **`supabase-studio`** | `iot_supabase_studio` | `supabase/studio:20240729-fa3d9bf` | `54323:3000` | Supabase Studio administrative Web UI (`http://127.0.0.1:54323`) |
-| **`timescaledb`** | `tsdb_postgres` | `timescale/timescaledb:latest-pg15` | `5433:5432` | Standalone TimescaleDB instance for `telemetry` hypertable (schema auto-provisioned via `timescaledb/init/`) |
-| **`mosquitto-init`** | `iot_mosquitto_init` | `eclipse-mosquitto:latest` | — | One-shot init container generating Mosquitto password file from environment variables |
-| **`mosquitto`** | `mqtt_broker` | `eclipse-mosquitto:latest` | `1883:1883`, `9001:9001` | Eclipse Mosquitto MQTT broker for Sparkplug B traffic (credentials auto-generated via `mosquitto-init` from `.env`) |
-| **`frontend`** | `iot_frontend` | `./frontend/Dockerfile` | `3000:3000` | React Web Dashboard UI (served via NGINX static file server) |
-| **`ingestion`** | `iot_ingestion` | `./Dockerfile` | — | Python daemon routing metadata to Supabase & telemetry to TimescaleDB |
-| **`node-red-init`** | `iot_node_red_init` | `nodered/node-red:latest` | — | One-shot init container configuring Node-RED flows & credentials |
-| **`node-red`** | `iot_node_red` | `nodered/node-red:latest` | `1880:1880` | Edge flow automation runtime |
-| **`grafana`** | `iot_grafana` | `grafana/grafana:latest` | `3002:3000` | Analytics dashboards connected to TimescaleDB |
+| **`supabase-db`** | `factoryplus_supabase_db` | `supabase/postgres:15.6.1.143` | `54322:5432` | Authoritative Supabase PostgreSQL BaaS engine |
+| **`supabase-db-init`** | `factoryplus_supabase_db_init` | `supabase/postgres:15.6.1.143` | — | One-shot init container applying migrations and seeding `seed.sql` |
+| **`supabase-auth`** | `factoryplus_supabase_auth` | `supabase/gotrue:v2.189.0` | — | GoTrue Auth server (connects via least-privilege `supabase_auth_admin` role) |
+| **`supabase-rest`** | `factoryplus_supabase_rest` | `postgrest/postgrest:v12.2.0` | — | PostgREST API engine (connects via least-privilege `authenticator` role) |
+| **`supabase-kong`** | `factoryplus_supabase_kong` | `kong:2.8.1-alpine` | `54321:8000` | Kong API Gateway (`http://127.0.0.1:54321`) |
+| **`supabase-functions`** | `factoryplus_supabase_functions` | `supabase/edge-runtime:v1.74.2` | — | Supabase Deno Edge Runtime executing serverless functions |
+| **`supabase-studio`** | `factoryplus_supabase_studio` | `supabase/studio:latest` | `54323:3000` | Supabase Studio administrative Web UI (`http://127.0.0.1:54323`) |
+| **`timescaledb`** | `factoryplus_timescaledb` | `timescale/timescaledb:latest-pg15` | `5433:5432` | Standalone TimescaleDB instance for `telemetry` hypertable (schema auto-provisioned via `timescaledb/init/`) |
+| **`mosquitto-init`** | `factoryplus_mosquitto_init` | `eclipse-mosquitto:latest` | — | One-shot init container generating Mosquitto password file from environment variables |
+| **`mosquitto`** | `factoryplus_mosquitto` | `eclipse-mosquitto:latest` | `1883:1883`, `9001:9001` | Eclipse Mosquitto MQTT broker for Sparkplug B traffic (credentials auto-generated via `mosquitto-init` from `.env`) |
+| **`frontend`** | `factoryplus_frontend` | `./frontend/Dockerfile` | `3000:3000` | React Web Dashboard UI (served via NGINX static file server) |
+| **`ingestion`** | `factoryplus_ingestion` | `./Dockerfile` | — | Python daemon routing metadata to Supabase & telemetry to TimescaleDB |
+| **`node-red-init`** | `factoryplus_node_red_init` | `nodered/node-red:latest` | — | One-shot init container configuring Node-RED flows & credentials |
+| **`node-red`** | `factoryplus_node_red` | `nodered/node-red:latest` | `1880:1880` | Edge flow automation runtime |
+| **`grafana`** | `factoryplus_grafana` | `grafana/grafana:latest` | `3002:3000` | Analytics dashboards connected to TimescaleDB |
 
 ---
 
@@ -114,9 +115,11 @@ All database migrations are stored in `supabase/migrations/`:
   - **RLS Policies**: Enforces RLS permissions for entity document links, asset parameter configurations, schema registry definitions, and directory services.
 - **`20260101000003_add_rbac_permissions.sql`**:
   - **Tables**: `roles`, `permissions`, `role_permissions`, `user_roles`.
-  - **Permissions System**: Defines role definitions and fine-grained permission UUIDs. This schema currently drives frontend UI permission gating (`usePermissions.js`), whereas server-side authorization enforcement is driven directly by the `app_metadata.role` JWT claim in RLS policies and Edge Functions.
+  - **Permissions System**: Defines role definitions and fine-grained permission UUIDs (including `digital_thread:read`). Drives frontend UI permission gating (`usePermissions.js`), with distinct permission assignments for `Operator` (`telemetry:read`, `quarantine:view`) and `Auditor` (`digital_thread:read`).
 - **`20260101000004_fix_user_roles_rls.sql`**:
   - **RLS Policy Fix**: Replaces overly-broad `user_roles` SELECT policy with `user_roles_select_own_or_privileged`, restricting visibility of `user_roles` records strictly to the record owner (`auth.uid()`) or administrative roles (`Administrator` / `Shopfloor_Manager`).
+- **`20260101000005_restrict_digital_thread_access.sql`**:
+  - **RLS Policy Restriction**: Replaces permissive `digital_thread_select_authenticated` policy with `digital_thread_select_privileged_or_auditor`, restricting `digital_thread` SELECT access strictly to `Administrator`, `Shopfloor_Manager`, and `Auditor` roles.
 
 ---
 
@@ -128,6 +131,8 @@ Edge functions are located in `supabase/functions/`:
   - Fails closed (`403 Forbidden`) if role claim is missing or unprivileged.
   - Sets `is_quarantined = false` and assigns `gateway_id` for approved devices via Supabase Service Role client.
 - **`deploy-nodered`** (`supabase/functions/deploy-nodered/index.ts`):
+  - Validates session JWT & role claims (`Administrator` / `Shopfloor_Manager`).
+  - Fails closed (`401 Unauthorized` / `403 Forbidden`) if Authorization header or role claim is missing or unprivileged.
   - Proxies flow deployment updates to Node-RED (`http://node-red:1880/flows`).
 
 ---
@@ -137,18 +142,26 @@ Edge functions are located in `supabase/functions/`:
 The GitHub Actions CI workflow ([`.github/workflows/ci.yml`](file:///.github/workflows/ci.yml)) executes automated testing and verification across three parallel jobs:
 
 1. **`frontend-build` (Frontend Build & Test)**: Installs Node.js dependencies, runs the Vitest unit test suite (`npm test`), and builds the Vite production bundle (`npm run build`).
-2. **`edge-function-auth-test` (Edge Function Authorization Unit Tests)**: Runs `python supabase/functions/approve-quarantine/test_approve_quarantine.py` to verify fail-closed role authorization for missing claims and non-privileged roles.
-3. **`e2e-validation` (End-to-End Ingestion Validation)**: Runs `npm run setup`, launches the unified Docker Compose stack (`docker compose up --build -d`), polls service health, and executes `python ingestion/validate.py`.
+2. **`edge-function-auth-test` (Edge Function Authorization Unit Tests)**: Runs unit tests (`test_approve_quarantine.py`, `test_deploy_nodered.py`, `test_user_roles_rls.py`) to verify fail-closed role authorization for missing claims and non-privileged roles.
+3. **`e2e-validation` (End-to-End Ingestion Validation)**: Installs Python dependencies, installs `protobuf-compiler`, compiles `sparkplug_b.proto` via `protoc --python_out=. sparkplug_b.proto`, launches the unified Docker Compose stack (`docker compose up -d`), polls service health, and executes `python ingestion/validate.py`.
 
 ---
 
 ## End-to-End Validation
 
-To execute the end-to-end integration test suite:
+Running `ingestion/validate.py` outside of Docker requires `protobuf-compiler` (`protoc`) installed on your host system to compile the Sparkplug B protobuf definition:
 
 ```bash
+# 1. Compile Sparkplug B Protobuf module (prerequisite outside Docker)
+protoc --python_out=. sparkplug_b.proto
+cp sparkplug_b_pb2.py ingestion/
+
+# 2. Execute the end-to-end integration test suite
 python ingestion/validate.py
 ```
+
+> [!NOTE]
+> When running the stack in Docker (`docker compose up --build -d`), `sparkplug_b_pb2.py` is compiled automatically inside the container build step.
 
 The validation script verifies:
 1. **MQTT Payload Publishing**: Sends Sparkplug B `DBIRTH` and `DDATA` messages to Mosquitto.

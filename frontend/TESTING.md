@@ -1,6 +1,6 @@
 # Frontend Vitest Automated Test Suite
 
-This directory contains automated unit and component tests for the React frontend of **Factory+ Asset Tracking Prototype**.
+This directory contains automated unit and component tests for the React frontend of **Factory+ Asset Tracking Platform**.
 
 ## Test Suite Structure
 

@@ -10,9 +10,12 @@
 // *   Cirrus Link Solutions - initial implementation
 
 //
-// To compile:
+// To compile (Java):
 // cd client_libraries/java
 // protoc --proto_path=../../ --java_out=src/main/java ../../sparkplug_b.proto
+//
+// To compile (Python):
+// protoc --python_out=. sparkplug_b.proto
 //
 
 syntax = "proto2";

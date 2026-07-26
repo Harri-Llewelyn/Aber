@@ -27,6 +27,7 @@ supabase/.branches/
 supabase/.temp/
 
 # Generated Protobuf files
+*_pb2.py
 ingestion/*_pb2.py
 
 # OS / IDE

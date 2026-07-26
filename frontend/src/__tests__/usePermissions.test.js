@@ -122,6 +122,31 @@ describe('usePermissions hook', () => {
     // Read permissions should be allowed
     expect(result.current.hasPermission(PERMISSION_UUIDS.TELEMETRY_READ)).toBe(true)
     expect(result.current.hasPermission(PERMISSION_UUIDS.QUARANTINE_VIEW)).toBe(true)
+    expect(result.current.hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)).toBe(false)
+  })
+
+  it('resolves Auditor role and grants DIGITAL_THREAD_READ permission while denying management and telemetry/quarantine actions', async () => {
+    const session = {
+      user: {
+        id: 'user-auditor-4',
+        app_metadata: { role: 'Auditor' }
+      }
+    }
+
+    const { result } = renderHook(() => usePermissions(session, vi.fn()))
+
+    await waitFor(() => {
+      expect(result.current.loadingPerms).toBe(false)
+      expect(result.current.userRole).toBe('Auditor')
+    })
+
+    // Digital Thread audit permission must be granted
+    expect(result.current.hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)).toBe(true)
+
+    // Management & telemetry/quarantine permissions must be denied
+    expect(result.current.hasPermission(PERMISSION_UUIDS.GATEWAY_MANAGE)).toBe(false)
+    expect(result.current.hasPermission(PERMISSION_UUIDS.TELEMETRY_READ)).toBe(false)
+    expect(result.current.hasPermission(PERMISSION_UUIDS.QUARANTINE_VIEW)).toBe(false)
   })
 
   it('denies permissions when user metadata lacks a role claim (fail-closed)', async () => {

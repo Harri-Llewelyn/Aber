@@ -82,7 +82,8 @@ def is_device_quarantined(asset_id: str) -> bool:
     Caches results for CACHE_TTL_SECONDS to avoid excessive Supabase round-trips.
     """
     if not supabase_client:
-        return False
+        logger.warning("Supabase client unavailable. Failing closed: device '%s' assumed QUARANTINED.", asset_id)
+        return True
 
     now = time.time()
     if asset_id in _quarantine_cache:
@@ -299,10 +300,11 @@ def on_message(client, userdata, msg):
 def main():
     logger.info("Initializing Supabase + TimescaleDB Ingestion Daemon...")
     if supabase_client is None:
-        logger.error(
-            "CRITICAL: Supabase client is uninitialized! SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing or invalid. "
-            "Quarantine gating is DISABLED and device registration checks will fail."
+        logger.critical(
+            "CRITICAL SECURITY ERROR: Supabase client is uninitialized! SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing or invalid. "
+            "Ingestion daemon refusing to start MQTT loop in fail-open state. System halting to enforce fail-closed device quarantine gating."
         )
+        raise SystemExit(1)
 
     # Note: Intentionally using paho-mqtt==1.6.1 v1 callback signatures.
     # If upgrading to paho-mqtt 2.x+, callbacks must be migrated to CallbackAPIVersion.VERSION2

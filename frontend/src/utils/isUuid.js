@@ -1,4 +1,4 @@
-// Keep this logic in sync with the twin implementation at supabase/functions/approve-quarantine/isUuid.ts — this duplication exists because the Deno edge function runtime cannot import frontend source.
+// Keep this logic in sync with the twin implementation at supabase/functions/approve-quarantine/isUuid.ts — enforced by frontend/src/__tests__/isUuid.test.js and CI.
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**

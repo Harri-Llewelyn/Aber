@@ -1,4 +1,4 @@
 paho-mqtt==1.6.1
 psycopg2-binary==2.9.9
-protobuf==4.25.3
+protobuf==4.25.3  # Compatible with apt protobuf-compiler (protoc 3.x/25.x)
 supabase

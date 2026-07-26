@@ -48,4 +48,27 @@ describe('isUuid helper and injection prevention', () => {
     // Assert eq('name', maliciousId) was called safely rather than raw template interpolation
     expect(queryBuilder.eq).toHaveBeenCalledWith('name', maliciousId);
   });
+
+  it('enforces exact regex match between frontend and Deno edge function isUuid implementations', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+
+    const frontendFile = path.resolve(__dirname, '../utils/isUuid.js');
+    const edgeFunctionFile = path.resolve(__dirname, '../../../supabase/functions/approve-quarantine/isUuid.ts');
+
+    const frontendCode = fs.readFileSync(frontendFile, 'utf-8');
+    const edgeFunctionCode = fs.readFileSync(edgeFunctionFile, 'utf-8');
+
+    const extractRegex = (code) => {
+      const match = code.match(/const\s+UUID_REGEX\s*=\s*(.+);/);
+      return match ? match[1].trim() : null;
+    };
+
+    const frontendRegex = extractRegex(frontendCode);
+    const edgeFunctionRegex = extractRegex(edgeFunctionCode);
+
+    expect(frontendRegex).not.toBeNull();
+    expect(edgeFunctionRegex).not.toBeNull();
+    expect(frontendRegex).toBe(edgeFunctionRegex);
+  });
 });

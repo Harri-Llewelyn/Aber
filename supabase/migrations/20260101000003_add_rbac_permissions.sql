@@ -51,7 +51,8 @@ INSERT INTO public.permissions (id, name, description) VALUES
   ('a012b345-6789-4c1d-8706-933e08544e38', 'document:manage', 'Add, edit, and remove external document links attached to assets'),
   ('e012c345-6789-4c1d-8706-933e08544e39', 'authz:manage', 'Manage roles, user permissions, and access checks'),
   ('f123d456-7890-4c1d-8706-933e08544e40', 'schema:manage', 'Register and validate industrial schemas'),
-  ('c234e567-8901-4c1d-8706-933e08544e41', 'gitops:manage', 'Deploy flows and manage GitOps edge configurations')
+  ('c234e567-8901-4c1d-8706-933e08544e41', 'gitops:manage', 'Deploy flows and manage GitOps edge configurations'),
+  ('d345e678-9012-4c1d-8706-933e08544e42', 'digital_thread:read', 'View continuous Digital Thread audit log entries')
 ON CONFLICT (id) DO NOTHING;
 
 -- Assign Permissions to Roles
@@ -68,6 +69,7 @@ INSERT INTO public.role_permissions (role_id, permission_id) VALUES
   (1, 'e012c345-6789-4c1d-8706-933e08544e39'),
   (1, 'f123d456-7890-4c1d-8706-933e08544e40'),
   (1, 'c234e567-8901-4c1d-8706-933e08544e41'),
+  (1, 'd345e678-9012-4c1d-8706-933e08544e42'),
 
   (2, 'cb46a943-42e1-4c1d-8706-933e08544e30'),
   (2, 'cb46a943-42e1-4c1d-8706-933e08544e31'),
@@ -81,12 +83,12 @@ INSERT INTO public.role_permissions (role_id, permission_id) VALUES
   (2, 'e012c345-6789-4c1d-8706-933e08544e39'),
   (2, 'f123d456-7890-4c1d-8706-933e08544e40'),
   (2, 'c234e567-8901-4c1d-8706-933e08544e41'),
+  (2, 'd345e678-9012-4c1d-8706-933e08544e42'),
 
   (3, 'f012a345-6789-4c1d-8706-933e08544e36'),
   (3, 'cb46a943-42e1-4c1d-8706-933e08544e30'),
 
-  (4, 'f012a345-6789-4c1d-8706-933e08544e36'),
-  (4, 'cb46a943-42e1-4c1d-8706-933e08544e30')
+  (4, 'd345e678-9012-4c1d-8706-933e08544e42')
 ON CONFLICT DO NOTHING;
 
 -- Enable RLS

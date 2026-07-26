@@ -31,14 +31,37 @@ jobs:
           cd frontend
           npm test
 
+      - name: Verify isUuid Regex Implementation Sync
+        run: |
+          FE_REGEX=$(grep -E 'const UUID_REGEX' frontend/src/utils/isUuid.js | tr -d '[:space:]')
+          DENO_REGEX=$(grep -E 'const UUID_REGEX' supabase/functions/approve-quarantine/isUuid.ts | tr -d '[:space:]')
+          if [ "$FE_REGEX" != "$DENO_REGEX" ]; then
+            echo "::error::isUuid UUID_REGEX definitions have drifted between frontend and Deno edge function!"
+            exit 1
+          fi
+          echo "isUuid UUID_REGEX definitions are byte-identical across frontend and Deno edge function."
+
       - name: Build Production Bundle
         run: |
           cd frontend
           npm run build
 
   edge-function-auth-test:
-    name: Edge Function Fail-Closed Authorization Unit Tests
+    name: Edge Function & RLS Authorization Tests
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: supabase/postgres:15.6.1.143
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 54322:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -48,9 +71,31 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: Install Python Test Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install psycopg2-binary
+
+      - name: Apply Supabase Database Migrations
+        run: |
+          PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -c "ALTER ROLE postgres SET search_path TO auth, public, extensions;"
+          for f in supabase/migrations/*.sql; do
+            echo "Applying $$f...";
+            PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f "$$f";
+          done;
+          if [ -f supabase/seed.sql ]; then
+            echo "Applying seed.sql...";
+            PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f supabase/seed.sql;
+          fi;
+
       - name: Run Edge Function Auth & RLS Policy Unit Tests
+        env:
+          SUPABASE_DB_HOST: localhost
+          SUPABASE_DB_PORT: '54322'
+          SUPABASE_DB_PASSWORD: postgres
         run: |
           python supabase/functions/approve-quarantine/test_approve_quarantine.py
+          python supabase/functions/deploy-nodered/test_deploy_nodered.py
           python supabase/migrations/test_user_roles_rls.py
 
   e2e-validation:
@@ -69,6 +114,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r ingestion/requirements.txt
+
+      - name: Install Protobuf Compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Generate Sparkplug B Protobuf Module
+        run: |
+          protoc --python_out=. sparkplug_b.proto
+          cp sparkplug_b_pb2.py ingestion/
 
       - name: Prepare Environment File
         run: |

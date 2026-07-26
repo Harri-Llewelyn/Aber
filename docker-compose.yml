@@ -3,6 +3,7 @@ services:
   # Standalone TimescaleDB (Telemetry Hypertable Storage)
   # ---------------------------------------------------------------------------
   timescaledb:
+    container_name: factoryplus_timescaledb
     image: timescale/timescaledb:latest-pg15
     restart: always
     environment:
@@ -26,6 +27,7 @@ services:
   # Self-Hosted Supabase Stack (Postgres, GoTrue Auth, PostgREST, Kong, Studio)
   # ---------------------------------------------------------------------------
   supabase-db:
+    container_name: factoryplus_supabase_db
     image: supabase/postgres:15.6.1.143
     restart: always
     ports:
@@ -39,12 +41,30 @@ services:
     volumes:
       - supabase_db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres && psql -U postgres -d postgres -c 'SELECT 1;'"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
+
+  supabase-db-roles-init:
+    container_name: factoryplus_supabase_db_roles_init
+    image: supabase/postgres:15.6.1.143
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Setting passwords for scoped Supabase roles...';
+      psql -h supabase-db -U supabase_admin -d postgres -c \"ALTER USER supabase_auth_admin WITH PASSWORD '${POSTGRES_PASSWORD:-postgres}';\";
+      psql -h supabase-db -U supabase_admin -d postgres -c \"ALTER USER authenticator WITH PASSWORD '${POSTGRES_PASSWORD:-postgres}';\";
+      echo 'Scoped role passwords set successfully.';
+      "
+    depends_on:
+      supabase-db:
+        condition: service_healthy
 
   supabase-db-init:
+    container_name: factoryplus_supabase_db_init
     image: supabase/postgres:15.6.1.143
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -69,19 +89,20 @@ services:
       echo 'Supabase database initialized successfully.';
       "
     depends_on:
-      supabase-db:
-        condition: service_healthy
+      supabase-db-roles-init:
+        condition: service_completed_successfully
       supabase-auth:
         condition: service_healthy
 
   supabase-auth:
+    container_name: factoryplus_supabase_auth
     image: supabase/gotrue:v2.189.0
     restart: always
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
       GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@supabase-db:5432/postgres?sslmode=disable
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD:-postgres}@supabase-db:5432/postgres?sslmode=disable
       GOTRUE_SITE_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
       API_EXTERNAL_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
       GOTRUE_JWT_SECRET: ${SUPABASE_JWT_SECRET}
@@ -93,25 +114,28 @@ services:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9999/health"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
     depends_on:
-      supabase-db:
-        condition: service_healthy
+      supabase-db-roles-init:
+        condition: service_completed_successfully
 
   supabase-rest:
+    container_name: factoryplus_supabase_rest
     image: postgrest/postgrest:v12.2.0
     restart: always
     environment:
-      PGRST_DB_URI: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@supabase-db:5432/postgres
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD:-postgres}@supabase-db:5432/postgres
       PGRST_DB_SCHEMAS: public,storage,graphql_public
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: ${SUPABASE_JWT_SECRET}
       PGRST_DB_USE_LEGACY_GUCS: "false"
     depends_on:
-      supabase-db:
-        condition: service_healthy
+      supabase-db-roles-init:
+        condition: service_completed_successfully
 
   supabase-kong:
+    container_name: factoryplus_supabase_kong
     image: kong:2.8.1-alpine
     restart: always
     ports:
@@ -132,6 +156,7 @@ services:
         condition: service_started
 
   supabase-functions:
+    container_name: factoryplus_supabase_functions
     image: supabase/edge-runtime:v1.74.2
     restart: always
     environment:
@@ -151,6 +176,7 @@ services:
         condition: service_completed_successfully
 
   supabase-studio:
+    container_name: factoryplus_supabase_studio
     image: supabase/studio:latest
     restart: always
     ports:
@@ -170,6 +196,7 @@ services:
   # Messaging & Edge Infrastructure
   # ---------------------------------------------------------------------------
   mosquitto-init:
+    container_name: factoryplus_mosquitto_init
     image: eclipse-mosquitto:latest
     user: "0"
     environment:
@@ -185,6 +212,7 @@ services:
       "
 
   mosquitto:
+    container_name: factoryplus_mosquitto
     image: eclipse-mosquitto:latest
     restart: always
     ports:
@@ -211,6 +239,7 @@ services:
   # ---------------------------------------------------------------------------
   # React Web Dashboard (multi-stage build serving static assets via NGINX on port 3000)
   frontend:
+    container_name: factoryplus_frontend
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -222,6 +251,7 @@ services:
       - "3000:3000"
 
   ingestion:
+    container_name: factoryplus_ingestion
     build:
       context: .
       dockerfile: Dockerfile
@@ -248,6 +278,7 @@ services:
         condition: service_completed_successfully
 
   node-red-init:
+    container_name: factoryplus_node_red_init
     image: nodered/node-red:latest
     user: "0"
     environment:
@@ -274,6 +305,7 @@ services:
       "
 
   node-red:
+    container_name: factoryplus_node_red
     image: nodered/node-red:latest
     restart: always
     ports:
@@ -287,6 +319,7 @@ services:
         condition: service_healthy
 
   grafana:
+    container_name: factoryplus_grafana
     image: grafana/grafana:latest
     restart: always
     environment:
