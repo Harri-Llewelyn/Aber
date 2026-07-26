@@ -8,7 +8,7 @@ This application provides real-time telemetry streaming, shopfloor spatial mappi
 
 ---
 
-## System Architecture
+## System Architecture & Design Principles
 
 The platform uses a decoupled architecture combining **Supabase Backend-as-a-Service (BaaS)** with **Standalone TimescaleDB**:
 
@@ -23,7 +23,7 @@ The platform uses a decoupled architecture combining **Supabase Backend-as-a-Ser
 flowchart TB
     subgraph Edge Layer ["Edge & Physical Shopfloor Layer"]
         NR["Node-RED Edge Gateway<br/>(Port 1880)"]
-        SIM["Sparkplug B Simulator<br/>(validate.py)"]
+        SIM["Sparkplug B Simulator<br/>(ingestion/validate.py)"]
     end
 
     subgraph Messaging ["Message Broker Layer"]
@@ -35,10 +35,10 @@ flowchart TB
         EF["Supabase Edge Functions<br/>(approve-quarantine, deploy-nodered)"]
     end
 
-    subgraph Supabase ["Supabase Backend-as-a-Service"]
+    subgraph Supabase ["Supabase Backend-as-a-Service (Local Dev / Cloud)"]
         AUTH["Supabase Auth"]
         POSTGREST["Supabase PostgREST API<br/>- cells, gateways, devices<br/>- digital_thread audit log<br/>- Row Level Security (RLS)"]
-        STUDIO["Supabase Studio Web UI<br/>(Port 8000)"]
+        STUDIO["Supabase Studio Web UI<br/>(Port 8000 / 54323)"]
     end
 
     subgraph TelemetryDB ["Standalone TimescaleDB"]
@@ -63,19 +63,36 @@ flowchart TB
 
 ---
 
-## Docker Compose Services
+## Service Port Directory (Docker Compose Stack)
 
-Running `docker compose up -d` starts the containerized environment:
+Running `docker compose up -d` starts 7 container services representing the current production runtime:
 
-| Service | Container Name | Image / Build | Port | Description |
+| Service | Container Name | Image / Build Target | Port | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | **`timescaledb`** | `tsdb_postgres` | `timescale/timescaledb:latest-pg15` | `5433:5432` | Standalone TimescaleDB instance for `telemetry` hypertable |
 | **`mosquitto`** | `mqtt_broker` | `eclipse-mosquitto:latest` | `1883:1883`, `9001:9001` | Eclipse Mosquitto MQTT broker for Sparkplug B traffic |
-| **`frontend`** | `iot_frontend` | `./frontend/Dockerfile` | `3001:3000` | React Web Dashboard UI |
+| **`frontend`** | `iot_frontend` | `./frontend/Dockerfile` | `3000:3000` | React Web Dashboard UI |
 | **`studio`** | `supabase_studio` | `supabase/studio:latest` | `8000:3000` | Supabase Studio database management Web UI |
 | **`ingestion`** | `iot_ingestion` | `./Dockerfile` | — | Python daemon routing metadata to Supabase & telemetry to TimescaleDB |
+| **`node-red-init`** | `iot_node_red_init` | `nodered/node-red:latest` | — | One-shot init container configuring Node-RED flows & credentials |
 | **`node-red`** | `iot_node_red` | `nodered/node-red:latest` | `1880:1880` | Edge flow automation runtime |
 | **`grafana`** | `iot_grafana` | `grafana/grafana:latest` | `3002:3000` | Analytics dashboards connected to TimescaleDB |
+
+---
+
+## Authentication & Role-Based Access Control (RBAC)
+
+Supabase Auth is the authoritative identity provider for the application. User privileges are determined by role claims stored in `app_metadata.role` or `user_metadata.role`:
+
+| Persona / Email | Role Claim | Access Scope |
+| :--- | :--- | :--- |
+| `admin@factoryplus.local` | `Administrator` | Full read/write access to cells, gateways, devices, and quarantine approvals. |
+| `manager@factoryplus.local` | `Shopfloor_Manager` | Operations management, device quarantine approvals, and Node-RED deployments. |
+| `operator@factoryplus.local` | `Operator` | Read-only view of shopfloor assets and telemetry. |
+| `auditor@factoryplus.local` | `Auditor` | Digital Thread audit trace view. |
+
+> [!IMPORTANT]
+> Edge Functions and RLS policies enforce **fail-closed** authorization. Any token missing a valid role claim or containing an unprivileged role (e.g. `Operator`) will receive `403 Forbidden` on administrative mutations such as device quarantine approval.
 
 ---
 
@@ -93,10 +110,21 @@ All database migrations are stored in `supabase/migrations/`:
 
 Edge functions are located in `supabase/functions/`:
 - **`approve-quarantine`** (`supabase/functions/approve-quarantine/index.ts`):
-  - Validates session token & role privileges (`Administrator` / `Shopfloor_Manager`).
-  - Sets `is_quarantined = false` and assigns `gateway_id` for approved devices.
+  - Validates session JWT & role claims (`Administrator` / `Shopfloor_Manager`).
+  - Fails closed (`403 Forbidden`) if role claim is missing or unprivileged.
+  - Sets `is_quarantined = false` and assigns `gateway_id` for approved devices via Supabase Service Role client.
 - **`deploy-nodered`** (`supabase/functions/deploy-nodered/index.ts`):
   - Proxies flow deployment updates to Node-RED (`http://node-red:1880/flows`).
+
+---
+
+## Continuous Integration (CI Pipeline)
+
+The GitHub Actions CI workflow ([`.github/workflows/ci.yml`](file:///.github/workflows/ci.yml)) executes automated testing and verification across three parallel jobs:
+
+1. **`frontend-build` (Frontend Build & Test)**: Installs Node.js dependencies, runs the Vitest unit test suite (`npm test`), and builds the Vite production bundle (`npm run build`).
+2. **`edge-function-auth-test` (Edge Function Authorization Unit Tests)**: Runs `python supabase/functions/approve-quarantine/test_approve_quarantine.py` to verify fail-closed role authorization for missing claims and non-privileged roles.
+3. **`e2e-validation` (End-to-End Ingestion Validation)**: Launches the container stack with `docker compose up -d` and executes `python ingestion/validate.py` to verify Sparkplug B MQTT publishing, device quarantine, PostgreSQL triggers, and TimescaleDB telemetry ingestion.
 
 ---
 
@@ -105,7 +133,7 @@ Edge functions are located in `supabase/functions/`:
 To execute the end-to-end integration test suite:
 
 ```bash
-python validate.py
+python ingestion/validate.py
 ```
 
 The validation script verifies:
@@ -116,25 +144,40 @@ The validation script verifies:
 
 ---
 
-## Getting Started
+## Quick Start & Installation Guide
 
 1. **Clone repository and set up environment**:
    ```bash
    cp .env.example .env
    ```
 
-2. **Start Docker Compose stack**:
+2. **Start Local Supabase (if running local BaaS)**:
    ```bash
-   docker compose up -d
+   npx supabase start
+   npx supabase db reset
    ```
 
-3. **Access Web Interfaces**:
-   - **React Dashboard**: `http://localhost:3001`
-   - **Supabase Studio**: `http://localhost:8000`
+3. **Start Docker Compose stack (7 services)**:
+   ```bash
+   docker compose up --build -d
+   ```
+
+4. **Access Web Interfaces**:
+   - **React Dashboard**: `http://localhost:3000`
+   - **Supabase Studio**: `http://localhost:8000` (or `http://localhost:54323` via `supabase status`)
    - **Node-RED Console**: `http://localhost:1880`
    - **Grafana Dashboards**: `http://localhost:3002`
 
-4. **Initialize local Supabase**:
+5. **Authentication Credentials**:
+   - **Default Sign In**: The login screen (`http://localhost:3000`) is pre-filled with:
+     - **Email**: `admin@factoryplus.local`
+     - **Password**: `factoryplus123`
+   - **Self-Registration**: Click **"Need an account? Sign Up"** on the Portal to create a new user account instantly.
+
+6. **Repository Hand-off & Packaging Best Practices**:
+   Before packaging or committing clean hand-offs, tear down volumes and ensure no untracked build artifacts remain:
    ```bash
-   npx supabase db reset
+   docker compose down -v
+   git status
    ```
+   Confirm `git status` displays a clean workspace with no untracked `node_modules`, `.env`, `dist`, or `coverage` folders.

@@ -26,10 +26,31 @@ jobs:
           cd frontend
           npm install
 
+      - name: Run Vitest Unit Tests
+        run: |
+          cd frontend
+          npm test
+
       - name: Build Production Bundle
         run: |
           cd frontend
           npm run build
+
+  edge-function-auth-test:
+    name: Edge Function Fail-Closed Authorization Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Run Edge Function Auth Unit Tests
+        run: |
+          python supabase/functions/approve-quarantine/test_approve_quarantine.py
 
   e2e-validation:
     name: End-to-End Supabase & TimescaleDB Ingestion Validation
@@ -46,7 +67,7 @@ jobs:
       - name: Install Python Validation Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r ingestion/requirements.txt
 
       - name: Start Docker Compose Services
         run: |
@@ -58,4 +79,4 @@ jobs:
 
       - name: Run End-to-End Validation Script
         run: |
-          python validate.py
+          python ingestion/validate.py

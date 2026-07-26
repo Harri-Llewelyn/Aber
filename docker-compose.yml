@@ -1,7 +1,6 @@
 services:
   timescaledb:
     image: timescale/timescaledb:latest-pg15
-    container_name: tsdb_postgres
     restart: always
     environment:
       POSTGRES_DB: ${DB_NAME:-postgres}
@@ -20,7 +19,6 @@ services:
 
   mosquitto:
     image: eclipse-mosquitto:latest
-    container_name: mqtt_broker
     restart: always
     ports:
       - "1883:1883"
@@ -42,14 +40,12 @@ services:
       args:
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-http://127.0.0.1:54321}
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IjEyNy4wLjAuMSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNjAwMDAwMDAwLCJleHAiOjIwMDAwMDAwMDB9.m7_WpY5q7a_C3Q1t7T-32V3_9-0Q}
-    container_name: iot_frontend
     restart: always
     ports:
-      - "3001:3000"
+      - "3000:3000"
 
   studio:
     image: supabase/studio:latest
-    container_name: supabase_studio
     restart: always
     ports:
       - "8000:3000"
@@ -65,7 +61,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: iot_ingestion
     restart: always
     environment:
       DB_HOST: ${DB_HOST:-timescaledb}
@@ -86,7 +81,6 @@ services:
 
   node-red-init:
     image: nodered/node-red:latest
-    container_name: iot_node_red_init
     user: "0"
     volumes:
       - nodered_data:/data
@@ -109,7 +103,6 @@ services:
 
   node-red:
     image: nodered/node-red:latest
-    container_name: iot_node_red
     restart: always
     ports:
       - "1880:1880"
@@ -123,7 +116,6 @@ services:
 
   grafana:
     image: grafana/grafana:latest
-    container_name: iot_grafana
     restart: always
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}

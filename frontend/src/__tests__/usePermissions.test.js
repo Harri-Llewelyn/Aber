@@ -1,63 +1,81 @@
 import { renderHook, waitFor } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { usePermissions } from '../hooks/usePermissions'
-import { api } from '../api'
-
-vi.mock('../api', () => ({
-  api: {
-    get: vi.fn()
-  },
-  setGlobalToken: vi.fn()
-}))
 
 describe('usePermissions hook', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  it('returns false during loading and updates permissions on fetch success', async () => {
-    const auth = {
-      isAuthenticated: true,
-      user: { access_token: 'fake-jwt-token' }
+  it('resolves Administrator role and grants permissions', async () => {
+    const session = {
+      user: {
+        id: 'user-admin-1',
+        app_metadata: { role: 'Administrator' }
+      }
     }
-    const mockPerms = {
-      permissions: [
-        { permission_uuid: '00000000-0000-0000-0000-000000000001' },
-        { permission_uuid: '00000000-0000-0000-0000-000000000002' }
-      ]
-    }
-    api.get.mockResolvedValue(mockPerms)
 
-    const { result } = renderHook(() => usePermissions(auth, vi.fn()))
+    const { result } = renderHook(() => usePermissions(session, vi.fn()))
 
     await waitFor(() => {
-      expect(result.current.userPerms.length).toBe(2)
+      expect(result.current.userRole).toBe('Administrator')
     })
 
-    expect(result.current.loadingPerms).toBe(false)
-    expect(result.current.hasPermission('00000000-0000-0000-0000-000000000001')).toBe(true)
-    expect(result.current.hasPermission('00000000-0000-0000-0000-000000000002')).toBe(true)
-    expect(result.current.hasPermission('00000000-0000-0000-0000-000000000099')).toBe(false)
+    expect(result.current.hasPermission('any-permission-uuid')).toBe(true)
   })
 
-  it('handles fetch failure safely by resetting permissions and setting error state', async () => {
-    const auth = {
-      isAuthenticated: true,
-      user: { access_token: 'fake-jwt-token' }
+  it('resolves Shopfloor_Manager role and grants permissions', async () => {
+    const session = {
+      user: {
+        id: 'user-mgr-2',
+        app_metadata: { role: 'Shopfloor_Manager' }
+      }
     }
-    const showToast = vi.fn()
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    api.get.mockRejectedValue(new Error('Network error'))
 
-    const { result } = renderHook(() => usePermissions(auth, showToast))
+    const { result } = renderHook(() => usePermissions(session, vi.fn()))
 
     await waitFor(() => {
-      expect(result.current.errorPerms).toBeTruthy()
+      expect(result.current.userRole).toBe('Shopfloor_Manager')
     })
 
-    expect(result.current.loadingPerms).toBe(false)
-    expect(result.current.hasPermission('00000000-0000-0000-0000-000000000001')).toBe(false)
-    expect(showToast).toHaveBeenCalledWith('Failed to load user permissions from database', 'error')
-    consoleSpy.mockRestore()
+    expect(result.current.hasPermission('any-permission-uuid')).toBe(true)
+  })
+
+  it('resolves Operator role and denies write permissions (fail-closed)', async () => {
+    const session = {
+      user: {
+        id: 'user-op-3',
+        app_metadata: { role: 'Operator' }
+      }
+    }
+
+    const { result } = renderHook(() => usePermissions(session, vi.fn()))
+
+    await waitFor(() => {
+      expect(result.current.userRole).toBe('Operator')
+    })
+
+    expect(result.current.hasPermission('any-permission-uuid')).toBe(false)
+  })
+
+  it('denies permissions when user metadata lacks a role claim (fail-closed)', async () => {
+    const session = {
+      user: {
+        id: 'user-norole-4',
+        app_metadata: {},
+        user_metadata: {}
+      }
+    }
+
+    const { result } = renderHook(() => usePermissions(session, vi.fn()))
+
+    await waitFor(() => {
+      expect(result.current.userRole).toBeNull()
+    })
+
+    expect(result.current.hasPermission('any-permission-uuid')).toBe(false)
+  })
+
+  it('denies permissions when no session is active', async () => {
+    const { result } = renderHook(() => usePermissions(null, vi.fn()))
+
+    expect(result.current.userRole).toBeNull()
+    expect(result.current.hasPermission('any-permission-uuid')).toBe(false)
   })
 })

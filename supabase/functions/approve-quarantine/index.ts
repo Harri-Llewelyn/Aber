@@ -38,10 +38,10 @@ serve(async (req: Request) => {
       );
     }
 
-    const userRole = user.app_metadata?.role || user.user_metadata?.role || "Administrator";
+    const userRole = user.app_metadata?.role || user.user_metadata?.role || null;
     const allowedRoles = ["Administrator", "Shopfloor_Manager"];
 
-    if (!allowedRoles.includes(userRole)) {
+    if (!userRole || !allowedRoles.includes(userRole)) {
       return new Response(
         JSON.stringify({ error: "Forbidden: Insufficient privileges" }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }

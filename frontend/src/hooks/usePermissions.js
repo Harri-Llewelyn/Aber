@@ -7,15 +7,15 @@ import { supabase } from '../lib/supabaseClient';
  * @param {Function} showToast - Toast notification function
  */
 export function usePermissions(session, showToast) {
-  const [userRole, setUserRole] = useState('Administrator');
+  const [userRole, setUserRole] = useState(null);
   const [loadingPerms, setLoadingPerms] = useState(false);
 
   useEffect(() => {
     if (session?.user) {
-      const role = session.user.app_metadata?.role || session.user.user_metadata?.role || 'Administrator';
+      const role = session.user.app_metadata?.role || session.user.user_metadata?.role || null;
       setUserRole(role);
     } else {
-      setUserRole('Administrator');
+      setUserRole(null);
     }
   }, [session]);
 
