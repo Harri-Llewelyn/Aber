@@ -1,6 +1,6 @@
 # Factory+ Asset Tracking Platform (Supabase BaaS + Standalone TimescaleDB)
 
-[![CI Pipeline](https://github.com/Harri-Llewelyn/factoryplus-asset-tracking/actions/workflows/ci.yml/badge.svg)](https://github.com/Harri-Llewelyn/factoryplus-asset-tracking/actions/workflows/ci.yml)
+[![CI Pipeline](https://github.com/Harri-Llewelyn/acs-cymru/actions/workflows/ci.yml/badge.svg)](https://github.com/Harri-Llewelyn/acs-cymru/actions/workflows/ci.yml)
 
 An industrial, asset-centric manufacturing management platform built in alignment with the **AMRC Connectivity Stack (ACS / Factory+)** framework.
 
