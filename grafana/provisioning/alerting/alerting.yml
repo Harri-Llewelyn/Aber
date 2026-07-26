@@ -1,0 +1,57 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: FactoryPlus_Telemetry_Alerts
+    folder: FactoryPlus Alerts
+    interval: 10s
+    rules:
+      - uid: temp_threshold_alarm
+        title: High Temperature Warning Threshold (> 80°C)
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: timescaledb
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              rawSql: "SELECT time AS \"time\", val_double AS \"value\" FROM telemetry WHERE metric_name = 'temperature' ORDER BY time DESC LIMIT 1"
+              format: time_series
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [80.0]
+
+      - uid: safety_interlock_alarm
+        title: Safety Interlock Breached Alarm
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: timescaledb
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              rawSql: "SELECT time AS \"time\", CASE WHEN val_bool = false THEN 1 ELSE 0 END AS \"value\" FROM telemetry WHERE metric_name = 'safety_ok' ORDER BY time DESC LIMIT 1"
+              format: time_series
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]

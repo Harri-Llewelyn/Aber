@@ -1,0 +1,145 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: tsdb_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${DB_NAME:-postgres}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mosquitto:
+    image: eclipse-mosquitto:latest
+    container_name: mqtt_broker
+    restart: always
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./mosquitto/password_file:/mosquitto/config/password_file:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -u factoryplus -P factoryplus123 -t '$$SYS/broker/version' -C 1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-http://127.0.0.1:54321}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IjEyNy4wLjAuMSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNjAwMDAwMDAwLCJleHAiOjIwMDAwMDAwMDB9.m7_WpY5q7a_C3Q1t7T-32V3_9-0Q}
+    container_name: iot_frontend
+    restart: always
+    ports:
+      - "3001:3000"
+
+  studio:
+    image: supabase/studio:latest
+    container_name: supabase_studio
+    restart: always
+    ports:
+      - "8000:3000"
+    environment:
+      STUDIO_PG_META_URL: http://studio:3000
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      SUPABASE_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
+      SUPABASE_PUBLIC_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IjEyNy4wLjAuMSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNjAwMDAwMDAwLCJleHAiOjIwMDAwMDAwMDB9.m7_WpY5q7a_C3Q1t7T-32V3_9-0Q}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IjEyNy4wLjAuMSIsInJvbGUiOiJzZXJ2aWNlX3JvbGUiLCJpYXQiOjE2MDAwMDAwMDAsImV4cCI6MjAwMDAwMDAwMH0.vW7_90vX79Z-C3Q1t7T-32V3_9-0Q}
+
+  ingestion:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: iot_ingestion
+    restart: always
+    environment:
+      DB_HOST: ${DB_HOST:-timescaledb}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-postgres}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      MQTT_HOST: ${MQTT_HOST:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_USER: ${MQTT_USER:-factoryplus}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-factoryplus123}
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+
+  node-red-init:
+    image: nodered/node-red:latest
+    container_name: iot_node_red_init
+    user: "0"
+    volumes:
+      - nodered_data:/data
+      - ./node_red_flow.json:/seed/flows.json:ro
+    entrypoint: >
+      /bin/sh -c "
+      cp /seed/flows.json /data/flows.json;
+      echo 'module.exports = { credentialSecret: \"factoryplussecret\" };' > /data/settings.js;
+      node -e \"
+        const credentials = require('/usr/src/node-red/node_modules/@node-red/runtime/lib/nodes/credentials');
+        credentials.init({ settings: { userDir: '/data', credentialSecret: 'factoryplussecret' } });
+        credentials.add('mqtt-broker-config', { user: 'factoryplus', password: 'factoryplus123' });
+        credentials.export().then(creds => {
+            require('fs').writeFileSync('/data/flows_cred.json', JSON.stringify(creds));
+        });
+      \";
+      chown -R 1000:1000 /data;
+      echo 'Node-RED flow and credentials initialized';
+      "
+
+  node-red:
+    image: nodered/node-red:latest
+    container_name: iot_node_red
+    restart: always
+    ports:
+      - "1880:1880"
+    volumes:
+      - nodered_data:/data
+    depends_on:
+      node-red-init:
+        condition: service_completed_successfully
+      mosquitto:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: iot_grafana
+    restart: always
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SERVER_ROOT_URL: "http://localhost:3002/"
+      GF_INSTALL_PLUGINS: ""
+    ports:
+      - "3002:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  nodered_data:
+  grafana_data:

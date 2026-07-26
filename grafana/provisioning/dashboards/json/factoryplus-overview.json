@@ -1,0 +1,106 @@
+{
+  "title": "FactoryPlus — Asset & Broker Overview",
+  "uid": "factoryplus-overview",
+  "schemaVersion": 39,
+  "version": 2,
+  "editable": true,
+  "timezone": "browser",
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "5s",
+  "templating": {
+    "list": [
+      {
+        "name": "asset_id",
+        "type": "query",
+        "datasource": { "type": "postgres", "uid": "timescaledb" },
+        "query": "SELECT DISTINCT asset_id FROM assets ORDER BY asset_id",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    { "id": 100, "type": "row", "title": "Broker Health", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 } },
+
+    {
+      "id": 1, "type": "stat", "title": "Mosquitto Subscriptions",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "mqtt_broker_subscriptions_count", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green" }] } }, "overrides": [] }
+    },
+    {
+      "id": 2, "type": "stat", "title": "Messages Received (1m avg)",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "mqtt_broker_load_messages_received_1min", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "id": 3, "type": "stat", "title": "Total Registered Devices",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "targets": [{ "rawSql": "SELECT COUNT(*) FROM assets", "format": "table", "refId": "A" }],
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 4, "type": "stat", "title": "Gateways Online",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "targets": [{ "rawSql": "SELECT COUNT(*) FROM gateways WHERE status = 'ONLINE'", "format": "table", "refId": "A" }],
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "red", "value": 0 }, { "color": "green", "value": 1 }] } }, "overrides": [] }
+    },
+
+    { "id": 101, "type": "row", "title": "Asset Telemetry", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 } },
+
+    {
+      "id": 5, "type": "timeseries", "title": "Temperature Stream by Device",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "targets": [{
+        "rawSql": "SELECT time AS \"time\", asset_id AS metric, val_double AS \"value\" FROM telemetry WHERE metric_name = 'temperature' AND asset_id IN (${asset_id:sqlstring}) ORDER BY time",
+        "format": "time_series",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": { "unit": "celsius" }, "overrides": [] }
+    },
+    {
+      "id": 6, "type": "state-timeline", "title": "Status Timeline by Device",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "targets": [{
+        "rawSql": "SELECT time AS \"time\", asset_id AS metric, val_string AS \"value\" FROM telemetry WHERE metric_name = 'status' AND asset_id IN (${asset_id:sqlstring}) ORDER BY time",
+        "format": "time_series",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 7, "type": "table", "title": "Latest Telemetry Readings",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 15 },
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "targets": [{
+        "rawSql": "SELECT DISTINCT ON (asset_id, metric_name) time, asset_id, metric_name, COALESCE(val_double::text, val_string, val_bool::text) AS value FROM telemetry WHERE asset_id IN (${asset_id:sqlstring}) ORDER BY asset_id, metric_name, time DESC",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+
+    { "id": 102, "type": "row", "title": "Device Configuration (DBIRTH)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 } },
+
+    {
+      "id": 8, "type": "table", "title": "Device Configuration Snapshot",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "datasource": { "type": "postgres", "uid": "timescaledb" },
+      "targets": [{
+        "rawSql": "SELECT ac.asset_id, a.asset_name, ac.metric_name, COALESCE(ac.val_double::text, ac.val_string, ac.val_bool::text) AS value, ac.updated_at FROM asset_config ac JOIN assets a ON a.asset_id = ac.asset_id WHERE ac.asset_id IN (${asset_id:sqlstring}) ORDER BY ac.asset_id, ac.metric_name",
+        "format": "table",
+        "refId": "A"
+      }],
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+# Environment variables
+.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.venv/
+venv/
+
+# Node / React
+node_modules/
+dist/
+build/
+.cache/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,501 @@
+[
+  {
+    "id": "tab-gateway-sim",
+    "type": "tab",
+    "label": "Gateway & OPC-UA Simulator",
+    "disabled": false,
+    "info": "Simulates Edge Gateway A publishing Sparkplug B DBIRTH, DDATA, and DDEATH lifecycle telemetry messages to Mosquitto MQTT broker."
+  },
+  {
+    "id": "subflow-opcua-spb",
+    "type": "subflow",
+    "name": "Factory+ OPC-UA to Sparkplug B Connector",
+    "info": "Reusable Subflow for packaging legacy PLC / OPC-UA telemetry into Factory+ Sparkplug B DBIRTH and DDATA MQTT messages.",
+    "category": "FactoryPlus",
+    "in": [
+      {
+        "x": 80,
+        "y": 100,
+        "wires": [
+          {
+            "id": "subflow-converter-logic"
+          }
+        ]
+      }
+    ],
+    "out": [
+      {
+        "x": 520,
+        "y": 100,
+        "wires": [
+          {
+            "id": "subflow-converter-logic",
+            "port": 0
+          }
+        ]
+      }
+    ],
+    "env": [
+      {
+        "name": "GATEWAY_ID",
+        "type": "str",
+        "value": "Virtual_Gateway_NodeRED"
+      },
+      {
+        "name": "GROUP_ID",
+        "type": "str",
+        "value": "FactoryPlus"
+      }
+    ]
+  },
+  {
+    "id": "subflow-converter-logic",
+    "type": "function",
+    "z": "subflow-opcua-spb",
+    "name": "Package OPC-UA to Sparkplug B",
+    "func": "const gwId   = env.get('GATEWAY_ID') || msg.gateway_id || 'Gateway_A';\nconst grpId  = env.get('GROUP_ID') || msg.group_id || 'FactoryPlus';\nconst asset  = msg.asset_id || msg.payload.asset_id || 'Simulated_CNC_01';\nconst isBirth = msg.is_birth || msg.payload.is_birth || false;\n\nconst msgType = isBirth ? 'DBIRTH' : 'DDATA';\nconst topic   = `spBv1.0/${grpId}/${msgType}/${gwId}/${asset}`;\n\nconst metricsList = [\n    { name: 'Asset_ID', string_value: asset, datatype: 12 }\n];\n\nconst rawData = msg.payload.metrics || msg.payload;\nfor (const [k, v] of Object.entries(rawData)) {\n    if (k === 'asset_id' || k === 'Asset_ID' || k === 'is_birth') continue;\n    if (typeof v === 'boolean') {\n        metricsList.push({ name: k, boolean_value: v, datatype: 11 });\n    } else if (typeof v === 'number') {\n        metricsList.push({ name: k, double_value: v, datatype: 10 });\n    } else if (typeof v === 'string') {\n        metricsList.push({ name: k, string_value: v, datatype: 12 });\n    }\n}\n\nconst spbPayload = {\n    timestamp: Date.now(),\n    metrics: metricsList,\n    seq: Math.floor(Math.random() * 255)\n};\n\nreturn { topic: topic, payload: JSON.stringify(spbPayload), qos: 0, retain: false };",
+    "outputs": 1,
+    "x": 300,
+    "y": 100,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "inject-dbirth-startup",
+    "type": "inject",
+    "z": "tab-gateway-sim",
+    "name": "1. Trigger DBIRTH Birth Certificate",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 2,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 200,
+    "y": 80,
+    "wires": [
+      [
+        "build-dbirth-payload"
+      ]
+    ]
+  },
+  {
+    "id": "build-dbirth-payload",
+    "type": "function",
+    "z": "tab-gateway-sim",
+    "name": "Build DBIRTH Certificate (Simulated_CNC_01)",
+    "func": "global.set('device_alive', true);\nconst topic = 'spBv1.0/FactoryPlus/DBIRTH/Virtual_Gateway_NodeRED/Simulated_CNC_01';\nconst spbBirthPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID',          string_value: 'Simulated_CNC_01',  datatype: 12 },\n        { name: 'firmware_version',  string_value: 'v3.2.0-industrial', datatype: 12 },\n        { name: 'serial_number',     string_value: 'SN-CNC-8832',       datatype: 12 },\n        { name: 'max_temp_threshold',double_value: 85.0,                datatype: 10 },\n        { name: 'safety_interlock',  boolean_value: true,               datatype: 11 }\n    ],\n    seq: 0\n};\nreturn { topic: topic, payload: JSON.stringify(spbBirthPayload), qos: 0, retain: false };",
+    "outputs": 1,
+    "x": 520,
+    "y": 80,
+    "wires": [
+      [
+        "mqtt-publish"
+      ]
+    ]
+  },
+  {
+    "id": "inject-ddata-timer",
+    "type": "inject",
+    "z": "tab-gateway-sim",
+    "name": "2. Stream DDATA Telemetry (every 5s)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "5",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 5,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 210,
+    "y": 160,
+    "wires": [
+      [
+        "build-ddata-payload"
+      ]
+    ]
+  },
+  {
+    "id": "build-ddata-payload",
+    "type": "function",
+    "z": "tab-gateway-sim",
+    "name": "Build DDATA Telemetry (Normal Ops)",
+    "func": "if (global.get('device_alive') === false) {\n    return null;\n}\nconst topic = 'spBv1.0/FactoryPlus/DDATA/Virtual_Gateway_NodeRED/Simulated_CNC_01';\nconst tempOverride = global.get('temp_override');\nconst currentTemp = tempOverride !== undefined ? tempOverride : +(42.0 + Math.sin(Date.now() / 6000) * 5.0 + (Math.random() * 1.5)).toFixed(2);\nconst statusVal = global.get('status_override') || 'RUNNING';\nconst safetyVal = global.get('safety_override') !== undefined ? global.get('safety_override') : true;\n\nconst spbDataPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID',    string_value: 'Simulated_CNC_01', datatype: 12 },\n        { name: 'temperature', double_value: currentTemp,        datatype: 10 },\n        { name: 'vibration',   double_value: 1.45,                datatype: 10 },\n        { name: 'status',      string_value: statusVal,          datatype: 12 },\n        { name: 'safety_ok',   boolean_value: safetyVal,         datatype: 11 }\n    ],\n    seq: Math.floor(Math.random() * 255)\n};\nreturn { topic: topic, payload: JSON.stringify(spbDataPayload), qos: 0, retain: false };",
+    "outputs": 1,
+    "x": 510,
+    "y": 160,
+    "wires": [
+      [
+        "mqtt-publish"
+      ]
+    ]
+  },
+  {
+    "id": "inject-ddeath-manual",
+    "type": "inject",
+    "z": "tab-gateway-sim",
+    "name": "3. Trigger DDEATH Disconnect Payload",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 210,
+    "y": 240,
+    "wires": [
+      [
+        "build-ddeath-payload"
+      ]
+    ]
+  },
+  {
+    "id": "build-ddeath-payload",
+    "type": "function",
+    "z": "tab-gateway-sim",
+    "name": "Build DDEATH Death Certificate",
+    "func": "global.set('device_alive', false);\nconst topic = 'spBv1.0/FactoryPlus/DDEATH/Virtual_Gateway_NodeRED/Simulated_CNC_01';\nconst spbDeathPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID', string_value: 'Simulated_CNC_01', datatype: 12 }\n    ],\n    seq: Math.floor(Math.random() * 255)\n};\nreturn { topic: topic, payload: JSON.stringify(spbDeathPayload), qos: 0, retain: false };",
+    "outputs": 1,
+    "x": 510,
+    "y": 240,
+    "wires": [
+      [
+        "mqtt-publish"
+      ]
+    ]
+  },
+  {
+    "id": "inject-alert-overheat",
+    "type": "inject",
+    "z": "tab-gateway-sim",
+    "name": "ANOMALY: Trigger Overheat Spike (95\u00b0C)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 220,
+    "y": 340,
+    "wires": [
+      [
+        "build-alert-payload"
+      ]
+    ]
+  },
+  {
+    "id": "build-alert-payload",
+    "type": "function",
+    "z": "tab-gateway-sim",
+    "name": "Publish Overheat Spike (95\u00b0C)",
+    "func": "global.set('device_alive', true);\nglobal.set('temp_override', 95.0);\nglobal.set('status_override', 'ALARM_OVERHEAT');\nglobal.set('safety_override', false);\n\nconst topic = 'spBv1.0/FactoryPlus/DDATA/Virtual_Gateway_NodeRED/Simulated_CNC_01';\nconst spbAlertPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID',    string_value: 'Simulated_CNC_01', datatype: 12 },\n        { name: 'temperature', double_value: 95.0,                datatype: 10 },\n        { name: 'vibration',   double_value: 8.92,                datatype: 10 },\n        { name: 'status',      string_value: 'ALARM_OVERHEAT',   datatype: 12 },\n        { name: 'safety_ok',   boolean_value: false,              datatype: 11 }\n    ],\n    seq: Math.floor(Math.random() * 255)\n};\nreturn { topic: topic, payload: JSON.stringify(spbAlertPayload), qos: 0, retain: false };",
+    "outputs": 1,
+    "x": 520,
+    "y": 340,
+    "wires": [
+      [
+        "mqtt-publish"
+      ]
+    ]
+  },
+  {
+    "id": "inject-alert-reset",
+    "type": "inject",
+    "z": "tab-gateway-sim",
+    "name": "RESET: Restore Normal Telemetry (42\u00b0C)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 220,
+    "y": 400,
+    "wires": [
+      [
+        "reset-alert-function"
+      ]
+    ]
+  },
+  {
+    "id": "reset-alert-function",
+    "type": "function",
+    "z": "tab-gateway-sim",
+    "name": "Reset Telemetry to Normal (42\u00b0C)",
+    "func": "global.set('device_alive', true);\nglobal.set('temp_override', undefined);\nglobal.set('status_override', 'RUNNING');\nglobal.set('safety_override', true);\n\nconst topic = 'spBv1.0/FactoryPlus/DDATA/Virtual_Gateway_NodeRED/Simulated_CNC_01';\nconst spbNormalPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID',    string_value: 'Simulated_CNC_01', datatype: 12 },\n        { name: 'temperature', double_value: 42.0,                datatype: 10 },\n        { name: 'vibration',   double_value: 1.20,                datatype: 10 },\n        { name: 'status',      string_value: 'RUNNING',          datatype: 12 },\n        { name: 'safety_ok',   boolean_value: true,               datatype: 11 }\n    ],\n    seq: Math.floor(Math.random() * 255)\n};\nreturn { topic: topic, payload: JSON.stringify(spbNormalPayload), qos: 0, retain: false };",
+    "outputs": 1,
+    "x": 520,
+    "y": 400,
+    "wires": [
+      [
+        "mqtt-publish"
+      ]
+    ]
+  },
+  {
+    "id": "inject-opcua-sim",
+    "type": "inject",
+    "z": "tab-gateway-sim",
+    "name": "OPC-UA Subflow Inject (every 10s)",
+    "props": [
+      {
+        "p": "payload",
+        "v": "{\"asset_id\":\"PLC_Siemens_01\",\"metrics\":{\"temperature\":72.4,\"vibration\":1.2,\"status\":\"RUNNING\",\"safety_ok\":true}}",
+        "vt": "json"
+      }
+    ],
+    "repeat": "10",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 3,
+    "topic": "",
+    "x": 200,
+    "y": 480,
+    "wires": [
+      [
+        "subflow-instance-opcua"
+      ]
+    ]
+  },
+  {
+    "id": "subflow-instance-opcua",
+    "type": "subflow:subflow-opcua-spb",
+    "z": "tab-gateway-sim",
+    "name": "OPC-UA Subflow Connector",
+    "env": [
+      {
+        "name": "GATEWAY_ID",
+        "value": "Virtual_Gateway_NodeRED"
+      },
+      {
+        "name": "GROUP_ID",
+        "value": "FactoryPlus"
+      }
+    ],
+    "x": 500,
+    "y": 480,
+    "wires": [
+      [
+        "mqtt-publish"
+      ]
+    ]
+  },
+  {
+    "id": "inject-heartbeat-timer",
+    "type": "inject",
+    "z": "tab-gateway-sim",
+    "name": "4. Gateway Heartbeat (every 30s)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "30",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 220,
+    "y": 560,
+    "wires": [
+      [
+        "build-heartbeat-payload"
+      ]
+    ]
+  },
+  {
+    "id": "build-heartbeat-payload",
+    "type": "function",
+    "z": "tab-gateway-sim",
+    "name": "Build NDATA Gateway Heartbeat",
+    "func": "const topic = 'spBv1.0/FactoryPlus/NDATA/Virtual_Gateway_NodeRED';\nconst spbHeartbeatPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Gateway_Status', string_value: 'ONLINE', datatype: 12 }\n    ],\n    seq: Math.floor(Math.random() * 255)\n};\nreturn { topic: topic, payload: JSON.stringify(spbHeartbeatPayload), qos: 0, retain: false };",
+    "outputs": 1,
+    "x": 520,
+    "y": 560,
+    "wires": [
+      [
+        "mqtt-publish"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt-publish",
+    "type": "mqtt out",
+    "z": "tab-gateway-sim",
+    "name": "Publish to Mosquitto Broker",
+    "topic": "",
+    "qos": "0",
+    "retain": "false",
+    "broker": "mqtt-broker-config",
+    "x": 800,
+    "y": 240,
+    "wires": []
+  },
+  {
+    "id": "mqtt-broker-config",
+    "type": "mqtt-broker",
+    "name": "IoT Mosquitto Broker",
+    "broker": "broker",
+    "port": "1883",
+    "clientid": "node-red-simulator",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "user": "factoryplus",
+    "password": "factoryplus123",
+    "credentials": {
+      "user": "factoryplus",
+      "password": "factoryplus123"
+    }
+  },
+  {
+    "id": "tab-dynamic-discovery",
+    "type": "tab",
+    "label": "Dynamic Gateway Discovery Sim",
+    "disabled": false,
+    "info": "Pull-based gateway discovery simulator that polls GET /api/v1/gateways/Virtual_Gateway_NodeRED/config to dynamically discover assigned assets and publish Sparkplug B DDATA messages."
+  },
+  {
+    "id": "inject-discovery-timer",
+    "type": "inject",
+    "z": "tab-dynamic-discovery",
+    "name": "Poll Gateway Config (every 15s)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "15",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 2,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 180,
+    "y": 100,
+    "wires": [
+      [
+        "http-get-gateway-config"
+      ]
+    ]
+  },
+  {
+    "id": "http-get-gateway-config",
+    "type": "http request",
+    "z": "tab-dynamic-discovery",
+    "name": "GET /api/v1/gateways/Virtual_Gateway_NodeRED/config",
+    "method": "GET",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "http://backend:8000/api/v1/gateways/Virtual_Gateway_NodeRED/config",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "sendallheaders": false,
+    "headers": [],
+    "x": 520,
+    "y": 100,
+    "wires": [
+      [
+        "extract-assigned-assets"
+      ]
+    ]
+  },
+  {
+    "id": "extract-assigned-assets",
+    "type": "function",
+    "z": "tab-dynamic-discovery",
+    "name": "Extract Assigned Assets Array",
+    "func": "const config = msg.payload;\nif (!config || !config.assigned_assets || !Array.isArray(config.assigned_assets)) {\n    node.warn('No assigned assets returned from gateway config');\n    return null;\n}\n\nmsg.gateway_id = (config.gateway && config.gateway.gateway_id) || 'Virtual_Gateway_NodeRED';\nmsg.payload = config.assigned_assets;\nreturn msg;",
+    "outputs": 1,
+    "x": 840,
+    "y": 100,
+    "wires": [
+      [
+        "split-discovered-assets"
+      ]
+    ]
+  },
+  {
+    "id": "split-discovered-assets",
+    "type": "split",
+    "z": "tab-dynamic-discovery",
+    "name": "Split Asset Array",
+    "s": "",
+    "arrayS": 1,
+    "arraySType": "len",
+    "stream": false,
+    "addname": "",
+    "x": 1080,
+    "y": 100,
+    "wires": [
+      [
+        "build-discovery-ddata"
+      ]
+    ]
+  },
+  {
+    "id": "build-discovery-ddata",
+    "type": "function",
+    "z": "tab-dynamic-discovery",
+    "name": "Build DDATA Payload per Asset",
+    "func": "const asset = msg.payload;\nconst gatewayId = msg.gateway_id || 'Virtual_Gateway_NodeRED';\nconst assetId = asset.asset_id;\n\nif (!assetId) {\n    return null;\n}\n\nconst topic = `spBv1.0/FactoryPlus/DDATA/${gatewayId}/${assetId}`;\nconst currentTemp = +(42.0 + Math.sin(Date.now() / 6000) * 5.0 + (Math.random() * 1.5)).toFixed(2);\n\nconst spbPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID',    string_value: assetId,     datatype: 12 },\n        { name: 'temperature', double_value: currentTemp,datatype: 10 },\n        { name: 'vibration',   double_value: 1.35,        datatype: 10 },\n        { name: 'status',      string_value: 'RUNNING',  datatype: 12 },\n        { name: 'safety_ok',   boolean_value: true,       datatype: 11 }\n    ],\n    seq: Math.floor(Math.random() * 255)\n};\n\nreturn { topic: topic, payload: JSON.stringify(spbPayload), qos: 0, retain: false };",
+    "outputs": 1,
+    "x": 1310,
+    "y": 100,
+    "wires": [
+      [
+        "mqtt-publish-discovery"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt-publish-discovery",
+    "type": "mqtt out",
+    "z": "tab-dynamic-discovery",
+    "name": "Publish to Mosquitto Broker",
+    "topic": "",
+    "qos": "0",
+    "retain": "false",
+    "broker": "mqtt-broker-config",
+    "x": 1560,
+    "y": 100,
+    "wires": []
+  }
+]
