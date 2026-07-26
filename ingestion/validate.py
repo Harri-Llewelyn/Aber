@@ -117,6 +117,9 @@ def seed_supabase():
 
 def run_simulation():
     print("Connecting validation publisher to MQTT broker...")
+    # Note: Intentionally using paho-mqtt==1.6.1 v1 callback signatures.
+    # If upgrading to paho-mqtt 2.x+, callbacks must be migrated to CallbackAPIVersion.VERSION2
+    # signatures (e.g. on_connect(client, userdata, flags, reason_code, properties)).
     client = mqtt.Client()
     client.username_pw_set(os.getenv("MQTT_USER", "factoryplus"), os.getenv("MQTT_PASSWORD", "factoryplus123"))
     
@@ -144,7 +147,13 @@ def run_simulation():
     client.publish(f"spBv1.0/Group1/DBIRTH/{VAL_GW_NAME}/Device1", payload_birth)
     time.sleep(2)
 
-    # 2. DDATA for known device -> should insert metrics into TimescaleDB
+    # 2. DDATA for quarantined device -> should be gated and NOT written to TimescaleDB
+    print(f"\n--- Simulating DDATA telemetry for quarantined device: {VAL_QUARANTINE_DEVICE} ---")
+    payload_quarantine_ddata = make_sparkplug_payload(VAL_QUARANTINE_DEVICE, {"temperature": 99.9, "status": "QUARANTINED"}, now_ms)
+    client.publish(f"spBv1.0/Group1/DDATA/{VAL_GW_NAME}/Device1", payload_quarantine_ddata)
+    time.sleep(2)
+
+    # 3. DDATA for registered device -> should insert metrics into TimescaleDB
     print(f"\n--- Simulating DDATA telemetry for registered device: {VAL_KNOWN_DEVICE} ---")
     payload_ddata = make_sparkplug_payload(VAL_KNOWN_DEVICE, {"temperature": 42.5, "status": "RUNNING", "safety_ok": True}, now_ms)
     client.publish(f"spBv1.0/Group1/DDATA/{VAL_GW_NAME}/Device1", payload_ddata)
@@ -188,7 +197,7 @@ def verify_results():
     else:
         print("⚠️  Skipping Supabase API checks: client unavailable.")
 
-    # 3. Verify TimescaleDB telemetry hypertable
+    # 3. Verify TimescaleDB telemetry hypertable for registered device
     try:
         conn = get_timescaledb_connection()
         cur = conn.cursor()
@@ -204,6 +213,22 @@ def verify_results():
         conn.close()
     except Exception as e:
         print(f"❌ 3. TIMESCALEDB TELEMETRY ERROR: {e}")
+        passed = False
+
+    # 4. Verify telemetry gating for quarantined device
+    try:
+        conn = get_timescaledb_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT metric_name FROM telemetry WHERE asset_id = %s;", (VAL_QUARANTINE_DEVICE,))
+        q_rows = cur.fetchall()
+        if len(q_rows) == 0:
+            print(f"✅ 4. QUARANTINE TELEMETRY GATING: Verified 0 telemetry records ingested for quarantined device '{VAL_QUARANTINE_DEVICE}'.")
+        else:
+            print(f"❌ 4. QUARANTINE TELEMETRY GATING FAIL: Found {len(q_rows)} telemetry records in TimescaleDB for quarantined device '{VAL_QUARANTINE_DEVICE}'.")
+            passed = False
+        conn.close()
+    except Exception as e:
+        print(f"❌ 4. QUARANTINE TELEMETRY GATING ERROR: {e}")
         passed = False
 
     print("==========================================")

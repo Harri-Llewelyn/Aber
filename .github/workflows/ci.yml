@@ -59,6 +59,16 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -69,13 +79,37 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r ingestion/requirements.txt
 
+      - name: Start Local Supabase
+        run: |
+          supabase start
+          supabase db reset
+
+      - name: Prepare Environment File
+        run: |
+          cp .env.example .env
+          eval $(supabase status -o env)
+          sed -i "s|^SUPABASE_URL=.*|SUPABASE_URL=${API_URL:-http://127.0.0.1:54321}|" .env
+          sed -i "s|^SUPABASE_ANON_KEY=.*|SUPABASE_ANON_KEY=${ANON_KEY}|" .env
+          sed -i "s|^SUPABASE_SERVICE_ROLE_KEY=.*|SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}|" .env
+          echo "SUPABASE_URL=${API_URL:-http://127.0.0.1:54321}" >> $GITHUB_ENV
+          echo "SUPABASE_ANON_KEY=${ANON_KEY}" >> $GITHUB_ENV
+          echo "SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}" >> $GITHUB_ENV
+
       - name: Start Docker Compose Services
         run: |
           docker compose up -d
 
       - name: Wait for Services Health
         run: |
-          sleep 15
+          echo "Polling Docker Compose service health..."
+          timeout 60s bash -c '
+            until docker compose exec -T timescaledb pg_isready -U postgres >/dev/null 2>&1 && \
+                  docker compose exec -T mosquitto mosquitto_sub -u factoryplus -P factoryplus123 -t "\$SYS/broker/version" -C 1 >/dev/null 2>&1; do
+              echo "Waiting for TimescaleDB and Mosquitto to become ready..."
+              sleep 2
+            done
+          '
+          echo "All services report healthy!"
 
       - name: Run End-to-End Validation Script
         run: |

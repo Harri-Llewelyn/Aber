@@ -69,6 +69,42 @@ def get_timescaledb_connection():
     return _ts_conn
 
 # -----------------------------------------------------------------------------
+# Quarantine Status In-Process TTL Cache
+# -----------------------------------------------------------------------------
+_quarantine_cache = {}
+CACHE_TTL_SECONDS = 5
+
+def is_device_quarantined(asset_id: str) -> bool:
+    """
+    Checks if a device is quarantined or unregistered in Supabase.
+    Returns True if the device is missing from Supabase OR if is_quarantined is True.
+    Returns False ONLY if the device exists in Supabase and is_quarantined is False.
+    Caches results for CACHE_TTL_SECONDS to avoid excessive Supabase round-trips.
+    """
+    if not supabase_client:
+        return False
+
+    now = time.time()
+    if asset_id in _quarantine_cache:
+        is_quarantined, cached_at = _quarantine_cache[asset_id]
+        if now - cached_at < CACHE_TTL_SECONDS:
+            return is_quarantined
+
+    try:
+        res = supabase_client.table("devices").select("is_quarantined").eq("name", asset_id).execute()
+        devices = res.data if res else []
+        if not devices:
+            is_quarantined = True
+        else:
+            is_quarantined = bool(devices[0].get("is_quarantined"))
+
+        _quarantine_cache[asset_id] = (is_quarantined, now)
+        return is_quarantined
+    except Exception as e:
+        logger.error("Error checking device quarantine status in Supabase for '%s': %s", asset_id, e)
+        return True
+
+# -----------------------------------------------------------------------------
 # Sparkplug B Ingestion Handlers
 # -----------------------------------------------------------------------------
 def process_dbirth(asset_id: str, gateway_id: str, payload):
@@ -93,13 +129,16 @@ def process_dbirth(asset_id: str, gateway_id: str, payload):
                 "status": "ONLINE",
                 "is_quarantined": True
             }).execute()
+            _quarantine_cache[asset_id] = (True, time.time())
             logger.warning(
                 "QUARANTINE ALERT: Device '%s' announced DBIRTH but was missing from Supabase 'devices' table. "
                 "Inserted new record with is_quarantined=True.", asset_id
             )
         else:
             dev = devices[0]
-            if dev.get("is_quarantined"):
+            is_quar = bool(dev.get("is_quarantined"))
+            _quarantine_cache[asset_id] = (is_quar, time.time())
+            if is_quar:
                 logger.warning("QUARANTINE NOTICE: DBIRTH received for quarantined device '%s'", asset_id)
             else:
                 supabase_client.table("devices").update({"status": "ONLINE"}).eq("id", dev["id"]).execute()
@@ -111,8 +150,14 @@ def process_dbirth(asset_id: str, gateway_id: str, payload):
 def process_ddata(asset_id: str, gateway_id: str, payload):
     """
     On Sparkplug B DDATA:
-    Insert metric timestamps and values into TimescaleDB telemetry hypertable.
+    Verify device registration & quarantine status in Supabase.
+    If quarantined or missing, drop DDATA telemetry.
+    Otherwise, insert metric timestamps and values into TimescaleDB telemetry hypertable.
     """
+    if is_device_quarantined(asset_id):
+        logger.warning("Dropping DDATA for quarantined/unregistered device '%s'", asset_id)
+        return
+
     db_conn = get_timescaledb_connection()
     if not db_conn:
         logger.warning("TimescaleDB connection unavailable. Skipping DDATA telemetry ingestion for '%s'", asset_id)
@@ -254,6 +299,9 @@ def on_message(client, userdata, msg):
 def main():
     logger.info("Initializing Supabase + TimescaleDB Ingestion Daemon...")
 
+    # Note: Intentionally using paho-mqtt==1.6.1 v1 callback signatures.
+    # If upgrading to paho-mqtt 2.x+, callbacks must be migrated to CallbackAPIVersion.VERSION2
+    # signatures (e.g. on_connect(client, userdata, flags, reason_code, properties)).
     client = mqtt.Client()
     client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
     client.on_connect = on_connect

@@ -68,35 +68,6 @@ export function DirectoryTab({ showToast, hasPermission }) {
         </div>
       )}
 
-      {/* Kerberos Realm & Principals Management Card */}
-      <div style={{ marginBottom: '24px', background: 'var(--bg-glass)', border: '1px solid var(--border-hover)', borderRadius: 'var(--radius)', padding: '20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px', fontWeight: 600 }}>
-            <span>🔐 AMRC FactoryPlus Kerberos 5 Realm</span>
-            <span className="badge badge-online">REALM: FACTORYPLUS.LOCAL</span>
-          </div>
-          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>KDC Service: <code className="mono">kerberos:88</code> | Encryption: AES256-CTS</span>
-        </div>
-        <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '14px' }}>
-          Kerberos Ticket Granting Server (TGS) providing principal management, keytab exports, and ticket-based authentication across Users, Services, and Edge Devices.
-        </p>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
-          <div style={{ background: 'var(--bg-card)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border)' }}>
-            <div style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--primary)', marginBottom: '4px' }}>User Principals</div>
-            <div style={{ fontSize: '12px' }} className="mono">admin, manager, operator, auditor</div>
-          </div>
-          <div style={{ background: 'var(--bg-card)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border)' }}>
-            <div style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--success)', marginBottom: '4px' }}>Service Principals & Keytabs</div>
-            <div style={{ fontSize: '12px' }} className="mono">HTTP/localhost (keycloak.keytab)<br/>mqtt/broker (mosquitto.keytab)</div>
-          </div>
-          <div style={{ background: 'var(--bg-card)', padding: '12px', borderRadius: '6px', border: '1px solid var(--border)' }}>
-            <div style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--warning)', marginBottom: '4px' }}>Device / Gateway Principals</div>
-            <div style={{ fontSize: '12px' }} className="mono">device/Virtual_Gateway_NodeRED (nodered.keytab)</div>
-          </div>
-        </div>
-      </div>
-
       {/* Active Stack Microservices */}
       <div className="section-header">
         <h3 className="section-title" style={{ fontSize: '16px' }}>Active Stack Microservices <span className="section-count">{services.length}</span></h3>

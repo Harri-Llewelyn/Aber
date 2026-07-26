@@ -20,17 +20,6 @@ export const PERMISSION_UUIDS = {
   GITOPS_MANAGE:      'c234e567-8901-4c1d-8706-933e08544e41',
 };
 
-export const oidcConfig = {
-  authority: import.meta.env.VITE_KEYCLOAK_AUTHORITY || "http://localhost:8084/realms/factoryplus",
-  client_id: import.meta.env.VITE_KEYCLOAK_CLIENT_ID || "factoryplus-dashboard",
-  redirect_uri: typeof window !== 'undefined' ? window.location.origin + "/" : "/",
-  onSigninCallback: () => {
-    if (typeof window !== 'undefined') {
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
-  }
-};
-
 export const VALID_TABS = [
   'overview', 'cells', 'gateways', 'devices', 'digital-thread', 'telemetry', 'schemas', 'directory', 'archives'
 ];

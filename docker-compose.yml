@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: ${DB_NAME:-postgres}
       POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
       - "5433:5432"
     volumes:
@@ -23,11 +23,14 @@ services:
     ports:
       - "1883:1883"
       - "9001:9001"
+    environment:
+      MQTT_USER: ${MQTT_USER:-factoryplus}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
     volumes:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
       - ./mosquitto/password_file:/mosquitto/config/password_file:ro
     healthcheck:
-      test: ["CMD-SHELL", "mosquitto_sub -u factoryplus -P factoryplus123 -t '$$SYS/broker/version' -C 1 || exit 1"]
+      test: ["CMD-SHELL", "mosquitto_sub -u $${MQTT_USER:-factoryplus} -P $${MQTT_PASSWORD} -t '$$SYS/broker/version' -C 1 || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -38,11 +41,64 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-http://127.0.0.1:54321}
-        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IjEyNy4wLjAuMSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNjAwMDAwMDAwLCJleHAiOjIwMDAwMDAwMDB9.m7_WpY5q7a_C3Q1t7T-32V3_9-0Q}
+        VITE_SUPABASE_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
+        VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
     restart: always
     ports:
       - "3000:3000"
+
+  postgres-meta:
+    image: supabase/postgres-meta:v0.68.0
+    restart: always
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: timescaledb
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: ${DB_NAME:-postgres}
+      PG_META_DB_USER: ${DB_USER:-postgres}
+      PG_META_DB_PASSWORD: ${DB_PASSWORD}
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+
+  postgrest:
+    image: postgrest/postgrest:v12.0.1
+    restart: always
+    environment:
+      PGRST_DB_URI: postgres://${DB_USER:-postgres}:${DB_PASSWORD}@timescaledb:5432/${DB_NAME:-postgres}
+      PGRST_DB_SCHEMAS: public,auth,storage
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${SUPABASE_JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters}
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+
+  gotrue:
+    image: supabase/gotrue:v2.132.3
+    restart: always
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://${DB_USER:-postgres}:${DB_PASSWORD}@timescaledb:5432/${DB_NAME:-postgres}?sslmode=disable
+      GOTRUE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters}
+      GOTRUE_SITE_URL: http://localhost:3000
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+
+  kong:
+    image: kong:2.8.1
+    restart: always
+    ports:
+      - "54321:8000"
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /usr/local/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth
+    volumes:
+      - ./kong.yml:/usr/local/kong/kong.yml:ro
 
   studio:
     image: supabase/studio:latest
@@ -50,12 +106,14 @@ services:
     ports:
       - "8000:3000"
     environment:
-      STUDIO_PG_META_URL: http://studio:3000
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      STUDIO_PG_META_URL: http://postgres-meta:8080
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
       SUPABASE_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
       SUPABASE_PUBLIC_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
-      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IjEyNy4wLjAuMSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNjAwMDAwMDAwLCJleHAiOjIwMDAwMDAwMDB9.m7_WpY5q7a_C3Q1t7T-32V3_9-0Q}
-      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IjEyNy4wLjAuMSIsInJvbGUiOiJzZXJ2aWNlX3JvbGUiLCJpYXQiOjE2MDAwMDAwMDAsImV4cCI6MjAwMDAwMDAwMH0.vW7_90vX79Z-C3Q1t7T-32V3_9-0Q}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+    depends_on:
+      - postgres-meta
 
   ingestion:
     build:
@@ -67,11 +125,11 @@ services:
       DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${DB_NAME:-postgres}
       DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD}
       MQTT_HOST: ${MQTT_HOST:-mosquitto}
       MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-factoryplus}
-      MQTT_PASSWORD: ${MQTT_PASSWORD:-factoryplus123}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
       PYTHONUNBUFFERED: "1"
     depends_on:
       timescaledb:
@@ -82,17 +140,21 @@ services:
   node-red-init:
     image: nodered/node-red:latest
     user: "0"
+    environment:
+      NODERED_CREDENTIAL_SECRET: ${NODERED_CREDENTIAL_SECRET}
+      MQTT_USER: ${MQTT_USER:-factoryplus}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
     volumes:
       - nodered_data:/data
       - ./node_red_flow.json:/seed/flows.json:ro
     entrypoint: >
       /bin/sh -c "
       cp /seed/flows.json /data/flows.json;
-      echo 'module.exports = { credentialSecret: \"factoryplussecret\" };' > /data/settings.js;
+      echo \"module.exports = { credentialSecret: \\\"$NODERED_CREDENTIAL_SECRET\\\" };\" > /data/settings.js;
       node -e \"
         const credentials = require('/usr/src/node-red/node_modules/@node-red/runtime/lib/nodes/credentials');
-        credentials.init({ settings: { userDir: '/data', credentialSecret: 'factoryplussecret' } });
-        credentials.add('mqtt-broker-config', { user: 'factoryplus', password: 'factoryplus123' });
+        credentials.init({ settings: { userDir: '/data', credentialSecret: process.env.NODERED_CREDENTIAL_SECRET } });
+        credentials.add('mqtt-broker-config', { user: process.env.MQTT_USER || 'factoryplus', password: process.env.MQTT_PASSWORD });
         credentials.export().then(creds => {
             require('fs').writeFileSync('/data/flows_cred.json', JSON.stringify(creds));
         });
@@ -119,7 +181,7 @@ services:
     restart: always
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
       GF_SERVER_ROOT_URL: "http://localhost:3002/"
       GF_INSTALL_PLUGINS: ""
     ports:

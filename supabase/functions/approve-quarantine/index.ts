@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { isUuid } from "./isUuid.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -59,11 +60,17 @@ serve(async (req: Request) => {
 
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 
-    const { data, error: updateError } = await supabaseAdmin
+    let query = supabaseAdmin
       .from("devices")
-      .update({ is_quarantined: false, gateway_id: gateway_id || null })
-      .or(`id.eq.${device_id},name.eq.${device_id}`)
-      .select();
+      .update({ is_quarantined: false, gateway_id: gateway_id || null });
+
+    if (isUuid(device_id)) {
+      query = query.eq("id", device_id);
+    } else {
+      query = query.eq("name", device_id);
+    }
+
+    const { data, error: updateError } = await query.select();
 
     if (updateError) {
       return new Response(

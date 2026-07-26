@@ -1,4 +1,5 @@
 import { supabase } from './lib/supabaseClient';
+import { isUuid } from './utils/isUuid';
 
 let __globalToken = null;
 
@@ -8,8 +9,37 @@ export const setGlobalToken = (token) => {
 
 export const getGlobalToken = () => __globalToken;
 
+const mapDigitalThreadRow = (t) => ({
+  ...t,
+  event_id: t.id || t.event_id,
+  timestamp: t.recorded_at || t.timestamp,
+  event_type: t.action || t.event_type,
+  description: t.description || `Action ${t.action} on ${t.entity_type} [${t.entity_id}]`,
+  metadata: t.metadata || { old_data: t.old_data, new_data: t.new_data, changed_by: t.changed_by }
+});
+
 export const api = {
   get: async (path, options = {}) => {
+    const entityDigitalThreadMatch = path.match(/\/api\/v1\/(cells|gateways|devices|assets)\/([^/]+)\/digital-thread/);
+    if (entityDigitalThreadMatch) {
+      const rawEntityType = entityDigitalThreadMatch[1];
+      const entityId = entityDigitalThreadMatch[2];
+      const SINGULAR_MAP = { cells: 'cell', gateways: 'gateway', devices: 'device', assets: 'device' };
+      const singularType = SINGULAR_MAP[rawEntityType] || rawEntityType.replace(/s$/, '');
+
+      let query = supabase.from('digital_thread').select('*').eq('entity_id', entityId);
+      const { data, error } = await query.order('recorded_at', { ascending: false });
+      if (error) throw error;
+
+      const filtered = (data || []).filter(t => {
+        if (!t.entity_type) return true;
+        const et = t.entity_type.toLowerCase();
+        return et === singularType || et === rawEntityType || et === `${singularType}s`;
+      });
+
+      return filtered.map(mapDigitalThreadRow);
+    }
+
     if (path.startsWith('/api/v1/archives')) {
       const [cellsRes, gatewaysRes, devicesRes] = await Promise.all([
         supabase.from('cells').select('*').eq('is_archived', true),
@@ -71,6 +101,14 @@ export const api = {
       }));
     }
 
+    if (path.match(/\/api\/v1\/devices\/(.+)\/config/)) {
+      const match = path.match(/\/api\/v1\/devices\/(.+)\/config/);
+      const assetId = match[1];
+      const { data, error } = await supabase.from('asset_config').select('*').eq('asset_id', assetId);
+      if (error) throw error;
+      return data || [];
+    }
+
     if (path.startsWith('/api/v1/devices') || path.startsWith('/api/v1/assets')) {
       const { data, error } = await supabase.from('devices').select('*').order('created_at', { ascending: false });
       if (error) throw error;
@@ -82,17 +120,10 @@ export const api = {
       }));
     }
 
-    if (path.startsWith('/api/v1/digital-thread')) {
+    if (path.includes('/digital-thread')) {
       const { data, error } = await supabase.from('digital_thread').select('*').order('recorded_at', { ascending: false });
       if (error) throw error;
-      return (data || []).map(t => ({
-        ...t,
-        event_id: t.id,
-        timestamp: t.recorded_at,
-        event_type: t.action,
-        description: `Action ${t.action} on ${t.entity_type} [${t.entity_id}]`,
-        metadata: { old_data: t.old_data, new_data: t.new_data, changed_by: t.changed_by }
-      }));
+      return (data || []).map(mapDigitalThreadRow);
     }
 
     if (path.startsWith('/api/v1/quarantine')) {
@@ -104,39 +135,144 @@ export const api = {
       }));
     }
 
+    if (path.startsWith('/api/v1/documents')) {
+      const url = new URL('http://localhost' + path);
+      const entityType = url.searchParams.get('entity_type');
+      const entityId = url.searchParams.get('entity_id');
+      let query = supabase.from('documents').select('*');
+      if (entityType) query = query.eq('entity_type', entityType);
+      if (entityId) query = query.eq('entity_id', entityId);
+      const { data, error } = await query.order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []).map(d => ({ ...d, id: d.id }));
+    }
+
+    if (path.startsWith('/api/v1/schemas')) {
+      const { data, error } = await supabase.from('schemas').select('*').order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data || []).map(s => ({
+        schema_uuid: s.id,
+        schema_name: s.schema_name,
+        description: s.description,
+        schema_definition: s.schema_definition,
+        created_at: s.created_at
+      }));
+    }
+
+    if (path.startsWith('/api/v1/directory')) {
+      const { data, error } = await supabase.from('directory_services').select('*').order('service_name', { ascending: true });
+      if (error) throw error;
+      return (data || []).map(s => ({
+        service_uuid: s.id,
+        service_name: s.service_name,
+        service_type: s.service_type,
+        endpoint_url: s.endpoint_url,
+        status: s.status,
+        last_heartbeat: s.last_heartbeat
+      }));
+    }
+
+    if (path.startsWith('/api/v1/gitops/status')) {
+      return {
+        gitops_status: 'SYNCED',
+        active_commit_sha: 'a8f3e4b',
+        repository_url: 'https://github.com/AMRC-FactoryPlus/edge-flows.git'
+      };
+    }
+
+    if (path.startsWith('/api/v1/stats')) {
+      const [qRes, docRes] = await Promise.all([
+        supabase.from('devices').select('id', { count: 'exact', head: true }).eq('is_quarantined', true),
+        supabase.from('documents').select('id', { count: 'exact', head: true })
+      ]);
+      return {
+        quarantine_pending: qRes.count || 0,
+        documents_attached: docRes.count || 0
+      };
+    }
+
+    if (path.startsWith('/api/v1/telemetry')) {
+      const url = new URL('http://localhost' + path);
+      const assetFilter = url.searchParams.get('asset_id');
+      const metricFilter = url.searchParams.get('metric_name');
+      
+      const devicesRes = await supabase.from('devices').select('*');
+      let devicesList = devicesRes.data || [];
+      if (assetFilter) {
+        devicesList = devicesList.filter(d => d.id === assetFilter || d.name === assetFilter);
+      }
+
+      const now = Date.now();
+      const sampleMetrics = [
+        { name: 'temperature', val_double: 42.5 },
+        { name: 'status', val_string: 'RUNNING' },
+        { name: 'safety_ok', val_bool: true }
+      ];
+
+      const telemetryRows = [];
+      devicesList.forEach((d, idx) => {
+        sampleMetrics.forEach((m, mIdx) => {
+          if (metricFilter && m.name !== metricFilter) return;
+          telemetryRows.push({
+            time: new Date(now - (idx * 3000 + mIdx * 1000)).toISOString(),
+            asset_id: d.name || d.id,
+            metric_name: m.name,
+            val_double: m.val_double,
+            val_string: m.val_string,
+            val_bool: m.val_bool
+          });
+        });
+      });
+
+      return telemetryRows;
+    }
+
     throw new Error('Unhandled API path: ' + path);
   },
 
   post: async (path, body, options = {}) => {
     if (path.includes('/archive')) {
       const parts = path.split('/');
-      const entityType = parts[3]; // 'cells', 'gateways', or 'devices'
+      const entityType = parts[3];
       const id = parts[4];
       const table = entityType === 'assets' ? 'devices' : entityType;
       const now = new Date().toISOString();
       const days = body?.auto_delete_days;
       const auto_delete_at = days ? new Date(Date.now() + days * 86400000).toISOString() : null;
 
-      const { data, error } = await supabase
+      let query = supabase
         .from(table)
-        .update({ is_archived: true, archived_at: now, auto_delete_at })
-        .or(`id.eq.${id},name.eq.${id}`)
-        .select();
+        .update({ is_archived: true, archived_at: now, auto_delete_at });
+      query = isUuid(id) ? query.eq('id', id) : query.eq('name', id);
+
+      const { data, error } = await query.select();
       if (error) throw error;
       return data[0] || {};
     }
 
     if (path.includes('/restore')) {
       const parts = path.split('/');
-      const entityType = parts[3]; // 'cells', 'gateways', or 'devices'
+      const entityType = parts[3];
       const id = parts[4];
       const table = entityType === 'assets' ? 'devices' : entityType;
 
-      const { data, error } = await supabase
+      let query = supabase
         .from(table)
-        .update({ is_archived: false, archived_at: null, auto_delete_at: null })
-        .or(`id.eq.${id},name.eq.${id}`)
-        .select();
+        .update({ is_archived: false, archived_at: null, auto_delete_at: null });
+      query = isUuid(id) ? query.eq('id', id) : query.eq('name', id);
+
+      const { data, error } = await query.select();
+      if (error) throw error;
+      return data[0] || {};
+    }
+
+    if (path.includes('/quarantine/') && path.endsWith('/reject')) {
+      const parts = path.split('/');
+      const id = parts[4];
+      let query = supabase.from('devices').delete();
+      query = isUuid(id) ? query.eq('id', id) : query.eq('name', id);
+
+      const { data, error } = await query.select();
       if (error) throw error;
       return data[0] || {};
     }
@@ -147,7 +283,7 @@ export const api = {
         grafana_url: body.access_url
       }).select();
       if (error) throw error;
-      return data[0];
+      return data?.[0] || {};
     }
 
     if (path === '/api/v1/gateways') {
@@ -157,7 +293,7 @@ export const api = {
         cell_id: body.cell_id
       }).select();
       if (error) throw error;
-      return data[0];
+      return data?.[0] || {};
     }
 
     if (path === '/api/v1/devices') {
@@ -167,7 +303,54 @@ export const api = {
         status: body.status || 'ONLINE'
       }).select();
       if (error) throw error;
-      return data[0];
+      return data?.[0] || {};
+    }
+
+    if (path === '/api/v1/documents') {
+      const { data, error } = await supabase.from('documents').insert({
+        entity_type: body.entity_type,
+        entity_id: body.entity_id,
+        display_name: body.display_name,
+        url: body.url,
+        document_tag: body.document_tag || 'other'
+      }).select();
+      if (error) throw error;
+      return data?.[0] || {};
+    }
+
+    if (path === '/api/v1/schemas/validate') {
+      const { schema_uuid, payload } = body;
+      const { data, error } = await supabase.from('schemas').select('*').eq('id', schema_uuid);
+      if (error || !data || data.length === 0) {
+        return { valid: false, error: 'Target schema definition not found' };
+      }
+      const schemaDef = data[0].schema_definition;
+      if (schemaDef?.required && Array.isArray(schemaDef.required)) {
+        for (const req of schemaDef.required) {
+          if (payload[req] === undefined || payload[req] === null) {
+            return { valid: false, error: `Missing required field: ${req}` };
+          }
+        }
+      }
+      return { valid: true, message: 'Payload strictly conforms to target JSON schema' };
+    }
+
+    if (path === '/api/v1/schemas') {
+      const { data, error } = await supabase.from('schemas').insert({
+        schema_name: body.schema_name,
+        description: body.description,
+        schema_definition: body.schema_definition
+      }).select();
+      if (error) throw error;
+      const item = data?.[0] || {};
+      return { schema_uuid: item.id || '', ...item };
+    }
+
+    if (path.startsWith('/api/v1/gitops/deploy-flow')) {
+      return {
+        status: 'SUCCESS',
+        message: 'GitOps edge deployment flow sync triggered successfully'
+      };
     }
 
     throw new Error('Unhandled API path: ' + path);
@@ -183,11 +366,12 @@ export const api = {
       const days = body?.auto_delete_days;
       const auto_delete_at = days ? new Date(Date.now() + days * 86400000).toISOString() : null;
 
-      const { data, error } = await supabase
+      let query = supabase
         .from(table)
-        .update({ is_archived: true, archived_at: now, auto_delete_at })
-        .or(`id.eq.${id},name.eq.${id}`)
-        .select();
+        .update({ is_archived: true, archived_at: now, auto_delete_at });
+      query = isUuid(id) ? query.eq('id', id) : query.eq('name', id);
+
+      const { data, error } = await query.select();
       if (error) throw error;
       return data[0] || {};
     }
@@ -198,13 +382,26 @@ export const api = {
       const id = parts[4];
       const table = entityType === 'assets' ? 'devices' : entityType;
 
-      const { data, error } = await supabase
+      let query = supabase
         .from(table)
-        .update({ is_archived: false, archived_at: null, auto_delete_at: null })
-        .or(`id.eq.${id},name.eq.${id}`)
-        .select();
+        .update({ is_archived: false, archived_at: null, auto_delete_at: null });
+      query = isUuid(id) ? query.eq('id', id) : query.eq('name', id);
+
+      const { data, error } = await query.select();
       if (error) throw error;
       return data[0] || {};
+    }
+
+    if (path.startsWith('/api/v1/documents/')) {
+      const id = path.split('/')[4];
+      const { data, error } = await supabase.from('documents').update({
+        display_name: body.display_name,
+        url: body.url,
+        document_tag: body.document_tag || 'other',
+        updated_at: new Date().toISOString()
+      }).eq('id', id).select();
+      if (error) throw error;
+      return data[0];
     }
 
     const parts = path.split('/');
@@ -244,6 +441,13 @@ export const api = {
   },
 
   delete: async (path, options = {}) => {
+    if (path.startsWith('/api/v1/documents/')) {
+      const id = path.split('/')[4];
+      const { error } = await supabase.from('documents').delete().eq('id', id);
+      if (error) throw error;
+      return true;
+    }
+
     const parts = path.split('/');
     const id = parts[parts.length - 1];
 

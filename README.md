@@ -46,7 +46,7 @@ flowchart TB
     end
 
     subgraph User Experience ["Presentation & Monitoring"]
-        UI["React Web Dashboard<br/>(Port 3001)"]
+        UI["React Web Dashboard<br/>(Port 3000)"]
         GRAF["Grafana Dashboards<br/>(Port 3002)"]
     end
 
@@ -65,13 +65,17 @@ flowchart TB
 
 ## Service Port Directory (Docker Compose Stack)
 
-Running `docker compose up -d` starts 7 container services representing the current production runtime:
+Running `docker compose up -d` starts 11 container services representing the current production runtime:
 
 | Service | Container Name | Image / Build Target | Port | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | **`timescaledb`** | `tsdb_postgres` | `timescale/timescaledb:latest-pg15` | `5433:5432` | Standalone TimescaleDB instance for `telemetry` hypertable |
 | **`mosquitto`** | `mqtt_broker` | `eclipse-mosquitto:latest` | `1883:1883`, `9001:9001` | Eclipse Mosquitto MQTT broker for Sparkplug B traffic |
 | **`frontend`** | `iot_frontend` | `./frontend/Dockerfile` | `3000:3000` | React Web Dashboard UI |
+| **`postgres-meta`** | `postgres_meta` | `supabase/postgres-meta:v0.68.0` | — | Database metadata API for Supabase Studio |
+| **`postgrest`** | `postgrest` | `postgrest/postgrest:v12.0.1` | — | PostgREST API engine |
+| **`gotrue`** | `gotrue` | `supabase/gotrue:v2.132.3` | — | GoTrue Auth service |
+| **`kong`** | `kong` | `kong:2.8.1` | `54321:8000` | Kong API Gateway |
 | **`studio`** | `supabase_studio` | `supabase/studio:latest` | `8000:3000` | Supabase Studio database management Web UI |
 | **`ingestion`** | `iot_ingestion` | `./Dockerfile` | — | Python daemon routing metadata to Supabase & telemetry to TimescaleDB |
 | **`node-red-init`** | `iot_node_red_init` | `nodered/node-red:latest` | — | One-shot init container configuring Node-RED flows & credentials |
@@ -103,6 +107,12 @@ All database migrations are stored in `supabase/migrations/`:
   - **Tables**: `cells`, `gateways`, `devices`, `digital_thread`.
   - **Triggers**: PL/pgSQL function `log_digital_thread_event()` automatically logs audit events on `cells`, `gateways`, and `devices` mutations.
   - **RLS Policies**: Enforces `SELECT` permissions for `authenticated` users, and `INSERT`/`UPDATE`/`DELETE` for `Administrator` and `Shopfloor_Manager` roles.
+- **`20260101000002_add_documents_and_config.sql`**:
+  - **Tables**: `documents`, `asset_config`, `schemas`, `directory_services`.
+  - **RLS Policies**: Enforces RLS permissions for entity document links, asset parameter configurations, schema registry definitions, and directory services.
+- **`20260101000003_add_rbac_permissions.sql`**:
+  - **Tables**: `roles`, `permissions`, `role_permissions`, `user_roles`.
+  - **Permissions System**: Seeds fine-grained RBAC permission UUIDs mapped to `Administrator`, `Shopfloor_Manager`, `Operator`, and `Auditor` personas.
 
 ---
 
@@ -124,7 +134,7 @@ The GitHub Actions CI workflow ([`.github/workflows/ci.yml`](file:///.github/wor
 
 1. **`frontend-build` (Frontend Build & Test)**: Installs Node.js dependencies, runs the Vitest unit test suite (`npm test`), and builds the Vite production bundle (`npm run build`).
 2. **`edge-function-auth-test` (Edge Function Authorization Unit Tests)**: Runs `python supabase/functions/approve-quarantine/test_approve_quarantine.py` to verify fail-closed role authorization for missing claims and non-privileged roles.
-3. **`e2e-validation` (End-to-End Ingestion Validation)**: Launches the container stack with `docker compose up -d` and executes `python ingestion/validate.py` to verify Sparkplug B MQTT publishing, device quarantine, PostgreSQL triggers, and TimescaleDB telemetry ingestion.
+3. **`e2e-validation` (End-to-End Ingestion Validation)**: Installs the Supabase CLI, launches the local Supabase stack (`supabase start`), resets database migrations (`supabase db reset`), configures `.env`, launches the Docker Compose stack, polls service health (`timescaledb` & `mosquitto`), and executes `python ingestion/validate.py`.
 
 ---
 
@@ -140,7 +150,8 @@ The validation script verifies:
 1. **MQTT Payload Publishing**: Sends Sparkplug B `DBIRTH` and `DDATA` messages to Mosquitto.
 2. **Supabase Device Quarantine**: Confirms unknown device `DBIRTH` announcements auto-insert into Supabase `devices` with `is_quarantined = true`.
 3. **Digital Thread Audit Triggers**: Confirms PostgreSQL triggers automatically populate `digital_thread`.
-4. **TimescaleDB Telemetry**: Confirms metric ingestion into the TimescaleDB `telemetry` hypertable.
+4. **TimescaleDB Telemetry**: Confirms metric ingestion for registered devices into the TimescaleDB `telemetry` hypertable.
+5. **Quarantine Telemetry Gating**: Confirms telemetry (`DDATA`) published by quarantined or unregistered devices is gated and dropped, ensuring zero records reach TimescaleDB until approved.
 
 ---
 
@@ -157,7 +168,7 @@ The validation script verifies:
    npx supabase db reset
    ```
 
-3. **Start Docker Compose stack (7 services)**:
+3. **Start Docker Compose stack (11 services)**:
    ```bash
    docker compose up --build -d
    ```
