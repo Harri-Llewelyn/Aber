@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '../lib/supabaseClient';
 import { PERMISSION_UUIDS } from '../constants';
 
-const ROLE_PERMISSIONS_MAP = {
+const DEFAULT_ROLE_PERMISSIONS_MAP = {
   Administrator: Object.values(PERMISSION_UUIDS),
   Shopfloor_Manager: Object.values(PERMISSION_UUIDS),
   Operator: [
@@ -15,7 +16,7 @@ const ROLE_PERMISSIONS_MAP = {
 };
 
 /**
- * Custom hook to fetch user role & permissions from Supabase Auth session
+ * Custom hook to fetch user role & permissions from Supabase DB tables & Auth session
  * @param {Object} session - Supabase auth session object
  * @param {Function} showToast - Toast notification function
  */
@@ -25,18 +26,61 @@ export function usePermissions(session, showToast) {
   const [loadingPerms, setLoadingPerms] = useState(false);
 
   useEffect(() => {
-    if (session?.user) {
-      const role = session.user.app_metadata?.role || session.user.user_metadata?.role || null;
-      setUserRole(role);
-      if (role && ROLE_PERMISSIONS_MAP[role]) {
-        setUserPerms(ROLE_PERMISSIONS_MAP[role]);
-      } else {
-        setUserPerms([]);
+    let isMounted = true;
+
+    async function fetchPermissions() {
+      if (!session?.user) {
+        if (isMounted) {
+          setUserRole(null);
+          setUserPerms([]);
+          setLoadingPerms(false);
+        }
+        return;
       }
-    } else {
-      setUserRole(null);
-      setUserPerms([]);
+
+      setLoadingPerms(true);
+      const appRole = session.user.app_metadata?.role || null;
+      let resolvedRole = appRole;
+      let permUuids = [];
+
+      try {
+        const { data, error } = await supabase
+          .from('user_roles')
+          .select('role_id, roles(name), role_permissions(permission_id, permissions(id, name))')
+          .eq('user_id', session.user.id);
+
+        if (!error && data && data.length > 0) {
+          const userRoleRecord = data[0];
+          if (userRoleRecord.roles?.name) {
+            resolvedRole = userRoleRecord.roles.name;
+          }
+          if (Array.isArray(userRoleRecord.role_permissions)) {
+            permUuids = userRoleRecord.role_permissions
+              .map(rp => rp.permission_id || rp.permissions?.id)
+              .filter(Boolean);
+          }
+        }
+      } catch (err) {
+        // Fallback handled below
+      }
+
+      // Fallback: If DB permissions query returned no rows but appRole is known
+      if (permUuids.length === 0 && appRole && DEFAULT_ROLE_PERMISSIONS_MAP[appRole]) {
+        permUuids = DEFAULT_ROLE_PERMISSIONS_MAP[appRole];
+      }
+
+      if (isMounted) {
+        setUserRole(resolvedRole);
+        setUserPerms(permUuids);
+        setLoadingPerms(false);
+      }
     }
+
+    fetchPermissions();
+
+    return () => {
+      isMounted = false;
+    };
   }, [session]);
 
   const hasPermission = useCallback((uuid) => {

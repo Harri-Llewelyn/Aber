@@ -9,7 +9,6 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
@@ -46,74 +45,6 @@ services:
     restart: always
     ports:
       - "3000:3000"
-
-  postgres-meta:
-    image: supabase/postgres-meta:v0.68.0
-    restart: always
-    environment:
-      PG_META_PORT: 8080
-      PG_META_DB_HOST: timescaledb
-      PG_META_DB_PORT: 5432
-      PG_META_DB_NAME: ${DB_NAME:-postgres}
-      PG_META_DB_USER: ${DB_USER:-postgres}
-      PG_META_DB_PASSWORD: ${DB_PASSWORD}
-    depends_on:
-      timescaledb:
-        condition: service_healthy
-
-  postgrest:
-    image: postgrest/postgrest:v12.0.1
-    restart: always
-    environment:
-      PGRST_DB_URI: postgres://${DB_USER:-postgres}:${DB_PASSWORD}@timescaledb:5432/${DB_NAME:-postgres}
-      PGRST_DB_SCHEMAS: public,auth,storage
-      PGRST_DB_ANON_ROLE: anon
-      PGRST_JWT_SECRET: ${SUPABASE_JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters}
-    depends_on:
-      timescaledb:
-        condition: service_healthy
-
-  gotrue:
-    image: supabase/gotrue:v2.132.3
-    restart: always
-    environment:
-      GOTRUE_API_HOST: 0.0.0.0
-      GOTRUE_API_PORT: 9999
-      GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_DATABASE_URL: postgres://${DB_USER:-postgres}:${DB_PASSWORD}@timescaledb:5432/${DB_NAME:-postgres}?sslmode=disable
-      GOTRUE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters}
-      GOTRUE_SITE_URL: http://localhost:3000
-    depends_on:
-      timescaledb:
-        condition: service_healthy
-
-  kong:
-    image: kong:2.8.1
-    restart: always
-    ports:
-      - "54321:8000"
-    environment:
-      KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /usr/local/kong/kong.yml
-      KONG_DNS_ORDER: LAST,A,CNAME
-      KONG_PLUGINS: request-transformer,cors,key-auth
-    volumes:
-      - ./kong.yml:/usr/local/kong/kong.yml:ro
-
-  studio:
-    image: supabase/studio:latest
-    restart: always
-    ports:
-      - "8000:3000"
-    environment:
-      STUDIO_PG_META_URL: http://postgres-meta:8080
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      SUPABASE_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
-      SUPABASE_PUBLIC_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
-      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
-      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
-    depends_on:
-      - postgres-meta
 
   ingestion:
     build:

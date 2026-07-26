@@ -95,6 +95,8 @@ jobs:
           echo "SUPABASE_ANON_KEY=${ANON_KEY}" >> $GITHUB_ENV
           echo "SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}" >> $GITHUB_ENV
 
+      # Note: Supabase BaaS services (Auth, PostgREST, Studio, Kong) are provided exclusively by 'supabase start'.
+      # docker compose up -d launches the remaining application services (timescaledb, mosquitto, frontend, ingestion, node-red, grafana).
       - name: Start Docker Compose Services
         run: |
           docker compose up -d

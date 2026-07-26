@@ -4,7 +4,7 @@ Supabase Edge Function for approving quarantined industrial devices and optional
 
 ## Authorization & Security Policy
 
-This function enforces **fail-closed** authorization. Requests are evaluated against user claims in `app_metadata.role` or `user_metadata.role`:
+This function enforces **fail-closed** authorization. Requests are evaluated strictly against user claims in `app_metadata.role` (which can only be set server-side via the Supabase Admin API or a service-role client):
 
 * **`Administrator`**: Allowed (`200 OK`)
 * **`Shopfloor_Manager`**: Allowed (`200 OK`)

@@ -39,7 +39,7 @@ serve(async (req: Request) => {
       );
     }
 
-    const userRole = user.app_metadata?.role || user.user_metadata?.role || null;
+    const userRole = user.app_metadata?.role || null;
     const allowedRoles = ["Administrator", "Shopfloor_Manager"];
 
     if (!userRole || !allowedRoles.includes(userRole)) {

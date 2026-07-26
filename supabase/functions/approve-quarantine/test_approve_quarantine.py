@@ -12,9 +12,7 @@ def evaluate_approve_quarantine_authorization(user: dict) -> tuple[int, str]:
         return 401, "Invalid user token"
 
     app_metadata = user.get("app_metadata", {})
-    user_metadata = user.get("user_metadata", {})
-
-    user_role = app_metadata.get("role") or user_metadata.get("role") or None
+    user_role = app_metadata.get("role") or None
     allowed_roles = ["Administrator", "Shopfloor_Manager"]
 
     if not user_role or user_role not in allowed_roles:
@@ -25,11 +23,22 @@ def evaluate_approve_quarantine_authorization(user: dict) -> tuple[int, str]:
 class TestApproveQuarantineAuth(unittest.TestCase):
 
     def test_missing_role_claim_returns_403(self):
-        """User token with no role in app_metadata or user_metadata must fail closed with 403."""
+        """User token with no role in app_metadata must fail closed with 403."""
         user = {
             "id": "usr-no-role-123",
             "app_metadata": {},
             "user_metadata": {}
+        }
+        status, message = evaluate_approve_quarantine_authorization(user)
+        self.assertEqual(status, 403)
+        self.assertIn("Forbidden", message)
+
+    def test_privileged_role_in_user_metadata_only_returns_403(self):
+        """User setting user_metadata.role = 'Administrator' must be rejected with 403."""
+        user = {
+            "id": "usr-attacker-000",
+            "app_metadata": {},
+            "user_metadata": {"role": "Administrator"}
         }
         status, message = evaluate_approve_quarantine_authorization(user)
         self.assertEqual(status, 403)
