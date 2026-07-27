@@ -1,14 +1,6 @@
 import { supabase } from './lib/supabaseClient';
 import { isUuid } from './utils/isUuid';
 
-let __globalToken = null;
-
-export const setGlobalToken = (token) => {
-  __globalToken = token;
-};
-
-export const getGlobalToken = () => __globalToken;
-
 const mapDigitalThreadRow = (t) => ({
   ...t,
   event_id: t.id || t.event_id,
@@ -136,7 +128,7 @@ export const api = {
     }
 
     if (path.startsWith('/api/v1/documents')) {
-      const url = new URL('http://localhost' + path);
+      const url = new URL(path, window.location.origin);
       const entityType = url.searchParams.get('entity_type');
       const entityId = url.searchParams.get('entity_id');
       let query = supabase.from('documents').select('*');
@@ -192,7 +184,7 @@ export const api = {
     }
 
     if (path.startsWith('/api/v1/telemetry')) {
-      const url = new URL('http://localhost' + path);
+      const url = new URL(path, window.location.origin);
       const assetFilter = url.searchParams.get('asset_id');
       const metricFilter = url.searchParams.get('metric_name');
       

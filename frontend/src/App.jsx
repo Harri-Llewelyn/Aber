@@ -235,7 +235,7 @@ function Dashboard({ session, onSignOut }) {
           {tab === 'gateways'       && <GatewaysTab showToast={showToast} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
           {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('telemetry', { asset_id: id }) }} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} />}
           {tab === 'digital-thread' && <DigitalThreadTab />}
-          {tab === 'telemetry'      && <TelemetryTab initialAssetFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} />}
+          {tab === 'telemetry'      && <TelemetryTab initialAssetFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} hasPermission={hasPermission} />}
           {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} />}
           {tab === 'directory'      && <DirectoryTab showToast={showToast} hasPermission={hasPermission} />}
           {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} />}
@@ -260,7 +260,19 @@ export default function App() {
     })
 
     // Listen for Supabase Auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // Handle SIGNED_OUT events - clear session and show auth screen
+      if (event === 'SIGNED_OUT') {
+        setSession(null)
+        setLoading(false)
+        return
+      }
+      // Handle TOKEN_REFRESHED events - update session silently
+      if (event === 'TOKEN_REFRESHED') {
+        setSession(session)
+        return
+      }
+      // For other events (INITIAL_SESSION, USER_MODIFIED), update session normally
       setSession(session)
       setLoading(false)
     })

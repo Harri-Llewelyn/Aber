@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api'
+import { PERMISSION_UUIDS } from '../../constants'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { AutoRefreshControl } from '../common/AutoRefreshControl'
 import { IconDownload } from '../common/Icons'
 
-export function TelemetryTab({ initialAssetFilter, onClearFilter }) {
+export function TelemetryTab({ initialAssetFilter, onClearFilter, hasPermission }) {
   const [rows, setRows]               = useState([])
   const [loading, setLoading]         = useState(true)
 
@@ -17,6 +18,9 @@ export function TelemetryTab({ initialAssetFilter, onClearFilter }) {
   const [metricFilter, setMetricFilter] = useState('')
   const [timeRange, setTimeRange]     = useState('')
   const [assets, setAssets]           = useState([])
+
+  // Check telemetry permission
+  const hasTelemetryPermission = hasPermission(PERMISSION_UUIDS.TELEMETRY_READ)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -61,6 +65,19 @@ export function TelemetryTab({ initialAssetFilter, onClearFilter }) {
     if (row.val_string !== null && row.val_string !== undefined) return <span className="telemetry-value val-string">"{row.val_string}"</span>
     if (row.val_double !== null && row.val_double !== undefined) return <span className="telemetry-value val-double">{row.val_double}</span>
     return <span style={{ color: 'var(--text-dim)' }}>null</span>
+  }
+
+  // If user doesn't have telemetry permission, show a restricted view
+  if (!hasTelemetryPermission) {
+    return (
+      <div className="card" style={{ padding: '40px', textAlign: 'center' }}>
+        <div style={{ fontSize: '64px', marginBottom: '16px' }}>🔒</div>
+        <h3>Access Restricted</h3>
+        <p style={{ color: 'var(--text-muted)' }}>
+          You do not have permission to view telemetry data. Please contact your administrator.
+        </p>
+      </div>
+    )
   }
 
   return (

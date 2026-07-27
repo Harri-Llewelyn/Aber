@@ -8,6 +8,12 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 
 -- Seed auth.users with the 4 standard demo personas
+-- Note: For GoTrue v2.x, we need to set:
+-- - confirmation_token and recovery_token to empty strings (not NULL) to avoid scan errors
+-- - email_confirmed_at to NOW() to mark users as confirmed
+-- - encrypted_password is stored as bcrypt hash
+-- - raw_app_meta_data must include the 'role' key with the user's role name
+-- - is_sso_user must be false (default)
 INSERT INTO auth.users (
   instance_id,
   id,
@@ -18,11 +24,17 @@ INSERT INTO auth.users (
   email_confirmed_at,
   recovery_sent_at,
   last_sign_in_at,
+  confirmation_token,
+  recovery_token,
   raw_app_meta_data,
   raw_user_meta_data,
   created_at,
   updated_at,
-  is_sso_user
+  is_sso_user,
+  phone_confirmed_at,
+  email_change_token_new,
+  email_change_token_current,
+  reauthentication_token
 ) VALUES
 (
   '00000000-0000-0000-0000-000000000000',
@@ -34,11 +46,17 @@ INSERT INTO auth.users (
   NOW(),
   NOW(),
   NOW(),
+  '',  -- confirmation_token: empty string instead of NULL
+  '',  -- recovery_token: empty string instead of NULL
   '{"provider":"email","providers":["email"],"role":"Administrator"}'::jsonb,
   '{}'::jsonb,
   NOW(),
   NOW(),
-  false
+  false,
+  NOW(),
+  '',  -- email_change_token_new
+  '',  -- email_change_token_current
+  ''   -- reauthentication_token
 ),
 (
   '00000000-0000-0000-0000-000000000000',
@@ -50,11 +68,17 @@ INSERT INTO auth.users (
   NOW(),
   NOW(),
   NOW(),
+  '',  -- confirmation_token: empty string instead of NULL
+  '',  -- recovery_token: empty string instead of NULL
   '{"provider":"email","providers":["email"],"role":"Shopfloor_Manager"}'::jsonb,
   '{}'::jsonb,
   NOW(),
   NOW(),
-  false
+  false,
+  NOW(),
+  '',  -- email_change_token_new
+  '',  -- email_change_token_current
+  ''   -- reauthentication_token
 ),
 (
   '00000000-0000-0000-0000-000000000000',
@@ -66,11 +90,17 @@ INSERT INTO auth.users (
   NOW(),
   NOW(),
   NOW(),
+  '',  -- confirmation_token: empty string instead of NULL
+  '',  -- recovery_token: empty string instead of NULL
   '{"provider":"email","providers":["email"],"role":"Operator"}'::jsonb,
   '{}'::jsonb,
   NOW(),
   NOW(),
-  false
+  false,
+  NOW(),
+  '',  -- email_change_token_new
+  '',  -- email_change_token_current
+  ''   -- reauthentication_token
 ),
 (
   '00000000-0000-0000-0000-000000000000',
@@ -82,15 +112,22 @@ INSERT INTO auth.users (
   NOW(),
   NOW(),
   NOW(),
+  '',  -- confirmation_token: empty string instead of NULL
+  '',  -- recovery_token: empty string instead of NULL
   '{"provider":"email","providers":["email"],"role":"Auditor"}'::jsonb,
   '{}'::jsonb,
   NOW(),
   NOW(),
-  false
+  false,
+  NOW(),
+  '',  -- email_change_token_new
+  '',  -- email_change_token_current
+  ''   -- reauthentication_token
 )
 ON CONFLICT (id) DO NOTHING;
 
 -- Seed auth.identities for password authentication
+-- The identity_data must include 'sub' (user_id) and 'email'
 INSERT INTO auth.identities (
   id,
   user_id,
