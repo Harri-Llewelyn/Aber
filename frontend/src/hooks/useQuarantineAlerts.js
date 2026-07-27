@@ -34,7 +34,20 @@ export function useQuarantineAlerts(showToast) {
             }
           })
         }
-      } catch (err) {}
+      } catch (err) {
+        // Only log or handle non-AbortError cases (AbortController aborts shouldn't trigger errors)
+        if (err.name !== 'AbortError') {
+          if (err.status === 401 || err.status === 403) {
+            // Authentication/authorization error - user may need to re-authenticate
+            if (showToastRef.current) {
+              showToastRef.current('Session expired. Please sign in again.', 'error')
+            }
+          } else {
+            // Log other errors for debugging
+            console.error('Quarantine polling error:', err)
+          }
+        }
+      }
     }
 
     const initialController = new AbortController()
@@ -42,7 +55,17 @@ export function useQuarantineAlerts(showToast) {
       if (!isCancelled && Array.isArray(q)) {
         q.forEach(d => knownQuarantineIds.current.add(d.asset_id))
       }
-    }).catch(() => {})
+    }).catch((err) => {
+      if (err.name !== 'AbortError') {
+        if (err.status === 401 || err.status === 403) {
+          if (showToastRef.current) {
+            showToastRef.current('Session expired. Please sign in again.', 'error')
+          }
+        } else {
+          console.error('Initial quarantine fetch error:', err)
+        }
+      }
+    })
 
     const timer = setInterval(pollQuarantine, 10000)
     return () => {
