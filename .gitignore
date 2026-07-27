@@ -35,3 +35,4 @@ ingestion/*_pb2.py
 Thumbs.db
 .vscode/
 .idea/
+.CLAUDE.md
