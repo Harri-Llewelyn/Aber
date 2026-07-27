@@ -7,6 +7,24 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const ALLOWED_ROLES = ["Administrator", "Shopfloor_Manager"];
+
+async function resolveUserRole(
+  supabaseUser: ReturnType<typeof createClient>,
+  userId: string,
+  jwtRole: string | null
+): Promise<string | null> {
+  const { data } = await supabaseUser
+    .from("user_roles")
+    .select("roles(name)")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  const dbRole = (data as { roles?: { name?: string } } | null)?.roles?.name;
+  if (typeof dbRole === "string") return dbRole;
+  return jwtRole;
+}
+
 export default async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -23,7 +41,14 @@ export default async function handler(req: Request): Promise<Response> {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-    const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+    if (!supabaseServiceRoleKey) {
+      return new Response(
+        JSON.stringify({ error: "Server misconfiguration" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     const supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authHeader } },
@@ -39,10 +64,13 @@ export default async function handler(req: Request): Promise<Response> {
       );
     }
 
-    const userRole = user.app_metadata?.role || null;
-    const allowedRoles = ["Administrator", "Shopfloor_Manager"];
+    const userRole = await resolveUserRole(
+      supabaseUser,
+      user.id,
+      user.app_metadata?.role || null
+    );
 
-    if (!userRole || !allowedRoles.includes(userRole)) {
+    if (!userRole || !ALLOWED_ROLES.includes(userRole)) {
       return new Response(
         JSON.stringify({ error: "Forbidden: Insufficient privileges" }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }

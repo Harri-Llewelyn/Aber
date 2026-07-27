@@ -54,7 +54,7 @@ export function InlineDocumentAccordion({ entityType, entityId, entityName, onOp
   const [loading, setLoading]   = useState(false)
   const [lastRefreshKey, setLastRefreshKey] = useState(refreshKey)
 
-  const canManage = hasPermission ? hasPermission(PERMISSION_UUIDS.DOCUMENT_MANAGE) : true
+  const canManage = hasPermission?.(PERMISSION_UUIDS.DOCUMENT_MANAGE) ?? false
 
   const fetchDocs = useCallback(() => {
     setLoading(true)

@@ -1,10 +1,13 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react'
+import React, { useState, useEffect, lazy, Suspense, useCallback, useMemo } from 'react'
 import { supabase } from './lib/supabaseClient'
 import { usePermissions } from './hooks/usePermissions'
 import { useAppRouting } from './hooks/useAppRouting'
 import { useTheme } from './hooks/useTheme'
 import { useToast } from './hooks/useToast'
 import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
+import { PERMISSION_UUIDS } from './constants'
+
+const allowSignUp = import.meta.env.VITE_ALLOW_SIGNUP === 'true'
 
 import {
   IconCog,
@@ -47,8 +50,13 @@ const TABS = [
   { id: 'telemetry',      label: 'Telemetry',         icon: <IconActivity size={15} /> },
   { id: 'schemas',        label: 'Schemas',           icon: <IconClipboardList size={15} /> },
   { id: 'directory',      label: 'Directory',         icon: <IconBookOpen size={15} /> },
-  { id: 'archives',       label: 'Archives',          icon: <IconArchive size={15} /> },
+  { id: 'archives',       label: 'Archives',          icon: <IconArchive size={15} />, permission: PERMISSION_UUIDS.ARCHIVE_MANAGE },
 ]
+
+function tabIsVisible(tabDef, hasPermission) {
+  if (!tabDef.permission) return true
+  return hasPermission(tabDef.permission)
+}
 
 function AuthScreen({ onLoginSuccess }) {
   const [email, setEmail] = useState('admin@factoryplus.local')
@@ -63,7 +71,7 @@ function AuthScreen({ onLoginSuccess }) {
     setLoading(true)
 
     try {
-      if (isSignUp) {
+      if (allowSignUp && isSignUp) {
         const { data, error } = await supabase.auth.signUp({ email, password })
         if (error) throw error
         if (data.session) onLoginSuccess(data.session)
@@ -127,10 +135,11 @@ function AuthScreen({ onLoginSuccess }) {
             disabled={loading}
             style={{ width: '100%', padding: '12px', borderRadius: '8px', fontWeight: 600, fontSize: '14px', background: 'var(--accent, #38bdf8)', color: '#0f172a', border: 'none', cursor: 'pointer' }}
           >
-            {loading ? 'Authenticating...' : isSignUp ? 'Create Supabase Account' : 'Sign In'}
+            {loading ? 'Authenticating...' : allowSignUp && isSignUp ? 'Create Supabase Account' : 'Sign In'}
           </button>
         </form>
 
+        {allowSignUp && (
         <div style={{ marginTop: '18px', textAlign: 'center' }}>
           <button
             type="button"
@@ -141,6 +150,7 @@ function AuthScreen({ onLoginSuccess }) {
             {isSignUp ? 'Already have an account? Sign In' : 'Need an account? Sign Up'}
           </button>
         </div>
+        )}
       </div>
     </div>
   )

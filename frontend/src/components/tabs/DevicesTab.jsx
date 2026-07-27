@@ -135,15 +135,26 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
   }
 
   const approveQuarantine = async (assetId, body) => {
+    const targetGateway = body?.active_gateway_id || body?.gateway_id || null
+
     try {
-      const targetGateway = body?.active_gateway_id || body?.gateway_id || null
       const { data, error } = await supabase.functions.invoke('approve-quarantine', {
         body: { device_id: assetId, gateway_id: targetGateway }
       })
+
       if (error) {
-        await api.put(`/api/v1/devices/${assetId}`, { is_quarantined: false, gateway_id: targetGateway })
+        showToast(error.message || 'Quarantine approval denied or failed', 'error')
+        return
       }
-      setApproveItem(null); loadAll(); showToast(`Device '${assetId}' approved & onboarded via Supabase Edge Function`, 'success')
+
+      if (!data?.success) {
+        showToast(data?.error || 'Quarantine approval failed', 'error')
+        return
+      }
+
+      setApproveItem(null)
+      loadAll()
+      showToast(`Device '${assetId}' approved and onboarded`, 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
 

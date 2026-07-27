@@ -110,6 +110,9 @@ services:
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
       GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
       GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_DISABLE_SIGNUP: "true"
+      GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED: "true"
+      GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI: "pg-functions://postgres/public/custom_access_token_hook"
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9999/health"]
       interval: 5s
@@ -165,6 +168,8 @@ services:
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
       JWT_SECRET: ${SUPABASE_JWT_SECRET}
       VERIFY_JWT: "false"
+      NODERED_URL: ${NODERED_URL:-http://node-red:1880/flows}
+      NODERED_ADMIN_TOKEN: ${NODERED_ADMIN_TOKEN:-}
     volumes:
       - ./supabase/functions:/home/deno/functions:ro
     command:

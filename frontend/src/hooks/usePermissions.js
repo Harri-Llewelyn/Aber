@@ -22,7 +22,7 @@ const DEFAULT_ROLE_PERMISSIONS_MAP = {
 export function usePermissions(session, showToast) {
   const [userRole, setUserRole] = useState(null);
   const [userPerms, setUserPerms] = useState([]);
-  const [loadingPerms, setLoadingPerms] = useState(false);
+  const [loadingPerms, setLoadingPerms] = useState(!!session?.user);
 
   useEffect(() => {
     let isMounted = true;
@@ -89,9 +89,9 @@ export function usePermissions(session, showToast) {
   }, [session]);
 
   const hasPermission = useCallback((uuid) => {
-    if (!uuid) return false;
+    if (loadingPerms || !uuid) return false;
     return userPerms.includes(uuid);
-  }, [userPerms]);
+  }, [userPerms, loadingPerms]);
 
   return {
     userRole,

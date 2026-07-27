@@ -58,7 +58,7 @@ export function EntityDocumentsModal({ entityType, entityId, entityName, onClose
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [form, setForm]               = useState({ display_name: '', url: '', document_tag: 'other' })
 
-  const canManage = hasPermission ? hasPermission(PERMISSION_UUIDS.DOCUMENT_MANAGE) : true
+  const canManage = hasPermission?.(PERMISSION_UUIDS.DOCUMENT_MANAGE) ?? false
 
   const loadDocs = useCallback(() => {
     setLoading(true)

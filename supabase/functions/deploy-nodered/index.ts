@@ -6,6 +6,24 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const ALLOWED_ROLES = ["Administrator", "Shopfloor_Manager"];
+
+async function resolveUserRole(
+  supabaseUser: ReturnType<typeof createClient>,
+  userId: string,
+  jwtRole: string | null
+): Promise<string | null> {
+  const { data } = await supabaseUser
+    .from("user_roles")
+    .select("roles(name)")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  const dbRole = (data as { roles?: { name?: string } } | null)?.roles?.name;
+  if (typeof dbRole === "string") return dbRole;
+  return jwtRole;
+}
+
 export default async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -37,23 +55,53 @@ export default async function handler(req: Request): Promise<Response> {
       );
     }
 
-    const userRole = user.app_metadata?.role || null;
-    const allowedRoles = ["Administrator", "Shopfloor_Manager"];
+    const userRole = await resolveUserRole(
+      supabaseUser,
+      user.id,
+      user.app_metadata?.role || null
+    );
 
-    if (!userRole || !allowedRoles.includes(userRole)) {
+    if (!userRole || !ALLOWED_ROLES.includes(userRole)) {
       return new Response(
         JSON.stringify({ error: "Forbidden: Insufficient privileges" }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const nodeRedUrl = Deno.env.get("NODERED_URL") || "http://node-red:1880/flows";
     const body = await req.json();
+
+    if (body?.commit_message && !Array.isArray(body)) {
+      return new Response(
+        JSON.stringify({
+          status: "ACCEPTED",
+          message: "GitOps sync request accepted; flow deployment requires a Node-RED flow array payload",
+        }),
+        { status: 202, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (!Array.isArray(body)) {
+      return new Response(
+        JSON.stringify({ error: "Body must be a Node-RED flow array" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const nodeRedUrl = Deno.env.get("NODERED_URL") || "http://node-red:1880/flows";
+    const nodeRedAdminToken = Deno.env.get("NODERED_ADMIN_TOKEN");
+
+    if (!nodeRedAdminToken) {
+      return new Response(
+        JSON.stringify({ error: "Server misconfiguration: NODERED_ADMIN_TOKEN is not set" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     const response = await fetch(nodeRedUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Authorization: `Bearer ${nodeRedAdminToken}`,
       },
       body: JSON.stringify(body),
     });

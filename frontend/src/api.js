@@ -347,9 +347,11 @@ export const api = {
     }
 
     if (path.startsWith('/api/v1/gitops/deploy-flow')) {
+      const { data, error } = await supabase.functions.invoke('deploy-nodered', { body });
+      if (error) throw error;
       return {
-        status: 'SUCCESS',
-        message: 'GitOps edge deployment flow sync triggered successfully'
+        status: data?.status || 'SUCCESS',
+        message: data?.message || 'GitOps edge deployment flow sync triggered successfully',
       };
     }
 
