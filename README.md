@@ -333,7 +333,7 @@ lost. Each entry names the offending code so it can be picked up directly.
    > All services — including the Supabase BaaS stack, TimescaleDB, MQTT broker, and web UI — launch automatically. Database migrations (`supabase/migrations/`) and seeds (`supabase/seed.sql`) are applied on initial container startup by `supabase-db-init`.
 
 3. **Access Web Interfaces**:
-   - **React Dashboard**: `http://localhost:3000`
+   - **React Dashboard & Management Console**: `http://localhost:3000`
    - **Supabase Studio**: `http://127.0.0.1:54323`
    - **API Reference (Swagger UI)**: `http://localhost:8088`
    - **Node-RED Console**: `http://localhost:1880`
