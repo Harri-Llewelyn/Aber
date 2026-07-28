@@ -183,11 +183,22 @@ jobs:
           echo "All core services report healthy!"
 
       # validate.py reads config via os.getenv, and Python does not load .env by
-      # itself. Without this, SUPABASE_SERVICE_ROLE_KEY is empty, the Supabase client
-      # fails to initialise ("supabase_key is required"), the registered test device is
-      # never seeded, and its telemetry is correctly dropped as unregistered - failing
-      # check 3 while check 4 passes vacuously.
+      # itself. Without sourcing it, SUPABASE_SERVICE_ROLE_KEY is empty, the Supabase
+      # client fails to initialise ("supabase_key is required"), the registered test
+      # device is never seeded, and its telemetry is correctly dropped as unregistered -
+      # failing check 3 while check 4 passes vacuously.
+      #
+      # But .env describes the *inside* of the compose network, and this script runs on
+      # the runner host. DB_HOST=timescaledb / MQTT_HOST=mosquitto are Docker service
+      # names that only resolve between containers, so sourcing them wholesale made
+      # every connection die with "Temporary failure in name resolution". Take the
+      # credentials from .env, then point the topology at the published ports.
       - name: Run End-to-End Validation Script
         run: |
           set -a && . ./.env && set +a
+          export DB_HOST=localhost
+          export DB_PORT=5433          # timescaledb  5433:5432
+          export MQTT_HOST=localhost
+          export MQTT_PORT=1883        # mosquitto    1883:1883
+          export SUPABASE_URL=http://127.0.0.1:54321  # supabase-kong 54321:8000
           python ingestion/validate.py

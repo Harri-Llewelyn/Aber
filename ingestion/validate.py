@@ -245,6 +245,18 @@ if __name__ == "__main__":
     parser.add_argument("--keep-data", action="store_true", help="Keep test data after running validation")
     args = parser.parse_args()
 
+    # Print the resolved endpoints before doing anything. This script runs from the
+    # host, so it needs published ports (localhost:5433 / 1883 / 54321) -- sourcing the
+    # compose .env instead points it at in-network service names ("timescaledb",
+    # "mosquitto") and every connection dies with "Temporary failure in name
+    # resolution". Showing the targets up front makes that obvious from the log alone.
+    print("Validation targets:")
+    print(f"  MQTT broker  : {MQTT_HOST}:{MQTT_PORT}")
+    print(f"  TimescaleDB  : {TIMESCALEDB_HOST}:{TIMESCALEDB_PORT}/{TIMESCALEDB_NAME}")
+    print(f"  Supabase API : {SUPABASE_URL}")
+    print(f"  Service role key: {'set' if SUPABASE_SERVICE_ROLE_KEY else 'MISSING'}")
+    print()
+
     if args.cleanup:
         cleanup_validation_data()
         sys.exit(0)
