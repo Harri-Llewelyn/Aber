@@ -1,5 +1,6 @@
 import { supabase } from './lib/supabaseClient';
 import { isUuid } from './utils/isUuid';
+import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
 
 const mapDigitalThreadRow = (t) => ({
   ...t,
@@ -340,7 +341,10 @@ export const api = {
 
     if (path.startsWith('/api/v1/gitops/deploy-flow')) {
       const { data, error } = await supabase.functions.invoke('deploy-nodered', { body });
-      if (error) throw error;
+      if (error) {
+        // Replace supabase-js's generic non-2xx message with the server's own.
+        throw new Error(await edgeFunctionErrorMessage(error, 'GitOps flow deployment failed'));
+      }
       return {
         status: data?.status || 'SUCCESS',
         message: data?.message || 'GitOps edge deployment flow sync triggered successfully',

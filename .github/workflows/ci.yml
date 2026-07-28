@@ -12,10 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'npm'
@@ -24,7 +24,7 @@ jobs:
       - name: Install Dependencies
         run: |
           cd frontend
-          npm install
+          npm ci
 
       - name: Run Vitest Unit Tests
         run: |
@@ -41,7 +41,14 @@ jobs:
           fi
           echo "isUuid UUID_REGEX definitions are byte-identical across frontend and Deno edge function."
 
+      # vite.config.js fails fast if these are unset. Docker passes them as build
+      # args; a bare `npm run build` in CI has to supply them explicitly. These are
+      # the local-dev demo values from .env.example and are baked into a throwaway
+      # bundle that is never deployed.
       - name: Build Production Bundle
+        env:
+          VITE_SUPABASE_URL: http://127.0.0.1:54321
+          VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiZXhwIjoyMDAwMDAwMDAwfQ.Z7KTfqo7mvr4j40uB-6K4f_VVT-d-ISkJ7E5VJ41jt0
         run: |
           cd frontend
           npm run build
@@ -64,10 +71,10 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.10'
 
@@ -76,17 +83,46 @@ jobs:
           python -m pip install --upgrade pip
           pip install psycopg2-binary
 
+      # GoTrue is not running in this job, so the auth helpers the migrations rely on
+      # are either missing or stale in the base supabase/postgres image:
+      #   * auth.jwt()  does not exist at all -> 4 of 9 migrations fail to apply.
+      #   * auth.uid()  ships a legacy definition reading the singular GUC
+      #                 'request.jwt.claim.sub', while the RLS tests set the modern
+      #                 'request.jwt.claims' JSON -> auth.uid() returns NULL and every
+      #                 policy denies, silently failing the tests.
+      # These are the definitions GoTrue installs in a real deployment.
+      - name: Bootstrap Supabase Auth Helper Functions
+        run: |
+          PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -h localhost -p 54322 -U postgres -d postgres -c "
+            CREATE SCHEMA IF NOT EXISTS auth;
+            CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS \$\$
+              SELECT coalesce(
+                nullif(current_setting('request.jwt.claim.sub', true), ''),
+                (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
+              )::uuid
+            \$\$;
+            CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb LANGUAGE sql STABLE AS \$\$
+              SELECT coalesce(
+                nullif(current_setting('request.jwt.claim', true), ''),
+                nullif(current_setting('request.jwt.claims', true), '')
+              )::jsonb
+            \$\$;"
+
+      # NOTE: single-dollar "$f", not the doubled form. Doubling is docker-compose
+      # escaping; in a shell "$$" is the PID, so every migration was previously fed a
+      # filename like "2932f" and was silently never applied.
+      #
+      # seed.sql is deliberately NOT applied here: the tests seed their own fixtures,
+      # and the base image's legacy auth.users lacks email_confirmed_at, is_sso_user,
+      # phone_change and other columns the seed writes.
       - name: Apply Supabase Database Migrations
         run: |
-          PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -c "ALTER ROLE postgres SET search_path TO auth, public, extensions;"
+          PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -h localhost -p 54322 -U postgres -d postgres \
+            -c "ALTER ROLE postgres SET search_path TO auth, public, extensions;"
           for f in supabase/migrations/*.sql; do
-            echo "Applying $$f...";
-            PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f "$$f";
-          done;
-          if [ -f supabase/seed.sql ]; then
-            echo "Applying seed.sql...";
-            PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f supabase/seed.sql;
-          fi;
+            echo "Applying $f...";
+            PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -h localhost -p 54322 -U postgres -d postgres -f "$f";
+          done
 
       - name: Run Edge Function Auth & RLS Policy Unit Tests
         env:
@@ -103,10 +139,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.10'
 
@@ -146,6 +182,12 @@ jobs:
           '
           echo "All core services report healthy!"
 
+      # validate.py reads config via os.getenv, and Python does not load .env by
+      # itself. Without this, SUPABASE_SERVICE_ROLE_KEY is empty, the Supabase client
+      # fails to initialise ("supabase_key is required"), the registered test device is
+      # never seeded, and its telemetry is correctly dropped as unregistered - failing
+      # check 3 while check 4 passes vacuously.
       - name: Run End-to-End Validation Script
         run: |
+          set -a && . ./.env && set +a
           python ingestion/validate.py

@@ -177,10 +177,24 @@ services:
       NODERED_ADMIN_TOKEN: ${NODERED_ADMIN_TOKEN:-}
     volumes:
       - ./supabase/functions:/home/deno/functions:ro
-    command:
-      - start
-      - --main-service
-      - /home/deno/functions/main
+      # The canonical Node-RED flow - the "git" side of the GitOps sync that
+      # deploy-nodered pushes to the running Node-RED.
+      - ./node_red_flow.json:/home/deno/flows/node_red_flow.json:ro
+      # Persist fetched remote modules so functions don't re-download on restart.
+      - deno_cache:/root/.cache/deno
+    # An edge-runtime user worker has no filesystem access to these mounts, so the
+    # flow is handed to it through the environment instead: main/index.ts forwards
+    # every env var to each worker it spawns. Reading the file here (in the plain
+    # container shell, before edge-runtime starts) sidesteps the worker sandbox
+    # without nesting a mountpoint inside the read-only functions mount, which
+    # would create a stray 0-byte file in the repository.
+    entrypoint:
+      - /bin/sh
+      - -e
+      - -c
+      - |
+        export NODERED_FLOW_JSON="$$(cat /home/deno/flows/node_red_flow.json)"
+        exec edge-runtime start --main-service /home/deno/functions/main
     depends_on:
       supabase-db-init:
         condition: service_completed_successfully
@@ -191,7 +205,10 @@ services:
   # schema requires, which surfaces as a validation error in the UI.
   supabase-meta:
     container_name: factoryplus_supabase_meta
-    image: supabase/postgres-meta:v0.91.0
+    # Pinned to the version the official self-hosted stack pairs with the Studio
+    # tag below. v0.91.0 omitted "formattedError" from its error payloads, which
+    # failed Studio's Zod schema on the Database page.
+    image: supabase/postgres-meta:v0.96.6
     restart: always
     environment:
       PG_META_PORT: 8080
@@ -200,19 +217,30 @@ services:
       PG_META_DB_NAME: postgres
       PG_META_DB_USER: supabase_admin
       PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      CRYPTO_KEY: ${PG_META_CRYPTO_KEY:-factoryplus-pg-meta-crypto-key}
     depends_on:
       supabase-db:
         condition: service_healthy
 
   supabase-studio:
     container_name: factoryplus_supabase_studio
-    image: supabase/studio:latest
+    # Pinned rather than :latest -- Studio's Zod schemas are coupled to a specific
+    # postgres-meta version. This is the pairing the official stack ships.
+    image: supabase/studio:2026.07.07-sha-a6a04f2
     restart: always
     ports:
       - "${STUDIO_PORT:-54323}:3000"
     environment:
+      # Without this Next.js binds only the container's own interface, so the
+      # image's bundled localhost healthcheck fails with ECONNREFUSED.
+      HOSTNAME: "0.0.0.0"
       STUDIO_PG_META_URL: http://supabase-meta:8080
+      PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY:-factoryplus-pg-meta-crypto-key}
+      POSTGRES_HOST: supabase-db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_USER_READ_WRITE: postgres
       # Server-side calls run inside the container, so this must be the internal
       # Kong address. SUPABASE_PUBLIC_URL stays host-facing for the browser.
       SUPABASE_URL: http://supabase-kong:8000
@@ -222,16 +250,17 @@ services:
       AUTH_JWT_SECRET: ${SUPABASE_JWT_SECRET}
       DEFAULT_ORGANIZATION_NAME: Factory+
       DEFAULT_PROJECT_NAME: Factory+ Asset Tracking
-    # Overrides the image's built-in healthcheck, which probes localhost:3000.
-    # Studio's Next.js server binds only the container's own interface (verified via
-    # /proc/net/tcp), so the bundled probe always fails with ECONNREFUSED and the
-    # container is reported unhealthy even while it serves correctly.
+      # Studio reads Edge Functions from disk, not over HTTP.
+      EDGE_FUNCTIONS_MANAGEMENT_FOLDER: /app/edge-functions
+      SNIPPETS_MANAGEMENT_FOLDER: /app/snippets
+    volumes:
+      - ./supabase/functions:/app/edge-functions:ro
+      - studio_snippets:/app/snippets
     healthcheck:
       test:
         - CMD-SHELL
         - >-
-          node -e "const os = require('os');
-          fetch('http://' + os.hostname() + ':3000/api/platform/profile')
+          node -e "fetch('http://localhost:3000/api/platform/profile')
           .then((r) => { if (r.status !== 200) throw new Error(r.status) })"
       interval: 10s
       timeout: 5s
@@ -392,3 +421,5 @@ volumes:
   grafana_provisioning_datasources:
   mosquitto_data:
   supabase_db_data:
+  studio_snippets:
+  deno_cache:

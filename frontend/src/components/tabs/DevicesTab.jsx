@@ -4,6 +4,7 @@ import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { downloadCSV } from '../../utils/downloadCSV'
+import { edgeFunctionErrorMessage } from '../../utils/edgeFunctionError'
 import { InlineDocumentAccordion } from '../common/InlineDocumentAccordion'
 import { ApproveQuarantineModal } from '../modals/ApproveQuarantineModal'
 import { ArchiveModal } from '../modals/ArchiveModal'
@@ -143,7 +144,12 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
       })
 
       if (error) {
-        showToast(error.message || 'Quarantine approval denied or failed', 'error')
+        // error.message is always generic on a non-2xx; the real reason (e.g.
+        // "Forbidden: Insufficient privileges") lives in the response body.
+        showToast(
+          await edgeFunctionErrorMessage(error, 'Quarantine approval denied or failed'),
+          'error'
+        )
         return
       }
 

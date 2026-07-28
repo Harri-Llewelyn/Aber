@@ -8,6 +8,37 @@ const corsHeaders = {
 
 const ALLOWED_ROLES = ["Administrator", "Shopfloor_Manager"];
 
+// Mounted read-only by docker-compose into this function's own directory. It has
+// to live here: an edge-runtime user worker can only read files beneath the
+// service path it was booted with, so a sibling directory is not visible to it.
+const CANONICAL_FLOW_SOURCE = "node_red_flow.json";
+
+/**
+ * Loads the flow definition committed to the repository.
+ *
+ * The flow arrives via the NODERED_FLOW_JSON environment variable, populated by
+ * the supabase-functions entrypoint. It is deliberately NOT read from disk: an
+ * edge-runtime user worker has no filesystem access to the mounted volumes, and
+ * module-relative paths resolve into an ephemeral compile directory rather than
+ * the mount. main/index.ts forwards all env vars to each worker it spawns.
+ */
+function loadCanonicalFlow(): unknown[] {
+  const raw = Deno.env.get("NODERED_FLOW_JSON");
+
+  if (!raw) {
+    throw new Error(
+      "NODERED_FLOW_JSON is not set; the supabase-functions entrypoint should " +
+        `populate it from ${CANONICAL_FLOW_SOURCE}`
+    );
+  }
+
+  const parsed = JSON.parse(raw);
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${CANONICAL_FLOW_SOURCE} is not a Node-RED flow array`);
+  }
+  return parsed;
+}
+
 async function resolveUserRole(
   supabaseUser: ReturnType<typeof createClient>,
   userId: string,
@@ -68,53 +99,77 @@ export default async function handler(req: Request): Promise<Response> {
       );
     }
 
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
 
-    if (body?.commit_message && !Array.isArray(body)) {
-      return new Response(
-        JSON.stringify({
-          status: "ACCEPTED",
-          message: "GitOps sync request accepted; flow deployment requires a Node-RED flow array payload",
-        }),
-        { status: 202, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    // Resolve what to deploy.
+    //   * An explicit Node-RED flow array is deployed as-is.
+    //   * Anything else (the dashboard sends { commit_message }) deploys the
+    //     canonical flow committed to the repository. That is the GitOps
+    //     contract: git is the source of truth and this syncs Node-RED to it.
+    let flow: unknown[];
+    let source: string;
 
-    if (!Array.isArray(body)) {
-      return new Response(
-        JSON.stringify({ error: "Body must be a Node-RED flow array" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    if (Array.isArray(body)) {
+      flow = body;
+      source = "request payload";
+    } else {
+      try {
+        flow = loadCanonicalFlow();
+        source = CANONICAL_FLOW_SOURCE;
+      } catch (readErr) {
+        return new Response(
+          JSON.stringify({
+            error: "Canonical Node-RED flow is unavailable",
+            details: readErr instanceof Error ? readErr.message : String(readErr),
+          }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     const nodeRedUrl = Deno.env.get("NODERED_URL") || "http://node-red:1880/flows";
     const nodeRedAdminToken = Deno.env.get("NODERED_ADMIN_TOKEN");
 
-    if (!nodeRedAdminToken) {
-      return new Response(
-        JSON.stringify({ error: "Server misconfiguration: NODERED_ADMIN_TOKEN is not set" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    // Only send credentials when Node-RED is actually secured. Requiring a token
+    // unconditionally made every deploy fail with a 500 on the default stack,
+    // where Node-RED runs without adminAuth.
+    const nodeRedHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+      "Node-RED-Deployment-Type": "full",
+    };
+    if (nodeRedAdminToken) {
+      nodeRedHeaders.Authorization = `Bearer ${nodeRedAdminToken}`;
     }
 
     const response = await fetch(nodeRedUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${nodeRedAdminToken}`,
-      },
-      body: JSON.stringify(body),
+      headers: nodeRedHeaders,
+      body: JSON.stringify(flow),
     });
 
-    const responseData = await response.text();
+    const responseText = await response.text();
 
-    return new Response(responseData, {
-      status: response.status,
-      headers: {
-        ...corsHeaders,
-        "Content-Type": "application/json",
-      },
-    });
+    if (!response.ok) {
+      return new Response(
+        JSON.stringify({
+          error: "Node-RED rejected the flow deployment",
+          status_code: response.status,
+          details: responseText.slice(0, 500),
+        }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        status: "DEPLOYED",
+        message: `Deployed ${flow.length} Node-RED nodes from ${source}`,
+        nodes_deployed: flow.length,
+        source,
+        commit_message: typeof body?.commit_message === "string" ? body.commit_message : null,
+      }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   } catch (err: any) {
     return new Response(
       JSON.stringify({ error: "Failed to deploy flow to Node-RED", details: err.message }),

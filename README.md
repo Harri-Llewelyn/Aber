@@ -17,6 +17,24 @@ The platform uses a decoupled architecture combining **Supabase Backend-as-a-Ser
 * **Python Ingestion Engine**: Consumes Sparkplug B industrial MQTT messages (`DBIRTH`, `DDATA`), verifying asset registration in Supabase (auto-quarantining unregistered devices) and streaming telemetry metrics directly to TimescaleDB.
 * **React Web Dashboard**: React 18 SPA powered by Supabase JS SDK, utilizing direct PostgREST queries, real-time database change channels (`supabase.channel`), and Supabase Auth session management.
 
+### Design Decision: Supabase Storage is Deliberately Not Deployed
+
+This platform stores **no binary objects**, so `supabase-storage` (storage-api) and `imgproxy` are
+intentionally omitted from `docker-compose.yml`. This is a deliberate design decision, not a gap.
+
+Document management is a **link registry, not a file store**. The `documents` table holds a
+`url TEXT` column pointing at an external system (SharePoint, Google Drive, or any HTTP(S) URL) —
+there is no upload path anywhere in the UI, and no bucket is ever created.
+
+> [!NOTE]
+> **Supabase Studio's Storage page will therefore report an error** (`API error happened while trying
+> to communicate with the server`) in this stack. This is expected and can be ignored — no
+> application feature depends on it. If binary object storage is ever required, add the official
+> `storage-api` and `imgproxy` services plus a `/storage/v1/` route in `supabase/kong.yml`.
+
+For the same reason, the `storage` entry in `PGRST_DB_SCHEMAS` is vestigial. It is harmless and left
+in place so the setting matches upstream Supabase defaults.
+
 ### System Topology Diagram
 
 ```mermaid
@@ -136,7 +154,16 @@ All database migrations are stored in `supabase/migrations/`:
 
 ## Supabase Edge Functions
 
-Edge functions are located in `supabase/functions/`:
+Edge functions are located in `supabase/functions/`. Requests arrive at Kong on `/functions/v1/<name>`
+and are dispatched by the **main service router** (`supabase/functions/main/index.ts`), which spawns
+each function as an isolated user worker via `EdgeRuntime.userWorkers.create()`.
+
+> [!IMPORTANT]
+> Because every function runs in its own isolate, each one **must** keep its own `serve(handler)`
+> entry point — that is required by the runtime, not redundant. Functions are *not* loaded by
+> in-process `import()`; attempting to do so fails and yields an opaque
+> `Edge Function returned a non-2xx status code` in the browser.
+
 - **`approve-quarantine`** (`supabase/functions/approve-quarantine/index.ts`):
   - Validates session JWT & role claims (`Administrator` / `Shopfloor_Manager`).
   - Fails closed (`403 Forbidden`) if role claim is missing or unprivileged.
@@ -144,7 +171,10 @@ Edge functions are located in `supabase/functions/`:
 - **`deploy-nodered`** (`supabase/functions/deploy-nodered/index.ts`):
   - Validates session JWT & role claims (`Administrator` / `Shopfloor_Manager`).
   - Fails closed (`401 Unauthorized` / `403 Forbidden`) if Authorization header or role claim is missing or unprivileged.
-  - Proxies flow deployment updates to Node-RED (`http://node-red:1880/flows`).
+  - Deploys flows to Node-RED (`http://node-red:1880/flows`) and returns `{ status: "DEPLOYED", nodes_deployed, source }`.
+  - **GitOps contract**: the repository is the source of truth. A request body of `{ "commit_message": "..." }` (what the Directory tab sends) deploys the canonical `node_red_flow.json` committed to this repo. Passing a Node-RED flow **array** instead deploys that payload verbatim.
+  - The flow reaches the function via the `NODERED_FLOW_JSON` environment variable, populated from `node_red_flow.json` by the `supabase-functions` entrypoint. An edge-runtime **user worker has no filesystem access to the mounted volumes**, and module-relative paths resolve into an ephemeral compile directory rather than the mount — so the flow is passed through the environment, which `main/index.ts` forwards to every worker it spawns.
+  - `NODERED_ADMIN_TOKEN` is optional: an `Authorization` header is sent only when it is set, so deployment works against a Node-RED instance without `adminAuth`.
 
 ---
 
@@ -180,6 +210,39 @@ The validation script verifies:
 3. **Digital Thread Audit Triggers**: Confirms PostgreSQL triggers automatically populate `digital_thread`.
 4. **TimescaleDB Telemetry**: Confirms metric ingestion for registered devices into the TimescaleDB `telemetry` hypertable.
 5. **Quarantine Telemetry Gating**: Confirms telemetry (`DDATA`) published by quarantined or unregistered devices is gated and dropped, ensuring zero records reach TimescaleDB until approved.
+
+---
+
+## Known Issues
+
+Open issues identified during development but **not** yet fixed. Recorded here so they are not
+lost. Each entry names the offending code so it can be picked up directly.
+
+### Functional gaps
+
+| # | Issue | Location | Impact |
+| :-- | :--- | :--- | :--- |
+| 1 | **Real-time subscriptions never fire.** The dashboard subscribes to `postgres_changes`, but no `realtime` service is deployed and `kong.yml` has no `/realtime/v1/` route. | [`frontend/src/App.jsx:175`](frontend/src/App.jsx#L175) | The UI silently falls back to `usePolling`; live DB changes do not push. |
+| 2 | **GitOps status is hardcoded stub data.** `gitops_status`, `active_commit_sha` and `repository_url` are literals, not real values. | [`frontend/src/api.js:168-174`](frontend/src/api.js#L168) | The Directory tab banner always shows `SYNCED` / commit `a8f3e4b` regardless of actual state. |
+| 3 | **Permission UUIDs are never read from the database.** The PostgREST embed `role_permissions(...)` has no foreign-key path from `user_roles` (both relate to `roles`, not to each other), so the query errors and the hook silently falls back to the hardcoded `DEFAULT_ROLE_PERMISSIONS_MAP`. | [`frontend/src/hooks/usePermissions.js:48`](frontend/src/hooks/usePermissions.js#L48) | Editing `role_permissions` in the DB has no effect on the UI. RBAC still works, but only via the hardcoded map. |
+| 4 | **Node-RED editor changes are discarded on restart.** `node-red-init` copies `node_red_flow.json` over `/data/flows.json` on every `docker compose up`. | [`docker-compose.yml`](docker-compose.yml) (`node-red-init`) | Flows edited at `localhost:1880` are lost on the next stack restart. Edit `node_red_flow.json` in the repo instead — it is the source of truth (see `deploy-nodered`). |
+
+### Security / hardening
+
+| # | Issue | Location | Impact |
+| :-- | :--- | :--- | :--- |
+| 5 | **Kong does not validate the `apikey` header.** There is no `key-auth` plugin and no consumers, unlike the stock Supabase gateway config. | [`supabase/kong.yml`](supabase/kong.yml) | Authorisation is enforced only downstream by PostgREST JWT verification and RLS. Acceptable for local dev; **must be addressed before any non-local deployment.** |
+| 6 | **`.env.example` contains working development secrets** (`SUPABASE_JWT_SECRET`, the demo anon/service-role JWTs, `MQTT_PASSWORD`) and is committed to the repository. | [`.env.example`](.env.example) | These are the standard Supabase demo values and are safe for local use only. **Generate fresh secrets for any shared or hosted environment.** |
+| 7 | **Node-RED admin API is unauthenticated.** The generated `settings.js` sets only `credentialSecret`; no `adminAuth` is configured, so `http://localhost:1880` and its `/flows` API are open. | `scripts/node-red-init.mjs` | Anyone with network access to port 1880 can read or replace edge flows. `deploy-nodered` sends an `Authorization` header only when `NODERED_ADMIN_TOKEN` is set, so enabling `adminAuth` is a config-only change. |
+
+### Expected behaviour (not defects)
+
+- **Supabase Studio's Storage page reports an error.** Storage is deliberately not deployed — see
+  [Design Decision: Supabase Storage is Deliberately Not Deployed](#design-decision-supabase-storage-is-deliberately-not-deployed).
+- **`PGRST_DB_SCHEMAS` still lists `storage`.** Vestigial while no storage-api runs; kept to match
+  upstream Supabase defaults.
+- **Simulated devices appear quarantined on first start.** `Simulated_CNC_01` is auto-registered with
+  `is_quarantined = true` by design; an `Administrator` must approve it before telemetry is stored.
 
 ---
 
