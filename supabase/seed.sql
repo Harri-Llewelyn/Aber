@@ -9,11 +9,17 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 
 -- Seed auth.users with the 4 standard demo personas
 -- Note: For GoTrue v2.x, we need to set:
--- - confirmation_token and recovery_token to empty strings (not NULL) to avoid scan errors
+-- - EVERY varchar token column to an empty string (not NULL). GoTrue maps these to Go
+--   `string` fields, so a NULL aborts the row scan with
+--   `converting NULL to string is unsupported` and the login returns a 500.
+--   auth.users.email_change in particular is nullable with NO default, so omitting
+--   it from this INSERT is enough to break authentication entirely.
 -- - email_confirmed_at to NOW() to mark users as confirmed
 -- - encrypted_password is stored as bcrypt hash
 -- - raw_app_meta_data must include the 'role' key with the user's role name
 -- - is_sso_user must be false (default)
+-- - aud must be 'authenticated' and must match GOTRUE_JWT_AUD in docker-compose.yml,
+--   otherwise GoTrue looks users up under a different audience and finds nothing.
 INSERT INTO auth.users (
   instance_id,
   id,
@@ -32,8 +38,11 @@ INSERT INTO auth.users (
   updated_at,
   is_sso_user,
   phone_confirmed_at,
+  email_change,
   email_change_token_new,
   email_change_token_current,
+  phone_change,
+  phone_change_token,
   reauthentication_token
 ) VALUES
 (
@@ -54,8 +63,11 @@ INSERT INTO auth.users (
   NOW(),
   false,
   NOW(),
+  '',  -- email_change: nullable with no default; NULL here breaks GoTrue row scans
   '',  -- email_change_token_new
   '',  -- email_change_token_current
+  '',  -- phone_change
+  '',  -- phone_change_token
   ''   -- reauthentication_token
 ),
 (
@@ -76,8 +88,11 @@ INSERT INTO auth.users (
   NOW(),
   false,
   NOW(),
+  '',  -- email_change
   '',  -- email_change_token_new
   '',  -- email_change_token_current
+  '',  -- phone_change
+  '',  -- phone_change_token
   ''   -- reauthentication_token
 ),
 (
@@ -98,8 +113,11 @@ INSERT INTO auth.users (
   NOW(),
   false,
   NOW(),
+  '',  -- email_change
   '',  -- email_change_token_new
   '',  -- email_change_token_current
+  '',  -- phone_change
+  '',  -- phone_change_token
   ''   -- reauthentication_token
 ),
 (
@@ -120,11 +138,34 @@ INSERT INTO auth.users (
   NOW(),
   false,
   NOW(),
+  '',  -- email_change
   '',  -- email_change_token_new
   '',  -- email_change_token_current
+  '',  -- phone_change
+  '',  -- phone_change_token
   ''   -- reauthentication_token
 )
-ON CONFLICT (id) DO NOTHING;
+-- DO UPDATE, not DO NOTHING: supabase-db-init re-runs this seed on every start, and
+-- the Supabase DB lives on a persistent volume. With DO NOTHING a persona row that
+-- was written by an older, broken version of this seed could never be repaired --
+-- the seed would silently report "INSERT 0 0" forever.
+ON CONFLICT (id) DO UPDATE SET
+  aud                        = EXCLUDED.aud,
+  role                       = EXCLUDED.role,
+  email                      = EXCLUDED.email,
+  encrypted_password         = EXCLUDED.encrypted_password,
+  email_confirmed_at         = EXCLUDED.email_confirmed_at,
+  confirmation_token         = EXCLUDED.confirmation_token,
+  recovery_token             = EXCLUDED.recovery_token,
+  email_change               = EXCLUDED.email_change,
+  email_change_token_new     = EXCLUDED.email_change_token_new,
+  email_change_token_current = EXCLUDED.email_change_token_current,
+  phone_change               = EXCLUDED.phone_change,
+  phone_change_token         = EXCLUDED.phone_change_token,
+  reauthentication_token     = EXCLUDED.reauthentication_token,
+  raw_app_meta_data          = EXCLUDED.raw_app_meta_data,
+  is_sso_user                = EXCLUDED.is_sso_user,
+  updated_at                 = NOW();
 
 -- Seed auth.identities for password authentication
 -- The identity_data must include 'sub' (user_id) and 'email'
@@ -178,9 +219,25 @@ INSERT INTO auth.identities (
   NOW(),
   NOW()
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+  user_id       = EXCLUDED.user_id,
+  identity_data = EXCLUDED.identity_data,
+  provider      = EXCLUDED.provider,
+  provider_id   = EXCLUDED.provider_id,
+  updated_at    = NOW();
 
--- Seed public.user_roles mapping auth user_id to public.roles(id)
+-- Seed public.user_roles mapping auth user_id to public.roles(id).
+-- Clear any pre-existing mappings for the demo personas first so each one ends up with
+-- exactly one role. usePermissions.js reads data[0] and custom_access_token_hook() uses
+-- LIMIT 1, so a persona holding two roles would resolve non-deterministically.
+DELETE FROM public.user_roles
+WHERE user_id IN (
+  'a0000000-0000-0000-0000-000000000001',
+  'a0000000-0000-0000-0000-000000000002',
+  'a0000000-0000-0000-0000-000000000003',
+  'a0000000-0000-0000-0000-000000000004'
+);
+
 INSERT INTO public.user_roles (user_id, role_id) VALUES
   ('a0000000-0000-0000-0000-000000000001', 1), -- Administrator
   ('a0000000-0000-0000-0000-000000000002', 2), -- Shopfloor_Manager

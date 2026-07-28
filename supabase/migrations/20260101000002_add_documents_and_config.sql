@@ -71,25 +71,41 @@ ALTER TABLE public.schemas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.directory_services ENABLE ROW LEVEL SECURITY;
 
 -- Policies for Documents
+DROP POLICY IF EXISTS "documents_select_authenticated" ON public.documents;
 CREATE POLICY "documents_select_authenticated" ON public.documents FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "documents_insert_privileged" ON public.documents;
 CREATE POLICY "documents_insert_privileged" ON public.documents FOR INSERT TO authenticated WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
+DROP POLICY IF EXISTS "documents_update_privileged" ON public.documents;
 CREATE POLICY "documents_update_privileged" ON public.documents FOR UPDATE TO authenticated USING ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager')) WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
+DROP POLICY IF EXISTS "documents_delete_privileged" ON public.documents;
 CREATE POLICY "documents_delete_privileged" ON public.documents FOR DELETE TO authenticated USING ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
 
 -- Policies for Asset Config
+DROP POLICY IF EXISTS "asset_config_select_authenticated" ON public.asset_config;
 CREATE POLICY "asset_config_select_authenticated" ON public.asset_config FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "asset_config_insert_privileged" ON public.asset_config;
 CREATE POLICY "asset_config_insert_privileged" ON public.asset_config FOR INSERT TO authenticated WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
+DROP POLICY IF EXISTS "asset_config_update_privileged" ON public.asset_config;
 CREATE POLICY "asset_config_update_privileged" ON public.asset_config FOR UPDATE TO authenticated USING ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager')) WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
+DROP POLICY IF EXISTS "asset_config_delete_privileged" ON public.asset_config;
 CREATE POLICY "asset_config_delete_privileged" ON public.asset_config FOR DELETE TO authenticated USING ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
 
 -- Policies for Schemas
+DROP POLICY IF EXISTS "schemas_select_authenticated" ON public.schemas;
 CREATE POLICY "schemas_select_authenticated" ON public.schemas FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "schemas_insert_privileged" ON public.schemas;
 CREATE POLICY "schemas_insert_privileged" ON public.schemas FOR INSERT TO authenticated WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
+DROP POLICY IF EXISTS "schemas_update_privileged" ON public.schemas;
 CREATE POLICY "schemas_update_privileged" ON public.schemas FOR UPDATE TO authenticated USING ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager')) WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
+DROP POLICY IF EXISTS "schemas_delete_privileged" ON public.schemas;
 CREATE POLICY "schemas_delete_privileged" ON public.schemas FOR DELETE TO authenticated USING ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
 
 -- Policies for Directory Services
+DROP POLICY IF EXISTS "directory_services_select_authenticated" ON public.directory_services;
 CREATE POLICY "directory_services_select_authenticated" ON public.directory_services FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "directory_services_insert_privileged" ON public.directory_services;
 CREATE POLICY "directory_services_insert_privileged" ON public.directory_services FOR INSERT TO authenticated WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
+DROP POLICY IF EXISTS "directory_services_update_privileged" ON public.directory_services;
 CREATE POLICY "directory_services_update_privileged" ON public.directory_services FOR UPDATE TO authenticated USING ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager')) WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
+DROP POLICY IF EXISTS "directory_services_delete_privileged" ON public.directory_services;
 CREATE POLICY "directory_services_delete_privileged" ON public.directory_services FOR DELETE TO authenticated USING ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));

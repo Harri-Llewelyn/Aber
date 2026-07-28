@@ -72,19 +72,19 @@ services:
       - ./supabase/migrations:/migrations:ro
       - ./supabase/seed.sql:/seed.sql:ro
     entrypoint: >
-      /bin/sh -c "
+      /bin/sh -e -c "
       echo 'Configuring PostgreSQL search_path...';
-      psql -h supabase-db -U postgres -d postgres -c 'ALTER ROLE postgres SET search_path TO auth, public, extensions;';
+      psql -v ON_ERROR_STOP=1 -h supabase-db -U postgres -d postgres -c 'ALTER ROLE postgres SET search_path TO auth, public, extensions;';
       echo 'Applying Supabase database migrations and seeds...';
       for f in /migrations/*.sql; do
         if [ -f \"$$f\" ]; then
           echo \"Executing migration $$f...\";
-          psql -h supabase-db -U postgres -d postgres -f \"$$f\";
+          psql -v ON_ERROR_STOP=1 -h supabase-db -U postgres -d postgres -f \"$$f\";
         fi
       done;
       if [ -f /seed.sql ]; then
         echo 'Executing seed.sql...';
-        psql -h supabase-db -U postgres -d postgres -f /seed.sql;
+        psql -v ON_ERROR_STOP=1 -h supabase-db -U postgres -d postgres -f /seed.sql;
       fi;
       echo 'Supabase database initialized successfully.';
       "
@@ -108,9 +108,14 @@ services:
       GOTRUE_JWT_SECRET: ${SUPABASE_JWT_SECRET}
       GOTRUE_JWT_EXP: 3600
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      # GoTrue does not default the audience. Without this it looks users up with
+      # aud = '', never matches the seeded aud = 'authenticated' rows, and every
+      # login fails with "Invalid login credentials".
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_ADMIN_ROLES: service_role
       GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
       GOTRUE_MAILER_AUTOCONFIRM: "true"
-      GOTRUE_DISABLE_SIGNUP: "true"
+      GOTRUE_DISABLE_SIGNUP: "false"
       GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED: "true"
       GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI: "pg-functions://postgres/public/custom_access_token_hook"
     healthcheck:
@@ -180,6 +185,25 @@ services:
       supabase-db-init:
         condition: service_completed_successfully
 
+  # Schema introspection API backing Supabase Studio's Database pages.
+  # Studio speaks the postgres-meta protocol; pointing it at PostgREST returns
+  # error payloads without the message/code/formattedError fields Studio's Zod
+  # schema requires, which surfaces as a validation error in the UI.
+  supabase-meta:
+    container_name: factoryplus_supabase_meta
+    image: supabase/postgres-meta:v0.91.0
+    restart: always
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: supabase-db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: postgres
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+
   supabase-studio:
     container_name: factoryplus_supabase_studio
     image: supabase/studio:latest
@@ -187,14 +211,36 @@ services:
     ports:
       - "${STUDIO_PORT:-54323}:3000"
     environment:
-      STUDIO_PG_META_URL: http://supabase-rest:3000
+      STUDIO_PG_META_URL: http://supabase-meta:8080
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      SUPABASE_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
+      # Server-side calls run inside the container, so this must be the internal
+      # Kong address. SUPABASE_PUBLIC_URL stays host-facing for the browser.
+      SUPABASE_URL: http://supabase-kong:8000
       SUPABASE_PUBLIC_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
       SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      AUTH_JWT_SECRET: ${SUPABASE_JWT_SECRET}
+      DEFAULT_ORGANIZATION_NAME: Factory+
+      DEFAULT_PROJECT_NAME: Factory+ Asset Tracking
+    # Overrides the image's built-in healthcheck, which probes localhost:3000.
+    # Studio's Next.js server binds only the container's own interface (verified via
+    # /proc/net/tcp), so the bundled probe always fails with ECONNREFUSED and the
+    # container is reported unhealthy even while it serves correctly.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "const os = require('os');
+          fetch('http://' + os.hostname() + ':3000/api/platform/profile')
+          .then((r) => { if (r.status !== 200) throw new Error(r.status) })"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
     depends_on:
       supabase-kong:
+        condition: service_started
+      supabase-meta:
         condition: service_started
 
   # ---------------------------------------------------------------------------
@@ -293,20 +339,13 @@ services:
     volumes:
       - nodered_data:/data
       - ./node_red_flow.json:/seed/flows.json:ro
+      - ./scripts/node-red-init.mjs:/seed/node-red-init.mjs:ro
+    # Writes flows_cred.json encrypted at rest. The script fails closed if it
+    # cannot produce ciphertext, rather than silently emitting plaintext secrets.
     entrypoint: >
-      /bin/sh -c "
-      cp /seed/flows.json /data/flows.json;
-      echo \"module.exports = { credentialSecret: \\\"$NODERED_CREDENTIAL_SECRET\\\" };\" > /data/settings.js;
-      node -e \"
-        const credentials = require('/usr/src/node-red/node_modules/@node-red/runtime/lib/nodes/credentials');
-        credentials.init({ settings: { userDir: '/data', credentialSecret: process.env.NODERED_CREDENTIAL_SECRET } });
-        credentials.add('mqtt-broker-config', { user: process.env.MQTT_USER || 'factoryplus', password: process.env.MQTT_PASSWORD });
-        credentials.export().then(creds => {
-            require('fs').writeFileSync('/data/flows_cred.json', JSON.stringify(creds));
-        });
-      \";
+      /bin/sh -e -c "
+      node /seed/node-red-init.mjs;
       chown -R 1000:1000 /data;
-      echo 'Node-RED flow and credentials initialized';
       "
 
   node-red:

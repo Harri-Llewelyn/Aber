@@ -2,64 +2,9 @@
   {
     "id": "tab-gateway-sim",
     "type": "tab",
-    "label": "Gateway & OPC-UA Simulator",
+    "label": "Gateway Simulator",
     "disabled": false,
     "info": "Simulates Edge Gateway A publishing Sparkplug B DBIRTH, DDATA, and DDEATH lifecycle telemetry messages to Mosquitto MQTT broker."
-  },
-  {
-    "id": "subflow-opcua-spb",
-    "type": "subflow",
-    "name": "Factory+ OPC-UA to Sparkplug B Connector",
-    "info": "Reusable Subflow for packaging legacy PLC / OPC-UA telemetry into Factory+ Sparkplug B DBIRTH and DDATA MQTT messages.",
-    "category": "FactoryPlus",
-    "in": [
-      {
-        "x": 80,
-        "y": 100,
-        "wires": [
-          {
-            "id": "subflow-converter-logic"
-          }
-        ]
-      }
-    ],
-    "out": [
-      {
-        "x": 520,
-        "y": 100,
-        "wires": [
-          {
-            "id": "subflow-converter-logic",
-            "port": 0
-          }
-        ]
-      }
-    ],
-    "env": [
-      {
-        "name": "GATEWAY_ID",
-        "type": "str",
-        "value": "Virtual_Gateway_NodeRED"
-      },
-      {
-        "name": "GROUP_ID",
-        "type": "str",
-        "value": "FactoryPlus"
-      }
-    ]
-  },
-  {
-    "id": "subflow-converter-logic",
-    "type": "function",
-    "z": "subflow-opcua-spb",
-    "name": "Package OPC-UA to Sparkplug B",
-    "func": "const gwId   = env.get('GATEWAY_ID') || msg.gateway_id || 'Gateway_A';\nconst grpId  = env.get('GROUP_ID') || msg.group_id || 'FactoryPlus';\nconst asset  = msg.asset_id || msg.payload.asset_id || 'Simulated_CNC_01';\nconst isBirth = msg.is_birth || msg.payload.is_birth || false;\n\nconst msgType = isBirth ? 'DBIRTH' : 'DDATA';\nconst topic   = `spBv1.0/${grpId}/${msgType}/${gwId}/${asset}`;\n\nconst metricsList = [\n    { name: 'Asset_ID', string_value: asset, datatype: 12 }\n];\n\nconst rawData = msg.payload.metrics || msg.payload;\nfor (const [k, v] of Object.entries(rawData)) {\n    if (k === 'asset_id' || k === 'Asset_ID' || k === 'is_birth') continue;\n    if (typeof v === 'boolean') {\n        metricsList.push({ name: k, boolean_value: v, datatype: 11 });\n    } else if (typeof v === 'number') {\n        metricsList.push({ name: k, double_value: v, datatype: 10 });\n    } else if (typeof v === 'string') {\n        metricsList.push({ name: k, string_value: v, datatype: 12 });\n    }\n}\n\nconst spbPayload = {\n    timestamp: Date.now(),\n    metrics: metricsList,\n    seq: Math.floor(Math.random() * 255)\n};\n\nreturn { topic: topic, payload: JSON.stringify(spbPayload), qos: 0, retain: false };",
-    "outputs": 1,
-    "x": 300,
-    "y": 100,
-    "wires": [
-      []
-    ]
   },
   {
     "id": "inject-dbirth-startup",
@@ -262,54 +207,6 @@
     ]
   },
   {
-    "id": "inject-opcua-sim",
-    "type": "inject",
-    "z": "tab-gateway-sim",
-    "name": "OPC-UA Subflow Inject (every 10s)",
-    "props": [
-      {
-        "p": "payload",
-        "v": "{\"asset_id\":\"PLC_Siemens_01\",\"metrics\":{\"temperature\":72.4,\"vibration\":1.2,\"status\":\"RUNNING\",\"safety_ok\":true}}",
-        "vt": "json"
-      }
-    ],
-    "repeat": "10",
-    "crontab": "",
-    "once": true,
-    "onceDelay": 3,
-    "topic": "",
-    "x": 200,
-    "y": 480,
-    "wires": [
-      [
-        "subflow-instance-opcua"
-      ]
-    ]
-  },
-  {
-    "id": "subflow-instance-opcua",
-    "type": "subflow:subflow-opcua-spb",
-    "z": "tab-gateway-sim",
-    "name": "OPC-UA Subflow Connector",
-    "env": [
-      {
-        "name": "GATEWAY_ID",
-        "value": "Virtual_Gateway_NodeRED"
-      },
-      {
-        "name": "GROUP_ID",
-        "value": "FactoryPlus"
-      }
-    ],
-    "x": 500,
-    "y": 480,
-    "wires": [
-      [
-        "mqtt-publish"
-      ]
-    ]
-  },
-  {
     "id": "inject-heartbeat-timer",
     "type": "inject",
     "z": "tab-gateway-sim",
@@ -366,19 +263,13 @@
     "id": "mqtt-broker-config",
     "type": "mqtt-broker",
     "name": "IoT Mosquitto Broker",
-    "broker": "broker",
+    "broker": "mosquitto",
     "port": "1883",
     "clientid": "node-red-simulator",
     "autoConnect": true,
     "usetls": false,
     "protocolVersion": "4",
     "keepalive": "60",
-    "cleansession": true,
-    "user": "factoryplus",
-    "password": "factoryplus123",
-    "credentials": {
-      "user": "factoryplus",
-      "password": "factoryplus123"
-    }
+    "cleansession": true
   }
 ]

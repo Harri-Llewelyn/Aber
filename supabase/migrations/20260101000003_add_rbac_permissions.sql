@@ -97,7 +97,11 @@ ALTER TABLE public.permissions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.role_permissions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "roles_select_authenticated" ON public.roles;
 CREATE POLICY "roles_select_authenticated" ON public.roles FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "permissions_select_authenticated" ON public.permissions;
 CREATE POLICY "permissions_select_authenticated" ON public.permissions FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "role_permissions_select_authenticated" ON public.role_permissions;
 CREATE POLICY "role_permissions_select_authenticated" ON public.role_permissions FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "user_roles_select_authenticated" ON public.user_roles;
 CREATE POLICY "user_roles_select_authenticated" ON public.user_roles FOR SELECT TO authenticated USING (true);

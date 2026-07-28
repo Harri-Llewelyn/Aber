@@ -3,6 +3,7 @@
 
 DROP POLICY IF EXISTS "digital_thread_select_authenticated" ON public.digital_thread;
 
+DROP POLICY IF EXISTS "digital_thread_select_privileged_or_auditor" ON public.digital_thread;
 CREATE POLICY "digital_thread_select_privileged_or_auditor" ON public.digital_thread
     FOR SELECT TO authenticated
     USING (

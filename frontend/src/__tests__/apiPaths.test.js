@@ -16,7 +16,12 @@ vi.mock('../lib/supabaseClient', () => {
 
   return {
     supabase: {
-      from: vi.fn(() => mockQueryBuilder)
+      from: vi.fn(() => mockQueryBuilder),
+      // '/api/v1/gitops/deploy-flow' routes through an Edge Function rather than
+      // PostgREST, so the mock needs this surface too.
+      functions: {
+        invoke: vi.fn().mockResolvedValue({ data: {}, error: null })
+      }
     }
   };
 });

@@ -105,73 +105,89 @@ ALTER TABLE public.devices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.digital_thread ENABLE ROW LEVEL SECURITY;
 
 -- Cells Policies
+DROP POLICY IF EXISTS "cells_select_authenticated" ON public.cells;
 CREATE POLICY "cells_select_authenticated"
 ON public.cells FOR SELECT TO authenticated
 USING (true);
 
+DROP POLICY IF EXISTS "cells_insert_privileged" ON public.cells;
 CREATE POLICY "cells_insert_privileged"
 ON public.cells FOR INSERT TO authenticated
 WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
 
+DROP POLICY IF EXISTS "cells_update_privileged" ON public.cells;
 CREATE POLICY "cells_update_privileged"
 ON public.cells FOR UPDATE TO authenticated
 USING ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'))
 WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
 
+DROP POLICY IF EXISTS "cells_delete_privileged" ON public.cells;
 CREATE POLICY "cells_delete_privileged"
 ON public.cells FOR DELETE TO authenticated
 USING ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
 
 -- Gateways Policies
+DROP POLICY IF EXISTS "gateways_select_authenticated" ON public.gateways;
 CREATE POLICY "gateways_select_authenticated"
 ON public.gateways FOR SELECT TO authenticated
 USING (true);
 
+DROP POLICY IF EXISTS "gateways_insert_privileged" ON public.gateways;
 CREATE POLICY "gateways_insert_privileged"
 ON public.gateways FOR INSERT TO authenticated
 WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
 
+DROP POLICY IF EXISTS "gateways_update_privileged" ON public.gateways;
 CREATE POLICY "gateways_update_privileged"
 ON public.gateways FOR UPDATE TO authenticated
 USING ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'))
 WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
 
+DROP POLICY IF EXISTS "gateways_delete_privileged" ON public.gateways;
 CREATE POLICY "gateways_delete_privileged"
 ON public.gateways FOR DELETE TO authenticated
 USING ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
 
 -- Devices Policies
+DROP POLICY IF EXISTS "devices_select_authenticated" ON public.devices;
 CREATE POLICY "devices_select_authenticated"
 ON public.devices FOR SELECT TO authenticated
 USING (true);
 
+DROP POLICY IF EXISTS "devices_insert_privileged" ON public.devices;
 CREATE POLICY "devices_insert_privileged"
 ON public.devices FOR INSERT TO authenticated
 WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
 
+DROP POLICY IF EXISTS "devices_update_privileged" ON public.devices;
 CREATE POLICY "devices_update_privileged"
 ON public.devices FOR UPDATE TO authenticated
 USING ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'))
 WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
 
+DROP POLICY IF EXISTS "devices_delete_privileged" ON public.devices;
 CREATE POLICY "devices_delete_privileged"
 ON public.devices FOR DELETE TO authenticated
 USING ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
 
 -- Digital Thread Policies
+DROP POLICY IF EXISTS "digital_thread_select_authenticated" ON public.digital_thread;
 CREATE POLICY "digital_thread_select_authenticated"
 ON public.digital_thread FOR SELECT TO authenticated
 USING (true);
 
+DROP POLICY IF EXISTS "digital_thread_insert_privileged" ON public.digital_thread;
 CREATE POLICY "digital_thread_insert_privileged"
 ON public.digital_thread FOR INSERT TO authenticated
 WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
 
+DROP POLICY IF EXISTS "digital_thread_update_privileged" ON public.digital_thread;
 CREATE POLICY "digital_thread_update_privileged"
 ON public.digital_thread FOR UPDATE TO authenticated
 USING ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'))
 WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
 
+DROP POLICY IF EXISTS "digital_thread_delete_privileged" ON public.digital_thread;
 CREATE POLICY "digital_thread_delete_privileged"
 ON public.digital_thread FOR DELETE TO authenticated
 USING ((auth.jwt() -> 'app_metadata' ->> 'role') IN ('Administrator', 'Shopfloor_Manager'));
