@@ -31,6 +31,9 @@ plugins:
       origins:
         - "http://localhost:3000"
         - "http://127.0.0.1:3000"
+        # Swagger UI ("Try it out" issues browser requests from its own origin).
+        - "http://localhost:8088"
+        - "http://127.0.0.1:8088"
       methods:
         - GET
         - POST

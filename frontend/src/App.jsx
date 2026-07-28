@@ -5,9 +5,11 @@ import { useAppRouting } from './hooks/useAppRouting'
 import { useTheme } from './hooks/useTheme'
 import { useToast } from './hooks/useToast'
 import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
+import { clearInvalidSession, isSessionRejected } from './utils/sessionError'
 import { PERMISSION_UUIDS } from './constants'
 
 const allowSignUp = import.meta.env.VITE_ALLOW_SIGNUP === 'true'
+const enableRealtime = import.meta.env.VITE_ENABLE_REALTIME === 'true'
 
 import {
   IconCog,
@@ -58,7 +60,7 @@ function tabIsVisible(tabDef, hasPermission) {
   return hasPermission(tabDef.permission)
 }
 
-function AuthScreen({ onLoginSuccess }) {
+function AuthScreen({ onLoginSuccess, notice }) {
   const [email, setEmail] = useState('admin@factoryplus.local')
   const [password, setPassword] = useState('factoryplus123')
   const [isSignUp, setIsSignUp] = useState(false)
@@ -97,6 +99,12 @@ function AuthScreen({ onLoginSuccess }) {
           <h2 style={{ fontSize: '22px', fontWeight: 700, margin: '0 0 6px 0', color: 'var(--text-main, #f8fafc)' }}>Factory+ Supabase Portal</h2>
           <p style={{ fontSize: '13px', color: 'var(--text-muted, #94a3b8)', margin: 0 }}>Sign in with your Supabase BaaS credentials</p>
         </div>
+
+        {notice && !authError && (
+          <div style={{ background: 'rgba(255,179,0,0.15)', border: '1px solid #ffb300', color: '#ffb300', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '18px' }}>
+            {notice}
+          </div>
+        )}
 
         {authError && (
           <div style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid #ef4444', color: '#ef4444', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '18px' }}>
@@ -165,17 +173,29 @@ function Dashboard({ session, onSignOut }) {
   const { theme, toggleTheme } = useTheme()
   const { toast, showToast, clearToast } = useToast()
 
-  const { userRole, hasPermission } = usePermissions(session, showToast)
+  const { userRole, hasPermission } = usePermissions(session)
   useQuarantineAlerts(showToast)
 
-  // Real-time Postgres Changes Listener
+  // Real-time Postgres Changes Listener.
+  //
+  // Off by default: this stack deploys no `realtime` service and kong.yml has no
+  // /realtime/v1/ route, so subscribing just opens a WebSocket that fails and retries
+  // forever in the background. Every tab already refreshes through usePolling. Set
+  // VITE_ENABLE_REALTIME=true once a realtime service is actually deployed.
   useEffect(() => {
+    if (!enableRealtime) return
+
     const channel = supabase
       .channel('schema-db-changes')
       .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
         showToast(`Real-time update: ${payload.table} ${payload.eventType}`, 'info')
       })
-      .subscribe()
+      .subscribe((status, err) => {
+        // Without this the failure mode is a silent retry loop with no diagnostics.
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('[realtime] subscription %s:', status, err?.message || 'no realtime service reachable')
+        }
+      })
 
     return () => {
       supabase.removeChannel(channel)
@@ -214,7 +234,7 @@ function Dashboard({ session, onSignOut }) {
           <button className="btn btn-ghost btn-sm" onClick={toggleTheme} title="Toggle Light / Dark UI Theme">
             {theme === 'dark' ? <IconSun size={14} /> : <IconMoon size={14} />}
           </button>
-          <div className="topbar-status" title="Real-time Supabase connection status"><div className="pulse-dot" /> Live</div>
+          <div className="topbar-status" title={enableRealtime ? 'Realtime channel subscribed; views also refresh on a 3s poll' : 'Views refresh on a 3s poll (no realtime service deployed)'}><div className="pulse-dot" /> Live</div>
         </div>
       </header>
 
@@ -251,13 +271,43 @@ function Dashboard({ session, onSignOut }) {
 export default function App() {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [authNotice, setAuthNotice] = useState(null)
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
+    let cancelled = false
+
+    // Restore and *validate* the stored session.
+    //
+    // getSession() only reads localStorage, and PostgREST only checks the JWT
+    // signature -- so a token whose auth.sessions row no longer exists (database
+    // volume recreated, session revoked, secret rotated) still reads data and the app
+    // looks signed in, while every Edge Function call fails with an opaque error.
+    // getUser() asks the auth server whether the session is actually still there.
+    const restoreSession = async () => {
+      const { data: { session: stored } } = await supabase.auth.getSession()
+
+      if (!stored) {
+        if (!cancelled) { setSession(null); setLoading(false) }
+        return
+      }
+
+      const { error } = await supabase.auth.getUser()
+      if (cancelled) return
+
+      if (isSessionRejected(error)) {
+        console.warn('[auth] stored session rejected by the auth server:', error.message)
+        setAuthNotice(await clearInvalidSession())
+        setSession(null)
+      } else {
+        // No error, or the auth server was simply unreachable -- keep the stored
+        // session rather than signing someone out over a network blip.
+        if (error) console.warn('[auth] could not validate the stored session:', error.message)
+        setSession(stored)
+      }
       setLoading(false)
-    })
+    }
+
+    restoreSession()
 
     // Listen for Supabase Auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -277,7 +327,10 @@ export default function App() {
       setLoading(false)
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      cancelled = true
+      subscription.unsubscribe()
+    }
   }, [])
 
   if (loading) {
@@ -285,7 +338,7 @@ export default function App() {
   }
 
   if (!session) {
-    return <AuthScreen onLoginSuccess={(sess) => setSession(sess)} />
+    return <AuthScreen notice={authNotice} onLoginSuccess={(sess) => { setAuthNotice(null); setSession(sess) }} />
   }
 
   return <Dashboard session={session} onSignOut={() => supabase.auth.signOut()} />

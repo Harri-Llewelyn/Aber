@@ -1,0 +1,858 @@
+openapi: 3.0.3
+
+info:
+  title: Factory+ Asset Tracking Platform API
+  version: "1.0.0"
+  description: |
+    The HTTP surface of the Factory+ Asset Tracking Platform. Every request goes through
+    the **Kong API gateway** on `http://127.0.0.1:54321`, which routes to three upstreams:
+
+    | Prefix | Upstream | Purpose |
+    | :--- | :--- | :--- |
+    | `/auth/v1/` | Supabase Auth (GoTrue) | Sign in, sign up, session refresh |
+    | `/rest/v1/` | PostgREST | Asset metadata, telemetry, audit log — one endpoint per table/view |
+    | `/functions/v1/` | Supabase Edge Runtime | Privileged operations that need the service role |
+
+    ### Authentication
+
+    Every request needs **both** headers:
+
+    * `apikey: <anon key>` — the project's anonymous key.
+    * `Authorization: Bearer <access_token>` — the JWT from `POST /auth/v1/token`.
+
+    Click **Authorize** and paste the access token. Sign in first with
+    `admin@factoryplus.local` / `factoryplus123` (local dev seed) to obtain one.
+
+    > ⚠️ **"Example Value" is documentation, not data.** Swagger UI shows a synthesised
+    > sample built from this spec's schemas — sample assets such as `Assembly Line 1`,
+    > `Virtual_Gateway_NodeRED` and `Simulated_CNC_01` appear there whether or not they
+    > exist in your database. Press **Execute** and read the **Response body** panel to
+    > see what your stack actually holds.
+
+    > ℹ️ **Tokens outlive their sessions.** PostgREST verifies only the JWT signature, so
+    > a token stays readable after its `auth.sessions` row is gone — which is what
+    > `docker compose down -v` does. Edge Functions validate the session properly and
+    > will answer `401 Invalid user token: Session from session_id claim in JWT does not
+    > exist`. Sign in again to get a fresh token.
+
+    ### Authorization
+
+    Row Level Security is enforced by PostgreSQL, not by this gateway. Reads are open to
+    any authenticated user; writes to `cells`, `gateways`, `devices` and friends require
+    the `Administrator` or `Shopfloor_Manager` role. Anything else gets `401`/`403` — the
+    policies fail closed. `telemetry` is readable by authenticated users only; `anon`
+    receives `401`.
+
+    ### PostgREST conventions
+
+    All `/rest/v1/` collections share the same grammar:
+
+    * **Select columns / embed relations** — `?select=id,name,gateways(id,name,devices(id,name))`
+    * **Filter** — `?status=eq.ONLINE`, `?time=gte.2026-01-01T00:00:00Z`, `?name=like.*CNC*`
+      (operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`, `in`, `is`)
+    * **Order** — `?order=created_at.desc`
+    * **Paginate** — `?limit=500&offset=500`, or the `Range` header
+    * **Return the written rows** — `Prefer: return=representation`
+    * **Exact row count** — `Prefer: count=exact` (returned in `Content-Range`)
+
+    ### Asset relationship model
+
+    `cells → gateways → devices` is a strict chain. **Devices have no `cell_id`**: a device
+    belongs to the cell that its gateway is assigned to. Fetch a whole cell in one call with
+    `GET /rest/v1/cells?select=*,gateways(*,devices(*))`.
+
+  contact:
+    name: Factory+ Asset Tracking Platform
+    url: https://github.com/Harri-Llewelyn/ACS-Cymru
+
+servers:
+  - url: http://127.0.0.1:54321
+    description: Local Docker Compose stack (Kong gateway)
+
+security:
+  - bearerAuth: []
+    apiKeyAuth: []
+
+tags:
+  - name: Auth
+    description: Supabase Auth (GoTrue) session management.
+  - name: Assets
+    description: Cells, gateways and devices — the shopfloor asset hierarchy.
+  - name: Telemetry
+    description: Time-series metrics, served from the standalone TimescaleDB hypertable.
+  - name: Audit
+    description: Append-only Digital Thread audit log.
+  - name: Registry
+    description: Schemas, documents, service directory and device birth parameters.
+  - name: Edge Functions
+    description: Privileged server-side operations.
+
+paths:
+
+  # ---------------------------------------------------------------- Auth ----
+  /auth/v1/token:
+    post:
+      tags: [Auth]
+      summary: Sign in and obtain an access token
+      description: |
+        Exchanges credentials for a JWT. The returned `access_token` is what every other
+        endpoint expects in `Authorization: Bearer <token>`.
+
+        The token carries the caller's role in `app_metadata.role`, refreshed from the
+        database on every issue by `custom_access_token_hook()`.
+      security:
+        - apiKeyAuth: []
+      parameters:
+        - name: grant_type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [password, refresh_token]
+            default: password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: admin@factoryplus.local
+                password:
+                  type: string
+                  format: password
+                  example: factoryplus123
+                refresh_token:
+                  type: string
+                  description: Send this instead of email/password when `grant_type=refresh_token`.
+      responses:
+        '200':
+          description: Authenticated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token: { type: string }
+                  token_type: { type: string, example: bearer }
+                  expires_in: { type: integer, example: 3600 }
+                  refresh_token: { type: string }
+                  user: { type: object }
+        '400':
+          description: Invalid login credentials.
+
+  /auth/v1/signup:
+    post:
+      tags: [Auth]
+      summary: Register a new account
+      description: |
+        Self-registered accounts are granted the read-only `Operator` role by the
+        `handle_new_user` trigger. An `Administrator` must promote them.
+      security:
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+      responses:
+        '200':
+          description: Account created; a session is returned when auto-confirm is enabled.
+
+  /auth/v1/user:
+    get:
+      tags: [Auth]
+      summary: Get the current user
+      responses:
+        '200':
+          description: The user behind the bearer token, including `app_metadata.role`.
+        '401':
+          description: Missing or invalid token.
+
+  # -------------------------------------------------------------- Assets ----
+  /rest/v1/cells:
+    get:
+      tags: [Assets]
+      summary: List shopfloor cells
+      description: |
+        Embed the whole hierarchy in one request:
+        `?select=*,gateways(*,devices(*))`
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - name: name
+          in: query
+          schema: { type: string }
+          description: 'Filter, e.g. `eq.Assembly Line 1`.'
+        - name: is_archived
+          in: query
+          schema: { type: string }
+          description: 'Filter, e.g. `eq.false`.'
+      responses:
+        '200':
+          description: Matching cells.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Cell' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Assets]
+      summary: Create a cell
+      parameters:
+        - $ref: '#/components/parameters/Prefer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CellWrite' }
+      responses:
+        '201': { description: Created. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    patch:
+      tags: [Assets]
+      summary: Update cells matching a filter
+      description: 'Always send a filter, e.g. `?id=eq.<uuid>`; an unfiltered PATCH updates every row.'
+      parameters:
+        - name: id
+          in: query
+          schema: { type: string }
+          description: 'e.g. `eq.<uuid>`'
+        - $ref: '#/components/parameters/Prefer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CellWrite' }
+      responses:
+        '204': { description: Updated. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [Assets]
+      summary: Delete cells matching a filter
+      description: 'Cascades to the cell''s gateways. Prefer archiving (`is_archived=true`) over deletion.'
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema: { type: string }
+          description: 'e.g. `eq.<uuid>`'
+      responses:
+        '204': { description: Deleted. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /rest/v1/gateways:
+    get:
+      tags: [Assets]
+      summary: List edge gateways
+      description: |
+        `last_heartbeat` is stamped by the ingestion daemon on every Sparkplug B
+        node-level message (`NBIRTH`/`NDATA`/`NDEATH`). A gateway that stops publishing
+        never writes an OFFLINE status — it just goes quiet — so treat a heartbeat older
+        than ~90s as stale.
+
+        Embed assigned devices with `?select=*,devices(*)`.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - $ref: '#/components/parameters/Limit'
+        - name: cell_id
+          in: query
+          schema: { type: string }
+          description: 'e.g. `eq.<uuid>`, or `is.null` for gateways in no cell.'
+      responses:
+        '200':
+          description: Matching gateways.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Gateway' }
+    post:
+      tags: [Assets]
+      summary: Register a gateway
+      description: |
+        `name` **must** equal the Sparkplug B edge node id in the MQTT topic
+        (`spBv1.0/<group>/NDATA/<edge node>`), or heartbeats will not match this row.
+      parameters:
+        - $ref: '#/components/parameters/Prefer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GatewayWrite' }
+      responses:
+        '201': { description: Created. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    patch:
+      tags: [Assets]
+      summary: Update gateways matching a filter
+      description: 'Assigning `cell_id` is what places a gateway — and therefore its devices — in a cell.'
+      parameters:
+        - name: id
+          in: query
+          schema: { type: string }
+          description: 'e.g. `eq.<uuid>`'
+        - $ref: '#/components/parameters/Prefer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GatewayWrite' }
+      responses:
+        '204': { description: Updated. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /rest/v1/devices:
+    get:
+      tags: [Assets]
+      summary: List devices
+      description: |
+        A device's cell is derived, not stored: embed its gateway to resolve it with
+        `?select=*,gateways(id,name,cell_id)`.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - $ref: '#/components/parameters/Limit'
+        - name: is_quarantined
+          in: query
+          schema: { type: string }
+          description: '`eq.true` returns the zero-touch onboarding quarantine queue.'
+        - name: gateway_id
+          in: query
+          schema: { type: string }
+          description: 'e.g. `eq.<uuid>`, or `is.null` for unassigned devices.'
+      responses:
+        '200':
+          description: Matching devices.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Device' }
+    post:
+      tags: [Assets]
+      summary: Register a device
+      description: |
+        `id` is generated by the database — do not send one. `name` **must** equal the
+        Sparkplug B device id in the MQTT topic
+        (`spBv1.0/<group>/DDATA/<edge node>/<device>`), because telemetry and birth
+        parameters are keyed by that name.
+      parameters:
+        - $ref: '#/components/parameters/Prefer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeviceWrite' }
+      responses:
+        '201': { description: Created. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    patch:
+      tags: [Assets]
+      summary: Update devices matching a filter
+      description: 'Set `gateway_id` to move a device between gateways (and therefore between cells).'
+      parameters:
+        - name: id
+          in: query
+          schema: { type: string }
+          description: 'e.g. `eq.<uuid>`'
+        - $ref: '#/components/parameters/Prefer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeviceWrite' }
+      responses:
+        '204': { description: Updated. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ----------------------------------------------------------- Telemetry ----
+  /rest/v1/telemetry:
+    get:
+      tags: [Telemetry]
+      summary: Read time-series telemetry
+      description: |
+        Read-only view over the standalone TimescaleDB `telemetry` hypertable, reached
+        with `postgres_fdw`. `asset_id` holds the **Sparkplug B device name**, not the
+        device UUID.
+
+        `postgres_fdw` pushes `WHERE` clauses to TimescaleDB but **not** `LIMIT`, so always
+        constrain the time window on large ranges:
+
+        `?asset_id=eq.Simulated_CNC_01&time=gte.2026-01-01T00:00:00Z&order=time.desc&limit=500`
+      parameters:
+        - name: asset_id
+          in: query
+          schema: { type: string }
+          description: 'Sparkplug B device name, e.g. `eq.Simulated_CNC_01`.'
+        - name: metric_name
+          in: query
+          schema: { type: string }
+          description: 'e.g. `eq.temperature`.'
+        - name: time
+          in: query
+          schema: { type: string }
+          description: 'e.g. `gte.2026-01-01T00:00:00Z`.'
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Matching telemetry rows, newest first when ordered by `time.desc`.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TelemetryRow' }
+        '401':
+          description: The view is granted to authenticated users only; `anon` is refused.
+
+  # --------------------------------------------------------------- Audit ----
+  /rest/v1/digital_thread:
+    get:
+      tags: [Audit]
+      summary: Read the Digital Thread audit log
+      description: |
+        Append-only. Rows are written exclusively by the `log_digital_thread_event()`
+        trigger on `cells`, `gateways` and `devices`; `INSERT`/`UPDATE`/`DELETE` are
+        revoked from `authenticated`. Readable by `Administrator`, `Shopfloor_Manager`
+        and `Auditor` only.
+      parameters:
+        - name: entity_id
+          in: query
+          schema: { type: string }
+          description: 'e.g. `eq.<uuid>`'
+        - name: entity_type
+          in: query
+          schema: { type: string }
+          description: 'e.g. `eq.devices`'
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Matching audit entries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DigitalThreadEntry' }
+        '403':
+          description: Role lacks Digital Thread read access.
+
+  # ------------------------------------------------------------ Registry ----
+  /rest/v1/asset_config:
+    get:
+      tags: [Registry]
+      summary: Read device birth (DBIRTH) parameters
+      description: |
+        Configuration metrics announced by a device in its Sparkplug B birth certificate —
+        firmware version, serial number, thresholds, interlocks. Written by the ingestion
+        daemon on every `DBIRTH`, upserted per `(asset_id, metric_name)`.
+
+        Recorded for quarantined devices too, so an administrator can inspect what a newly
+        discovered device claims before approving it. `asset_id` is the device **name**.
+      parameters:
+        - name: asset_id
+          in: query
+          schema: { type: string }
+          description: 'Sparkplug B device name, e.g. `eq.Simulated_CNC_01`.'
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+      responses:
+        '200':
+          description: Birth parameters for the device.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AssetConfigRow' }
+
+  /rest/v1/directory_services:
+    get:
+      tags: [Registry]
+      summary: List registered stack services
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+      responses:
+        '200':
+          description: The service directory backing the dashboard's Directory tab.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DirectoryService' }
+
+  /rest/v1/schemas:
+    get:
+      tags: [Registry]
+      summary: List registered Sparkplug B / industrial schemas
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+      responses:
+        '200':
+          description: Schema registry entries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Schema' }
+    post:
+      tags: [Registry]
+      summary: Register a schema
+      parameters:
+        - $ref: '#/components/parameters/Prefer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [schema_name, schema_definition]
+              properties:
+                schema_name: { type: string }
+                description: { type: string }
+                schema_definition:
+                  type: object
+                  description: JSON Schema document.
+      responses:
+        '201': { description: Created. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /rest/v1/documents:
+    get:
+      tags: [Registry]
+      summary: List external document links attached to an asset
+      description: 'A link registry, not a file store — `url` points at an external system. No binaries are held by this platform.'
+      parameters:
+        - name: entity_type
+          in: query
+          schema: { type: string }
+          description: '`eq.cell` | `eq.gateway` | `eq.device`'
+        - name: entity_id
+          in: query
+          schema: { type: string }
+          description: 'e.g. `eq.<uuid>`'
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Matching document links.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Document' }
+
+  # ----------------------------------------------------- Edge Functions ----
+  /functions/v1/approve-quarantine:
+    post:
+      tags: [Edge Functions]
+      summary: Approve a quarantined device
+      description: |
+        Clears `is_quarantined` and assigns the device to a gateway, using the service
+        role server-side. Fails closed: a missing `Authorization` header returns `401`,
+        and any role other than `Administrator` / `Shopfloor_Manager` returns `403`.
+
+        Until a device is approved, the ingestion daemon drops all of its `DDATA`
+        telemetry.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id]
+              properties:
+                device_id:
+                  type: string
+                  description: Device UUID or Sparkplug B device name.
+                  example: Simulated_CNC_01
+                gateway_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: Gateway to serve this device. Determines the device's cell.
+      responses:
+        '200':
+          description: Approved.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  data: { type: array, items: { $ref: '#/components/schemas/Device' } }
+        '400': { description: 'Missing required parameter: device_id.' }
+        '401': { description: Missing or invalid Authorization header. }
+        '403': { description: 'Forbidden: insufficient privileges.' }
+
+  /functions/v1/deploy-nodered:
+    post:
+      tags: [Edge Functions]
+      summary: Deploy edge flows to Node-RED (GitOps sync)
+      description: |
+        The repository is the source of truth. Sending `{ "commit_message": "..." }`
+        deploys the canonical `node_red_flow.json` committed to the repo; sending a
+        Node-RED flow **array** instead deploys that payload verbatim.
+
+        Requires the `Administrator` or `Shopfloor_Manager` role.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  properties:
+                    commit_message:
+                      type: string
+                      example: Manual GitOps Flow Sync from Dashboard UI
+                - type: array
+                  items: { type: object }
+                  description: A Node-RED flow array, deployed as sent.
+      responses:
+        '200':
+          description: Deployed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: DEPLOYED }
+                  nodes_deployed: { type: integer }
+                  source: { type: string }
+        '401': { description: Missing Authorization header. }
+        '403': { description: 'Forbidden: insufficient privileges.' }
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 'Access token from `POST /auth/v1/token?grant_type=password`.'
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: apikey
+      description: The Supabase anon key. Required on every request, including authenticated ones.
+
+  parameters:
+    Select:
+      name: select
+      in: query
+      schema: { type: string }
+      description: 'Columns and embedded relations, e.g. `*,gateways(id,name,devices(id,name))`.'
+    Order:
+      name: order
+      in: query
+      schema: { type: string }
+      description: 'e.g. `created_at.desc`, `name.asc`.'
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, default: 100 }
+      description: Maximum rows to return.
+    Offset:
+      name: offset
+      in: query
+      schema: { type: integer, default: 0 }
+      description: Rows to skip — combine with `limit` to page.
+    Prefer:
+      name: Prefer
+      in: header
+      schema:
+        type: string
+        enum: [return=representation, return=minimal, count=exact]
+      description: '`return=representation` echoes the written rows; `count=exact` adds a total to `Content-Range`.'
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid credentials.
+    Forbidden:
+      description: Authenticated, but the role is not permitted. RLS policies fail closed.
+
+  schemas:
+
+    Cell:
+      type: object
+      description: A shopfloor cell zone. Owns gateways; devices reach a cell through them.
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        name: { type: string, example: Assembly Line 1 }
+        grafana_url: { type: string, nullable: true, description: Dashboard URL surfaced on the cell card. }
+        is_archived: { type: boolean, default: false }
+        archived_at: { type: string, format: date-time, nullable: true }
+        auto_delete_at: { type: string, format: date-time, nullable: true, description: Retention purge deadline, or null for permanent retention. }
+        created_at: { type: string, format: date-time, readOnly: true }
+        gateways:
+          type: array
+          description: Present only when embedded via `select`.
+          items: { $ref: '#/components/schemas/Gateway' }
+
+    CellWrite:
+      type: object
+      properties:
+        name: { type: string, example: Assembly Line 1 }
+        grafana_url: { type: string, nullable: true }
+        is_archived: { type: boolean }
+        archived_at: { type: string, format: date-time, nullable: true }
+        auto_delete_at: { type: string, format: date-time, nullable: true }
+
+    Gateway:
+      type: object
+      description: An edge gateway (Sparkplug B edge node).
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        name:
+          type: string
+          example: Virtual_Gateway_NodeRED
+          description: Must equal the Sparkplug B edge node id for heartbeats to match.
+        cell_id: { type: string, format: uuid, nullable: true, description: 'Null means this gateway — and its devices — appear in no cell.' }
+        access_url: { type: string, nullable: true }
+        status: { type: string, enum: [ONLINE, OFFLINE], default: OFFLINE }
+        last_heartbeat:
+          type: string
+          format: date-time
+          nullable: true
+          readOnly: true
+          description: Receipt time of the last node-level Sparkplug B message. Null means none has ever arrived.
+        ip_address: { type: string, nullable: true }
+        is_virtual: { type: boolean, default: false }
+        is_archived: { type: boolean, default: false }
+        created_at: { type: string, format: date-time, readOnly: true }
+        devices:
+          type: array
+          description: Present only when embedded via `select`.
+          items: { $ref: '#/components/schemas/Device' }
+
+    GatewayWrite:
+      type: object
+      properties:
+        name: { type: string, example: Virtual_Gateway_NodeRED }
+        cell_id: { type: string, format: uuid, nullable: true }
+        access_url: { type: string, nullable: true }
+        status: { type: string, enum: [ONLINE, OFFLINE] }
+        ip_address: { type: string, nullable: true }
+        is_virtual: { type: boolean }
+        is_archived: { type: boolean }
+
+    Device:
+      type: object
+      description: A shopfloor device served by an edge gateway.
+      properties:
+        id: { type: string, format: uuid, readOnly: true, description: Generated by the database — never sent on create. }
+        name:
+          type: string
+          example: Simulated_CNC_01
+          description: Must equal the Sparkplug B device id; telemetry and birth parameters are keyed by it.
+        gateway_id: { type: string, format: uuid, nullable: true, description: 'Serving gateway. The device''s cell is this gateway''s cell.' }
+        status: { type: string, enum: [ONLINE, OFFLINE], default: OFFLINE, description: Set ONLINE on DBIRTH and OFFLINE on DDEATH by the ingestion daemon. }
+        is_quarantined:
+          type: boolean
+          default: false
+          description: True for auto-discovered devices awaiting approval. Their DDATA telemetry is dropped.
+        asset_type: { type: string, nullable: true, example: CNC }
+        connection_method: { type: string, nullable: true, example: Sparkplug B }
+        is_archived: { type: boolean, default: false }
+        created_at: { type: string, format: date-time, readOnly: true }
+
+    DeviceWrite:
+      type: object
+      properties:
+        name: { type: string, example: Simulated_CNC_01 }
+        gateway_id: { type: string, format: uuid, nullable: true }
+        status: { type: string, enum: [ONLINE, OFFLINE] }
+        is_quarantined: { type: boolean }
+        asset_type: { type: string, nullable: true }
+        connection_method: { type: string, nullable: true }
+        is_archived: { type: boolean }
+
+    TelemetryRow:
+      type: object
+      description: 'One metric sample. Exactly one of val_double / val_string / val_bool is populated.'
+      properties:
+        time: { type: string, format: date-time }
+        asset_id: { type: string, example: Simulated_CNC_01, description: Sparkplug B device name. }
+        metric_name: { type: string, example: temperature }
+        val_double: { type: number, nullable: true }
+        val_string: { type: string, nullable: true }
+        val_bool: { type: boolean, nullable: true }
+
+    AssetConfigRow:
+      type: object
+      description: One DBIRTH birth-certificate parameter.
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        asset_id: { type: string, example: Simulated_CNC_01, description: Sparkplug B device name. }
+        metric_name: { type: string, example: firmware_version }
+        val_double: { type: number, nullable: true }
+        val_string: { type: string, nullable: true }
+        val_bool: { type: boolean, nullable: true }
+        datatype:
+          type: integer
+          nullable: true
+          example: 12
+          description: 'Sparkplug B datatype code (9 Float, 10 Double, 11 Boolean, 12 String, ...).'
+        updated_at: { type: string, format: date-time }
+
+    DigitalThreadEntry:
+      type: object
+      description: One trigger-written audit event.
+      properties:
+        id: { type: integer, readOnly: true }
+        entity_type: { type: string, enum: [cells, gateways, devices] }
+        entity_id: { type: string, format: uuid }
+        action: { type: string, enum: [INSERT, UPDATE, DELETE] }
+        old_data: { type: object, nullable: true }
+        new_data: { type: object, nullable: true }
+        changed_by: { type: string, format: uuid, nullable: true, description: 'auth.users id, or null for changes made by the service role.' }
+        recorded_at: { type: string, format: date-time }
+
+    DirectoryService:
+      type: object
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        service_name: { type: string, example: Supabase Studio }
+        service_type: { type: string, example: GRAPHICAL_UI }
+        endpoint_url: { type: string, example: 'http://127.0.0.1:54323' }
+        status: { type: string, example: ACTIVE }
+        last_heartbeat: { type: string, format: date-time, nullable: true }
+
+    Schema:
+      type: object
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        schema_name: { type: string, example: SparkplugB-Telemetry-Standard-Schema }
+        description: { type: string, nullable: true }
+        schema_definition: { type: object, description: JSON Schema document. }
+        created_at: { type: string, format: date-time, readOnly: true }
+
+    Document:
+      type: object
+      description: An external link attached to an asset. No binary is stored by this platform.
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        entity_type: { type: string, enum: [cell, gateway, device] }
+        entity_id: { type: string }
+        display_name: { type: string }
+        url: { type: string, format: uri }
+        document_tag: { type: string, default: other }
+        created_at: { type: string, format: date-time, readOnly: true }
+        updated_at: { type: string, format: date-time }

@@ -10,13 +10,13 @@
     "id": "inject-dbirth-startup",
     "type": "inject",
     "z": "tab-gateway-sim",
-    "name": "1. Trigger DBIRTH Birth Certificate",
+    "name": "1. Trigger DBIRTH Birth Certificate (rebirth every 60s)",
     "props": [
       {
         "p": "payload"
       }
     ],
-    "repeat": "",
+    "repeat": "60",
     "crontab": "",
     "once": true,
     "onceDelay": 2,
@@ -36,7 +36,7 @@
     "type": "function",
     "z": "tab-gateway-sim",
     "name": "Build DBIRTH Certificate (Simulated_CNC_01)",
-    "func": "global.set('device_alive', true);\nconst topic = 'spBv1.0/FactoryPlus/DBIRTH/Virtual_Gateway_NodeRED/Simulated_CNC_01';\nconst spbBirthPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID',          string_value: 'Simulated_CNC_01',  datatype: 12 },\n        { name: 'firmware_version',  string_value: 'v3.2.0-industrial', datatype: 12 },\n        { name: 'serial_number',     string_value: 'SN-CNC-8832',       datatype: 12 },\n        { name: 'max_temp_threshold',double_value: 85.0,                datatype: 10 },\n        { name: 'safety_interlock',  boolean_value: true,               datatype: 11 }\n    ],\n    seq: 0\n};\nreturn { topic: topic, payload: JSON.stringify(spbBirthPayload), qos: 0, retain: false };",
+    "func": "// Periodic rebirth so a consumer that starts after Node-RED still receives the\n// birth certificate. Stays silent while the device is in its DDEATH state, so the\n// DDEATH demo is not undone by the next rebirth tick.\nif (global.get('device_alive') === false) {\n    return null;\n}\nglobal.set('device_alive', true);\nconst topic = 'spBv1.0/FactoryPlus/DBIRTH/Virtual_Gateway_NodeRED/Simulated_CNC_01';\nconst spbBirthPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID',          string_value: 'Simulated_CNC_01',  datatype: 12 },\n        { name: 'firmware_version',  string_value: 'v3.2.0-industrial', datatype: 12 },\n        { name: 'serial_number',     string_value: 'SN-CNC-8832',       datatype: 12 },\n        { name: 'max_temp_threshold',double_value: 85.0,                datatype: 10 },\n        { name: 'safety_interlock',  boolean_value: true,               datatype: 11 }\n    ],\n    seq: 0\n};\nreturn { topic: topic, payload: JSON.stringify(spbBirthPayload), qos: 0, retain: false };",
     "outputs": 1,
     "x": 520,
     "y": 80,
@@ -130,7 +130,7 @@
     "id": "inject-alert-overheat",
     "type": "inject",
     "z": "tab-gateway-sim",
-    "name": "ANOMALY: Trigger Overheat Spike (95\u00b0C)",
+    "name": "ANOMALY: Trigger Overheat Spike (95°C)",
     "props": [
       {
         "p": "payload"
@@ -155,7 +155,7 @@
     "id": "build-alert-payload",
     "type": "function",
     "z": "tab-gateway-sim",
-    "name": "Publish Overheat Spike (95\u00b0C)",
+    "name": "Publish Overheat Spike (95°C)",
     "func": "global.set('device_alive', true);\nglobal.set('temp_override', 95.0);\nglobal.set('status_override', 'ALARM_OVERHEAT');\nglobal.set('safety_override', false);\n\nconst topic = 'spBv1.0/FactoryPlus/DDATA/Virtual_Gateway_NodeRED/Simulated_CNC_01';\nconst spbAlertPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID',    string_value: 'Simulated_CNC_01', datatype: 12 },\n        { name: 'temperature', double_value: 95.0,                datatype: 10 },\n        { name: 'vibration',   double_value: 8.92,                datatype: 10 },\n        { name: 'status',      string_value: 'ALARM_OVERHEAT',   datatype: 12 },\n        { name: 'safety_ok',   boolean_value: false,              datatype: 11 }\n    ],\n    seq: Math.floor(Math.random() * 255)\n};\nreturn { topic: topic, payload: JSON.stringify(spbAlertPayload), qos: 0, retain: false };",
     "outputs": 1,
     "x": 520,
@@ -170,7 +170,7 @@
     "id": "inject-alert-reset",
     "type": "inject",
     "z": "tab-gateway-sim",
-    "name": "RESET: Restore Normal Telemetry (42\u00b0C)",
+    "name": "RESET: Restore Normal Telemetry (42°C)",
     "props": [
       {
         "p": "payload"
@@ -195,7 +195,7 @@
     "id": "reset-alert-function",
     "type": "function",
     "z": "tab-gateway-sim",
-    "name": "Reset Telemetry to Normal (42\u00b0C)",
+    "name": "Reset Telemetry to Normal (42°C)",
     "func": "global.set('device_alive', true);\nglobal.set('temp_override', undefined);\nglobal.set('status_override', 'RUNNING');\nglobal.set('safety_override', true);\n\nconst topic = 'spBv1.0/FactoryPlus/DDATA/Virtual_Gateway_NodeRED/Simulated_CNC_01';\nconst spbNormalPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID',    string_value: 'Simulated_CNC_01', datatype: 12 },\n        { name: 'temperature', double_value: 42.0,                datatype: 10 },\n        { name: 'vibration',   double_value: 1.20,                datatype: 10 },\n        { name: 'status',      string_value: 'RUNNING',          datatype: 12 },\n        { name: 'safety_ok',   boolean_value: true,               datatype: 11 }\n    ],\n    seq: Math.floor(Math.random() * 255)\n};\nreturn { topic: topic, payload: JSON.stringify(spbNormalPayload), qos: 0, retain: false };",
     "outputs": 1,
     "x": 520,

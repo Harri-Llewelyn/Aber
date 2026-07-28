@@ -9,12 +9,16 @@ vi.mock('../lib/supabaseClient', () => {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockImplementation((col, val) => {
       if (val === 'user-db-role-1') {
+        // role_permissions is nested under roles -- that is the only FK path PostgREST
+        // can follow from user_roles.
         return Promise.resolve({
           data: [
             {
               role_id: 1,
-              roles: { name: 'Administrator' },
-              role_permissions: Object.values(PERMISSION_UUIDS).map(id => ({ permission_id: id }))
+              roles: {
+                name: 'Administrator',
+                role_permissions: Object.values(PERMISSION_UUIDS).map(id => ({ permission_id: id }))
+              }
             }
           ],
           error: null

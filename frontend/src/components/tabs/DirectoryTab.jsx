@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
+import { describeAuthFailure } from '../../utils/sessionError'
 import { StatusBadge } from '../common/StatusBadge'
 import { IconRefresh, IconGitBranch, IconRefreshCw, IconExternalLink } from '../common/Icons'
 
@@ -27,7 +28,10 @@ export function DirectoryTab({ showToast, hasPermission }) {
       const res = await api.post('/api/v1/gitops/deploy-flow', { commit_message: 'Manual GitOps Flow Sync from Dashboard UI' })
       showToast(res.message, 'success')
       loadAll()
-    } catch (e) { showToast(e.message, 'error') }
+    } catch (e) {
+      // Deploy runs through an Edge Function, which validates the session server-side.
+      showToast(await describeAuthFailure(e, 'GitOps flow deployment failed'), 'error')
+    }
   }
 
   const canManageGateway = hasPermission(PERMISSION_UUIDS.GATEWAY_MANAGE)

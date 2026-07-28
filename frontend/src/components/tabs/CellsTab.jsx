@@ -2,7 +2,9 @@ import React, { useState, useCallback } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
+import { gatewayLiveStatus, formatHeartbeat } from '../../utils/gatewayStatus'
 import { InlineDocumentAccordion } from '../common/InlineDocumentAccordion'
+import { StatusBadge } from '../common/StatusBadge'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { DigitalThreadModal } from '../modals/DigitalThreadModal'
 import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
@@ -37,6 +39,9 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
 
   const loadAll = useCallback(async (signal) => {
     try {
+      // /api/v1/cells embeds each cell's gateways and, through them, its devices --
+      // devices have no cell_id of their own, so the relationship only exists via the
+      // gateway. `assets` stays loaded for the unassigned-device counter below.
       const [c, a] = await Promise.all([
         api.get('/api/v1/cells', { signal }),
         api.get('/api/v1/devices', { signal }),
@@ -77,6 +82,10 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
 
   const canManage = hasPermission(PERMISSION_UUIDS.CELL_MANAGE)
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
+
+  // A device with no gateway -- or whose gateway is not assigned to a cell -- appears on
+  // no cell card at all. Surface those rather than letting them silently vanish.
+  const unlinkedDevices = assets.filter(a => !a.is_archived && !a.cell_id)
 
   const filteredCells = cells.filter(c => {
     if (filterMode === 'active'   && c.is_archived) return false
@@ -128,8 +137,20 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
         </div>
       </div>
       <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
-        Manage physical and logical shopfloor cell zones, inspect assigned edge devices, and monitor zone lifecycle audit history.
+        Manage physical and logical shopfloor cell zones, inspect assigned edge gateways and devices, and monitor zone lifecycle audit history.
+        A device belongs to a cell through its edge gateway.
       </p>
+
+      {unlinkedDevices.length > 0 && (
+        <div style={{ marginBottom: '20px', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px 16px', fontSize: '13px', color: 'var(--warning)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <IconShieldAlert size={18} />
+          <div>
+            <strong>{unlinkedDevices.length} device{unlinkedDevices.length === 1 ? '' : 's'} not linked to any cell zone:</strong>{' '}
+            {unlinkedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unlinkedDevices.length > 5 ? ', …' : ''}.
+            Assign each device to a gateway on the Devices page, and assign that gateway to a cell on the Gateways page.
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="loading-wrap"><div className="spinner" /> Loading shopfloor cells…</div>
@@ -142,7 +163,8 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
         </div>
       ) : (
         filteredCells.map(c => {
-          const cellAssets = assets.filter(a => a.cell_id === c.cell_id)
+          const cellGateways = c.gateways || []
+          const cellAssets = c.devices || []
 
           return (
             <div key={c.cell_id} className="cell-card" style={{ opacity: c.is_archived ? 0.9 : 1, border: c.is_archived ? '1px solid var(--warning)' : '1px solid var(--border)' }}>
@@ -151,7 +173,8 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
                   <IconFactory size={18} />
                   <span>{c.cell_name}</span>
                   <span className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>ID: {c.cell_id}</span>
-                  <span className="badge badge-neutral" title="Count of devices assigned to this cell">{cellAssets.length} Devices</span>
+                  <span className="badge badge-neutral" title="Count of edge gateways assigned to this cell">{cellGateways.length} Gateways</span>
+                  <span className="badge badge-neutral" title="Count of devices reachable through this cell's gateways">{cellAssets.length} Devices</span>
                   {c.is_archived && (
                     <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Cell decommissioned and archived">
                       <IconArchive size={11} /> ARCHIVED (OUT OF COMMISSION)
@@ -212,8 +235,38 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
                 )}
 
                 <div className="nested-box">
+                  <div className="nested-box-title">Assigned Edge Gateways ({cellGateways.length})</div>
+                  {cellGateways.length === 0 ? (
+                    <div style={{ fontStyle: 'italic', fontSize: '12px', color: 'var(--text-dim)' }}>
+                      No gateways assigned to this cell zone. Assign a gateway to this cell on the Gateways page — devices reach a cell through their gateway.
+                    </div>
+                  ) : (
+                    <div className="table-wrap">
+                      <table>
+                        <thead><tr><th title="Gateway ID">Gateway ID</th><th title="Gateway Name">Name</th><th title="Connectivity status">Status</th><th title="Last Sparkplug B node heartbeat">Last Heartbeat</th><th title="Devices served by this gateway">Devices</th></tr></thead>
+                        <tbody>
+                          {cellGateways.map(g => (
+                            <tr key={g.gateway_id} style={{ background: g.is_archived ? 'rgba(255,179,0,0.06)' : undefined }}>
+                              <td><span className="mono">{g.gateway_id}</span></td>
+                              <td><strong>{g.gateway_name}</strong></td>
+                              <td>
+                                {g.is_archived
+                                  ? <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)' }}>DECOMMISSIONED</span>
+                                  : <StatusBadge status={gatewayLiveStatus(g)} />}
+                              </td>
+                              <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{formatHeartbeat(g.last_heartbeat)}</td>
+                              <td><span className="badge badge-neutral">{g.device_count}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                <div className="nested-box">
                   <div className="nested-box-title">Assigned Devices ({cellAssets.length})</div>
-                  {cellAssets.length === 0 ? <div style={{ fontStyle: 'italic', fontSize: '12px', color: 'var(--text-dim)' }}>No devices assigned to this cell zone.</div> : (
+                  {cellAssets.length === 0 ? <div style={{ fontStyle: 'italic', fontSize: '12px', color: 'var(--text-dim)' }}>No devices reachable through this cell zone's gateways.</div> : (
                     <div className="table-wrap">
                       <table>
                         <thead><tr><th title="Device ID">Device ID</th><th title="Device Name">Name</th><th title="Status">Status</th><th title="Connected Edge Gateway">Gateway</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
@@ -244,7 +297,7 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
                                     </span>
                                   )}
                                 </td>
-                                <td><span className="mono" style={{ color: 'var(--warning)' }}>{a.active_gateway_id || '—'}</span></td>
+                                <td><span className="mono" style={{ color: 'var(--warning)' }} title={a.active_gateway_id || 'No gateway assigned'}>{a.gateway_name || a.active_gateway_id || '—'}</span></td>
                                 <td style={{ textAlign: 'right' }}>
                                   <button className="btn btn-ghost btn-sm" onClick={() => onSelectDevice(a.asset_id)} title="View live telemetry for this device">
                                     <IconActivity size={12} /> Telemetry

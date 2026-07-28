@@ -15,6 +15,8 @@ vi.mock('../lib/supabaseClient', () => ({
   supabase: {
     auth: {
       getSession: vi.fn(),
+      // getSession() only reads localStorage; App validates it with getUser().
+      getUser: vi.fn(),
       onAuthStateChange: vi.fn(),
       signInWithPassword: vi.fn(),
       signUp: vi.fn(),
@@ -40,6 +42,8 @@ describe('App Component', () => {
     vi.clearAllMocks()
     window.history.pushState({}, '', '/')
     supabase.auth.getSession.mockResolvedValue({ data: { session: null } })
+    supabase.auth.getUser.mockResolvedValue({ data: { user: mockSession.user }, error: null })
+    supabase.auth.signOut.mockResolvedValue({ error: null })
     supabase.auth.onAuthStateChange.mockReturnValue({
       data: { subscription: { unsubscribe: vi.fn() } }
     })
@@ -67,6 +71,43 @@ describe('App Component', () => {
 
     expect(screen.getByText('Supabase BaaS + Standalone TimescaleDB Architecture')).toBeInTheDocument()
     expect(screen.getByText('admin@factoryplus.local')).toBeInTheDocument()
+  })
+
+  it('returns to the login screen when the stored session no longer exists on the server', async () => {
+    // The browser still holds a signature-valid JWT, but auth.sessions was wiped (e.g.
+    // `docker compose down -v`). PostgREST would still serve reads, so without this
+    // check the dashboard renders as if signed in and only Edge Functions fail.
+    supabase.auth.getSession.mockResolvedValue({ data: { session: mockSession } })
+    supabase.auth.getUser.mockResolvedValue({
+      data: { user: null },
+      error: { status: 403, message: 'Session from session_id claim in JWT does not exist' }
+    })
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Factory+ Supabase Portal')).toBeInTheDocument()
+    })
+
+    expect(screen.getByText(/session is no longer valid/i)).toBeInTheDocument()
+    // Stale tokens are dropped locally; the server-side session is already gone.
+    expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
+    expect(screen.queryByText('Factory+ Asset Tracking Platform')).not.toBeInTheDocument()
+  })
+
+  it('stays signed in when the auth server is unreachable', async () => {
+    supabase.auth.getSession.mockResolvedValue({ data: { session: mockSession } })
+    supabase.auth.getUser.mockResolvedValue({
+      data: { user: null },
+      error: { name: 'AuthRetryableFetchError', message: 'Failed to fetch' }
+    })
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Factory+ Asset Tracking Platform')).toBeInTheDocument()
+    })
+    expect(supabase.auth.signOut).not.toHaveBeenCalled()
   })
 
   it('navigates between navigation tabs when clicked', async () => {

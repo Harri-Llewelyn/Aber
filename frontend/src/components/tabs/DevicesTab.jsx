@@ -5,6 +5,7 @@ import { PERMISSION_UUIDS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { edgeFunctionErrorMessage } from '../../utils/edgeFunctionError'
+import { describeAuthFailure } from '../../utils/sessionError'
 import { InlineDocumentAccordion } from '../common/InlineDocumentAccordion'
 import { ApproveQuarantineModal } from '../modals/ApproveQuarantineModal'
 import { ArchiveModal } from '../modals/ArchiveModal'
@@ -44,7 +45,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
   const [docsForDevice, setDocsForDevice] = useState(null)
   const [expandedDeviceDocs, setExpandedDeviceDocs] = useState({})
   const [docRefreshKey, setDocRefreshKey] = useState(0)
-  const [blank]                 = useState({ asset_id: '', asset_name: '', asset_type: 'CNC', cell_id: '', connection_method: 'OPC-UA', active_gateway_id: '' })
+  const [blank]                 = useState({ asset_id: '', asset_name: '', asset_type: 'CNC', connection_method: 'Sparkplug B', active_gateway_id: '' })
   const [form, setForm]         = useState(blank)
   const [filterMode, setFilterMode] = useState('all')
 
@@ -103,19 +104,26 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
 
   usePolling(loadAll, 3000)
 
+  // A device's cell is whatever cell its gateway belongs to; there is no direct link.
+  const cellNameForGateway = (gatewayId) => {
+    const gw = gateways.find(g => g.gateway_id === gatewayId)
+    if (!gw?.cell_id) return ''
+    return cells.find(c => c.cell_id === gw.cell_id)?.cell_name || ''
+  }
+
   const save = async () => {
     try {
       const payload = {
         asset_name: form.asset_name,
         asset_type: form.asset_type || null,
-        cell_id: form.cell_id ? parseInt(form.cell_id, 10) : null,
-        connection_method: form.connection_method || 'Sparkplug B',
+        connection_method: form.connection_method || null,
         active_gateway_id: form.active_gateway_id || null,
       }
       if (editing) {
         await api.put(`/api/v1/devices/${editing.asset_id}`, payload)
       } else {
-        await api.post('/api/v1/devices', { asset_id: form.asset_id, ...payload })
+        // No asset_id: the devices table generates the UUID (gen_random_uuid()).
+        await api.post('/api/v1/devices', payload)
       }
       setShowForm(false); loadAll(); showToast('Device saved successfully', 'success')
     } catch (e) { showToast(e.message, 'error') }
@@ -125,13 +133,11 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
     try {
       await api.put(`/api/v1/devices/${asset.asset_id}`, {
         asset_name: asset.asset_name,
-        asset_type: asset.asset_type,
-        cell_id: asset.cell_id,
-        connection_method: asset.connection_method,
         active_gateway_id: newGwId || null
       })
-      loadAll()
-      showToast(`Device '${asset.asset_name}' gateway reassigned to '${newGwId || 'Unassigned'}'`, 'success')
+      await loadAll()
+      const gwName = gateways.find(g => g.gateway_id === newGwId)?.gateway_name || 'Unassigned'
+      showToast(`Device '${asset.asset_name}' gateway reassigned to '${gwName}'`, 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
 
@@ -146,10 +152,11 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
       if (error) {
         // error.message is always generic on a non-2xx; the real reason (e.g.
         // "Forbidden: Insufficient privileges") lives in the response body.
-        showToast(
-          await edgeFunctionErrorMessage(error, 'Quarantine approval denied or failed'),
-          'error'
-        )
+        const detail = await edgeFunctionErrorMessage(error, 'Quarantine approval denied or failed')
+        // Edge Functions validate the session with the auth server, so they are where a
+        // session that PostgREST still accepts first shows up as dead. Sign out rather
+        // than leaving the user half-authenticated.
+        showToast(await describeAuthFailure(detail, detail), 'error')
         return
       }
 
@@ -422,12 +429,17 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
             
             <div className="form-group">
               <label className="form-label">Device ID</label>
-              <input className="form-control" value={form.asset_id} disabled={!!editing} onChange={e => setForm(f => ({ ...f, asset_id: e.target.value }))} title="Unique device asset ID" placeholder="e.g. CNC_Machine_02" />
+              {/* Database-generated UUID, exactly like gateways. This used to be a text
+                  input whose value was discarded on save. */}
+              <input className="form-control" value={form.asset_id || '— assigned on save —'} disabled readOnly title="Database-generated UUID; not editable" />
             </div>
 
             <div className="form-group">
               <label className="form-label">Device Name</label>
-              <input className="form-control" value={form.asset_name} onChange={e => setForm(f => ({ ...f, asset_name: e.target.value }))} title="Descriptive device name" placeholder="e.g. 5-Axis CNC Milling Center" />
+              <input className="form-control" value={form.asset_name} onChange={e => setForm(f => ({ ...f, asset_name: e.target.value }))} title="Must match the Sparkplug B device id published in the MQTT topic" placeholder="e.g. Simulated_CNC_01" />
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                Must match the Sparkplug B device id (<span className="mono">spBv1.0/&lt;group&gt;/DDATA/&lt;edge node&gt;/&lt;device&gt;</span>) so birth parameters and telemetry are matched to this record.
+              </div>
             </div>
 
             <div className="form-group">
@@ -444,14 +456,19 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
 
             <div className="form-group">
               <label className="form-label">Shopfloor Cell Zone</label>
-              <select className="form-control" value={form.cell_id || ''} onChange={e => setForm(f => ({ ...f, cell_id: e.target.value }))} title="Select shopfloor cell zone assignment">
-                <option value="">— Unassigned Zone —</option>
-                {cells.map(c => (
-                  <option key={c.cell_id} value={c.cell_id}>
-                    {c.cell_name} (Zone #{c.cell_id})
-                  </option>
-                ))}
-              </select>
+              {/* Derived, not editable: a device's cell is the cell of its gateway.
+                  This used to be a select whose value PostgREST silently discarded,
+                  because devices have no cell_id column. */}
+              <input
+                className="form-control"
+                value={cellNameForGateway(form.active_gateway_id) || '— follows the assigned gateway —'}
+                disabled
+                readOnly
+                title="A device belongs to the cell its edge gateway is assigned to"
+              />
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                Set by the gateway above. To move this device to another cell, pick a gateway in that cell — or assign this gateway to a cell on the Gateways page.
+              </div>
             </div>
 
             <div className="form-group">

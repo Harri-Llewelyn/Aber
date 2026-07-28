@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
+import { gatewayLiveStatus, formatHeartbeat } from '../../utils/gatewayStatus'
 import { InlineDocumentAccordion } from '../common/InlineDocumentAccordion'
 import { StatusBadge } from '../common/StatusBadge'
 import { ArchiveModal } from '../modals/ArchiveModal'
@@ -25,11 +26,12 @@ import {
 export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onClearFilter, onBugReport }) {
   const [gateways, setGateways] = useState([])
   const [assets, setAssets]     = useState([])
+  const [cells, setCells]       = useState([])
   const [loading, setLoading]   = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing]   = useState(null)
   const [archiveTarget, setArchiveTarget] = useState(null)
-  const blank = { gateway_id: '', gateway_name: '', ip_address: '', status: 'OFFLINE', is_virtual: false, access_url: '' }
+  const blank = { gateway_id: '', gateway_name: '', ip_address: '', status: 'OFFLINE', is_virtual: false, access_url: '', cell_id: '' }
   const [form, setForm]         = useState(blank)
   const [threadFor, setThreadFor] = useState(null)
   const [docsForGw, setDocsForGw] = useState(null)
@@ -66,11 +68,15 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
 
   const load = useCallback(async (signal) => {
     try {
-      const [g, a] = await Promise.all([
+      // Each gateway arrives with its devices embedded (gateways?select=*,devices(...)),
+      // so an assignment made anywhere shows up on the next poll. The flat device list
+      // is still needed to surface devices that belong to no gateway at all.
+      const [g, a, c] = await Promise.all([
         api.get('/api/v1/gateways', { signal }),
-        api.get('/api/v1/devices', { signal })
+        api.get('/api/v1/devices', { signal }),
+        api.get('/api/v1/cells', { signal })
       ])
-      setGateways(g); setAssets(a)
+      setGateways(g); setAssets(a); setCells(c)
       setLoading(false)
     } catch (e) {
       if (e.name !== 'AbortError') {
@@ -106,6 +112,8 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
 
   const canManage = hasPermission(PERMISSION_UUIDS.GATEWAY_MANAGE)
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
+
+  const unassignedDevices = assets.filter(a => !a.is_archived && !a.active_gateway_id)
 
   const filteredGateways = gateways.filter(g => {
     if (filterMode === 'active'   && g.is_archived) return false
@@ -157,8 +165,17 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
         </div>
       </div>
       <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
-        Register and configure edge gateways, inspect network status, and manage edge node connections across the factory network.
+        Register and configure edge gateways, inspect heartbeat status, and manage edge node connections across the factory network.
+        A gateway's status follows the Sparkplug B node heartbeat: it is shown as <strong>STALE</strong> once no NBIRTH/NDATA has arrived for 90 seconds.
       </p>
+
+      {unassignedDevices.length > 0 && (
+        <div style={{ marginBottom: '20px', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px 16px', fontSize: '13px', color: 'var(--warning)' }}>
+          <strong>{unassignedDevices.length} device{unassignedDevices.length === 1 ? '' : 's'} not assigned to any gateway:</strong>{' '}
+          {unassignedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unassignedDevices.length > 5 ? ', …' : ''}.
+          Assign them from the Devices page.
+        </div>
+      )}
 
       <div className="card">
         {loading ? <div className="loading-wrap"><div className="spinner" /> Loading gateways…</div> :
@@ -175,16 +192,19 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
                    <th title="Unique gateway ID string">Gateway ID</th>
                    <th title="Human-readable gateway name">Gateway Name</th>
                    <th title="Network IP address">IP Address</th>
+                   <th title="Shopfloor cell zone this gateway serves">Cell Zone</th>
                    <th title="Network connectivity status">Gateway Status</th>
-                   <th title="Connected devices online/offline state">Connected Devices</th>
+                   <th title="Age of the last Sparkplug B node heartbeat (NBIRTH/NDATA/NDEATH)">Last Heartbeat</th>
+                   <th title="Devices assigned to this gateway">Connected Devices</th>
                    <th style={{ textAlign: 'right' }}>Actions</th>
                  </tr>
                </thead>
                <tbody>
                  {filteredGateways.map(g => {
-                   const gwAssets = assets.filter(a => a.active_gateway_id === g.gateway_id)
+                   const gwAssets = g.devices || []
                    const onlineCount = gwAssets.filter(a => a.status === 'ONLINE' || !a.status).length
                    const offlineCount = gwAssets.filter(a => a.status === 'OFFLINE').length
+                   const liveStatus = gatewayLiveStatus(g)
 
                    return (
                      <React.Fragment key={g.gateway_id}>
@@ -205,16 +225,45 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
                          </td>
                          <td><span className="mono" style={{ color: 'var(--text-muted)' }}>{g.ip_address || '—'}</span></td>
                          <td>
+                           {g.cell_id
+                             ? (cells.find(c => c.cell_id === g.cell_id)?.cell_name || <span className="mono">{g.cell_id}</span>)
+                             : <span style={{ fontSize: '11px', color: 'var(--warning)', fontStyle: 'italic' }} title="Devices on this gateway will not appear under any cell">Unassigned</span>}
+                         </td>
+                         <td>
                            {g.is_archived ? (
                              <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)' }}>DECOMMISSIONED</span>
                            ) : (
-                             <StatusBadge status={g.status} />
+                             <StatusBadge status={liveStatus} />
                            )}
                          </td>
+                         <td
+                           style={{ fontSize: '11px', color: liveStatus === 'STALE' ? 'var(--warning)' : 'var(--text-muted)' }}
+                           title={g.last_heartbeat ? new Date(g.last_heartbeat).toLocaleString() : 'No Sparkplug B node message has ever been received from this edge node'}
+                         >
+                           {formatHeartbeat(g.last_heartbeat)}
+                         </td>
                          <td>
-                           <span className="badge badge-neutral" title="Connected devices breakdown">
-                             {g.is_archived ? 'Archived (Inaccessible)' : `${onlineCount} Online / ${offlineCount} Offline`}
-                           </span>
+                           {g.is_archived ? (
+                             <span className="badge badge-neutral">Archived (Inaccessible)</span>
+                           ) : gwAssets.length === 0 ? (
+                             <span style={{ fontSize: '11px', color: 'var(--text-dim)', fontStyle: 'italic' }}>No devices assigned</span>
+                           ) : (
+                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
+                               <span className="badge badge-neutral" title="Connected devices breakdown">
+                                 {onlineCount} Online / {offlineCount} Offline
+                               </span>
+                               {gwAssets.map(a => (
+                                 <span
+                                   key={a.asset_id}
+                                   className={`badge ${a.status === 'OFFLINE' ? 'badge-neutral' : 'badge-online'}`}
+                                   style={{ fontSize: '10px' }}
+                                   title={`${a.asset_name} — ${a.is_quarantined ? 'QUARANTINED' : a.status || 'ONLINE'}`}
+                                 >
+                                   {a.asset_name}{a.is_quarantined ? ' (quarantined)' : ''}
+                                 </span>
+                               ))}
+                             </div>
+                           )}
                          </td>
                          <td>
                            <div className="btn-group" style={{ justifyContent: 'flex-end' }}>
@@ -261,7 +310,7 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
                        </tr>
                        {expandedGwDocs[g.gateway_id] && (
                          <tr key={`docs-${g.gateway_id}`} style={{ background: 'rgba(0,0,0,0.2)' }}>
-                           <td colSpan={6} style={{ padding: '8px 16px' }}>
+                           <td colSpan={8} style={{ padding: '8px 16px' }}>
                              <InlineDocumentAccordion
                                entityType="gateway"
                                entityId={g.gateway_id}
@@ -288,11 +337,26 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
             <div className="modal-title">{editing ? 'Edit Gateway' : 'Register Gateway'}</div>
             <div className="form-group">
               <label className="form-label">Gateway ID</label>
-              <input className="form-control" value={form.gateway_id} disabled={!!editing} onChange={e => setForm(f => ({ ...f, gateway_id: e.target.value }))} title="Unique gateway ID" />
+              <input className="form-control" value={form.gateway_id || '— assigned on save —'} disabled readOnly title="Database-generated UUID; not editable" />
             </div>
             <div className="form-group">
               <label className="form-label">Gateway Name</label>
-              <input className="form-control" value={form.gateway_name} onChange={e => setForm(f => ({ ...f, gateway_name: e.target.value }))} title="Descriptive gateway name" />
+              <input className="form-control" value={form.gateway_name} onChange={e => setForm(f => ({ ...f, gateway_name: e.target.value }))} title="Must match the Sparkplug B edge node id in the MQTT topic for heartbeats to be matched" placeholder="e.g. Virtual_Gateway_NodeRED" />
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                Must match the Sparkplug B edge node id (<span className="mono">spBv1.0/&lt;group&gt;/NDATA/&lt;edge node&gt;</span>) for heartbeats to update this gateway.
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Shopfloor Cell Zone</label>
+              <select className="form-control" value={form.cell_id || ''} onChange={e => setForm(f => ({ ...f, cell_id: e.target.value }))} title="Cell this gateway serves — devices inherit their cell from their gateway">
+                <option value="">— Unassigned Zone —</option>
+                {cells.filter(c => !c.is_archived).map(c => (
+                  <option key={c.cell_id} value={c.cell_id}>{c.cell_name}</option>
+                ))}
+              </select>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                Devices served by this gateway appear under this cell on the Cells and Overview pages.
+              </div>
             </div>
             <div className="form-group">
               <label className="form-label">IP Address</label>

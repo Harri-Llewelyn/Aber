@@ -68,6 +68,14 @@ services:
     image: supabase/postgres:15.6.1.143
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      # TimescaleDB connection settings, handed to the migrations as psql variables so
+      # 20260101000010_telemetry_foreign_table.sql can build its postgres_fdw link
+      # without hardcoding credentials. Host/port are the compose-internal ones.
+      TS_HOST: timescaledb
+      TS_PORT: "5432"
+      TS_DBNAME: ${DB_NAME:-postgres}
+      TS_USER: ${DB_USER:-postgres}
+      TS_PASSWORD: ${DB_PASSWORD:-postgres}
     volumes:
       - ./supabase/migrations:/migrations:ro
       - ./supabase/seed.sql:/seed.sql:ro
@@ -79,7 +87,7 @@ services:
       for f in /migrations/*.sql; do
         if [ -f \"$$f\" ]; then
           echo \"Executing migration $$f...\";
-          psql -v ON_ERROR_STOP=1 -h supabase-db -U postgres -d postgres -f \"$$f\";
+          psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -h supabase-db -U postgres -d postgres -f \"$$f\";
         fi
       done;
       if [ -f /seed.sql ]; then
@@ -272,6 +280,27 @@ services:
       supabase-meta:
         condition: service_started
 
+  # Interactive API reference for the platform's HTTP surface (Kong -> Auth /
+  # PostgREST / Edge Functions). Serves the curated spec in docs/openapi.yaml
+  # alongside the live spec PostgREST generates from the database schema.
+  swagger-ui:
+    container_name: factoryplus_swagger_ui
+    image: swaggerapi/swagger-ui:v5.17.14
+    restart: always
+    ports:
+      - "${SWAGGER_PORT:-8088}:8080"
+    environment:
+      # The curated spec is mounted; the PostgREST entry is fetched by the browser from
+      # Kong, so it needs the CORS origin allowed in supabase/kong.yml.
+      URLS: >-
+        [{"url":"/openapi.yaml","name":"Factory+ Platform API"},
+         {"url":"${SUPABASE_URL:-http://127.0.0.1:54321}/rest/v1/","name":"PostgREST (live database schema)"}]
+      URLS_PRIMARY_NAME: Factory+ Platform API
+      DEEP_LINKING: "true"
+      DISPLAY_REQUEST_DURATION: "true"
+    volumes:
+      - ./docs/openapi.yaml:/usr/share/nginx/html/openapi.yaml:ro
+
   # ---------------------------------------------------------------------------
   # Messaging & Edge Infrastructure
   # ---------------------------------------------------------------------------
@@ -390,6 +419,11 @@ services:
         condition: service_completed_successfully
       mosquitto:
         condition: service_healthy
+      # Start the simulator after the consumer so the first DBIRTH is less likely to be
+      # published into an empty subscription. The flow also rebirths every 60s, which is
+      # what actually guarantees the birth certificate is eventually seen.
+      ingestion:
+        condition: service_started
 
   grafana:
     container_name: factoryplus_grafana

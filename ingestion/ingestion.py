@@ -74,6 +74,14 @@ def get_timescaledb_connection():
 _quarantine_cache = {}
 CACHE_TTL_SECONDS = 5
 
+# Sparkplug B node-level (edge gateway) message types, as opposed to the device-level
+# DBIRTH/DDATA/DDEATH. Their topics carry no device component.
+NODE_MESSAGE_TYPES = ("NBIRTH", "NDATA", "NDEATH")
+
+# Throttle for "unregistered edge node" warnings, keyed by edge node id.
+_unknown_gateway_warned = {}
+UNKNOWN_GATEWAY_WARN_INTERVAL_SECONDS = 300
+
 def is_device_quarantined(asset_id: str) -> bool:
     """
     Checks if a device is quarantined or unregistered in Supabase.
@@ -108,16 +116,78 @@ def is_device_quarantined(asset_id: str) -> bool:
 # -----------------------------------------------------------------------------
 # Sparkplug B Ingestion Handlers
 # -----------------------------------------------------------------------------
+def store_birth_parameters(asset_id: str, payload):
+    """
+    Persist the metrics carried by a DBIRTH birth certificate to `asset_config`, so the
+    dashboard's device Config view can show the parameters the device announced
+    (firmware version, serial number, thresholds, interlocks...).
+
+    These are configuration parameters, not telemetry: they are stored for quarantined
+    devices too, precisely so an administrator can inspect what a newly discovered
+    device claims about itself *before* approving it. DDATA telemetry stays gated.
+    """
+    if not supabase_client:
+        return
+
+    rows = []
+    for metric in payload.metrics:
+        if not metric.name or metric.name == 'Asset_ID':
+            continue
+
+        row = {
+            "asset_id": asset_id,
+            "metric_name": metric.name,
+            "val_double": None,
+            "val_string": None,
+            "val_bool": None,
+            "datatype": metric.datatype if metric.HasField("datatype") else None,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+
+        if metric.HasField("int_value"):
+            row["val_double"] = float(metric.int_value)
+        elif metric.HasField("long_value"):
+            row["val_double"] = float(metric.long_value)
+        elif metric.HasField("float_value"):
+            row["val_double"] = float(metric.float_value)
+        elif metric.HasField("double_value"):
+            row["val_double"] = metric.double_value
+        elif metric.HasField("boolean_value"):
+            row["val_bool"] = metric.boolean_value
+        elif metric.HasField("string_value"):
+            row["val_string"] = metric.string_value
+        else:
+            continue
+
+        rows.append(row)
+
+    if not rows:
+        return
+
+    try:
+        # uq_asset_config_metric (asset_id, metric_name) makes this a per-metric upsert,
+        # so a re-birth refreshes values instead of accumulating duplicates.
+        supabase_client.table("asset_config").upsert(
+            rows, on_conflict="asset_id,metric_name"
+        ).execute()
+        logger.info("DBIRTH: Stored %d birth parameters for device '%s'", len(rows), asset_id)
+    except Exception as e:
+        logger.error("Error storing DBIRTH parameters for '%s': %s", asset_id, e, exc_info=True)
+
+
 def process_dbirth(asset_id: str, gateway_id: str, payload):
     """
     On Sparkplug B DBIRTH:
     Check if device exists in Supabase `devices` table.
     If missing, insert a new record with is_quarantined = True and trigger quarantine alert log.
+    Birth certificate metrics are recorded to `asset_config` either way.
     """
     logger.info("Processing DBIRTH for device '%s' via gateway '%s'", asset_id, gateway_id)
     if not supabase_client:
         logger.warning("Supabase client unavailable. Skipping Supabase DBIRTH check for '%s'", asset_id)
         return
+
+    store_birth_parameters(asset_id, payload)
 
     try:
         res = supabase_client.table("devices").select("*").eq("name", asset_id).execute()
@@ -146,6 +216,76 @@ def process_dbirth(asset_id: str, gateway_id: str, payload):
                 logger.info("DBIRTH: Verified registered device '%s' in Supabase", asset_id)
     except Exception as e:
         logger.error("Error checking/updating Supabase devices for DBIRTH: %s", e, exc_info=True)
+
+
+def process_ddeath(asset_id: str, gateway_id: str):
+    """
+    On Sparkplug B DDEATH: mark the registered device OFFLINE in Supabase so the
+    dashboard's "OFFLINE / DDEATH" state reflects the actual death certificate.
+    """
+    logger.info("Processing DDEATH for device '%s' via gateway '%s'", asset_id, gateway_id)
+    if not supabase_client:
+        logger.warning("Supabase client unavailable. Skipping DDEATH status update for '%s'", asset_id)
+        return
+
+    try:
+        res = supabase_client.table("devices").update({"status": "OFFLINE"}).eq("name", asset_id).execute()
+        if not res.data:
+            logger.warning("DDEATH received for unregistered device '%s'; nothing to update", asset_id)
+    except Exception as e:
+        logger.error("Error applying DDEATH status update for '%s': %s", asset_id, e, exc_info=True)
+
+
+def process_node_message(edge_node_id: str, msg_type: str, payload):
+    """
+    On Sparkplug B node-level messages (NBIRTH / NDATA / NDEATH):
+    Update the matching `gateways` row's status and last_heartbeat in Supabase.
+
+    NBIRTH/NDATA mark the edge node ONLINE; NDEATH marks it OFFLINE. A `Gateway_Status`
+    string metric in the payload (what node_red_flow.json publishes) overrides the
+    status derived from the message type.
+
+    Gateways are never auto-created: an unregistered edge node is logged and dropped,
+    mirroring the fail-closed treatment of unregistered devices.
+    """
+    if not supabase_client:
+        logger.warning("Supabase client unavailable. Dropping %s heartbeat for edge node '%s'", msg_type, edge_node_id)
+        return
+
+    status = "OFFLINE" if msg_type == "NDEATH" else "ONLINE"
+    for metric in payload.metrics:
+        if metric.name in ("Gateway_Status", "Node_Status") and metric.HasField("string_value"):
+            status = metric.string_value
+            break
+
+    # Receipt time, not the payload timestamp: staleness is judged against this server's
+    # clock, and edge node clocks drift (or, for a replayed payload, are plain wrong).
+    heartbeat_dt = datetime.now(timezone.utc)
+
+    try:
+        res = supabase_client.table("gateways").update({
+            "status": status,
+            "last_heartbeat": heartbeat_dt.isoformat()
+        }).eq("name", edge_node_id).execute()
+
+        if res.data:
+            logger.info(
+                "HEARTBEAT: %s from edge node '%s' -> status=%s at %s",
+                msg_type, edge_node_id, status, heartbeat_dt.isoformat()
+            )
+        else:
+            # Rate-limited: an unregistered node beats every 30s and would otherwise
+            # fill the log with the same line forever.
+            now = time.time()
+            last_warned = _unknown_gateway_warned.get(edge_node_id, 0)
+            if now - last_warned > UNKNOWN_GATEWAY_WARN_INTERVAL_SECONDS:
+                _unknown_gateway_warned[edge_node_id] = now
+                logger.warning(
+                    "Received %s from unregistered edge node '%s'. Register a gateway with this "
+                    "exact name to track its heartbeat.", msg_type, edge_node_id
+                )
+    except Exception as e:
+        logger.error("Error updating gateway heartbeat for '%s': %s", edge_node_id, e, exc_info=True)
 
 
 def process_ddata(asset_id: str, gateway_id: str, payload):
@@ -232,20 +372,15 @@ def on_connect(client, userdata, flags, rc):
         logger.error("Failed to connect to MQTT Broker, return code %s", rc)
 
 
-def on_message(client, userdata, msg):
-    parts = msg.topic.split('/')
-    if len(parts) < 4 or parts[0] != 'spBv1.0':
-        return
-
-    msg_type = parts[2]
-    gateway_id = parts[3]
-
-    if not msg.payload:
-        return
-
+def parse_sparkplug_payload(msg):
+    """
+    Decode a Sparkplug B payload, falling back to the JSON encoding used by the
+    Node-RED simulator flow. Returns None if the payload cannot be decoded.
+    """
     payload = sparkplug_b_pb2.Payload()
     try:
         payload.ParseFromString(msg.payload)
+        return payload
     except Exception as pb_err:
         try:
             import json
@@ -268,9 +403,32 @@ def on_message(client, userdata, msg):
                     metric.int_value = int(m['int_value'])
                 if 'datatype' in m and m['datatype'] is not None:
                     metric.datatype = int(m['datatype'])
-        except Exception as json_err:
+            return payload
+        except Exception:
             logger.warning("Failed to decode Sparkplug B payload on topic %s: %s", msg.topic, pb_err)
-            return
+            return None
+
+
+def on_message(client, userdata, msg):
+    parts = msg.topic.split('/')
+    if len(parts) < 4 or parts[0] != 'spBv1.0':
+        return
+
+    msg_type = parts[2]
+    gateway_id = parts[3]
+
+    if not msg.payload:
+        return
+
+    payload = parse_sparkplug_payload(msg)
+    if payload is None:
+        return
+
+    # Node-level topics (spBv1.0/<group>/<NBIRTH|NDATA|NDEATH>/<edge_node>) carry no
+    # device component and no Asset_ID metric -- they are edge gateway heartbeats.
+    if msg_type in NODE_MESSAGE_TYPES and len(parts) < 5:
+        process_node_message(gateway_id, msg_type, payload)
+        return
 
     asset_id = None
     for metric in payload.metrics:
@@ -293,6 +451,8 @@ def on_message(client, userdata, msg):
         process_dbirth(asset_id, gateway_id, payload)
     elif msg_type == "DDATA":
         process_ddata(asset_id, gateway_id, payload)
+    elif msg_type == "DDEATH":
+        process_ddeath(asset_id, gateway_id)
     else:
         logger.info("Received %s message for asset '%s' via gateway '%s'", msg_type, asset_id, gateway_id)
 

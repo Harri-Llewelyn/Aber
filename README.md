@@ -103,6 +103,7 @@ Running `docker compose up -d` launches the entire unified application stack:
 | **`node-red-init`** | `factoryplus_node_red_init` | `nodered/node-red:latest` | — | One-shot init container configuring Node-RED flows & credentials |
 | **`node-red`** | `factoryplus_node_red` | `nodered/node-red:latest` | `1880:1880` | Edge flow automation runtime |
 | **`grafana`** | `factoryplus_grafana` | `grafana/grafana:latest` | `3002:3000` | Analytics dashboards connected to TimescaleDB |
+| **`swagger-ui`** | `factoryplus_swagger_ui` | `swaggerapi/swagger-ui:v5.17.14` | `8088:8080` | Interactive API reference (`http://localhost:8088`) |
 
 ---
 
@@ -146,6 +147,23 @@ All database migrations are stored in `supabase/migrations/`:
   - **JWT Claim Sync**: Adds `public.custom_access_token_hook()` so `app_metadata.role` is refreshed from the database on every token issue/refresh.
 - **`20260101000008_handle_new_user.sql`**:
   - **Default Role for Self-Registration**: `AFTER INSERT` trigger on `auth.users` granting new sign-ups the read-only `Operator` role (both a `user_roles` row and `raw_app_meta_data.role`). Seeded personas are left untouched.
+- **`20260101000009_gateway_heartbeat_and_service_directory.sql`**:
+  - **Gateway Heartbeats**: Adds `gateways.last_heartbeat` (plus `ip_address` and `is_virtual`), written by the ingestion daemon on every Sparkplug B node-level message.
+  - **DBIRTH Parameters**: `asset_config` is populated by the ingestion daemon on every `DBIRTH`, upserted per `(asset_id, metric_name)` and keyed by the Sparkplug B device name. This is what the Devices page's **Config** button displays — firmware version, serial number, thresholds and interlocks announced in the birth certificate. Recorded for quarantined devices too, so an administrator can inspect what a newly discovered device claims before approving it (DDATA telemetry stays gated).
+  - **Device Classification**: Adds `devices.asset_type` and `devices.connection_method`, which the device form has always collected but had nowhere to store.
+  - **Edge Node Registration**: Registers the `Virtual_Gateway_NodeRED` edge node published by `node_red_flow.json`, so heartbeats have a matching gateway row on a fresh stack.
+  - **Service Directory**: Completes `directory_services` with every stack service — Supabase Studio, Kong, Auth, PostgREST, Edge Functions, Supabase PostgreSQL, TimescaleDB, and the ingestion engine.
+- **`20260101000010_telemetry_foreign_table.sql`**:
+  - **Telemetry over PostgREST**: Creates a `postgres_fdw` link to the standalone TimescaleDB and exposes the hypertable as the read-only `public.telemetry` view, granted to `authenticated` only (`anon` gets `401`). This is how the dashboard reads real time-series data — TimescaleDB itself is not reachable from the browser.
+  - Connection settings arrive as `psql -v` variables from `supabase-db-init`; the defaults match `docker-compose.yml`, so the file is still runnable standalone.
+
+### Asset Relationship Model
+
+`cells → gateways → devices` is a strict chain. **Devices have no `cell_id`**: a device belongs to
+the cell that its edge gateway is assigned to. The dashboard reads this with nested PostgREST
+embeds (`cells?select=*,gateways(...,devices(...))`), and the Gateways page is where a gateway is
+attached to a cell. A gateway with no cell — or a device with no gateway — is flagged in the UI
+rather than silently disappearing from the Cells and Overview pages.
 
 > [!NOTE]
 > All migrations are idempotent and are re-applied by `supabase-db-init` on every stack start. `supabase-db-init` runs with `set -e` and `psql -v ON_ERROR_STOP=1`, so a failing migration aborts startup loudly instead of being silently skipped.
@@ -175,6 +193,46 @@ each function as an isolated user worker via `EdgeRuntime.userWorkers.create()`.
   - **GitOps contract**: the repository is the source of truth. A request body of `{ "commit_message": "..." }` (what the Directory tab sends) deploys the canonical `node_red_flow.json` committed to this repo. Passing a Node-RED flow **array** instead deploys that payload verbatim.
   - The flow reaches the function via the `NODERED_FLOW_JSON` environment variable, populated from `node_red_flow.json` by the `supabase-functions` entrypoint. An edge-runtime **user worker has no filesystem access to the mounted volumes**, and module-relative paths resolve into an ephemeral compile directory rather than the mount — so the flow is passed through the environment, which `main/index.ts` forwards to every worker it spawns.
   - `NODERED_ADMIN_TOKEN` is optional: an `Authorization` header is sent only when it is set, so deployment works against a Node-RED instance without `adminAuth`.
+
+---
+
+## API Reference (Swagger UI)
+
+The platform's HTTP surface is documented as OpenAPI 3 in [`docs/openapi.yaml`](docs/openapi.yaml)
+and served interactively by the `swagger-ui` container at **`http://localhost:8088`**.
+
+Two specs are available from the dropdown:
+
+| Spec | Source | Use it for |
+| :--- | :--- | :--- |
+| **Factory+ Platform API** | `docs/openapi.yaml` (curated) | Hand-written reference with worked examples, the asset relationship model, RLS behaviour, and the Edge Functions. |
+| **PostgREST (live database schema)** | Generated by PostgREST at runtime | The exhaustive, always-current list of every table, column and filter operator. |
+
+Everything routes through Kong on `http://127.0.0.1:54321`:
+
+| Prefix | Upstream | Purpose |
+| :--- | :--- | :--- |
+| `/auth/v1/` | Supabase Auth (GoTrue) | Sign in, sign up, session refresh |
+| `/rest/v1/` | PostgREST | Asset metadata, telemetry, audit log |
+| `/functions/v1/` | Supabase Edge Runtime | `approve-quarantine`, `deploy-nodered` |
+
+### Trying a request
+
+Every request needs **both** an `apikey` header (the anon key from `.env`) and an
+`Authorization: Bearer <token>` header. Get a token first:
+
+```bash
+curl -X POST "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
+  -H "apikey: $SUPABASE_ANON_KEY" -H "Content-Type: application/json" \
+  -d '{"email":"admin@factoryplus.local","password":"factoryplus123"}'
+```
+
+Paste the `access_token` into Swagger UI's **Authorize** dialog and "Try it out" works against
+the running stack — `supabase/kong.yml` allows the Swagger UI origin through CORS.
+
+> [!NOTE]
+> Changing `SWAGGER_PORT` in `.env` also requires adding the new origin to the `cors` plugin
+> in [`supabase/kong.yml`](supabase/kong.yml), otherwise in-browser requests are blocked.
 
 ---
 
@@ -222,20 +280,32 @@ lost. Each entry names the offending code so it can be picked up directly.
 
 | # | Issue | Location | Impact |
 | :-- | :--- | :--- | :--- |
-| 1 | **Real-time subscriptions never fire.** The dashboard subscribes to `postgres_changes`, but no `realtime` service is deployed and `kong.yml` has no `/realtime/v1/` route. | [`frontend/src/App.jsx:175`](frontend/src/App.jsx#L175) | The UI silently falls back to `usePolling`; live DB changes do not push. |
-| 2 | **GitOps status is hardcoded stub data.** `gitops_status`, `active_commit_sha` and `repository_url` are literals, not real values. | [`frontend/src/api.js:168-174`](frontend/src/api.js#L168) | The Directory tab banner always shows `SYNCED` / commit `a8f3e4b` regardless of actual state. |
-| 3 | **Permission UUIDs are never read from the database.** The PostgREST embed `role_permissions(...)` has no foreign-key path from `user_roles` (both relate to `roles`, not to each other), so the query errors and the hook silently falls back to the hardcoded `DEFAULT_ROLE_PERMISSIONS_MAP`. | [`frontend/src/hooks/usePermissions.js:48`](frontend/src/hooks/usePermissions.js#L48) | Editing `role_permissions` in the DB has no effect on the UI. RBAC still works, but only via the hardcoded map. |
-| 4 | **Node-RED editor changes are discarded on restart.** `node-red-init` copies `node_red_flow.json` over `/data/flows.json` on every `docker compose up`. | [`docker-compose.yml`](docker-compose.yml) (`node-red-init`) | Flows edited at `localhost:1880` are lost on the next stack restart. Edit `node_red_flow.json` in the repo instead — it is the source of truth (see `deploy-nodered`). |
+| 1 | **Real-time subscriptions are disabled.** No `realtime` service is deployed and `kong.yml` has no `/realtime/v1/` route, so `postgres_changes` can never fire. The subscription is now behind `VITE_ENABLE_REALTIME` (default off) rather than opening a WebSocket that fails and retries forever. | [`frontend/src/App.jsx`](frontend/src/App.jsx) | Every tab refreshes on a 3s `usePolling` cycle. Set `VITE_ENABLE_REALTIME=true` once a realtime service is actually deployed. |
+| 2 | **GitOps status is hardcoded stub data.** `gitops_status`, `active_commit_sha` and `repository_url` are literals, not real values. | [`frontend/src/api.js`](frontend/src/api.js) | The Directory tab banner always shows `SYNCED` / commit `a8f3e4b` regardless of actual state. |
+| 3 | **Node-RED editor changes are discarded on restart.** `node-red-init` copies `node_red_flow.json` over `/data/flows.json` on every `docker compose up`. | [`docker-compose.yml`](docker-compose.yml) (`node-red-init`) | Flows edited at `localhost:1880` are lost on the next stack restart. Edit `node_red_flow.json` in the repo instead — it is the source of truth (see `deploy-nodered`). |
+| 4 | **`LIMIT` is not pushed down to TimescaleDB.** `postgres_fdw` pushes `WHERE` clauses to the remote but never `LIMIT`, so a telemetry query without a time filter materialises the whole matching range in Supabase before trimming. | [`supabase/migrations/20260101000010_telemetry_foreign_table.sql`](supabase/migrations/20260101000010_telemetry_foreign_table.sql) | Fine at demo volumes. At scale, narrow the time window or replace the view with a `dblink`-based RPC that builds the remote `LIMIT`. |
+| 5 | **Device `asset_type` / `connection_method` are free text.** They are stored but not validated against the schema registry. | [`supabase/migrations/20260101000009_gateway_heartbeat_and_service_directory.sql`](supabase/migrations/20260101000009_gateway_heartbeat_and_service_directory.sql) | Cosmetic; no feature depends on their values. |
 
 ### Security / hardening
 
 | # | Issue | Location | Impact |
 | :-- | :--- | :--- | :--- |
-| 5 | **Kong does not validate the `apikey` header.** There is no `key-auth` plugin and no consumers, unlike the stock Supabase gateway config. | [`supabase/kong.yml`](supabase/kong.yml) | Authorisation is enforced only downstream by PostgREST JWT verification and RLS. Acceptable for local dev; **must be addressed before any non-local deployment.** |
-| 6 | **`.env.example` contains working development secrets** (`SUPABASE_JWT_SECRET`, the demo anon/service-role JWTs, `MQTT_PASSWORD`) and is committed to the repository. | [`.env.example`](.env.example) | These are the standard Supabase demo values and are safe for local use only. **Generate fresh secrets for any shared or hosted environment.** |
-| 7 | **Node-RED admin API is unauthenticated.** The generated `settings.js` sets only `credentialSecret`; no `adminAuth` is configured, so `http://localhost:1880` and its `/flows` API are open. | `scripts/node-red-init.mjs` | Anyone with network access to port 1880 can read or replace edge flows. `deploy-nodered` sends an `Authorization` header only when `NODERED_ADMIN_TOKEN` is set, so enabling `adminAuth` is a config-only change. |
+| 6 | **Kong does not validate the `apikey` header.** There is no `key-auth` plugin and no consumers, unlike the stock Supabase gateway config. | [`supabase/kong.yml`](supabase/kong.yml) | Authorisation is enforced only downstream by PostgREST JWT verification and RLS. Acceptable for local dev; **must be addressed before any non-local deployment.** |
+| 7 | **`.env.example` contains working development secrets** (`SUPABASE_JWT_SECRET`, the demo anon/service-role JWTs, `MQTT_PASSWORD`) and is committed to the repository. | [`.env.example`](.env.example) | These are the standard Supabase demo values and are safe for local use only. **Generate fresh secrets for any shared or hosted environment.** |
+| 8 | **Node-RED admin API is unauthenticated.** The generated `settings.js` sets only `credentialSecret`; no `adminAuth` is configured, so `http://localhost:1880` and its `/flows` API are open. | `scripts/node-red-init.mjs` | Anyone with network access to port 1880 can read or replace edge flows. `deploy-nodered` sends an `Authorization` header only when `NODERED_ADMIN_TOKEN` is set, so enabling `adminAuth` is a config-only change. |
 
 ### Expected behaviour (not defects)
+
+- **`docker compose down -v` invalidates every logged-in browser.** The `-v` flag drops
+  `supabase_db_data`, and with it `auth.sessions`. A browser still holding a token keeps
+  reading data — PostgREST verifies only the JWT signature — but Edge Functions validate
+  the session with GoTrue and answer `401 Invalid user token: Session from session_id
+  claim in JWT does not exist`. The dashboard now detects this on load (it validates the
+  restored session with `auth.getUser()`), clears the stale tokens and returns to the
+  login screen with an explanatory notice. Just sign in again.
+- **Swagger UI's "Example Value" is documentation, not data.** The samples rendered from
+  `docs/openapi.yaml` (`Assembly Line 1`, `Simulated_CNC_01`, ...) appear whether or not
+  those records exist. Press **Execute** and read the **Response body** panel for real data.
 
 - **Supabase Studio's Storage page reports an error.** Storage is deliberately not deployed — see
   [Design Decision: Supabase Storage is Deliberately Not Deployed](#design-decision-supabase-storage-is-deliberately-not-deployed).
@@ -265,6 +335,7 @@ lost. Each entry names the offending code so it can be picked up directly.
 3. **Access Web Interfaces**:
    - **React Dashboard**: `http://localhost:3000`
    - **Supabase Studio**: `http://127.0.0.1:54323`
+   - **API Reference (Swagger UI)**: `http://localhost:8088`
    - **Node-RED Console**: `http://localhost:1880`
    - **Grafana Dashboards**: `http://localhost:3002`
 

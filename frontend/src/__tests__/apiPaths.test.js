@@ -9,8 +9,13 @@ vi.mock('../lib/supabaseClient', () => {
     update: vi.fn().mockReturnThis(),
     delete: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
+    gte: vi.fn().mockReturnThis(),
     or: vi.fn().mockReturnThis(),
-    order: vi.fn().mockResolvedValue({ data: [], error: null }),
+    limit: vi.fn().mockReturnThis(),
+    // The telemetry queries end in .order(...).range(...), so order() has to keep
+    // returning the builder as well as being awaitable on its own.
+    order: vi.fn().mockReturnThis(),
+    range: vi.fn().mockResolvedValue({ data: [], error: null }),
     then: vi.fn((resolve) => resolve({ data: [], error: null }))
   };
 
@@ -42,7 +47,8 @@ describe('API Path Coverage Test', () => {
     '/api/v1/directory',
     '/api/v1/gitops/status',
     '/api/v1/stats',
-    '/api/v1/telemetry?limit=500'
+    '/api/v1/telemetry?limit=500',
+    '/api/v1/telemetry/latest?minutes=60'
   ];
 
   const postPaths = [

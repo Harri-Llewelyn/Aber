@@ -17,9 +17,8 @@ const DEFAULT_ROLE_PERMISSIONS_MAP = {
 /**
  * Custom hook to fetch user role & permissions from Supabase DB tables & Auth session
  * @param {Object} session - Supabase auth session object
- * @param {Function} showToast - Toast notification function
  */
-export function usePermissions(session, showToast) {
+export function usePermissions(session) {
   const [userRole, setUserRole] = useState(null);
   const [userPerms, setUserPerms] = useState([]);
   const [loadingPerms, setLoadingPerms] = useState(!!session?.user);
@@ -43,34 +42,44 @@ export function usePermissions(session, showToast) {
       let permUuids = [];
 
       try {
+        // role_permissions hangs off `roles`, not off `user_roles` -- both reference
+        // roles, but there is no FK between them. Embedding it directly under
+        // user_roles made PostgREST reject the whole query (PGRST200), so the DB
+        // permissions were never read and the static map below always won.
         const { data, error } = await supabase
           .from('user_roles')
-          .select('role_id, roles(name), role_permissions(permission_id, permissions(id, name))')
+          .select('role_id, roles(name, role_permissions(permission_id, permissions(id, name)))')
           .eq('user_id', session.user.id);
 
-        if (!error && data && data.length > 0) {
+        if (error) {
+          console.warn(
+            '[usePermissions] user_roles query failed (%s %s): %s',
+            error.code || 'no-code', error.hint || '', error.message
+          );
+        } else if (data && data.length > 0) {
           const userRoleRecord = data[0];
           if (userRoleRecord.roles?.name) {
             resolvedRole = userRoleRecord.roles.name;
           }
-          if (Array.isArray(userRoleRecord.role_permissions)) {
-            permUuids = userRoleRecord.role_permissions
+          const rolePermissions = userRoleRecord.roles?.role_permissions;
+          if (Array.isArray(rolePermissions)) {
+            permUuids = rolePermissions
               .map(rp => rp.permission_id || rp.permissions?.id)
               .filter(Boolean);
           }
-        } else if (error) {
-          console.warn('[usePermissions] DB user_roles query error:', error.message);
         }
       } catch (err) {
-        console.warn('[usePermissions] DB user_roles query exception:', err.message);
+        console.warn('[usePermissions] user_roles query exception:', err.message);
       }
 
-      // Fallback: If DB permissions query returned no rows but appRole is known
+      // Fallback for a user whose role is known from the JWT but has no rows in
+      // role_permissions. Logged, not toasted: it is not actionable by the operator,
+      // and the toast fired on every token refresh.
       if (permUuids.length === 0 && appRole && DEFAULT_ROLE_PERMISSIONS_MAP[appRole]) {
-        console.warn(`[usePermissions] DB user_roles query returned zero rows for user ${session.user.id}; static permission fallback in use for role '${appRole}'.`);
-        if (typeof showToast === 'function') {
-          showToast('warning', `DB user_roles query empty; static permission fallback in use for role '${appRole}'`);
-        }
+        console.warn(
+          `[usePermissions] No role_permissions rows resolved for user ${session.user.id}; ` +
+          `falling back to the built-in permission map for role '${appRole}'.`
+        );
         permUuids = DEFAULT_ROLE_PERMISSIONS_MAP[appRole];
       }
 
@@ -86,7 +95,10 @@ export function usePermissions(session, showToast) {
     return () => {
       isMounted = false;
     };
-  }, [session]);
+    // Keyed on identity rather than the session object: supabase-js hands back a new
+    // session on every token refresh and tab focus, which re-ran this query (and, when
+    // it toasted, popped a notification) every hour for no change in permissions.
+  }, [session?.user?.id, session?.user?.app_metadata?.role]);
 
   const hasPermission = useCallback((uuid) => {
     if (loadingPerms || !uuid) return false;

@@ -2,6 +2,7 @@ import React, { useState, useCallback, useMemo } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
+import { gatewayLiveStatus, isGatewayOnline, formatHeartbeat } from '../../utils/gatewayStatus'
 import {
   IconMap,
   IconFactory,
@@ -28,7 +29,9 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPer
         api.get('/api/v1/cells', { signal }),
         api.get('/api/v1/gateways', { signal }),
         api.get('/api/v1/devices', { signal }),
-        api.get('/api/v1/telemetry?limit=500', { signal }),
+        // The map only needs the current value of each metric, not history -- and this
+        // runs on a 3s poll, so it must stay bounded.
+        api.get('/api/v1/telemetry/latest?minutes=60', { signal }).catch(() => []),
         api.get('/api/v1/stats', { signal }).catch(() => ({ quarantine_pending: 0, documents_attached: 0 })),
       ])
       setStats({ cells: c.length, gateways: g.length, assets: a.length, telemetry: t.length, quarantine: s.quarantine_pending, docs: s.documents_attached })
@@ -63,22 +66,38 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPer
       const assetData = JSON.parse(e.dataTransfer.getData('application/json'))
       if (assetData.cell_id === targetCellId) return
 
+      // Devices have no cell_id column -- a device joins a cell by being served by one
+      // of that cell's gateways. Writing cell_id here used to be silently discarded by
+      // PostgREST, so the drop reported success and changed nothing.
+      const targetGateways = gwList.filter(g => g.cell_id === targetCellId && !g.is_archived)
+      const targetCellName = cells.find(c => c.cell_id === targetCellId)?.cell_name || 'the target cell'
+
+      if (targetGateways.length === 0) {
+        showToast(`'${targetCellName}' has no active edge gateway — assign a gateway to this cell first`, 'error')
+        return
+      }
+      if (targetGateways.length > 1) {
+        showToast(`'${targetCellName}' has ${targetGateways.length} gateways — pick one on the Devices page`, 'error')
+        return
+      }
+
+      const targetGateway = targetGateways[0]
       await api.put(`/api/v1/devices/${assetData.asset_id}`, {
         asset_name: assetData.asset_name,
-        asset_type: assetData.asset_type,
-        cell_id: targetCellId,
-        connection_method: assetData.connection_method,
-        active_gateway_id: assetData.active_gateway_id,
+        active_gateway_id: targetGateway.gateway_id,
       })
 
-      showToast(`Device '${assetData.asset_name}' dragged & reassigned to Zone #${targetCellId}`, 'success')
+      await loadAll()
+      showToast(`Device '${assetData.asset_name}' reassigned to '${targetCellName}' via gateway '${targetGateway.gateway_name}'`, 'success')
     } catch (err) {
       showToast(err.message, 'error')
     }
   }
 
-  // Pre-build Map for O(1) telemetry lookups per asset instead of O(N) array filter on every render
-  const telemetryByAssetId = useMemo(() => {
+  // Pre-build Map for O(1) telemetry lookups per asset instead of O(N) array filter on
+  // every render. Telemetry is keyed by the Sparkplug B device *name* (what the
+  // hypertable stores in asset_id), not by the device UUID.
+  const telemetryByAssetName = useMemo(() => {
     const map = new Map()
     for (let i = 0; i < telemetry.length; i++) {
       const t = telemetry[i]
@@ -93,7 +112,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPer
   const getDeviceStatusColor = useCallback((asset) => {
     if (asset.is_archived) return 'chip-warning'
     if (asset.status === 'OFFLINE') return 'chip-offline'
-    const latest = telemetryByAssetId.get(asset.asset_id) || []
+    const latest = telemetryByAssetName.get(asset.asset_name) || []
     const statusMetric = latest.find(t => t.metric_name === 'status')
     if (statusMetric && (statusMetric.val_string === 'OFFLINE' || statusMetric.val_string === 'DDEATH_RECEIVED')) return 'chip-offline'
 
@@ -104,15 +123,17 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPer
     if (tempMetric && tempMetric.val_double > 80.0) return 'chip-danger'
     if (statusMetric && (statusMetric.val_string === 'MAINTENANCE' || statusMetric.val_string === 'IDLE')) return 'chip-warning'
     return 'chip-success'
-  }, [telemetryByAssetId])
+  }, [telemetryByAssetName])
 
   if (loading) return <div className="loading-wrap"><div className="spinner" /> Loading shopfloor overview…</div>
 
   const activeCellsCount = cells.filter(c => !c.is_archived).length
   const archivedCellsCount = cells.filter(c => c.is_archived).length
 
-  const onlineGwCount = gwList.filter(g => g.status === 'ONLINE' && !g.is_archived).length
-  const offlineGwCount = gwList.filter(g => (g.status === 'OFFLINE' || !g.status) && !g.is_archived).length
+  // A gateway is only "online" while its heartbeat is fresh -- an edge node that stops
+  // publishing never writes an OFFLINE status, it just goes quiet.
+  const onlineGwCount = gwList.filter(g => !g.is_archived && isGatewayOnline(g)).length
+  const offlineGwCount = gwList.filter(g => !g.is_archived && !isGatewayOnline(g)).length
   const archivedGwCount = gwList.filter(g => g.is_archived).length
 
   const onlineAssetsCount = assets.filter(a => (a.status === 'ONLINE' || !a.status) && !a.is_archived).length
@@ -163,9 +184,10 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPer
               </div>
             ) : (
               cells.map(c => {
-                const cellAssets = assets.filter(a => a.cell_id === c.cell_id)
-                const activeGwIds = [...new Set(cellAssets.map(a => a.active_gateway_id).filter(Boolean))]
-                const cellGateways = gwList.filter(g => activeGwIds.includes(g.gateway_id))
+                // Cells own gateways; gateways own devices. Deriving the gateway list
+                // from the devices instead hid every gateway that has no device yet.
+                const cellGateways = gwList.filter(g => g.cell_id === c.cell_id)
+                const cellAssets = c.devices || []
 
                 return (
                   <div
@@ -205,10 +227,11 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPer
                           <div className="zone-chips">
                             {cellGateways.map(g => {
                               const isGwArch = g.is_archived
+                              const gwStatus = gatewayLiveStatus(g)
                               return (
-                                <span key={g.gateway_id} className="chip chip-gw" title={`Gateway ${g.gateway_name} ${g.is_virtual ? '(Virtual Gateway)' : ''} ${isGwArch ? '(Archived)' : `(${g.status})`} — Click to view on Gateways page`} onClick={() => onSelectGateway(g.gateway_id)} style={{ cursor: 'pointer', borderColor: isGwArch ? 'var(--warning)' : g.is_virtual ? 'var(--accent)' : undefined, opacity: isGwArch ? 0.75 : 1 }}>
-                                  {isGwArch ? <IconArchive size={11} style={{ color: 'var(--warning)' }} /> : <span className={`badge-dot ${g.status === 'ONLINE' ? 'badge-online' : 'badge-offline'}`} />}
-                                  <span className="mono">{g.gateway_id}</span> ({g.gateway_name})
+                                <span key={g.gateway_id} className="chip chip-gw" title={`Gateway ${g.gateway_name} ${g.is_virtual ? '(Virtual Gateway)' : ''} ${isGwArch ? '(Archived)' : `(${gwStatus}, heartbeat ${formatHeartbeat(g.last_heartbeat)})`} — ${g.device_count} device(s) — Click to view on Gateways page`} onClick={() => onSelectGateway(g.gateway_id)} style={{ cursor: 'pointer', borderColor: isGwArch ? 'var(--warning)' : g.is_virtual ? 'var(--accent)' : undefined, opacity: isGwArch ? 0.75 : 1 }}>
+                                  {isGwArch ? <IconArchive size={11} style={{ color: 'var(--warning)' }} /> : <span className={`badge-dot ${gwStatus === 'ONLINE' ? 'badge-online' : 'badge-offline'}`} />}
+                                  <span className="mono">{g.gateway_name}</span> ({g.device_count} devices)
                                   {g.is_virtual && !isGwArch && <span className="badge badge-warning" style={{ background: 'rgba(0,212,255,0.15)', color: 'var(--accent)', border: '1px solid var(--accent)', padding: '1px 5px', fontSize: '9px', marginLeft: '4px', display: 'inline-flex', alignItems: 'center', gap: '2px' }}><IconZap size={9} /> VIRTUAL</span>}
                                   {isGwArch && <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)', padding: '1px 5px', fontSize: '9px', marginLeft: '4px' }}>ARCHIVED</span>}
                                 </span>

@@ -2,6 +2,91 @@ import { supabase } from './lib/supabaseClient';
 import { isUuid } from './utils/isUuid';
 import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
 
+// Devices are related to cells *through* gateways (devices.gateway_id -> gateways.id ->
+// gateways.cell_id -> cells.id). There is no devices.cell_id column, so anything that
+// wants "the devices in this cell" has to walk the embed rather than filter on a field.
+const mapDeviceRow = (d, gateway) => ({
+  ...d,
+  asset_id: d.id,
+  asset_name: d.name,
+  active_gateway_id: d.gateway_id ?? gateway?.id ?? null,
+  gateway_name: gateway?.name ?? null
+});
+
+const mapGatewayRow = (g) => {
+  const devices = (g.devices || []).map(d => mapDeviceRow(d, g));
+  return {
+    ...g,
+    gateway_id: g.id,
+    gateway_name: g.name,
+    devices,
+    device_count: devices.length
+  };
+};
+
+// PostgREST embeds. Kept as constants so the Cells and Gateways queries stay in step.
+const DEVICE_EMBED = 'id, name, status, is_quarantined, is_archived, gateway_id, created_at';
+const GATEWAY_EMBED =
+  `id, name, cell_id, access_url, status, last_heartbeat, ip_address, is_virtual, ` +
+  `is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
+
+// PostgREST rejects '' for a UUID/foreign-key column; the UI's "unassigned" option
+// submits exactly that.
+const emptyToNull = (v) => (v === '' || v === undefined ? null : v);
+
+// The UI carries a device's gateway as `active_gateway_id`; the column is `gateway_id`.
+const gatewayIdFrom = (body) => emptyToNull(body.active_gateway_id ?? body.gateway_id);
+
+export const TELEMETRY_PAGE_SIZE = 500;
+// postgres_fdw pushes WHERE clauses to TimescaleDB but not LIMIT, so an unbounded
+// query materialises the whole matching range in Supabase before trimming. Cap it.
+const TELEMETRY_MAX_ROWS = 5000;
+
+/**
+ * Sparkplug B keys everything it publishes by device *name*, so `telemetry.asset_id`
+ * and `asset_config.asset_id` both hold the name while the UI works in device UUIDs.
+ * Translate before querying either of them.
+ *
+ * An unresolvable UUID is returned unchanged, so the query comes back empty rather
+ * than silently widening to every device.
+ */
+async function resolveAssetName(assetId) {
+  if (!assetId || !isUuid(assetId)) return assetId || '';
+
+  const { data, error } = await supabase.from('devices').select('name').eq('id', assetId);
+  if (error) throw error;
+  return data?.[0]?.name || assetId;
+}
+
+/**
+ * Query the `telemetry` view -- a postgres_fdw projection of the standalone
+ * TimescaleDB hypertable, exposed through PostgREST (see
+ * supabase/migrations/20260101000010_telemetry_foreign_table.sql).
+ */
+async function queryTelemetry({ assetId, metricName, minutes, limit, offset } = {}) {
+  const pageSize = Math.min(
+    Number.isFinite(limit) && limit > 0 ? limit : TELEMETRY_PAGE_SIZE,
+    TELEMETRY_MAX_ROWS
+  );
+  const from = Number.isFinite(offset) && offset > 0 ? offset : 0;
+
+  const assetName = await resolveAssetName(assetId);
+
+  let query = supabase.from('telemetry').select('*');
+  if (assetName) query = query.eq('asset_id', assetName);
+  if (metricName) query = query.eq('metric_name', metricName);
+  if (Number.isFinite(minutes) && minutes > 0) {
+    query = query.gte('time', new Date(Date.now() - minutes * 60000).toISOString());
+  }
+
+  const { data, error } = await query
+    .order('time', { ascending: false })
+    .range(from, from + pageSize - 1);
+
+  if (error) throw error;
+  return data || [];
+}
+
 const mapDigitalThreadRow = (t) => ({
   ...t,
   event_id: t.id || t.event_id,
@@ -74,42 +159,67 @@ export const api = {
     }
 
     if (path.startsWith('/api/v1/cells')) {
-      const { data, error } = await supabase.from('cells').select('*').order('created_at', { ascending: false });
+      // Nested embed so each cell arrives with its gateways, and each gateway with its
+      // devices, in one round trip.
+      const { data, error } = await supabase
+        .from('cells')
+        .select(`*, gateways(${GATEWAY_EMBED})`)
+        .order('created_at', { ascending: false });
       if (error) throw error;
-      return (data || []).map(c => ({
-        ...c,
-        cell_id: c.id,
-        cell_name: c.name,
-        access_url: c.grafana_url
-      }));
+      return (data || []).map(c => {
+        const gateways = (c.gateways || []).map(mapGatewayRow);
+        const devices = gateways.flatMap(g => g.devices);
+        return {
+          ...c,
+          cell_id: c.id,
+          cell_name: c.name,
+          access_url: c.grafana_url,
+          gateways,
+          devices,
+          gateway_count: gateways.length,
+          device_count: devices.length
+        };
+      });
     }
 
     if (path.startsWith('/api/v1/gateways')) {
-      const { data, error } = await supabase.from('gateways').select('*').order('created_at', { ascending: false });
+      const { data, error } = await supabase
+        .from('gateways')
+        .select(`*, devices(${DEVICE_EMBED})`)
+        .order('created_at', { ascending: false });
       if (error) throw error;
-      return (data || []).map(g => ({
-        ...g,
-        gateway_id: g.id,
-        gateway_name: g.name
-      }));
+      return (data || []).map(mapGatewayRow);
     }
 
     if (path.match(/\/api\/v1\/devices\/(.+)\/config/)) {
       const match = path.match(/\/api\/v1\/devices\/(.+)\/config/);
-      const assetId = match[1];
-      const { data, error } = await supabase.from('asset_config').select('*').eq('asset_id', assetId);
+      // asset_config is keyed by the Sparkplug B device name written by the ingestion
+      // daemon on DBIRTH; the UI passes a device UUID.
+      const assetName = await resolveAssetName(match[1]);
+      const { data, error } = await supabase
+        .from('asset_config')
+        .select('*')
+        .eq('asset_id', assetName)
+        .order('metric_name', { ascending: true });
       if (error) throw error;
       return data || [];
     }
 
     if (path.startsWith('/api/v1/devices') || path.startsWith('/api/v1/assets')) {
-      const { data, error } = await supabase.from('devices').select('*').order('created_at', { ascending: false });
+      // Embed the serving gateway so each device carries its resolved gateway name and
+      // the cell it belongs to -- a device's cell is the cell of its gateway.
+      const { data, error } = await supabase
+        .from('devices')
+        .select('*, gateways(id, name, cell_id, status, is_archived)')
+        .order('created_at', { ascending: false });
       if (error) throw error;
       return (data || []).map(d => ({
         ...d,
         asset_id: d.id,
         asset_name: d.name,
-        active_gateway_id: d.gateway_id
+        active_gateway_id: d.gateway_id,
+        gateway_name: d.gateways?.name || null,
+        cell_id: d.gateways?.cell_id || null
       }));
     }
 
@@ -120,11 +230,19 @@ export const api = {
     }
 
     if (path.startsWith('/api/v1/quarantine')) {
-      const { data, error } = await supabase.from('devices').select('*').eq('is_quarantined', true);
+      const { data, error } = await supabase
+        .from('devices')
+        .select('*, gateways(id, name)')
+        .eq('is_quarantined', true);
       if (error) throw error;
       return (data || []).map(d => ({
         ...d,
-        asset_id: d.name
+        // approve/reject address the device by its Sparkplug B name.
+        asset_id: d.name,
+        quarantine_id: d.id,
+        discovered_at: d.created_at,
+        gateway_id: d.gateway_id || null,
+        gateway_name: d.gateways?.name || null
       }));
     }
 
@@ -184,40 +302,32 @@ export const api = {
       };
     }
 
+    // Latest value per (device, metric) inside a bounded recent window. Used by the
+    // Overview map, which only needs current state -- not the full history the
+    // Telemetry tab pages through.
+    if (path.startsWith('/api/v1/telemetry/latest')) {
+      const url = new URL(path, window.location.origin);
+      const minutes = Number.parseInt(url.searchParams.get('minutes') || '60', 10);
+      const rows = await queryTelemetry({ minutes, limit: 1000 });
+
+      const latest = new Map();
+      for (const row of rows) {
+        const key = `${row.asset_id}::${row.metric_name}`;
+        // queryTelemetry returns newest-first, so the first hit for a key wins.
+        if (!latest.has(key)) latest.set(key, row);
+      }
+      return [...latest.values()];
+    }
+
     if (path.startsWith('/api/v1/telemetry')) {
       const url = new URL(path, window.location.origin);
-      const assetFilter = url.searchParams.get('asset_id');
-      const metricFilter = url.searchParams.get('metric_name');
-      
-      const devicesRes = await supabase.from('devices').select('*');
-      let devicesList = devicesRes.data || [];
-      if (assetFilter) {
-        devicesList = devicesList.filter(d => d.id === assetFilter || d.name === assetFilter);
-      }
-
-      const now = Date.now();
-      const sampleMetrics = [
-        { name: 'temperature', val_double: 42.5 },
-        { name: 'status', val_string: 'RUNNING' },
-        { name: 'safety_ok', val_bool: true }
-      ];
-
-      const telemetryRows = [];
-      devicesList.forEach((d, idx) => {
-        sampleMetrics.forEach((m, mIdx) => {
-          if (metricFilter && m.name !== metricFilter) return;
-          telemetryRows.push({
-            time: new Date(now - (idx * 3000 + mIdx * 1000)).toISOString(),
-            asset_id: d.name || d.id,
-            metric_name: m.name,
-            val_double: m.val_double,
-            val_string: m.val_string,
-            val_bool: m.val_bool
-          });
-        });
+      return queryTelemetry({
+        assetId: url.searchParams.get('asset_id'),
+        metricName: url.searchParams.get('metric_name'),
+        minutes: Number.parseInt(url.searchParams.get('minutes') || '', 10),
+        limit: Number.parseInt(url.searchParams.get('limit') || '', 10),
+        offset: Number.parseInt(url.searchParams.get('offset') || '', 10)
       });
-
-      return telemetryRows;
     }
 
     throw new Error('Unhandled API path: ' + path);
@@ -283,7 +393,10 @@ export const api = {
       const { data, error } = await supabase.from('gateways').insert({
         name: body.gateway_name,
         access_url: body.access_url,
-        cell_id: body.cell_id
+        cell_id: emptyToNull(body.cell_id),
+        ip_address: emptyToNull(body.ip_address),
+        is_virtual: !!body.is_virtual,
+        status: body.status || 'OFFLINE'
       }).select();
       if (error) throw error;
       return data?.[0] || {};
@@ -292,7 +405,9 @@ export const api = {
     if (path === '/api/v1/devices') {
       const { data, error } = await supabase.from('devices').insert({
         name: body.asset_name,
-        gateway_id: body.gateway_id,
+        gateway_id: gatewayIdFrom(body),
+        asset_type: emptyToNull(body.asset_type),
+        connection_method: emptyToNull(body.connection_method),
         status: body.status || 'ONLINE'
       }).select();
       if (error) throw error;
@@ -415,22 +530,36 @@ export const api = {
     }
 
     if (path.startsWith('/api/v1/gateways/')) {
-      const { data, error } = await supabase.from('gateways').update({
+      // Only the keys the caller actually sent are written, so a partial update cannot
+      // blank out a field it never mentioned.
+      const patch = {
         name: body.gateway_name,
-        access_url: body.access_url,
-        cell_id: body.cell_id
-      }).eq('id', id).select();
+        access_url: body.access_url
+      };
+      if ('cell_id' in body)     patch.cell_id = emptyToNull(body.cell_id);
+      if ('ip_address' in body)  patch.ip_address = emptyToNull(body.ip_address);
+      if ('is_virtual' in body)  patch.is_virtual = !!body.is_virtual;
+
+      const { data, error } = await supabase.from('gateways').update(patch).eq('id', id).select();
       if (error) throw error;
       return data[0];
     }
 
     if (path.startsWith('/api/v1/devices/')) {
-      const { data, error } = await supabase.from('devices').update({
+      // gateway_id is written from whichever key the caller supplied. The UI models a
+      // device's gateway as `active_gateway_id`; reading only `gateway_id` here meant
+      // every reassignment silently updated nothing.
+      const patch = {
         name: body.asset_name,
-        gateway_id: body.gateway_id,
         status: body.status,
         is_quarantined: body.is_quarantined
-      }).eq('id', id).select();
+      };
+      if ('asset_type' in body) patch.asset_type = emptyToNull(body.asset_type);
+      if ('connection_method' in body) patch.connection_method = emptyToNull(body.connection_method);
+      if ('active_gateway_id' in body || 'gateway_id' in body) {
+        patch.gateway_id = gatewayIdFrom(body);
+      }
+      const { data, error } = await supabase.from('devices').update(patch).eq('id', id).select();
       if (error) throw error;
       return data[0];
     }
