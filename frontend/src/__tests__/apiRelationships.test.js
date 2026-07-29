@@ -137,24 +137,32 @@ describe('device gateway assignment', () => {
 });
 
 describe('device DBIRTH parameters', () => {
-  it('looks up asset_config by the Sparkplug B device name, not the device UUID', async () => {
-    state.responses.devices = { data: [{ name: 'Simulated_CNC_01' }], error: null };
+  // asset_config is keyed by sparkplug_id. That value is a generated column derived from the
+  // device's UUID primary key, so the UI derives it locally instead of querying for it --
+  // 'ccd19944-8805-4c11-ae66-ea0d2c50f40c' -> 'dev' + the first 21 unhyphenated hex chars.
+  const DEVICE_UUID = 'ccd19944-8805-4c11-ae66-ea0d2c50f40c';
+  const DEVICE_SPARKPLUG_ID = 'devccd1994488054c11ae66e';
 
-    await api.get('/api/v1/devices/ccd19944-8805-4c11-ae66-ea0d2c50f40c/config');
+  it('looks up asset_config by the device sparkplug_id, derived from its UUID', async () => {
+    await api.get(`/api/v1/devices/${DEVICE_UUID}/config`);
 
     const call = callFor('asset_config');
-    expect(call.filters).toContainEqual(['eq', 'asset_id', 'Simulated_CNC_01']);
+    expect(call.filters).toContainEqual(['eq', 'asset_id', DEVICE_SPARKPLUG_ID]);
     expect(call.order).toEqual(['metric_name', { ascending: true }]);
   });
 
+  it('resolves the sparkplug_id without a devices round-trip', async () => {
+    await api.get(`/api/v1/devices/${DEVICE_UUID}/config`);
+    expect(callFor('devices')).toBeUndefined();
+  });
+
   it('returns the stored birth parameters', async () => {
-    state.responses.devices = { data: [{ name: 'Simulated_CNC_01' }], error: null };
     state.responses.asset_config = {
-      data: [{ asset_id: 'Simulated_CNC_01', metric_name: 'firmware_version', val_string: 'v3.2.0-industrial', datatype: 12 }],
+      data: [{ asset_id: DEVICE_SPARKPLUG_ID, metric_name: 'firmware_version', val_string: 'v3.2.0-industrial', datatype: 12 }],
       error: null
     };
 
-    const rows = await api.get('/api/v1/devices/ccd19944-8805-4c11-ae66-ea0d2c50f40c/config');
+    const rows = await api.get(`/api/v1/devices/${DEVICE_UUID}/config`);
 
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ metric_name: 'firmware_version', val_string: 'v3.2.0-industrial', datatype: 12 });
@@ -177,12 +185,10 @@ describe('telemetry queries', () => {
     expect(callFor('telemetry').range).toEqual([0, 499]);
   });
 
-  it('resolves a device UUID filter to the Sparkplug B device name the hypertable stores', async () => {
-    state.responses.devices = { data: [{ name: 'Simulated_CNC_01' }], error: null };
-
+  it('resolves a device UUID filter to the sparkplug_id the hypertable stores', async () => {
     await api.get('/api/v1/telemetry?asset_id=ccd19944-8805-4c11-ae66-ea0d2c50f40c');
 
-    expect(callFor('telemetry').filters).toContainEqual(['eq', 'asset_id', 'Simulated_CNC_01']);
+    expect(callFor('telemetry').filters).toContainEqual(['eq', 'asset_id', 'devccd1994488054c11ae66e']);
   });
 
   it('passes a non-UUID asset filter straight through', async () => {

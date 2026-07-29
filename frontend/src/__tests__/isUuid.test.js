@@ -39,14 +39,17 @@ describe('isUuid helper and injection prevention', () => {
 
   it('safely uses exact equality matching instead of raw template-literal .or() interpolation', async () => {
     const maliciousId = 'x,is_archived.eq.false';
-    
+
     // Call api.post for archiving with a malicious ID string containing commas/injection syntax
     await api.post(`/api/v1/devices/${maliciousId}/archive`, { auto_delete_days: 7 });
 
     const queryBuilder = supabase.from('devices');
-    
-    // Assert eq('name', maliciousId) was called safely rather than raw template interpolation
-    expect(queryBuilder.eq).toHaveBeenCalledWith('name', maliciousId);
+
+    // Assert exact equality matching rather than raw template interpolation. The column is
+    // always `id` now: devices used to be addressable by Sparkplug B name as well, which is
+    // why this call site had to sniff the id's format first.
+    expect(queryBuilder.eq).toHaveBeenCalledWith('id', maliciousId);
+    expect(queryBuilder.or).not.toHaveBeenCalled();
   });
 
   it('enforces exact regex match between frontend and Deno edge function isUuid implementations', async () => {

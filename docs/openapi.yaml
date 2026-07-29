@@ -385,18 +385,18 @@ paths:
       summary: Read time-series telemetry
       description: |
         Read-only view over the standalone TimescaleDB `telemetry` hypertable, reached
-        with `postgres_fdw`. `asset_id` holds the **Sparkplug B device name**, not the
-        device UUID.
+        with `postgres_fdw`. `asset_id` holds the device's immutable **Sparkplug ID**
+        (`devices.sparkplug_id`), not its UUID and not its editable name.
 
         `postgres_fdw` pushes `WHERE` clauses to TimescaleDB but **not** `LIMIT`, so always
         constrain the time window on large ranges:
 
-        `?asset_id=eq.Simulated_CNC_01&time=gte.2026-01-01T00:00:00Z&order=time.desc&limit=500`
+        `?asset_id=eq.dev200000000000400080000&time=gte.2026-01-01T00:00:00Z&order=time.desc&limit=500`
       parameters:
         - name: asset_id
           in: query
           schema: { type: string }
-          description: 'Sparkplug B device name, e.g. `eq.Simulated_CNC_01`.'
+          description: 'Device Sparkplug ID, e.g. `eq.dev200000000000400080000`.'
         - name: metric_name
           in: query
           schema: { type: string }
@@ -469,7 +469,7 @@ paths:
         - name: asset_id
           in: query
           schema: { type: string }
-          description: 'Sparkplug B device name, e.g. `eq.Simulated_CNC_01`.'
+          description: 'Device Sparkplug ID, e.g. `eq.dev200000000000400080000`.'
         - $ref: '#/components/parameters/Select'
         - $ref: '#/components/parameters/Order'
       responses:
@@ -580,8 +580,9 @@ paths:
               properties:
                 device_id:
                   type: string
-                  description: Device UUID or Sparkplug B device name.
-                  example: Simulated_CNC_01
+                  description: Device UUID. Sparkplug B names are no longer accepted here.
+                  format: uuid
+                  example: ccd19944-8805-4c11-ae66-ea0d2c50f40c
                 gateway_id:
                   type: string
                   format: uuid
@@ -723,7 +724,14 @@ components:
         name:
           type: string
           example: Virtual_Gateway_NodeRED
-          description: Must equal the Sparkplug B edge node id for heartbeats to match.
+          description: Display label only. Freely editable and not unique; heartbeats are matched on sparkplug_id.
+        sparkplug_id:
+          type: string
+          readOnly: true
+          example: gwy100000000000400080000
+          description: >-
+            Immutable Sparkplug B edge node id, generated from the primary key ('gwy' plus 21 hex
+            characters, 24 total). This is the edge node segment of the MQTT topic.
         cell_id: { type: string, format: uuid, nullable: true, description: 'Null means this gateway — and its devices — appear in no cell.' }
         access_url: { type: string, nullable: true }
         status: { type: string, enum: [ONLINE, OFFLINE], default: OFFLINE }
@@ -761,7 +769,31 @@ components:
         name:
           type: string
           example: Simulated_CNC_01
-          description: Must equal the Sparkplug B device id; telemetry and birth parameters are keyed by it.
+          description: Display label only. Freely editable and not unique; renaming does not affect ingestion or telemetry history.
+        sparkplug_id:
+          type: string
+          readOnly: true
+          example: dev200000000000400080000
+          description: >-
+            Immutable Sparkplug B device id, generated from the primary key ('dev' plus 21 hex
+            characters, 24 total). This is what appears in the MQTT topic and keys telemetry and
+            birth parameters.
+        reported_identity:
+          type: string
+          nullable: true
+          readOnly: true
+          description: The id this device actually publishes under, when it differs from the issued sparkplug_id.
+        quarantine_reason:
+          type: string
+          nullable: true
+          readOnly: true
+          description: 'Why the device is held: UNKNOWN_DEVICE, MALFORMED_IDENTITY or IDENTITY_MISMATCH, followed by a detail message.'
+        identity_source:
+          type: string
+          nullable: true
+          readOnly: true
+          enum: [sparkplug_id, reported_identity, legacy_name]
+          description: How ingestion last resolved this device. 'legacy_name' marks a gateway still to be reconfigured.
         gateway_id: { type: string, format: uuid, nullable: true, description: 'Serving gateway. The device''s cell is this gateway''s cell.' }
         status: { type: string, enum: [ONLINE, OFFLINE], default: OFFLINE, description: Set ONLINE on DBIRTH and OFFLINE on DDEATH by the ingestion daemon. }
         is_quarantined:
@@ -789,7 +821,7 @@ components:
       description: 'One metric sample. Exactly one of val_double / val_string / val_bool is populated.'
       properties:
         time: { type: string, format: date-time }
-        asset_id: { type: string, example: Simulated_CNC_01, description: Sparkplug B device name. }
+        asset_id: { type: string, example: dev200000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
         metric_name: { type: string, example: temperature }
         val_double: { type: number, nullable: true }
         val_string: { type: string, nullable: true }
@@ -800,7 +832,7 @@ components:
       description: One DBIRTH birth-certificate parameter.
       properties:
         id: { type: string, format: uuid, readOnly: true }
-        asset_id: { type: string, example: Simulated_CNC_01, description: Sparkplug B device name. }
+        asset_id: { type: string, example: dev200000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
         metric_name: { type: string, example: firmware_version }
         val_double: { type: number, nullable: true }
         val_string: { type: string, nullable: true }

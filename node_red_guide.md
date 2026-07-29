@@ -47,27 +47,41 @@ Double-click the **"IoT Mosquitto Broker"** config node and set:
 Every message follows the same topic shape:
 
 ```text
-spBv1.0/{GroupID}/{MessageType}/{EdgeNodeID}[/{AssetID}]
+spBv1.0/{GroupID}/{MessageType}/{EdgeNodeID}[/{DeviceID}]
 ```
+
+`{EdgeNodeID}` and `{DeviceID}` are **Sparkplug IDs**, not names: a 3-character type prefix
+(`gwy` for gateways, `dev` for devices) followed by 21 hex characters, 24 in total. The platform
+issues one to every gateway and device, derived from its database id, and shows it on that
+asset's page — click it to copy. It never changes, so the asset can be renamed freely without
+breaking anything downstream.
+
+The two ids used below (`gwy100000000000400080000` and `dev200000000000400080000`) belong to the
+pre-seeded `Virtual_Gateway_NodeRED` row and this simulator's device. They are pinned in
+migration `0009` precisely so this flow can hardcode them.
 
 The simulator publishes, in order:
 
 | Order | Message Type | Topic Example | Purpose |
 |-------|--------------|----------------|---------|
-| 1 | `NBIRTH` | `spBv1.0/FactoryPlus/NBIRTH/Virtual_Gateway_NodeRED` | The edge node's own birth certificate, published once at startup, before any device birth. Real Sparkplug B requires this ordering; this app's ingestion treats `NBIRTH`/`NDATA` the same for gateway status, but the simulator sends it anyway for spec accuracy. |
-| 2 | `DBIRTH` | `spBv1.0/FactoryPlus/DBIRTH/Virtual_Gateway_NodeRED/Simulated_CNC_01` | A device's birth certificate -- the metric names/types/config it will report. Re-sent every 60s so late-starting consumers still see it. |
-| 3 | `DDATA` | `spBv1.0/FactoryPlus/DDATA/Virtual_Gateway_NodeRED/Simulated_CNC_01` | Streaming telemetry, every 5s. |
-| 4 | `DDEATH` | `spBv1.0/FactoryPlus/DDEATH/Virtual_Gateway_NodeRED/Simulated_CNC_01` | Manually triggered -- marks the device offline. |
-| 5 | `NDATA` | `spBv1.0/FactoryPlus/NDATA/Virtual_Gateway_NodeRED` | Gateway heartbeat, every 30s. |
+| 1 | `NBIRTH` | `spBv1.0/FactoryPlus/NBIRTH/gwy100000000000400080000` | The edge node's own birth certificate, published once at startup, before any device birth. Real Sparkplug B requires this ordering; this app's ingestion treats `NBIRTH`/`NDATA` the same for gateway status, but the simulator sends it anyway for spec accuracy. |
+| 2 | `DBIRTH` | `spBv1.0/FactoryPlus/DBIRTH/gwy100000000000400080000/dev200000000000400080000` | A device's birth certificate -- the metric names/types/config it will report. Re-sent every 60s so late-starting consumers still see it. |
+| 3 | `DDATA` | `spBv1.0/FactoryPlus/DDATA/gwy100000000000400080000/dev200000000000400080000` | Streaming telemetry, every 5s. |
+| 4 | `DDEATH` | `spBv1.0/FactoryPlus/DDEATH/gwy100000000000400080000/dev200000000000400080000` | Manually triggered -- marks the device offline. |
+| 5 | `NDATA` | `spBv1.0/FactoryPlus/NDATA/gwy100000000000400080000` | Gateway heartbeat, every 30s. |
 
-The JSON payload simulates a Sparkplug B DDATA message with the required `Asset_ID` metric embedded:
+The JSON payload simulates a Sparkplug B DDATA message. `Asset_ID` repeats the device's Sparkplug
+ID as a **cross-check** — the topic is what identifies the device, and if the two disagree the
+device is quarantined rather than one of them silently winning. `Asset_Name` is a friendly label
+for display only; the platform never overwrites its own record's name from it.
 
 ```json
 {
   "timestamp": 1721399123456,
   "seq": 42,
   "metrics": [
-    { "name": "Asset_ID",    "datatype": 12, "string_value": "Simulated_CNC_01" },
+    { "name": "Asset_ID",    "datatype": 12, "string_value": "dev200000000000400080000" },
+    { "name": "Asset_Name",  "datatype": 12, "string_value": "Simulated_CNC_01" },
     { "name": "temperature", "datatype": 10, "double_value": 42.5 },
     { "name": "vibration",   "datatype": 10, "double_value": 1.35 },
     { "name": "status",      "datatype": 12, "string_value": "RUNNING" },
@@ -82,25 +96,43 @@ The JSON payload simulates a Sparkplug B DDATA message with the required `Asset_
 
 ## Step 4 — Onboard a New Device
 
-To point this simulator at a device of your own instead of `Simulated_CNC_01`, edit the **"Build DBIRTH Certificate"** and **"Build DDATA Telemetry"** function nodes (see the "ADD YOUR OWN DEVICE" comment node next to them on the canvas):
+To point this simulator at a device of your own, edit the **"Build DBIRTH Certificate"** and **"Build DDATA Telemetry"** function nodes (see the "ADD YOUR OWN DEVICE" comment node next to them on the canvas):
 
-1. Change the topic's last path segment (the `{AssetID}`) to your device's name.
-2. Change every `Asset_ID` metric value to match -- it must be identical in both the `DBIRTH` and `DDATA` function nodes.
-3. Replace the metric list with your device's real telemetry (`name` / `datatype` / value field).
-4. Deploy. No database changes are needed first.
+1. Register the device in the app's **Devices** tab and copy its issued **Sparkplug ID** (click the id to copy it).
+2. Put that id in the topic's last path segment and in the `Asset_ID` metric of both the `DBIRTH` and `DDATA` nodes. The topic is authoritative; `Asset_ID` is a cross-check.
+3. Set `Asset_Name` to whatever you want the device called. It is a label only.
+4. Replace the metric list with your device's real telemetry (`name` / `datatype` / value field).
+5. Deploy.
+
+You can also skip step 1 and just invent a well-formed id — the device will land in the quarantine queue for approval, which is the zero-touch path below.
+
+### If you mistype the ID
+
+A device id that is the right shape but unknown is treated as a new discovery. One that is the
+*wrong* shape — truncated, padded, or containing non-hex characters — is quarantined with a
+message saying exactly what is wrong, e.g.:
+
+> `MALFORMED_IDENTITY: device id 'devfffffffffffffffffff' is 23 characters; expected 24 ('dev' followed by 21 hex characters). The id is most likely truncated or padded in the gateway configuration — copy it again from the device's page in the dashboard.`
+
+That distinction is the reason the format is fixed-width: a misconfigured gateway is diagnosable
+rather than anonymous. Either way the device appears in the queue — it is never silently dropped.
 
 ## Step 5 — Complete the Loop: Approve the Quarantined Device
 
-The first time a `DBIRTH` arrives for a device name Supabase doesn't recognize, the ingestion engine auto-inserts it into the `devices` table with `is_quarantined = true` -- and its `DDATA` telemetry is silently dropped until it's approved. This is intentional: it's the platform's zero-touch onboarding flow.
+The first time a `DBIRTH` arrives for a Sparkplug ID Supabase doesn't recognize, the ingestion engine auto-inserts it into the `devices` table with `is_quarantined = true` -- and its `DDATA` telemetry is silently dropped until it's approved. This is intentional: it's the platform's zero-touch onboarding flow.
 
 1. Open the app UI and go to the **Devices** tab.
-2. Look for the **"Zero-Touch Onboarding Quarantine Queue"** section -- your new device will be listed there.
+2. Look for the **"Zero-Touch Onboarding Quarantine Queue"** section -- your new device will be listed there, showing the id it published under and why it was held.
 3. As an **Administrator** or **Shopfloor_Manager**, click **Approve** (assigning it to a cell/gateway) or **Reject**.
 4. Once approved, subsequent `DDATA` messages start flowing into the `TelemetryTab` / TimescaleDB.
 
+The device keeps publishing under the id it announced; the platform records that on the row rather than demanding the device be reconfigured.
+
 ## Step 6 — Register the Gateway (for heartbeat tracking)
 
-Unlike devices, **gateways are never auto-created**. If you don't first create a gateway named exactly `Virtual_Gateway_NodeRED` (or whatever `{EdgeNodeID}` you're publishing as) via the **Gateways** tab, the simulator's `NBIRTH`/`NDATA` heartbeats are logged as "unregistered edge node" and dropped -- the gateway will never show as `ONLINE` in the UI. This doesn't block device telemetry (devices auto-register independently), but it does mean gateway status/last-heartbeat tracking needs this one manual step.
+Unlike devices, **gateways are never auto-created**. Create a gateway via the **Gateways** tab, copy its issued Sparkplug ID, and publish `NBIRTH`/`NDATA` under that as the `{EdgeNodeID}`. Otherwise the heartbeats are logged as "unregistered edge node" and dropped -- the gateway will never show as `ONLINE` in the UI. This doesn't block device telemetry (devices auto-register independently), but it does mean gateway status/last-heartbeat tracking needs this one manual step.
+
+The pre-seeded `Virtual_Gateway_NodeRED` row already exists with the pinned id `gwy100000000000400080000`, so the shipped flow works with no setup.
 
 ---
 

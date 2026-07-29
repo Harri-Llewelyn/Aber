@@ -24,12 +24,33 @@ Factory+ Asset Tracking Platform is an industrial manufacturing management syste
 
 1. **Sparkplug B devices** publish `DBIRTH` (birth) and `DDATA` (data) messages to Mosquitto
 2. **Python ingestion engine** consumes `spBv1.0/#` topic:
-   - Checks device registration in Supabase `devices` table
+   - Resolves the topic's edge node and device segments to `gateways.sparkplug_id` / `devices.sparkplug_id`
    - Auto-quarantines unknown devices (sets `is_quarantined = true`)
    - Gates DDATA telemetry for quarantined devices
-   - Writes valid telemetry to TimescaleDB `telemetry` hypertable
+   - Writes valid telemetry to TimescaleDB `telemetry` hypertable, keyed by `sparkplug_id`
 3. **PostgreSQL triggers** automatically log all changes to `digital_thread` audit table
 4. **React dashboard** queries Supabase directly via PostgREST API with real-time subscriptions
+
+### Asset Identity
+
+Every gateway and device carries an immutable **`sparkplug_id`**: a 3-character type prefix
+(`gwy` / `dev`) plus 21 lowercase hex characters, 24 in total. It is a `GENERATED ALWAYS ... STORED`
+column derived from the row's UUID primary key (`supabase/migrations/20260101000014_sparkplug_identity.sql`),
+so it cannot drift and needs no immutability trigger.
+
+- **This is the identity on the wire.** It appears in the MQTT topic and keys `telemetry.asset_id`
+  in TimescaleDB and `asset_config.asset_id` in Supabase.
+- **`name` is a display label.** It is freely editable and no longer `UNIQUE` on gateways or devices
+  — two cells can both contain a `Pump_01`. Renaming never detaches telemetry or re-quarantines.
+- **The topic is authoritative**; the `Asset_ID` payload metric is a cross-check. A disagreement
+  quarantines the device rather than one silently winning. `Asset_Name` is a hint used only to label
+  a newly discovered device — it never overwrites an existing row's name.
+- **Malformed identifiers quarantine with a diagnosis** (`quarantine_reason`), never dropped. The
+  fixed width is what lets a truncated id be reported as such rather than as an unknown device.
+- **Migration window:** ingestion falls back to matching by `name`, flagging the row
+  `identity_source = 'legacy_name'` and warning. Remove that arm once all gateways are reconfigured.
+- The frontend derives `sparkplug_id` from a UUID locally (`frontend/src/utils/sparkplugId.js`) —
+  keep it in step with the SQL expression.
 
 ## Development Commands
 
@@ -106,15 +127,17 @@ python ingestion/validate.py
 ## Database Schema
 
 ### Core Tables
-- `cells` — Factory cell/groupings
-- `gateways` — Edge gateways linked to cells
-- `devices` — Devices linked to gateways, `is_quarantined` flag
+- `cells` — Factory cell/groupings (`name` is still `UNIQUE`; cells are not addressed on the wire)
+- `gateways` — Edge gateways linked to cells; `sparkplug_id` generated column
+- `devices` — Devices linked to gateways, `is_quarantined` flag; `sparkplug_id` generated column,
+  plus `reported_identity` / `quarantine_reason` / `identity_source` for quarantine diagnostics
 - `digital_thread` — Auto-populated audit log via triggers
 - `documents`, `asset_config`, `schemas`, `directory_services` — Extended metadata
 - `roles`, `permissions`, `role_permissions`, `user_roles` — RBAC tables
 
 ### TimescaleDB
-- `assets` dimension table
+- `assets` dimension table — `asset_id` is the device's `sparkplug_id`; `asset_name` is a
+  display-only cached label refreshed on every birth
 - `telemetry` hypertable with columns: `time`, `asset_id`, `metric_name`, `val_double`, `val_string`, `val_bool`
 
 ## CI Pipeline
@@ -127,7 +150,8 @@ GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)):
 ## Important Notes
 
 - **Fail-closed security**: Edge functions and RLS policies deny access by default; missing role claims result in `403 Forbidden`
-- **Quarantine gating**: Unregistered devices auto-insert into Supabase with `is_quarantined=true`; telemetry for quarantined devices is dropped
+- **Quarantine gating**: Unregistered devices auto-insert into Supabase with `is_quarantined=true`; telemetry for quarantined devices is dropped. The arriving edge node is recorded on the row, so approval does not require re-picking the gateway
+- **Renaming is safe**: `name` carries no identity (see Asset Identity above). Do not reintroduce name-based lookups — the `isUuid()` format-sniffing that used to guard them has been removed
 - **Digital Thread**: PostgreSQL `log_digital_thread_event()` trigger automatically logs INSERT/UPDATE/DELETE on cells, gateways, and devices
 - **Cross-platform setup**: `scripts/setup.mjs` uses Node.js fs module (no POSIX shell required)
 - **paho-mqtt v1 API**: Ingestion code intentionally uses v1 callback signatures; upgrading to v2 requires migration

@@ -10,8 +10,9 @@ const getTabFromPath = () => {
  * Custom hook to manage application tab routing and URL synchronization.
  * @param {Function} setSelectedDeviceFilter - State setter for device search filter
  * @param {Function} setSelectedGatewayFilter - State setter for gateway search filter
+ * @param {Function} setSelectedSchemaFilter - State setter for the Devices page's schema filter
  */
-export function useAppRouting(setSelectedDeviceFilter, setSelectedGatewayFilter) {
+export function useAppRouting(setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter) {
   const [tab, setTabState] = useState(getTabFromPath)
 
   const setTab = useCallback((newTab, queryParams = {}) => {
@@ -27,11 +28,15 @@ export function useAppRouting(setSelectedDeviceFilter, setSelectedGatewayFilter)
     }
   }, [])
 
+  // Clicking a nav item is an explicit "start fresh", so cross-page filters handed over by a
+  // drill-down (Overview -> Devices, Schemas -> Devices) are dropped rather than silently
+  // narrowing a page the user navigated to directly.
   const handleNavClick = useCallback((tabId) => {
     if (setSelectedDeviceFilter) setSelectedDeviceFilter('')
     if (setSelectedGatewayFilter) setSelectedGatewayFilter('')
+    if (setSelectedSchemaFilter) setSelectedSchemaFilter('')
     setTab(tabId)
-  }, [setTab, setSelectedDeviceFilter, setSelectedGatewayFilter])
+  }, [setTab, setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter])
 
   useEffect(() => {
     if (window.location.search.includes('code=') || window.location.search.includes('state=')) return

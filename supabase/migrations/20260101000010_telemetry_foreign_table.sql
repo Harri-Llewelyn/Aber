@@ -74,8 +74,10 @@ OPTIONS (schema_name 'public', table_name 'telemetry');
 GRANT USAGE ON SCHEMA timescale TO authenticated, service_role;
 GRANT SELECT ON timescale.telemetry TO authenticated, service_role;
 
--- Read-only projection for PostgREST. `telemetry.asset_id` holds the Sparkplug B
--- device name (see ingestion.py), which is what the UI filters on.
+-- Read-only projection for PostgREST. `telemetry.asset_id` holds the device's immutable
+-- Sparkplug B identifier -- `devices.sparkplug_id` (see migration 0014 and ingestion.py).
+-- The UI derives that value from the device UUID it already holds rather than looking the
+-- device up, since sparkplug_id is a pure function of the primary key.
 --
 -- security_invoker = true so the view runs with the querying role's own privileges
 -- (per the GRANTs above) rather than the view owner's -- avoids the Supabase

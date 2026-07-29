@@ -21,8 +21,9 @@ COMMENT ON COLUMN public.gateways.last_heartbeat IS
   'so it stays comparable with server time regardless of edge clock drift. '
   'NULL means no heartbeat has ever arrived.';
 
--- The ingestion daemon looks gateways up by name (the Sparkplug B edge node id in the
--- topic), so that lookup needs to be indexed. `name` is already UNIQUE, which provides it.
+-- The ingestion daemon used to look gateways up by name (the Sparkplug B edge node id in
+-- the topic). As of migration 0014 it resolves them by `sparkplug_id` instead, and `name`
+-- is a free-form label; both columns are indexed there.
 
 -- 1b. Device classification columns -------------------------------------------------
 -- The device form has always collected these and the device table has always rendered
@@ -31,11 +32,17 @@ ALTER TABLE public.devices ADD COLUMN IF NOT EXISTS asset_type TEXT;
 ALTER TABLE public.devices ADD COLUMN IF NOT EXISTS connection_method TEXT;
 
 -- 2. Register the Node-RED simulator edge node ------------------------------------
--- node_red_flow.json publishes on spBv1.0/FactoryPlus/<TYPE>/Virtual_Gateway_NodeRED,
--- so the gateway row must carry exactly that name for heartbeats to match.
-INSERT INTO public.gateways (name, access_url, status, is_virtual)
-VALUES ('Virtual_Gateway_NodeRED', 'http://localhost:1880', 'OFFLINE', TRUE)
-ON CONFLICT (name) DO NOTHING;
+-- node_red_flow.json publishes on spBv1.0/FactoryPlus/<TYPE>/gwy100000000000400080000.
+-- That edge node id is derived from this row's primary key (see migration 0014), so the
+-- UUID must be pinned rather than generated -- otherwise the flow's hardcoded topics
+-- would break on every fresh stack. The name is now just a display label.
+--
+-- ON CONFLICT targets `id`, not `name`: migration 0014 drops the UNIQUE constraint on
+-- name, and supabase-db-init re-runs every migration against a persistent volume, so a
+-- name-targeted upsert would fail on the second run.
+INSERT INTO public.gateways (id, name, access_url, status, is_virtual)
+VALUES ('10000000-0000-4000-8000-000000000001', 'Virtual_Gateway_NodeRED', 'http://localhost:1880', 'OFFLINE', TRUE)
+ON CONFLICT (id) DO NOTHING;
 
 -- 3. Complete the stack service directory ------------------------------------------
 -- Endpoints are the host-facing URLs from docker-compose.yml. DO UPDATE (not DO NOTHING)

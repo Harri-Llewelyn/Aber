@@ -4,6 +4,15 @@
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 -- Assets table
+--
+-- asset_id holds the device's immutable Sparkplug B identifier (devices.sparkplug_id in
+-- Supabase -- 'dev' + 21 hex characters, derived from that row's UUID primary key). It used
+-- to hold the device *name*, which made it impossible to rename a device without orphaning
+-- its telemetry: asset_id is this table's primary key and part of the telemetry hypertable's
+-- composite key, neither of which can be rewritten cheaply.
+--
+-- asset_name is a display-only cached copy of the Supabase label. It carries no identity and
+-- is refreshed by the ingestion daemon on every birth, so a rename propagates here.
 CREATE TABLE IF NOT EXISTS assets (
     asset_id TEXT PRIMARY KEY,
     asset_name TEXT,

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { api, TELEMETRY_PAGE_SIZE } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { downloadCSV } from '../../utils/downloadCSV'
+import { effectiveSparkplugId } from '../../utils/sparkplugId'
 import { AutoRefreshControl } from '../common/AutoRefreshControl'
 import { IconDownload } from '../common/Icons'
 
@@ -24,6 +25,7 @@ export function TelemetryTab({ initialAssetFilter, onClearFilter, hasPermission 
   const [metricFilter, setMetricFilter] = useState('')
   const [timeRange, setTimeRange]     = useState('')
   const [assets, setAssets]           = useState([])
+  const [catalog, setCatalog]         = useState([])
 
   // Check telemetry permission
   const hasTelemetryPermission = hasPermission(PERMISSION_UUIDS.TELEMETRY_READ)
@@ -110,16 +112,30 @@ export function TelemetryTab({ initialAssetFilter, onClearFilter, hasPermission 
 
   useEffect(() => { api.get('/api/v1/devices').then(d => setAssets(d)).catch(() => {}) }, [])
   useEffect(() => {
+    // The metric catalog is the registry of metrics devices are *meant* to publish. Without it
+    // the dropdown could only offer metrics already present in the loaded page, so a metric that
+    // exists but hasn't been paged to yet was simply unselectable.
+    api.get('/api/v1/metric-catalog').then(d => setCatalog(d)).catch(() => {})
+  }, [])
+  useEffect(() => {
     load(true)
   }, [load])
 
-  // Built from the metrics actually present in the stream rather than a hardcoded list,
-  // which omitted metrics the devices really publish (e.g. `vibration`).
-  const metricOptions = useMemo(() => {
-    const names = new Set(knownMetrics)
-    if (metricFilter) names.add(metricFilter)
-    return [...names].sort()
-  }, [knownMetrics, metricFilter])
+  // Two groups, because the difference is diagnostic rather than cosmetic:
+  //   - Catalog: registered metrics, whether or not any have arrived yet. Selecting one that
+  //     returns nothing is itself the finding -- a device is not publishing what it should.
+  //   - Uncatalogued: metrics seen in the stream that no catalog entry covers. Usually a typo in
+  //     a device's metric name, or a metric someone forgot to register.
+  const { catalogMetrics, uncataloguedMetrics } = useMemo(() => {
+    const active = catalog.filter(m => !m.deprecated).map(m => m.name)
+    const catalogNames = new Set(active)
+    const seen = new Set(knownMetrics)
+    if (metricFilter) seen.add(metricFilter)
+    return {
+      catalogMetrics: [...catalogNames].sort(),
+      uncataloguedMetrics: [...seen].filter(n => !catalogNames.has(n)).sort()
+    }
+  }, [catalog, knownMetrics, metricFilter])
 
   const fmtVal = row => {
     if (row.val_bool !== null && row.val_bool !== undefined) return <span className={`telemetry-value val-bool-${row.val_bool}`}>{String(row.val_bool)}</span>
@@ -146,13 +162,24 @@ export function TelemetryTab({ initialAssetFilter, onClearFilter, hasPermission 
       <div className="section-header" style={{ marginBottom: '8px' }}>
         <h2 className="section-title">Telemetry Stream <span className="section-count">{rows.length}</span></h2>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <select className="form-control" style={{ width: '180px' }} value={assetFilter} onChange={e => handleAssetFilterChange(e.target.value)} title="Filter telemetry by specific device ID">
+          <select className="form-control" style={{ width: '220px' }} value={assetFilter} onChange={e => handleAssetFilterChange(e.target.value)} title="Filter telemetry by device">
             <option value="">All Devices</option>
-            {assets.map(a => <option key={a.asset_id} value={a.asset_id}>{a.asset_name} ({a.asset_id})</option>)}
+            {/* Labelled by name and Sparkplug ID -- the UUID this is valued by means nothing to
+                an engineer reading the stream. */}
+            {assets.map(a => <option key={a.asset_id} value={a.asset_id}>{a.asset_name} — {effectiveSparkplugId(a)}</option>)}
           </select>
-          <select className="form-control" style={{ width: '150px' }} value={metricFilter} onChange={e => setMetricFilter(e.target.value)} title="Filter telemetry by metric name">
+          <select className="form-control" style={{ width: '190px' }} value={metricFilter} onChange={e => setMetricFilter(e.target.value)} title="Filter by a registered catalog metric, or by one seen in the stream that no catalog entry covers">
             <option value="">All Metrics</option>
-            {metricOptions.map(m => <option key={m} value={m}>{m}</option>)}
+            {catalogMetrics.length > 0 && (
+              <optgroup label="Metric catalog">
+                {catalogMetrics.map(m => <option key={m} value={m}>{m}</option>)}
+              </optgroup>
+            )}
+            {uncataloguedMetrics.length > 0 && (
+              <optgroup label="Uncatalogued (seen in stream)">
+                {uncataloguedMetrics.map(m => <option key={m} value={m}>{m}</option>)}
+              </optgroup>
+            )}
           </select>
           <select className="form-control" style={{ width: '140px' }} value={timeRange} onChange={e => setTimeRange(e.target.value)} title="Filter telemetry by time window">
             <option value="">All History</option>
@@ -165,7 +192,9 @@ export function TelemetryTab({ initialAssetFilter, onClearFilter, hasPermission 
         </div>
       </div>
       <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
-        Real-time and historical time-series metric updates with filtering by device ID, metric name, and custom time windows.
+        Real-time and historical time-series metric updates, filterable by device, metric and time window.
+        The metric list is drawn from the Schemas page's metric catalog, so a registered metric can be
+        selected even before any sample has arrived — an empty result is then itself the finding.
       </p>
 
       {error && (

@@ -167,9 +167,13 @@ function AuthScreen({ onLoginSuccess, notice }) {
 function Dashboard({ session, onSignOut }) {
   const [selectedDeviceFilter, setSelectedDeviceFilter] = useState('')
   const [selectedGatewayFilter, setSelectedGatewayFilter] = useState('')
+  // Set when a schema's device count is clicked on the Schemas page; consumed by DevicesTab.
+  const [selectedSchemaFilter, setSelectedSchemaFilter] = useState('')
   const [showBugReport, setShowBugReport] = useState(false)
 
-  const { tab, setTab, handleNavClick } = useAppRouting(setSelectedDeviceFilter, setSelectedGatewayFilter)
+  const { tab, setTab, handleNavClick } = useAppRouting(
+    setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter
+  )
   const { theme, toggleTheme } = useTheme()
   const { toast, showToast, clearToast } = useToast()
 
@@ -253,10 +257,10 @@ function Dashboard({ session, onSignOut }) {
           {tab === 'overview'       && <OverviewTab onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }} onSelectGateway={id => { setSelectedGatewayFilter(id); setTab('gateways', { search: id }) }} showToast={showToast} hasPermission={hasPermission} onNavigateTab={t => setTab(t)} />}
           {tab === 'cells'          && <CellsTab showToast={showToast} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('telemetry', { asset_id: id }) }} hasPermission={hasPermission} />}
           {tab === 'gateways'       && <GatewaysTab showToast={showToast} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
-          {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('telemetry', { asset_id: id }) }} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} />}
+          {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('telemetry', { asset_id: id }) }} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} />}
           {tab === 'digital-thread' && <DigitalThreadTab />}
           {tab === 'telemetry'      && <TelemetryTab initialAssetFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} hasPermission={hasPermission} />}
-          {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} />}
+          {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={uuid => { setSelectedSchemaFilter(uuid); setTab('devices', { schema: uuid }) }} />}
           {tab === 'directory'      && <DirectoryTab showToast={showToast} hasPermission={hasPermission} />}
           {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} />}
         </Suspense>

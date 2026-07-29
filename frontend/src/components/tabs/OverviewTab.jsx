@@ -3,6 +3,7 @@ import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { gatewayLiveStatus, isGatewayOnline, formatHeartbeat } from '../../utils/gatewayStatus'
+import { effectiveSparkplugId } from '../../utils/sparkplugId'
 import {
   IconMap,
   IconFactory,
@@ -95,9 +96,9 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPer
   }
 
   // Pre-build Map for O(1) telemetry lookups per asset instead of O(N) array filter on
-  // every render. Telemetry is keyed by the Sparkplug B device *name* (what the
-  // hypertable stores in asset_id), not by the device UUID.
-  const telemetryByAssetName = useMemo(() => {
+  // every render. Telemetry is keyed by the device's immutable `sparkplug_id` (what the
+  // hypertable stores in asset_id), not by the device UUID or its editable name.
+  const telemetryBySparkplugId = useMemo(() => {
     const map = new Map()
     for (let i = 0; i < telemetry.length; i++) {
       const t = telemetry[i]
@@ -112,7 +113,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPer
   const getDeviceStatusColor = useCallback((asset) => {
     if (asset.is_archived) return 'chip-warning'
     if (asset.status === 'OFFLINE') return 'chip-offline'
-    const latest = telemetryByAssetName.get(asset.asset_name) || []
+    const latest = telemetryBySparkplugId.get(effectiveSparkplugId(asset)) || []
     const statusMetric = latest.find(t => t.metric_name === 'status')
     if (statusMetric && (statusMetric.val_string === 'OFFLINE' || statusMetric.val_string === 'DDEATH_RECEIVED')) return 'chip-offline'
 
@@ -123,7 +124,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPer
     if (tempMetric && tempMetric.val_double > 80.0) return 'chip-danger'
     if (statusMetric && (statusMetric.val_string === 'MAINTENANCE' || statusMetric.val_string === 'IDLE')) return 'chip-warning'
     return 'chip-success'
-  }, [telemetryByAssetName])
+  }, [telemetryBySparkplugId])
 
   if (loading) return <div className="loading-wrap"><div className="spinner" /> Loading shopfloor overview…</div>
 

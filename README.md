@@ -116,9 +116,43 @@ binary protobuf decoding first. This platform is a **fleet-monitoring dashboard 
 subset of the spec that serves that job. This section documents exactly where that line is drawn, so a
 reader integrating a real device — or extending the platform — knows what to expect.
 
+### Asset identity on the wire
+
+Every gateway and device carries an immutable **Sparkplug ID** — a 3-character type prefix (`gwy` /
+`dev`) plus 21 lowercase hex characters, 24 in total, e.g. `dev200000000000400080000`. It is a
+`GENERATED ALWAYS ... STORED` column derived from the row's UUID primary key
+(`supabase/migrations/20260101000014_sparkplug_identity.sql`), so it cannot drift from the record it
+identifies and needs no immutability trigger. Each asset's page shows it; click to copy.
+
+```text
+spBv1.0/{GroupID}/{MessageType}/{gwy…}[/{dev…}]
+```
+
+This is what identity means throughout the platform:
+
+- **Names are labels.** `gateways.name` and `devices.name` are freely editable and no longer `UNIQUE`
+  — two cells can both hold a `Pump_01`. Renaming an asset does not detach its telemetry, orphan its
+  birth parameters, or cause it to be re-quarantined on the next `DBIRTH`. Before this, identity *was*
+  the name, and all three of those happened silently.
+- **The topic is authoritative.** The `Asset_ID` payload metric is retained as a cross-check only; if
+  it contradicts the topic the device is quarantined rather than one of them quietly winning. `Asset_ID`
+  is also absent from alias-encoded `DDATA`, where the topic is the only identity available.
+- **`Asset_Name` is a hint, not a write.** It labels a newly discovered device. It is never applied to
+  an existing record — otherwise a rename in the dashboard would be stomped on the device's next birth.
+- **Malformed IDs are diagnosed, not dropped.** An id with the right prefix but the wrong shape is
+  quarantined with an actionable `quarantine_reason`, e.g. *"device id 'devfff…' is 23 characters;
+  expected 24 … most likely truncated or padded in the gateway configuration"*. An unrecognised but
+  well-formed id is simply a new discovery. That distinction is what the fixed width buys.
+- **Third-party devices keep their own id.** Hardware with a factory-preset Sparkplug id cannot be made
+  to publish a platform-issued one, so ingestion records what it saw in `devices.reported_identity` and
+  resolves against it thereafter.
+- **Migration window.** Ingestion still falls back to matching by name, flagging the row
+  `identity_source = 'legacy_name'` and logging a throttled deprecation warning, so gateways can be
+  reconfigured one at a time. Remove that fallback once the fleet is migrated.
+
 ### Messages the platform acts on
 
-`on_message()` (`ingestion/ingestion.py:412-457`) routes six message types to real behaviour:
+`on_message()` (`ingestion/ingestion.py:723-760`) routes six message types to real behaviour:
 
 | Message | Level | Handled by | Effect |
 | :--- | :--- | :--- | :--- |
@@ -151,7 +185,7 @@ simply never read:
 
 > [!NOTE]
 > The simulator (`node_red_flow.json`) publishes JSON, not binary protobuf. `parse_sparkplug_payload()`
-> (`ingestion/ingestion.py:375-409`) falls back to decoding that JSON into the same `Payload`/`Metric`
+> (`ingestion/ingestion.py:628-662`) falls back to decoding that JSON into the same `Payload`/`Metric`
 > objects when protobuf parsing fails, so the simulator's messages are handled identically to a real
 > device's once parsed — see `node_red_guide.md` for the full simulator walkthrough.
 
@@ -160,11 +194,11 @@ simply never read:
 - **`NCMD` / `DCMD`** (Node/Device Command) — the spec's Host→Edge control channel for pushing commands
   or a "Rebirth" request down to a device. This platform is strictly one-directional; nothing ever
   publishes to a device. A node-level `NCMD` is silently dropped (no `Asset_ID` to resolve, hits the
-  early return at `ingestion/ingestion.py:447-448`); a device-level `DCMD` is logged and discarded (the
-  `else` branch at `ingestion/ingestion.py:456-457`).
+  early return at `ingestion/ingestion.py:744-745`); a device-level `DCMD` is logged and discarded (the
+  `else` branch at `ingestion/ingestion.py:759-760`).
 - **`STATE`** (`spBv1.0/STATE/{host_id}`) — the retained topic a Sparkplug "Primary Host Application"
   publishes to announce itself online/offline. The topic is only 3 segments, so it's dropped before
-  message-type dispatch even runs (`len(parts) < 4` at `ingestion/ingestion.py:414-415`). This platform
+  message-type dispatch even runs (`len(parts) < 4` at `ingestion/ingestion.py:725-726`). This platform
   never announces itself as a primary host.
 
 ### Why this is scoped this way
@@ -220,9 +254,9 @@ All database migrations are stored in `supabase/migrations/`:
   - **Default Role for Self-Registration**: `AFTER INSERT` trigger on `auth.users` granting new sign-ups the read-only `Operator` role (both a `user_roles` row and `raw_app_meta_data.role`). Seeded personas are left untouched.
 - **`20260101000009_gateway_heartbeat_and_service_directory.sql`**:
   - **Gateway Heartbeats**: Adds `gateways.last_heartbeat` (plus `ip_address` and `is_virtual`), written by the ingestion daemon on every Sparkplug B node-level message.
-  - **DBIRTH Parameters**: `asset_config` is populated by the ingestion daemon on every `DBIRTH`, upserted per `(asset_id, metric_name)` and keyed by the Sparkplug B device name. This is what the Devices page's **Config** button displays — firmware version, serial number, thresholds and interlocks announced in the birth certificate. Recorded for quarantined devices too, so an administrator can inspect what a newly discovered device claims before approving it (DDATA telemetry stays gated).
+  - **DBIRTH Parameters**: `asset_config` is populated by the ingestion daemon on every `DBIRTH`, upserted per `(asset_id, metric_name)` and keyed by the device's immutable `sparkplug_id`. This is what the Devices page's **Config** button displays — firmware version, serial number, thresholds and interlocks announced in the birth certificate. Recorded for quarantined devices too, so an administrator can inspect what a newly discovered device claims before approving it (DDATA telemetry stays gated).
   - **Device Classification**: Adds `devices.asset_type` and `devices.connection_method`, which the device form has always collected but had nowhere to store.
-  - **Edge Node Registration**: Registers the `Virtual_Gateway_NodeRED` edge node published by `node_red_flow.json`, so heartbeats have a matching gateway row on a fresh stack.
+  - **Edge Node Registration**: Registers the `Virtual_Gateway_NodeRED` edge node published by `node_red_flow.json`, so heartbeats have a matching gateway row on a fresh stack. Its UUID is pinned so the generated `sparkplug_id` (`gwy100000000000400080000`) is stable and the flow can hardcode its topics.
   - **Service Directory**: Completes `directory_services` with every stack service — Supabase Studio, Kong, Auth, PostgREST, Edge Functions, Supabase PostgreSQL, TimescaleDB, and the ingestion engine.
 - **`20260101000010_telemetry_foreign_table.sql`**:
   - **Telemetry over PostgREST**: Creates a `postgres_fdw` link to the standalone TimescaleDB and exposes the hypertable as the read-only `public.telemetry` view, granted to `authenticated` only (`anon` gets `401`). This is how the dashboard reads real time-series data — TimescaleDB itself is not reachable from the browser.
@@ -234,7 +268,7 @@ All database migrations are stored in `supabase/migrations/`:
 - **`20260101000012_device_provisioning_tracking.sql`**:
   - **Provisioning tracking**: Adds `devices.first_dbirth_at`, written exactly once by the ingestion daemon on a device's real first `DBIRTH`. Distinguishes "provisioned but never seen" from "was online, then went offline" — both previously looked identical (`status = 'OFFLINE'`). The Devices tab flags a device **AWAITING FIRST BIRTH** once more than 24h have passed since provisioning with no birth received (computed client-side, same pattern as gateway heartbeat staleness — see `frontend/src/utils/deviceProvisioning.js`).
   - **Schema linkage**: Adds `devices.schema_id`, optionally linking a device to a `schemas` row.
-  - **Quarantine suggested-match**: when an unrecognized device lands in quarantine, it's compared against every provisioned-but-never-seen device by name similarity, and — if a candidate has a schema assigned — by overlap between the schema's required metrics and what the quarantined device actually reported. A match surfaces as a "did you mean...?" suggestion in the approval modal; accepting it re-keys the quarantined device's `asset_config` history onto the provisioned device, absorbs its status, and discards the quarantined row, rather than treating a typo'd device name as a brand new device (see `approve-quarantine` below).
+  - **Quarantine suggested-match**: when an unrecognized device lands in quarantine, it's compared against every provisioned-but-never-seen device by similarity of its reported name, and — if a candidate has a schema assigned — by overlap between the schema's required metrics and what the quarantined device actually reported. A match surfaces as a "did you mean...?" suggestion in the approval modal; accepting it re-keys the quarantined device's `asset_config` history onto the provisioned device, absorbs its status, and discards the quarantined row, rather than treating a device that announced an unexpected id as a brand new device (see `approve-quarantine` below).
 - **`20260101000013_metric_catalog.sql`**:
   - **Metric catalog**: A registry of individually-defined Sparkplug B metrics (name, Sparkplug datatype, description) that schemas are built from via the Schemas tab's **Build Schema from Catalog** flow — pick metrics, then either download a JSON spec sheet (the metric list plus the exact topic string an integrator's device should publish to) or provision a device with the resulting schema already attached.
   - **Append-only by design**: a metric's `name`/`datatype` are immutable once created, enforced by a `BEFORE UPDATE` trigger (not just the UI) — a physical device is already configured to publish under that exact name, so "editing" a metric means deprecating it and adding a new catalog entry, never rewriting one in place. Mirrors `digital_thread`'s append-only philosophy.
@@ -394,8 +428,9 @@ lost. Each entry names the offending code so it can be picked up directly.
   [Design Decision: Supabase Storage is Deliberately Not Deployed](#design-decision-supabase-storage-is-deliberately-not-deployed).
 - **`PGRST_DB_SCHEMAS` still lists `storage`.** Vestigial while no storage-api runs; kept to match
   upstream Supabase defaults.
-- **Simulated devices appear quarantined on first start.** `Simulated_CNC_01` is auto-registered with
-  `is_quarantined = true` by design; an `Administrator` must approve it before telemetry is stored.
+- **Simulated devices appear quarantined on first start.** `Simulated_CNC_01` (Sparkplug ID
+  `dev200000000000400080000`) is auto-registered with `is_quarantined = true` by design; an
+  `Administrator` must approve it before telemetry is stored.
 
 ---
 

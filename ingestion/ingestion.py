@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import psycopg2
 import paho.mqtt.client as mqtt
@@ -69,9 +70,36 @@ def get_timescaledb_connection():
     return _ts_conn
 
 # -----------------------------------------------------------------------------
-# Quarantine Status In-Process TTL Cache
+# Sparkplug B Wire Identity
 # -----------------------------------------------------------------------------
-_quarantine_cache = {}
+# Assets are identified on the wire by an immutable, platform-issued id: a 3-character type
+# prefix plus 21 lowercase hex characters, derived from the row's UUID primary key by the
+# `sparkplug_id` generated column (migration 0014). Asset *names* are display labels only
+# and can be edited freely without breaking ingestion, telemetry continuity, or the audit
+# trail -- which was the entire point of moving off name-based identity.
+GATEWAY_ID_PATTERN = re.compile(r"^gwy[0-9a-f]{21}$")
+DEVICE_ID_PATTERN = re.compile(r"^dev[0-9a-f]{21}$")
+SPARKPLUG_ID_LENGTH = 24
+
+# Payload metrics that carry identity rather than configuration or telemetry. Asset_ID is the
+# device's own claim about which asset it is (used only as a cross-check against the topic);
+# Asset_Name is a human-readable hint. Neither is stored as a parameter or a metric.
+IDENTITY_METRICS = ("Asset_ID", "Asset_Name")
+
+# Recorded on devices.quarantine_reason as "<CODE>: <detail>".
+REASON_UNKNOWN_DEVICE = "UNKNOWN_DEVICE"
+REASON_MALFORMED_IDENTITY = "MALFORMED_IDENTITY"
+REASON_IDENTITY_MISMATCH = "IDENTITY_MISMATCH"
+
+# Recorded on devices.identity_source.
+SOURCE_SPARKPLUG_ID = "sparkplug_id"
+SOURCE_REPORTED_IDENTITY = "reported_identity"
+SOURCE_LEGACY_NAME = "legacy_name"
+
+# Device resolution TTL cache, keyed by the id seen on the wire.
+# Values are (device_row_or_None, cached_at).
+_device_cache = {}
+_gateway_cache = {}
 CACHE_TTL_SECONDS = 5
 
 # Sparkplug B node-level (edge gateway) message types, as opposed to the device-level
@@ -82,45 +110,182 @@ NODE_MESSAGE_TYPES = ("NBIRTH", "NDATA", "NDEATH")
 _unknown_gateway_warned = {}
 UNKNOWN_GATEWAY_WARN_INTERVAL_SECONDS = 300
 
-def is_device_quarantined(asset_id: str) -> bool:
+# Throttle for legacy name-based identity deprecation warnings, keyed by the id on the wire.
+_legacy_identity_warned = {}
+LEGACY_IDENTITY_WARN_INTERVAL_SECONDS = 300
+
+_DEVICE_COLUMNS = "id,name,sparkplug_id,reported_identity,gateway_id,is_quarantined,first_dbirth_at"
+
+
+def diagnose_device_identity(wire_id: str):
     """
-    Checks if a device is quarantined or unregistered in Supabase.
-    Returns True if the device is missing from Supabase OR if is_quarantined is True.
-    Returns False ONLY if the device exists in Supabase and is_quarantined is False.
-    Caches results for CACHE_TTL_SECONDS to avoid excessive Supabase round-trips.
+    Explain how `wire_id` fails the wire-identity contract, or return None if it is acceptable.
+
+    A bare legacy name is deliberately *not* an error during the migration window -- only
+    something that is evidently an attempt at a platform-issued id (right prefix, wrong shape)
+    is. That distinction is what makes "the gateway truncated the id" a diagnosable condition
+    rather than just another anonymous unknown device in the queue.
+    """
+    if DEVICE_ID_PATTERN.match(wire_id):
+        return None
+
+    lowered = wire_id.lower()
+    if not lowered.startswith(("dev", "gwy")):
+        return None  # A legacy name. Handled by the deprecation path, not the quarantine path.
+
+    if lowered.startswith("gwy"):
+        return (
+            "'%s' is an edge gateway id, but it was published in the device position of the "
+            "topic. Check that the gateway is not publishing DBIRTH/DDATA under its own id."
+            % wire_id
+        )
+
+    if len(wire_id) != SPARKPLUG_ID_LENGTH:
+        return (
+            "device id '%s' is %d characters; expected %d ('dev' followed by 21 hex characters). "
+            "The id is most likely truncated or padded in the gateway configuration -- copy it "
+            "again from the device's page in the dashboard."
+            % (wire_id, len(wire_id), SPARKPLUG_ID_LENGTH)
+        )
+
+    return (
+        "device id '%s' is the correct length but contains characters outside 0-9 and a-f after "
+        "the 'dev' prefix. Copy it again from the device's page in the dashboard."
+        % wire_id
+    )
+
+
+def _throttled(store: dict, key: str, interval: int) -> bool:
+    """True at most once per `interval` seconds per key, so a 30s heartbeat cannot flood the log."""
+    now = time.time()
+    if now - store.get(key, 0) > interval:
+        store[key] = now
+        return True
+    return False
+
+
+def resolve_device(wire_id: str, use_cache: bool = True):
+    """
+    Resolve an id seen on the wire to its `devices` row, in order of precedence:
+
+      1. sparkplug_id      -- the platform-issued id, the current scheme.
+      2. reported_identity -- a third-party device's own factory-preset id, recorded when it
+                              was discovered. Such a device cannot be made to publish an
+                              issued id, so its own is what must keep resolving.
+      3. name              -- legacy, pre-0014 devices. Warns; this arm goes away once every
+                              gateway has been reconfigured.
+
+    Returns the row (with `_identity_source` attached) or None if unregistered. Any failure
+    resolves to None, which callers treat as "quarantined" -- the fail-closed answer.
     """
     if not supabase_client:
-        logger.warning("Supabase client unavailable. Failing closed: device '%s' assumed QUARANTINED.", asset_id)
-        return True
+        logger.warning("Supabase client unavailable. Failing closed: device '%s' assumed QUARANTINED.", wire_id)
+        return None
 
-    now = time.time()
-    if asset_id in _quarantine_cache:
-        is_quarantined, cached_at = _quarantine_cache[asset_id]
-        if now - cached_at < CACHE_TTL_SECONDS:
-            return is_quarantined
+    if use_cache and wire_id in _device_cache:
+        row, cached_at = _device_cache[wire_id]
+        if time.time() - cached_at < CACHE_TTL_SECONDS:
+            return row
+
+    # A well-formed platform id is never also a legacy name, so skip that round-trip.
+    lookups = [("sparkplug_id", SOURCE_SPARKPLUG_ID), ("reported_identity", SOURCE_REPORTED_IDENTITY)]
+    if not DEVICE_ID_PATTERN.match(wire_id):
+        lookups.append(("name", SOURCE_LEGACY_NAME))
 
     try:
-        res = supabase_client.table("devices").select("is_quarantined").eq("name", asset_id).execute()
-        devices = res.data if res else []
-        if not devices:
-            is_quarantined = True
-        else:
-            is_quarantined = bool(devices[0].get("is_quarantined"))
+        for column, source in lookups:
+            res = supabase_client.table("devices").select(_DEVICE_COLUMNS).eq(column, wire_id).execute()
+            rows = res.data if res else []
+            if not rows:
+                continue
 
-        _quarantine_cache[asset_id] = (is_quarantined, now)
-        return is_quarantined
+            if len(rows) > 1:
+                # reported_identity is deliberately non-unique: duplicates are a real
+                # misconfiguration that must surface in the queue rather than abort ingestion.
+                logger.warning(
+                    "Ambiguous device identity: %d devices match %s='%s'. Using '%s'. Two gateways "
+                    "are probably configured with the same device id.",
+                    len(rows), column, wire_id, rows[0].get("name")
+                )
+
+            row = dict(rows[0])
+            row["_identity_source"] = source
+            if source == SOURCE_LEGACY_NAME and _throttled(
+                _legacy_identity_warned, wire_id, LEGACY_IDENTITY_WARN_INTERVAL_SECONDS
+            ):
+                logger.warning(
+                    "DEPRECATED IDENTITY: device '%s' was matched by name. Reconfigure its gateway to "
+                    "publish sparkplug_id '%s' instead; name-based matching will be removed.",
+                    wire_id, row.get("sparkplug_id")
+                )
+
+            _device_cache[wire_id] = (row, time.time())
+            return row
+
+        _device_cache[wire_id] = (None, time.time())
+        return None
     except Exception as e:
-        logger.error("Error checking device quarantine status in Supabase for '%s': %s", asset_id, e)
-        return True
+        # Not cached: a transient Supabase failure must not pin this device to "unregistered"
+        # for the full TTL.
+        logger.error("Error resolving device identity '%s' in Supabase: %s", wire_id, e)
+        return None
+
+
+def resolve_gateway(wire_id: str):
+    """
+    Resolve an edge node id to its `gateways` row by sparkplug_id, then by name (legacy).
+
+    Gateways are never auto-created -- an unregistered edge node is logged and dropped,
+    mirroring the fail-closed treatment of unregistered devices.
+    """
+    if not supabase_client or not wire_id:
+        return None
+
+    if wire_id in _gateway_cache:
+        row, cached_at = _gateway_cache[wire_id]
+        if time.time() - cached_at < CACHE_TTL_SECONDS:
+            return row
+
+    lookups = ["sparkplug_id"] if GATEWAY_ID_PATTERN.match(wire_id) else ["sparkplug_id", "name"]
+
+    try:
+        for column in lookups:
+            res = supabase_client.table("gateways").select("id,name,sparkplug_id").eq(column, wire_id).execute()
+            rows = res.data if res else []
+            if not rows:
+                continue
+
+            row = dict(rows[0])
+            row["_identity_source"] = SOURCE_SPARKPLUG_ID if column == "sparkplug_id" else SOURCE_LEGACY_NAME
+            if column == "name" and _throttled(
+                _legacy_identity_warned, wire_id, LEGACY_IDENTITY_WARN_INTERVAL_SECONDS
+            ):
+                logger.warning(
+                    "DEPRECATED IDENTITY: edge node '%s' was matched by name. Reconfigure it to publish "
+                    "sparkplug_id '%s' instead; name-based matching will be removed.",
+                    wire_id, row.get("sparkplug_id")
+                )
+
+            _gateway_cache[wire_id] = (row, time.time())
+            return row
+
+        _gateway_cache[wire_id] = (None, time.time())
+        return None
+    except Exception as e:
+        logger.error("Error resolving gateway identity '%s' in Supabase: %s", wire_id, e)
+        return None
 
 # -----------------------------------------------------------------------------
 # Sparkplug B Ingestion Handlers
 # -----------------------------------------------------------------------------
-def store_birth_parameters(asset_id: str, payload):
+def store_birth_parameters(sparkplug_id: str, payload):
     """
     Persist the metrics carried by a DBIRTH birth certificate to `asset_config`, so the
     dashboard's device Config view can show the parameters the device announced
     (firmware version, serial number, thresholds, interlocks...).
+
+    Keyed by the device's `sparkplug_id`, not its name, so renaming the device leaves its
+    recorded birth parameters attached to it.
 
     These are configuration parameters, not telemetry: they are stored for quarantined
     devices too, precisely so an administrator can inspect what a newly discovered
@@ -131,7 +296,9 @@ def store_birth_parameters(asset_id: str, payload):
 
     rows = []
     for metric in payload.metrics:
-        if not metric.name or metric.name == 'Asset_ID':
+        # Asset_ID and Asset_Name carry identity, not configuration -- identity lives in the
+        # topic and in `devices`, so storing them as parameters would just be a stale copy.
+        if not metric.name or metric.name in IDENTITY_METRICS:
             continue
 
         row = {
@@ -175,71 +342,141 @@ def store_birth_parameters(asset_id: str, payload):
         logger.error("Error storing DBIRTH parameters for '%s': %s", asset_id, e, exc_info=True)
 
 
-def process_dbirth(asset_id: str, gateway_id: str, payload):
+def extract_name_hint(payload):
+    """
+    The device's self-reported friendly name, used only as the initial label for a newly
+    discovered device.
+
+    It is never applied to an existing row: the friendly name is platform-owned, and letting a
+    DBIRTH write it back would mean a rename in the dashboard gets stomped on the device's next
+    birth -- reintroducing the exact name/identity coupling this scheme removes.
+    """
+    for metric in payload.metrics:
+        if metric.name == 'Asset_Name' and metric.HasField('string_value'):
+            return metric.string_value.strip() or None
+    return None
+
+
+def quarantine_new_device(wire_id: str, gateway_wire_id: str, reason: str, payload):
+    """
+    Insert a newly discovered device with is_quarantined = True, and return the created row.
+
+    The arriving edge node is recorded on the row. Ingestion has always had it in scope and
+    always discarded it, which is why approving a quarantined device previously required the
+    operator to re-pick its gateway by hand.
+    """
+    gateway = resolve_gateway(gateway_wire_id)
+    if gateway is None:
+        logger.warning(
+            "Quarantining device '%s' from unregistered edge node '%s': it will have no gateway "
+            "assigned until one is chosen at approval.", wire_id, gateway_wire_id
+        )
+
+    record = {
+        "name": extract_name_hint(payload) or wire_id,
+        "status": "ONLINE",
+        "is_quarantined": True,
+        "first_dbirth_at": datetime.now(timezone.utc).isoformat(),
+        "reported_identity": wire_id,
+        "quarantine_reason": reason,
+        "identity_source": SOURCE_REPORTED_IDENTITY,
+        "gateway_id": gateway["id"] if gateway else None,
+    }
+
+    res = supabase_client.table("devices").insert(record).execute()
+    rows = res.data if res else []
+    row = dict(rows[0]) if rows else None
+
+    # sparkplug_id is a generated column, so it comes back in the returned representation.
+    # If the client was configured not to return one, resolve it rather than guessing.
+    if row and not row.get("sparkplug_id"):
+        row = resolve_device(wire_id, use_cache=False)
+    if row:
+        row["_identity_source"] = SOURCE_REPORTED_IDENTITY
+        _device_cache[wire_id] = (row, time.time())
+
+    logger.warning(
+        "QUARANTINE ALERT: device '%s' announced DBIRTH via edge node '%s' but is not registered. "
+        "Inserted with is_quarantined=True (%s).", wire_id, gateway_wire_id, reason
+    )
+    return row
+
+
+def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reason: str = None):
     """
     On Sparkplug B DBIRTH:
-    Check if device exists in Supabase `devices` table.
-    If missing, insert a new record with is_quarantined = True and trigger quarantine alert log.
+    Resolve the device by its wire identity. If it is unregistered, insert it quarantined,
+    recording both the id it published under and why it was held.
     Birth certificate metrics are recorded to `asset_config` either way.
+
+    `quarantine_reason` is supplied by the caller when the identity itself was already found
+    to be faulty (malformed, or contradicting the payload's Asset_ID claim). Such a device is
+    still admitted to the queue rather than dropped -- silently discarding it would make a
+    misconfigured gateway invisible instead of diagnosable.
     """
-    logger.info("Processing DBIRTH for device '%s' via gateway '%s'", asset_id, gateway_id)
+    logger.info("Processing DBIRTH for device '%s' via edge node '%s'", wire_id, gateway_wire_id)
     if not supabase_client:
-        logger.warning("Supabase client unavailable. Skipping Supabase DBIRTH check for '%s'", asset_id)
+        logger.warning("Supabase client unavailable. Skipping Supabase DBIRTH check for '%s'", wire_id)
         return
 
-    store_birth_parameters(asset_id, payload)
-
     try:
-        res = supabase_client.table("devices").select("*").eq("name", asset_id).execute()
-        devices = res.data if res else []
+        device = resolve_device(wire_id, use_cache=False)
 
-        if not devices:
-            # Device missing -> Insert with is_quarantined = True
-            supabase_client.table("devices").insert({
-                "name": asset_id,
-                "status": "ONLINE",
+        if device is None:
+            device = quarantine_new_device(
+                wire_id, gateway_wire_id, quarantine_reason or REASON_UNKNOWN_DEVICE, payload
+            )
+            if device is None:
+                logger.error("Failed to record quarantined device '%s'; dropping its birth certificate.", wire_id)
+                return
+        elif device.get("is_quarantined"):
+            logger.warning("QUARANTINE NOTICE: DBIRTH received for quarantined device '%s'", device.get("name"))
+        elif quarantine_reason:
+            # A registered device that has started publishing a faulty identity. Re-quarantine
+            # it: whatever is on the wire no longer reliably identifies this asset.
+            supabase_client.table("devices").update({
                 "is_quarantined": True,
-                "first_dbirth_at": datetime.now(timezone.utc).isoformat()
-            }).execute()
-            _quarantine_cache[asset_id] = (True, time.time())
+                "quarantine_reason": quarantine_reason,
+                "reported_identity": wire_id,
+            }).eq("id", device["id"]).execute()
+            _device_cache.pop(wire_id, None)
             logger.warning(
-                "QUARANTINE ALERT: Device '%s' announced DBIRTH but was missing from Supabase 'devices' table. "
-                "Inserted new record with is_quarantined=True.", asset_id
+                "QUARANTINE ALERT: registered device '%s' published a faulty identity and was "
+                "re-quarantined (%s).", device.get("name"), quarantine_reason
             )
         else:
-            dev = devices[0]
-            is_quar = bool(dev.get("is_quarantined"))
-            _quarantine_cache[asset_id] = (is_quar, time.time())
-            if is_quar:
-                logger.warning("QUARANTINE NOTICE: DBIRTH received for quarantined device '%s'", asset_id)
-            else:
-                # first_dbirth_at is write-once: only set it the first time this row sees a
-                # real birth, so a later rebirth never overwrites the original timestamp.
-                update_fields = {"status": "ONLINE"}
-                if not dev.get("first_dbirth_at"):
-                    update_fields["first_dbirth_at"] = datetime.now(timezone.utc).isoformat()
-                supabase_client.table("devices").update(update_fields).eq("id", dev["id"]).execute()
-                logger.info("DBIRTH: Verified registered device '%s' in Supabase", asset_id)
+            # first_dbirth_at is write-once: only set it the first time this row sees a
+            # real birth, so a later rebirth never overwrites the original timestamp.
+            update_fields = {"status": "ONLINE", "identity_source": device["_identity_source"]}
+            if not device.get("first_dbirth_at"):
+                update_fields["first_dbirth_at"] = datetime.now(timezone.utc).isoformat()
+            supabase_client.table("devices").update(update_fields).eq("id", device["id"]).execute()
+            logger.info("DBIRTH: verified registered device '%s' (%s)", device.get("name"), wire_id)
+
+        store_birth_parameters(device["sparkplug_id"], payload)
     except Exception as e:
         logger.error("Error checking/updating Supabase devices for DBIRTH: %s", e, exc_info=True)
 
 
-def process_ddeath(asset_id: str, gateway_id: str):
+def process_ddeath(wire_id: str, gateway_wire_id: str):
     """
     On Sparkplug B DDEATH: mark the registered device OFFLINE in Supabase so the
     dashboard's "OFFLINE / DDEATH" state reflects the actual death certificate.
     """
-    logger.info("Processing DDEATH for device '%s' via gateway '%s'", asset_id, gateway_id)
+    logger.info("Processing DDEATH for device '%s' via edge node '%s'", wire_id, gateway_wire_id)
     if not supabase_client:
-        logger.warning("Supabase client unavailable. Skipping DDEATH status update for '%s'", asset_id)
+        logger.warning("Supabase client unavailable. Skipping DDEATH status update for '%s'", wire_id)
+        return
+
+    device = resolve_device(wire_id)
+    if device is None:
+        logger.warning("DDEATH received for unregistered device '%s'; nothing to update", wire_id)
         return
 
     try:
-        res = supabase_client.table("devices").update({"status": "OFFLINE"}).eq("name", asset_id).execute()
-        if not res.data:
-            logger.warning("DDEATH received for unregistered device '%s'; nothing to update", asset_id)
+        supabase_client.table("devices").update({"status": "OFFLINE"}).eq("id", device["id"]).execute()
     except Exception as e:
-        logger.error("Error applying DDEATH status update for '%s': %s", asset_id, e, exc_info=True)
+        logger.error("Error applying DDEATH status update for '%s': %s", wire_id, e, exc_info=True)
 
 
 def process_node_message(edge_node_id: str, msg_type: str, payload):
@@ -268,46 +505,51 @@ def process_node_message(edge_node_id: str, msg_type: str, payload):
     # clock, and edge node clocks drift (or, for a replayed payload, are plain wrong).
     heartbeat_dt = datetime.now(timezone.utc)
 
+    gateway = resolve_gateway(edge_node_id)
+    if gateway is None:
+        # Rate-limited: an unregistered node beats every 30s and would otherwise
+        # fill the log with the same line forever.
+        if _throttled(_unknown_gateway_warned, edge_node_id, UNKNOWN_GATEWAY_WARN_INTERVAL_SECONDS):
+            logger.warning(
+                "Received %s from unregistered edge node '%s'. Register a gateway in the dashboard "
+                "and configure this node to publish the sparkplug_id it is issued.",
+                msg_type, edge_node_id
+            )
+        return
+
     try:
-        res = supabase_client.table("gateways").update({
+        supabase_client.table("gateways").update({
             "status": status,
             "last_heartbeat": heartbeat_dt.isoformat()
-        }).eq("name", edge_node_id).execute()
+        }).eq("id", gateway["id"]).execute()
 
-        if res.data:
-            logger.info(
-                "HEARTBEAT: %s from edge node '%s' -> status=%s at %s",
-                msg_type, edge_node_id, status, heartbeat_dt.isoformat()
-            )
-        else:
-            # Rate-limited: an unregistered node beats every 30s and would otherwise
-            # fill the log with the same line forever.
-            now = time.time()
-            last_warned = _unknown_gateway_warned.get(edge_node_id, 0)
-            if now - last_warned > UNKNOWN_GATEWAY_WARN_INTERVAL_SECONDS:
-                _unknown_gateway_warned[edge_node_id] = now
-                logger.warning(
-                    "Received %s from unregistered edge node '%s'. Register a gateway with this "
-                    "exact name to track its heartbeat.", msg_type, edge_node_id
-                )
+        logger.info(
+            "HEARTBEAT: %s from edge node '%s' (%s) -> status=%s at %s",
+            msg_type, gateway.get("name"), edge_node_id, status, heartbeat_dt.isoformat()
+        )
     except Exception as e:
         logger.error("Error updating gateway heartbeat for '%s': %s", edge_node_id, e, exc_info=True)
 
 
-def process_ddata(asset_id: str, gateway_id: str, payload):
+def process_ddata(wire_id: str, gateway_wire_id: str, payload):
     """
     On Sparkplug B DDATA:
     Verify device registration & quarantine status in Supabase.
     If quarantined or missing, drop DDATA telemetry.
-    Otherwise, insert metric timestamps and values into TimescaleDB telemetry hypertable.
+    Otherwise, insert metric timestamps and values into TimescaleDB telemetry hypertable,
+    keyed by the device's immutable `sparkplug_id` so a rename never breaks the series.
     """
-    if is_device_quarantined(asset_id):
-        logger.warning("Dropping DDATA for quarantined/unregistered device '%s'", asset_id)
+    device = resolve_device(wire_id)
+    if device is None or device.get("is_quarantined"):
+        logger.warning("Dropping DDATA for quarantined/unregistered device '%s'", wire_id)
         return
+
+    asset_id = device["sparkplug_id"]
+    asset_name = device.get("name") or asset_id
 
     db_conn = get_timescaledb_connection()
     if not db_conn:
-        logger.warning("TimescaleDB connection unavailable. Skipping DDATA telemetry ingestion for '%s'", asset_id)
+        logger.warning("TimescaleDB connection unavailable. Skipping DDATA telemetry ingestion for '%s'", wire_id)
         return
 
     payload_ts = payload.timestamp if hasattr(payload, 'timestamp') and payload.timestamp > 0 else int(time.time() * 1000)
@@ -316,15 +558,20 @@ def process_ddata(asset_id: str, gateway_id: str, payload):
     try:
         with db_conn:
             with db_conn.cursor() as cur:
-                # Ensure asset entry exists in TimescaleDB assets table to satisfy foreign key constraint
+                # Ensure asset entry exists in TimescaleDB assets table to satisfy foreign key
+                # constraint. asset_name is a display-only cached copy of the Supabase label, so
+                # it is refreshed on every birth rather than left stale after a rename.
                 cur.execute(
-                    "INSERT INTO assets (asset_id, asset_name) VALUES (%s, %s) ON CONFLICT (asset_id) DO NOTHING;",
-                    (asset_id, asset_id)
+                    """
+                    INSERT INTO assets (asset_id, asset_name) VALUES (%s, %s)
+                    ON CONFLICT (asset_id) DO UPDATE SET asset_name = EXCLUDED.asset_name;
+                    """,
+                    (asset_id, asset_name)
                 )
 
                 metric_count = 0
                 for metric in payload.metrics:
-                    if metric.name == 'Asset_ID':
+                    if metric.name in IDENTITY_METRICS:
                         continue
 
                     if metric.HasField('timestamp') and metric.timestamp > 0:
@@ -415,13 +662,71 @@ def parse_sparkplug_payload(msg):
             return None
 
 
+def extract_claimed_asset_id(payload):
+    """The device's own Asset_ID claim, if it published one. Absent from aliased DDATA."""
+    for metric in payload.metrics:
+        if metric.name == 'Asset_ID':
+            if metric.HasField('string_value'):
+                return metric.string_value
+            if metric.HasField('int_value'):
+                return str(metric.int_value)
+            if metric.HasField('long_value'):
+                return str(metric.long_value)
+            return None
+    return None
+
+
+def resolve_wire_identity(parts, payload):
+    """
+    Determine which device a message is about, and whether its identity is trustworthy.
+
+    Returns (wire_id, quarantine_reason). wire_id is None if the message carries no usable
+    identity at all.
+
+    The topic is authoritative. The Asset_ID metric used to silently override it, which meant
+    a device could publish under one id and be tracked as another -- and it is absent entirely
+    from alias-encoded DDATA, where the topic is the only identity available.
+
+    The strict contract is applied only to devices already publishing a platform-issued id.
+    A legacy device still publishing its name keeps the old "payload metric wins" behaviour so
+    that reconfiguring gateways one at a time stays non-breaking; that arm goes away with the
+    rest of the name-matching fallback.
+    """
+    topic_id = parts[4] if len(parts) >= 5 else None
+    claimed_id = extract_claimed_asset_id(payload)
+
+    if not topic_id:
+        # Pre-0014 flows that put identity solely in the payload metric.
+        return claimed_id, None
+
+    if DEVICE_ID_PATTERN.match(topic_id):
+        if claimed_id and claimed_id != topic_id:
+            logger.warning(
+                "IDENTITY MISMATCH: topic says device '%s' but the Asset_ID metric claims '%s'. "
+                "Trusting the topic and quarantining.", topic_id, claimed_id
+            )
+            return topic_id, "%s: topic device id '%s' contradicts the Asset_ID metric '%s'" % (
+                REASON_IDENTITY_MISMATCH, topic_id, claimed_id
+            )
+        return topic_id, None
+
+    detail = diagnose_device_identity(topic_id)
+    if detail:
+        return topic_id, "%s: %s" % (REASON_MALFORMED_IDENTITY, detail)
+
+    # A legacy name in the topic. Preserve the historical precedence during the window.
+    if claimed_id and claimed_id != topic_id:
+        return claimed_id, None
+    return topic_id, None
+
+
 def on_message(client, userdata, msg):
     parts = msg.topic.split('/')
     if len(parts) < 4 or parts[0] != 'spBv1.0':
         return
 
     msg_type = parts[2]
-    gateway_id = parts[3]
+    edge_node_id = parts[3]
 
     if not msg.payload:
         return
@@ -433,34 +738,26 @@ def on_message(client, userdata, msg):
     # Node-level topics (spBv1.0/<group>/<NBIRTH|NDATA|NDEATH>/<edge_node>) carry no
     # device component and no Asset_ID metric -- they are edge gateway heartbeats.
     if msg_type in NODE_MESSAGE_TYPES and len(parts) < 5:
-        process_node_message(gateway_id, msg_type, payload)
+        process_node_message(edge_node_id, msg_type, payload)
         return
 
-    asset_id = None
-    for metric in payload.metrics:
-        if metric.name == 'Asset_ID':
-            if metric.HasField('string_value'):
-                asset_id = metric.string_value
-            elif metric.HasField('int_value'):
-                asset_id = str(metric.int_value)
-            elif metric.HasField('long_value'):
-                asset_id = str(metric.long_value)
-            break
-
-    if not asset_id and len(parts) >= 5:
-        asset_id = parts[4]
-
-    if not asset_id:
+    wire_id, quarantine_reason = resolve_wire_identity(parts, payload)
+    if not wire_id:
         return
 
     if msg_type in ("DBIRTH", "NBIRTH"):
-        process_dbirth(asset_id, gateway_id, payload)
+        process_dbirth(wire_id, edge_node_id, payload, quarantine_reason)
     elif msg_type == "DDATA":
-        process_ddata(asset_id, gateway_id, payload)
+        if quarantine_reason:
+            # Faulty identity: the birth path is what records it for the operator. Telemetry
+            # from an asset we cannot reliably identify must not reach the historian.
+            logger.warning("Dropping DDATA from device '%s': %s", wire_id, quarantine_reason)
+            return
+        process_ddata(wire_id, edge_node_id, payload)
     elif msg_type == "DDEATH":
-        process_ddeath(asset_id, gateway_id)
+        process_ddeath(wire_id, edge_node_id)
     else:
-        logger.info("Received %s message for asset '%s' via gateway '%s'", msg_type, asset_id, gateway_id)
+        logger.info("Received %s message for device '%s' via edge node '%s'", msg_type, wire_id, edge_node_id)
 
 
 def main():

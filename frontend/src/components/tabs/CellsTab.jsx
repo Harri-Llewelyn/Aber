@@ -3,6 +3,8 @@ import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { gatewayLiveStatus, formatHeartbeat } from '../../utils/gatewayStatus'
+import { effectiveSparkplugId, gatewaySparkplugId } from '../../utils/sparkplugId'
+import CopyableId from '../common/CopyableId'
 import { InlineDocumentAccordion } from '../common/InlineDocumentAccordion'
 import { StatusBadge } from '../common/StatusBadge'
 import { ArchiveModal } from '../modals/ArchiveModal'
@@ -36,6 +38,8 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
   const [docRefreshKey, setDocRefreshKey] = useState(0)
   const [filterMode, setFilterMode] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
+  const [attentionOnly, setAttentionOnly] = useState(false)
+  const [emptyOnly, setEmptyOnly] = useState(false)
 
   const loadAll = useCallback(async (signal) => {
     try {
@@ -87,15 +91,36 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
   // no cell card at all. Surface those rather than letting them silently vanish.
   const unlinkedDevices = assets.filter(a => !a.is_archived && !a.cell_id)
 
+  // Cell-level rollups. A cell has no state of its own worth filtering on -- what matters is the
+  // condition of the gateways and devices reachable through it. /api/v1/cells already embeds both
+  // (see the comment on loadAll), so these read straight off the cell rather than re-querying.
+  const liveGateways = (c) => (c.gateways || []).filter(g => !g.is_archived)
+  const liveDevices = (c) => (c.devices || []).filter(a => !a.is_archived)
+
+  const cellNeedsAttention = (c) =>
+    liveGateways(c).some(g => gatewayLiveStatus(g) !== 'ONLINE') ||
+    liveDevices(c).some(a => a.is_quarantined)
+
+  // Either no gateways at all, or gateways serving nothing -- usually a provisioning mistake or a
+  // decommissioned area nobody cleaned up.
+  const cellIsEmpty = (c) => liveGateways(c).length === 0 || liveDevices(c).length === 0
+
   const filteredCells = cells.filter(c => {
     if (filterMode === 'active'   && c.is_archived) return false
     if (filterMode === 'archived' && !c.is_archived) return false
+    if (attentionOnly && !cellNeedsAttention(c)) return false
+    if (emptyOnly && !cellIsEmpty(c)) return false
     if (searchQuery) {
       const q = searchQuery.toLowerCase()
       if (!String(c.cell_id).toLowerCase().includes(q) && !c.cell_name.toLowerCase().includes(q)) return false
     }
     return true
   })
+
+  const attentionCount = cells.filter(c => !c.is_archived && cellNeedsAttention(c)).length
+  const emptyCount = cells.filter(c => !c.is_archived && cellIsEmpty(c)).length
+  const activeFilterCount =
+    (searchQuery ? 1 : 0) + (attentionOnly ? 1 : 0) + (emptyOnly ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
 
   return (
     <>
@@ -114,18 +139,6 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
             </button>
           </div>
 
-          <input
-            className="form-control"
-            style={{ width: '200px' }}
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search by Cell ID or name…"
-            title="Filter cells by ID or name"
-          />
-          {searchQuery && (
-            <button className="btn btn-ghost btn-sm" onClick={() => setSearchQuery('')} title="Clear search"><IconX size={13} /> Clear</button>
-          )}
-
           <button
             className={`btn btn-primary ${!canManage ? 'btn-disabled' : ''}`}
             disabled={!canManage}
@@ -136,10 +149,47 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
           </button>
         </div>
       </div>
-      <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
+      <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '16px' }}>
         Manage physical and logical shopfloor cell zones, inspect assigned edge gateways and devices, and monitor zone lifecycle audit history.
         A device belongs to a cell through its edge gateway.
       </p>
+
+      <div className="filter-bar">
+        <input
+          className="form-control"
+          style={{ width: '220px' }}
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          placeholder="Search by Cell ID or name…"
+          title="Filter cells by ID or name"
+        />
+
+        <button
+          className={`btn btn-sm ${attentionOnly ? 'btn-primary' : 'btn-ghost'}`}
+          onClick={() => setAttentionOnly(v => !v)}
+          title="Cells containing an offline or stale gateway, or any quarantined device"
+        >
+          <IconShieldAlert size={13} /> Needs attention ({attentionCount})
+        </button>
+
+        <button
+          className={`btn btn-sm ${emptyOnly ? 'btn-primary' : 'btn-ghost'}`}
+          onClick={() => setEmptyOnly(v => !v)}
+          title="Cells with no gateways, or gateways serving no devices"
+        >
+          Empty ({emptyCount})
+        </button>
+
+        {activeFilterCount > 0 && (
+          <button
+            className="btn btn-ghost btn-sm filter-bar-spacer"
+            onClick={() => { setSearchQuery(''); setAttentionOnly(false); setEmptyOnly(false); setFilterMode('all') }}
+            title="Clear every filter"
+          >
+            <IconX size={13} /> Clear filters ({activeFilterCount})
+          </button>
+        )}
+      </div>
 
       {unlinkedDevices.length > 0 && (
         <div style={{ marginBottom: '20px', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px 16px', fontSize: '13px', color: 'var(--warning)', display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -243,12 +293,12 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
                   ) : (
                     <div className="table-wrap">
                       <table>
-                        <thead><tr><th title="Gateway ID">Gateway ID</th><th title="Gateway Name">Name</th><th title="Connectivity status">Status</th><th title="Last Sparkplug B node heartbeat">Last Heartbeat</th><th title="Devices served by this gateway">Devices</th></tr></thead>
+                        <thead><tr><th title="Gateway Name">Name</th><th title="Sparkplug B edge node id">Sparkplug ID</th><th title="Connectivity status">Status</th><th title="Last Sparkplug B node heartbeat">Last Heartbeat</th><th title="Devices served by this gateway">Devices</th></tr></thead>
                         <tbody>
                           {cellGateways.map(g => (
                             <tr key={g.gateway_id} style={{ background: g.is_archived ? 'rgba(255,179,0,0.06)' : undefined }}>
-                              <td><span className="mono">{g.gateway_id}</span></td>
                               <td><strong>{g.gateway_name}</strong></td>
+                              <td><CopyableId value={g.sparkplug_id || gatewaySparkplugId(g.gateway_id)} label="Sparkplug edge node id" onNotify={showToast} /></td>
                               <td>
                                 {g.is_archived
                                   ? <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)' }}>DECOMMISSIONED</span>
@@ -269,14 +319,13 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
                   {cellAssets.length === 0 ? <div style={{ fontStyle: 'italic', fontSize: '12px', color: 'var(--text-dim)' }}>No devices reachable through this cell zone's gateways.</div> : (
                     <div className="table-wrap">
                       <table>
-                        <thead><tr><th title="Device ID">Device ID</th><th title="Device Name">Name</th><th title="Status">Status</th><th title="Connected Edge Gateway">Gateway</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+                        <thead><tr><th title="Device Name">Name</th><th title="Sparkplug B device id">Sparkplug ID</th><th title="Status">Status</th><th title="Connected Edge Gateway">Gateway</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
                         <tbody>
                           {cellAssets.map(a => {
                             const isOff = a.status === 'OFFLINE'
                             const isArch = a.is_archived
                             return (
                               <tr key={a.asset_id} style={{ background: isArch ? 'rgba(255,179,0,0.06)' : undefined }}>
-                                <td><span className="mono">{a.asset_id}</span></td>
                                 <td>
                                   <strong>{a.asset_name}</strong>
                                   {isArch && (
@@ -285,6 +334,7 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
                                     </span>
                                   )}
                                 </td>
+                                <td><CopyableId value={effectiveSparkplugId(a)} label="Sparkplug device id" onNotify={showToast} /></td>
                                 <td>
                                   {isArch ? (
                                     <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Decommissioned device (Out of Commission)">

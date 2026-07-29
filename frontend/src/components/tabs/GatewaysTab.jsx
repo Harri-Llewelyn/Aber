@@ -3,6 +3,8 @@ import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { gatewayLiveStatus, formatHeartbeat } from '../../utils/gatewayStatus'
+import { gatewaySparkplugId } from '../../utils/sparkplugId'
+import CopyableId from '../common/CopyableId'
 import { InlineDocumentAccordion } from '../common/InlineDocumentAccordion'
 import { StatusBadge } from '../common/StatusBadge'
 import { ArchiveModal } from '../modals/ArchiveModal'
@@ -20,6 +22,7 @@ import {
   IconChevronDown,
   IconChevronUp,
   IconZap,
+  IconShieldAlert,
   IconX
 } from '../common/Icons'
 
@@ -47,6 +50,9 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
   }
 
   const [searchQuery, setSearchQuery] = useState(getInitialSearch)
+  const [liveStatusFilter, setLiveStatusFilter] = useState('')
+  const [kindFilter, setKindFilter] = useState('')
+  const [quarantineOnly, setQuarantineOnly] = useState(false)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -64,6 +70,15 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
       window.history.replaceState({}, '', window.location.pathname)
     }
     if (onClearFilter) onClearFilter()
+  }
+
+  const resetFilters = () => {
+    setSearchQuery('')
+    setLiveStatusFilter('')
+    setKindFilter('')
+    setQuarantineOnly(false)
+    setFilterMode('all')
+    handleClearSearch()
   }
 
   const load = useCallback(async (signal) => {
@@ -115,15 +130,33 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
 
   const unassignedDevices = assets.filter(a => !a.is_archived && !a.active_gateway_id)
 
+  // Built from the flat device list rather than the embedded one: ingestion records the arriving
+  // edge node on a quarantined device, so a device held on a gateway is attributable even though
+  // it has not been approved onto it yet.
+  const gatewaysWithQuarantine = new Set(
+    assets.filter(a => a.is_quarantined && a.active_gateway_id).map(a => a.active_gateway_id)
+  )
+
   const filteredGateways = gateways.filter(g => {
     if (filterMode === 'active'   && g.is_archived) return false
     if (filterMode === 'archived' && !g.is_archived) return false
     if (searchQuery) {
+      // Matches the friendly name, the internal UUID and the Sparkplug edge node id.
       const q = searchQuery.toLowerCase()
-      if (!g.gateway_id.toLowerCase().includes(q) && !g.gateway_name.toLowerCase().includes(q)) return false
+      const haystack = [g.gateway_name, g.gateway_id, g.sparkplug_id || gatewaySparkplugId(g.gateway_id)]
+        .filter(Boolean).join(' ').toLowerCase()
+      if (!haystack.includes(q)) return false
     }
+    if (liveStatusFilter && gatewayLiveStatus(g) !== liveStatusFilter) return false
+    if (kindFilter === 'virtual'  && !g.is_virtual) return false
+    if (kindFilter === 'physical' && g.is_virtual) return false
+    if (quarantineOnly && !gatewaysWithQuarantine.has(g.gateway_id)) return false
     return true
   })
+
+  const activeFilterCount =
+    [searchQuery, liveStatusFilter, kindFilter].filter(Boolean).length +
+    (quarantineOnly ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
 
   return (
     <>
@@ -142,18 +175,6 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
             </button>
           </div>
 
-          <input
-            className="form-control"
-            style={{ width: '200px' }}
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search by Gateway ID or name…"
-            title="Filter gateways by ID or name"
-          />
-          {searchQuery && (
-            <button className="btn btn-ghost btn-sm" onClick={handleClearSearch} title="Clear search"><IconX size={13} /> Clear</button>
-          )}
-
           <button
             className={`btn btn-primary ${!canManage ? 'btn-disabled' : ''}`}
             disabled={!canManage}
@@ -164,10 +185,50 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
           </button>
         </div>
       </div>
-      <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
+      <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '16px' }}>
         Register and configure edge gateways, inspect heartbeat status, and manage edge node connections across the factory network.
         A gateway's status follows the Sparkplug B node heartbeat: it is shown as <strong>STALE</strong> once no NBIRTH/NDATA has arrived for 90 seconds.
       </p>
+
+      <div className="filter-bar">
+        <input
+          className="form-control"
+          style={{ width: '220px' }}
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          placeholder="Search name, UUID or Sparkplug ID…"
+          title="Filter gateways by friendly name, internal UUID, or Sparkplug ID"
+        />
+
+        {/* Live status is derived from heartbeat age, not the stored `status` column -- a gateway
+            that died without sending NDEATH still reads ONLINE in the database. */}
+        <select className="form-control" style={{ width: '160px' }} value={liveStatusFilter} onChange={e => setLiveStatusFilter(e.target.value)} title="Filter by live heartbeat status (90s staleness threshold)">
+          <option value="">Any status</option>
+          <option value="ONLINE">Online</option>
+          <option value="STALE">Stale</option>
+          <option value="OFFLINE">Offline</option>
+        </select>
+
+        <select className="form-control" style={{ width: '160px' }} value={kindFilter} onChange={e => setKindFilter(e.target.value)} title="Separate simulated/virtual edge nodes from physical hardware">
+          <option value="">Any kind</option>
+          <option value="physical">Physical</option>
+          <option value="virtual">Virtual</option>
+        </select>
+
+        <button
+          className={`btn btn-sm ${quarantineOnly ? 'btn-primary' : 'btn-ghost'}`}
+          onClick={() => setQuarantineOnly(v => !v)}
+          title="Show only gateways currently reporting devices held in quarantine — points at the misconfigured edge node when several devices fail at once"
+        >
+          <IconShieldAlert size={13} /> Has quarantined devices ({gatewaysWithQuarantine.size})
+        </button>
+
+        {activeFilterCount > 0 && (
+          <button className="btn btn-ghost btn-sm filter-bar-spacer" onClick={resetFilters} title="Clear every filter">
+            <IconX size={13} /> Clear filters ({activeFilterCount})
+          </button>
+        )}
+      </div>
 
       {unassignedDevices.length > 0 && (
         <div style={{ marginBottom: '20px', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px 16px', fontSize: '13px', color: 'var(--warning)' }}>
@@ -189,8 +250,8 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
              <table>
                <thead>
                  <tr>
-                   <th title="Unique gateway ID string">Gateway ID</th>
                    <th title="Human-readable gateway name">Gateway Name</th>
+                   <th title="Sparkplug B edge node id this gateway publishes under">Sparkplug ID</th>
                    <th title="Network IP address">IP Address</th>
                    <th title="Shopfloor cell zone this gateway serves">Cell Zone</th>
                    <th title="Network connectivity status">Gateway Status</th>
@@ -209,7 +270,6 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
                    return (
                      <React.Fragment key={g.gateway_id}>
                        <tr style={{ background: g.is_archived ? 'rgba(255,179,0,0.06)' : undefined }}>
-                         <td><span className="mono">{g.gateway_id}</span></td>
                          <td>
                            <strong>{g.gateway_name}</strong>
                            {g.is_virtual && (
@@ -223,6 +283,7 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
                              </span>
                            )}
                          </td>
+                         <td><CopyableId value={g.sparkplug_id || gatewaySparkplugId(g.gateway_id)} label="Sparkplug edge node id" onNotify={showToast} /></td>
                          <td><span className="mono" style={{ color: 'var(--text-muted)' }}>{g.ip_address || '—'}</span></td>
                          <td>
                            {g.cell_id
@@ -335,16 +396,33 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
         <div className="modal-overlay">
           <div className="modal">
             <div className="modal-title">{editing ? 'Edit Gateway' : 'Register Gateway'}</div>
-            <div className="form-group">
-              <label className="form-label">Gateway ID</label>
-              <input className="form-control" value={form.gateway_id || '— assigned on save —'} disabled readOnly title="Database-generated UUID; not editable" />
-            </div>
+            {/* Name first: it is the human handle. The identifiers below are machine-issued
+                and read-only, and only matter when configuring the physical edge node. */}
             <div className="form-group">
               <label className="form-label">Gateway Name</label>
-              <input className="form-control" value={form.gateway_name} onChange={e => setForm(f => ({ ...f, gateway_name: e.target.value }))} title="Must match the Sparkplug B edge node id in the MQTT topic for heartbeats to be matched" placeholder="e.g. Virtual_Gateway_NodeRED" />
+              <input className="form-control" value={form.gateway_name} onChange={e => setForm(f => ({ ...f, gateway_name: e.target.value }))} title="Friendly label for this gateway" placeholder="e.g. Virtual_Gateway_NodeRED" />
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                Must match the Sparkplug B edge node id (<span className="mono">spBv1.0/&lt;group&gt;/NDATA/&lt;edge node&gt;</span>) for heartbeats to update this gateway.
+                A display label only — rename it freely. Heartbeats are matched on the Sparkplug ID below.
               </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Sparkplug ID</label>
+              {editing ? (
+                <>
+                  <CopyableId value={editing.sparkplug_id || gatewaySparkplugId(editing.gateway_id)} label="Sparkplug edge node id" onNotify={showToast} />
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    Configure this edge node to publish on <span className="mono">spBv1.0/&lt;group&gt;/NDATA/{editing.sparkplug_id || gatewaySparkplugId(editing.gateway_id)}</span>. Click to copy.
+                  </div>
+                </>
+              ) : (
+                <input className="form-control" value="— issued on save —" disabled readOnly title="Derived from the gateway's database id once the record exists" />
+              )}
+            </div>
+            <div className="form-group">
+              <label className="form-label">Internal UUID</label>
+              {editing
+                ? <CopyableId value={form.gateway_id} label="gateway UUID" onNotify={showToast} />
+                : <input className="form-control" value="— assigned on save —" disabled readOnly title="Database-generated UUID; not editable" />}
             </div>
             <div className="form-group">
               <label className="form-label">Shopfloor Cell Zone</label>

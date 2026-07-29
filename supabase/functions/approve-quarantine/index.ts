@@ -77,7 +77,7 @@ export default async function handler(req: Request): Promise<Response> {
       );
     }
 
-    const { device_id, gateway_id, merge_into_device_id } = await req.json();
+    const { device_id, gateway_id, merge_into_device_id, asset_name } = await req.json();
 
     if (!device_id) {
       return new Response(
@@ -86,13 +86,23 @@ export default async function handler(req: Request): Promise<Response> {
       );
     }
 
+    // Devices are addressed by their UUID primary key. This used to accept either a UUID or a
+    // Sparkplug B name, because the quarantine list handed out names; identity now lives on
+    // `sparkplug_id` and the list returns UUIDs like every other device view.
+    if (!isUuid(device_id)) {
+      return new Response(
+        JSON.stringify({ error: "device_id must be a device UUID" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 
     // Suggested-match acceptance: the quarantined row is a device that was already
-    // provisioned under a different (correct) name -- e.g. an integrator typo'd the
-    // Sparkplug B device name. Rather than un-quarantining the mistyped row, absorb its
-    // runtime state into the provisioned row (which may already carry a gateway/schema
-    // assignment worth keeping) and discard the quarantined duplicate.
+    // provisioned in the dashboard, whose gateway then came online announcing a different
+    // Sparkplug id than the one it was issued. Rather than un-quarantining the discovered
+    // row, absorb its runtime state into the provisioned row (which may already carry a
+    // gateway/schema assignment worth keeping) and discard the duplicate.
     if (merge_into_device_id) {
       if (merge_into_device_id === device_id) {
         return new Response(
@@ -101,11 +111,10 @@ export default async function handler(req: Request): Promise<Response> {
         );
       }
 
-      let quarantinedQuery = supabaseAdmin.from("devices").select("*");
-      quarantinedQuery = isUuid(device_id)
-        ? quarantinedQuery.eq("id", device_id)
-        : quarantinedQuery.eq("name", device_id);
-      const { data: quarantinedRows, error: quarantinedError } = await quarantinedQuery;
+      const { data: quarantinedRows, error: quarantinedError } = await supabaseAdmin
+        .from("devices")
+        .select("*")
+        .eq("id", device_id);
 
       if (quarantinedError) {
         return new Response(
@@ -149,12 +158,12 @@ export default async function handler(req: Request): Promise<Response> {
         );
       }
 
-      // asset_config is keyed by Sparkplug B device name, not id -- re-key the
-      // quarantined device's recorded birth parameters onto the candidate's name.
+      // asset_config is keyed by sparkplug_id, not by the row id -- re-key the quarantined
+      // device's recorded birth parameters onto the candidate.
       const { error: rekeyError } = await supabaseAdmin
         .from("asset_config")
-        .update({ asset_id: candidate.name })
-        .eq("asset_id", quarantined.name);
+        .update({ asset_id: candidate.sparkplug_id })
+        .eq("asset_id", quarantined.sparkplug_id);
 
       if (rekeyError) {
         return new Response(
@@ -166,11 +175,18 @@ export default async function handler(req: Request): Promise<Response> {
       // Absorb the quarantined row's now-known runtime state; leave the candidate's
       // deliberately-provisioned fields (gateway_id, asset_type, connection_method,
       // schema_id) untouched.
+      //
+      // reported_identity carries over: the physical device will keep publishing under the id
+      // it announced, and that is what ingestion has to keep resolving. Without this the
+      // merged device would be re-quarantined on its very next birth.
       const { data: mergedData, error: mergeError } = await supabaseAdmin
         .from("devices")
         .update({
           status: quarantined.status,
           first_dbirth_at: candidate.first_dbirth_at || quarantined.first_dbirth_at,
+          reported_identity: quarantined.reported_identity,
+          identity_source: quarantined.identity_source,
+          quarantine_reason: null,
           is_quarantined: false
         })
         .eq("id", candidate.id)
@@ -201,17 +217,23 @@ export default async function handler(req: Request): Promise<Response> {
       );
     }
 
-    let query = supabaseAdmin
-      .from("devices")
-      .update({ is_quarantined: false, gateway_id: gateway_id || null });
-
-    if (isUuid(device_id)) {
-      query = query.eq("id", device_id);
-    } else {
-      query = query.eq("name", device_id);
+    // Straight approval. quarantine_reason is cleared so a device held for a malformed or
+    // contradictory identifier does not keep displaying that diagnosis after it is accepted.
+    const patch: Record<string, unknown> = {
+      is_quarantined: false,
+      quarantine_reason: null,
+      gateway_id: gateway_id || null
+    };
+    // The operator may correct the label the device announced itself under.
+    if (typeof asset_name === "string" && asset_name.trim()) {
+      patch.name = asset_name.trim();
     }
 
-    const { data, error: updateError } = await query.select();
+    const { data, error: updateError } = await supabaseAdmin
+      .from("devices")
+      .update(patch)
+      .eq("id", device_id)
+      .select();
 
     if (updateError) {
       return new Response(

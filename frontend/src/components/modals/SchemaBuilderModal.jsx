@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react'
-import { IconFileCode, IconDownload, IconCheck } from '../common/Icons'
+import { IconFileCode, IconDownload } from '../common/Icons'
 import { datatypeLabel, datatypeToJsonSchemaType } from '../../utils/sparkplugDatatype'
 
 export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
@@ -107,7 +107,10 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
 
             <div className="form-group">
               <label className="form-label">Device Name</label>
-              <input className="form-control" value={deviceName} onChange={e => setDeviceName(e.target.value)} placeholder="e.g. Robot_Arm_04" title="Must match the Sparkplug B device id the physical device will publish under" />
+              <input className="form-control" value={deviceName} onChange={e => setDeviceName(e.target.value)} placeholder="e.g. Robot_Arm_04" title="Friendly label for the device record" />
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                A display label. The Sparkplug ID the device must publish under is issued when the record is created, and appears in the spec sheet.
+              </div>
             </div>
 
             <div className="form-group">
@@ -135,11 +138,11 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
           <button className={`btn btn-primary ${!canSave ? 'btn-disabled' : ''}`} disabled={!canSave} onClick={() => canSave && handleSubmit('save')} title="Save the schema only">
             Save Schema Only
           </button>
-          <button className={`btn btn-primary ${!canUseDeviceActions ? 'btn-disabled' : ''}`} disabled={!canUseDeviceActions} onClick={() => canUseDeviceActions && handleSubmit('download')} title={!canUseDeviceActions ? 'Enter a device name first' : 'Save the schema and download a spec sheet'}>
-            <IconDownload size={13} /> Save & Download Spec Sheet
-          </button>
-          <button className={`btn btn-primary ${!canUseDeviceActions ? 'btn-disabled' : ''}`} disabled={!canUseDeviceActions} onClick={() => canUseDeviceActions && handleSubmit('provision')} title={!canUseDeviceActions ? 'Enter a device name first' : 'Save the schema and provision a device with it attached'}>
-            <IconCheck size={13} /> Save & Provision Device
+          {/* There is no separate "Save & Provision Device" action: provisioning is now a
+              prerequisite of the spec sheet, since the sheet has to quote the Sparkplug ID the
+              platform issues to the device. The two buttons did the same thing. */}
+          <button className={`btn btn-primary ${!canUseDeviceActions ? 'btn-disabled' : ''}`} disabled={!canUseDeviceActions} onClick={() => canUseDeviceActions && handleSubmit('download')} title={!canUseDeviceActions ? 'Enter a device name first' : 'Save the schema, provision the device, and download a spec sheet quoting its issued Sparkplug ID'}>
+            <IconDownload size={13} /> Save, Provision & Download Spec
           </button>
         </div>
       </div>

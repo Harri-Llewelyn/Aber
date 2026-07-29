@@ -6,13 +6,15 @@ import { usePolling } from '../../hooks/usePolling'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { edgeFunctionErrorMessage } from '../../utils/edgeFunctionError'
 import { describeAuthFailure } from '../../utils/sessionError'
+import CopyableId from '../common/CopyableId'
+import { effectiveSparkplugId } from '../../utils/sparkplugId'
 import { InlineDocumentAccordion } from '../common/InlineDocumentAccordion'
 import { ApproveQuarantineModal } from '../modals/ApproveQuarantineModal'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { AssetConfigModal } from '../modals/AssetConfigModal'
 import { DigitalThreadModal } from '../modals/DigitalThreadModal'
 import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
-import { isProvisioningOverdue } from '../../utils/deviceProvisioning'
+import { isProvisioningOverdue, isNeverSeen } from '../../utils/deviceProvisioning'
 import { suggestMatches } from '../../utils/quarantineMatching'
 import {
   IconCpu,
@@ -33,7 +35,7 @@ import {
   IconX
 } from '../common/Icons'
 
-export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSearchFilter, onClearFilter }) {
+export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter }) {
   const [assets, setAssets]     = useState([])
   const [cells, setCells]       = useState([])
   const [gateways, setGateways] = useState([])
@@ -60,7 +62,18 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
     return params.get('search') || initialSearchFilter || ''
   }
 
+  const getInitialSchema = () => {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('schema') || initialSchemaFilter || ''
+  }
+
   const [searchQuery, setSearchQuery] = useState(getInitialSearch)
+  // Set when arriving from a schema's device count on the Schemas page, or from ?schema=<uuid>.
+  const [schemaFilter, setSchemaFilter] = useState(getInitialSchema)
+  const [statusFilter, setStatusFilter] = useState('')
+  const [gatewayFilter, setGatewayFilter] = useState('')
+  const [cellFilter, setCellFilter] = useState('')
+  const [attentionOnly, setAttentionOnly] = useState(false)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -72,12 +85,48 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
     }
   }, [initialSearchFilter])
 
-  const handleClearSearch = () => {
-    setSearchQuery('')
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const urlSchema = params.get('schema')
+    if (urlSchema) {
+      setSchemaFilter(urlSchema)
+    } else if (initialSchemaFilter) {
+      setSchemaFilter(initialSchemaFilter)
+    }
+  }, [initialSchemaFilter])
+
+  // Drops the query string along with the filter, so a reload does not resurrect it.
+  const clearUrlQuery = () => {
     if (window.location.search) {
       window.history.replaceState({}, '', window.location.pathname)
     }
+  }
+
+  const handleClearSearch = () => {
+    setSearchQuery('')
+    clearUrlQuery()
     if (onClearFilter) onClearFilter()
+  }
+
+  const handleSchemaFilterChange = (val) => {
+    setSchemaFilter(val)
+    if (!val) {
+      clearUrlQuery()
+      if (onClearSchemaFilter) onClearSchemaFilter()
+    }
+  }
+
+  const resetFilters = () => {
+    setSearchQuery('')
+    setSchemaFilter('')
+    setStatusFilter('')
+    setGatewayFilter('')
+    setCellFilter('')
+    setAttentionOnly(false)
+    setFilterMode('all')
+    clearUrlQuery()
+    if (onClearFilter) onClearFilter()
+    if (onClearSchemaFilter) onClearSchemaFilter()
   }
 
   const loadAll = useCallback(async (signal) => {
@@ -152,7 +201,9 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
 
     try {
       const { data, error } = await supabase.functions.invoke('approve-quarantine', {
-        body: { device_id: assetId, gateway_id: targetGateway }
+        // asset_name carries the operator's correction to the label the device announced
+        // itself under. It was collected by the modal and then dropped on the floor here.
+        body: { device_id: assetId, gateway_id: targetGateway, asset_name: body?.asset_name }
       })
 
       if (error) {
@@ -173,7 +224,8 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
 
       setApproveItem(null)
       loadAll()
-      showToast(`Device '${assetId}' approved and onboarded`, 'success')
+      // Report the friendly name, not the UUID the edge function is addressed by.
+      showToast(`Device '${approveItem?.asset_name || assetId}' approved and onboarded`, 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
 
@@ -196,14 +248,14 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
 
       setApproveItem(null)
       loadAll()
-      showToast(`Device '${assetId}' matched and merged into the provisioned device`, 'success')
+      showToast(`Device '${approveItem?.asset_name || assetId}' matched and merged into the provisioned device`, 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
 
-  const rejectQuarantine = async (assetId) => {
+  const rejectQuarantine = async (item) => {
     try {
-      await api.post(`/api/v1/quarantine/${assetId}/reject`, {})
-      loadAll(); showToast(`Quarantined device '${assetId}' rejected`, 'success')
+      await api.post(`/api/v1/quarantine/${item.asset_id}/reject`, {})
+      loadAll(); showToast(`Quarantined device '${item.asset_name}' rejected`, 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
 
@@ -226,15 +278,41 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
   const canManage  = hasPermission(PERMISSION_UUIDS.DEVICE_MANAGE)
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
 
+  // A device an operator needs to act on: held in quarantine, provisioned but never seen, or
+  // still being resolved by name because its gateway has not been moved onto Sparkplug IDs yet.
+  const needsAttention = (a) =>
+    a.is_quarantined || isProvisioningOverdue(a) || a.identity_source === 'legacy_name'
+
   const filteredAssets = assets.filter(a => {
     if (filterMode === 'active'   && a.is_archived) return false
     if (filterMode === 'archived' && !a.is_archived) return false
+    if (schemaFilter && a.schema_id !== schemaFilter) return false
+    if (gatewayFilter && (a.active_gateway_id || '') !== gatewayFilter) return false
+    if (cellFilter && (a.cell_id || '') !== cellFilter) return false
+    if (attentionOnly && !needsAttention(a)) return false
+
+    if (statusFilter === 'online'   && (a.status === 'OFFLINE' || a.is_archived)) return false
+    if (statusFilter === 'offline'  && a.status !== 'OFFLINE') return false
+    // "Never seen" is distinct from offline: the row exists but no DBIRTH has ever arrived.
+    if (statusFilter === 'unborn'   && !isNeverSeen(a)) return false
+    if (statusFilter === 'overdue'  && !isProvisioningOverdue(a)) return false
+
     if (searchQuery) {
+      // Searchable by everything an engineer might paste in: the friendly name, the internal
+      // UUID (for log correlation) and the Sparkplug id seen on the wire.
       const q = searchQuery.toLowerCase()
-      if (!a.asset_id.toLowerCase().includes(q) && !a.asset_name.toLowerCase().includes(q)) return false
+      const haystack = [a.asset_name, a.asset_id, effectiveSparkplugId(a)]
+        .filter(Boolean).join(' ').toLowerCase()
+      if (!haystack.includes(q)) return false
     }
     return true
   })
+
+  const attentionCount = assets.filter(needsAttention).length
+  const activeFilterCount =
+    [schemaFilter, statusFilter, gatewayFilter, cellFilter, searchQuery].filter(Boolean).length +
+    (attentionOnly ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
+  const schemaName = schemas.find(s => s.schema_uuid === schemaFilter)?.schema_name
 
   return (
     <>
@@ -253,19 +331,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
             </button>
           </div>
 
-          <input
-            className="form-control"
-            style={{ width: '200px' }}
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search by Device ID or name…"
-            title="Filter devices by ID or name"
-          />
-          {searchQuery && (
-            <button className="btn btn-ghost btn-sm" onClick={handleClearSearch} title="Clear search"><IconX size={13} /> Clear</button>
-          )}
-
-          <button className="btn btn-ghost btn-sm" onClick={() => downloadCSV(filteredAssets, 'devices-export.csv')} title="Download devices list as CSV"><IconDownload size={13} /> Export CSV</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => downloadCSV(filteredAssets, 'devices-export.csv')} title="Download the filtered devices list as CSV"><IconDownload size={13} /> Export CSV</button>
           <button
             className={`btn btn-primary ${!canManage ? 'btn-disabled' : ''}`}
             disabled={!canManage}
@@ -276,9 +342,66 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
           </button>
         </div>
       </div>
-      <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
+      <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '16px' }}>
         Manage shopfloor manufacturing devices, review Zero-Touch onboarding quarantine queue, inspect DBIRTH configuration parameters, and decommission assets.
       </p>
+
+      {/* Filters live on their own row: the header outgrew a single line once schema, status and
+          relationship filters arrived, and the primary actions were being pushed off screen. */}
+      <div className="filter-bar">
+        <input
+          className="form-control"
+          style={{ width: '220px' }}
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          placeholder="Search name, UUID or Sparkplug ID…"
+          title="Filter devices by friendly name, internal UUID, or Sparkplug ID"
+        />
+
+        <select className="form-control" style={{ width: '170px' }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)} title="Filter by operational state">
+          <option value="">Any status</option>
+          <option value="online">Online</option>
+          <option value="offline">Offline / DDEATH</option>
+          <option value="unborn">Never sent a birth</option>
+          <option value="overdue">Awaiting first birth (24h+)</option>
+        </select>
+
+        <select className="form-control" style={{ width: '190px' }} value={schemaFilter} onChange={e => handleSchemaFilterChange(e.target.value)} title="Filter by the schema a device was provisioned with">
+          <option value="">Any schema</option>
+          {schemas.map(s => <option key={s.schema_uuid} value={s.schema_uuid}>{s.schema_name}</option>)}
+        </select>
+
+        <select className="form-control" style={{ width: '190px' }} value={gatewayFilter} onChange={e => setGatewayFilter(e.target.value)} title="Filter by serving edge gateway">
+          <option value="">Any gateway</option>
+          {gateways.map(g => <option key={g.gateway_id} value={g.gateway_id}>{g.gateway_name}</option>)}
+        </select>
+
+        {/* A device's cell is its gateway's cell -- there is no devices.cell_id column. */}
+        <select className="form-control" style={{ width: '170px' }} value={cellFilter} onChange={e => setCellFilter(e.target.value)} title="Filter by cell zone, derived from the device's gateway">
+          <option value="">Any cell</option>
+          {cells.map(c => <option key={c.cell_id} value={c.cell_id}>{c.cell_name}</option>)}
+        </select>
+
+        <button
+          className={`btn btn-sm ${attentionOnly ? 'btn-primary' : 'btn-ghost'}`}
+          onClick={() => setAttentionOnly(v => !v)}
+          title="Show only devices that are quarantined, overdue their first birth, or still matched by legacy name"
+        >
+          <IconAlertTriangle size={13} /> Needs attention ({attentionCount})
+        </button>
+
+        {activeFilterCount > 0 && (
+          <button className="btn btn-ghost btn-sm filter-bar-spacer" onClick={resetFilters} title="Clear every filter">
+            <IconX size={13} /> Clear filters ({activeFilterCount})
+          </button>
+        )}
+      </div>
+
+      {schemaName && (
+        <div style={{ marginBottom: '16px', fontSize: '12px', color: 'var(--text-muted)' }}>
+          Showing devices provisioned with schema <strong style={{ color: 'var(--accent)' }}>{schemaName}</strong>.
+        </div>
+      )}
 
       {quarantine.length > 0 && (
         <div style={{ marginBottom: '24px', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '20px' }}>
@@ -296,21 +419,27 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
           
           <div className="table-wrap">
             <table>
-              <thead><tr><th title="Discovered Device ID">Device ID</th><th title="Source Gateway ID">Gateway</th><th title="Discovery timestamp">Discovered At</th><th title="Sparkplug B birth payload">Payload</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+              <thead><tr><th title="Reported device name">Reported Name</th><th title="Sparkplug B id the device published under">Published ID</th><th title="Source gateway">Gateway</th><th title="Discovery timestamp">Discovered At</th><th title="Sparkplug B birth payload">Payload</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
               <tbody>
                 {quarantine.map(q => {
                   const [suggestion] = suggestMatches(q, assets, schemas)
                   return (
                   <tr key={q.quarantine_id}>
                     <td>
-                      <span className="mono">{q.asset_id}</span>
+                      <strong>{q.asset_name}</strong>
+                      {q.quarantine_reason && (
+                        <div style={{ fontSize: '10px', color: 'var(--danger)', marginTop: '3px', display: 'flex', alignItems: 'flex-start', gap: '3px' }}>
+                          <IconAlertTriangle size={10} style={{ flexShrink: 0, marginTop: '1px' }} /> {q.quarantine_reason}
+                        </div>
+                      )}
                       {suggestion && (
                         <div style={{ fontSize: '10px', color: 'var(--warning)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '3px' }} title={suggestion.evidence}>
                           <IconAlertTriangle size={10} /> Possible match: {suggestion.candidateName}
                         </div>
                       )}
                     </td>
-                    <td><span className="mono">{q.gateway_id}</span></td>
+                    <td><CopyableId value={q.reported_identity} label="published device id" onNotify={showToast} /></td>
+                    <td>{q.gateway_name || <span className="mono">—</span>}</td>
                     <td style={{ fontSize: '11px' }}>{new Date(q.discovered_at).toLocaleString()}</td>
                     <td><code>{q.birth_payload || '{}'}</code></td>
                     <td style={{ textAlign: 'right' }}>
@@ -326,7 +455,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                         <button
                           className={`btn btn-danger btn-sm ${!canReject ? 'btn-disabled' : ''}`}
                           disabled={!canReject}
-                          onClick={() => canReject && rejectQuarantine(q.asset_id)}
+                          onClick={() => canReject && rejectQuarantine(q)}
                           title={!canReject ? 'Requires Admin permissions' : 'Reject quarantine payload'}
                         >
                           Reject
@@ -352,20 +481,27 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
          ) : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th title="Device Asset ID">Device ID</th><th title="Human-readable device name">Name</th><th title="Device status">Status</th><th title="Device classification">Type</th><th title="Assigned cell zone">Cell</th><th title="Serving edge gateway (reassignable)">Serving Edge Gateway</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+              <thead><tr><th title="Human-readable device name">Name</th><th title="Sparkplug B id this device publishes under">Sparkplug ID</th><th title="Device status">Status</th><th title="Device classification">Type</th><th title="Assigned cell zone">Cell</th><th title="Serving edge gateway (reassignable)">Serving Edge Gateway</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
               <tbody>
                 {filteredAssets.map(a => {
                   const isOff = a.status === 'OFFLINE'
                   return (
                     <React.Fragment key={a.asset_id}>
                       <tr style={{ background: a.is_archived ? 'rgba(255,179,0,0.06)' : undefined }}>
-                        <td><span className="mono">{a.asset_id}</span></td>
                         <td>
                           <strong>{a.asset_name}</strong>
                           {a.is_archived && (
                             <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Decommissioned device">
                               <IconArchive size={11} /> ARCHIVED
                             </span>
+                          )}
+                        </td>
+                        <td>
+                          <CopyableId value={effectiveSparkplugId(a)} label="Sparkplug device id" onNotify={showToast} />
+                          {a.identity_source === 'legacy_name' && (
+                            <div style={{ fontSize: '10px', color: 'var(--warning)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '3px' }} title="This device is still matched by name. Reconfigure its gateway to publish the Sparkplug ID; name matching will be removed.">
+                              <IconAlertTriangle size={10} /> Legacy name matching
+                            </div>
                           )}
                         </td>
                         <td>
@@ -470,18 +606,37 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
           <div className="modal" style={{ maxWidth: 480 }}>
             <div className="modal-title">{editing ? 'Edit Device Configuration' : 'Register New Device'}</div>
             
+            {/* Name first: it is the human handle. The identifiers below are machine-issued
+                and read-only, and only matter when configuring the physical gateway. */}
             <div className="form-group">
-              <label className="form-label">Device ID</label>
-              {/* Database-generated UUID, exactly like gateways. This used to be a text
-                  input whose value was discarded on save. */}
-              <input className="form-control" value={form.asset_id || '— assigned on save —'} disabled readOnly title="Database-generated UUID; not editable" />
+              <label className="form-label">Device Name</label>
+              <input className="form-control" value={form.asset_name} onChange={e => setForm(f => ({ ...f, asset_name: e.target.value }))} title="Friendly label for this device" placeholder="e.g. Simulated_CNC_01" />
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                A display label only — rename it freely. Identity on the wire is the Sparkplug ID below, so renaming never breaks ingestion or detaches telemetry history.
+              </div>
             </div>
 
             <div className="form-group">
-              <label className="form-label">Device Name</label>
-              <input className="form-control" value={form.asset_name} onChange={e => setForm(f => ({ ...f, asset_name: e.target.value }))} title="Must match the Sparkplug B device id published in the MQTT topic" placeholder="e.g. Simulated_CNC_01" />
+              <label className="form-label">Sparkplug ID</label>
+              {editing ? (
+                <>
+                  <CopyableId value={effectiveSparkplugId(editing)} label="Sparkplug device id" onNotify={showToast} />
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    Configure the gateway to publish this device on <span className="mono">spBv1.0/&lt;group&gt;/DDATA/&lt;edge node&gt;/{effectiveSparkplugId(editing)}</span>. Click to copy.
+                  </div>
+                </>
+              ) : (
+                <input className="form-control" value="— issued on save —" disabled readOnly title="Derived from the device's database id once the record exists" />
+              )}
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Internal UUID</label>
+              {editing
+                ? <CopyableId value={form.asset_id} label="device UUID" onNotify={showToast} />
+                : <input className="form-control" value="— assigned on save —" disabled readOnly title="Database-generated UUID; not editable" />}
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                Must match the Sparkplug B device id (<span className="mono">spBv1.0/&lt;group&gt;/DDATA/&lt;edge node&gt;/&lt;device&gt;</span>) so birth parameters and telemetry are matched to this record.
+                Database primary key. Needed only for correlating with server logs and the digital thread.
               </div>
             </div>
 

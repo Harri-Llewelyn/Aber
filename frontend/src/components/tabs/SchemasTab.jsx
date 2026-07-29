@@ -7,9 +7,11 @@ import { SchemaBuilderModal } from '../modals/SchemaBuilderModal'
 import { DeprecateMetricModal } from '../modals/DeprecateMetricModal'
 import { downloadJSON } from '../../utils/downloadJSON'
 import { datatypeLabel, SPARKPLUG_DATATYPES } from '../../utils/sparkplugDatatype'
+import { deviceSparkplugId, gatewaySparkplugId } from '../../utils/sparkplugId'
+import CopyableId from '../common/CopyableId'
 import { IconCheck, IconPlus, IconFileCode, IconAlertTriangle, IconArchive } from '../common/Icons'
 
-export function SchemasTab({ showToast, hasPermission }) {
+export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
   const [schemas, setSchemas]         = useState([])
   const [catalog, setCatalog]         = useState([])
   const [gateways, setGateways]       = useState([])
@@ -82,7 +84,22 @@ export function SchemasTab({ showToast, hasPermission }) {
       const saved = await api.post('/api/v1/schemas', schemaPayload)
 
       if (action === 'download') {
-        const gatewayName = gateways.find(g => g.gateway_id === deviceDetails.gateway_id)?.gateway_name || 'YOUR_GATEWAY_NAME'
+        // Provisioning is a prerequisite, not a separate action: the spec sheet has to quote the
+        // Sparkplug identifiers the device and gateway will actually publish under, and those are
+        // derived from database ids -- so the platform must issue them before it can tell an
+        // engineer what to configure. The device name is just the label on the record.
+        const device = await api.post('/api/v1/devices', {
+          asset_name: deviceDetails.device_name,
+          active_gateway_id: deviceDetails.gateway_id,
+          schema_id: saved.schema_uuid
+        })
+
+        const gateway = gateways.find(g => g.gateway_id === deviceDetails.gateway_id)
+        const gatewayId = gateway
+          ? (gateway.sparkplug_id || gatewaySparkplugId(gateway.gateway_id))
+          : 'YOUR_GATEWAY_SPARKPLUG_ID'
+        const deviceId = device.sparkplug_id || deviceSparkplugId(device.id)
+
         const spec = {
           schema_name: schemaPayload.schema_name,
           schema_uuid: saved.schema_uuid,
@@ -90,21 +107,16 @@ export function SchemasTab({ showToast, hasPermission }) {
           metrics: schemaPayload.schema_definition.properties,
           required: schemaPayload.schema_definition.required,
           device_name: deviceDetails.device_name,
-          gateway_name: gatewayName,
+          device_sparkplug_id: deviceId,
+          gateway_name: gateway?.gateway_name || null,
+          gateway_sparkplug_id: gatewayId,
           topics: {
-            dbirth: `spBv1.0/${deviceDetails.group_id}/DBIRTH/${gatewayName}/${deviceDetails.device_name}`,
-            ddata: `spBv1.0/${deviceDetails.group_id}/DDATA/${gatewayName}/${deviceDetails.device_name}`
+            dbirth: `spBv1.0/${deviceDetails.group_id}/DBIRTH/${gatewayId}/${deviceId}`,
+            ddata: `spBv1.0/${deviceDetails.group_id}/DDATA/${gatewayId}/${deviceId}`
           }
         }
         downloadJSON(spec, `${deviceDetails.device_name}-spec-sheet.json`)
-        showToast(`Schema '${schemaPayload.schema_name}' saved and spec sheet downloaded`, 'success')
-      } else if (action === 'provision') {
-        await api.post('/api/v1/devices', {
-          asset_name: deviceDetails.device_name,
-          active_gateway_id: deviceDetails.gateway_id,
-          schema_id: saved.schema_uuid
-        })
-        showToast(`Schema '${schemaPayload.schema_name}' saved and device '${deviceDetails.device_name}' provisioned`, 'success')
+        showToast(`Schema saved, device '${deviceDetails.device_name}' provisioned, spec sheet downloaded`, 'success')
       } else {
         showToast(`Schema '${schemaPayload.schema_name}' saved`, 'success')
       }
@@ -152,8 +164,10 @@ export function SchemasTab({ showToast, hasPermission }) {
       </p>
 
       <div className="card" style={{ marginBottom: '24px' }}>
-        <div className="section-header" style={{ marginBottom: '8px' }}>
-          <h3 className="section-title" style={{ fontSize: '15px' }}>Metric Catalog <span className="section-count">{activeCatalog.length}</span></h3>
+        {/* `.card-header`, not `.section-header`: the card has no padding of its own, so a plain
+            section header would sit flush against its borders. */}
+        <div className="card-header">
+          <h3 className="section-title">Metric Catalog <span className="section-count">{activeCatalog.length}</span></h3>
           <button
             className={`btn btn-ghost btn-sm ${!canManageSchema ? 'btn-disabled' : ''}`}
             disabled={!canManageSchema}
@@ -165,7 +179,7 @@ export function SchemasTab({ showToast, hasPermission }) {
         </div>
 
         {showAddMetric && (
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', marginBottom: '16px', padding: '12px', background: 'var(--bg-glass)', borderRadius: 'var(--radius)', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', margin: '16px 20px', padding: '12px', background: 'var(--bg-glass)', borderRadius: 'var(--radius)', flexWrap: 'wrap' }}>
             <div className="form-group" style={{ margin: 0, flex: '1 1 160px' }}>
               <label className="form-label">Metric Name</label>
               <input className="form-control" value={newMetric.name} onChange={e => setNewMetric(m => ({ ...m, name: e.target.value }))} placeholder="e.g. Robot.Axis.1.Angle" title="The literal Sparkplug B metric name devices will publish -- cannot be changed once created" />
@@ -227,20 +241,40 @@ export function SchemasTab({ showToast, hasPermission }) {
       </div>
 
       <div className="card">
+        <div className="card-header">
+          <h3 className="section-title">Registered Schemas <span className="section-count">{schemas.length}</span></h3>
+        </div>
         {loading ? <div className="loading-wrap"><div className="spinner" /> Loading schemas…</div> : (
           <div className="table-wrap">
             <table>
               <thead><tr><th title="Schema descriptive name">Schema Name</th><th title="Schema unique UUID">Schema UUID</th><th title="Industrial standard description">Description</th><th title="Devices provisioned with this schema">Devices</th><th title="JSON Schema definition specs">Definition Specs</th></tr></thead>
               <tbody>
-                {schemas.map(sch => (
-                  <tr key={sch.schema_uuid}>
-                    <td><strong>{sch.schema_name}</strong></td>
-                    <td><span className="mono">{sch.schema_uuid}</span></td>
-                    <td style={{ color: 'var(--text-muted)' }}>{sch.description || '—'}</td>
-                    <td><span className="section-count">{deviceCountFor(sch.schema_uuid)}</span></td>
-                    <td><code style={{ fontSize: '11px', color: 'var(--accent)' }}>{JSON.stringify(sch.schema_definition)}</code></td>
-                  </tr>
-                ))}
+                {schemas.map(sch => {
+                  const count = deviceCountFor(sch.schema_uuid)
+                  return (
+                    <tr key={sch.schema_uuid}>
+                      <td><strong>{sch.schema_name}</strong></td>
+                      <td><CopyableId value={sch.schema_uuid} label="schema UUID" onNotify={showToast} /></td>
+                      <td style={{ color: 'var(--text-muted)' }}>{sch.description || '—'}</td>
+                      <td>
+                        {/* The count is the natural entry point to "which devices are these?",
+                            so it navigates to the Devices page filtered to this schema. */}
+                        <button
+                          type="button"
+                          className="count-link"
+                          disabled={count === 0}
+                          onClick={() => count > 0 && onSelectSchema?.(sch.schema_uuid)}
+                          title={count === 0
+                            ? 'No devices are provisioned with this schema'
+                            : `Show the ${count} device${count === 1 ? '' : 's'} using this schema`}
+                        >
+                          <span className="section-count">{count}</span>
+                        </button>
+                      </td>
+                      <td><code style={{ fontSize: '11px', color: 'var(--accent)' }}>{JSON.stringify(sch.schema_definition)}</code></td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

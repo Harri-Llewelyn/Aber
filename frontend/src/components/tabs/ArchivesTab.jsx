@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
+import CopyableId from '../common/CopyableId'
 import { IconArchive, IconRefreshCw } from '../common/Icons'
 
 export function ArchivesTab({ showToast, hasPermission }) {
@@ -42,12 +43,12 @@ export function ArchivesTab({ showToast, hasPermission }) {
          ) : (
            <div className="table-wrap">
              <table>
-               <thead><tr><th title="Entity ID">Entity ID</th><th title="Entity Name">Name</th><th title="Entity classification">Type</th><th title="Decommissioned timestamp">Archived At</th><th title="Retention compliance auto-purge timer">Auto-Purge Expiration</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+               <thead><tr><th title="Entity Name">Name</th><th title="Entity ID">Entity ID</th><th title="Entity classification">Type</th><th title="Decommissioned timestamp">Archived At</th><th title="Retention compliance auto-purge timer">Auto-Purge Expiration</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
                <tbody>
                  {archives.map((a, i) => (
                    <tr key={i}>
-                     <td><span className="mono">{a.entity_id}</span></td>
                      <td><strong>{a.name}</strong></td>
+                     <td><CopyableId value={a.entity_id} label="entity id" onNotify={showToast} /></td>
                      <td><span className="badge badge-warning">{a.entity_type.toUpperCase()}</span></td>
                      <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{a.archived_at ? new Date(a.archived_at).toLocaleString() : '—'}</td>
                      <td>

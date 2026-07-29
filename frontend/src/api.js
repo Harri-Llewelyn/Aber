@@ -1,14 +1,21 @@
 import { supabase } from './lib/supabaseClient';
 import { isUuid } from './utils/isUuid';
+import { deviceSparkplugId } from './utils/sparkplugId';
 import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
 
 // Devices are related to cells *through* gateways (devices.gateway_id -> gateways.id ->
 // gateways.cell_id -> cells.id). There is no devices.cell_id column, so anything that
 // wants "the devices in this cell" has to walk the embed rather than filter on a field.
+//
+// `asset_id` is always the device UUID -- including for quarantined devices, which used to
+// carry the Sparkplug name here instead. That one exception was why the UI and the
+// approve-quarantine edge function both had to sniff whether an id was a UUID or a name
+// before they knew which column to address.
 const mapDeviceRow = (d, gateway) => ({
   ...d,
   asset_id: d.id,
   asset_name: d.name,
+  sparkplug_id: d.sparkplug_id ?? deviceSparkplugId(d.id),
   active_gateway_id: d.gateway_id ?? gateway?.id ?? null,
   gateway_name: gateway?.name ?? null
 });
@@ -25,9 +32,11 @@ const mapGatewayRow = (g) => {
 };
 
 // PostgREST embeds. Kept as constants so the Cells and Gateways queries stay in step.
-const DEVICE_EMBED = 'id, name, status, is_quarantined, is_archived, gateway_id, created_at';
+const DEVICE_EMBED =
+  'id, name, sparkplug_id, reported_identity, identity_source, status, is_quarantined, ' +
+  'is_archived, gateway_id, created_at';
 const GATEWAY_EMBED =
-  `id, name, cell_id, access_url, status, last_heartbeat, ip_address, is_virtual, ` +
+  `id, name, sparkplug_id, cell_id, access_url, status, last_heartbeat, ip_address, is_virtual, ` +
   `is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
 
 // PostgREST rejects '' for a UUID/foreign-key column; the UI's "unassigned" option
@@ -43,19 +52,17 @@ export const TELEMETRY_PAGE_SIZE = 500;
 const TELEMETRY_MAX_ROWS = 5000;
 
 /**
- * Sparkplug B keys everything it publishes by device *name*, so `telemetry.asset_id`
- * and `asset_config.asset_id` both hold the name while the UI works in device UUIDs.
- * Translate before querying either of them.
+ * `telemetry.asset_id` and `asset_config.asset_id` are keyed by the device's immutable
+ * `sparkplug_id`, while the UI works in device UUIDs. Translate before querying either.
  *
- * An unresolvable UUID is returned unchanged, so the query comes back empty rather
- * than silently widening to every device.
+ * sparkplug_id is a generated column derived from the UUID primary key, so this is a pure
+ * local derivation -- no round-trip. A value that is already a wire identifier (or anything
+ * else non-UUID) passes through unchanged, so the query comes back empty rather than
+ * silently widening to every device.
  */
-async function resolveAssetName(assetId) {
-  if (!assetId || !isUuid(assetId)) return assetId || '';
-
-  const { data, error } = await supabase.from('devices').select('name').eq('id', assetId);
-  if (error) throw error;
-  return data?.[0]?.name || assetId;
+function toTelemetryKey(assetId) {
+  if (!assetId) return '';
+  return isUuid(assetId) ? deviceSparkplugId(assetId) : assetId;
 }
 
 /**
@@ -70,10 +77,10 @@ async function queryTelemetry({ assetId, metricName, minutes, limit, offset } = 
   );
   const from = Number.isFinite(offset) && offset > 0 ? offset : 0;
 
-  const assetName = await resolveAssetName(assetId);
+  const telemetryKey = toTelemetryKey(assetId);
 
   let query = supabase.from('telemetry').select('*');
-  if (assetName) query = query.eq('asset_id', assetName);
+  if (telemetryKey) query = query.eq('asset_id', telemetryKey);
   if (metricName) query = query.eq('metric_name', metricName);
   if (Number.isFinite(minutes) && minutes > 0) {
     query = query.gte('time', new Date(Date.now() - minutes * 60000).toISOString());
@@ -193,13 +200,12 @@ export const api = {
 
     if (path.match(/\/api\/v1\/devices\/(.+)\/config/)) {
       const match = path.match(/\/api\/v1\/devices\/(.+)\/config/);
-      // asset_config is keyed by the Sparkplug B device name written by the ingestion
-      // daemon on DBIRTH; the UI passes a device UUID.
-      const assetName = await resolveAssetName(match[1]);
+      // asset_config is keyed by the device's sparkplug_id, written by the ingestion daemon
+      // on DBIRTH; the UI passes a device UUID.
       const { data, error } = await supabase
         .from('asset_config')
         .select('*')
-        .eq('asset_id', assetName)
+        .eq('asset_id', toTelemetryKey(match[1]))
         .order('metric_name', { ascending: true });
       if (error) throw error;
       return data || [];
@@ -214,11 +220,7 @@ export const api = {
         .order('created_at', { ascending: false });
       if (error) throw error;
       return (data || []).map(d => ({
-        ...d,
-        asset_id: d.id,
-        asset_name: d.name,
-        active_gateway_id: d.gateway_id,
-        gateway_name: d.gateways?.name || null,
+        ...mapDeviceRow(d, d.gateways),
         cell_id: d.gateways?.cell_id || null
       }));
     }
@@ -236,15 +238,16 @@ export const api = {
         .eq('is_quarantined', true);
       if (error) throw error;
 
-      const names = (data || []).map(d => d.name);
-      let metricsByName = new Map();
-      if (names.length > 0) {
+      // asset_config is keyed by sparkplug_id, which is derivable from the UUID we already have.
+      const keys = (data || []).map(d => d.sparkplug_id || deviceSparkplugId(d.id)).filter(Boolean);
+      let metricsByKey = new Map();
+      if (keys.length > 0) {
         const { data: configRows, error: configError } = await supabase
           .from('asset_config')
           .select('asset_id, metric_name')
-          .in('asset_id', names);
+          .in('asset_id', keys);
         if (configError) throw configError;
-        metricsByName = (configRows || []).reduce((map, row) => {
+        metricsByKey = (configRows || []).reduce((map, row) => {
           const list = map.get(row.asset_id) || [];
           list.push(row.metric_name);
           map.set(row.asset_id, list);
@@ -253,15 +256,19 @@ export const api = {
       }
 
       return (data || []).map(d => {
-        const reportedMetrics = metricsByName.get(d.name) || [];
+        const sparkplugId = d.sparkplug_id || deviceSparkplugId(d.id);
+        const reportedMetrics = metricsByKey.get(sparkplugId) || [];
         return {
-          ...d,
-          // approve/reject address the device by its Sparkplug B name.
-          asset_id: d.name,
+          ...mapDeviceRow(d, d.gateways),
           quarantine_id: d.id,
           discovered_at: d.created_at,
           gateway_id: d.gateway_id || null,
           gateway_name: d.gateways?.name || null,
+          // The id this device actually published under -- the only way a *malformed* one is
+          // visible, since sparkplug_id is derived from the row's own UUID and so never equals
+          // what a misconfigured gateway sent.
+          reported_identity: d.reported_identity || null,
+          quarantine_reason: d.quarantine_reason || null,
           reported_metrics: reportedMetrics,
           birth_payload: JSON.stringify(reportedMetrics)
         };
@@ -382,7 +389,7 @@ export const api = {
       let query = supabase
         .from(table)
         .update({ is_archived: true, archived_at: now, auto_delete_at });
-      query = isUuid(id) ? query.eq('id', id) : query.eq('name', id);
+      query = query.eq('id', id);
 
       const { data, error } = await query.select();
       if (error) throw error;
@@ -398,7 +405,7 @@ export const api = {
       let query = supabase
         .from(table)
         .update({ is_archived: false, archived_at: null, auto_delete_at: null });
-      query = isUuid(id) ? query.eq('id', id) : query.eq('name', id);
+      query = query.eq('id', id);
 
       const { data, error } = await query.select();
       if (error) throw error;
@@ -409,7 +416,7 @@ export const api = {
       const parts = path.split('/');
       const id = parts[4];
       let query = supabase.from('devices').delete();
-      query = isUuid(id) ? query.eq('id', id) : query.eq('name', id);
+      query = query.eq('id', id);
 
       const { data, error } = await query.select();
       if (error) throw error;
@@ -541,7 +548,7 @@ export const api = {
       let query = supabase
         .from(table)
         .update({ is_archived: true, archived_at: now, auto_delete_at });
-      query = isUuid(id) ? query.eq('id', id) : query.eq('name', id);
+      query = query.eq('id', id);
 
       const { data, error } = await query.select();
       if (error) throw error;
@@ -557,7 +564,7 @@ export const api = {
       let query = supabase
         .from(table)
         .update({ is_archived: false, archived_at: null, auto_delete_at: null });
-      query = isUuid(id) ? query.eq('id', id) : query.eq('name', id);
+      query = query.eq('id', id);
 
       const { data, error } = await query.select();
       if (error) throw error;
@@ -605,6 +612,9 @@ export const api = {
     }
 
     if (path.startsWith('/api/v1/devices/')) {
+      // Renaming is safe: `name` is a display label, and telemetry, birth parameters and the
+      // MQTT topic are all keyed by the immutable sparkplug_id, so nothing needs re-keying.
+      //
       // gateway_id is written from whichever key the caller supplied. The UI models a
       // device's gateway as `active_gateway_id`; reading only `gateway_id` here meant
       // every reassignment silently updated nothing.

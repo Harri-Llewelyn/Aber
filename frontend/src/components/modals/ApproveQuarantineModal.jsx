@@ -1,9 +1,10 @@
 import React, { useState } from 'react'
+import CopyableId from '../common/CopyableId'
 import { IconShieldAlert, IconAlertTriangle } from '../common/Icons'
 
 export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onApprove, onMerge, onCancel }) {
   const isGateway = item.entity_type === 'GATEWAY'
-  const [assetName, setAssetName] = useState(item.asset_id)
+  const [assetName, setAssetName] = useState(item.asset_name)
   const [connMethod, setConnMethod] = useState('Sparkplug B')
   const [gatewayId, setGatewayId] = useState(item.gateway_id || (gateways[0] ? gateways[0].gateway_id : ''))
   const [ipAddress, setIpAddress] = useState('')
@@ -33,7 +34,21 @@ export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onAp
       <div className="modal" style={{ maxWidth: 460 }}>
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <IconShieldAlert size={18} />
-          <span>Approve Discovered {isGateway ? 'Gateway' : 'Device'} <span className="mono">[{item.asset_id}]</span></span>
+          <span>Approve Discovered {isGateway ? 'Gateway' : 'Device'} <span className="mono">[{item.asset_name}]</span></span>
+        </div>
+
+        {/* What the device actually put on the wire, and why it was held. For a malformed
+            identifier this is the whole diagnosis -- the id below is what the gateway sent,
+            and the reason says how it failed the format contract. */}
+        <div className="form-group">
+          <label className="form-label">Published Sparkplug ID</label>
+          <CopyableId value={item.reported_identity} label="published device id" />
+          {item.quarantine_reason && (
+            <div style={{ fontSize: '11px', color: 'var(--danger)', marginTop: '6px', display: 'flex', alignItems: 'flex-start', gap: '5px' }}>
+              <IconAlertTriangle size={12} style={{ flexShrink: 0, marginTop: '1px' }} />
+              <span>{item.quarantine_reason}</span>
+            </div>
+          )}
         </div>
 
         {!isGateway && suggestion && (
