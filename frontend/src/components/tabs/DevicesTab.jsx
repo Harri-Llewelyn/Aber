@@ -12,6 +12,8 @@ import { ArchiveModal } from '../modals/ArchiveModal'
 import { AssetConfigModal } from '../modals/AssetConfigModal'
 import { DigitalThreadModal } from '../modals/DigitalThreadModal'
 import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
+import { isProvisioningOverdue } from '../../utils/deviceProvisioning'
+import { suggestMatches } from '../../utils/quarantineMatching'
 import {
   IconCpu,
   IconPlus,
@@ -25,6 +27,7 @@ import {
   IconChevronDown,
   IconChevronUp,
   IconShieldAlert,
+  IconAlertTriangle,
   IconLock,
   IconDownload,
   IconX
@@ -34,6 +37,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
   const [assets, setAssets]     = useState([])
   const [cells, setCells]       = useState([])
   const [gateways, setGateways] = useState([])
+  const [schemas, setSchemas]   = useState([])
   const [quarantine, setQuarantine] = useState([])
   const [loading, setLoading]   = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -45,7 +49,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
   const [docsForDevice, setDocsForDevice] = useState(null)
   const [expandedDeviceDocs, setExpandedDeviceDocs] = useState({})
   const [docRefreshKey, setDocRefreshKey] = useState(0)
-  const [blank]                 = useState({ asset_id: '', asset_name: '', asset_type: 'CNC', connection_method: 'Sparkplug B', active_gateway_id: '' })
+  const [blank]                 = useState({ asset_id: '', asset_name: '', asset_type: 'CNC', connection_method: 'Sparkplug B', active_gateway_id: '', schema_id: '' })
   const [form, setForm]         = useState(blank)
   const [filterMode, setFilterMode] = useState('all')
 
@@ -78,12 +82,13 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
 
   const loadAll = useCallback(async (signal) => {
     try {
-      const [a, c, g] = await Promise.all([
+      const [a, c, g, s] = await Promise.all([
         api.get('/api/v1/devices', { signal }),
         api.get('/api/v1/cells', { signal }),
         api.get('/api/v1/gateways', { signal }),
+        api.get('/api/v1/schemas', { signal }),
       ])
-      setAssets(a); setCells(c); setGateways(g)
+      setAssets(a); setCells(c); setGateways(g); setSchemas(s)
 
       try {
         const q = await api.get('/api/v1/quarantine', { signal })
@@ -118,6 +123,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
         asset_type: form.asset_type || null,
         connection_method: form.connection_method || null,
         active_gateway_id: form.active_gateway_id || null,
+        schema_id: form.schema_id || null,
       }
       if (editing) {
         await api.put(`/api/v1/devices/${editing.asset_id}`, payload)
@@ -168,6 +174,29 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
       setApproveItem(null)
       loadAll()
       showToast(`Device '${assetId}' approved and onboarded`, 'success')
+    } catch (e) { showToast(e.message, 'error') }
+  }
+
+  const mergeQuarantine = async (assetId, candidateId) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('approve-quarantine', {
+        body: { device_id: assetId, merge_into_device_id: candidateId }
+      })
+
+      if (error) {
+        const detail = await edgeFunctionErrorMessage(error, 'Quarantine match acceptance denied or failed')
+        showToast(await describeAuthFailure(detail, detail), 'error')
+        return
+      }
+
+      if (!data?.success) {
+        showToast(data?.error || 'Quarantine match acceptance failed', 'error')
+        return
+      }
+
+      setApproveItem(null)
+      loadAll()
+      showToast(`Device '${assetId}' matched and merged into the provisioned device`, 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
 
@@ -269,9 +298,18 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
             <table>
               <thead><tr><th title="Discovered Device ID">Device ID</th><th title="Source Gateway ID">Gateway</th><th title="Discovery timestamp">Discovered At</th><th title="Sparkplug B birth payload">Payload</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
               <tbody>
-                {quarantine.map(q => (
+                {quarantine.map(q => {
+                  const [suggestion] = suggestMatches(q, assets, schemas)
+                  return (
                   <tr key={q.quarantine_id}>
-                    <td><span className="mono">{q.asset_id}</span></td>
+                    <td>
+                      <span className="mono">{q.asset_id}</span>
+                      {suggestion && (
+                        <div style={{ fontSize: '10px', color: 'var(--warning)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '3px' }} title={suggestion.evidence}>
+                          <IconAlertTriangle size={10} /> Possible match: {suggestion.candidateName}
+                        </div>
+                      )}
+                    </td>
                     <td><span className="mono">{q.gateway_id}</span></td>
                     <td style={{ fontSize: '11px' }}>{new Date(q.discovered_at).toLocaleString()}</td>
                     <td><code>{q.birth_payload || '{}'}</code></td>
@@ -296,7 +334,8 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                       </div>
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -333,6 +372,10 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                           {a.is_archived ? (
                             <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Decommissioned device (Out of Commission)">
                               <IconArchive size={11} /> ARCHIVED (OUT OF COMMISSION)
+                            </span>
+                          ) : isProvisioningOverdue(a) ? (
+                            <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Provisioned more than 24h ago and has never sent a DBIRTH">
+                              <IconAlertTriangle size={11} /> AWAITING FIRST BIRTH
                             </span>
                           ) : (
                             <span className={`badge ${isOff ? 'badge-neutral' : 'badge-online'}`} title={isOff ? 'Sparkplug B DDEATH Received — Device Offline' : 'Device Active'}>
@@ -477,6 +520,17 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
             </div>
 
             <div className="form-group">
+              <label className="form-label">Schema (optional)</label>
+              <select className="form-control" value={form.schema_id || ''} onChange={e => setForm(f => ({ ...f, schema_id: e.target.value }))} title="Expected metric schema, from the Schemas registry">
+                <option value="">— No schema assigned —</option>
+                {schemas.map(s => <option key={s.schema_uuid} value={s.schema_uuid}>{s.schema_name}</option>)}
+              </select>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                Used to suggest a match if a differently-named device shows up in quarantine reporting metrics that overlap this schema's required fields.
+              </div>
+            </div>
+
+            <div className="form-group">
               <label className="form-label">Connection Method</label>
               <select className="form-control" value={form.connection_method || 'Sparkplug B'} onChange={e => setForm(f => ({ ...f, connection_method: e.target.value }))} title="Protocol connection method">
                 <option value="Sparkplug B">Sparkplug B MQTT</option>
@@ -494,9 +548,19 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
         </div>
       )}
 
-      {approveItem && <ApproveQuarantineModal item={approveItem} cells={cells} gateways={gateways} onApprove={approveQuarantine} onCancel={() => setApproveItem(null)} />}
+      {approveItem && (
+        <ApproveQuarantineModal
+          item={approveItem}
+          cells={cells}
+          gateways={gateways}
+          suggestion={suggestMatches(approveItem, assets, schemas)[0] || null}
+          onApprove={approveQuarantine}
+          onMerge={mergeQuarantine}
+          onCancel={() => setApproveItem(null)}
+        />
+      )}
       {archiveTarget && <ArchiveModal entityType="devices" entityId={archiveTarget.asset_id} displayName={archiveTarget.asset_name} onArchive={archiveDevice} onCancel={() => setArchiveTarget(null)} />}
-      {configAsset && <AssetConfigModal asset={configAsset} onClose={() => setConfigAsset(null)} />}
+      {configAsset && <AssetConfigModal asset={configAsset} schemas={schemas} onClose={() => setConfigAsset(null)} />}
       {threadFor && <DigitalThreadModal entityType="devices" entityId={threadFor.asset_id} displayName={threadFor.asset_name} onClose={() => setThreadFor(null)} />}
       {docsForDevice && (
         <EntityDocumentsModal entityType="device" entityId={docsForDevice.asset_id} entityName={docsForDevice.asset_name} onClose={() => { setDocsForDevice(null); setDocRefreshKey(k => k + 1) }} showToast={showToast} hasPermission={hasPermission} />

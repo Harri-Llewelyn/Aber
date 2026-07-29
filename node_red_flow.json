@@ -4,260 +4,41 @@
     "type": "tab",
     "label": "Gateway Simulator",
     "disabled": false,
-    "info": "Simulates Edge Gateway A publishing Sparkplug B DBIRTH, DDATA, and DDEATH lifecycle telemetry messages to Mosquitto MQTT broker."
+    "info": "Simulates Edge Gateway A publishing Sparkplug B NBIRTH, DBIRTH, DDATA, and DDEATH lifecycle telemetry messages to Mosquitto MQTT broker. Read the on-canvas comment nodes for a walkthrough of how to onboard your own device, register a gateway, and approve a quarantined device -- see node_red_guide.md for the full write-up."
   },
   {
-    "id": "inject-dbirth-startup",
-    "type": "inject",
+    "id": "eb74e7d1698084b8",
+    "type": "group",
     "z": "tab-gateway-sim",
-    "name": "1. Trigger DBIRTH Birth Certificate (rebirth every 60s)",
-    "props": [
-      {
-        "p": "payload"
-      }
+    "name": "Guide on setting up a Gateway and Device",
+    "style": {
+      "label": true
+    },
+    "nodes": [
+      "comment-nbirth-note",
+      "inject-nbirth-startup",
+      "build-nbirth-payload",
+      "comment-onboard-device",
+      "comment-approve-quarantine",
+      "inject-dbirth-startup",
+      "build-dbirth-payload",
+      "inject-ddata-timer",
+      "build-ddata-payload",
+      "inject-ddeath-manual",
+      "build-ddeath-payload",
+      "inject-alert-overheat",
+      "build-alert-payload",
+      "inject-alert-reset",
+      "reset-alert-function",
+      "comment-register-gateway",
+      "inject-heartbeat-timer",
+      "build-heartbeat-payload",
+      "mqtt-publish"
     ],
-    "repeat": "60",
-    "crontab": "",
-    "once": true,
-    "onceDelay": 2,
-    "topic": "",
-    "payload": "",
-    "payloadType": "date",
-    "x": 200,
-    "y": 80,
-    "wires": [
-      [
-        "build-dbirth-payload"
-      ]
-    ]
-  },
-  {
-    "id": "build-dbirth-payload",
-    "type": "function",
-    "z": "tab-gateway-sim",
-    "name": "Build DBIRTH Certificate (Simulated_CNC_01)",
-    "func": "// Periodic rebirth so a consumer that starts after Node-RED still receives the\n// birth certificate. Stays silent while the device is in its DDEATH state, so the\n// DDEATH demo is not undone by the next rebirth tick.\nif (global.get('device_alive') === false) {\n    return null;\n}\nglobal.set('device_alive', true);\nconst topic = 'spBv1.0/FactoryPlus/DBIRTH/Virtual_Gateway_NodeRED/Simulated_CNC_01';\nconst spbBirthPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID',          string_value: 'Simulated_CNC_01',  datatype: 12 },\n        { name: 'firmware_version',  string_value: 'v3.2.0-industrial', datatype: 12 },\n        { name: 'serial_number',     string_value: 'SN-CNC-8832',       datatype: 12 },\n        { name: 'max_temp_threshold',double_value: 85.0,                datatype: 10 },\n        { name: 'safety_interlock',  boolean_value: true,               datatype: 11 }\n    ],\n    seq: 0\n};\nreturn { topic: topic, payload: JSON.stringify(spbBirthPayload), qos: 0, retain: false };",
-    "outputs": 1,
-    "x": 520,
-    "y": 80,
-    "wires": [
-      [
-        "mqtt-publish"
-      ]
-    ]
-  },
-  {
-    "id": "inject-ddata-timer",
-    "type": "inject",
-    "z": "tab-gateway-sim",
-    "name": "2. Stream DDATA Telemetry (every 5s)",
-    "props": [
-      {
-        "p": "payload"
-      }
-    ],
-    "repeat": "5",
-    "crontab": "",
-    "once": true,
-    "onceDelay": 5,
-    "topic": "",
-    "payload": "",
-    "payloadType": "date",
-    "x": 210,
-    "y": 160,
-    "wires": [
-      [
-        "build-ddata-payload"
-      ]
-    ]
-  },
-  {
-    "id": "build-ddata-payload",
-    "type": "function",
-    "z": "tab-gateway-sim",
-    "name": "Build DDATA Telemetry (Normal Ops)",
-    "func": "if (global.get('device_alive') === false) {\n    return null;\n}\nconst topic = 'spBv1.0/FactoryPlus/DDATA/Virtual_Gateway_NodeRED/Simulated_CNC_01';\nconst tempOverride = global.get('temp_override');\nconst currentTemp = tempOverride !== undefined ? tempOverride : +(42.0 + Math.sin(Date.now() / 6000) * 5.0 + (Math.random() * 1.5)).toFixed(2);\nconst statusVal = global.get('status_override') || 'RUNNING';\nconst safetyVal = global.get('safety_override') !== undefined ? global.get('safety_override') : true;\n\nconst spbDataPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID',    string_value: 'Simulated_CNC_01', datatype: 12 },\n        { name: 'temperature', double_value: currentTemp,        datatype: 10 },\n        { name: 'vibration',   double_value: 1.45,                datatype: 10 },\n        { name: 'status',      string_value: statusVal,          datatype: 12 },\n        { name: 'safety_ok',   boolean_value: safetyVal,         datatype: 11 }\n    ],\n    seq: Math.floor(Math.random() * 255)\n};\nreturn { topic: topic, payload: JSON.stringify(spbDataPayload), qos: 0, retain: false };",
-    "outputs": 1,
-    "x": 510,
-    "y": 160,
-    "wires": [
-      [
-        "mqtt-publish"
-      ]
-    ]
-  },
-  {
-    "id": "inject-ddeath-manual",
-    "type": "inject",
-    "z": "tab-gateway-sim",
-    "name": "3. Trigger DDEATH Disconnect Payload",
-    "props": [
-      {
-        "p": "payload"
-      }
-    ],
-    "repeat": "",
-    "crontab": "",
-    "once": false,
-    "onceDelay": "",
-    "topic": "",
-    "payload": "",
-    "payloadType": "date",
-    "x": 210,
-    "y": 240,
-    "wires": [
-      [
-        "build-ddeath-payload"
-      ]
-    ]
-  },
-  {
-    "id": "build-ddeath-payload",
-    "type": "function",
-    "z": "tab-gateway-sim",
-    "name": "Build DDEATH Death Certificate",
-    "func": "global.set('device_alive', false);\nconst topic = 'spBv1.0/FactoryPlus/DDEATH/Virtual_Gateway_NodeRED/Simulated_CNC_01';\nconst spbDeathPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID', string_value: 'Simulated_CNC_01', datatype: 12 }\n    ],\n    seq: Math.floor(Math.random() * 255)\n};\nreturn { topic: topic, payload: JSON.stringify(spbDeathPayload), qos: 0, retain: false };",
-    "outputs": 1,
-    "x": 510,
-    "y": 240,
-    "wires": [
-      [
-        "mqtt-publish"
-      ]
-    ]
-  },
-  {
-    "id": "inject-alert-overheat",
-    "type": "inject",
-    "z": "tab-gateway-sim",
-    "name": "ANOMALY: Trigger Overheat Spike (95°C)",
-    "props": [
-      {
-        "p": "payload"
-      }
-    ],
-    "repeat": "",
-    "crontab": "",
-    "once": false,
-    "onceDelay": "",
-    "topic": "",
-    "payload": "",
-    "payloadType": "date",
-    "x": 220,
-    "y": 340,
-    "wires": [
-      [
-        "build-alert-payload"
-      ]
-    ]
-  },
-  {
-    "id": "build-alert-payload",
-    "type": "function",
-    "z": "tab-gateway-sim",
-    "name": "Publish Overheat Spike (95°C)",
-    "func": "global.set('device_alive', true);\nglobal.set('temp_override', 95.0);\nglobal.set('status_override', 'ALARM_OVERHEAT');\nglobal.set('safety_override', false);\n\nconst topic = 'spBv1.0/FactoryPlus/DDATA/Virtual_Gateway_NodeRED/Simulated_CNC_01';\nconst spbAlertPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID',    string_value: 'Simulated_CNC_01', datatype: 12 },\n        { name: 'temperature', double_value: 95.0,                datatype: 10 },\n        { name: 'vibration',   double_value: 8.92,                datatype: 10 },\n        { name: 'status',      string_value: 'ALARM_OVERHEAT',   datatype: 12 },\n        { name: 'safety_ok',   boolean_value: false,              datatype: 11 }\n    ],\n    seq: Math.floor(Math.random() * 255)\n};\nreturn { topic: topic, payload: JSON.stringify(spbAlertPayload), qos: 0, retain: false };",
-    "outputs": 1,
-    "x": 520,
-    "y": 340,
-    "wires": [
-      [
-        "mqtt-publish"
-      ]
-    ]
-  },
-  {
-    "id": "inject-alert-reset",
-    "type": "inject",
-    "z": "tab-gateway-sim",
-    "name": "RESET: Restore Normal Telemetry (42°C)",
-    "props": [
-      {
-        "p": "payload"
-      }
-    ],
-    "repeat": "",
-    "crontab": "",
-    "once": false,
-    "onceDelay": "",
-    "topic": "",
-    "payload": "",
-    "payloadType": "date",
-    "x": 220,
-    "y": 400,
-    "wires": [
-      [
-        "reset-alert-function"
-      ]
-    ]
-  },
-  {
-    "id": "reset-alert-function",
-    "type": "function",
-    "z": "tab-gateway-sim",
-    "name": "Reset Telemetry to Normal (42°C)",
-    "func": "global.set('device_alive', true);\nglobal.set('temp_override', undefined);\nglobal.set('status_override', 'RUNNING');\nglobal.set('safety_override', true);\n\nconst topic = 'spBv1.0/FactoryPlus/DDATA/Virtual_Gateway_NodeRED/Simulated_CNC_01';\nconst spbNormalPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID',    string_value: 'Simulated_CNC_01', datatype: 12 },\n        { name: 'temperature', double_value: 42.0,                datatype: 10 },\n        { name: 'vibration',   double_value: 1.20,                datatype: 10 },\n        { name: 'status',      string_value: 'RUNNING',          datatype: 12 },\n        { name: 'safety_ok',   boolean_value: true,               datatype: 11 }\n    ],\n    seq: Math.floor(Math.random() * 255)\n};\nreturn { topic: topic, payload: JSON.stringify(spbNormalPayload), qos: 0, retain: false };",
-    "outputs": 1,
-    "x": 520,
-    "y": 400,
-    "wires": [
-      [
-        "mqtt-publish"
-      ]
-    ]
-  },
-  {
-    "id": "inject-heartbeat-timer",
-    "type": "inject",
-    "z": "tab-gateway-sim",
-    "name": "4. Gateway Heartbeat (every 30s)",
-    "props": [
-      {
-        "p": "payload"
-      }
-    ],
-    "repeat": "30",
-    "crontab": "",
-    "once": true,
-    "onceDelay": 1,
-    "topic": "",
-    "payload": "",
-    "payloadType": "date",
-    "x": 220,
-    "y": 560,
-    "wires": [
-      [
-        "build-heartbeat-payload"
-      ]
-    ]
-  },
-  {
-    "id": "build-heartbeat-payload",
-    "type": "function",
-    "z": "tab-gateway-sim",
-    "name": "Build NDATA Gateway Heartbeat",
-    "func": "const topic = 'spBv1.0/FactoryPlus/NDATA/Virtual_Gateway_NodeRED';\nconst spbHeartbeatPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Gateway_Status', string_value: 'ONLINE', datatype: 12 }\n    ],\n    seq: Math.floor(Math.random() * 255)\n};\nreturn { topic: topic, payload: JSON.stringify(spbHeartbeatPayload), qos: 0, retain: false };",
-    "outputs": 1,
-    "x": 520,
-    "y": 560,
-    "wires": [
-      [
-        "mqtt-publish"
-      ]
-    ]
-  },
-  {
-    "id": "mqtt-publish",
-    "type": "mqtt out",
-    "z": "tab-gateway-sim",
-    "name": "Publish to Mosquitto Broker",
-    "topic": "",
-    "qos": "0",
-    "retain": "false",
-    "broker": "mqtt-broker-config",
-    "x": 800,
-    "y": 240,
-    "wires": []
+    "x": 54,
+    "y": 39,
+    "w": 1292,
+    "h": 482
   },
   {
     "id": "mqtt-broker-config",
@@ -271,5 +52,357 @@
     "protocolVersion": "4",
     "keepalive": "60",
     "cleansession": true
+  },
+  {
+    "id": "comment-nbirth-note",
+    "type": "comment",
+    "z": "tab-gateway-sim",
+    "g": "eb74e7d1698084b8",
+    "name": "NBIRTH",
+    "info": "The edge node's own birth certificate. Real Sparkplug B requires this once before any DBIRTH. This app's ingestion (process_node_message) treats NBIRTH/NDATA identically for gateway status, so it isn't strictly required here -- but real brokers/hosts expect the order below.",
+    "x": 140,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "inject-nbirth-startup",
+    "type": "inject",
+    "z": "tab-gateway-sim",
+    "g": "eb74e7d1698084b8",
+    "name": "1. Trigger NBIRTH Node Birth Certificate (once at startup)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 310,
+    "y": 120,
+    "wires": [
+      [
+        "build-nbirth-payload"
+      ]
+    ]
+  },
+  {
+    "id": "build-nbirth-payload",
+    "type": "function",
+    "z": "tab-gateway-sim",
+    "g": "eb74e7d1698084b8",
+    "name": "Build NBIRTH Certificate (Virtual_Gateway_NodeRED)",
+    "func": "// NBIRTH: the edge node's own birth certificate, published once before any DBIRTH.\n// Real Sparkplug B NBIRTH also carries a bdSeq (birth/death sequence) metric, omitted\n// here because the ingestion engine's JSON-fallback parser (used by this simulator)\n// only understands string_value/double_value/boolean_value metrics, not long_value.\nconst topic = 'spBv1.0/FactoryPlus/NBIRTH/Virtual_Gateway_NodeRED';\nconst spbNBirthPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Gateway_Status', string_value: 'ONLINE', datatype: 12 }\n    ],\n    seq: 0\n};\nreturn { topic: topic, payload: JSON.stringify(spbNBirthPayload), qos: 0, retain: false };",
+    "outputs": 1,
+    "x": 760,
+    "y": 120,
+    "wires": [
+      [
+        "mqtt-publish"
+      ]
+    ]
+  },
+  {
+    "id": "comment-onboard-device",
+    "type": "comment",
+    "z": "tab-gateway-sim",
+    "g": "eb74e7d1698084b8",
+    "name": "ADD YOUR OWN DEVICE:",
+    "info": "1) Change the topic's last path segment to your device's name. 2) Change every Asset_ID metric value to match (must be identical in DBIRTH and DDATA below). 3) Replace the metric list with your device's real telemetry. 4) Deploy -- first DBIRTH auto-registers the device, no DB changes needed. See the comment near DBIRTH for what happens next.",
+    "x": 200,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "comment-approve-quarantine",
+    "type": "comment",
+    "z": "tab-gateway-sim",
+    "g": "eb74e7d1698084b8",
+    "name": "COMPLETE THE LOOP -- Approve the device",
+    "info": " On first DBIRTH, an unrecognized device is auto-inserted into the devices table as quarantined (is_quarantined = true) and its DDATA is silently dropped until approved. Open the app -> Devices tab -> 'Zero-Touch Onboarding Quarantine Queue' and Approve (or Reject) it as an Administrator or Shopfloor_Manager.",
+    "x": 250,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "inject-dbirth-startup",
+    "type": "inject",
+    "z": "tab-gateway-sim",
+    "g": "eb74e7d1698084b8",
+    "name": "2. Trigger DBIRTH Birth Certificate (rebirth every 60s)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "60",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 2,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 300,
+    "y": 240,
+    "wires": [
+      [
+        "build-dbirth-payload"
+      ]
+    ]
+  },
+  {
+    "id": "build-dbirth-payload",
+    "type": "function",
+    "z": "tab-gateway-sim",
+    "g": "eb74e7d1698084b8",
+    "name": "Build DBIRTH Certificate (Simulated_CNC_01)",
+    "func": "// Periodic rebirth so a consumer that starts after Node-RED still receives the\n// birth certificate. Stays silent while the device is in its DDEATH state, so the\n// DDEATH demo is not undone by the next rebirth tick.\nif (global.get('device_alive') === false) {\n    return null;\n}\nglobal.set('device_alive', true);\nconst topic = 'spBv1.0/FactoryPlus/DBIRTH/Virtual_Gateway_NodeRED/Simulated_CNC_01';\nconst spbBirthPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID',          string_value: 'Simulated_CNC_01',  datatype: 12 },\n        { name: 'firmware_version',  string_value: 'v3.2.0-industrial', datatype: 12 },\n        { name: 'serial_number',     string_value: 'SN-CNC-8832',       datatype: 12 },\n        { name: 'max_temp_threshold',double_value: 85.0,                datatype: 10 },\n        { name: 'safety_interlock',  boolean_value: true,               datatype: 11 }\n    ],\n    seq: 0\n};\nreturn { topic: topic, payload: JSON.stringify(spbBirthPayload), qos: 0, retain: false };",
+    "outputs": 1,
+    "x": 740,
+    "y": 240,
+    "wires": [
+      [
+        "mqtt-publish"
+      ]
+    ]
+  },
+  {
+    "id": "inject-ddata-timer",
+    "type": "inject",
+    "z": "tab-gateway-sim",
+    "g": "eb74e7d1698084b8",
+    "name": "3. Stream DDATA Telemetry (every 5s)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "5",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 5,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 260,
+    "y": 280,
+    "wires": [
+      [
+        "build-ddata-payload"
+      ]
+    ]
+  },
+  {
+    "id": "build-ddata-payload",
+    "type": "function",
+    "z": "tab-gateway-sim",
+    "g": "eb74e7d1698084b8",
+    "name": "Build DDATA Telemetry (Normal Ops)",
+    "func": "if (global.get('device_alive') === false) {\n    return null;\n}\nconst topic = 'spBv1.0/FactoryPlus/DDATA/Virtual_Gateway_NodeRED/Simulated_CNC_01';\nconst tempOverride = global.get('temp_override');\nconst currentTemp = tempOverride !== undefined ? tempOverride : +(42.0 + Math.sin(Date.now() / 6000) * 5.0 + (Math.random() * 1.5)).toFixed(2);\nconst statusVal = global.get('status_override') || 'RUNNING';\nconst safetyVal = global.get('safety_override') !== undefined ? global.get('safety_override') : true;\n\nconst spbDataPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID',    string_value: 'Simulated_CNC_01', datatype: 12 },\n        { name: 'temperature', double_value: currentTemp,        datatype: 10 },\n        { name: 'vibration',   double_value: 1.45,                datatype: 10 },\n        { name: 'status',      string_value: statusVal,          datatype: 12 },\n        { name: 'safety_ok',   boolean_value: safetyVal,         datatype: 11 }\n    ],\n    seq: Math.floor(Math.random() * 255)\n};\nreturn { topic: topic, payload: JSON.stringify(spbDataPayload), qos: 0, retain: false };",
+    "outputs": 1,
+    "x": 710,
+    "y": 280,
+    "wires": [
+      [
+        "mqtt-publish"
+      ]
+    ]
+  },
+  {
+    "id": "inject-ddeath-manual",
+    "type": "inject",
+    "z": "tab-gateway-sim",
+    "g": "eb74e7d1698084b8",
+    "name": "4. Trigger DDEATH Disconnect Payload",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 250,
+    "y": 320,
+    "wires": [
+      [
+        "build-ddeath-payload"
+      ]
+    ]
+  },
+  {
+    "id": "build-ddeath-payload",
+    "type": "function",
+    "z": "tab-gateway-sim",
+    "g": "eb74e7d1698084b8",
+    "name": "Build DDEATH Death Certificate",
+    "func": "global.set('device_alive', false);\nconst topic = 'spBv1.0/FactoryPlus/DDEATH/Virtual_Gateway_NodeRED/Simulated_CNC_01';\nconst spbDeathPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID', string_value: 'Simulated_CNC_01', datatype: 12 }\n    ],\n    seq: Math.floor(Math.random() * 255)\n};\nreturn { topic: topic, payload: JSON.stringify(spbDeathPayload), qos: 0, retain: false };",
+    "outputs": 1,
+    "x": 690,
+    "y": 320,
+    "wires": [
+      [
+        "mqtt-publish"
+      ]
+    ]
+  },
+  {
+    "id": "inject-alert-overheat",
+    "type": "inject",
+    "z": "tab-gateway-sim",
+    "g": "eb74e7d1698084b8",
+    "name": "BONUS TEST: Trigger Overheat Spike (95°C)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 270,
+    "y": 360,
+    "wires": [
+      [
+        "build-alert-payload"
+      ]
+    ]
+  },
+  {
+    "id": "build-alert-payload",
+    "type": "function",
+    "z": "tab-gateway-sim",
+    "g": "eb74e7d1698084b8",
+    "name": "Publish Overheat Spike (95°C)",
+    "func": "global.set('device_alive', true);\nglobal.set('temp_override', 95.0);\nglobal.set('status_override', 'ALARM_OVERHEAT');\nglobal.set('safety_override', false);\n\nconst topic = 'spBv1.0/FactoryPlus/DDATA/Virtual_Gateway_NodeRED/Simulated_CNC_01';\nconst spbAlertPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID',    string_value: 'Simulated_CNC_01', datatype: 12 },\n        { name: 'temperature', double_value: 95.0,                datatype: 10 },\n        { name: 'vibration',   double_value: 8.92,                datatype: 10 },\n        { name: 'status',      string_value: 'ALARM_OVERHEAT',   datatype: 12 },\n        { name: 'safety_ok',   boolean_value: false,              datatype: 11 }\n    ],\n    seq: Math.floor(Math.random() * 255)\n};\nreturn { topic: topic, payload: JSON.stringify(spbAlertPayload), qos: 0, retain: false };",
+    "outputs": 1,
+    "x": 690,
+    "y": 360,
+    "wires": [
+      [
+        "mqtt-publish"
+      ]
+    ]
+  },
+  {
+    "id": "inject-alert-reset",
+    "type": "inject",
+    "z": "tab-gateway-sim",
+    "g": "eb74e7d1698084b8",
+    "name": "BONUS TEST: Restore Normal Telemetry (42°C)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": "",
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 280,
+    "y": 400,
+    "wires": [
+      [
+        "reset-alert-function"
+      ]
+    ]
+  },
+  {
+    "id": "reset-alert-function",
+    "type": "function",
+    "z": "tab-gateway-sim",
+    "g": "eb74e7d1698084b8",
+    "name": "Reset Telemetry to Normal (42°C)",
+    "func": "global.set('device_alive', true);\nglobal.set('temp_override', undefined);\nglobal.set('status_override', 'RUNNING');\nglobal.set('safety_override', true);\n\nconst topic = 'spBv1.0/FactoryPlus/DDATA/Virtual_Gateway_NodeRED/Simulated_CNC_01';\nconst spbNormalPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Asset_ID',    string_value: 'Simulated_CNC_01', datatype: 12 },\n        { name: 'temperature', double_value: 42.0,                datatype: 10 },\n        { name: 'vibration',   double_value: 1.20,                datatype: 10 },\n        { name: 'status',      string_value: 'RUNNING',          datatype: 12 },\n        { name: 'safety_ok',   boolean_value: true,               datatype: 11 }\n    ],\n    seq: Math.floor(Math.random() * 255)\n};\nreturn { topic: topic, payload: JSON.stringify(spbNormalPayload), qos: 0, retain: false };",
+    "outputs": 1,
+    "x": 700,
+    "y": 400,
+    "wires": [
+      [
+        "mqtt-publish"
+      ]
+    ]
+  },
+  {
+    "id": "comment-register-gateway",
+    "type": "comment",
+    "z": "tab-gateway-sim",
+    "g": "eb74e7d1698084b8",
+    "name": "REGISTER THE GATEWAY FIRST:",
+    "info": "unlike devices, gateways are never auto-created. Before these heartbeats show up as ONLINE, create a gateway named exactly 'Virtual_Gateway_NodeRED' via the app's Gateways tab (Administrator or Shopfloor_Manager). Otherwise NBIRTH/NDATA is logged as an unregistered edge node and dropped.",
+    "x": 220,
+    "y": 440,
+    "wires": []
+  },
+  {
+    "id": "inject-heartbeat-timer",
+    "type": "inject",
+    "z": "tab-gateway-sim",
+    "g": "eb74e7d1698084b8",
+    "name": "5. Gateway Heartbeat (every 30s)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "30",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 240,
+    "y": 480,
+    "wires": [
+      [
+        "build-heartbeat-payload"
+      ]
+    ]
+  },
+  {
+    "id": "build-heartbeat-payload",
+    "type": "function",
+    "z": "tab-gateway-sim",
+    "g": "eb74e7d1698084b8",
+    "name": "Build NDATA Gateway Heartbeat",
+    "func": "const topic = 'spBv1.0/FactoryPlus/NDATA/Virtual_Gateway_NodeRED';\nconst spbHeartbeatPayload = {\n    timestamp: Date.now(),\n    metrics: [\n        { name: 'Gateway_Status', string_value: 'ONLINE', datatype: 12 }\n    ],\n    seq: Math.floor(Math.random() * 255)\n};\nreturn { topic: topic, payload: JSON.stringify(spbHeartbeatPayload), qos: 0, retain: false };",
+    "outputs": 1,
+    "x": 700,
+    "y": 480,
+    "wires": [
+      [
+        "mqtt-publish"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt-publish",
+    "type": "mqtt out",
+    "z": "tab-gateway-sim",
+    "g": "eb74e7d1698084b8",
+    "name": "Publish to Mosquitto Broker",
+    "topic": "",
+    "qos": "0",
+    "retain": "false",
+    "broker": "mqtt-broker-config",
+    "x": 1200,
+    "y": 300,
+    "wires": []
   }
 ]

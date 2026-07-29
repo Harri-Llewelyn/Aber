@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
-import { IconShieldAlert } from '../common/Icons'
+import { IconShieldAlert, IconAlertTriangle } from '../common/Icons'
 
-export function ApproveQuarantineModal({ item, cells, gateways, onApprove, onCancel }) {
+export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onApprove, onMerge, onCancel }) {
   const isGateway = item.entity_type === 'GATEWAY'
   const [assetName, setAssetName] = useState(item.asset_id)
   const [connMethod, setConnMethod] = useState('Sparkplug B')
@@ -24,6 +24,10 @@ export function ApproveQuarantineModal({ item, cells, gateways, onApprove, onCan
     })
   }
 
+  const handleAcceptMatch = () => {
+    onMerge(item.asset_id, suggestion.candidateId)
+  }
+
   return (
     <div className="modal-overlay">
       <div className="modal" style={{ maxWidth: 460 }}>
@@ -31,6 +35,23 @@ export function ApproveQuarantineModal({ item, cells, gateways, onApprove, onCan
           <IconShieldAlert size={18} />
           <span>Approve Discovered {isGateway ? 'Gateway' : 'Device'} <span className="mono">[{item.asset_id}]</span></span>
         </div>
+
+        {!isGateway && suggestion && (
+          <div style={{ background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--warning)', fontWeight: 600, marginBottom: '4px' }}>
+              <IconAlertTriangle size={16} />
+              <span>This looks like it might be <span className="mono">{suggestion.candidateName}</span></span>
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '10px' }}>
+              A provisioned device that has never sent a birth message ({suggestion.evidence}). If this was
+              a mistyped device name, accepting the match keeps that device's existing configuration and
+              discards this quarantined duplicate — rather than approving it as a brand new device.
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={handleAcceptMatch} title="Merge this quarantined device into the suggested provisioned device">
+              Accept Match
+            </button>
+          </div>
+        )}
 
         <div className="form-group">
           <label className="form-label">{isGateway ? 'Gateway Name' : 'Device Name'}</label>

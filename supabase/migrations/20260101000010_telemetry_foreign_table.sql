@@ -47,9 +47,16 @@ CREATE SERVER timescaledb_server
   FOREIGN DATA WRAPPER postgres_fdw
   OPTIONS (host :'ts_host', port :'ts_port', dbname :'ts_dbname');
 
--- Only the table owner ever connects through the FDW; PostgREST's `authenticated`
--- role reaches the data through the view, which runs with the owner's rights.
+-- `postgres` keeps its own mapping for admin/superuser access. A second mapping
+-- FOR PUBLIC covers every other local role (authenticated, service_role) with the
+-- same TimescaleDB credentials, since the view below runs as security_invoker and
+-- each querying role needs its own path through the FDW. `anon` still can't reach
+-- any of this -- it has no SELECT on the view or the foreign table.
 CREATE USER MAPPING FOR postgres
+  SERVER timescaledb_server
+  OPTIONS (user :'ts_user', password :'ts_password');
+
+CREATE USER MAPPING FOR PUBLIC
   SERVER timescaledb_server
   OPTIONS (user :'ts_user', password :'ts_password');
 
@@ -64,9 +71,18 @@ CREATE FOREIGN TABLE timescale.telemetry (
 SERVER timescaledb_server
 OPTIONS (schema_name 'public', table_name 'telemetry');
 
+GRANT USAGE ON SCHEMA timescale TO authenticated, service_role;
+GRANT SELECT ON timescale.telemetry TO authenticated, service_role;
+
 -- Read-only projection for PostgREST. `telemetry.asset_id` holds the Sparkplug B
 -- device name (see ingestion.py), which is what the UI filters on.
-CREATE OR REPLACE VIEW public.telemetry AS
+--
+-- security_invoker = true so the view runs with the querying role's own privileges
+-- (per the GRANTs above) rather than the view owner's -- avoids the Supabase
+-- "Security Definer View" advisor finding while keeping the same effective access
+-- every authenticated user already had (all authenticated users see all telemetry).
+CREATE OR REPLACE VIEW public.telemetry
+WITH (security_invoker = true) AS
 SELECT "time", asset_id, metric_name, val_double, val_string, val_bool
 FROM timescale.telemetry;
 

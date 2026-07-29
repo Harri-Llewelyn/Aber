@@ -198,7 +198,8 @@ def process_dbirth(asset_id: str, gateway_id: str, payload):
             supabase_client.table("devices").insert({
                 "name": asset_id,
                 "status": "ONLINE",
-                "is_quarantined": True
+                "is_quarantined": True,
+                "first_dbirth_at": datetime.now(timezone.utc).isoformat()
             }).execute()
             _quarantine_cache[asset_id] = (True, time.time())
             logger.warning(
@@ -212,7 +213,12 @@ def process_dbirth(asset_id: str, gateway_id: str, payload):
             if is_quar:
                 logger.warning("QUARANTINE NOTICE: DBIRTH received for quarantined device '%s'", asset_id)
             else:
-                supabase_client.table("devices").update({"status": "ONLINE"}).eq("id", dev["id"]).execute()
+                # first_dbirth_at is write-once: only set it the first time this row sees a
+                # real birth, so a later rebirth never overwrites the original timestamp.
+                update_fields = {"status": "ONLINE"}
+                if not dev.get("first_dbirth_at"):
+                    update_fields["first_dbirth_at"] = datetime.now(timezone.utc).isoformat()
+                supabase_client.table("devices").update(update_fields).eq("id", dev["id"]).execute()
                 logger.info("DBIRTH: Verified registered device '%s' in Supabase", asset_id)
     except Exception as e:
         logger.error("Error checking/updating Supabase devices for DBIRTH: %s", e, exc_info=True)

@@ -107,6 +107,77 @@ Running `docker compose up -d` launches the entire unified application stack:
 
 ---
 
+## Sparkplug B Protocol Coverage
+
+The ingestion engine (`ingestion/ingestion.py`) subscribes to `spBv1.0/#` and speaks real Sparkplug B —
+`sparkplug_b.proto` is the full, unmodified Eclipse Tahu schema, and `parse_sparkplug_payload()` tries
+binary protobuf decoding first. This platform is a **fleet-monitoring dashboard with one-way ingestion**
+(device → MQTT → Supabase/TimescaleDB), not a SCADA/MES control system, so it deliberately uses only the
+subset of the spec that serves that job. This section documents exactly where that line is drawn, so a
+reader integrating a real device — or extending the platform — knows what to expect.
+
+### Messages the platform acts on
+
+`on_message()` (`ingestion/ingestion.py:412-457`) routes six message types to real behaviour:
+
+| Message | Level | Handled by | Effect |
+| :--- | :--- | :--- | :--- |
+| `NBIRTH` | Node (gateway) | `process_node_message()` | Sets `gateways.status = ONLINE`, stamps `last_heartbeat` |
+| `NDATA` | Node (gateway) | `process_node_message()` | Same as `NBIRTH` — refreshes `last_heartbeat` so the gateway isn't marked `STALE` (`frontend/src/utils/gatewayStatus.js`, 90s threshold) |
+| `NDEATH` | Node (gateway) | `process_node_message()` | Sets `gateways.status = OFFLINE` |
+| `DBIRTH` | Device | `process_dbirth()` | Auto-registers an unrecognized device as quarantined (`is_quarantined = true`); stores birth parameters into `asset_config`; stamps `devices.first_dbirth_at` once, on the real first birth |
+| `DDATA` | Device | `process_ddata()` | Writes telemetry to the TimescaleDB `telemetry` hypertable — gated: dropped silently for quarantined/unregistered devices |
+| `DDEATH` | Device | `process_ddeath()` | Sets `devices.status = OFFLINE` |
+
+`NBIRTH` and `NDATA` are treated identically at the gateway level — there's no separate "define metrics"
+step for the node birth. Both are recurring liveness pings as far as this platform is concerned; `NDEATH`
+is the only node-level message that changes behaviour.
+
+### Spec features defined in the schema but not used
+
+`sparkplug_b.proto` carries the complete Tahu message definition, but ingestion only ever reads a
+metric's `.name`, `.datatype`, and its scalar value field (`double_value` / `string_value` /
+`boolean_value`). The following fields arrive on the wire (with a real protobuf-speaking device) and are
+simply never read:
+
+| Feature | Proto reference | Purpose in the spec | Status here |
+| :--- | :--- | :--- | :--- |
+| `seq` (payload sequence number) | `sparkplug_b.proto:223` | Detect dropped/out-of-order messages and trigger a rebirth | Set by every publisher (including `node_red_flow.json`), never checked for gaps |
+| `metric.alias` | `sparkplug_b.proto:194` | Numeric shorthand for a metric name, established at birth, to shrink `DATA` payloads | Never used — every message always carries full metric names |
+| `metric.is_historical` | `sparkplug_b.proto:197` | Flags backfilled/buffered data so it isn't mistaken for a live reading | Not read. Per-metric timestamps *are* honoured (`process_ddata` uses `metric.timestamp` when present), so backfilled data still lands at the correct time in TimescaleDB — it's just not distinguished from live data anywhere (e.g. no "backfilled" marker in the UI) |
+| `metric.properties` / `metadata` | `sparkplug_b.proto:200-201` | Structured per-metric metadata (units, ranges, docs) | Not used — values like `max_temp_threshold` are plain sibling metrics, not properties attached to `temperature` |
+| `DataSet` / `Template` | `sparkplug_b.proto:79,108` | Tabular / nested structured metric types (UDTs) | Not used anywhere — only flat scalar metrics appear |
+| `bdSeq` | MQTT Last Will and Testament payload | Ties a node's `NDEATH` to its MQTT session so an ungraceful disconnect is caught immediately | Not used. The JSON fallback parser (see below) doesn't even support `long_value`, so it couldn't carry `bdSeq` without a code change |
+
+> [!NOTE]
+> The simulator (`node_red_flow.json`) publishes JSON, not binary protobuf. `parse_sparkplug_payload()`
+> (`ingestion/ingestion.py:375-409`) falls back to decoding that JSON into the same `Payload`/`Metric`
+> objects when protobuf parsing fails, so the simulator's messages are handled identically to a real
+> device's once parsed — see `node_red_guide.md` for the full simulator walkthrough.
+
+### Message types the platform never listens for
+
+- **`NCMD` / `DCMD`** (Node/Device Command) — the spec's Host→Edge control channel for pushing commands
+  or a "Rebirth" request down to a device. This platform is strictly one-directional; nothing ever
+  publishes to a device. A node-level `NCMD` is silently dropped (no `Asset_ID` to resolve, hits the
+  early return at `ingestion/ingestion.py:447-448`); a device-level `DCMD` is logged and discarded (the
+  `else` branch at `ingestion/ingestion.py:456-457`).
+- **`STATE`** (`spBv1.0/STATE/{host_id}`) — the retained topic a Sparkplug "Primary Host Application"
+  publishes to announce itself online/offline. The topic is only 3 segments, so it's dropped before
+  message-type dispatch even runs (`len(parts) < 4` at `ingestion/ingestion.py:414-415`). This platform
+  never announces itself as a primary host.
+
+### Why this is scoped this way
+
+Aliasing, Templates/DataSets, and the command channel all solve problems (bandwidth at scale, structured
+complex payloads, two-way control) that a fleet-monitoring dashboard doesn't need. The one gap worth
+calling out as a genuine improvement rather than an intentional scope boundary is **`seq` gap detection**:
+it's cheap to add and directly improves data integrity (which this platform already cares about — see
+fail-closed quarantine gating and the `digital_thread` audit trail) by letting the ingestion engine notice
+a dropped message and log/alert on it, rather than silently continuing.
+
+---
+
 ## Authentication & Role-Based Access Control (RBAC)
 
 Supabase Auth is the authoritative identity provider for the application. User privileges are determined strictly by server-side role claims stored in `app_metadata.role`:
@@ -155,7 +226,18 @@ All database migrations are stored in `supabase/migrations/`:
   - **Service Directory**: Completes `directory_services` with every stack service — Supabase Studio, Kong, Auth, PostgREST, Edge Functions, Supabase PostgreSQL, TimescaleDB, and the ingestion engine.
 - **`20260101000010_telemetry_foreign_table.sql`**:
   - **Telemetry over PostgREST**: Creates a `postgres_fdw` link to the standalone TimescaleDB and exposes the hypertable as the read-only `public.telemetry` view, granted to `authenticated` only (`anon` gets `401`). This is how the dashboard reads real time-series data — TimescaleDB itself is not reachable from the browser.
+  - **`security_invoker = true`**: the view runs with the querying role's own privileges rather than the view owner's (`postgres`), avoiding Supabase Advisor's Security Definer View finding. A `FOR PUBLIC` user mapping plus `GRANT`s on the underlying foreign table give `authenticated`/`service_role` their own path through the FDW — every authenticated user still sees the same unfiltered telemetry as before, only whose privileges enforce the read has changed.
   - Connection settings arrive as `psql -v` variables from `supabase-db-init`; the defaults match `docker-compose.yml`, so the file is still runnable standalone.
+- **`20260101000011_advisor_hardening.sql`**:
+  - **Closes remaining Supabase Advisor findings**: revokes `anon`'s residual `SELECT` on every RBAC table — an unused grant surviving Supabase's cluster-init defaults, not something any migration had explicitly requested. RLS already returned zero rows to `anon` on all of them, so this only closes `pg_graphql` schema-introspection exposure, not an actual data leak.
+  - **Locks down `SECURITY DEFINER` functions**: revokes `EXECUTE` from roles that never legitimately call them directly — `custom_access_token_hook`, `handle_new_user`, and `log_digital_thread_event` from `anon`/`authenticated` entirely (trigger/auth-hook-only functions), and `has_role` from `anon` only (`authenticated` keeps it, since RLS policies invoke it from their own `USING`/`WITH CHECK` clauses).
+- **`20260101000012_device_provisioning_tracking.sql`**:
+  - **Provisioning tracking**: Adds `devices.first_dbirth_at`, written exactly once by the ingestion daemon on a device's real first `DBIRTH`. Distinguishes "provisioned but never seen" from "was online, then went offline" — both previously looked identical (`status = 'OFFLINE'`). The Devices tab flags a device **AWAITING FIRST BIRTH** once more than 24h have passed since provisioning with no birth received (computed client-side, same pattern as gateway heartbeat staleness — see `frontend/src/utils/deviceProvisioning.js`).
+  - **Schema linkage**: Adds `devices.schema_id`, optionally linking a device to a `schemas` row.
+  - **Quarantine suggested-match**: when an unrecognized device lands in quarantine, it's compared against every provisioned-but-never-seen device by name similarity, and — if a candidate has a schema assigned — by overlap between the schema's required metrics and what the quarantined device actually reported. A match surfaces as a "did you mean...?" suggestion in the approval modal; accepting it re-keys the quarantined device's `asset_config` history onto the provisioned device, absorbs its status, and discards the quarantined row, rather than treating a typo'd device name as a brand new device (see `approve-quarantine` below).
+- **`20260101000013_metric_catalog.sql`**:
+  - **Metric catalog**: A registry of individually-defined Sparkplug B metrics (name, Sparkplug datatype, description) that schemas are built from via the Schemas tab's **Build Schema from Catalog** flow — pick metrics, then either download a JSON spec sheet (the metric list plus the exact topic string an integrator's device should publish to) or provision a device with the resulting schema already attached.
+  - **Append-only by design**: a metric's `name`/`datatype` are immutable once created, enforced by a `BEFORE UPDATE` trigger (not just the UI) — a physical device is already configured to publish under that exact name, so "editing" a metric means deprecating it and adding a new catalog entry, never rewriting one in place. Mirrors `digital_thread`'s append-only philosophy.
 
 ### Asset Relationship Model
 
@@ -186,6 +268,7 @@ each function as an isolated user worker via `EdgeRuntime.userWorkers.create()`.
   - Validates session JWT & role claims (`Administrator` / `Shopfloor_Manager`).
   - Fails closed (`403 Forbidden`) if role claim is missing or unprivileged.
   - Sets `is_quarantined = false` and assigns `gateway_id` for approved devices via Supabase Service Role client.
+  - **Suggested-match merge**: an optional `merge_into_device_id` in the request body switches to a different path — instead of un-quarantining the submitted device, it re-keys the quarantined device's `asset_config` rows onto the target provisioned device, absorbs its status/`first_dbirth_at`, and deletes the quarantined row. Driven by the Devices tab's quarantine "did you mean...?" suggestion (see `20260101000012_device_provisioning_tracking.sql` above).
 - **`deploy-nodered`** (`supabase/functions/deploy-nodered/index.ts`):
   - Validates session JWT & role claims (`Administrator` / `Shopfloor_Manager`).
   - Fails closed (`401 Unauthorized` / `403 Forbidden`) if Authorization header or role claim is missing or unprivileged.

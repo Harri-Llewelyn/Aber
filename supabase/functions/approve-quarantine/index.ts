@@ -77,7 +77,7 @@ export default async function handler(req: Request): Promise<Response> {
       );
     }
 
-    const { device_id, gateway_id } = await req.json();
+    const { device_id, gateway_id, merge_into_device_id } = await req.json();
 
     if (!device_id) {
       return new Response(
@@ -87,6 +87,119 @@ export default async function handler(req: Request): Promise<Response> {
     }
 
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
+
+    // Suggested-match acceptance: the quarantined row is a device that was already
+    // provisioned under a different (correct) name -- e.g. an integrator typo'd the
+    // Sparkplug B device name. Rather than un-quarantining the mistyped row, absorb its
+    // runtime state into the provisioned row (which may already carry a gateway/schema
+    // assignment worth keeping) and discard the quarantined duplicate.
+    if (merge_into_device_id) {
+      if (merge_into_device_id === device_id) {
+        return new Response(
+          JSON.stringify({ error: "merge_into_device_id must differ from device_id" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      let quarantinedQuery = supabaseAdmin.from("devices").select("*");
+      quarantinedQuery = isUuid(device_id)
+        ? quarantinedQuery.eq("id", device_id)
+        : quarantinedQuery.eq("name", device_id);
+      const { data: quarantinedRows, error: quarantinedError } = await quarantinedQuery;
+
+      if (quarantinedError) {
+        return new Response(
+          JSON.stringify({ error: quarantinedError.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const quarantined = quarantinedRows?.[0];
+      if (!quarantined) {
+        return new Response(
+          JSON.stringify({ error: "Quarantined device not found" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const { data: candidateRows, error: candidateError } = await supabaseAdmin
+        .from("devices")
+        .select("*")
+        .eq("id", merge_into_device_id);
+
+      if (candidateError) {
+        return new Response(
+          JSON.stringify({ error: candidateError.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const candidate = candidateRows?.[0];
+      if (!candidate) {
+        return new Response(
+          JSON.stringify({ error: "Target device not found" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (candidate.id === quarantined.id) {
+        return new Response(
+          JSON.stringify({ error: "Cannot merge a device into itself" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // asset_config is keyed by Sparkplug B device name, not id -- re-key the
+      // quarantined device's recorded birth parameters onto the candidate's name.
+      const { error: rekeyError } = await supabaseAdmin
+        .from("asset_config")
+        .update({ asset_id: candidate.name })
+        .eq("asset_id", quarantined.name);
+
+      if (rekeyError) {
+        return new Response(
+          JSON.stringify({ error: rekeyError.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Absorb the quarantined row's now-known runtime state; leave the candidate's
+      // deliberately-provisioned fields (gateway_id, asset_type, connection_method,
+      // schema_id) untouched.
+      const { data: mergedData, error: mergeError } = await supabaseAdmin
+        .from("devices")
+        .update({
+          status: quarantined.status,
+          first_dbirth_at: candidate.first_dbirth_at || quarantined.first_dbirth_at,
+          is_quarantined: false
+        })
+        .eq("id", candidate.id)
+        .select();
+
+      if (mergeError) {
+        return new Response(
+          JSON.stringify({ error: mergeError.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const { error: deleteError } = await supabaseAdmin
+        .from("devices")
+        .delete()
+        .eq("id", quarantined.id);
+
+      if (deleteError) {
+        return new Response(
+          JSON.stringify({ error: deleteError.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, data: mergedData }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     let query = supabaseAdmin
       .from("devices")

@@ -235,15 +235,37 @@ export const api = {
         .select('*, gateways(id, name)')
         .eq('is_quarantined', true);
       if (error) throw error;
-      return (data || []).map(d => ({
-        ...d,
-        // approve/reject address the device by its Sparkplug B name.
-        asset_id: d.name,
-        quarantine_id: d.id,
-        discovered_at: d.created_at,
-        gateway_id: d.gateway_id || null,
-        gateway_name: d.gateways?.name || null
-      }));
+
+      const names = (data || []).map(d => d.name);
+      let metricsByName = new Map();
+      if (names.length > 0) {
+        const { data: configRows, error: configError } = await supabase
+          .from('asset_config')
+          .select('asset_id, metric_name')
+          .in('asset_id', names);
+        if (configError) throw configError;
+        metricsByName = (configRows || []).reduce((map, row) => {
+          const list = map.get(row.asset_id) || [];
+          list.push(row.metric_name);
+          map.set(row.asset_id, list);
+          return map;
+        }, new Map());
+      }
+
+      return (data || []).map(d => {
+        const reportedMetrics = metricsByName.get(d.name) || [];
+        return {
+          ...d,
+          // approve/reject address the device by its Sparkplug B name.
+          asset_id: d.name,
+          quarantine_id: d.id,
+          discovered_at: d.created_at,
+          gateway_id: d.gateway_id || null,
+          gateway_name: d.gateways?.name || null,
+          reported_metrics: reportedMetrics,
+          birth_payload: JSON.stringify(reportedMetrics)
+        };
+      });
     }
 
     if (path.startsWith('/api/v1/documents')) {
@@ -256,6 +278,20 @@ export const api = {
       const { data, error } = await query.order('created_at', { ascending: false });
       if (error) throw error;
       return (data || []).map(d => ({ ...d, id: d.id }));
+    }
+
+    if (path.startsWith('/api/v1/metric-catalog')) {
+      const { data, error } = await supabase.from('metric_catalog').select('*').order('name', { ascending: true });
+      if (error) throw error;
+      return (data || []).map(m => ({
+        metric_uuid: m.id,
+        name: m.name,
+        datatype: m.datatype,
+        description: m.description,
+        deprecated: m.deprecated,
+        superseded_by: m.superseded_by,
+        created_at: m.created_at
+      }));
     }
 
     if (path.startsWith('/api/v1/schemas')) {
@@ -408,6 +444,7 @@ export const api = {
         gateway_id: gatewayIdFrom(body),
         asset_type: emptyToNull(body.asset_type),
         connection_method: emptyToNull(body.connection_method),
+        schema_id: emptyToNull(body.schema_id),
         status: body.status || 'ONLINE'
       }).select();
       if (error) throw error;
@@ -422,6 +459,28 @@ export const api = {
         url: body.url,
         document_tag: body.document_tag || 'other'
       }).select();
+      if (error) throw error;
+      return data?.[0] || {};
+    }
+
+    if (path === '/api/v1/metric-catalog') {
+      const { data, error } = await supabase.from('metric_catalog').insert({
+        name: body.name,
+        datatype: body.datatype,
+        description: body.description || null
+      }).select();
+      if (error) throw error;
+      const item = data?.[0] || {};
+      return { metric_uuid: item.id || '', ...item };
+    }
+
+    if (path.includes('/metric-catalog/') && path.endsWith('/deprecate')) {
+      const parts = path.split('/');
+      const id = parts[4];
+      const { data, error } = await supabase.from('metric_catalog').update({
+        deprecated: true,
+        superseded_by: emptyToNull(body?.superseded_by)
+      }).eq('id', id).select();
       if (error) throw error;
       return data?.[0] || {};
     }
@@ -556,6 +615,7 @@ export const api = {
       };
       if ('asset_type' in body) patch.asset_type = emptyToNull(body.asset_type);
       if ('connection_method' in body) patch.connection_method = emptyToNull(body.connection_method);
+      if ('schema_id' in body) patch.schema_id = emptyToNull(body.schema_id);
       if ('active_gateway_id' in body || 'gateway_id' in body) {
         patch.gateway_id = gatewayIdFrom(body);
       }
