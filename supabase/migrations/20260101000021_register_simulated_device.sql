@@ -22,12 +22,22 @@
 -- already attached, so approving it lights up tags, unmodelled detection, telemetry and the
 -- Grafana dashboards together, instead of leaving them blank until someone also picks a schema.
 
+-- The schema is resolved by name rather than by a pinned UUID, and prefers the tri-standard schema
+-- migration 0033 creates. Every migration replays on each boot, so a hardcoded id here would reset
+-- the device to the legacy schema on every boot and 0033 would move it back -- and because
+-- log_digital_thread_event() fires on every UPDATE to `devices`, that round trip would append an
+-- audit row to an append-only table once per boot, forever. The COALESCE makes 0021 and 0033 agree,
+-- so after the first boot 0033's assignment is a genuine no-op. The fallback keeps this migration
+-- standalone-correct on a database that has not reached 0033 yet.
 INSERT INTO public.devices (id, name, gateway_id, schema_id, status, is_quarantined, quarantine_reason, asset_type, connection_method)
 VALUES (
   '20000000-0000-4000-8000-000000000002',
   'Simulated_CNC_01',
   '10000000-0000-4000-8000-000000000001',   -- Virtual_Gateway_NodeRED, pinned by migration 0009
-  'e1111111-2222-3333-4444-555555555555',   -- SparkplugB-Telemetry-Standard-Schema, seeded by 0002
+  COALESCE(
+    (SELECT id FROM public.schemas WHERE schema_name = 'Simulated_CNC_01_Schema'),
+    (SELECT id FROM public.schemas WHERE schema_name = 'SparkplugB-Telemetry-Standard-Schema')
+  ),
   'OFFLINE',
   TRUE,
   'UNKNOWN_DEVICE',
@@ -36,7 +46,12 @@ VALUES (
 )
 ON CONFLICT (id) DO UPDATE SET
   gateway_id = EXCLUDED.gateway_id,
-  schema_id  = EXCLUDED.schema_id;
+  schema_id  = EXCLUDED.schema_id
+-- Write only on change. An UPDATE fires log_digital_thread_event() whether or not any value
+-- actually differs, so an unguarded DO UPDATE appended one audit row to an append-only table on
+-- every single boot -- the same trap record_declared_metrics() avoids in ingestion.py.
+WHERE public.devices.gateway_id IS DISTINCT FROM EXCLUDED.gateway_id
+   OR public.devices.schema_id  IS DISTINCT FROM EXCLUDED.schema_id;
 
 -- A device auto-discovered by an earlier run holds the same wire identity under a different UUID.
 -- Its telemetry is keyed by that old sparkplug_id and cannot be moved (the id is generated), so the

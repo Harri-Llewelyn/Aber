@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
-  dataItemTypes, subTypes, unitNames, categoryOfType, typesByCategory, composeMTConnectName,
+  dataItemTypes, subTypes, unitNames, categoryOfType, typesByCategory,
   vocabularySections, adoptedVocabulary, CATEGORY_WITH_UNITS
 } from '../utils/mtconnect'
-import { deriveMetricGroup } from '../utils/metricGroup'
+import { deriveMetricGroup, composeMetricName } from '../utils/metricGroup'
 
 // A slice of what mtconnect_vocabulary actually holds after migration 20260101000018.
 const vocabulary = [
@@ -131,31 +131,36 @@ describe('adoptedVocabulary', () => {
   })
 })
 
-describe('composeMTConnectName', () => {
+describe('composing an MTConnect metric name', () => {
+  // Exercised through composeMetricName, the single composer every standard shares. The part
+  // order (component, instance, type, subType) is MTConnect's and is spelled out by the caller.
+  const compose = ({ component, instance, type, subType } = {}) =>
+    composeMetricName(component, instance, type, subType)
+
   it('builds a fully-qualified name from component, instance, type and subType', () => {
-    expect(composeMTConnectName({
+    expect(compose({
       component: 'Axes', instance: 'C', type: 'ANGULAR_VELOCITY', subType: 'ACTUAL'
     })).toBe('Axes/C/ANGULAR_VELOCITY/ACTUAL')
   })
 
   it('omits the parts that were left blank', () => {
-    expect(composeMTConnectName({ component: 'Environmental', type: 'HUMIDITY_RELATIVE' }))
+    expect(compose({ component: 'Environmental', type: 'HUMIDITY_RELATIVE' }))
       .toBe('Environmental/HUMIDITY_RELATIVE')
-    expect(composeMTConnectName({ type: 'TEMPERATURE' })).toBe('TEMPERATURE')
-    expect(composeMTConnectName({ component: 'Axes', instance: 'C', type: 'ANGLE' }))
+    expect(compose({ type: 'TEMPERATURE' })).toBe('TEMPERATURE')
+    expect(compose({ component: 'Axes', instance: 'C', type: 'ANGLE' }))
       .toBe('Axes/C/ANGLE')
   })
 
   it('carries the subType in the name, not only in its column', () => {
     // Sparkplug keys on the metric name alone, so ACTUAL and COMMANDED readings of the same type
     // would collide on metric_catalog's UNIQUE(name) if the subType lived only in a column.
-    const actual = composeMTConnectName({ component: 'Axes', type: 'ANGLE', subType: 'ACTUAL' })
-    const commanded = composeMTConnectName({ component: 'Axes', type: 'ANGLE', subType: 'COMMANDED' })
+    const actual = compose({ component: 'Axes', type: 'ANGLE', subType: 'ACTUAL' })
+    const commanded = compose({ component: 'Axes', type: 'ANGLE', subType: 'COMMANDED' })
     expect(actual).not.toBe(commanded)
   })
 
   it('trims each part and never emits an empty segment', () => {
-    const composed = composeMTConnectName({ component: ' Axes ', instance: '  ', type: ' ANGLE ' })
+    const composed = compose({ component: ' Axes ', instance: '  ', type: ' ANGLE ' })
     expect(composed).toBe('Axes/ANGLE')
     expect(composed).not.toContain('//')
   })
@@ -163,11 +168,11 @@ describe('composeMTConnectName', () => {
   it('composes a name whose group derives back to the chosen component', () => {
     // The invariant tying this to the generated column: what the operator picked as the component
     // is what the database will store as metric_group.
-    const composed = composeMTConnectName({ component: 'Controller', instance: 'Path', type: 'EXECUTION' })
+    const composed = compose({ component: 'Controller', instance: 'Path', type: 'EXECUTION' })
     expect(deriveMetricGroup(composed)).toBe('Controller')
   })
 
   it('is empty when nothing has been chosen', () => {
-    expect(composeMTConnectName({})).toBe('')
+    expect(compose({})).toBe('')
   })
 })

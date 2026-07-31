@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../api'
-import { deviceHasTag, schemaForDevice, availableTags } from '../../utils/deviceTags'
+import { deviceHasTag, schemasForDevice, availableTags } from '../../utils/deviceTags'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { AutoRefreshControl } from '../common/AutoRefreshControl'
 import { IconHistory, IconDownload, IconX } from '../common/Icons'
@@ -27,7 +27,7 @@ export function DigitalThreadTab() {
   const taggedDeviceIds = useMemo(() => {
     if (!tagFilter) return null
     return devices
-      .filter(d => deviceHasTag(d, schemaForDevice(d, schemas), tagFilter))
+      .filter(d => deviceHasTag(d, schemasForDevice(d, schemas), tagFilter))
       .map(d => d.asset_id)
   }, [tagFilter, devices, schemas])
 

@@ -282,6 +282,14 @@ services:
       VERIFY_JWT: "false"
       NODERED_URL: ${NODERED_URL:-http://node-red:1880/flows}
       NODERED_ADMIN_TOKEN: ${NODERED_ADMIN_TOKEN:-}
+      # AAS export (aas-export). The base IRI namespaces every `globalAssetId` and submodel id the
+      # shell carries, so it has to name the organisation publishing the document -- the default is
+      # only correct for a local stack. Declared here rather than only in .env because an edge
+      # worker sees nothing but the vars main/index.ts forwards to it.
+      AAS_BASE_IRI: ${AAS_BASE_IRI:-https://factoryplus.local/ids/asset/}
+      # Where a consumer fetches the samples a Time Series LinkedSegment points at. Never the rows
+      # themselves -- the shell references the historian, it does not embed it.
+      AAS_HISTORIAN_ENDPOINT: ${AAS_HISTORIAN_ENDPOINT:-http://localhost:54321/rest/v1/telemetry}
     volumes:
       - ./supabase/functions:/home/deno/functions:ro
       # The canonical Node-RED flow - the "git" side of the GitOps sync that
@@ -494,6 +502,9 @@ services:
       NODERED_CREDENTIAL_SECRET: ${NODERED_CREDENTIAL_SECRET}
       MQTT_USER: ${MQTT_USER:-factoryplus}
       MQTT_PASSWORD: ${MQTT_PASSWORD}
+      # Seeding is first-run only, so editor changes survive `docker compose up`.
+      # Set to true for a deliberate reset back to the repo's flow.
+      NODE_RED_FORCE_SEED: ${NODE_RED_FORCE_SEED:-false}
     volumes:
       - nodered_data:/data
       - ./node_red_flow.json:/seed/flows.json:ro

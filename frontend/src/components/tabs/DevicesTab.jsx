@@ -5,6 +5,8 @@ import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../const
 import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { downloadCSV } from '../../utils/downloadCSV'
+import { downloadJSON } from '../../utils/downloadJSON'
+import { downloadBlob } from '../../utils/downloadBlob'
 import { edgeFunctionErrorMessage } from '../../utils/edgeFunctionError'
 import { describeAuthFailure } from '../../utils/sessionError'
 import CopyableId from '../common/CopyableId'
@@ -18,7 +20,7 @@ import { DigitalThreadModal } from '../modals/DigitalThreadModal'
 import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
 import { isProvisioningOverdue, isNeverSeen } from '../../utils/deviceProvisioning'
 import {
-  unmodelledMetrics, schemaForDevice, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG
+  unmodelledMetrics, schemasForDevice, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG
 } from '../../utils/deviceTags'
 import { suggestMatches } from '../../utils/quarantineMatching'
 import {
@@ -200,6 +202,53 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
     } catch (e) { showToast(e.message, 'error') }
   }
 
+  // Tracks the device currently exporting, so the row's own button can show progress rather than
+  // a page-wide spinner -- composing a shell is a few round trips and the table stays usable.
+  const [exportingAas, setExportingAas] = useState(null)
+
+  /**
+   * Download this device's Asset Administration Shell (IEC 63278) as AAS V3 JSON.
+   *
+   * The document is composed server-side by the `aas-export` edge function; the browser only names
+   * the file. That split is deliberate — the shell needs the service role to read `asset_config`
+   * and the whole `metric_catalog`, and building it client-side would mean granting every signed-in
+   * browser that read surface.
+   */
+  const exportAas = async (asset, format = 'json') => {
+    setExportingAas(asset.asset_id)
+    try {
+      const result = await api.post('/api/v1/devices/aas-export', { device_id: asset.asset_id, format })
+
+      if (format === 'aasx') {
+        // Already a packaged ZIP; downloadJSON would re-serialise it. Anchor-download the blob
+        // directly, the same mechanism downloadJSON/downloadCSV use.
+        downloadBlob(result.blob, `${asset.asset_name}.aasx`)
+      } else {
+        downloadJSON(result.aas, `${asset.asset_name}_aas_v3.json`)
+      }
+
+      // An unmapped metric is a real gap in the export's usefulness, so it is reported rather than
+      // left to be discovered by diffing the payload. It is a warning, not an error: `semantic_id`
+      // is nullable on purpose and a local extension legitimately has none.
+      const stats = result.stats || {}
+      const unmapped = stats.unmapped_semantic_ids || 0
+      const label = format === 'aasx' ? 'AASX package' : 'AAS JSON'
+      const summary = `${stats.submodels || 0} submodels, ${stats.telemetry_metrics || 0} metrics`
+      if (unmapped > 0) {
+        showToast(
+          `${label} exported for '${asset.asset_name}' (${summary}) — ${unmapped} metric${unmapped === 1 ? '' : 's'} carried no semantic id`,
+          'warning'
+        )
+      } else {
+        showToast(`${label} exported for '${asset.asset_name}' (${summary})`, 'success')
+      }
+    } catch (e) {
+      showToast(e.message, 'error')
+    } finally {
+      setExportingAas(null)
+    }
+  }
+
   const reassignGatewayInline = async (asset, newGwId) => {
     try {
       await api.put(`/api/v1/devices/${asset.asset_id}`, {
@@ -298,7 +347,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
   // Derived, not stored: adding the metric to the schema clears this on the next poll rather
   // than waiting for the device to rebirth. See utils/deviceTags.js.
   const unmodelledFor = useCallback(
-    (a) => unmodelledMetrics(a, schemaForDevice(a, schemas)),
+    (a) => unmodelledMetrics(a, schemasForDevice(a, schemas)),
     [schemas]
   )
 
@@ -327,8 +376,10 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
 
     if (filterMode === 'active'   && a.is_archived) return false
     if (filterMode === 'archived' && !a.is_archived) return false
-    if (schemaFilter && a.schema_id !== schemaFilter) return false
-    if (tagFilter && !deviceHasTag(a, schemaForDevice(a, schemas), tagFilter)) return false
+    // Matches either the legacy 1:1 column or any attached submodel, so a device filtered by
+    // schema is found however it was provisioned.
+    if (schemaFilter && !schemasForDevice(a, schemas).some(s => s.schema_uuid === schemaFilter)) return false
+    if (tagFilter && !deviceHasTag(a, schemasForDevice(a, schemas), tagFilter)) return false
     if (gatewayFilter && (a.active_gateway_id || '') !== gatewayFilter) return false
     if (cellFilter && (a.cell_id || '') !== cellFilter) return false
     if (attentionOnly && !needsAttention(a)) return false
@@ -373,7 +424,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
               most likely wants. Projected in explicitly. */}
           <button className="btn btn-ghost btn-sm" onClick={() => downloadCSV(filteredAssets.map(a => ({
             ...a,
-            device_tags: deviceTagList(a, schemaForDevice(a, schemas)).join(' ')
+            device_tags: deviceTagList(a, schemasForDevice(a, schemas)).join(' ')
           })), 'devices-export.csv')} title="Download the filtered devices list as CSV"><IconDownload size={13} /> Export CSV</button>
           <button
             className={`btn btn-primary ${!canManage ? 'btn-disabled' : ''}`}
@@ -601,7 +652,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                         </td>
                         <td>
                           {(() => {
-                            const schema = schemaForDevice(a, schemas)
+                            const schema = schemasForDevice(a, schemas)
                             const tags = deviceTagList(a, schema)
                             const extra = unmodelledMetrics(a, schema)
                             if (tags.length === 0 && !a.asset_type) return '—'
@@ -648,6 +699,26 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                               <IconActivity size={13} /> Telemetry
                             </button>
                             <button className="btn btn-ghost btn-sm" onClick={() => setThreadFor(a)} title="View device Digital Thread audit trace"><IconHistory size={13} /> Thread</button>
+                            {/* Read-only and available to every role that can see the device: an
+                                export is a read, and handing a partner a shell is the point.
+                                Two formats, one control: JSON is the AAS Part 5 Environment every
+                                tool reads, AASX the OPC package it is normally shipped in. A
+                                select rather than two buttons keeps the already-crowded row from
+                                growing, and makes them read as one action with a choice. */}
+                            <select
+                              className="form-control form-control-sm"
+                              style={{ width: 'auto', display: 'inline-block' }}
+                              value=""
+                              disabled={exportingAas === a.asset_id}
+                              onChange={e => { if (e.target.value) { exportAas(a, e.target.value); e.target.value = '' } }}
+                              title="Download this device's Asset Administration Shell (IEC 63278)"
+                            >
+                              <option value="">
+                                {exportingAas === a.asset_id ? 'Exporting…' : 'Export AAS ▾'}
+                              </option>
+                              <option value="json">Export JSON (AAS V3)</option>
+                              <option value="aasx">Export AASX Package</option>
+                            </select>
                             <button
                               className={`btn btn-ghost btn-sm ${!canManage || a.is_archived ? 'btn-disabled' : ''}`}
                               disabled={!canManage || a.is_archived}

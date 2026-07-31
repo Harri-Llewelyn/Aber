@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { api } from '../../api'
 import { SPARKPLUG_TYPES } from '../../constants'
-import { modelledMetrics, schemaForDevice } from '../../utils/deviceTags'
+import { modelledMetricsAcross, schemasForDevice } from '../../utils/deviceTags'
 import { IconClipboardList, IconShieldAlert, IconFileCode, IconCheck, IconAlertTriangle } from '../common/Icons'
 
 export function AssetConfigModal({ asset, schemas, onClose }) {
@@ -24,7 +24,8 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
   }
 
   const isOffline = asset.status === 'OFFLINE'
-  const schema = schemaForDevice(asset, schemas)
+  // Every schema attached through device_submodels (migration 0034), or the legacy 1:1 one.
+  const attachedSchemas = schemasForDevice(asset, schemas)
 
   // Expected-vs-actual: every metric the schema models (present or missing), plus anything the
   // device reported that the schema doesn't account for.
@@ -35,9 +36,10 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
   // the former would let a valueless unmodelled metric show as a badge on the Devices list and
   // then be missing from this table.
   let comparisonRows = []
-  if (schema) {
+  if (attachedSchemas.length > 0) {
     const configByName = new Map(config.map(row => [row.metric_name, row]))
-    const modelled = modelledMetrics(schema) || new Set()
+    // Across every attached submodel -- a metric modelled by any of them belongs in this table.
+    const modelled = modelledMetricsAcross(attachedSchemas) || new Set()
     const declared = Array.isArray(asset.last_birth_metrics) ? asset.last_birth_metrics : []
     const reported = new Set([...configByName.keys(), ...declared])
 
@@ -77,10 +79,13 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
           <span>Device Configuration Parameters — <span className="mono">{asset.asset_id}</span></span>
         </div>
 
-        {schema && (
+        {attachedSchemas.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px' }}>
             <IconFileCode size={13} />
-            <span>Compared against assigned schema <strong>{schema.schema_name}</strong></span>
+            <span>
+              Compared against {attachedSchemas.length === 1 ? 'assigned schema' : `${attachedSchemas.length} attached submodels`}{' '}
+              <strong>{attachedSchemas.map(s => s.schema_name).join(', ')}</strong>
+            </span>
           </div>
         )}
 
@@ -99,7 +104,7 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
           <div className="loading-wrap"><div className="spinner" /> Loading DBIRTH parameters…</div>
         ) : error ? (
           <div className="empty-state"><div className="empty-text">{error}</div></div>
-        ) : schema ? (
+        ) : attachedSchemas.length > 0 ? (
           comparisonRows.length === 0 ? (
             <div className="empty-state">
               <div className="empty-icon"><IconClipboardList size={36} /></div>

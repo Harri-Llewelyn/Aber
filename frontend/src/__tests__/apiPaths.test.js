@@ -44,8 +44,14 @@ describe('API Path Coverage Test', () => {
     '/api/v1/documents?entity_type=cell&entity_id=123',
     '/api/v1/devices/dev-123/config',
     '/api/v1/schemas',
+    // Reference vocabularies. All three are read-only tables with no write policy, so a route
+    // that silently 404s here would leave a vocabulary panel permanently empty rather than error.
+    '/api/v1/metric-catalog',
+    '/api/v1/metric-groups',
+    '/api/v1/mtconnect-vocabulary',
+    '/api/v1/iso22400-vocabulary',
+    '/api/v1/opcua-vocabulary',
     '/api/v1/directory',
-    '/api/v1/gitops/status',
     '/api/v1/stats',
     '/api/v1/telemetry?limit=500',
     '/api/v1/telemetry/latest?minutes=60'
@@ -58,6 +64,7 @@ describe('API Path Coverage Test', () => {
     '/api/v1/cells/cell-123/archive',
     '/api/v1/cells/cell-123/restore',
     '/api/v1/quarantine/dev-123/reject',
+    '/api/v1/devices/aas-export',
     '/api/v1/documents',
     '/api/v1/schemas/validate',
     '/api/v1/schemas',

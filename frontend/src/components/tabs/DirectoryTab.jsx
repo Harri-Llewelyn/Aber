@@ -3,27 +3,25 @@ import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { describeAuthFailure } from '../../utils/sessionError'
 import { StatusBadge } from '../common/StatusBadge'
+import { ConfirmModal } from '../modals/ConfirmModal'
 import { IconRefresh, IconGitBranch, IconRefreshCw, IconExternalLink } from '../common/Icons'
 
 export function DirectoryTab({ showToast, hasPermission }) {
   const [services, setServices] = useState([])
-  const [gitops, setGitops]     = useState(null)
   const [loading, setLoading]   = useState(true)
+  const [confirmSync, setConfirmSync] = useState(false)
 
   const loadAll = useCallback(async () => {
     setLoading(true)
     try {
-      const [s, g] = await Promise.all([
-        api.get('/api/v1/directory'),
-        api.get('/api/v1/gitops/status'),
-      ])
-      setServices(s); setGitops(g)
+      setServices(await api.get('/api/v1/directory'))
     } finally { setLoading(false) }
   }, [])
 
   useEffect(() => { loadAll() }, [loadAll])
 
   const triggerGitopsSync = async () => {
+    setConfirmSync(false)
     try {
       const res = await api.post('/api/v1/gitops/deploy-flow', { commit_message: 'Manual GitOps Flow Sync from Dashboard UI' })
       showToast(res.message, 'success')
@@ -34,7 +32,10 @@ export function DirectoryTab({ showToast, hasPermission }) {
     }
   }
 
-  const canManageGateway = hasPermission(PERMISSION_UUIDS.GATEWAY_MANAGE)
+  // gitops:manage, not gateway:manage -- deploying edge flows is its own
+  // privilege. Seeded to Administrator and Shopfloor_Manager only, which is the
+  // same pair the deploy-nodered Edge Function enforces server-side.
+  const canManageGitops = hasPermission(PERMISSION_UUIDS.GITOPS_MANAGE)
 
   return (
     <>
@@ -46,30 +47,38 @@ export function DirectoryTab({ showToast, hasPermission }) {
         Catalog tracking microservice health heartbeats, HTTP/MQTT service endpoints, and Edge GitOps deployment flow synchronization.
       </p>
 
-      {/* Edge GitOps Manager Banner */}
-      {gitops && (
-        <div style={{ marginBottom: '24px', background: 'var(--bg-glass)', border: '1px solid var(--border-hover)', borderRadius: 'var(--radius)', padding: '20px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px', fontWeight: 600 }}>
-                <IconGitBranch size={18} /> Edge GitOps Deployment Manager
-                <span className="badge badge-online" title="Edge deployment status">STATUS: {gitops.gitops_status}</span>
-              </div>
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                Commit: <span className="mono">{gitops.active_commit_sha}</span> | Repo: <span className="mono">{gitops.repository_url}</span>
-              </div>
-            </div>
-            <button
-              className={`btn btn-primary ${!canManageGateway ? 'btn-disabled' : ''}`}
-              disabled={!canManageGateway}
-              onClick={() => canManageGateway && triggerGitopsSync()}
-              title={!canManageGateway ? 'Requires Admin permissions' : 'Hot-reload Node-RED flows from repository SHA'}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-            >
-              <IconRefreshCw size={14} /> Sync Edge Flows via GitOps
-            </button>
+      {/* No deployment status is shown: nothing here can observe what Node-RED is
+          actually running, and a badge asserting a state it has not checked is
+          worse than no badge. The button is a one-way push of the repo flow. */}
+      <div style={{ marginBottom: '24px', background: 'var(--bg-glass)', border: '1px solid var(--border-hover)', borderRadius: 'var(--radius)', padding: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px', fontWeight: 600 }}>
+            <IconGitBranch size={18} /> Edge GitOps Deployment Manager
           </div>
+          <button
+            className={`btn btn-primary ${!canManageGitops ? 'btn-disabled' : ''}`}
+            disabled={!canManageGitops}
+            onClick={() => canManageGitops && setConfirmSync(true)}
+            title={!canManageGitops ? 'Requires Administrator or Shopfloor Manager' : 'Overwrite the running Node-RED flows with the repository flow'}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+          >
+            <IconRefreshCw size={14} /> Sync Edge Flows via GitOps
+          </button>
         </div>
+      </div>
+
+      {/* Destructive: a full deployment replaces every flow in the running
+          Node-RED, so anything edited at :1880 and not committed is lost. */}
+      {confirmSync && (
+        <ConfirmModal
+          message={
+            'This replaces ALL flows running in Node-RED with the flow committed to the repository ' +
+            '(node_red_flow.json). Any changes made in the Node-RED editor that are not in the ' +
+            'repository will be permanently lost. Continue?'
+          }
+          onConfirm={triggerGitopsSync}
+          onCancel={() => setConfirmSync(false)}
+        />
       )}
 
       {/* Active Stack Microservices */}

@@ -3,7 +3,7 @@ import { api, TELEMETRY_PAGE_SIZE } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { effectiveSparkplugId } from '../../utils/sparkplugId'
-import { deviceHasTag, schemaForDevice, availableTags } from '../../utils/deviceTags'
+import { deviceHasTag, schemasForDevice, availableTags } from '../../utils/deviceTags'
 import { AutoRefreshControl } from '../common/AutoRefreshControl'
 import { IconDownload } from '../common/Icons'
 
@@ -52,7 +52,7 @@ export function TelemetryTab({ initialAssetFilter, onClearFilter, hasPermission 
   const taggedAssetIds = useMemo(() => {
     if (!tagFilter) return null
     return assets
-      .filter(a => deviceHasTag(a, schemaForDevice(a, schemas), tagFilter))
+      .filter(a => deviceHasTag(a, schemasForDevice(a, schemas), tagFilter))
       .map(a => a.asset_id)
   }, [tagFilter, assets, schemas])
 

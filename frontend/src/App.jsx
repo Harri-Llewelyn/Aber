@@ -1,4 +1,4 @@
-import React, { useState, useEffect, lazy, Suspense, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, lazy, Suspense } from 'react'
 import { supabase } from './lib/supabaseClient'
 import { usePermissions } from './hooks/usePermissions'
 import { useAppRouting } from './hooks/useAppRouting'

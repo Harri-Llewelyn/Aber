@@ -1,4 +1,4 @@
-import { supabase } from './lib/supabaseClient';
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './lib/supabaseClient';
 import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId } from './utils/sparkplugId';
 import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
@@ -229,9 +229,23 @@ export const api = {
         .select('*, gateways(id, name, cell_id, status, is_archived)')
         .order('created_at', { ascending: false });
       if (error) throw error;
+
+      // The schemas attached through device_submodels (migration 0034), one AAS Submodel each.
+      // Read from the `device_schemas` view so the fallback to the legacy 1:1 devices.schema_id is
+      // applied once, in SQL, rather than being re-derived by every caller. A failure here is
+      // non-fatal: schemasForDevice() falls back to schema_id, so the page degrades to
+      // single-submodel behaviour instead of rendering no devices at all.
+      const { data: links } = await supabase.from('device_schemas').select('device_id, schema_id');
+      const schemasByDevice = new Map();
+      for (const link of links || []) {
+        if (!schemasByDevice.has(link.device_id)) schemasByDevice.set(link.device_id, []);
+        schemasByDevice.get(link.device_id).push(link.schema_id);
+      }
+
       return (data || []).map(d => ({
         ...mapDeviceRow(d, d.gateways),
-        cell_id: d.gateways?.cell_id || null
+        cell_id: d.gateways?.cell_id || null,
+        submodel_schema_ids: schemasByDevice.get(d.id) || []
       }));
     }
 
@@ -341,7 +355,50 @@ export const api = {
         .select('*')
         .order('name', { ascending: true });
       if (error) throw error;
-      return (data || []).map(v => ({ kind: v.kind, name: v.name, category: v.category }));
+      // semantic_id is the concept-level local IRI added by migration 0032 -- distinct from the
+      // observation-level id a catalog metric carries, which is built from the whole metric name.
+      return (data || []).map(v => ({
+        kind: v.kind, name: v.name, category: v.category, semantic_id: v.semantic_id ?? null
+      }));
+    }
+
+    if (path.startsWith('/api/v1/iso22400-vocabulary')) {
+      // Reference data (migration 20260101000030), read-only to the app -- there is no write
+      // policy on the table, so a POST here would fail at the database regardless.
+      const { data, error } = await supabase
+        .from('iso22400_vocabulary')
+        .select('*')
+        .order('name', { ascending: true });
+      if (error) throw error;
+      return (data || []).map(k => ({
+        name: k.name,
+        kpi_id: k.kpi_id,
+        description: k.description,
+        category: k.category,
+        unit: k.unit,
+        formula: k.formula,
+        semantic_id: k.semantic_id
+      }));
+    }
+
+    if (path.startsWith('/api/v1/opcua-vocabulary')) {
+      // Reference data (migration 20260101000031). Ordered by spec then name so the panel's
+      // sections arrive already grouped. `node_id` is a browse path, not a numeric NodeId.
+      const { data, error } = await supabase
+        .from('opcua_vocabulary')
+        .select('*')
+        .order('companion_spec', { ascending: true })
+        .order('name', { ascending: true });
+      if (error) throw error;
+      return (data || []).map(p => ({
+        name: p.name,
+        companion_spec: p.companion_spec,
+        node_id: p.node_id,
+        description: p.description,
+        datatype: p.datatype,
+        unit: p.unit,
+        semantic_id: p.semantic_id
+      }));
     }
 
     // Checked before /metric-catalog: startsWith on the shorter path would otherwise not match,
@@ -376,6 +433,10 @@ export const api = {
         units: m.units ?? null,
         sub_type: m.sub_type ?? null,
         standard: m.standard ?? null,
+        // AAS (IEC 63278) semanticId -- migration 20260101000029. NULL means unmapped, which is a
+        // legitimate state: MTConnect publishes no per-type identifier, so those stay NULL.
+        semantic_id: m.semantic_id ?? null,
+        semantic_id_type: m.semantic_id_type ?? null,
         description: m.description,
         deprecated: m.deprecated,
         superseded_by: m.superseded_by,
@@ -391,6 +452,8 @@ export const api = {
         schema_name: s.schema_name,
         description: s.description,
         schema_definition: s.schema_definition,
+        semantic_id: s.semantic_id ?? null,
+        semantic_id_type: s.semantic_id_type ?? null,
         created_at: s.created_at
       }));
     }
@@ -406,14 +469,6 @@ export const api = {
         status: s.status,
         last_heartbeat: s.last_heartbeat
       }));
-    }
-
-    if (path.startsWith('/api/v1/gitops/status')) {
-      return {
-        gitops_status: 'SYNCED',
-        active_commit_sha: 'a8f3e4b',
-        repository_url: 'https://github.com/AMRC-FactoryPlus/edge-flows.git'
-      };
     }
 
     if (path.startsWith('/api/v1/stats')) {
@@ -575,6 +630,10 @@ export const api = {
         units: emptyToNull(body.units),
         sub_type: emptyToNull(body.sub_type),
         standard: emptyToNull(body.standard),
+        semantic_id: emptyToNull(body.semantic_id),
+        // Only meaningful alongside an id. Sent as NULL when the id is blank so the pair cannot
+        // end up half-populated, which would export as a Reference with a type and no value.
+        semantic_id_type: emptyToNull(body.semantic_id) ? emptyToNull(body.semantic_id_type) : null,
         description: body.description || null
       }).select();
       if (error) throw error;
@@ -614,7 +673,9 @@ export const api = {
       const { data, error } = await supabase.from('schemas').insert({
         schema_name: body.schema_name,
         description: body.description,
-        schema_definition: body.schema_definition
+        schema_definition: body.schema_definition,
+        semantic_id: emptyToNull(body.semantic_id),
+        semantic_id_type: emptyToNull(body.semantic_id) ? emptyToNull(body.semantic_id_type) : null
       }).select();
       if (error) throw error;
       const item = data?.[0] || {};
@@ -631,6 +692,47 @@ export const api = {
         status: data?.status || 'SUCCESS',
         message: data?.message || 'GitOps edge deployment flow sync triggered successfully',
       };
+    }
+
+    if (path.startsWith('/api/v1/devices/aas-export')) {
+      // Phase 3 of the AAS roadmap. The whole document is composed server-side: the shell needs
+      // the service role to read asset_config and the full metric_catalog, and composing it in the
+      // browser would mean shipping that read surface to every client.
+      //
+      // AASX is fetched directly rather than through functions.invoke(): supabase-js decodes any
+      // response that is not JSON or octet-stream as *text*, and an AASX package is a ZIP -- text
+      // decoding silently corrupts it. The JSON path keeps using invoke() for its error handling.
+      if (body?.format === 'aasx') {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/aas-export?format=aasx`, {
+          method: 'POST',
+          headers: {
+            apikey: SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ device_id: body.device_id })
+        });
+
+        if (!res.ok) {
+          // The function reports failures as JSON even on the AASX path, so the real message is
+          // recoverable rather than being swallowed as an opaque status.
+          let message = `AAS export failed (${res.status})`;
+          try { message = (await res.json())?.error || message; } catch { /* non-JSON body */ }
+          throw new Error(message);
+        }
+
+        // Counts ride in a header because a binary body has nowhere to carry them.
+        let stats = {};
+        try { stats = JSON.parse(res.headers.get('X-AAS-Stats') || '{}'); } catch { /* absent */ }
+        return { blob: await res.blob(), stats, format: 'aasx' };
+      }
+
+      const { data, error } = await supabase.functions.invoke('aas-export', { body });
+      if (error) {
+        throw new Error(await edgeFunctionErrorMessage(error, 'AAS export failed'));
+      }
+      return data;
     }
 
     throw new Error('Unhandled API path: ' + path);

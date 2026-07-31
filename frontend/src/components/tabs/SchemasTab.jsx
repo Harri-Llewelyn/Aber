@@ -1,20 +1,25 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
-import { CreateSchemaModal } from '../modals/CreateSchemaModal'
 import { ValidatePayloadModal } from '../modals/ValidatePayloadModal'
 import { SchemaBuilderModal } from '../modals/SchemaBuilderModal'
 import { DeprecateMetricModal } from '../modals/DeprecateMetricModal'
 import { downloadJSON } from '../../utils/downloadJSON'
 import { datatypeLabel, SPARKPLUG_DATATYPES } from '../../utils/sparkplugDatatype'
 import {
-  groupCatalog, knownGroupNames, groupOptionsByStandard, canonicaliseGroup, isValidMetricName
+  groupCatalog, knownGroupNames, groupOptionsByStandard, canonicaliseGroup, isValidMetricName,
+  composeMetricName
 } from '../../utils/metricGroup'
 import { modelledMetrics } from '../../utils/deviceTags'
 import {
-  typesByCategory, subTypes, unitNames, categoryOfType, composeMTConnectName,
-  MTCONNECT_STANDARD, CATEGORY_WITH_UNITS
+  typesByCategory, subTypes, unitNames, categoryOfType, CATEGORY_WITH_UNITS
 } from '../../utils/mtconnect'
+import {
+  STANDARDS, STANDARD_OPTIONS, SEMANTIC_ID_TYPES, inferSemanticIdType, LOCAL_EXTENSION_LABEL,
+  mtconnectSemanticId, DEFAULT_SEMANTIC_ID_TYPE
+} from '../../utils/standards'
+import { kpis, kpiByName, iso22400Prefill } from '../../utils/iso22400'
+import { dataPointByName, opcuaSections, opcuaPrefill } from '../../utils/opcua'
 
 // Sentinel for the "not in the list yet" option in the group picker. Not a valid group name --
 // the CHECK constraint on metric_groups.name rejects anything containing the separator.
@@ -23,10 +28,38 @@ const NEW_GROUP = '__new__'
 // "Not in the MTConnect vocabulary". The standard itself allows extension, so this escape has to
 // exist -- but it is a deliberate choice rather than the default path.
 const CUSTOM_TYPE = '__custom__'
+
+// Separator for the OPC UA type picker's option values. The vocabulary is keyed on
+// (companion_spec, name) because Machinery and Robotics both define names like `Manufacturer`, so
+// the option value has to carry both or the wrong row is resolved.
+const OPCUA_KEY_SEP = '::'
+
+// Extracted because three paths need it: the initial state, a successful add, and cancelling out
+// of the form. Duplicating the shape was how a field would get missed from one of the resets.
+const BLANK_METRIC = {
+  // Which vocabulary the type picker draws from, and the provenance recorded on the metric.
+  // MTConnect is the default because it is the largest vocabulary and most metrics come from it.
+  standard: STANDARDS.MTCONNECT,
+  group: '', newGroup: '', instance: '', type: '', customType: '',
+  subType: '', units: '', datatype: 10, description: '',
+  // AAS semanticId. ISO 22400 and OPC UA take theirs from the vocabulary row; MTConnect derives
+  // one from the composed name. `semanticIdManual` records that the operator has taken the field
+  // over, so the derivation stops fighting them from that point on.
+  semanticId: '', semanticIdType: '', semanticIdManual: false,
+  // Only set for standards whose vocabulary states it. MTConnect derives it from the data item
+  // type instead, so this stays blank there and effectiveCategory falls back to the derivation.
+  vocabCategory: ''
+}
 import { deviceSparkplugId, gatewaySparkplugId } from '../../utils/sparkplugId'
 import CopyableId from '../common/CopyableId'
-import { MTConnectVocabularyPanel } from '../common/MTConnectVocabularyPanel'
-import { IconCheck, IconPlus, IconFileCode, IconAlertTriangle, IconArchive } from '../common/Icons'
+import { VocabularyPanel } from '../common/VocabularyPanel'
+import { mtconnectVocabularyTab } from '../common/MTConnectVocabularyPanel'
+import { iso22400VocabularyTab } from '../common/ISO22400VocabularyPanel'
+import { opcuaVocabularyTab } from '../common/OPCUAVocabularyPanel'
+import {
+  IconCheck, IconPlus, IconFileCode, IconAlertTriangle, IconArchive,
+  IconChevronDown, IconChevronUp, IconX
+} from '../common/Icons'
 
 export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
   const [schemas, setSchemas]         = useState([])
@@ -34,56 +67,137 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
   const [gateways, setGateways]       = useState([])
   const [devices, setDevices]         = useState([])
   const [loading, setLoading]         = useState(true)
-  const [showCreateModal, setShowCreateModal] = useState(false)
   const [showValidateModal, setShowValidateModal] = useState(false)
   const [showBuilderModal, setShowBuilderModal] = useState(false)
   const [groups, setGroups]           = useState([])
   const [vocabulary, setVocabulary]   = useState([])
+  const [isoVocabulary, setIsoVocabulary]     = useState([])
+  const [opcuaVocabulary, setOpcuaVocabulary] = useState([])
   const [showAddMetric, setShowAddMetric] = useState(false)
   // The metric name is composed from its MTConnect parts rather than typed whole: component
   // ("group"), an optional component instance, the data item type, and an optional subType.
   // NEW_GROUP / CUSTOM_TYPE are the sentinels for "not in the standard vocabulary" -- MTConnect
   // permits extension, so those escapes have to exist.
-  const [newMetric, setNewMetric] = useState({
-    group: '', newGroup: '', instance: '', type: '', customType: '',
-    subType: '', units: '', datatype: 10, description: ''
-  })
+  const [newMetric, setNewMetric] = useState(BLANK_METRIC)
   const [deprecateTarget, setDeprecateTarget] = useState(null)
+  // Collapse state for the catalog's group sections, keyed by group label. Absent means expanded:
+  // the catalog is deployment state an operator came here to read, so it opens showing its
+  // contents and collapsing is the deliberate act. (The MTConnect vocabulary panel defaults the
+  // other way because it is ~600 reference entries nobody wants unrolled on arrival.)
+  const [collapsedGroups, setCollapsedGroups] = useState({})
+  const [showDeprecated, setShowDeprecated] = useState(false)
+
+  const isGroupOpen = (label) => collapsedGroups[label] !== true
+  const toggleGroup = (label) =>
+    setCollapsedGroups(prev => ({ ...prev, [label]: isGroupOpen(label) }))
+
+  // "Cancel" means discard, so closing the form clears it. That also stops half-finished input
+  // leaking into the next open -- including the one the vocabulary panel triggers.
+  const toggleAddMetric = () => {
+    if (showAddMetric) setNewMetric(BLANK_METRIC)
+    setShowAddMetric(v => !v)
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [sch, cat, grp, voc, gw, dev] = await Promise.all([
+      const [sch, cat, grp, voc, iso, opc, gw, dev] = await Promise.all([
         api.get('/api/v1/schemas'),
         api.get('/api/v1/metric-catalog'),
         api.get('/api/v1/metric-groups'),
         api.get('/api/v1/mtconnect-vocabulary'),
+        api.get('/api/v1/iso22400-vocabulary'),
+        api.get('/api/v1/opcua-vocabulary'),
         api.get('/api/v1/gateways'),
         api.get('/api/v1/devices'),
       ])
-      setSchemas(sch); setCatalog(cat); setGroups(grp); setVocabulary(voc); setGateways(gw); setDevices(dev)
+      setSchemas(sch); setCatalog(cat); setGroups(grp); setVocabulary(voc)
+      setIsoVocabulary(iso); setOpcuaVocabulary(opc)
+      setGateways(gw); setDevices(dev)
     } finally { setLoading(false) }
   }, [])
 
   useEffect(() => { load() }, [load])
 
-  const handleCreateSchema = async (payload) => {
-    try {
-      await api.post('/api/v1/schemas', payload)
-      setShowCreateModal(false)
-      load()
-      showToast(`Schema '${payload.schema_name}' registered successfully`, 'success')
-    } catch (e) {
-      showToast(e.message, 'error')
-    }
+  /**
+   * Turn a suggested group name into the two fields the picker needs.
+   *
+   * A vocabulary can suggest a group this deployment has never registered (OPC UA's `MotionDevice`
+   * on a fresh stack, say). The select only lists known groups, so an unknown suggestion has to
+   * arrive as "+ New group…" with the name pre-typed rather than as a value with no option behind
+   * it, which would silently render blank.
+   */
+  const groupFields = (suggested) => {
+    if (!suggested) return { group: '', newGroup: '' }
+    const known = knownGroups.find(g => g.toLowerCase() === suggested.toLowerCase())
+    return known ? { group: known, newGroup: '' } : { group: NEW_GROUP, newGroup: suggested }
+  }
+
+  /** Apply a vocabulary prefill (utils/iso22400 or utils/opcua) to the form and open it. */
+  const applyPrefill = (prefill) => {
+    if (!prefill) return
+    setNewMetric(m => ({
+      ...m,
+      ...groupFields(prefill.group),
+      standard: prefill.standard,
+      type: prefill.type,
+      customType: '',
+      // A KPI and an OPC UA data point are both whole concepts; neither has an MTConnect subType.
+      subType: '',
+      units: prefill.units,
+      datatype: prefill.datatype,
+      vocabCategory: prefill.category,
+      semanticId: prefill.semanticId,
+      semanticIdType: prefill.semanticId ? inferSemanticIdType(prefill.semanticId) : '',
+      // The vocabulary's id is authoritative for these two standards, so it is not re-derived.
+      semanticIdManual: !!prefill.semanticId,
+      // Only fill a description that is still empty, so the vocabulary's blurb never overwrites
+      // something the operator has already written.
+      description: m.description || prefill.description || ''
+    }))
+    setShowAddMetric(true)
   }
 
   // Clicking a data item type in the vocabulary panel starts a catalog entry from it: open the
   // Add Metric form with the type already chosen, leaving the component and instance -- the parts
   // the standard cannot know -- for the operator.
   const handleUseVocabularyType = (typeName) => {
-    setNewMetric(m => ({ ...m, type: typeName, customType: '' }))
+    setNewMetric(m => ({ ...m, standard: STANDARDS.MTCONNECT, type: typeName, customType: '' }))
     setShowAddMetric(true)
+  }
+
+  const handleUseKpi = (kpi) => applyPrefill(iso22400Prefill(kpi))
+  const handleUseOpcuaPoint = (point) => applyPrefill(opcuaPrefill(point))
+
+  /** Selecting an entry in the type picker prefills everything that entry determines. */
+  const handleTypeChange = (value) => {
+    if (newMetric.standard === STANDARDS.ISO22400) {
+      const kpi = kpiByName(isoVocabulary, value)
+      if (kpi) return applyPrefill(iso22400Prefill(kpi))
+    }
+    if (newMetric.standard === STANDARDS.OPCUA) {
+      const [spec, name] = String(value).split(OPCUA_KEY_SEP)
+      const point = dataPointByName(opcuaVocabulary, spec, name)
+      if (point) return applyPrefill(opcuaPrefill(point))
+    }
+    setNewMetric(m => ({ ...m, type: value }))
+  }
+
+  /**
+   * Switching standard clears everything the previous vocabulary decided.
+   *
+   * Keeping the type across a switch would leave an MTConnect data item type selected while the
+   * form claims ISO 22400 provenance -- and `standard` is what an AAS export reads to decide which
+   * namespace a metric belongs to, so a stale value there is a wrong interoperability claim rather
+   * than cosmetic. The group and description survive because they are the operator's own input.
+   */
+  const handleStandardChange = (value) => {
+    setNewMetric(m => ({
+      ...m,
+      standard: value,
+      type: '', customType: '', subType: '', units: '',
+      vocabCategory: '', semanticId: '', semanticIdType: '', semanticIdManual: false
+    }))
   }
 
   const handleAddMetric = async () => {
@@ -104,13 +218,15 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
         // the column is what can be queried without parsing.
         sub_type: newMetric.subType,
         units: unitsApply ? newMetric.units : '',
-        standard: usingCustomType ? '' : MTCONNECT_STANDARD,
+        standard: effectiveStandard,
+        // Phase 1 of the AAS alignment (migration 0029). Blank is a legitimate value -- MTConnect
+        // publishes no per-type identifier, so those metrics stay unmapped rather than carrying an
+        // invented one.
+        semantic_id: semanticIdValue,
+        semantic_id_type: semanticIdTypeValue,
         description: newMetric.description
       })
-      setNewMetric({
-        group: '', newGroup: '', instance: '', type: '', customType: '',
-        subType: '', units: '', datatype: 10, description: ''
-      })
+      setNewMetric(BLANK_METRIC)
       setShowAddMetric(false)
       load()
       showToast(`Metric '${composed}' added to the catalog`, 'success')
@@ -128,7 +244,9 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
     schemas.filter(s => modelledMetrics(s)?.has(metricName)).length
 
   const deviceCountFor = (schemaUuid) =>
-    devices.filter(d => d.schema_id === schemaUuid).length
+    devices.filter(d =>
+      (d.submodel_schema_ids?.length ? d.submodel_schema_ids : [d.schema_id]).includes(schemaUuid)
+    ).length
 
   const handleDeprecate = async (supersededBy) => {
     try {
@@ -208,16 +326,47 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
     ? canonicaliseGroup(newMetric.newGroup, knownGroups)
     : newMetric.group
 
-  const usingCustomType = newMetric.type === CUSTOM_TYPE
-  const effectiveType = usingCustomType ? newMetric.customType.trim() : newMetric.type
-  // MTConnect assigns each data item type a category; it is not the operator's to choose, so it
-  // is derived rather than offered. A custom type has none until someone says otherwise.
-  const effectiveCategory = usingCustomType ? '' : categoryOfType(vocabulary, effectiveType)
-  // Only SAMPLE is a continuously-varying measurement, so only SAMPLE carries units.
-  const unitsApply = effectiveCategory === CATEGORY_WITH_UNITS
+  const isMTConnect = newMetric.standard === STANDARDS.MTCONNECT
+  const isIso = newMetric.standard === STANDARDS.ISO22400
+  const isOpcua = newMetric.standard === STANDARDS.OPCUA
+  const isCustomStandard = newMetric.standard === STANDARDS.CUSTOM
+
+  // Only MTConnect offers a "not in the vocabulary" escape inside the type picker. The other two
+  // have the Custom *standard* for that, which is the more honest place for it: a data point that
+  // is not in OPC UA is not an OPC UA data point, whereas MTConnect explicitly permits extending
+  // its type list while staying MTConnect.
+  const usingCustomType = isMTConnect && newMetric.type === CUSTOM_TYPE
+  const effectiveType = (usingCustomType || isCustomStandard)
+    ? newMetric.customType.trim()
+    : newMetric.type
+
+  // Provenance actually recorded. A custom MTConnect type is a local extension, so it drops the
+  // MTConnect claim even though the form was on the MTConnect tab.
+  const effectiveStandard = (isCustomStandard || usingCustomType) ? STANDARDS.CUSTOM : newMetric.standard
+
+  // MTConnect assigns each data item type a category, so it is derived rather than offered. ISO
+  // 22400 and OPC UA supply theirs with the vocabulary entry (utils/iso22400, utils/opcua), which
+  // is why the prefill carries it. A local extension has none until someone says otherwise.
+  const effectiveCategory = isMTConnect
+    ? (usingCustomType ? '' : categoryOfType(vocabulary, effectiveType))
+    : newMetric.vocabCategory
+
+  // For MTConnect, only SAMPLE is a continuously-varying measurement, so only SAMPLE carries
+  // units. The other standards state the unit on the vocabulary entry itself, so the field stays
+  // available for them regardless of the category the entry maps onto.
+  const unitsApply = isMTConnect ? effectiveCategory === CATEGORY_WITH_UNITS : true
   const typeGroups = typesByCategory(vocabulary)
   const availableSubTypes = subTypes(vocabulary)
-  const availableUnits = unitNames(vocabulary)
+  const isoKpis = kpis(isoVocabulary)
+  const opcuaGroups = opcuaSections(opcuaVocabulary)
+  // The MTConnect UnitEnum, plus whatever the current selection prefilled if that is not in it.
+  // ISO 22400 measures MTBF in HOUR and OPC UA carries UNECE codes, neither of which MTConnect
+  // guarantees to list -- without this the select would silently show blank for a unit the
+  // vocabulary had just supplied.
+  const mtconnectUnits = unitNames(vocabulary)
+  const availableUnits = newMetric.units && !mtconnectUnits.includes(newMetric.units)
+    ? [newMetric.units, ...mtconnectUnits]
+    : mtconnectUnits
   // Typing a case variant of an established group resolves to the established spelling. Surfaced
   // before submitting, because the database rejects the fork outright and discovering that as an
   // error is a worse experience than being told up front.
@@ -225,16 +374,37 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
     newMetric.group === NEW_GROUP &&
     newMetric.newGroup.trim() !== '' &&
     effectiveGroup !== newMetric.newGroup.trim()
-  const composedName = composeMTConnectName({
-    component: effectiveGroup,
-    instance: newMetric.instance,
-    type: effectiveType,
-    subType: newMetric.subType
-  })
+  // One composer for all three standards, so every name a group derivation has to read is built
+  // the same way. The subType segment only exists for MTConnect -- an ISO KPI or an OPC UA browse
+  // name is a whole concept with no qualifier to append.
+  const composedName = composeMetricName(
+    effectiveGroup,
+    newMetric.instance,
+    effectiveType,
+    isMTConnect ? newMetric.subType : ''
+  )
+  // MTConnect metrics get an id derived from the name they will publish under, in this
+  // deployment's own namespace (see utils/standards.js for why local rather than mtconnect.org).
+  // It tracks the name as the form is filled in, and stops the moment the operator types their
+  // own -- an id that overwrote a hand-entered crosswalk on the next keystroke would be worse
+  // than no prefill at all.
+  // Gated on the type being chosen, not merely on the name being non-empty: with only a group
+  // picked the composed name is `OEE`, and an id derived from that names a group rather than a
+  // metric. Nothing is derived until there is a metric to derive it from.
+  const derivedSemanticId =
+    isMTConnect && effectiveType !== '' ? mtconnectSemanticId(composedName) : ''
+  const semanticIdValue = (newMetric.semanticIdManual ? newMetric.semanticId : derivedSemanticId).trim()
+  const semanticIdTypeValue = newMetric.semanticIdManual
+    ? newMetric.semanticIdType
+    : (semanticIdValue ? DEFAULT_SEMANTIC_ID_TYPE : '')
+
   const canAddMetric =
     effectiveType !== '' &&
     isValidMetricName(composedName) &&
-    (newMetric.group !== NEW_GROUP || newMetric.newGroup.trim() !== '')
+    (newMetric.group !== NEW_GROUP || newMetric.newGroup.trim() !== '') &&
+    // A type without a value would export as an AAS Reference with no key. Rejected here rather
+    // than nulled on the way out, so the operator sees the field they left half-filled.
+    (semanticIdValue !== '' || semanticIdTypeValue === '')
 
   return (
     <>
@@ -244,21 +414,19 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
           <button className="btn btn-ghost btn-sm" onClick={() => setShowValidateModal(true)} disabled={schemas.length === 0} title="Test sample telemetry payload against registered schema rules">
             <IconCheck size={14} /> Validate Candidate Payload
           </button>
+          {/* The only way to create a schema. "Register New Schema" used to sit beside this,
+              taking a raw JSON Schema document as free text -- which meant a schema could name
+              metrics that were not in the catalog, had no standard, and carried no semantic id.
+              Every derived feature reads schemas: device tags, unmodelled detection, the tag
+              filters on three pages. Building from the catalog is what guarantees those inputs
+              exist, so it is now the single path rather than the more careful of two. */}
           <button
-            className={`btn btn-ghost btn-sm ${!canManageSchema ? 'btn-disabled' : ''}`}
+            className={`btn btn-primary btn-sm ${!canManageSchema ? 'btn-disabled' : ''}`}
             disabled={!canManageSchema}
             onClick={() => canManageSchema && setShowBuilderModal(true)}
             title={!canManageSchema ? 'Requires Admin permissions' : 'Build a schema from the metric catalog, then download a spec sheet or provision a device'}
           >
             <IconFileCode size={14} /> Build Schema from Catalog
-          </button>
-          <button
-            className={`btn btn-primary btn-sm ${!canManageSchema ? 'btn-disabled' : ''}`}
-            disabled={!canManageSchema}
-            onClick={() => canManageSchema && setShowCreateModal(true)}
-            title={!canManageSchema ? 'Requires Admin permissions' : 'Register new JSON Schema definition'}
-          >
-            <IconPlus size={14} /> Register New Schema
           </button>
         </div>
       </div>
@@ -271,13 +439,20 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
             section header would sit flush against its borders. */}
         <div className="card-header">
           <h3 className="section-title">Metric Catalog <span className="section-count">{activeCatalog.length}</span></h3>
+          {/* The label follows the form's state rather than naming a fixed action, so the control
+              always says what pressing it will do. */}
           <button
             className={`btn btn-ghost btn-sm ${!canManageSchema ? 'btn-disabled' : ''}`}
             disabled={!canManageSchema}
-            onClick={() => canManageSchema && setShowAddMetric(v => !v)}
-            title={!canManageSchema ? 'Requires Admin permissions' : 'Add a new metric to the catalog'}
+            aria-expanded={showAddMetric}
+            onClick={() => canManageSchema && toggleAddMetric()}
+            title={!canManageSchema
+              ? 'Requires Admin permissions'
+              : showAddMetric ? 'Discard this metric and close the form' : 'Add a new metric to the catalog'}
           >
-            <IconPlus size={13} /> Add Metric
+            {showAddMetric
+              ? <><IconX size={13} /> Cancel</>
+              : <><IconPlus size={13} /> Add Metric</>}
           </button>
         </div>
 
@@ -293,6 +468,21 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
         {showAddMetric && (
           <div style={{ margin: '16px 20px', padding: '12px', background: 'var(--bg-glass)', borderRadius: 'var(--radius)' }}>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              {/* Chosen first because it decides what every control to its right offers. */}
+              <div className="form-group" style={{ margin: 0, flex: '0 1 150px' }}>
+                <label className="form-label">Standard</label>
+                <select
+                  className="form-control"
+                  value={newMetric.standard}
+                  onChange={e => handleStandardChange(e.target.value)}
+                  title="Which vocabulary this metric is named from. Recorded as the metric's provenance, and what an AAS export reads to decide which namespace it belongs to."
+                >
+                  {STANDARD_OPTIONS.map(o => (
+                    <option key={o.label} value={o.value} title={o.hint}>{o.label}</option>
+                  ))}
+                </select>
+              </div>
+
               <div className="form-group" style={{ margin: 0, flex: '0 1 170px' }}>
                 <label className="form-label">Group</label>
                 <select
@@ -335,49 +525,108 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
                 />
               </div>
 
-              <div className="form-group" style={{ margin: 0, flex: '1 1 200px' }}>
-                <label className="form-label">Data Item Type</label>
-                <select
-                  className="form-control"
-                  value={newMetric.type}
-                  onChange={e => setNewMetric(m => ({ ...m, type: e.target.value }))}
-                  title="The MTConnect data item type. Grouped by category: SAMPLE is a continuous measurement, EVENT a discrete state change, CONDITION a fault or warning."
-                >
-                  <option value="">— Select a type —</option>
-                  {typeGroups.map(g => (
-                    <optgroup key={g.category} label={`${g.category} (${g.types.length})`}>
-                      {g.types.map(t => <option key={t} value={t}>{t}</option>)}
-                    </optgroup>
-                  ))}
-                  <option value={CUSTOM_TYPE}>+ Not in MTConnect…</option>
-                </select>
-              </div>
+              {/* One slot, three vocabularies. Which one fills it is the Standard selector's only
+                  job, so the label changes with it rather than staying generic and leaving the
+                  operator to work out what a "type" means for a KPI. */}
+              {isMTConnect && (
+                <div className="form-group" style={{ margin: 0, flex: '1 1 200px' }}>
+                  <label className="form-label">Data Item Type</label>
+                  <select
+                    className="form-control"
+                    value={newMetric.type}
+                    onChange={e => handleTypeChange(e.target.value)}
+                    title="The MTConnect data item type. Grouped by category: SAMPLE is a continuous measurement, EVENT a discrete state change, CONDITION a fault or warning."
+                  >
+                    <option value="">— Select a type —</option>
+                    {typeGroups.map(g => (
+                      <optgroup key={g.category} label={`${g.category} (${g.types.length})`}>
+                        {g.types.map(t => <option key={t} value={t}>{t}</option>)}
+                      </optgroup>
+                    ))}
+                    <option value={CUSTOM_TYPE}>+ Not in MTConnect…</option>
+                  </select>
+                </div>
+              )}
 
-              {usingCustomType && (
+              {isIso && (
+                <div className="form-group" style={{ margin: 0, flex: '1 1 200px' }}>
+                  <label className="form-label">KPI</label>
+                  <select
+                    className="form-control"
+                    value={newMetric.type}
+                    onChange={e => handleTypeChange(e.target.value)}
+                    title="The ISO 22400-2 key performance indicator. Selecting one fills in its unit, its semantic id and the group it files under — those are properties of the standard, not choices."
+                  >
+                    <option value="">— Select a KPI —</option>
+                    {isoKpis.map(k => (
+                      <option key={k.name} value={k.name} title={k.formula || ''}>
+                        {k.name}{k.kpi_id && k.kpi_id !== k.name ? ` (${k.kpi_id})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {isOpcua && (
+                <div className="form-group" style={{ margin: 0, flex: '1 1 220px' }}>
+                  <label className="form-label">Data Point</label>
+                  <select
+                    className="form-control"
+                    value={newMetric.type
+                      ? `${(dataPointByName(opcuaVocabulary, null, newMetric.type)?.companion_spec) || ''}${OPCUA_KEY_SEP}${newMetric.type}`
+                      : ''}
+                    onChange={e => handleTypeChange(e.target.value)}
+                    title="The OPC UA companion specification data point. Selecting one fills in its group from the browse path, its datatype and its semantic id."
+                  >
+                    <option value="">— Select a data point —</option>
+                    {opcuaGroups.map(section => (
+                      <optgroup key={section.key} label={`${section.title} (${section.entries.length})`}>
+                        {section.entries.map(p => (
+                          <option
+                            key={`${p.companion_spec}${OPCUA_KEY_SEP}${p.name}`}
+                            value={`${p.companion_spec}${OPCUA_KEY_SEP}${p.name}`}
+                            title={p.description || ''}
+                          >
+                            {p.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {(usingCustomType || isCustomStandard) && (
                 <div className="form-group" style={{ margin: 0, flex: '1 1 170px' }}>
-                  <label className="form-label">Custom Type</label>
+                  <label className="form-label">{isCustomStandard ? 'Metric Name' : 'Custom Type'}</label>
                   <input
                     className="form-control"
                     value={newMetric.customType}
                     onChange={e => setNewMetric(m => ({ ...m, customType: e.target.value.replace(/\//g, '') }))}
                     placeholder="e.g. VIBRATION_RMS"
-                    title="A local extension. MTConnect permits these, but prefer a standard type where one fits."
+                    title={isCustomStandard
+                      ? 'A local extension with no standard behind it. It still composes into Group/Instance/Name, so it groups and tags like everything else.'
+                      : 'A local extension. MTConnect permits these, but prefer a standard type where one fits.'}
                   />
                 </div>
               )}
 
-              <div className="form-group" style={{ margin: 0, flex: '0 1 150px' }}>
-                <label className="form-label">Sub Type</label>
-                <select
-                  className="form-control"
-                  value={newMetric.subType}
-                  onChange={e => setNewMetric(m => ({ ...m, subType: e.target.value }))}
-                  title="Optional MTConnect qualifier — ACTUAL vs COMMANDED vs TARGET. It becomes the last segment of the name, because Sparkplug keys only on the name and the variants would otherwise collide."
-                >
-                  <option value="">— None —</option>
-                  {availableSubTypes.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
+              {/* MTConnect only: a subType qualifies a data item type. An ISO KPI and an OPC UA
+                  browse name are whole concepts, so there is nothing to qualify. */}
+              {isMTConnect && (
+                <div className="form-group" style={{ margin: 0, flex: '0 1 150px' }}>
+                  <label className="form-label">Sub Type</label>
+                  <select
+                    className="form-control"
+                    value={newMetric.subType}
+                    onChange={e => setNewMetric(m => ({ ...m, subType: e.target.value }))}
+                    title="Optional MTConnect qualifier — ACTUAL vs COMMANDED vs TARGET. It becomes the last segment of the name, because Sparkplug keys only on the name and the variants would otherwise collide."
+                  >
+                    <option value="">— None —</option>
+                    {availableSubTypes.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              )}
 
               <div className="form-group" style={{ margin: 0, flex: '0 1 150px' }}>
                 <label className="form-label">Units</label>
@@ -407,6 +656,59 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
                 <input className="form-control" value={newMetric.description} onChange={e => setNewMetric(m => ({ ...m, description: e.target.value }))} placeholder="What this metric represents" />
               </div>
 
+              {/* AAS Phase 1. Prefilled from the vocabulary for ISO 22400 and OPC UA, and derived
+                  from the composed name for MTConnect; editable in every case, because a semantic
+                  id is an assertion about the metric and assertions get corrected. */}
+              <div className="form-group" style={{ margin: 0, flex: '2 1 260px' }}>
+                <label className="form-label">
+                  Semantic ID <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}>(optional)</span>
+                  {!newMetric.semanticIdManual && derivedSemanticId && (
+                    <span style={{ fontWeight: 400, color: 'var(--text-dim)', marginLeft: '5px' }} title="Built from the metric name in this deployment's namespace. Type to override.">
+                      · auto
+                    </span>
+                  )}
+                </label>
+                <input
+                  className="form-control mono"
+                  style={{ fontSize: '11px' }}
+                  value={semanticIdValue}
+                  onChange={e => {
+                    const value = e.target.value
+                    setNewMetric(m => ({
+                      ...m,
+                      semanticId: value,
+                      // Taking the field over stops the derivation, so it cannot overwrite a
+                      // hand-entered crosswalk on the next keystroke.
+                      semanticIdManual: true,
+                      // Only ever fills a blank type, so a deliberate choice is never overwritten.
+                      semanticIdType: m.semanticIdType || inferSemanticIdType(value)
+                    }))
+                  }}
+                  placeholder="e.g. http://opcfoundation.org/UA/Robotics/ActualPosition"
+                  title="AAS (IEC 63278) semanticId — the resolvable identity of the concept this metric measures. Unlike the name, it can be corrected later."
+                />
+              </div>
+
+              <div className="form-group" style={{ margin: 0, flex: '0 1 140px' }}>
+                <label className="form-label">Reference Type</label>
+                <select
+                  className="form-control"
+                  value={semanticIdTypeValue}
+                  onChange={e => setNewMetric(m => ({
+                    ...m,
+                    semanticIdType: e.target.value,
+                    // Choosing a type adopts the id currently shown, rather than leaving the type
+                    // attached to a value the derivation could still change underneath it.
+                    semanticIdManual: true,
+                    semanticId: m.semanticIdManual ? m.semanticId : semanticIdValue
+                  }))}
+                  title="Which kind of AAS Reference the semantic id is. IRI for a URI, IRDI for an ECLASS or IEC CDD identifier, ModelReference to point inside another AAS."
+                >
+                  <option value="">— None —</option>
+                  {SEMANTIC_ID_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+
               <button className={`btn btn-primary btn-sm ${!canAddMetric ? 'btn-disabled' : ''}`} disabled={!canAddMetric} onClick={handleAddMetric} title="Add this metric to the catalog">
                 Add
               </button>
@@ -420,9 +722,25 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
                 {composedName || '…'}
               </span>
               {' '}— immutable once created.
-              {effectiveCategory && <> Category <strong>{effectiveCategory}</strong>, from the MTConnect standard.</>}
-              {usingCustomType && <> Recorded as a <strong>local extension</strong>, not an MTConnect standard type.</>}
+              {effectiveCategory && (
+                <> Category <strong>{effectiveCategory}</strong>
+                  {isMTConnect ? ', from the MTConnect standard.' : `, mapped from ${newMetric.standard}.`}</>
+              )}
+              {effectiveStandard
+                ? <> Provenance <strong>{effectiveStandard}</strong>.</>
+                : <> Recorded as a <strong>local extension</strong>, with no standard provenance.</>}
+              {semanticIdValue && (
+                <> Semantic id <span className="mono" style={{ color: 'var(--accent)' }}>{semanticIdValue}</span>
+                  {semanticIdTypeValue ? ` (${semanticIdTypeValue})` : ''} — editable later, unlike the name.</>
+              )}
             </div>
+
+            {semanticIdValue === '' && semanticIdTypeValue !== '' && (
+              <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <IconAlertTriangle size={12} />
+                <span>A reference type needs an id to describe. Enter a semantic id, or set the type back to None.</span>
+              </div>
+            )}
 
             {groupCaseCollision && (
               <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -439,33 +757,56 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
         {loading ? <div className="loading-wrap"><div className="spinner" /> Loading catalog…</div> : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Name</th><th title="MTConnect observation category">Category</th><th title="MTConnect units — SAMPLE data items only">Units</th><th>Datatype</th><th>Description</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
-              {catalogGroups.map(group => (
+              <thead><tr><th>Name</th><th title="Which standard vocabulary this metric was named from">Standard</th><th title="MTConnect observation category">Category</th><th title="MTConnect units — SAMPLE data items only">Units</th><th>Datatype</th><th title="AAS (IEC 63278) semanticId — the resolvable identity of the concept this metric measures">Semantic ID</th><th>Description</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+              {catalogGroups.map(group => {
+                const open = isGroupOpen(group.label)
+                return (
                 <tbody key={group.label}>
                   <tr>
-                    <td colSpan={6} style={{ background: 'var(--bg-glass)', padding: '6px 12px', borderTop: '1px solid var(--border)' }}>
-                      <span
-                        style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: group.isUngrouped ? 'var(--text-muted)' : 'var(--accent)' }}
-                        title={group.isUngrouped
-                          ? 'These metric names carry no "Group.Metric" prefix, so they belong to no category'
-                          : `Metrics named "${group.label}/…"`}
+                    <td colSpan={8} style={{ background: 'var(--bg-glass)', padding: 0, borderTop: '1px solid var(--border)' }}>
+                      {/* Whole header row is the control, same as the vocabulary panel's sections. */}
+                      <button
+                        type="button"
+                        onClick={() => toggleGroup(group.label)}
+                        aria-expanded={open}
+                        style={{
+                          width: '100%', display: 'flex', alignItems: 'center', gap: '8px',
+                          padding: '6px 12px', background: 'none', border: 'none',
+                          cursor: 'pointer', color: 'inherit', textAlign: 'left', font: 'inherit'
+                        }}
+                        title={open
+                          ? `Collapse ${group.label}`
+                          : `Expand ${group.label} (${group.metrics.length} metric${group.metrics.length === 1 ? '' : 's'})`}
                       >
-                        {group.label}
-                      </span>
-                      <span className="section-count" style={{ marginLeft: '8px' }}>{group.metrics.length}</span>
+                        {open ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
+                        <span
+                          style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: group.isUngrouped ? 'var(--text-muted)' : 'var(--accent)' }}
+                          title={group.isUngrouped
+                            ? 'These metric names carry no "Group/Metric" prefix, so they belong to no category'
+                            : `Metrics named "${group.label}/…"`}
+                        >
+                          {group.label}
+                        </span>
+                        <span className="section-count">{group.metrics.length}</span>
+                      </button>
                     </td>
                   </tr>
-                  {group.metrics.map(m => (
+                  {open && group.metrics.map(m => (
                     <tr key={m.metric_uuid}>
                       <td>
                         <span className="mono">{m.name}</span>
                         {/* MTConnect permits local extensions, so this marks provenance rather
                             than flagging a problem. */}
                         {!m.standard && m.category && (
-                          <span style={{ fontSize: '10px', color: 'var(--text-dim)', marginLeft: '6px', fontStyle: 'italic' }} title="Local extension — not an MTConnect standard data item type">
+                          <span style={{ fontSize: '10px', color: 'var(--text-dim)', marginLeft: '6px', fontStyle: 'italic' }} title="Local extension — not drawn from a standard vocabulary">
                             local
                           </span>
                         )}
+                      </td>
+                      <td>
+                        {m.standard
+                          ? <span className="badge badge-neutral" style={{ fontSize: '10px' }} title={`Named from the ${m.standard} vocabulary`}>{m.standard}</span>
+                          : <span style={{ color: 'var(--text-dim)', fontSize: '11px' }}>{LOCAL_EXTENSION_LABEL}</span>}
                       </td>
                       <td>
                         {m.category
@@ -474,6 +815,18 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
                       </td>
                       <td style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{m.units || '—'}</td>
                       <td>{datatypeLabel(m.datatype)}</td>
+                      {/* Capped and scrollable: a semantic id is a full IRI, and `.table-wrap`
+                          scrolls horizontally, so an unconstrained cell pushes the Deprecate
+                          button off-screen. Same lesson as the quarantine payload cell. */}
+                      <td style={{ maxWidth: '260px' }}>
+                        {m.semantic_id
+                          ? <CopyableId
+                              value={m.semantic_id}
+                              label={`semantic id${m.semantic_id_type ? ` (${m.semantic_id_type})` : ''}`}
+                              onNotify={showToast}
+                            />
+                          : <span style={{ color: 'var(--text-dim)' }} title="Not mapped to a standard concept. Legitimate for MTConnect metrics, which have no published per-type identifier.">—</span>}
+                      </td>
                       <td style={{ color: 'var(--text-muted)' }}>{m.description || '—'}</td>
                       <td style={{ textAlign: 'right' }}>
                         <button
@@ -488,14 +841,45 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
                     </tr>
                   ))}
                 </tbody>
-              ))}
+                )
+              })}
+
+              {/* Deprecated metrics get a section of their own, collapsed by default: they are
+                  retired, so they are context rather than the working set. Rendered only when
+                  some exist, so the header is never an empty promise. */}
+              {deprecatedCatalog.length > 0 && (
               <tbody>
-                {deprecatedCatalog.map(m => (
+                <tr>
+                  <td colSpan={8} style={{ background: 'var(--bg-glass)', padding: 0, borderTop: '1px solid var(--border)' }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowDeprecated(v => !v)}
+                      aria-expanded={showDeprecated}
+                      style={{
+                        width: '100%', display: 'flex', alignItems: 'center', gap: '8px',
+                        padding: '6px 12px', background: 'none', border: 'none',
+                        cursor: 'pointer', color: 'inherit', textAlign: 'left', font: 'inherit'
+                      }}
+                      title={showDeprecated ? 'Hide deprecated metrics' : 'Show metrics that have been retired and replaced'}
+                    >
+                      {showDeprecated ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
+                      <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                        Deprecated
+                      </span>
+                      <span className="section-count">{deprecatedCatalog.length}</span>
+                    </button>
+                  </td>
+                </tr>
+                {showDeprecated && deprecatedCatalog.map(m => (
                   <tr key={m.metric_uuid} style={{ opacity: 0.5 }}>
                     <td><span className="mono" style={{ textDecoration: 'line-through' }}>{m.name}</span></td>
+                    <td style={{ fontSize: '11px' }}>{m.standard || LOCAL_EXTENSION_LABEL}</td>
                     <td>{m.category || '—'}</td>
                     <td style={{ fontSize: '11px' }}>{m.units || '—'}</td>
                     <td>{datatypeLabel(m.datatype)}</td>
+                    <td className="mono" style={{ fontSize: '10px', maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.semantic_id || ''}>
+                      {m.semantic_id || '—'}
+                    </td>
                     <td style={{ color: 'var(--text-muted)' }}>
                       <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)' }}>
                         <IconAlertTriangle size={10} /> DEPRECATED
@@ -505,19 +889,31 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
                   </tr>
                 ))}
               </tbody>
+              )}
             </table>
           </div>
         )}
       </div>
 
-      {/* Sits below the catalog: the catalog is this deployment's state and comes first, the
-          vocabulary is the reference behind it. */}
+      {/* One reference card for all three standards, below the catalog: the catalog is this
+          deployment's state and comes first, the standards behind it follow. Tab order is by size —
+          MTConnect is ~600 entries and the one most metrics come from, then the two smaller
+          specialised ones. */}
       {!loading && (
-        <MTConnectVocabularyPanel
-          vocabulary={vocabulary}
-          catalog={catalog}
+        <VocabularyPanel
+          title="Standard Vocabulary Reference"
           canAddMetric={canManageSchema}
-          onUseType={handleUseVocabularyType}
+          tabs={[
+            mtconnectVocabularyTab({
+              vocabulary, catalog, onUseType: handleUseVocabularyType
+            }),
+            iso22400VocabularyTab({
+              vocabulary: isoVocabulary, catalog, onUseKpi: handleUseKpi
+            }),
+            opcuaVocabularyTab({
+              vocabulary: opcuaVocabulary, catalog, onUsePoint: handleUseOpcuaPoint
+            })
+          ]}
         />
       )}
 
@@ -562,7 +958,6 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
         )}
       </div>
 
-      {showCreateModal && <CreateSchemaModal onSave={handleCreateSchema} onCancel={() => setShowCreateModal(false)} />}
       {showValidateModal && <ValidatePayloadModal schemas={schemas} onClose={() => setShowValidateModal(false)} />}
       {showBuilderModal && <SchemaBuilderModal catalog={catalog} gateways={gateways} onSubmit={handleBuilderSubmit} onCancel={() => setShowBuilderModal(false)} />}
       {deprecateTarget && (

@@ -2,22 +2,39 @@ import React, { useState, useMemo } from 'react'
 import { IconFileCode, IconDownload } from '../common/Icons'
 import { datatypeLabel, datatypeToJsonSchemaType } from '../../utils/sparkplugDatatype'
 import { groupCatalog } from '../../utils/metricGroup'
+import {
+  STANDARD_OPTIONS, SEMANTIC_ID_TYPES, inferSemanticIdType, LOCAL_EXTENSION_LABEL
+} from '../../utils/standards'
+
+/** Sentinel for the standard filter's default. Not a `standard` value -- '' means local extension. */
+const ANY_STANDARD = '__any__'
 
 export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
   const [schemaName, setSchemaName] = useState('')
   const [description, setDescription] = useState('')
   const [search, setSearch] = useState('')
+  const [standard, setStandard] = useState(ANY_STANDARD)
   const [selectedIds, setSelectedIds] = useState(new Set())
+  const [semanticId, setSemanticId] = useState('')
+  const [semanticIdType, setSemanticIdType] = useState('')
   const [deviceName, setDeviceName] = useState('')
   const [gatewayId, setGatewayId] = useState('')
   const [groupId, setGroupId] = useState('FactoryPlus')
 
   const activeCatalog = useMemo(() => (catalog || []).filter(m => !m.deprecated), [catalog])
+
+  // The standard filter narrows what is *listed*, never what is selected. A schema legitimately
+  // mixes standards -- an OEE submodel of ISO KPIs alongside the MTConnect observations they are
+  // computed from is the normal case -- so clearing a selection on filter change would fight the
+  // thing the filter exists to make easier.
   const filteredCatalog = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return activeCatalog
-    return activeCatalog.filter(m => m.name.toLowerCase().includes(q) || (m.description || '').toLowerCase().includes(q))
-  }, [activeCatalog, search])
+    return activeCatalog.filter(m => {
+      if (standard !== ANY_STANDARD && (m.standard || '') !== standard) return false
+      if (!q) return true
+      return m.name.toLowerCase().includes(q) || (m.description || '').toLowerCase().includes(q)
+    })
+  }, [activeCatalog, search, standard])
 
   const toggleMetric = (id) => {
     setSelectedIds(prev => {
@@ -43,7 +60,12 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
         type: 'object',
         properties,
         required: selectedMetrics.map(m => m.name)
-      }
+      },
+      // The AAS Submodel this schema corresponds to, if it is a known one -- an IDTA submodel
+      // template id, say. Optional: most schemas are local compositions with no template behind
+      // them, and asserting one there would be a false claim.
+      semantic_id: semanticId.trim(),
+      semantic_id_type: semanticIdType
     }
   }
 
@@ -76,14 +98,60 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
         </div>
 
         <div className="form-group">
+          <label className="form-label">Semantic ID <span style={{ fontWeight: 400, color: 'var(--text-dim)' }}>(optional)</span></label>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input
+              className="form-control mono"
+              style={{ flex: '1 1 auto', fontSize: '11px' }}
+              value={semanticId}
+              onChange={e => {
+                setSemanticId(e.target.value)
+                setSemanticIdType(t => t || inferSemanticIdType(e.target.value))
+              }}
+              placeholder="e.g. https://admin-shell.io/idta/SubmodelTemplate/…"
+              title="AAS (IEC 63278) semanticId for the Submodel this schema corresponds to."
+            />
+            <select
+              className="form-control"
+              style={{ flex: '0 0 140px' }}
+              value={semanticIdType}
+              onChange={e => setSemanticIdType(e.target.value)}
+              title="Which kind of AAS Reference the semantic id is"
+            >
+              <option value="">— None —</option>
+              {SEMANTIC_ID_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="form-group">
           <label className="form-label">Metrics <span className="section-count">{selectedMetrics.length} selected</span></label>
-          <input
-            className="form-control"
-            style={{ marginBottom: '8px' }}
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search catalog metrics…"
-          />
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+            <input
+              className="form-control"
+              style={{ flex: '1 1 auto' }}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search catalog metrics…"
+            />
+            {/* Filters the list only. A schema mixing standards is normal — ISO 22400 KPIs beside
+                the MTConnect observations they are computed from — so selections survive a change
+                here. */}
+            <select
+              className="form-control"
+              style={{ flex: '0 0 165px' }}
+              value={standard}
+              onChange={e => setStandard(e.target.value)}
+              title="Show only metrics named from one standard. Metrics already selected stay selected."
+            >
+              <option value={ANY_STANDARD}>All standards</option>
+              {STANDARD_OPTIONS.map(o => (
+                <option key={o.label} value={o.value}>
+                  {o.value === '' ? LOCAL_EXTENSION_LABEL : o.label}
+                </option>
+              ))}
+            </select>
+          </div>
           <div style={{ maxHeight: '220px', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
             {filteredCatalog.length === 0 ? (
               <div style={{ padding: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>No matching catalog metrics.</div>
@@ -104,6 +172,14 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
                       <input type="checkbox" checked={selectedIds.has(m.metric_uuid)} onChange={() => toggleMetric(m.metric_uuid)} />
                       <span className="mono" style={{ fontSize: '12px' }}>{m.name}</span>
                       <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{datatypeLabel(m.datatype)}</span>
+                      {/* Which standard a metric came from is what makes a mixed-standard schema
+                          legible; the tick marks the ones carrying an AAS semantic id. */}
+                      <span
+                        style={{ fontSize: '10px', color: 'var(--text-dim)' }}
+                        title={m.semantic_id ? `${m.standard || LOCAL_EXTENSION_LABEL} — semantic id ${m.semantic_id}` : (m.standard || LOCAL_EXTENSION_LABEL)}
+                      >
+                        {m.standard || LOCAL_EXTENSION_LABEL}{m.semantic_id ? ' ✓' : ''}
+                      </span>
                       {m.description && <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: 'auto' }}>{m.description}</span>}
                     </label>
                   ))}

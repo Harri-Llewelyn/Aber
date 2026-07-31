@@ -12,7 +12,8 @@
  * type would otherwise collide on metric_catalog's UNIQUE(name).
  */
 
-import { METRIC_GROUP_SEPARATOR } from './metricGroup'
+import { METRIC_GROUP_SEPARATOR, composeMetricName } from './metricGroup'
+import { STANDARDS } from './standards'
 
 export const VOCABULARY_KINDS = {
   DATA_ITEM_TYPE: 'DATA_ITEM_TYPE',
@@ -22,8 +23,12 @@ export const VOCABULARY_KINDS = {
   COMPONENT: 'COMPONENT'
 }
 
-/** Provenance recorded on a catalog entry built from the standard vocabulary. */
-export const MTCONNECT_STANDARD = 'MTConnect'
+/**
+ * Provenance recorded on a catalog entry built from the standard vocabulary.
+ * Re-exported from the standards registry rather than repeated, so the string that ends up in
+ * `metric_catalog.standard` has exactly one definition.
+ */
+export const MTCONNECT_STANDARD = STANDARDS.MTCONNECT
 
 /** Only SAMPLE observations are a continuously-varying measurement, so only they carry units. */
 export const CATEGORY_WITH_UNITS = 'SAMPLE'
@@ -122,15 +127,8 @@ export function vocabularySections(vocabulary) {
   return sections
 }
 
-/**
- * Build the Sparkplug metric name from its MTConnect parts.
- *
- * Every part is optional except the type, so a bare `TEMPERATURE` on a device with no component
- * breakdown is expressible, and so is the fully-qualified `Axes/C/ANGULAR_VELOCITY/ACTUAL`.
- */
-export function composeMTConnectName({ component, instance, type, subType }) {
-  return [component, instance, type, subType]
-    .map(part => (part || '').trim())
-    .filter(Boolean)
-    .join(METRIC_GROUP_SEPARATOR)
-}
+// Name composition lives in utils/metricGroup.js as composeMetricName(). There is deliberately no
+// MTConnect-specific composer: it was a wrapper that only fixed the part order
+// (component, instance, type, subType), and two composers is exactly the drift risk the single
+// derivation exists to avoid -- ISO 22400 and OPC UA names have to group identically. The order is
+// spelled out at the one call site that needs it, in SchemasTab's Add Metric form.

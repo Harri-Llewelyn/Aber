@@ -146,6 +146,22 @@ export function canonicaliseGroup(input, knownGroups) {
 }
 
 /**
+ * Join name parts into a metric name, dropping the empty ones.
+ *
+ * Standard-agnostic on purpose: MTConnect composes component/instance/type/subType, an OPC UA
+ * browse name composes component/instance/name, and an ISO 22400 KPI composes family/KPI. They are
+ * the same operation over a different number of parts, and having one composer is what guarantees
+ * all three produce names the same group derivation can read.
+ */
+export function composeMetricName(...parts) {
+  return parts
+    .flat()
+    .map(part => (part || '').trim())
+    .filter(Boolean)
+    .join(METRIC_GROUP_SEPARATOR)
+}
+
+/**
  * Whether a composed name is a usable metric name.
  *
  * Rejects empty segments -- a leading, trailing or doubled separator. Those are not merely untidy:

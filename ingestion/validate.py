@@ -44,12 +44,18 @@ VAL_QUARANTINE_DEVICE = "VALIDATE_Quarantine_Device_001"
 VAL_MALFORMED_DEVICE = "VALIDATE_Malformed_Device_001"
 VAL_RENAMED_DEVICE = "VALIDATE_Device_001_Renamed"
 VAL_SCHEMA_NAME = "VALIDATE_Schema_Robot_Standard"
+# A second schema attached to the same device through device_submodels (migration 0034). It exists
+# to prove the modelled set is the UNION across every attached submodel: VAL_KPI_METRIC is declared
+# at birth and modelled ONLY here, so a reader that looked at one schema would wrongly flag it.
+VAL_KPI_SCHEMA_NAME = "VALIDATE_Schema_OEE"
 
 # The schema attached to the registered device, and a metric deliberately left out of it. The
 # device declares the extra metric at birth, so it must surface as unmodelled -- and stop being
 # unmodelled once the schema is widened, without the device rebirthing.
 VAL_SCHEMA_METRICS = ["Systems/TEMPERATURE", "Controller/EXECUTION", "Controller/EMERGENCY_STOP"]
 VAL_UNMODELLED_METRIC = "Environmental/HUMIDITY_RELATIVE"
+VAL_KPI_METRIC = "OEE/AVAILABILITY"
+VAL_KPI_SCHEMA_METRICS = [VAL_KPI_METRIC]
 
 # A well-formed device id that is deliberately not registered: 'dev' + 21 hex = 24 characters.
 UNKNOWN_DEVICE_ID = "dev" + "f" * 21
@@ -82,14 +88,59 @@ def modelled_metrics(schema_definition):
     return names or None
 
 
-def unmodelled_metrics(declared, schema_definition):
-    """Metrics declared at the last birth that the schema does not account for."""
+def modelled_metrics_across(schema_definitions):
+    """
+    Python mirror of modelledMetricsAcross() in frontend/src/utils/deviceTags.js: the union of the
+    metrics every attached submodel models, or None when none of them can be evaluated.
+
+    A device may have several schemas attached through device_submodels (migration 0034), one AAS
+    Submodel each. A metric modelled by any one of them is modelled -- judging against a single
+    schema would flag a device for publishing what another of its own submodels accounts for.
+    """
+    union = set()
+    evaluable = False
+    for definition in schema_definitions or []:
+        modelled = modelled_metrics(definition)
+        if modelled is None:
+            continue
+        evaluable = True
+        union |= modelled
+    return union if evaluable else None
+
+
+def unmodelled_metrics(declared, schema_definitions):
+    """
+    Metrics declared at the last birth that no attached submodel accounts for.
+
+    Accepts a single definition or a list of them, so existing single-schema callers keep working.
+    """
     if not declared:
         return []
-    modelled = modelled_metrics(schema_definition)
+    if isinstance(schema_definitions, dict) or schema_definitions is None:
+        schema_definitions = [schema_definitions]
+    modelled = modelled_metrics_across(schema_definitions)
     if modelled is None:
         return []
     return sorted(set(declared) - modelled)
+
+
+def device_schema_definitions(device_uuid):
+    """
+    Every schema definition attached to a device, resolved through the `device_schemas` view.
+
+    The view is the union of device_submodels and the legacy 1:1 devices.schema_id, so this is the
+    same resolution the exporter and the frontend use rather than a third one that could disagree.
+    """
+    if not supabase_client or not device_uuid:
+        return []
+    links = supabase_client.table("device_schemas").select("schema_id").eq(
+        "device_id", device_uuid
+    ).execute()
+    ids = [row["schema_id"] for row in (links.data or []) if row.get("schema_id")]
+    if not ids:
+        return []
+    rows = supabase_client.table("schemas").select("id,schema_definition").in_("id", ids).execute()
+    return [r["schema_definition"] for r in (rows.data or [])]
 
 
 def get_timescaledb_connection():
@@ -105,13 +156,37 @@ def cleanup_validation_data():
     print("Cleaning up validation data...")
     if supabase_client:
         try:
+            # Audit rows are keyed by entity_id, and log_digital_thread_event() only ever writes
+            # 'devices' / 'gateways' / 'cells' into entity_type -- so the ids have to be collected
+            # while the rows carrying the VALIDATE_ names still exist. Deleting the entities first
+            # loses the only link back to their audit trail.
+            #
+            # This previously filtered `entity_type LIKE '%VALIDATE%'`, which matches none of those
+            # three values and so silently deleted nothing on every run since it was written. The
+            # audit rows from every validation run were left in an append-only table for good.
+            stale_ids = []
+            for table, column, value in (
+                ("devices", "name", "VALIDATE_%"),
+                ("gateways", "name", "VALIDATE_%"),
+                ("cells", "name", None),
+            ):
+                query = supabase_client.table(table).select("id")
+                query = query.eq(column, VAL_CELL_NAME) if value is None else query.like(column, value)
+                stale_ids += [row["id"] for row in (query.execute().data or []) if row.get("id")]
+
+            # Deleting the cell cascades to its gateways (gateways.cell_id ON DELETE CASCADE), so
+            # ordering matters here even though devices.gateway_id is only SET NULL.
             supabase_client.table("devices").delete().like("name", "VALIDATE_%").execute()
             supabase_client.table("gateways").delete().like("name", "VALIDATE_%").execute()
             supabase_client.table("cells").delete().eq("name", VAL_CELL_NAME).execute()
             # schema_name is UNIQUE, so a schema left behind by an aborted run would fail the
             # next seed. devices.schema_id is ON DELETE SET NULL, so ordering does not matter.
             supabase_client.table("schemas").delete().like("schema_name", "VALIDATE_%").execute()
-            supabase_client.table("digital_thread").delete().like("entity_type", "%VALIDATE%").execute()
+
+            # Guarded: an empty `in_` list is not a no-op filter, and an unfiltered delete against
+            # digital_thread would wipe the whole audit history.
+            if stale_ids:
+                supabase_client.table("digital_thread").delete().in_("entity_id", stale_ids).execute()
         except Exception as e:
             print(f"Supabase cleanup warning: {e}")
 
@@ -175,6 +250,9 @@ def seed_supabase():
     # Seed cell
     c_res = supabase_client.table("cells").insert({"name": VAL_CELL_NAME}).execute()
     cell_id = c_res.data[0]["id"] if c_res.data else None
+    # Kept on SEEDED so check 2 can scope itself to this run's entities: digital_thread is keyed
+    # by entity_id, and the cell's id is otherwise not recoverable once the row is deleted.
+    SEEDED["cell_uuid"] = cell_id
 
     # Seed gateway
     g_res = supabase_client.table("gateways").insert({"name": VAL_GW_NAME, "cell_id": cell_id, "status": "ONLINE"}).execute()
@@ -218,10 +296,34 @@ def seed_supabase():
     }).execute()
     SEEDED["schema_uuid"] = s_res.data[0]["id"] if s_res.data else None
 
+    # The second submodel. Only this schema models VAL_KPI_METRIC, so checks 6c/6e fail unless the
+    # verdict is computed across both attachments.
+    k_res = supabase_client.table("schemas").insert({
+        "schema_name": VAL_KPI_SCHEMA_NAME,
+        "description": "End-to-end validation KPI submodel",
+        "schema_definition": {
+            "type": "object",
+            "properties": {name: {"type": "number"} for name in VAL_KPI_SCHEMA_METRICS},
+            "required": VAL_KPI_SCHEMA_METRICS,
+        },
+    }).execute()
+    SEEDED["kpi_schema_uuid"] = k_res.data[0]["id"] if k_res.data else None
+
     if SEEDED.get("schema_uuid") and SEEDED.get("known_uuid"):
+        # devices.schema_id is still written: it is the fallback arm migration 0034 deliberately
+        # retains, and leaving it unset would mean the join table were the only thing under test.
         supabase_client.table("devices").update(
             {"schema_id": SEEDED["schema_uuid"]}
         ).eq("id", SEEDED["known_uuid"]).execute()
+
+        # Both schemas attached as submodels. The first duplicates devices.schema_id on purpose --
+        # the view must not return it twice.
+        for schema_key in ("schema_uuid", "kpi_schema_uuid"):
+            if SEEDED.get(schema_key):
+                supabase_client.table("device_submodels").insert({
+                    "device_id": SEEDED["known_uuid"],
+                    "schema_id": SEEDED[schema_key],
+                }).execute()
 
     missing = [k for k, v in SEEDED.items() if not v]
     if missing:
@@ -301,7 +403,9 @@ def run_simulation():
     #    row each time to a deliberately append-only table.
     print(f"\n--- DBIRTH from registered device declaring an unmodelled metric: {VAL_UNMODELLED_METRIC} ---")
     birth_metrics = {"Systems/TEMPERATURE": 42.5, "Controller/EXECUTION": "ACTIVE",
-                     "Controller/EMERGENCY_STOP": "ARMED", VAL_UNMODELLED_METRIC: 55.2}
+                     "Controller/EMERGENCY_STOP": "ARMED", VAL_UNMODELLED_METRIC: 55.2,
+                     # Modelled only by the second attached submodel -- see check 6e.
+                     VAL_KPI_METRIC: 0.92}
     publish("DBIRTH", SEEDED["known_id"], birth_metrics)
 
     if supabase_client and SEEDED.get("known_uuid"):
@@ -435,7 +539,7 @@ def verify_results():
             ).eq("id", SEEDED.get("known_uuid")).execute()
             row = res.data[0] if res.data else {}
             declared = row.get("last_birth_metrics")
-            expected = sorted(VAL_SCHEMA_METRICS + [VAL_UNMODELLED_METRIC])
+            expected = sorted(VAL_SCHEMA_METRICS + [VAL_UNMODELLED_METRIC, VAL_KPI_METRIC])
 
             if declared and sorted(declared) == expected:
                 print("✅ 6. BIRTH METRIC OBSERVATION: declared metric set recorded on the device row.")
@@ -465,13 +569,15 @@ def verify_results():
             else:
                 print("⚠️  6b. CHANGE-ONLY WRITE: skipped, no baseline timestamp captured.")
 
-            # 6c. The verdict is derived, never stored: the schema does not model
-            # VAL_UNMODELLED_METRIC, so exactly that metric must come out as unmodelled.
+            # 6c. The verdict is derived, never stored: no attached submodel models
+            # VAL_UNMODELLED_METRIC, so exactly that metric must come out as unmodelled -- while
+            # VAL_KPI_METRIC, modelled only by the second submodel, must NOT.
+            definitions = device_schema_definitions(SEEDED.get("known_uuid"))
             s_res = supabase_client.table("schemas").select("schema_definition").eq(
                 "id", SEEDED.get("schema_uuid")
             ).execute()
             definition = s_res.data[0]["schema_definition"] if s_res.data else None
-            extra = unmodelled_metrics(declared, definition)
+            extra = unmodelled_metrics(declared, definitions)
             if extra == [VAL_UNMODELLED_METRIC]:
                 print(f"✅ 6c. UNMODELLED DETECTION: '{VAL_UNMODELLED_METRIC}' identified as outside the schema.")
             else:
@@ -493,7 +599,8 @@ def verify_results():
                 "id", SEEDED.get("schema_uuid")
             ).execute()
             re_definition = re_res.data[0]["schema_definition"] if re_res.data else None
-            cleared = unmodelled_metrics(declared, re_definition)
+            cleared = unmodelled_metrics(
+                declared, device_schema_definitions(SEEDED.get("known_uuid")))
 
             post_res = supabase_client.table("devices").select("last_birth_metrics_at").eq(
                 "id", SEEDED.get("known_uuid")
@@ -513,15 +620,63 @@ def verify_results():
             print(f"❌ 6. BIRTH METRIC OBSERVATION ERROR: {e}")
             passed = False
 
-        # 2. Verify Digital Thread triggers
+        # 6e. Phase 5: the modelled set is the union across every attached submodel. Asserted by
+        # showing the same metric flips verdict depending on whether the second submodel is counted
+        # -- otherwise this check would pass even if device_submodels were ignored entirely.
         try:
-            res_thread = supabase_client.table("digital_thread").select("*").execute()
-            logs = res_thread.data if res_thread else []
-            if len(logs) > 0:
-                print(f"✅ 2. DIGITAL THREAD TRIGGERS: Found {len(logs)} automated PostgreSQL audit trigger entries in digital_thread.")
-            else:
-                print("❌ 2. DIGITAL THREAD TRIGGERS FAIL: No trigger log entries found in digital_thread table.")
+            definitions = device_schema_definitions(SEEDED.get("known_uuid"))
+            primary_only = unmodelled_metrics(declared, definition)
+            across_all = unmodelled_metrics(declared, definitions)
+
+            if len(definitions) < 2:
+                print(f"❌ 6e. MULTI-SUBMODEL FAIL: expected 2 attached schemas, resolved {len(definitions)}.")
                 passed = False
+            elif VAL_KPI_METRIC in primary_only and VAL_KPI_METRIC not in across_all:
+                print(f"✅ 6e. MULTI-SUBMODEL: '{VAL_KPI_METRIC}' is modelled only by the second "
+                      f"attached submodel, and the union across {len(definitions)} schemas accounts for it.")
+            else:
+                print(f"❌ 6e. MULTI-SUBMODEL FAIL: primary-only={primary_only}, union={across_all}; "
+                      f"'{VAL_KPI_METRIC}' should be unmodelled against the primary schema alone "
+                      "and modelled across both.")
+                passed = False
+        except Exception as e:
+            print(f"❌ 6e. MULTI-SUBMODEL ERROR: {e}")
+            passed = False
+
+        # 2. Verify Digital Thread triggers
+        #
+        # Scoped to the entities this run created. Selecting the whole table and asserting it is
+        # non-empty -- which is what this did -- passes on audit rows from any source: a migration,
+        # the demo device booting, an edit made in the UI. It could never fail once the table was
+        # non-empty for any reason, so it did not actually exercise the trigger.
+        #
+        # Both actions are required because log_digital_thread_event() is one function serving
+        # INSERT, UPDATE and DELETE, and the run performs the first two: the seed inserts a cell,
+        # a gateway and three devices, and the rename updates one of them.
+        try:
+            run_entity_ids = [
+                SEEDED[key] for key in ("cell_uuid", "gateway_uuid", "known_uuid", "legacy_uuid", "mismatch_uuid")
+                if SEEDED.get(key)
+            ]
+            if not run_entity_ids:
+                print("❌ 2. DIGITAL THREAD TRIGGERS FAIL: no seeded entity ids to check against.")
+                passed = False
+            else:
+                res_thread = supabase_client.table("digital_thread").select(
+                    "entity_type,entity_id,action"
+                ).in_("entity_id", run_entity_ids).execute()
+                logs = res_thread.data if res_thread else []
+                actions = {row.get("action") for row in logs}
+                if "INSERT" in actions and "UPDATE" in actions:
+                    print(f"✅ 2. DIGITAL THREAD TRIGGERS: {len(logs)} audit entries written for this run's "
+                          f"{len(run_entity_ids)} entities, covering {', '.join(sorted(actions))}.")
+                elif logs:
+                    print(f"❌ 2. DIGITAL THREAD TRIGGERS FAIL: {len(logs)} entries for this run's entities but "
+                          f"actions were {sorted(actions)}; expected both INSERT and UPDATE.")
+                    passed = False
+                else:
+                    print("❌ 2. DIGITAL THREAD TRIGGERS FAIL: no audit entries for any entity this run created.")
+                    passed = False
         except Exception as e:
             print(f"❌ 2. DIGITAL THREAD TRIGGERS ERROR: {e}")
             passed = False

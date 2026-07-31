@@ -121,7 +121,8 @@ jobs:
       - name: Install Python Test Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install psycopg2-binary
+          # jsonschema validates the AAS export against the vendored official IDTA schema.
+          pip install psycopg2-binary jsonschema
 
       # GoTrue is not running in this job, so the auth helpers the migrations rely on
       # are either missing or stale in the base supabase/postgres image:
@@ -173,6 +174,9 @@ jobs:
           python supabase/functions/approve-quarantine/test_approve_quarantine.py
           python supabase/functions/deploy-nodered/test_deploy_nodered.py
           python supabase/migrations/test_user_roles_rls.py
+          # No stack here, so this run covers the authorization ladder and the Sparkplug -> XSD
+          # mapper parity guard; its live export checks skip themselves and run in e2e-validation.
+          python supabase/functions/aas-export/test_aas_export.py
 
       # Runs here rather than in e2e-validation because it needs no stack: the suite stubs
       # protobuf/MQTT/psycopg2 before importing ingestion.py, so a pure-logic test does not
@@ -197,6 +201,8 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r ingestion/requirements.txt
+          # Official AAS V3 schema validation in the live export checks below.
+          pip install jsonschema
 
       - name: Install Protobuf Compiler
         run: |
@@ -304,3 +310,15 @@ jobs:
           export MQTT_PORT=1883        # mosquitto    1883:1883
           export SUPABASE_URL=http://127.0.0.1:54321  # supabase-kong 54321:8000
           python ingestion/validate.py
+
+      # The live half of the AAS export suite: composes a shell for the demo device against the
+      # running stack and validates the emitted document. The same file runs in
+      # edge-function-auth-test, where these checks skip themselves for want of a stack.
+      #
+      # Ordered after validate.py deliberately -- it approves Simulated_CNC_01 out of quarantine and
+      # records its birth parameters, which is what gives the Nameplate submodel anything to carry.
+      - name: Validate AAS V3 Export
+        run: |
+          set -a && . ./.env && set +a
+          export SUPABASE_URL=http://127.0.0.1:54321
+          python supabase/functions/aas-export/test_aas_export.py

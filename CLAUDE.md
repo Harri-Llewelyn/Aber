@@ -100,6 +100,155 @@ vocabularies: 249 data item types with their category, 123 subtypes, 100 units, 
 
 The starter catalog was moved onto it by `20260101000019_mtconnect_catalog_migration.sql`.
 
+### ISO 22400 and OPC UA Vocabularies
+
+`iso22400_vocabulary` (`20260101000030`) holds 8 KPI definitions; `opcua_vocabulary`
+(`20260101000031`) holds 25 companion-specification data points from OPC 40001 (Machinery) and
+OPC 40010 (Robotics). Both follow `mtconnect_vocabulary`'s stance exactly: reference data, no write
+policy, `anon` revoked, maintained by editing the migration.
+
+- **Three standards, not three alternatives.** MTConnect is machine tools, OPC UA is robotics and
+  general machinery, ISO 22400 is the computed KPIs both deliberately exclude. A mixed fleet needs
+  all three, which is why the builder offers a choice rather than a migration path.
+- **`opcua_vocabulary.node_id` is a browse path, not a numeric NodeId** — `nsu=<ns>;s=<BrowsePath>`.
+  The numeric ids live in each spec's NodeSet2 XML, which is not vendored; they were not invented.
+  The browse names are transcribed and need confirming against those files.
+- **The OPC UA group is derived from the browse path**, not a hardcoded spec→group map — a browse
+  path is already `/`-delimited, which is part of why `/` is the metric group separator.
+- **The vocabulary uses ISO's terminology.** ISO 22400-2 calls the second OEE factor
+  *Effectiveness*, not Performance. `0032` supersedes the catalog's `OEE/PERFORMANCE` with
+  `OEE/EFFECTIVENESS` — **deprecate-and-supersede, not a rename**, since `name` is immutable. Both
+  rows carry the *same* `semantic_id`: they are two names for one concept, which is why the index
+  on `semantic_id` is deliberately not unique. `ISO-22400-OEE-Schema` lists **both** names in
+  `properties` so a device still publishing the old one is not flagged `Unmodelled` for doing what
+  it was provisioned to do.
+- **The vocabulary rename lives in 0030's seed, not in 0032.** Every migration replays on each
+  boot, so a 0032 that renamed the row would fight 0030's `ON CONFLICT DO UPDATE` forever —
+  re-creating `PERFORMANCE` each boot and then colliding on the rename. 0032 only `DELETE`s the
+  stale row for databases that ran the earlier 0030.
+- `kpi_id` is the ISO **symbol**, not a clause number — none are asserted, because the standard is
+  paywalled and they could not be checked.
+- Semantic ids for both are **derived, not issued** — see below.
+
+### Semantic Identity (AAS Phase 1)
+
+`metric_catalog` and `schemas` carry nullable `semantic_id` / `semantic_id_type`
+(`20260101000029_semantic_identifiers.sql`). This is Phase 1 of aligning with the Asset
+Administration Shell (IEC 63278) **without** adopting its metamodel.
+
+- **`semanticId` is the only part of AAS that carries information this database lacked.** The name
+  is a wire contract, the group is a display taxonomy, the MTConnect facets describe behaviour —
+  none say which *concept* a metric instantiates. Native `Submodel`/`SubmodelElement` tables would
+  be EAV: recursive RLS, a third identifier namespace beside `name`/`sparkplug_id`, and a fourth
+  type system beside Sparkplug codes, JSON Schema types and MTConnect units. Two columns buy the
+  interoperability; the metamodel buys the cost. If an AAS export layer is built, it reads these.
+- **`semantic_id` is deliberately mutable**, unlike `name`/`datatype`. It is an assertion *about*
+  the metric and crosswalks get corrected; freezing it would mean deprecating a metric — and
+  reconfiguring a device — to fix a typo. Migration 0029 ends with a probe that inserts a row and
+  asserts the UPDATE succeeds, so widening `enforce_metric_catalog_immutability()` later fails the
+  migration rather than silently making semantic ids unfixable.
+- **`semantic_id_type` is CHECK-constrained** to `IRI`/`IRDI`/`ModelReference`, mirrored by
+  `SEMANTIC_ID_TYPES` in `utils/standards.js` — same keep-in-step obligation as `sparkplugId.js`.
+  Unlike `units`/`standard` this is a closed set in the standard, and a bad value would surface as
+  an invalid AAS Reference at export time.
+- **Never mint a semantic id that impersonates a standard — the namespace is the honesty
+  mechanism.** Every locally-minted id sits under `https://factoryplus.local/semantics/…`, which
+  says plainly whose identifier it is. An id under `mtconnect.org` or `iso.org` would assert an
+  interoperability that does not exist; a local one is a stable, deterministic handle an AAS export
+  can emit today and a single `UPDATE` can replace if a published crosswalk appears. What it does
+  not do is make two organisations agree. OPC UA ids are the exception: they are the companion
+  spec's own namespace URI plus browse name, derived from something the OPC Foundation does
+  publish — but still not a concept URI it registers.
+- **MTConnect ids exist at two levels** (`0032`). `mtconnect_vocabulary.semantic_id` is the
+  *concept*, scoped by kind (`…/v2.0/DataItemType/ANGLE`) because a component and a data item type
+  could share a name and `(kind, name)` is the table's key. `metric_catalog.semantic_id` is the
+  *observation*, built from the whole metric name (`…/v2.0/Axes/C/ANGLE`) because a catalog entry
+  is a specific data item on a specific component path — which is what an AAS SubmodelElement
+  corresponds to.
+- **The MTConnect namespace pins `v2.0`, the major line — not `SCHEMA_VERSION` (2.8).** An id that
+  changed every time the vocabulary was regenerated would defeat the point of being stable.
+- **Backfills are scoped `WHERE semantic_id IS NULL`.** `semantic_id` is mutable so it can be
+  corrected; a migration that re-stamped it every boot would make that impossible. Local extensions
+  stay unmapped — `standard` is NULL for them precisely because no standard describes them.
+- `mtconnectSemanticId()` in `utils/standards.js` mirrors 0032's SQL expression; the form derives a
+  MTConnect id from the composed name and stops the moment the operator types their own
+  (`semanticIdManual`), so it can never overwrite a hand-entered crosswalk. It derives nothing
+  until a type is chosen — with only a group picked, the composed name names a group, not a metric.
+- **The pair is never half-populated.** `api.js` nulls the type when the id is blank, and the form
+  refuses to submit a type with no id.
+
+### AAS Export (Phase 3/4)
+
+`supabase/functions/aas-export/` composes an AAS V3 **Environment** for one device and the Devices
+tab downloads it (`<device>_aas_v3.json`). It is an *adapter*: nothing upstream knows AAS exists.
+
+- **Telemetry values are never inlined.** The Time Series submodel carries a `LinkedSegment`
+  naming the historian endpoint plus an `asset_id` query — which is what IDTA 02008 defines that
+  element for. A shell embedding samples would be unbounded.
+- **A missing `semanticId` is omitted, never emitted empty.** `semanticReference()` returns
+  `undefined` so `JSON.stringify` drops the key; an empty `Reference` is invalid AAS and asserts a
+  mapping it cannot name. The unmapped count is returned in `stats` instead, and the UI surfaces it
+  as a warning toast.
+- **Submodels are split by `metric_catalog.standard`, not by name prefix** — ISO 22400 metrics go
+  to `KeyPerformanceIndicators`, everything else to `OperationalTelemetry`. That submodel is
+  omitted entirely when empty rather than shipped hollow.
+- **`sparkplugToXsd` is duplicated** in `functions/aas-export/sparkplugToXsd.ts` and
+  `utils/sparkplugDatatype.js` — an edge worker cannot import the frontend bundle. `test_aas_export.py`
+  parses both files and fails on drift, the same discipline `metricGroup.js` has against its SQL.
+- **There is no `xs:int32`.** AAS `DataTypeDefXsd` is the XSD built-ins, so Int32 is `xs:int`. An
+  invented type name fails at the consumer, not at export — same class of error the
+  `semantic_id_type` CHECK exists to prevent. Both mappers and both test suites assert it.
+- **Export is allowed to `Operator`/`Auditor` too**, unlike `approve-quarantine`: it is a read.
+  Still an allow-list, and still a broader disclosure than any single table — a shell aggregates
+  nameplate, config and gateway identity into one payload.
+- `AAS_BASE_IRI` and `AAS_HISTORIAN_ENDPOINT` must be declared on the **`supabase-functions`
+  service**, not only in `.env` — a worker isolate sees only what `main/index.ts` forwards.
+
+**Conformance is checked against the real IDTA schema** (`tests/schemas/`, vendored verbatim from
+`admin-shell-io/aas-specs`, never hand-edited). Validating against it caught three violations the
+hand-written structural tests had passed, all of the same shape — *the metamodel expresses "absent"
+by omitting the field, never by a placeholder*:
+
+- **`Property.value` is `type: "string"`.** Every value serialises as text whatever `valueType`
+  says, so numbers and booleans are invalid — and so is `null`. There is no "exists but unset"
+  value; an unpublished metric **omits `value`**. This corrects the opposite decision made when the
+  exporter was first written.
+- **`SubmodelElementCollection.value` is `minItems: 1`** — an empty collection is invalid, not just
+  useless. `collection()` returns `undefined` so it is dropped.
+- **`conceptDescriptions` is `minItems: 1`** — the key is omitted rather than emitted as `[]`.
+
+**AASX (`?format=aasx`) is an OPC/ISO 29500 container**, and every part of its discovery chain is
+load-bearing: `[Content_Types].xml` → `_rels/.rels` → the deliberately **empty** `aasx/aasx-origin`
+marker → `aasx/_rels/aasx-origin.rels` → `aasx/aasenv-root.json`. A reader walks that chain rather
+than guessing filenames; drop a link and the package is unreadable. The packaged Environment is
+byte-identical to the JSON export, and a test asserts it.
+
+- **The browser cannot fetch AASX through `functions.invoke()`.** supabase-js decodes anything that
+  is not JSON or octet-stream as *text*, which corrupts a ZIP. `api.js` builds that request itself
+  and asks for a Blob; counts ride back in an `X-AAS-Stats` header because a binary body has
+  nowhere to carry them.
+
+### Multi-Submodel Attachment (Phase 5)
+
+`device_submodels` (`20260101000034`) attaches many schemas to one device, one AAS Submodel each.
+
+- **`devices.schema_id` is retained as a fallback, not dropped.** Migrations 0021 and 0033 write it,
+  and every reader resolves the union via the `device_schemas` view — join rows, falling back to the
+  1:1 column for a device with none. New code reads the join; `schema_id` is the compatibility arm.
+- **The modelled set is the union across attachments.** `modelledMetricsAcross()` in `deviceTags.js`,
+  mirrored by `modelled_metrics_across()` in `validate.py`. Judging against one schema would flag a
+  device for publishing what another of its own submodels accounts for.
+- **The derived tag functions accept a schema *or* an array**, so existing single-schema call sites
+  stayed correct while the multi-submodel ones pass a list.
+- **No immutability trigger, deliberately.** Attaching a submodel is ordinary reconfiguration that
+  must stay reversible and changes no wire contract — the opposite of `metric_catalog.name`.
+- **The exporter qualifies well-known idShorts once more than one schema is attached**
+  (`OperationalTelemetry` → `<SchemaKey>_OperationalTelemetry`), because two schemas on one device
+  would otherwise both claim the same idShort. Tests resolve submodels by idShort *suffix* so they
+  hold in either configuration.
+- `utils/standards.js` is the single source for the `standard` strings; `MTCONNECT_STANDARD` in
+  `utils/mtconnect.js` re-exports from it rather than repeating the literal.
+
 - **Changing a metric is deprecate-and-supersede, never a rename** — `name` is immutable because a
   device is configured against that exact string. Set `deprecated` + `superseded_by`.
 - **Values are part of the contract, not just names.** `Controller/EXECUTION` is
@@ -110,7 +259,8 @@ The starter catalog was moved onto it by `20260101000019_mtconnect_catalog_migra
   NULL, evaluates false, and stops alerting silently.
 - Live metric names: `Systems/TEMPERATURE`, `Axes/DISPLACEMENT`, `Controller/EXECUTION`,
   `Controller/EMERGENCY_STOP`, `Controller/FIRMWARE`, `SERIAL_NUMBER`, `OEE/{AVAILABILITY,
-  PERFORMANCE,QUALITY}`, plus the local extensions `safety_interlock` and `max_temp_threshold`.
+  EFFECTIVENESS,QUALITY}`, plus the local extensions `safety_interlock` and `max_temp_threshold`.
+  `OEE/PERFORMANCE` is deprecated, superseded by `OEE/EFFECTIVENESS` (migration 0032).
 
 `metric_groups` (`20260101000017_metric_group_vocabulary.sql`) is a registry of approved group
 **spellings**, not of group membership — membership is always derived from the name. Since 0018 it
@@ -131,6 +281,22 @@ A device's type is **derived, never stored**: the distinct metric groups its ass
 (`deviceGroupTags`), plus `Unmodelled` when it declared metrics outside that schema. One schema
 covering `Robot.*` and `Environmental.*` metrics gives its devices both tags — which is why
 multiple schemas per device were not needed.
+
+`Simulated_CNC_01_Schema` (`20260101000033`) is the single default schema, replacing the two seeded
+demo ones. It spans all three standards because `devices.schema_id` is 1:1 — a split schema meant a
+device could be modelled by MTConnect *or* ISO 22400, never both.
+
+- **It is a superset of the metrics the simulator publishes, deliberately.** Unmodelled is
+  *(declared)* − *(modelled)*, so a schema that only held the "interesting" metrics would flag the
+  demo device for publishing what it was provisioned to publish. The ISO 22400 and OPC UA entries
+  are the converse: modelled but never published, until `node_red_flow.json` is extended.
+- **0033 asserts its own invariant** — a `DO` block raises if any metric in the schema is missing
+  from `metric_catalog`, deprecated, or has a NULL `semantic_id`.
+- **0021 resolves the schema by name, and both it and 0033 guard their writes.** Migrations replay
+  every boot; an unguarded `ON CONFLICT DO UPDATE` on `devices` fires `log_digital_thread_event()`
+  even when nothing changed, which was appending an audit row per boot before 0033 fixed it.
+- `Execution/EXECUTION` is **not** a metric — the concept lives at `Controller/EXECUTION`, which is
+  what the simulator publishes and what Grafana and `OverviewTab` read by name.
 
 - Tags come from the **schema**, not from observation. A provisioned device is therefore taggable
   before its first birth, and a metric published outside the schema confers no tag — it reports as
@@ -220,9 +386,29 @@ unbound on INSERT, which is why it is two triggers sharing one function.
 - `webhook_endpoints` has **no write RLS policy by design** — a writable endpoint table is an
   SSRF primitive. `anon` is revoked at the grant level too.
 
-**Vault** holds only secrets read *from SQL*. `MQTT_PASSWORD` / `POSTGRES_PASSWORD` stay in
-`.env` — they are needed before the database accepts connections, and duplicating them would
-create two sources of truth.
+**Vault** holds only secrets read *from SQL* — in practice just `nodered_admin_token`, which
+`dispatch_device_quarantine_webhook()` attaches to its outbound pg_net request (migration 0026).
+`MQTT_PASSWORD` / `DB_PASSWORD` / `POSTGRES_PASSWORD` stay in `.env`: mosquitto-init and supabase-db
+need them before the database accepts connections, and duplicating them would create two sources of
+truth. The `deploy-nodered` edge function reads `NODERED_ADMIN_TOKEN` from its own environment, not
+from Vault — Vault is only for the SQL-side consumer.
+
+### Node-RED Credentials
+
+Node-RED's broker credentials are **not** the Vault-held admin token — they are `MQTT_USER` /
+`MQTT_PASSWORD`, written to `/data/flows_cred.json` by `scripts/node-red-init.mjs`, encrypted under
+`NODERED_CREDENTIAL_SECRET` (aes-256-ctr, key = `sha256(secret)`, 32-hex IV prefix).
+
+- **`_credentialSecret` in `/data/.config.runtime.json` silently defeats the seed.** Node-RED mints
+  that key for itself whenever `settings.js` has no `credentialSecret`, and thereafter prefers it:
+  it fails to decrypt the seeded file, **discards the credentials**, and rewrites the file empty
+  under its own key. The broker node ends up with no username and Mosquitto answers
+  `not authorised`. The init script clears it on the seed path — do not remove that step.
+- **Only on the seed path.** Credentials a user entered through the editor really are encrypted
+  under `_credentialSecret`, so clearing it on an existing volume would destroy them.
+- **Diagnose from Mosquitto's log, not Node-RED's.** Node-RED logs only a generic
+  `Connection failed to broker: <clientId>@<url>` — note that is the *client id*, not the username.
+  `docker logs factoryplus_mosquitto` says `disconnected: not authorised` outright.
 
 ### Grafana SSO
 
@@ -262,6 +448,12 @@ npm test            # Vitest unit tests
 npm run test:cov    # Tests with coverage report
 ```
 
+**`ingestion/validate.py` must scope every assertion to the run's own entities.** The stack always
+has audit rows, telemetry and devices from the demo simulator, so a check that queries a whole table
+and asserts "not empty" passes regardless of whether anything was exercised. Its cleanup must also
+collect `digital_thread` entity ids *before* deleting the named rows — audit rows key on
+`entity_id`, and `entity_type` only ever holds `devices`/`gateways`/`cells`, never a fixture name.
+
 ### End-to-End Validation
 ```bash
 # Outside Docker (requires protoc installed)
@@ -292,6 +484,8 @@ python ingestion/validate.py
 ### Edge Functions
 - `supabase/functions/approve-quarantine/` — Validates role claims (`Administrator`/`Shopfloor_Manager`) before approving quarantined devices
 - `supabase/functions/deploy-nodered/` — Validates role claims before proxying Node-RED flow deployments
+- `supabase/functions/aas-export/` — Composes an AAS V3 Environment for one device (Phase 3);
+  read-scoped roles, telemetry referenced not inlined. See **AAS Export** above
 - `supabase/functions/grafana-userinfo/` — OIDC userinfo for Grafana's `api_url`; returns the
   standard identity claims plus `role` read from `public.user_roles`, and **omits `role`
   entirely** when unmapped so `role_attribute_strict` refuses the login
@@ -324,8 +518,14 @@ python ingestion/validate.py
 ### Shared Utilities
 - `hooks/useRealtimeTable.js` — postgres_changes subscription; debounced, session-gated
 - `hooks/useClockTick.js` — network-free re-render for wall-clock-derived state
-- `utils/metricGroup.js` — metric name grouping; mirrors the SQL generated column
+- `utils/metricGroup.js` — metric name grouping; mirrors the SQL generated column. `composeMetricName()`
+  is standard-agnostic and builds every metric name, so all three vocabularies produce names the
+  same group derivation reads
+- `utils/standards.js` — the standard registry, AAS reference types, semantic-id inference
 - `utils/mtconnect.js` — MTConnect vocabulary selectors and name composition
+- `utils/iso22400.js` — KPI selectors, families, and the form prefill a KPI implies
+- `utils/opcua.js` — ExpandedNodeId parsing, browse-path→group derivation, OPC UA→Sparkplug
+  datatype mapping
 - `utils/deviceTags.js` — schema-derived device tags and unmodelled-metric detection
 - `utils/deviceProvisioning.js`, `utils/gatewayStatus.js`, `utils/sparkplugId.js`
 
@@ -339,8 +539,15 @@ python ingestion/validate.py
   has its own badge)
 - `DigitalThreadTab` — Audit trail of all metadata changes
 - `TelemetryTab` — Time-series data viewer (connects to TimescaleDB)
-- `SchemasTab` — Metric catalog (what devices publish), browsable MTConnect vocabulary panel
-  (`common/MTConnectVocabularyPanel`), and the schema registry
+- `SchemasTab` — Metric catalog (what devices publish), one **Standard Vocabulary Reference** card
+  with a MTConnect / ISO 22400 / OPC UA tab selector (`common/VocabularyPanel` plus a tab descriptor
+  per standard from `common/{MTConnect,ISO22400,OPCUA}VocabularyPanel.jsx`), and the schema
+  registry. Search text survives a tab switch on purpose. **Building from the catalog is the only
+  way to create a schema** — *Register New Schema* was removed because a free-text JSON Schema could
+  name metrics with no catalog entry, no standard and no semantic id, and every derived feature
+  reads schemas. The Add Metric form's **Standard** selector decides which vocabulary the type
+  picker draws from and what the prefill supplies; switching it clears the previous selection,
+  because `standard` is what an AAS export reads to pick a namespace
 - `DirectoryTab` — Directory service configuration
 - `ArchivesTab` — Soft-deleted records restoration
 
@@ -356,7 +563,10 @@ python ingestion/validate.py
   plus `reported_identity` / `quarantine_reason` / `identity_source` for quarantine diagnostics,
   and `last_birth_metrics` / `last_birth_metrics_at` for birth-metric observation (see below)
 - `digital_thread` — Auto-populated audit log via triggers
-- `documents`, `asset_config`, `schemas`, `directory_services` — Extended metadata
+- `documents`, `asset_config`, `schemas`, `directory_services` — Extended metadata.
+  `schemas` and `metric_catalog` carry `semantic_id` / `semantic_id_type` (AAS Phase 1)
+- `mtconnect_vocabulary`, `iso22400_vocabulary`, `opcua_vocabulary` — reference vocabularies.
+  Read-only to the app: `SELECT` for `authenticated`, everything else revoked, no write policy
 - `roles`, `permissions`, `role_permissions`, `user_roles` — RBAC tables.
   ⚠️ `roles_id_seq` was never advanced past `seed.sql`'s explicit ids, so inserting a **new**
   role without an explicit id fails on `roles_pkey`. Fix with
