@@ -61,7 +61,7 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
     }
     if (status === 'missing') {
       return (
-        <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)' }} title="Required by the schema but not reported yet">
+        <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)' }} title="Required by the schema but not reported yet">
           <IconAlertTriangle size={10} /> Missing
         </span>
       )
@@ -86,7 +86,7 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
 
         {isOffline && (
           <div style={{
-            background: 'rgba(255,179,0,0.12)', border: '1px solid var(--warning)', color: 'var(--warning)',
+            background: 'rgba(255,179,0,0.12)', border: '1px solid var(--warning)', color: 'var(--warning-text)',
             padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px',
             display: 'flex', alignItems: 'center', gap: '8px'
           }}>

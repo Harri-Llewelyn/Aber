@@ -157,7 +157,11 @@ function AuthScreen({ onLoginSuccess, notice }) {
             type="submit"
             className="btn btn-primary"
             disabled={loading}
-            style={{ width: '100%', padding: '12px', borderRadius: '8px', fontWeight: 600, fontSize: '14px', background: 'var(--accent, #38bdf8)', color: '#0f172a', border: 'none', cursor: 'pointer' }}
+            // Fill and ink come from .btn-primary via --accent-strong / --accent-contrast.
+            // This used to pin dark ink onto --accent, which in the light theme is the pairing
+            // that measures 5.13:1 by WCAG 2 but only APCA Lc 36.6 -- legible on paper, hard
+            // to read on screen.
+            style={{ width: '100%', padding: '12px', borderRadius: '8px', fontWeight: 600, fontSize: '14px', border: 'none', cursor: 'pointer' }}
           >
             {loading ? 'Authenticating...' : allowSignUp && isSignUp ? 'Create Supabase Account' : 'Sign In'}
           </button>

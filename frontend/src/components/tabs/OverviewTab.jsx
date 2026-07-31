@@ -14,6 +14,7 @@ import {
   IconArchive,
   IconExternalLink,
   IconLock,
+  IconShieldAlert,
   IconZap,
   IconCog
 } from '../common/Icons'
@@ -28,16 +29,20 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPer
 
   const loadAll = useCallback(async (signal) => {
     try {
-      const [c, g, a, t, s] = await Promise.all([
+      // /api/v1/stats is deliberately no longer requested. Its only consumers were the
+      // Pending Quarantine card's value and a `docs` field nothing ever read. The quarantine
+      // figure is now derived from `assets`, which this page already has in full -- so the
+      // endpoint was a second round-trip per refresh for a number we could already count,
+      // and a second source of truth that could disagree with the list beside it.
+      const [c, g, a, t] = await Promise.all([
         api.get('/api/v1/cells', { signal }),
         api.get('/api/v1/gateways', { signal }),
         api.get('/api/v1/devices', { signal }),
         // The map only needs the current value of each metric, not history -- and this
         // runs on a 3s poll, so it must stay bounded.
         api.get('/api/v1/telemetry/latest?minutes=60', { signal }).catch(() => []),
-        api.get('/api/v1/stats', { signal }).catch(() => ({ quarantine_pending: 0, documents_attached: 0 })),
       ])
-      setStats({ cells: c.length, gateways: g.length, assets: a.length, telemetry: t.length, quarantine: s.quarantine_pending, docs: s.documents_attached })
+      setStats({ cells: c.length, gateways: g.length, assets: a.length, telemetry: t.length })
       setCells(c); setGwList(g); setAssets(a); setTelemetry(t)
       setLoading(false)
     } catch (err) {
@@ -153,8 +158,17 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPer
   const offlineGwCount = gwList.filter(g => !g.is_archived && !isGatewayOnline(g)).length
   const archivedGwCount = gwList.filter(g => g.is_archived).length
 
-  const onlineAssetsCount = assets.filter(a => (a.status === 'ONLINE' || !a.status) && !a.is_archived).length
-  const offlineAssetsCount = assets.filter(a => a.status === 'OFFLINE' && !a.is_archived).length
+  // Quarantined is its OWN bucket, and Online/Offline exclude it.
+  //
+  // These used to overlap: a quarantined device is stored with status OFFLINE, so a single
+  // pending device was counted as "1 Offline" here AND as "1" on a separate Pending
+  // Quarantine card -- the same device reported twice on one screen, and the Offline figure
+  // implied a fault where the real state was "waiting to be admitted".
+  //
+  // The four buckets are now mutually exclusive and sum to the card's total.
+  const quarantinedAssetsCount = assets.filter(a => a.is_quarantined && !a.is_archived).length
+  const onlineAssetsCount = assets.filter(a => (a.status === 'ONLINE' || !a.status) && !a.is_archived && !a.is_quarantined).length
+  const offlineAssetsCount = assets.filter(a => a.status === 'OFFLINE' && !a.is_archived && !a.is_quarantined).length
   const archivedAssetsCount = assets.filter(a => a.is_archived).length
 
   return (
@@ -169,8 +183,41 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPer
       <div className="stats-row">
         <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => onNavigateTab && onNavigateTab('cells')} title="Total active cell zones configured. Click to view Cells."><div className="stat-label">Cells</div><div className="stat-value">{stats.cells}</div><div className="stat-sub">{activeCellsCount} Active / {archivedCellsCount} Archived</div></div>
         <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => onNavigateTab && onNavigateTab('gateways')} title="Total registered edge gateways. Click to view Gateways."><div className="stat-label">Total Gateways</div><div className="stat-value">{stats.gateways}</div><div className="stat-sub">{onlineGwCount} Online / {offlineGwCount} Offline / {archivedGwCount} Archived</div></div>
-        <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => onNavigateTab && onNavigateTab('devices')} title="Total registered shopfloor devices. Click to view Devices."><div className="stat-label">Total Devices</div><div className="stat-value">{stats.assets}</div><div className="stat-sub">{onlineAssetsCount} Online / {offlineAssetsCount} Offline / {archivedAssetsCount} Archived</div></div>
-        <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => onNavigateTab && onNavigateTab('devices')} title="Devices pending zero-touch quarantine approval. Click to view Devices."><div className="stat-label">Pending Quarantine</div><div className="stat-value">{stats.quarantine || 0}</div><div className="stat-sub">Awaiting onboarding</div></div>
+        {/*
+          The separate "Pending Quarantine" card was folded in here. It reported the same
+          device the Offline figure already counted, and quarantine is a sub-state of the
+          device population rather than a population of its own.
+
+          Losing the dedicated card must not lose the prominence, since quarantine is the one
+          state on this page that requires an operator to act. The card therefore raises a
+          warning treatment while any device is held: a coloured border, an icon beside the
+          label, and the count called out in the breakdown. The icon and the word
+          "Quarantined" carry the meaning on their own, so the signal does not depend on
+          colour alone.
+        */}
+        <div
+          className={`stat-card${quarantinedAssetsCount > 0 ? ' stat-card-alert' : ''}`}
+          style={{ cursor: 'pointer' }}
+          onClick={() => onNavigateTab && onNavigateTab('devices')}
+          title={quarantinedAssetsCount > 0
+            ? `${quarantinedAssetsCount} device${quarantinedAssetsCount === 1 ? '' : 's'} awaiting zero-touch onboarding approval. Click to review the quarantine queue.`
+            : 'Total registered shopfloor devices. Click to view Devices.'}
+        >
+          <div className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            Total Devices
+            {quarantinedAssetsCount > 0 && (
+              <IconShieldAlert size={13} style={{ color: 'var(--warning-text)' }} aria-label="Devices awaiting quarantine approval" />
+            )}
+          </div>
+          <div className="stat-value">{stats.assets}</div>
+          <div className="stat-sub">
+            {onlineAssetsCount} Online / {offlineAssetsCount} Offline /{' '}
+            <span style={quarantinedAssetsCount > 0 ? { color: 'var(--warning-text)', fontWeight: 700 } : undefined}>
+              {quarantinedAssetsCount} Quarantined
+            </span>
+            {' '}/ {archivedAssetsCount} Archived
+          </div>
+        </div>
       </div>
 
       <div className="shopfloor-map-card">
@@ -219,13 +266,13 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPer
                       <div className="zone-title" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }} onClick={() => onNavigateTab && onNavigateTab('cells')} title={`Click to view Cell '${c.cell_name}' on Cells page`}>
                         <IconFactory size={16} /> <span>{c.cell_name}</span>
                         {c.is_archived && (
-                          <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)', padding: '1px 6px', fontSize: '9px', display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Shopfloor Cell zone archived">
+                          <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', padding: '1px 6px', fontSize: '9px', display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Shopfloor Cell zone archived">
                             <IconArchive size={10} /> ARCHIVED
                           </span>
                         )}
                       </div>
                       {c.access_url ? (
-                        <a href={c.access_url} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm" style={{ textDecoration: 'none', gap: '4px', background: 'var(--accent)', color: '#000', padding: '2px 8px', fontSize: '11px' }} title="Open Cell Dashboard / Grafana UI">
+                        <a href={c.access_url} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm" style={{ textDecoration: 'none', gap: '4px', padding: '2px 8px', fontSize: '11px' }} title="Open Cell Dashboard / Grafana UI">
                           <IconExternalLink size={11} /> Dashboard
                         </a>
                       ) : (
@@ -247,10 +294,10 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPer
                               const gwStatus = gatewayLiveStatus(g)
                               return (
                                 <span key={g.gateway_id} className="chip chip-gw" title={`Gateway ${g.gateway_name} ${g.is_virtual ? '(Virtual Gateway)' : ''} ${isGwArch ? '(Archived)' : `(${gwStatus}, heartbeat ${formatHeartbeat(g.last_heartbeat)})`} — ${g.device_count} device(s) — Click to view on Gateways page`} onClick={() => onSelectGateway(g.gateway_id)} style={{ cursor: 'pointer', borderColor: isGwArch ? 'var(--warning)' : g.is_virtual ? 'var(--accent)' : undefined, opacity: isGwArch ? 0.75 : 1 }}>
-                                  {isGwArch ? <IconArchive size={11} style={{ color: 'var(--warning)' }} /> : <span className={`badge-dot ${gwStatus === 'ONLINE' ? 'badge-online' : 'badge-offline'}`} />}
+                                  {isGwArch ? <IconArchive size={11} style={{ color: 'var(--warning-text)' }} /> : <span className={`badge-dot ${gwStatus === 'ONLINE' ? 'badge-online' : 'badge-offline'}`} />}
                                   <span className="mono">{g.gateway_name}</span> ({g.device_count} devices)
                                   {g.is_virtual && !isGwArch && <span className="badge badge-warning" style={{ background: 'rgba(0,212,255,0.15)', color: 'var(--accent)', border: '1px solid var(--accent)', padding: '1px 5px', fontSize: '9px', marginLeft: '4px', display: 'inline-flex', alignItems: 'center', gap: '2px' }}><IconZap size={9} /> VIRTUAL</span>}
-                                  {isGwArch && <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)', padding: '1px 5px', fontSize: '9px', marginLeft: '4px' }}>ARCHIVED</span>}
+                                  {isGwArch && <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', padding: '1px 5px', fontSize: '9px', marginLeft: '4px' }}>ARCHIVED</span>}
                                 </span>
                               )
                             })}
@@ -286,7 +333,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPer
                                   {isArch ? <IconArchive size={12} /> : <IconCog size={12} />}
                                   <span>{a.asset_name}</span>
                                   <span className="mono" style={{ fontSize: '10px' }}>[{a.asset_id}]</span>
-                                  {isArch && <span style={{ fontSize: '10px', fontWeight: 600, color: 'var(--warning)', marginLeft: '2px' }}>(ARCHIVED)</span>}
+                                  {isArch && <span style={{ fontSize: '10px', fontWeight: 600, color: 'var(--warning-text)', marginLeft: '2px' }}>(ARCHIVED)</span>}
                                   {isOff && !isArch && <span style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-muted)', marginLeft: '2px' }}>(OFFLINE)</span>}
                                 </span>
                               )

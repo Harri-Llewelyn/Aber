@@ -425,7 +425,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
             </div>
 
             {groupCaseCollision && (
-              <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--warning)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <IconAlertTriangle size={12} />
                 <span>
                   Group <span className="mono">{newMetric.newGroup.trim()}</span> already exists as{' '}
@@ -497,7 +497,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
                     <td style={{ fontSize: '11px' }}>{m.units || '—'}</td>
                     <td>{datatypeLabel(m.datatype)}</td>
                     <td style={{ color: 'var(--text-muted)' }}>
-                      <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)' }}>
+                      <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)' }}>
                         <IconAlertTriangle size={10} /> DEPRECATED
                       </span>
                     </td>

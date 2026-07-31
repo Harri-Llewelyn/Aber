@@ -201,7 +201,7 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
       </div>
 
       {unlinkedDevices.length > 0 && (
-        <div style={{ marginBottom: '20px', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px 16px', fontSize: '13px', color: 'var(--warning)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ marginBottom: '20px', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px 16px', fontSize: '13px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '10px' }}>
           <IconShieldAlert size={18} />
           <div>
             <strong>{unlinkedDevices.length} device{unlinkedDevices.length === 1 ? '' : 's'} not linked to any cell zone:</strong>{' '}
@@ -235,7 +235,7 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
                   <span className="badge badge-neutral" title="Count of edge gateways assigned to this cell">{cellGateways.length} Gateways</span>
                   <span className="badge badge-neutral" title="Count of devices reachable through this cell's gateways">{cellAssets.length} Devices</span>
                   {c.is_archived && (
-                    <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Cell decommissioned and archived">
+                    <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Cell decommissioned and archived">
                       <IconArchive size={11} /> ARCHIVED (OUT OF COMMISSION)
                     </span>
                   )}
@@ -243,7 +243,7 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
 
                 <div className="btn-group">
                   {c.access_url && (
-                    <a href={c.access_url} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm" style={{ textDecoration: 'none', gap: '4px', background: 'var(--accent)', color: '#000', padding: '4px 10px' }} title="Open Cell Dashboard / Grafana UI">
+                    <a href={c.access_url} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm" style={{ textDecoration: 'none', gap: '4px', padding: '4px 10px' }} title="Open Cell Dashboard / Grafana UI">
                       <IconExternalLink size={12} /> Dashboard
                     </a>
                   )}
@@ -285,7 +285,7 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
 
               <div className="cell-card-body">
                 {c.is_archived && (
-                  <div style={{ background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', fontSize: '13px', color: 'var(--warning)', display: 'flex', alignItems: 'center', gap: '10px', width: '100%' }}>
+                  <div style={{ background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', fontSize: '13px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '10px', width: '100%' }}>
                     <IconShieldAlert size={18} />
                     <div>
                       <strong>Cell Zone Out of Commission:</strong> This shopfloor cell is decommissioned and archived. {c.auto_delete_at ? `Retention purge timer active (auto-purges on ${new Date(c.auto_delete_at).toLocaleDateString()}).` : 'Permanent retention active (no auto-purge).'}
@@ -310,7 +310,7 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
                               <td><CopyableId value={g.sparkplug_id || gatewaySparkplugId(g.gateway_id)} label="Sparkplug edge node id" onNotify={showToast} /></td>
                               <td>
                                 {g.is_archived
-                                  ? <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)' }}>DECOMMISSIONED</span>
+                                  ? <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)' }}>DECOMMISSIONED</span>
                                   : <StatusBadge status={gatewayLiveStatus(g)} />}
                               </td>
                               <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{formatHeartbeat(g.last_heartbeat)}</td>
@@ -338,7 +338,7 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
                                 <td>
                                   <strong>{a.asset_name}</strong>
                                   {isArch && (
-                                    <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Decommissioned device">
+                                    <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Decommissioned device">
                                       <IconArchive size={11} /> ARCHIVED
                                     </span>
                                   )}
@@ -346,7 +346,7 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
                                 <td><CopyableId value={effectiveSparkplugId(a)} label="Sparkplug device id" onNotify={showToast} /></td>
                                 <td>
                                   {isArch ? (
-                                    <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Decommissioned device (Out of Commission)">
+                                    <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Decommissioned device (Out of Commission)">
                                       <IconArchive size={11} /> ARCHIVED (OUT OF COMMISSION)
                                     </span>
                                   ) : (
@@ -356,7 +356,7 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
                                     </span>
                                   )}
                                 </td>
-                                <td><span className="mono" style={{ color: 'var(--warning)' }} title={a.active_gateway_id || 'No gateway assigned'}>{a.gateway_name || a.active_gateway_id || '—'}</span></td>
+                                <td><span className="mono" style={{ color: 'var(--warning-text)' }} title={a.active_gateway_id || 'No gateway assigned'}>{a.gateway_name || a.active_gateway_id || '—'}</span></td>
                                 <td style={{ textAlign: 'right' }}>
                                   <button className="btn btn-ghost btn-sm" onClick={() => onSelectDevice(a.asset_id)} title="View live telemetry for this device">
                                     <IconActivity size={12} /> Telemetry

@@ -7,7 +7,7 @@ export function ArchiveModal({ entityType, entityId, displayName, onArchive, onC
   return (
     <div className="modal-overlay">
       <div className="modal" style={{ maxWidth: 460 }}>
-        <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--warning)' }}>
+        <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--warning-text)' }}>
           <IconArchive size={18} />
           <span>Archive Entity (Decommission)</span>
         </div>

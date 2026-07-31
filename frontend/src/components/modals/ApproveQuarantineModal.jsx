@@ -53,7 +53,7 @@ export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onAp
 
         {!isGateway && suggestion && (
           <div style={{ background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px', marginBottom: '16px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--warning)', fontWeight: 600, marginBottom: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--warning-text)', fontWeight: 600, marginBottom: '4px' }}>
               <IconAlertTriangle size={16} />
               <span>This looks like it might be <span className="mono">{suggestion.candidateName}</span></span>
             </div>

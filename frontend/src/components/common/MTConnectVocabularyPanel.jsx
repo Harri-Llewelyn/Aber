@@ -93,7 +93,7 @@ export function MTConnectVocabularyPanel({ vocabulary, catalog, onUseType, canAd
                 <span style={{ fontWeight: 600, fontSize: '13px' }}>{section.title}</span>
                 <span className="section-count">{section.names.length}</span>
                 {used > 0 && (
-                  <span style={{ fontSize: '11px', color: 'var(--success)' }} title={`${used} already used by a catalog metric`}>
+                  <span style={{ fontSize: '11px', color: 'var(--success-text)' }} title={`${used} already used by a catalog metric`}>
                     {used} in use
                   </span>
                 )}

@@ -257,16 +257,32 @@ jobs:
       - name: Verify Realtime WebSocket Upgrade Through Kong
         run: |
           set -a && . ./.env && set +a
-          CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+
+          # A successful upgrade leaves curl holding an open WebSocket that never sends a
+          # body, so curl blocks until Kong's 60s proxy_read_timeout and then exits non-zero
+          # ("empty reply from server", exit 52) on some builds and 0 on others -- the
+          # handshake itself succeeded either way. Asserting on curl's exit code or on
+          # %{http_code} therefore tests the curl build, not the route.
+          #
+          # So: bound the request with --max-time, and assert on the status line in the
+          # response headers. `|| true` keeps a non-zero curl exit from aborting the step
+          # under `bash -e` BEFORE the diagnostics below can run -- which is exactly what
+          # hid the cause the first time this failed.
+          ERR="$(mktemp)"
+          RESP=$(curl -sS -i --max-time 5 --http1.1 \
             -H "Connection: Upgrade" -H "Upgrade: websocket" \
             -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
-            "http://127.0.0.1:54321/realtime/v1/websocket?apikey=$SUPABASE_ANON_KEY&vsn=1.0.0")
-          if [ "$CODE" != "101" ]; then
-            echo "::error::Realtime WebSocket upgrade through Kong returned $CODE, expected 101"
+            "http://127.0.0.1:54321/realtime/v1/websocket?apikey=$SUPABASE_ANON_KEY&vsn=1.0.0" \
+            2>"$ERR" || true)
+
+          if ! printf '%s' "$RESP" | grep -q "101 Switching Protocols"; then
+            echo "::error::Realtime did not complete the WebSocket upgrade through Kong"
+            echo "--- response headers ---"; printf '%s\n' "$RESP" | head -20
+            echo "--- curl stderr ---";      head -5 "$ERR"
             docker compose logs --tail 50 supabase-realtime supabase-kong
             exit 1
           fi
-          echo "Realtime WebSocket upgrade through Kong returned 101."
+          echo "Realtime completed the WebSocket upgrade through Kong (101 Switching Protocols)."
 
       # validate.py reads config via os.getenv, and Python does not load .env by
       # itself. Without sourcing it, SUPABASE_SERVICE_ROLE_KEY is empty, the Supabase

@@ -145,9 +145,50 @@ describe('OverviewTab shopfloor map', () => {
     expect(screen.getByText('Active Edge Gateways (1)')).toBeInTheDocument()
     expect(screen.getByText('Operating Devices (1)')).toBeInTheDocument()
     expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument()
-    // Gateway and device stat cards both read 1 online -- the gateway counts as online
-    // because its heartbeat is fresh.
-    expect(screen.getAllByText('1 Online / 0 Offline / 0 Archived')).toHaveLength(2)
+    // The gateway card keeps its three-bucket breakdown; it reads 1 online because its
+    // heartbeat is fresh.
+    expect(screen.getAllByText('1 Online / 0 Offline / 0 Archived')).toHaveLength(1)
+    // The device card now reports Quarantined as a fourth, mutually exclusive bucket, so its
+    // text is read from the node rather than matched whole (it is split across spans so the
+    // quarantine figure can be styled independently).
+    const statSubs = [...document.querySelectorAll('.stat-sub')].map(n => n.textContent)
+    expect(statSubs).toContain('1 Online / 0 Offline / 0 Quarantined / 0 Archived')
+  })
+
+  // A quarantined device is stored with status OFFLINE. It used to be counted in the Offline
+  // figure AND on a separate Pending Quarantine card -- the same device twice, with the
+  // Offline count implying a fault rather than "waiting to be admitted".
+  it('counts a quarantined device only as Quarantined, and raises the alert treatment', async () => {
+    api.get.mockImplementation(routeGet({
+      devices: [{ ...gateway.devices[0], is_quarantined: true, status: 'OFFLINE' }],
+    }))
+    render(
+      <OverviewTab
+        onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} showToast={vi.fn()}
+        hasPermission={() => true} onNavigateTab={vi.fn()}
+      />
+    )
+    await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
+
+    const statSubs = [...document.querySelectorAll('.stat-sub')].map(n => n.textContent)
+    // Not counted as Offline, and the four buckets still sum to the card's total of 1.
+    expect(statSubs).toContain('0 Online / 0 Offline / 1 Quarantined / 0 Archived')
+
+    // The card raises the warning treatment so the state is visible without reading the text.
+    expect(document.querySelector('.stat-card-alert')).not.toBeNull()
+  })
+
+  it('shows no alert treatment when nothing is quarantined', async () => {
+    api.get.mockImplementation(routeGet())
+    render(
+      <OverviewTab
+        onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} showToast={vi.fn()}
+        hasPermission={() => true} onNavigateTab={vi.fn()}
+      />
+    )
+    await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
+
+    expect(document.querySelector('.stat-card-alert')).toBeNull()
   })
 
   it('refuses to "reassign" a device into a cell that has no gateway', async () => {

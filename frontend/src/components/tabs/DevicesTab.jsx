@@ -479,7 +479,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
       {quarantine.length > 0 && (
         <div style={{ marginBottom: '24px', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--warning)', fontWeight: 600 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--warning-text)', fontWeight: 600 }}>
               <IconShieldAlert size={20} />
               <span>Zero-Touch Onboarding Quarantine Queue <span className="section-count">{quarantine.length}</span></span>
             </div>
@@ -512,7 +512,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                         </div>
                       )}
                       {suggestion && (
-                        <div style={{ fontSize: '10px', color: 'var(--warning)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '3px' }} title={suggestion.evidence}>
+                        <div style={{ fontSize: '10px', color: 'var(--warning-text)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '3px' }} title={suggestion.evidence}>
                           <IconAlertTriangle size={10} /> Possible match: {suggestion.candidateName}
                         </div>
                       )}
@@ -570,7 +570,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                         <td>
                           <strong>{a.asset_name}</strong>
                           {a.is_archived && (
-                            <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Decommissioned device">
+                            <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Decommissioned device">
                               <IconArchive size={11} /> ARCHIVED
                             </span>
                           )}
@@ -578,18 +578,18 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                         <td>
                           <CopyableId value={effectiveSparkplugId(a)} label="Sparkplug device id" onNotify={showToast} />
                           {a.identity_source === 'legacy_name' && (
-                            <div style={{ fontSize: '10px', color: 'var(--warning)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '3px' }} title="This device is still matched by name. Reconfigure its gateway to publish the Sparkplug ID; name matching will be removed.">
+                            <div style={{ fontSize: '10px', color: 'var(--warning-text)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '3px' }} title="This device is still matched by name. Reconfigure its gateway to publish the Sparkplug ID; name matching will be removed.">
                               <IconAlertTriangle size={10} /> Legacy name matching
                             </div>
                           )}
                         </td>
                         <td>
                           {a.is_archived ? (
-                            <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Decommissioned device (Out of Commission)">
+                            <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Decommissioned device (Out of Commission)">
                               <IconArchive size={11} /> ARCHIVED (OUT OF COMMISSION)
                             </span>
                           ) : isProvisioningOverdue(a) ? (
-                            <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Provisioned more than 24h ago and has never sent a DBIRTH">
+                            <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Provisioned more than 24h ago and has never sent a DBIRTH">
                               <IconAlertTriangle size={11} /> AWAITING FIRST BIRTH
                             </span>
                           ) : (
@@ -611,7 +611,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                                   <span
                                     key={tag}
                                     className="badge badge-warning"
-                                    style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)', fontSize: '10px' }}
+                                    style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', fontSize: '10px' }}
                                     title={`Declared at its last birth but absent from schema '${schema?.schema_name}': ${extra.join(', ')}`}
                                   >
                                     <IconAlertTriangle size={10} /> {tag} ({extra.length})

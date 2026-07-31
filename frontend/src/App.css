@@ -11,12 +11,28 @@
   --accent:       #00d4ff;
   --accent-dim:   rgba(0, 212, 255, 0.15);
   --accent-glow:  rgba(0, 212, 255, 0.35);
+  /* Filled-button pair. --accent is tuned to read AS text on a dark surface; a filled button
+     inverts that, so it needs its own fill and its own ink. Bright cyan carries dark ink at
+     APCA Lc 71.6 -- white on it is only 1.77:1, which is what .btn-primary used to specify. */
+  --accent-strong:   #00d4ff;
+  --accent-contrast: #0b0e14;
   --success:      #00e896;
   --warning:      #ffb300;
   --danger:       #ff4d6d;
   --text-primary: #e8eaf0;
-  --text-muted:   #7b8498;
-  --text-dim:     #4a5168;
+  /* Both secondary tiers were lifted one notch. Measured against --bg-card (#161d2a), the
+     old --text-dim (#4a5168) was 2.15:1 -- less than half the 4.5:1 WCAG AA needs for body
+     text -- which is why card sub-text was legible in light mode and not in dark. --text-muted
+     sat exactly on the 4.5:1 floor, leaving no room for a dimmer tier beneath it at all.
+     These values keep three distinguishable tiers with every one of them passing AA. */
+  --text-muted:   #858ea3;  /* 5.14:1 on --bg-card */
+  --text-dim:     #7b8498;  /* 4.50:1 on --bg-card */
+  /* --warning and --success are tuned for borders, icons and tinted fills (3:1 suffices for
+     those). The -text variants are the same signals at a contrast that is safe for TEXT.
+     In the dark theme both already cleared AA, so these are deliberately identical -- the
+     tokens exist so call sites express intent and the light theme can diverge. */
+  --warning-text: #ffb300;
+  --success-text: #00e896;
   --radius:       12px;
   --radius-sm:    8px;
   --shadow:       0 4px 24px rgba(0, 0, 0, 0.5);
@@ -33,12 +49,29 @@
   --accent:       #0284c7;
   --accent-dim:   rgba(2, 132, 199, 0.12);
   --accent-glow:  rgba(2, 132, 199, 0.25);
+  /* Filled buttons take a darker fill (sky-700) than --accent so WHITE ink clears both
+     metrics: 5.93:1 WCAG and APCA Lc 84.3. On --accent itself (#0284c7) neither ink is
+     clean -- black measures 5.13:1 WCAG but only Lc 36.6 APCA, which is the "passes the
+     old maths, unreadable in practice" case that made these buttons hard to read. */
+  --accent-strong:   #0369a1;
+  --accent-contrast: #ffffff;
   --success:      #059669;
   --warning:      #d97706;
   --danger:       #e11d48;
   --text-primary: #0f172a;
-  --text-muted:   #475569;
-  --text-dim:     #64748b;
+  --text-muted:   #475569;  /* 7.58:1 on --bg-card */
+  /* Was #64748b. That cleared AA on a white card (4.76:1) but only reached 4.34:1 on
+     --bg-base (#f1f5f9), the slightly grey page background -- so the same token was readable
+     inside a card and marginal outside one. This clears both (5.25:1 / 4.80:1) and stays
+     comfortably dimmer than --text-muted's 7.58:1, preserving the tier. */
+  --text-dim:     #5f6d82;
+  /* The light-theme --warning (#d97706) is only 3.19:1 on a white card, and --success
+     (#059669) only 3.77:1 -- fine for a border or an icon, below AA for text. These are the
+     readable equivalents, one step darker on the same hue (amber-700 / emerald-700).
+     Worst case for each is the 0.15 tinted badge fill they usually sit on: 4.59:1 and
+     4.99:1 respectively. */
+  --warning-text: #b45309;
+  --success-text: #047857;
   --shadow:       0 4px 20px rgba(0, 0, 0, 0.06);
 }
 
@@ -365,6 +398,28 @@ html, body, #root {
   transform: translateY(-1px);
 }
 
+/* Raised on a stat card whose figure needs an operator to act -- currently the Total Devices
+   card while any device is held in quarantine. The left bar gives the card a distinct shape
+   in peripheral vision; the border and tint keep it legible in both themes. Colour is never
+   the only signal: the card also shows an icon and the word "Quarantined". */
+.stat-card-alert {
+  border-color: var(--warning);
+  border-left: 3px solid var(--warning);
+  background: linear-gradient(to right, rgba(255, 179, 0, 0.07), var(--bg-card) 60%);
+}
+
+.stat-card-alert:hover {
+  border-color: var(--warning);
+  box-shadow: 0 0 20px rgba(255, 179, 0, 0.25);
+}
+
+/* The alert card's amber tint lightens the surface, which costs the sub-text contrast: in
+   dark mode --text-dim drops from 4.50:1 to 3.95:1 against the tinted background and stops
+   clearing AA. Step this card's sub-text up one tier to claw it back (4.52:1). */
+.stat-card-alert .stat-sub {
+  color: var(--text-muted);
+}
+
 .stat-label {
   font-size: 11px;
   text-transform: uppercase;
@@ -383,8 +438,11 @@ html, body, #root {
 
 .stat-sub {
   margin-top: 8px;
-  font-size: 11px;
+  /* 11px was small enough that the low dark-mode contrast compounded into genuine
+     illegibility. The colour is fixed at the token level; this recovers the rest. */
+  font-size: 12px;
   color: var(--text-dim);
+  line-height: 1.5;
 }
 
 /* ===== Table ===== */
@@ -493,9 +551,9 @@ tbody tr:hover { background: var(--bg-glass); }
   letter-spacing: 0.5px;
 }
 
-.badge-online  { background: rgba(0, 232, 150, 0.15); color: var(--success); }
+.badge-online  { background: rgba(0, 232, 150, 0.15); color: var(--success-text); }
 .badge-offline { background: rgba(255, 77, 109, 0.15); color: var(--danger);  }
-.badge-warning { background: rgba(255, 179, 0, 0.15);  color: var(--warning); }
+.badge-warning { background: rgba(255, 179, 0, 0.15);  color: var(--warning-text); }
 .badge-neutral { background: var(--bg-glass); color: var(--text-muted); border: 1px solid var(--border); }
 
 .badge-dot {
@@ -522,8 +580,8 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 .btn-primary {
-  background: var(--accent);
-  color: #ffffff;
+  background: var(--accent-strong);
+  color: var(--accent-contrast);
 }
 .btn-primary:hover {
   filter: brightness(1.1);
@@ -680,8 +738,8 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 .val-double { color: var(--accent); }
-.val-string { color: var(--success); }
-.val-bool-true  { color: var(--success); }
+.val-string { color: var(--success-text); }
+.val-bool-true  { color: var(--success-text); }
 .val-bool-false { color: var(--danger); }
 
 /* ===== Toast ===== */
@@ -702,7 +760,7 @@ tbody tr:hover { background: var(--bg-glass); }
   box-shadow: var(--shadow);
 }
 
-.toast-success { background: rgba(0, 232, 150, 0.15); border: 1px solid var(--success); color: var(--success); }
+.toast-success { background: rgba(0, 232, 150, 0.15); border: 1px solid var(--success); color: var(--success-text); }
 .toast-error   { background: rgba(255, 77, 109, 0.15); border: 1px solid var(--danger);  color: var(--danger);  }
 
 @keyframes slideInRight {

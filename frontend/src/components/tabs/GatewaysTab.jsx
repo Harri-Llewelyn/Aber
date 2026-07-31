@@ -248,7 +248,7 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
       </div>
 
       {unassignedDevices.length > 0 && (
-        <div style={{ marginBottom: '20px', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px 16px', fontSize: '13px', color: 'var(--warning)' }}>
+        <div style={{ marginBottom: '20px', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px 16px', fontSize: '13px', color: 'var(--warning-text)' }}>
           <strong>{unassignedDevices.length} device{unassignedDevices.length === 1 ? '' : 's'} not assigned to any gateway:</strong>{' '}
           {unassignedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unassignedDevices.length > 5 ? ', …' : ''}.
           Assign them from the Devices page.
@@ -295,7 +295,7 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
                              </span>
                            )}
                            {g.is_archived && (
-                             <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Decommissioned gateway">
+                             <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Decommissioned gateway">
                                <IconArchive size={11} /> ARCHIVED
                              </span>
                            )}
@@ -305,11 +305,11 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
                          <td>
                            {g.cell_id
                              ? (cells.find(c => c.cell_id === g.cell_id)?.cell_name || <span className="mono">{g.cell_id}</span>)
-                             : <span style={{ fontSize: '11px', color: 'var(--warning)', fontStyle: 'italic' }} title="Devices on this gateway will not appear under any cell">Unassigned</span>}
+                             : <span style={{ fontSize: '11px', color: 'var(--warning-text)', fontStyle: 'italic' }} title="Devices on this gateway will not appear under any cell">Unassigned</span>}
                          </td>
                          <td>
                            {g.is_archived ? (
-                             <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)' }}>DECOMMISSIONED</span>
+                             <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)' }}>DECOMMISSIONED</span>
                            ) : (
                              <StatusBadge status={liveStatus} />
                            )}
@@ -346,7 +346,7 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
                          <td>
                            <div className="btn-group" style={{ justifyContent: 'flex-end' }}>
                              {g.access_url && (
-                               <a href={g.access_url} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm" style={{ textDecoration: 'none', gap: '4px', background: 'var(--accent)', color: '#000', padding: '4px 10px' }} title="Open Node-RED / Virtual Gateway Editor">
+                               <a href={g.access_url} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm" style={{ textDecoration: 'none', gap: '4px', padding: '4px 10px' }} title="Open Node-RED / Virtual Gateway Editor">
                                  <IconExternalLink size={12} /> Launch UI
                                </a>
                              )}

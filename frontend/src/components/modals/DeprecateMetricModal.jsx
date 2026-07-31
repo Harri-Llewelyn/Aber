@@ -9,7 +9,7 @@ export function DeprecateMetricModal({ metric, usageCount, catalog, onConfirm, o
   return (
     <div className="modal-overlay">
       <div className="modal" style={{ maxWidth: 460 }}>
-        <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--warning)' }}>
+        <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--warning-text)' }}>
           <IconAlertTriangle size={18} />
           <span>Deprecate Metric <span className="mono">{metric.name}</span></span>
         </div>
