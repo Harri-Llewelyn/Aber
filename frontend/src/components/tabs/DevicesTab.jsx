@@ -1,20 +1,25 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import { api } from '../../api'
-import { PERMISSION_UUIDS } from '../../constants'
+import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
+import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { edgeFunctionErrorMessage } from '../../utils/edgeFunctionError'
 import { describeAuthFailure } from '../../utils/sessionError'
 import CopyableId from '../common/CopyableId'
 import { effectiveSparkplugId } from '../../utils/sparkplugId'
 import { InlineDocumentAccordion } from '../common/InlineDocumentAccordion'
+import { QuarantinePayloadCell } from '../common/QuarantinePayloadCell'
 import { ApproveQuarantineModal } from '../modals/ApproveQuarantineModal'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { AssetConfigModal } from '../modals/AssetConfigModal'
 import { DigitalThreadModal } from '../modals/DigitalThreadModal'
 import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
 import { isProvisioningOverdue, isNeverSeen } from '../../utils/deviceProvisioning'
+import {
+  unmodelledMetrics, schemaForDevice, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG
+} from '../../utils/deviceTags'
 import { suggestMatches } from '../../utils/quarantineMatching'
 import {
   IconCpu,
@@ -51,7 +56,10 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
   const [docsForDevice, setDocsForDevice] = useState(null)
   const [expandedDeviceDocs, setExpandedDeviceDocs] = useState({})
   const [docRefreshKey, setDocRefreshKey] = useState(0)
-  const [blank]                 = useState({ asset_id: '', asset_name: '', asset_type: 'CNC', connection_method: 'Sparkplug B', active_gateway_id: '', schema_id: '' })
+  // No asset_type: a device's classification is now derived from the metric groups its schema
+  // models (see utils/deviceTags.js), not typed in by hand. The column is left in place so
+  // legacy values keep displaying, but nothing writes it any more.
+  const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_id: '' })
   const [form, setForm]         = useState(blank)
   const [filterMode, setFilterMode] = useState('all')
 
@@ -71,6 +79,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
   // Set when arriving from a schema's device count on the Schemas page, or from ?schema=<uuid>.
   const [schemaFilter, setSchemaFilter] = useState(getInitialSchema)
   const [statusFilter, setStatusFilter] = useState('')
+  const [tagFilter, setTagFilter] = useState('')
   const [gatewayFilter, setGatewayFilter] = useState('')
   const [cellFilter, setCellFilter] = useState('')
   const [attentionOnly, setAttentionOnly] = useState(false)
@@ -120,6 +129,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
     setSearchQuery('')
     setSchemaFilter('')
     setStatusFilter('')
+    setTagFilter('')
     setGatewayFilter('')
     setCellFilter('')
     setAttentionOnly(false)
@@ -156,7 +166,12 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
     }
   }, [])
 
-  usePolling(loadAll, 3000)
+  // Reconciliation loop, not the primary refresh -- see useRealtimeTable for why polling stays.
+  usePolling(loadAll, refreshInterval())
+  // The quarantine queue rendered on this page is a filtered view of `devices`, so it arrives
+  // on the same subscription. `cells` is watched because each row shows its device's cell,
+  // resolved through the gateway.
+  useRealtimeTable(['devices', 'gateways', 'cells'], loadAll, { enabled: REALTIME_ENABLED })
 
   // A device's cell is whatever cell its gateway belongs to; there is no direct link.
   const cellNameForGateway = (gatewayId) => {
@@ -167,9 +182,10 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
 
   const save = async () => {
     try {
+      // asset_type is deliberately not sent: omitting it leaves any legacy value intact
+      // (api.js only patches keys present in the body) rather than nulling it on every edit.
       const payload = {
         asset_name: form.asset_name,
-        asset_type: form.asset_type || null,
         connection_method: form.connection_method || null,
         active_gateway_id: form.active_gateway_id || null,
         schema_id: form.schema_id || null,
@@ -278,15 +294,41 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
   const canManage  = hasPermission(PERMISSION_UUIDS.DEVICE_MANAGE)
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
 
-  // A device an operator needs to act on: held in quarantine, provisioned but never seen, or
-  // still being resolved by name because its gateway has not been moved onto Sparkplug IDs yet.
+  // Metrics the device declared at its last birth that its schema does not account for.
+  // Derived, not stored: adding the metric to the schema clears this on the next poll rather
+  // than waiting for the device to rebirth. See utils/deviceTags.js.
+  const unmodelledFor = useCallback(
+    (a) => unmodelledMetrics(a, schemaForDevice(a, schemas)),
+    [schemas]
+  )
+
+  // A device an operator needs to act on: held in quarantine, provisioned but never seen,
+  // still being resolved by name because its gateway has not been moved onto Sparkplug IDs
+  // yet, or publishing metrics its schema does not model.
+  //
+  // The is_quarantined arm is kept as the definition of "needs attention" even though the
+  // table below never renders a quarantined device -- both callers now exclude them first.
+  // It stays so this predicate remains true to its name if it is ever reused somewhere the
+  // quarantine banner is not present.
   const needsAttention = (a) =>
-    a.is_quarantined || isProvisioningOverdue(a) || a.identity_source === 'legacy_name'
+    a.is_quarantined || isProvisioningOverdue(a) || a.identity_source === 'legacy_name' ||
+    unmodelledFor(a).length > 0
 
   const filteredAssets = assets.filter(a => {
+    // Quarantined devices belong to the Zero-Touch Onboarding Quarantine Queue above and
+    // nowhere else. They used to appear here as well, so every pending device was listed
+    // twice on the same screen -- once with approve/reject actions, once with the ordinary
+    // edit/archive actions that do not apply to a device which has not been admitted yet.
+    //
+    // The two lists come from different sources (this filters `assets`; the banner renders
+    // the `quarantine` state loaded from /api/v1/quarantine), so this is the only place the
+    // separation can be enforced.
+    if (a.is_quarantined) return false
+
     if (filterMode === 'active'   && a.is_archived) return false
     if (filterMode === 'archived' && !a.is_archived) return false
     if (schemaFilter && a.schema_id !== schemaFilter) return false
+    if (tagFilter && !deviceHasTag(a, schemaForDevice(a, schemas), tagFilter)) return false
     if (gatewayFilter && (a.active_gateway_id || '') !== gatewayFilter) return false
     if (cellFilter && (a.cell_id || '') !== cellFilter) return false
     if (attentionOnly && !needsAttention(a)) return false
@@ -296,6 +338,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
     // "Never seen" is distinct from offline: the row exists but no DBIRTH has ever arrived.
     if (statusFilter === 'unborn'   && !isNeverSeen(a)) return false
     if (statusFilter === 'overdue'  && !isProvisioningOverdue(a)) return false
+    if (statusFilter === 'unmodelled' && unmodelledFor(a).length === 0) return false
 
     if (searchQuery) {
       // Searchable by everything an engineer might paste in: the friendly name, the internal
@@ -308,9 +351,15 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
     return true
   })
 
-  const attentionCount = assets.filter(needsAttention).length
+  // Counts only what the "Needs attention" filter can actually reveal in the table below.
+  // Quarantined devices are excluded because they are no longer rendered there -- they are
+  // counted by the quarantine banner's own badge instead. Including them here would make the
+  // number disagree with the rows shown the moment the filter is switched on, and would
+  // double-count every pending device across the two badges.
+  const attentionCount = assets.filter(a => !a.is_quarantined && needsAttention(a)).length
+  const tagOptions = availableTags(assets, schemas)
   const activeFilterCount =
-    [schemaFilter, statusFilter, gatewayFilter, cellFilter, searchQuery].filter(Boolean).length +
+    [schemaFilter, statusFilter, tagFilter, gatewayFilter, cellFilter, searchQuery].filter(Boolean).length +
     (attentionOnly ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
   const schemaName = schemas.find(s => s.schema_uuid === schemaFilter)?.schema_name
 
@@ -319,19 +368,13 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
       <div className="section-header" style={{ marginBottom: '8px' }}>
         <h2 className="section-title">Shopfloor Devices <span className="section-count">{assets.length}</span></h2>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <div style={{ display: 'flex', gap: '4px', background: 'var(--bg-glass)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border)' }}>
-            <button className={`btn btn-sm ${filterMode === 'all' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setFilterMode('all')} title="Show all devices">
-              All ({assets.length})
-            </button>
-            <button className={`btn btn-sm ${filterMode === 'active' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setFilterMode('active')} title="Show active devices only">
-              Active ({assets.filter(a => !a.is_archived).length})
-            </button>
-            <button className={`btn btn-sm ${filterMode === 'archived' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setFilterMode('archived')} title="Show decommissioned archived devices">
-              Archived ({assets.filter(a => a.is_archived).length})
-            </button>
-          </div>
-
-          <button className="btn btn-ghost btn-sm" onClick={() => downloadCSV(filteredAssets, 'devices-export.csv')} title="Download the filtered devices list as CSV"><IconDownload size={13} /> Export CSV</button>
+          {/* Tags are derived at render time, so a raw row dump would export a device list with
+              no classification in it at all -- the one column an engineer reading the export
+              most likely wants. Projected in explicitly. */}
+          <button className="btn btn-ghost btn-sm" onClick={() => downloadCSV(filteredAssets.map(a => ({
+            ...a,
+            device_tags: deviceTagList(a, schemaForDevice(a, schemas)).join(' ')
+          })), 'devices-export.csv')} title="Download the filtered devices list as CSV"><IconDownload size={13} /> Export CSV</button>
           <button
             className={`btn btn-primary ${!canManage ? 'btn-disabled' : ''}`}
             disabled={!canManage}
@@ -349,6 +392,21 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
       {/* Filters live on their own row: the header outgrew a single line once schema, status and
           relationship filters arrived, and the primary actions were being pushed off screen. */}
       <div className="filter-bar">
+        {/* Lifecycle lives here rather than as a separate segmented control in the header: it is
+            a filter like the rest, and having two filter surfaces on one page meant the header
+            row also crowded out the primary action. Counts are kept in the option labels. */}
+        <select
+          className="form-control"
+          style={{ width: '150px' }}
+          value={filterMode}
+          onChange={e => setFilterMode(e.target.value)}
+          title="Filter by lifecycle state"
+        >
+          <option value="all">All ({assets.length})</option>
+          <option value="active">Active ({assets.filter(a => !a.is_archived).length})</option>
+          <option value="archived">Archived ({assets.filter(a => a.is_archived).length})</option>
+        </select>
+
         <input
           className="form-control"
           style={{ width: '220px' }}
@@ -364,6 +422,21 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
           <option value="offline">Offline / DDEATH</option>
           <option value="unborn">Never sent a birth</option>
           <option value="overdue">Awaiting first birth (24h+)</option>
+          <option value="unmodelled">Publishing unmodelled metrics</option>
+        </select>
+
+        <select
+          className="form-control"
+          style={{ width: '170px' }}
+          value={tagFilter}
+          onChange={e => setTagFilter(e.target.value)}
+          disabled={tagOptions.length === 0}
+          title={tagOptions.length === 0
+            ? 'No device carries a tag yet — tags come from the metric groups a device\'s schema models'
+            : 'Filter by device type, derived from the metric groups the assigned schema models'}
+        >
+          <option value="">Any type</option>
+          {tagOptions.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
 
         <select className="form-control" style={{ width: '190px' }} value={schemaFilter} onChange={e => handleSchemaFilterChange(e.target.value)} title="Filter by the schema a device was provisioned with">
@@ -385,7 +458,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
         <button
           className={`btn btn-sm ${attentionOnly ? 'btn-primary' : 'btn-ghost'}`}
           onClick={() => setAttentionOnly(v => !v)}
-          title="Show only devices that are quarantined, overdue their first birth, or still matched by legacy name"
+          title="Show only devices that are overdue their first birth, still matched by legacy name, or publishing metrics their schema does not model. Quarantined devices are listed separately in the onboarding queue above."
         >
           <IconAlertTriangle size={13} /> Needs attention ({attentionCount})
         </button>
@@ -425,11 +498,17 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                   const [suggestion] = suggestMatches(q, assets, schemas)
                   return (
                   <tr key={q.quarantine_id}>
-                    <td>
+                    {/* Constrained for the same reason as the payload cell: a MALFORMED_IDENTITY
+                        reason is a full diagnostic sentence (~200 characters), so left to size
+                        itself it pushes the action buttons off the right-hand edge on exactly the
+                        rows where an operator most needs to act. It wraps instead of truncating —
+                        the whole point of that message is that it is readable. */}
+                    <td style={{ maxWidth: '280px' }}>
                       <strong>{q.asset_name}</strong>
                       {q.quarantine_reason && (
                         <div style={{ fontSize: '10px', color: 'var(--danger)', marginTop: '3px', display: 'flex', alignItems: 'flex-start', gap: '3px' }}>
-                          <IconAlertTriangle size={10} style={{ flexShrink: 0, marginTop: '1px' }} /> {q.quarantine_reason}
+                          <IconAlertTriangle size={10} style={{ flexShrink: 0, marginTop: '1px' }} />
+                          <span style={{ minWidth: 0 }}>{q.quarantine_reason}</span>
                         </div>
                       )}
                       {suggestion && (
@@ -441,7 +520,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                     <td><CopyableId value={q.reported_identity} label="published device id" onNotify={showToast} /></td>
                     <td>{q.gateway_name || <span className="mono">—</span>}</td>
                     <td style={{ fontSize: '11px' }}>{new Date(q.discovered_at).toLocaleString()}</td>
-                    <td><code>{q.birth_payload || '{}'}</code></td>
+                    <QuarantinePayloadCell metrics={q.reported_metrics} fallbackJson={q.birth_payload} />
                     <td style={{ textAlign: 'right' }}>
                       <div className="btn-group" style={{ justifyContent: 'flex-end' }}>
                         <button
@@ -520,7 +599,39 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                             </span>
                           )}
                         </td>
-                        <td>{a.asset_type || '—'}</td>
+                        <td>
+                          {(() => {
+                            const schema = schemaForDevice(a, schemas)
+                            const tags = deviceTagList(a, schema)
+                            const extra = unmodelledMetrics(a, schema)
+                            if (tags.length === 0 && !a.asset_type) return '—'
+                            return (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
+                                {tags.map(tag => tag === UNMODELLED_TAG ? (
+                                  <span
+                                    key={tag}
+                                    className="badge badge-warning"
+                                    style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning)', border: '1px solid var(--warning)', fontSize: '10px' }}
+                                    title={`Declared at its last birth but absent from schema '${schema?.schema_name}': ${extra.join(', ')}`}
+                                  >
+                                    <IconAlertTriangle size={10} /> {tag} ({extra.length})
+                                  </span>
+                                ) : (
+                                  <span key={tag} className="badge badge-neutral" style={{ fontSize: '10px' }} title={`This device's schema models ${tag}.* metrics`}>
+                                    {tag}
+                                  </span>
+                                ))}
+                                {/* Free-text classification from before types were derived. Shown
+                                    so the value is not silently lost, but nothing writes it now. */}
+                                {a.asset_type && (
+                                  <span style={{ fontSize: '10px', color: 'var(--text-dim)', fontStyle: 'italic' }} title="Legacy free-text classification. Assign a schema to derive this instead.">
+                                    {a.asset_type}
+                                  </span>
+                                )}
+                              </div>
+                            )
+                          })()}
+                        </td>
                         <td>{cells.find(c => c.cell_id == a.cell_id)?.cell_name || '—'}</td>
                         <td>
                           <select className="form-control form-control-sm" style={{ width: '100%' }} value={a.active_gateway_id || ''} onChange={e => reassignGatewayInline(a, e.target.value)} disabled={!canManage || a.is_archived}>
@@ -670,8 +781,18 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
             </div>
 
             <div className="form-group">
-              <label className="form-label">Device Type / Classification</label>
-              <input className="form-control" value={form.asset_type || ''} onChange={e => setForm(f => ({ ...f, asset_type: e.target.value }))} title="Device classification" placeholder="e.g. CNC, PLC, Robot Arm, Sensor" />
+              <label className="form-label">Device Type / Classification <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '11px' }}>(derived)</span></label>
+              <div className="form-control" style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-muted)', background: 'var(--bg-glass)' }} title="Derived from the metric groups the assigned schema models — not typed in by hand">
+                {(() => {
+                  const preview = deviceTagList(editing, schemas.find(s => s.schema_uuid === form.schema_id) || null)
+                  if (preview.length === 0) {
+                    return <span style={{ fontSize: '12px' }}>Assign a schema below to classify this device</span>
+                  }
+                  return preview.map(t => (
+                    <span key={t} className="badge badge-neutral" style={{ fontSize: '10px' }}>{t}</span>
+                  ))
+                })()}
+              </div>
             </div>
 
             <div className="form-group">

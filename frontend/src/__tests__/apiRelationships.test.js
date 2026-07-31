@@ -23,6 +23,7 @@ function makeBuilder(table) {
     update: (payload) => { record.op = 'update'; record.payload = payload; return builder; },
     delete: () => { record.op = 'delete'; return builder; },
     eq: (col, val) => { record.filters.push(['eq', col, val]); return builder; },
+    in: (col, vals) => { record.filters.push(['in', col, vals]); return builder; },
     gte: (col, val) => { record.filters.push(['gte', col, val]); return builder; },
     limit: (n) => { record.filters.push(['limit', n]); return builder; },
     order: (col, opts) => { record.order = [col, opts]; return builder; },
@@ -215,5 +216,87 @@ describe('telemetry queries', () => {
   it('propagates query errors instead of returning placeholder rows', async () => {
     state.responses.telemetry = { data: null, error: { message: 'relation "telemetry" does not exist' } };
     await expect(api.get('/api/v1/telemetry')).rejects.toMatchObject({ message: expect.stringContaining('telemetry') });
+  });
+});
+
+describe('telemetry filtering by device tag', () => {
+  it('expands asset_ids into a single IN over the telemetry view', async () => {
+    // A tag filter resolves to a whole group of devices client-side, because a device's tags are
+    // derived from its schema and the database does not model them.
+    await api.get('/api/v1/telemetry?asset_ids=dev200000000000400080000,dev300000000000400080000');
+    expect(callFor('telemetry').filters).toContainEqual([
+      'in', 'asset_id', ['dev200000000000400080000', 'dev300000000000400080000']
+    ]);
+  });
+
+  it('translates device UUIDs in asset_ids to Sparkplug keys', async () => {
+    // telemetry.asset_id is keyed by sparkplug_id; the UI works in UUIDs. Same local derivation
+    // as the single-device path: 'dev' + the first 21 unhyphenated hex characters.
+    await api.get('/api/v1/telemetry?asset_ids=ccd19944-8805-4c11-ae66-ea0d2c50f40c');
+    const [, , keys] = callFor('telemetry').filters.find(f => f[0] === 'in');
+    expect(keys).toEqual(['devccd1994488054c11ae66e']);
+  });
+
+  it('returns nothing — not everything — for a tag that matches no device', async () => {
+    // The failure mode this guards: an empty IN list silently widening to the whole fleet.
+    const rows = await api.get('/api/v1/telemetry?asset_ids=');
+    expect(rows).toEqual([]);
+    expect(callFor('telemetry')).toBeUndefined();
+  });
+
+  it('lets an explicitly chosen device win over a tag', async () => {
+    await api.get('/api/v1/telemetry?asset_id=dev200000000000400080000&asset_ids=dev300000000000400080000');
+    const filters = callFor('telemetry').filters;
+    expect(filters).toContainEqual(['eq', 'asset_id', 'dev200000000000400080000']);
+    expect(filters.find(f => f[0] === 'in')).toBeUndefined();
+  });
+});
+
+describe('digital thread filtering', () => {
+  it('normalises the UI entity type to the table name the trigger records', async () => {
+    // log_digital_thread_event() writes TG_TABLE_NAME ('devices'); the dropdown offers 'DEVICE'.
+    // An exact match would never have hit even once the parameter was honoured at all.
+    await api.get('/api/v1/digital-thread?entity_type=DEVICE');
+    expect(callFor('digital_thread').filters).toContainEqual(['eq', 'entity_type', 'devices']);
+  });
+
+  it('honours the row limit', async () => {
+    await api.get('/api/v1/digital-thread?limit=200');
+    expect(callFor('digital_thread').filters).toContainEqual(['limit', 200]);
+  });
+
+  it('restricts to the entity ids carrying a device tag', async () => {
+    await api.get('/api/v1/digital-thread?entity_ids=dev-a,dev-b');
+    expect(callFor('digital_thread').filters).toContainEqual(['in', 'entity_id', ['dev-a', 'dev-b']]);
+  });
+
+  it('returns nothing for a tag that matches no device', async () => {
+    const rows = await api.get('/api/v1/digital-thread?entity_ids=');
+    expect(rows).toEqual([]);
+    expect(callFor('digital_thread')).toBeUndefined();
+  });
+
+  it('searches entity id and rendered description, case-insensitively', async () => {
+    state.responses.digital_thread = {
+      data: [
+        { id: 1, entity_type: 'devices', entity_id: 'dev-alpha', action: 'INSERT', recorded_at: '2026-01-01T00:00:00Z' },
+        { id: 2, entity_type: 'cells', entity_id: 'cell-beta', action: 'UPDATE', recorded_at: '2026-01-01T00:00:01Z' }
+      ],
+      error: null
+    };
+
+    const byId = await api.get('/api/v1/digital-thread?entity_id=ALPHA');
+    expect(byId.map(r => r.entity_id)).toEqual(['dev-alpha']);
+
+    const byDescription = await api.get('/api/v1/digital-thread?entity_id=action update');
+    expect(byDescription.map(r => r.entity_id)).toEqual(['cell-beta']);
+  });
+
+  it('returns every event when no filter is supplied', async () => {
+    state.responses.digital_thread = {
+      data: [{ id: 1, entity_type: 'devices', entity_id: 'dev-a', action: 'INSERT', recorded_at: '2026-01-01T00:00:00Z' }],
+      error: null
+    };
+    expect(await api.get('/api/v1/digital-thread')).toHaveLength(1);
   });
 });

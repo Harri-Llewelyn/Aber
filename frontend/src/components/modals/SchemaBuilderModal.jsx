@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { IconFileCode, IconDownload } from '../common/Icons'
 import { datatypeLabel, datatypeToJsonSchemaType } from '../../utils/sparkplugDatatype'
+import { groupCatalog } from '../../utils/metricGroup'
 
 export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
   const [schemaName, setSchemaName] = useState('')
@@ -87,13 +88,26 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
             {filteredCatalog.length === 0 ? (
               <div style={{ padding: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>No matching catalog metrics.</div>
             ) : (
-              filteredCatalog.map(m => (
-                <label key={m.metric_uuid} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={selectedIds.has(m.metric_uuid)} onChange={() => toggleMetric(m.metric_uuid)} />
-                  <span className="mono" style={{ fontSize: '12px' }}>{m.name}</span>
-                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{datatypeLabel(m.datatype)}</span>
-                  {m.description && <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: 'auto' }}>{m.description}</span>}
-                </label>
+              // Grouped the same way as the Schemas page catalog table -- this is the same
+              // registry, and a picker that ordered it differently would be its own puzzle.
+              // Grouping applies to the search results, so a filtered list stays navigable.
+              groupCatalog(filteredCatalog).map(group => (
+                <div key={group.label}>
+                  <div
+                    style={{ position: 'sticky', top: 0, background: 'var(--bg-glass)', backdropFilter: 'blur(4px)', padding: '5px 12px', borderBottom: '1px solid var(--border)', fontSize: '10px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: group.isUngrouped ? 'var(--text-muted)' : 'var(--accent)' }}
+                    title={group.isUngrouped ? 'Metric names carrying no "Group/Metric" prefix' : `Metrics named "${group.label}/…"`}
+                  >
+                    {group.label} <span style={{ opacity: 0.7 }}>({group.metrics.length})</span>
+                  </div>
+                  {group.metrics.map(m => (
+                    <label key={m.metric_uuid} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={selectedIds.has(m.metric_uuid)} onChange={() => toggleMetric(m.metric_uuid)} />
+                      <span className="mono" style={{ fontSize: '12px' }}>{m.name}</span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{datatypeLabel(m.datatype)}</span>
+                      {m.description && <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: 'auto' }}>{m.description}</span>}
+                    </label>
+                  ))}
+                </div>
               ))
             )}
           </div>

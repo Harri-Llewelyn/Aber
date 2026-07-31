@@ -17,6 +17,24 @@ services:
         paths:
           - /rest/v1/
 
+  # WebSocket change feed. Two details that are easy to get wrong:
+  #   * The upstream path is /socket/ (not /), so a subscriber connecting to
+  #     /realtime/v1/websocket reaches /socket/websocket on Realtime.
+  #   * The host is `realtime-dev.supabase-realtime`, not `supabase-realtime`.
+  #     Realtime reads the tenant id from the leading hostname label, so addressing
+  #     it by the plain service name makes every handshake fail with a bare 403.
+  #     The alias is declared on the supabase-realtime service in docker-compose.yml.
+  - name: realtime-v1
+    url: http://realtime-dev.supabase-realtime:4000/socket/
+    routes:
+      - name: realtime-v1-ws
+        strip_path: true
+        paths:
+          - /realtime/v1/
+        protocols:
+          - http
+          - https
+
   - name: functions-v1
     url: http://supabase-functions:9000/
     routes:

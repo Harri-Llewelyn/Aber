@@ -1,0 +1,130 @@
+/**
+ * Schema conformance of a device's declared metrics, derived at read time.
+ *
+ * `devices.last_birth_metrics` is what the device declared in its most recent DBIRTH, written
+ * by ingestion.py. Which of those metrics its assigned schema fails to account for is worked
+ * out here rather than stored, so that editing a schema reclassifies its devices immediately
+ * instead of at their next birth -- rebirths are rare by design and may be weeks apart. Same
+ * client-side, no-backend-cron pattern as deviceProvisioning.js and gatewayStatus.js.
+ */
+
+import { deriveMetricGroup } from './metricGroup'
+
+/**
+ * The metric names a schema accounts for.
+ *
+ * `schema_definition` is free-form JSONB: only schemas produced by the Schema Builder are
+ * guaranteed the `{ type, properties, required }` shape, while hand-written ones registered
+ * through CreateSchemaModal may carry either key, or neither. The union of both is taken so a
+ * schema listing metrics in only one of them is still read correctly.
+ *
+ * Returns null -- not an empty set -- when neither key is present. That is "this schema cannot
+ * be evaluated", which is a different answer from "this schema models nothing", and the
+ * difference decides whether a device gets flagged. See unmodelledMetrics().
+ */
+export function modelledMetrics(schema) {
+  const def = schema?.schema_definition
+  if (!def) return null
+
+  const properties = def.properties && typeof def.properties === 'object' ? Object.keys(def.properties) : []
+  const required = Array.isArray(def.required) ? def.required : []
+  if (properties.length === 0 && required.length === 0) return null
+
+  return new Set([...properties, ...required])
+}
+
+/**
+ * Metrics the device declared that its schema does not account for.
+ *
+ * Empty when the device conforms, when it has never been seen, when it has no schema, or when
+ * the schema cannot be evaluated. Those last two are deliberately *not* treated as "everything
+ * is unmodelled": "publishes beyond its model" and "has no model" are different findings, and
+ * conflating them would flag every unschematised device until the tag meant nothing.
+ */
+export function unmodelledMetrics(device, schema) {
+  const declared = device?.last_birth_metrics
+  if (!Array.isArray(declared) || declared.length === 0) return []
+
+  const modelled = modelledMetrics(schema)
+  if (!modelled) return []
+
+  return declared.filter(name => !modelled.has(name))
+}
+
+/** True when the device declared at least one metric outside its assigned schema. */
+export function hasUnmodelledMetrics(device, schema) {
+  return unmodelledMetrics(device, schema).length > 0
+}
+
+/**
+ * Resolve the schema assigned to a device from a loaded schema list.
+ *
+ * The list comes from `/api/v1/schemas`, which keys rows as `schema_uuid`; `devices.schema_id`
+ * holds the same value.
+ */
+export function schemaForDevice(device, schemas) {
+  if (!device?.schema_id) return null
+  return (schemas || []).find(s => s.schema_uuid === device.schema_id) || null
+}
+
+/** The tag applied to a device publishing metrics its schema does not account for. */
+export const UNMODELLED_TAG = 'Unmodelled'
+
+/**
+ * The device-type tags implied by its schema: the distinct groups of the metrics that schema
+ * models. A schema covering `Axes/C/ANGLE` and `Environmental/HUMIDITY_RELATIVE` tags its devices
+ * both `Axes` and `Environmental` -- multiple tags without needing multiple schemas.
+ *
+ * Drawn from the *schema*, not from what the device was last seen publishing. Two consequences,
+ * both wanted:
+ *   - a provisioned device is tagged before its first birth, so it can be found by tag while you
+ *     are still waiting for it to appear;
+ *   - a metric the device publishes but its schema does not model contributes no tag. It reports
+ *     as Unmodelled instead, which is the signal to fix the schema -- letting it quietly confer
+ *     its group would legitimise the drift and hide it.
+ */
+export function deviceGroupTags(device, schema) {
+  const modelled = modelledMetrics(schema)
+  if (!modelled) return []
+
+  const groups = new Set()
+  for (const name of modelled) {
+    const group = deriveMetricGroup(name)
+    if (group) groups.add(group)
+  }
+  return [...groups].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+}
+
+/**
+ * Every tag a device carries: its schema's metric groups, plus `Unmodelled` when it declared
+ * metrics outside that schema. Ordered with Unmodelled last, since it is a finding rather than
+ * a classification.
+ */
+export function deviceTagList(device, schema) {
+  const tags = deviceGroupTags(device, schema)
+  return hasUnmodelledMetrics(device, schema) ? [...tags, UNMODELLED_TAG] : tags
+}
+
+/** Whether a device carries a given tag. */
+export function deviceHasTag(device, schema, tag) {
+  if (!tag) return true
+  return deviceTagList(device, schema).includes(tag)
+}
+
+/**
+ * Every tag present across a fleet, for populating a filter. Unmodelled is offered only when at
+ * least one device actually has it -- an empty finding is not worth a filter option.
+ */
+export function availableTags(devices, schemas) {
+  const groups = new Set()
+  let anyUnmodelled = false
+
+  for (const device of devices || []) {
+    const schema = schemaForDevice(device, schemas)
+    for (const tag of deviceGroupTags(device, schema)) groups.add(tag)
+    if (!anyUnmodelled && hasUnmodelledMetrics(device, schema)) anyUnmodelled = true
+  }
+
+  const sorted = [...groups].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+  return anyUnmodelled ? [...sorted, UNMODELLED_TAG] : sorted
+}

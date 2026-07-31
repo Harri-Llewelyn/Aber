@@ -4,7 +4,8 @@ import { IconBookOpen } from '../common/Icons'
 export function CreateSchemaModal({ onSave, onCancel }) {
   const [name, setName] = useState('')
   const [desc, setDesc] = useState('')
-  const defaultDef = `{\n  "type": "object",\n  "properties": {\n    "vibration_rms": { "type": "number" },\n    "frequency_hz": { "type": "number" },\n    "status": { "type": "string" }\n  },\n  "required": ["vibration_rms", "status"]\n}`
+  // MTConnect data item types under their component path — see the Metric Catalog on this page.
+  const defaultDef = `{\n  "type": "object",\n  "properties": {\n    "Axes/DISPLACEMENT": { "type": "number" },\n    "Systems/TEMPERATURE": { "type": "number" },\n    "Controller/EXECUTION": { "type": "string" }\n  },\n  "required": ["Axes/DISPLACEMENT", "Controller/EXECUTION"]\n}`
   const [definition, setDefinition] = useState(defaultDef)
   const [jsonError, setJsonError] = useState(null)
 

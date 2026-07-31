@@ -43,6 +43,13 @@ VAL_MISMATCH_DEVICE = "VALIDATE_Mismatch_Device_001"
 VAL_QUARANTINE_DEVICE = "VALIDATE_Quarantine_Device_001"
 VAL_MALFORMED_DEVICE = "VALIDATE_Malformed_Device_001"
 VAL_RENAMED_DEVICE = "VALIDATE_Device_001_Renamed"
+VAL_SCHEMA_NAME = "VALIDATE_Schema_Robot_Standard"
+
+# The schema attached to the registered device, and a metric deliberately left out of it. The
+# device declares the extra metric at birth, so it must surface as unmodelled -- and stop being
+# unmodelled once the schema is widened, without the device rebirthing.
+VAL_SCHEMA_METRICS = ["Systems/TEMPERATURE", "Controller/EXECUTION", "Controller/EMERGENCY_STOP"]
+VAL_UNMODELLED_METRIC = "Environmental/HUMIDITY_RELATIVE"
 
 # A well-formed device id that is deliberately not registered: 'dev' + 21 hex = 24 characters.
 UNKNOWN_DEVICE_ID = "dev" + "f" * 21
@@ -58,6 +65,32 @@ try:
     supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 except Exception as e:
     print(f"Warning: Supabase client init failed: {e}")
+
+def modelled_metrics(schema_definition):
+    """
+    Python mirror of frontend/src/utils/deviceTags.js modelledMetrics(): the union of a schema's
+    `properties` keys and its `required` list, or None when it declares neither and so cannot be
+    evaluated. Kept in step with the JS deliberately -- both answer the same question.
+    """
+    if not isinstance(schema_definition, dict):
+        return None
+    properties = schema_definition.get("properties")
+    required = schema_definition.get("required")
+    names = set(properties.keys()) if isinstance(properties, dict) else set()
+    if isinstance(required, list):
+        names |= set(required)
+    return names or None
+
+
+def unmodelled_metrics(declared, schema_definition):
+    """Metrics declared at the last birth that the schema does not account for."""
+    if not declared:
+        return []
+    modelled = modelled_metrics(schema_definition)
+    if modelled is None:
+        return []
+    return sorted(set(declared) - modelled)
+
 
 def get_timescaledb_connection():
     return psycopg2.connect(
@@ -75,6 +108,9 @@ def cleanup_validation_data():
             supabase_client.table("devices").delete().like("name", "VALIDATE_%").execute()
             supabase_client.table("gateways").delete().like("name", "VALIDATE_%").execute()
             supabase_client.table("cells").delete().eq("name", VAL_CELL_NAME).execute()
+            # schema_name is UNIQUE, so a schema left behind by an aborted run would fail the
+            # next seed. devices.schema_id is ON DELETE SET NULL, so ordering does not matter.
+            supabase_client.table("schemas").delete().like("schema_name", "VALIDATE_%").execute()
             supabase_client.table("digital_thread").delete().like("entity_type", "%VALIDATE%").execute()
         except Exception as e:
             print(f"Supabase cleanup warning: {e}")
@@ -163,6 +199,30 @@ def seed_supabase():
         SEEDED[key + "_uuid"] = row.get("id")
         SEEDED[key + "_id"] = row.get("sparkplug_id")
 
+    # Seed a schema and attach it to the registered device, so birth-declared metrics have
+    # something to be judged against. Without an assigned schema a device is deliberately never
+    # flagged as unmodelled -- "publishes beyond its model" and "has no model" are different
+    # findings -- so this is a prerequisite of checks 6c/6d, not decoration.
+    s_res = supabase_client.table("schemas").insert({
+        "schema_name": VAL_SCHEMA_NAME,
+        "description": "End-to-end validation schema",
+        "schema_definition": {
+            "type": "object",
+            # SAMPLE data items are numeric; EVENT data items carry a controlled string.
+            "properties": {
+                name: {"type": "number" if name.endswith("TEMPERATURE") else "string"}
+                for name in VAL_SCHEMA_METRICS
+            },
+            "required": VAL_SCHEMA_METRICS,
+        },
+    }).execute()
+    SEEDED["schema_uuid"] = s_res.data[0]["id"] if s_res.data else None
+
+    if SEEDED.get("schema_uuid") and SEEDED.get("known_uuid"):
+        supabase_client.table("devices").update(
+            {"schema_id": SEEDED["schema_uuid"]}
+        ).eq("id", SEEDED["known_uuid"]).execute()
+
     missing = [k for k, v in SEEDED.items() if not v]
     if missing:
         print(f"⚠️  Seed incomplete, missing: {missing}")
@@ -210,11 +270,11 @@ def run_simulation():
 
     # 2. DDATA for that quarantined device -> gated, nothing reaches TimescaleDB
     print(f"\n--- DDATA from quarantined device: {UNKNOWN_DEVICE_ID} ---")
-    publish("DDATA", UNKNOWN_DEVICE_ID, {"temperature": 99.9, "status": "QUARANTINED"})
+    publish("DDATA", UNKNOWN_DEVICE_ID, {"Systems/TEMPERATURE": 99.9, "Controller/EXECUTION": "STOPPED"})
 
     # 3. DDATA for the registered device -> ingested, keyed by its sparkplug_id
     print(f"\n--- DDATA from registered device: {VAL_KNOWN_DEVICE} ({SEEDED.get('known_id')}) ---")
-    publish("DDATA", SEEDED["known_id"], {"temperature": 42.5, "status": "RUNNING", "safety_ok": True})
+    publish("DDATA", SEEDED["known_id"], {"Systems/TEMPERATURE": 42.5, "Controller/EXECUTION": "ACTIVE", "Controller/EMERGENCY_STOP": "ARMED"})
 
     # 4. DBIRTH under a truncated id -> quarantined with a message naming the length mismatch.
     #    This is the whole point of the fixed 24-character format: a misconfigured gateway is
@@ -232,15 +292,40 @@ def run_simulation():
     #    device was resolved, so it has to be sent before the DDATA.
     print(f"\n--- DBIRTH/DDATA from a legacy name-addressed device: {VAL_LEGACY_DEVICE} ---")
     publish("DBIRTH", VAL_LEGACY_DEVICE, {"firmware": "v0.9.0"})
-    publish("DDATA", VAL_LEGACY_DEVICE, {"temperature": 30.0, "status": "RUNNING"})
+    publish("DDATA", VAL_LEGACY_DEVICE, {"Systems/TEMPERATURE": 30.0, "Controller/EXECUTION": "ACTIVE"})
 
-    # 7. The acceptance test for the whole change: rename the device, then publish again.
+    # 7. DBIRTH for the registered device declaring one metric its schema does not model.
+    #    Published twice, identically: the daemon must record the declared set the first time
+    #    and then write nothing at all the second, because log_digital_thread_event() fires on
+    #    every UPDATE to `devices` and an unchanged rewrite per rebirth would append an audit
+    #    row each time to a deliberately append-only table.
+    print(f"\n--- DBIRTH from registered device declaring an unmodelled metric: {VAL_UNMODELLED_METRIC} ---")
+    birth_metrics = {"Systems/TEMPERATURE": 42.5, "Controller/EXECUTION": "ACTIVE",
+                     "Controller/EMERGENCY_STOP": "ARMED", VAL_UNMODELLED_METRIC: 55.2}
+    publish("DBIRTH", SEEDED["known_id"], birth_metrics)
+
+    if supabase_client and SEEDED.get("known_uuid"):
+        res = supabase_client.table("devices").select("last_birth_metrics_at").eq(
+            "id", SEEDED["known_uuid"]
+        ).execute()
+        SEEDED["birth_metrics_at"] = res.data[0]["last_birth_metrics_at"] if res.data else None
+
+    print("\n--- Identical DBIRTH again: the declared set is unchanged, so nothing must be written ---")
+    time.sleep(6)  # outlast the daemon's 5s device-resolution cache
+    publish("DBIRTH", SEEDED["known_id"], birth_metrics)
+
+    # 8. The acceptance test for the whole change: rename the device, then publish again.
     #    Telemetry must continue landing on the same series.
     if supabase_client and SEEDED.get("known_uuid"):
         print(f"\n--- Renaming {VAL_KNOWN_DEVICE} -> {VAL_RENAMED_DEVICE}, then publishing again ---")
         supabase_client.table("devices").update({"name": VAL_RENAMED_DEVICE}).eq("id", SEEDED["known_uuid"]).execute()
         time.sleep(6)  # outlast the daemon's 5s device-resolution cache
-        publish("DDATA", SEEDED["known_id"], {"temperature": 43.5, "status": "RUNNING_AFTER_RENAME"})
+        # The sentinel goes on a local test metric rather than on Controller/EXECUTION, whose
+        # values MTConnect constrains to READY/ACTIVE/INTERRUPTED/... Putting an arbitrary marker
+        # there would make the validator publish exactly the kind of standard-name/non-standard-
+        # value payload the simulator was just moved off.
+        publish("DDATA", SEEDED["known_id"],
+                {"Systems/TEMPERATURE": 43.5, "VALIDATE/RENAME_SENTINEL": "RUNNING_AFTER_RENAME"})
 
     client.loop_stop()
     client.disconnect()
@@ -321,6 +406,111 @@ def verify_results():
                 passed = False
         except Exception as e:
             print(f"❌ 1f. LEGACY FALLBACK ERROR: {e}")
+            passed = False
+
+        # 5. asset_config must be populated from the birth certificate. This is the regression
+        # guard for a rename that left three stale `asset_id` references in
+        # store_birth_parameters(), making it raise NameError on every DBIRTH -- swallowed by
+        # process_dbirth's except, so the Config view was simply always empty and CI never knew.
+        try:
+            res = supabase_client.table("asset_config").select("metric_name").eq(
+                "asset_id", SEEDED.get("known_id")
+            ).execute()
+            names = sorted(r["metric_name"] for r in (res.data or []))
+            if names:
+                print(f"✅ 5. DBIRTH PARAMETERS: {len(names)} birth parameters stored to asset_config.")
+                print(f"      -> {', '.join(names)}")
+            else:
+                print("❌ 5. DBIRTH PARAMETERS FAIL: no asset_config rows recorded for "
+                      f"'{SEEDED.get('known_id')}'; store_birth_parameters() is not writing.")
+                passed = False
+        except Exception as e:
+            print(f"❌ 5. DBIRTH PARAMETERS ERROR: {e}")
+            passed = False
+
+        # 6. The birth-declared metric names must be recorded on the device row.
+        try:
+            res = supabase_client.table("devices").select(
+                "last_birth_metrics,last_birth_metrics_at,schema_id"
+            ).eq("id", SEEDED.get("known_uuid")).execute()
+            row = res.data[0] if res.data else {}
+            declared = row.get("last_birth_metrics")
+            expected = sorted(VAL_SCHEMA_METRICS + [VAL_UNMODELLED_METRIC])
+
+            if declared and sorted(declared) == expected:
+                print("✅ 6. BIRTH METRIC OBSERVATION: declared metric set recorded on the device row.")
+                print(f"      -> {', '.join(sorted(declared))}")
+            else:
+                print(f"❌ 6. BIRTH METRIC OBSERVATION FAIL: expected {expected}, got {declared}.")
+                passed = False
+
+            # 6a. Identity metrics are not something a schema should model, so they must not
+            # appear in the declared set even though every payload carries Asset_ID.
+            if declared and not ({"Asset_ID", "Asset_Name"} & set(declared)):
+                print("✅ 6a. IDENTITY EXCLUSION: Asset_ID/Asset_Name absent from the declared set.")
+            elif declared:
+                print("❌ 6a. IDENTITY EXCLUSION FAIL: identity metrics leaked into last_birth_metrics.")
+                passed = False
+
+            # 6b. The change-only write: an identical rebirth must not touch the row, or every
+            # rebirth would append a digital_thread entry saying nothing changed.
+            before = SEEDED.get("birth_metrics_at")
+            after = row.get("last_birth_metrics_at")
+            if before and after == before:
+                print("✅ 6b. CHANGE-ONLY WRITE: identical rebirth left the row untouched.")
+            elif before:
+                print(f"❌ 6b. CHANGE-ONLY WRITE FAIL: last_birth_metrics_at moved {before} -> {after}; "
+                      "an unchanged rebirth is rewriting the row and appending audit noise.")
+                passed = False
+            else:
+                print("⚠️  6b. CHANGE-ONLY WRITE: skipped, no baseline timestamp captured.")
+
+            # 6c. The verdict is derived, never stored: the schema does not model
+            # VAL_UNMODELLED_METRIC, so exactly that metric must come out as unmodelled.
+            s_res = supabase_client.table("schemas").select("schema_definition").eq(
+                "id", SEEDED.get("schema_uuid")
+            ).execute()
+            definition = s_res.data[0]["schema_definition"] if s_res.data else None
+            extra = unmodelled_metrics(declared, definition)
+            if extra == [VAL_UNMODELLED_METRIC]:
+                print(f"✅ 6c. UNMODELLED DETECTION: '{VAL_UNMODELLED_METRIC}' identified as outside the schema.")
+            else:
+                print(f"❌ 6c. UNMODELLED DETECTION FAIL: expected ['{VAL_UNMODELLED_METRIC}'], got {extra}.")
+                passed = False
+
+            # 6d. The acceptance test for deriving rather than storing the verdict: widening the
+            # schema must clear the finding immediately, with no rebirth from the device. Had
+            # ingestion written a flag instead, this would stay wrong until the device next
+            # birthed -- which for a stable device can be weeks.
+            widened = dict(definition or {})
+            widened["properties"] = {**(widened.get("properties") or {}),
+                                     VAL_UNMODELLED_METRIC: {"type": "number"}}
+            supabase_client.table("schemas").update({"schema_definition": widened}).eq(
+                "id", SEEDED.get("schema_uuid")
+            ).execute()
+
+            re_res = supabase_client.table("schemas").select("schema_definition").eq(
+                "id", SEEDED.get("schema_uuid")
+            ).execute()
+            re_definition = re_res.data[0]["schema_definition"] if re_res.data else None
+            cleared = unmodelled_metrics(declared, re_definition)
+
+            post_res = supabase_client.table("devices").select("last_birth_metrics_at").eq(
+                "id", SEEDED.get("known_uuid")
+            ).execute()
+            untouched = (post_res.data[0]["last_birth_metrics_at"] if post_res.data else None) == after
+
+            if cleared == [] and untouched:
+                print("✅ 6d. SCHEMA EDIT CLEARS IT: widening the schema cleared the finding with no "
+                      "rebirth, and without writing to the device row.")
+            elif cleared != []:
+                print(f"❌ 6d. SCHEMA EDIT FAIL: still reporting {cleared} after the schema was widened.")
+                passed = False
+            else:
+                print("❌ 6d. SCHEMA EDIT FAIL: the device row was written during a schema-only edit.")
+                passed = False
+        except Exception as e:
+            print(f"❌ 6. BIRTH METRIC OBSERVATION ERROR: {e}")
             passed = False
 
         # 2. Verify Digital Thread triggers

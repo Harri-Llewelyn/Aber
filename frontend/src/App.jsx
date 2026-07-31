@@ -6,10 +6,13 @@ import { useTheme } from './hooks/useTheme'
 import { useToast } from './hooks/useToast'
 import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
 import { clearInvalidSession, isSessionRejected } from './utils/sessionError'
-import { PERMISSION_UUIDS } from './constants'
+import { PERMISSION_UUIDS, REALTIME_ENABLED } from './constants'
 
 const allowSignUp = import.meta.env.VITE_ALLOW_SIGNUP === 'true'
-const enableRealtime = import.meta.env.VITE_ENABLE_REALTIME === 'true'
+
+// Must match GOTRUE_OAUTH_SERVER_AUTHORIZATION_PATH in docker-compose.yml. GoTrue appends it
+// to GOTRUE_SITE_URL when redirecting an OAuth client's user here to grant consent.
+const OAUTH_CONSENT_PATH = '/oauth/consent'
 
 import {
   IconCog,
@@ -38,6 +41,8 @@ const CellsTab         = lazy(() => import('./components/tabs/CellsTab').then(m 
 const GatewaysTab      = lazy(() => import('./components/tabs/GatewaysTab').then(m => ({ default: m.GatewaysTab })))
 const DevicesTab       = lazy(() => import('./components/tabs/DevicesTab').then(m => ({ default: m.DevicesTab })))
 const DigitalThreadTab = lazy(() => import('./components/tabs/DigitalThreadTab').then(m => ({ default: m.DigitalThreadTab })))
+// Reached only via GoTrue's OAuth redirect, so it is never in the main bundle's critical path.
+const OAuthConsent     = lazy(() => import('./pages/OAuthConsent').then(m => ({ default: m.OAuthConsent })))
 const TelemetryTab     = lazy(() => import('./components/tabs/TelemetryTab').then(m => ({ default: m.TelemetryTab })))
 const SchemasTab       = lazy(() => import('./components/tabs/SchemasTab').then(m => ({ default: m.SchemasTab })))
 const DirectoryTab     = lazy(() => import('./components/tabs/DirectoryTab').then(m => ({ default: m.DirectoryTab })))
@@ -89,15 +94,26 @@ function AuthScreen({ onLoginSuccess, notice }) {
     }
   }
 
+  // Colours come from the theme variables in App.css (:root / [data-theme="light"]).
+  //
+  // This card used to read var(--text-main) and var(--bg-main). NEITHER VARIABLE EXISTS --
+  // the real names are --text-primary and --bg-base -- so both silently fell through to the
+  // hardcoded near-white literals they were given as fallbacks, in BOTH themes. The card
+  // background used --bg-card, which does exist and is #ffffff in light mode, so the result
+  // was white text on a white card. The inputs were worse: a literal color: '#fff'.
+  //
+  // Do not reintroduce fallback literals here. A CSS variable fallback is exactly what let a
+  // typo'd variable name look correct in dark mode and fail silently in light mode; without
+  // one, an unknown variable renders as an obviously-wrong inherited colour instead.
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-main, #0f172a)', padding: '20px' }}>
-      <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '32px', borderRadius: '16px', background: 'var(--bg-card, #1e293b)', border: '1px solid var(--border, #334155)', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.5)' }}>
+    <div style={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)', padding: '20px' }}>
+      <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '32px', borderRadius: '16px', background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)' }}>
         <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-          <div style={{ display: 'inline-flex', padding: '12px', borderRadius: '12px', background: 'rgba(56, 189, 248, 0.1)', color: 'var(--accent, #38bdf8)', marginBottom: '12px' }}>
+          <div style={{ display: 'inline-flex', padding: '12px', borderRadius: '12px', background: 'var(--accent-dim)', color: 'var(--accent)', marginBottom: '12px' }}>
             <IconCog size={36} />
           </div>
-          <h2 style={{ fontSize: '22px', fontWeight: 700, margin: '0 0 6px 0', color: 'var(--text-main, #f8fafc)' }}>Factory+ Supabase Portal</h2>
-          <p style={{ fontSize: '13px', color: 'var(--text-muted, #94a3b8)', margin: 0 }}>Sign in with your Supabase BaaS credentials</p>
+          <h2 style={{ fontSize: '22px', fontWeight: 700, margin: '0 0 6px 0', color: 'var(--text-primary)' }}>Factory+ Supabase Portal</h2>
+          <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>Sign in with your Supabase BaaS credentials</p>
         </div>
 
         {notice && !authError && (
@@ -114,11 +130,11 @@ function AuthScreen({ onLoginSuccess, notice }) {
 
         <form onSubmit={handleAuth}>
           <div className="form-group" style={{ marginBottom: '16px' }}>
-            <label className="form-label" style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: 'var(--text-main, #f8fafc)' }}>Email Address</label>
+            <label className="form-label" style={{ marginBottom: '6px' }}>Email Address</label>
             <input
               type="email"
               className="form-control"
-              style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border, #475569)', background: 'var(--bg-glass, #0f172a)', color: '#fff' }}
+              style={{ borderRadius: '8px' }}
               value={email}
               onChange={e => setEmail(e.target.value)}
               required
@@ -126,11 +142,11 @@ function AuthScreen({ onLoginSuccess, notice }) {
           </div>
 
           <div className="form-group" style={{ marginBottom: '24px' }}>
-            <label className="form-label" style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px', color: 'var(--text-main, #f8fafc)' }}>Password</label>
+            <label className="form-label" style={{ marginBottom: '6px' }}>Password</label>
             <input
               type="password"
               className="form-control"
-              style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--border, #475569)', background: 'var(--bg-glass, #0f172a)', color: '#fff' }}
+              style={{ borderRadius: '8px' }}
               value={password}
               onChange={e => setPassword(e.target.value)}
               required
@@ -180,31 +196,17 @@ function Dashboard({ session, onSignOut }) {
   const { userRole, hasPermission } = usePermissions(session)
   useQuarantineAlerts(showToast)
 
-  // Real-time Postgres Changes Listener.
+  // The app-wide "something changed" toast that used to live here has been removed.
   //
-  // Off by default: this stack deploys no `realtime` service and kong.yml has no
-  // /realtime/v1/ route, so subscribing just opens a WebSocket that fails and retries
-  // forever in the background. Every tab already refreshes through usePolling. Set
-  // VITE_ENABLE_REALTIME=true once a realtime service is actually deployed.
-  useEffect(() => {
-    if (!enableRealtime) return
-
-    const channel = supabase
-      .channel('schema-db-changes')
-      .on('postgres_changes', { event: '*', schema: 'public' }, (payload) => {
-        showToast(`Real-time update: ${payload.table} ${payload.eventType}`, 'info')
-      })
-      .subscribe((status, err) => {
-        // Without this the failure mode is a silent retry loop with no diagnostics.
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.warn('[realtime] subscription %s:', status, err?.message || 'no realtime service reachable')
-        }
-      })
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [showToast])
+  // It subscribed to every table in the `public` schema and raised a toast per change. With a
+  // realtime service actually deployed that is no longer a debugging aid but a nuisance:
+  // ingestion stamps gateways.last_heartbeat on every NBIRTH/NDATA/NDEATH, so it would toast
+  // roughly every 30 seconds per gateway, forever.
+  //
+  // Data refresh is now owned by the tabs themselves through useRealtimeTable, which
+  // subscribes only to the tables the visible tab actually renders. Quarantine arrivals --
+  // the one change class that genuinely warrants interrupting the operator -- are handled by
+  // useQuarantineAlerts below.
 
   const persona = session?.user?.email || 'Administrator'
 
@@ -238,7 +240,12 @@ function Dashboard({ session, onSignOut }) {
           <button className="btn btn-ghost btn-sm" onClick={toggleTheme} title="Toggle Light / Dark UI Theme">
             {theme === 'dark' ? <IconSun size={14} /> : <IconMoon size={14} />}
           </button>
-          <div className="topbar-status" title={enableRealtime ? 'Realtime channel subscribed; views also refresh on a 3s poll' : 'Views refresh on a 3s poll (no realtime service deployed)'}><div className="pulse-dot" /> Live</div>
+          <div
+            className="topbar-status"
+            title={REALTIME_ENABLED
+              ? 'Live: tabs update on Realtime change events, with a 60s reconciliation refresh'
+              : 'Polling: tabs refresh every 3s (Realtime disabled)'}
+          ><div className="pulse-dot" /> {REALTIME_ENABLED ? 'Live' : 'Polling'}</div>
         </div>
       </header>
 
@@ -336,6 +343,21 @@ export default function App() {
       subscription.unsubscribe()
     }
   }, [])
+
+  // OAuth consent, checked before the loading and auth branches below.
+  //
+  // GoTrue sends the browser here from /oauth/authorize (see
+  // GOTRUE_OAUTH_SERVER_AUTHORIZATION_PATH in docker-compose.yml) because it ships no consent
+  // UI of its own. The page reads the session itself and renders its own sign-in prompt when
+  // there is none, so it must not fall through to AuthScreen -- doing so would lose the
+  // authorization_id and strand the OAuth client with no way back.
+  if (window.location.pathname === OAUTH_CONSENT_PATH) {
+    return (
+      <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading…</div>}>
+        <OAuthConsent />
+      </Suspense>
+    )
+  }
 
   if (loading) {
     return <div className="loading-wrap"><div className="spinner" /> Connecting to Supabase Auth…</div>

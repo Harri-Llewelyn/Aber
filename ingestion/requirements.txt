@@ -1,4 +1,8 @@
 paho-mqtt==1.6.1
-psycopg2-binary==2.9.9
+# 2.9.10, not 2.9.9: 2.9.9 predates CPython 3.13 and ships no wheel for it, so `pip install -r`
+# tries to build from source and fails on any machine running a current Python. The container and
+# CI both pin 3.10, where either version works -- this only ever bit local development, which is
+# exactly where validate.py is meant to be runnable. 2.9.10 supports 3.8+, so nothing regresses.
+psycopg2-binary==2.9.10
 protobuf==4.25.3  # Compatible with apt protobuf-compiler (protoc 3.x/25.x)
 supabase

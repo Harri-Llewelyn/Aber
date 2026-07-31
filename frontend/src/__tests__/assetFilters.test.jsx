@@ -171,11 +171,58 @@ describe('DevicesTab filters', () => {
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
-    fireEvent.click(screen.getByTitle(/quarantined, overdue their first birth, or still matched by legacy name/i))
+    // Selected by its visible label rather than its title text, so that rewording the
+    // tooltip does not break the test -- which is exactly what happened when quarantined
+    // devices were removed from this table and the tooltip had to stop mentioning them.
+    fireEvent.click(screen.getByRole('button', { name: /Needs attention/i }))
 
     await waitFor(() => expect(screen.queryByText('CNC_01')).toBeNull())
     // Robot_03 is overdue its first birth; the quarantined device is listed in the queue above.
     expect(screen.getByText('Robot_03')).toBeTruthy()
+  })
+
+  // Regression: quarantined devices used to render BOTH in the onboarding queue and again in
+  // the table below, so every pending device appeared twice on one screen -- once with
+  // approve/reject actions and once with edit/archive actions that do not apply to a device
+  // which has not been admitted yet.
+  it('lists a quarantined device in the onboarding queue but not in the devices table', async () => {
+    api.get.mockImplementation(routeGet())
+    renderDevices()
+    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
+
+    // Present on the page exactly once -- in the quarantine queue.
+    expect(screen.getAllByText('Unknown_Thing')).toHaveLength(1)
+
+    // ...and that one occurrence is not in the devices table.
+    const tableNames = deviceTableRows().map(r => r.textContent)
+    expect(tableNames.some(t => t.includes('Unknown_Thing'))).toBe(false)
+    expect(tableNames.some(t => t.includes('CNC_01'))).toBe(true)
+  })
+
+  it('keeps quarantined devices out of the table even when a filter would match them', async () => {
+    api.get.mockImplementation(routeGet())
+    renderDevices()
+    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
+
+    // gw-2 / cell-2 is the quarantined device's gateway. Only Robot_03 should surface.
+    fireEvent.change(screen.getByTitle('Filter by serving edge gateway'), { target: { value: 'gw-2' } })
+
+    await waitFor(() => expect(screen.queryByText('CNC_01')).toBeNull())
+    const tableNames = deviceTableRows().map(r => r.textContent)
+    expect(tableNames.some(t => t.includes('Robot_03'))).toBe(true)
+    expect(tableNames.some(t => t.includes('Unknown_Thing'))).toBe(false)
+  })
+
+  // The badge must agree with what switching the filter on actually reveals. Quarantined
+  // devices are counted by the queue's own badge instead, so counting them here too would
+  // both double-count them and overstate the table's row count.
+  it('excludes quarantined devices from the needs-attention count', async () => {
+    api.get.mockImplementation(routeGet())
+    renderDevices()
+    await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
+
+    // Of the four fixtures only Robot_03 (overdue) qualifies once the quarantined one is out.
+    expect(screen.getByRole('button', { name: /Needs attention \(1\)/i })).toBeTruthy()
   })
 
   it('filters by serving gateway', async () => {

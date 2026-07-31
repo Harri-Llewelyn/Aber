@@ -3,9 +3,27 @@ import { api, TELEMETRY_PAGE_SIZE } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { effectiveSparkplugId } from '../../utils/sparkplugId'
+import { deviceHasTag, schemaForDevice, availableTags } from '../../utils/deviceTags'
 import { AutoRefreshControl } from '../common/AutoRefreshControl'
 import { IconDownload } from '../common/Icons'
 
+// DELIBERATELY NOT MIGRATED TO REALTIME.
+//
+// Every other data tab moved from polling to supabase.channel() subscriptions in Phase 5.
+// This one cannot, and the reason is structural rather than a matter of effort:
+//
+//   `public.telemetry` is a postgres_fdw foreign table (supabase migration 0010) projecting
+//   the hypertable in the standalone TimescaleDB container. Its rows are written to
+//   TimescaleDB's WAL, never to Supabase's, and Realtime works by decoding Supabase's WAL.
+//   Adding it to the `supabase_realtime` publication would not error -- it would silently
+//   emit nothing, which is the worse failure. Migration 0023 excludes it explicitly.
+//
+// Even if it were reachable, it would be the wrong thing to subscribe to: Realtime evaluates
+// RLS per change PER SUBSCRIBER, and telemetry arrives at device message rate. That is the
+// load profile the publication is deliberately scoped to keep out.
+//
+// So this tab keeps paged reads (queryTelemetry in api.js, capped at TELEMETRY_MAX_ROWS) with
+// an operator-controlled AutoRefreshControl, which defaults to off.
 export function TelemetryTab({ initialAssetFilter, onClearFilter, hasPermission }) {
   const [rows, setRows]               = useState([])
   const [loading, setLoading]         = useState(true)
@@ -23,9 +41,30 @@ export function TelemetryTab({ initialAssetFilter, onClearFilter, hasPermission 
 
   const [assetFilter, setAssetFilter] = useState(getInitialAsset)
   const [metricFilter, setMetricFilter] = useState('')
+  const [tagFilter, setTagFilter]     = useState('')
   const [timeRange, setTimeRange]     = useState('')
   const [assets, setAssets]           = useState([])
+  const [schemas, setSchemas]         = useState([])
   const [catalog, setCatalog]         = useState([])
+
+  // Devices carrying the selected tag. Resolved here rather than server-side because a device's
+  // tags are derived from its schema (see utils/deviceTags.js), which the database does not model.
+  const taggedAssetIds = useMemo(() => {
+    if (!tagFilter) return null
+    return assets
+      .filter(a => deviceHasTag(a, schemaForDevice(a, schemas), tagFilter))
+      .map(a => a.asset_id)
+  }, [tagFilter, assets, schemas])
+
+  const tagOptions = useMemo(() => availableTags(assets, schemas), [assets, schemas])
+
+  // A tag expands to an IN list over every matching device, and postgres_fdw pushes the WHERE
+  // down to TimescaleDB but not the LIMIT (README known issue #4) -- so an unbounded tag query
+  // materialises the whole matching range before trimming. Require a window rather than letting
+  // the page get slower the longer the stack has been running.
+  useEffect(() => {
+    if (tagFilter && !timeRange) setTimeRange('60')
+  }, [tagFilter, timeRange])
 
   // Check telemetry permission
   const hasTelemetryPermission = hasPermission(PERMISSION_UUIDS.TELEMETRY_READ)
@@ -60,13 +99,15 @@ export function TelemetryTab({ initialAssetFilter, onClearFilter, hasPermission 
 
   const buildQuery = useCallback((offset) => {
     const params = []
-    if (assetFilter)  params.push(`asset_id=${encodeURIComponent(assetFilter)}`)
+    // An explicit device beats a tag: picking one device from the list is the narrower intent.
+    if (assetFilter)            params.push(`asset_id=${encodeURIComponent(assetFilter)}`)
+    else if (taggedAssetIds)    params.push(`asset_ids=${encodeURIComponent(taggedAssetIds.join(','))}`)
     if (metricFilter) params.push(`metric_name=${encodeURIComponent(metricFilter)}`)
     if (timeRange)    params.push(`minutes=${encodeURIComponent(timeRange)}`)
     params.push(`limit=${TELEMETRY_PAGE_SIZE}`)
     if (offset) params.push(`offset=${offset}`)
     return params.join('&')
-  }, [assetFilter, metricFilter, timeRange])
+  }, [assetFilter, taggedAssetIds, metricFilter, timeRange])
 
   // Replaces the whole result set: used on mount, on filter change, and on refresh.
   const load = useCallback((isInitial = false) => {
@@ -111,6 +152,9 @@ export function TelemetryTab({ initialAssetFilter, onClearFilter, hasPermission 
   const handleRefresh = useCallback(() => load(false), [load])
 
   useEffect(() => { api.get('/api/v1/devices').then(d => setAssets(d)).catch(() => {}) }, [])
+  // Device tags are derived from the assigned schema's metric groups, so the schema list is
+  // needed to offer a tag filter at all.
+  useEffect(() => { api.get('/api/v1/schemas').then(d => setSchemas(d)).catch(() => {}) }, [])
   useEffect(() => {
     // The metric catalog is the registry of metrics devices are *meant* to publish. Without it
     // the dropdown could only offer metrics already present in the loaded page, so a metric that
@@ -168,6 +212,21 @@ export function TelemetryTab({ initialAssetFilter, onClearFilter, hasPermission 
                 an engineer reading the stream. */}
             {assets.map(a => <option key={a.asset_id} value={a.asset_id}>{a.asset_name} — {effectiveSparkplugId(a)}</option>)}
           </select>
+          <select
+            className="form-control"
+            style={{ width: '170px' }}
+            value={tagFilter}
+            onChange={e => setTagFilter(e.target.value)}
+            disabled={tagOptions.length === 0 || !!assetFilter}
+            title={assetFilter
+              ? 'Clear the device filter to stream a whole device type'
+              : tagOptions.length === 0
+                ? 'No device carries a tag yet — tags come from the metric groups a device\'s schema models'
+                : 'Stream telemetry for every device of this type'}
+          >
+            <option value="">All Types</option>
+            {tagOptions.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
           <select className="form-control" style={{ width: '190px' }} value={metricFilter} onChange={e => setMetricFilter(e.target.value)} title="Filter by a registered catalog metric, or by one seen in the stream that no catalog entry covers">
             <option value="">All Metrics</option>
             {catalogMetrics.length > 0 && (
@@ -181,8 +240,10 @@ export function TelemetryTab({ initialAssetFilter, onClearFilter, hasPermission 
               </optgroup>
             )}
           </select>
-          <select className="form-control" style={{ width: '140px' }} value={timeRange} onChange={e => setTimeRange(e.target.value)} title="Filter telemetry by time window">
-            <option value="">All History</option>
+          <select className="form-control" style={{ width: '140px' }} value={timeRange} onChange={e => setTimeRange(e.target.value)} title={tagFilter ? 'A time window is required when streaming a whole device type' : 'Filter telemetry by time window'}>
+            {/* Withheld while a tag is active: see the note on buildQuery -- an unbounded query
+                over a whole device type has no LIMIT pushdown to TimescaleDB. */}
+            {!tagFilter && <option value="">All History</option>}
             <option value="15">Last 15m</option>
             <option value="60">Last 1 Hour</option>
             <option value="1440">Last 24 Hours</option>

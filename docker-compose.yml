@@ -76,6 +76,14 @@ services:
       TS_DBNAME: ${DB_NAME:-postgres}
       TS_USER: ${DB_USER:-postgres}
       TS_PASSWORD: ${DB_PASSWORD:-postgres}
+      # Seeded into Supabase Vault by 20260101000026_vault_secrets.sql, which is the only
+      # place it can live: the quarantine webhook trigger has to read it from SQL. Empty on
+      # the default stack, where Node-RED runs without adminAuth -- the migration then leaves
+      # the secret unset and the webhook goes out unauthenticated.
+      NODERED_ADMIN_TOKEN: ${NODERED_ADMIN_TOKEN:-}
+      # Hashed into auth.oauth_clients by 20260101000028_grafana_oauth_client.sql. Grafana
+      # reads the same plaintext from its own environment via grafana.ini.
+      GRAFANA_OAUTH_CLIENT_SECRET: ${GRAFANA_OAUTH_CLIENT_SECRET:-}
     volumes:
       - ./supabase/migrations:/migrations:ro
       - ./supabase/seed.sql:/seed.sql:ro
@@ -87,7 +95,7 @@ services:
       for f in /migrations/*.sql; do
         if [ -f \"$$f\" ]; then
           echo \"Executing migration $$f...\";
-          psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -h supabase-db -U postgres -d postgres -f \"$$f\";
+          psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -h supabase-db -U postgres -d postgres -f \"$$f\";
         fi
       done;
       if [ -f /seed.sql ]; then
@@ -111,7 +119,10 @@ services:
       GOTRUE_API_PORT: 9999
       GOTRUE_DB_DRIVER: postgres
       GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD:-postgres}@supabase-db:5432/postgres?sslmode=disable
-      GOTRUE_SITE_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
+      # The application's own URL, not Kong's. GoTrue builds user-facing redirects from this,
+      # including the OAuth consent redirect below -- pointing it at the API gateway would
+      # send the browser to a URL that serves no UI.
+      GOTRUE_SITE_URL: ${FRONTEND_URL:-http://localhost:3000}
       API_EXTERNAL_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
       GOTRUE_JWT_SECRET: ${SUPABASE_JWT_SECRET}
       GOTRUE_JWT_EXP: 3600
@@ -126,6 +137,24 @@ services:
       GOTRUE_DISABLE_SIGNUP: "false"
       GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED: "true"
       GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI: "pg-functions://postgres/public/custom_access_token_hook"
+      # OAuth 2.1 / OIDC authorization server, used by Grafana's [auth.generic_oauth].
+      #
+      # GoTrue serves /.well-known/openid-configuration unconditionally, whether or not this
+      # is on -- a 200 there proves nothing. With the server disabled every endpoint it
+      # advertises returns 404 ("OAuth server is disabled"). This flag is what makes
+      # /oauth/authorize, /oauth/token and /oauth/userinfo real.
+      GOTRUE_OAUTH_SERVER_ENABLED: "true"
+      # Lets a client self-register at /oauth/clients/register. Kept on because the Grafana
+      # client is seeded by migration through auth.oauth_clients instead, and this is the
+      # documented way to mint a correctly-hashed secret if that ever needs redoing by hand.
+      GOTRUE_OAUTH_SERVER_ALLOW_DYNAMIC_REGISTRATION: "true"
+      # GoTrue ships NO consent UI. On /oauth/authorize it redirects the browser to
+      # GOTRUE_SITE_URL + this path with ?authorization_id=..., and the application is
+      # expected to render consent and POST the decision back to
+      # /oauth/authorizations/{id}/consent. Without it, /oauth/authorize fails with
+      # "oauth authorization path not configured" and no OIDC client can ever complete a login.
+      # The route is served by the React dashboard (frontend/src/pages/OAuthConsent.jsx).
+      GOTRUE_OAUTH_SERVER_AUTHORIZATION_PATH: "/oauth/consent"
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9999/health"]
       interval: 5s
@@ -150,6 +179,72 @@ services:
       supabase-db-roles-init:
         condition: service_completed_successfully
 
+  # Realtime v2: tails the Postgres WAL through a logical replication slot and fans
+  # changes out over WebSockets, replacing the dashboard's 3s polling loops.
+  #
+  # Only the metadata tables in the `supabase_realtime` publication are published.
+  # `public.telemetry` is deliberately excluded and cannot ever be included: it is a
+  # postgres_fdw foreign table (migration 0010) whose rows live in TimescaleDB's WAL,
+  # never this database's, so it would emit nothing.
+  supabase-realtime:
+    container_name: factoryplus_supabase_realtime
+    # Pinned rather than :latest -- Realtime runs its own migrations against the
+    # _realtime schema on boot and is coupled to the Postgres image version.
+    image: supabase/realtime:v2.34.47
+    restart: always
+    environment:
+      PORT: 4000
+      DB_HOST: supabase-db
+      DB_PORT: 5432
+      # Needs REPLICATION privilege to create its logical slot. The scoped
+      # `authenticator` role PostgREST connects as does not have it.
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DB_NAME: postgres
+      DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
+      DB_ENC_KEY: ${REALTIME_DB_ENC_KEY}
+      # Must be the same secret Kong, PostgREST and GoTrue verify with, or every
+      # subscriber is rejected at the socket handshake.
+      API_JWT_SECRET: ${SUPABASE_JWT_SECRET}
+      SECRET_KEY_BASE: ${REALTIME_SECRET_KEY_BASE}
+      ERL_AFLAGS: -proto_dist inet_tcp
+      DNS_NODES: "''"
+      # The image's /app/run.sh runs `ulimit -n $RLIMIT_NOFILE` under `set -u`, so
+      # leaving this unset crash-loops the container on "unbound variable" before
+      # the Elixir app ever starts. It is not optional.
+      RLIMIT_NOFILE: "10000"
+      # RLS is evaluated per change, per subscriber. Required: digital_thread is
+      # restricted to privileged/auditor roles (migration 0005), and that has to
+      # hold over the socket exactly as it does over PostgREST.
+      RLS_ENABLED: "true"
+      SEED_SELF_HOST: "true"
+      RUN_JANITOR: "true"
+      APP_NAME: realtime
+    # Realtime resolves which tenant a request belongs to from the LEADING HOSTNAME
+    # LABEL of the Host header, not from the JWT. Kong must therefore address it as
+    # `realtime-dev.<something>` or every socket handshake is rejected with a bare 403.
+    # `realtime-dev` is the tenant SEED_SELF_HOST creates. This alias is what makes the
+    # upstream URL in supabase/kong.yml resolvable -- the two must be changed together.
+    networks:
+      default:
+        aliases:
+          - realtime-dev.supabase-realtime
+    healthcheck:
+      # Two non-obvious details, both verified against this image:
+      #   * The tenant is `realtime-dev`. SEED_SELF_HOST uses its own built-in name and
+      #     ignores TENANT_NAME, so probing /api/tenants/realtime/health returns 404.
+      #   * The endpoint is authenticated. An unauthenticated probe gets a flat 403 and
+      #     the container never reports healthy. Using the anon key here also proves
+      #     API_JWT_SECRET matches what the browser will present on the socket.
+      test: ["CMD-SHELL", "curl -sf -H \"Authorization: Bearer ${SUPABASE_ANON_KEY}\" http://localhost:4000/api/tenants/realtime-dev/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    depends_on:
+      supabase-db-init:
+        condition: service_completed_successfully
+
   supabase-kong:
     container_name: factoryplus_supabase_kong
     image: kong:2.8.1-alpine
@@ -169,6 +264,10 @@ services:
       supabase-rest:
         condition: service_started
       supabase-functions:
+        condition: service_started
+      # service_started, not service_healthy, to match its siblings: Kong should
+      # not block stack startup on Realtime finishing its _realtime migrations.
+      supabase-realtime:
         condition: service_started
 
   supabase-functions:
@@ -355,6 +454,7 @@ services:
       args:
         VITE_SUPABASE_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
         VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+        VITE_ENABLE_REALTIME: ${VITE_ENABLE_REALTIME:-true}
     restart: always
     ports:
       - "3000:3000"
@@ -435,10 +535,14 @@ services:
       GF_SERVER_ROOT_URL: "http://localhost:3002/"
       GF_INSTALL_PLUGINS: ""
       DB_PASSWORD: ${DB_PASSWORD}
+      # Read by grafana.ini through $__env{GRAFANA_OAUTH_CLIENT_SECRET}, so the secret is not
+      # committed. Must match what 20260101000028 hashed into auth.oauth_clients.
+      GRAFANA_OAUTH_CLIENT_SECRET: ${GRAFANA_OAUTH_CLIENT_SECRET:-}
     ports:
       - "3002:3000"
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini:ro
       - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./grafana/provisioning/alerting:/etc/grafana/provisioning/alerting:ro
       - ./grafana/provisioning/datasources:/tmp/datasources-template:ro

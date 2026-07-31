@@ -633,6 +633,19 @@ tbody tr:hover { background: var(--bg-glass); }
   box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
+/* Placeholders had no rule at all, so they fell to the browser default -- which derives from
+   the input's own colour and is not guaranteed to stay legible when the theme flips.
+   Bind them to the theme explicitly.
+
+   --text-muted, not --text-dim: measured against --bg-base, --text-dim gives 2.45:1 in dark
+   mode, which fails WCAG AA (and even the 3:1 large-text floor). --text-muted is 5.15:1 dark
+   and 6.92:1 light. It is still clearly dimmer than --text-primary input text, so the visual
+   hierarchy holds without the contrast cost. */
+.form-control::placeholder {
+  color: var(--text-muted);
+  opacity: 1; /* Firefox dims placeholders by default, compounding the contrast problem. */
+}
+
 .form-control option { background: var(--bg-surface); color: var(--text-primary); }
 
 .modal-actions {

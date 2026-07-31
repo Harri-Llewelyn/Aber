@@ -1,7 +1,8 @@
 import React, { useState, useCallback } from 'react'
 import { api } from '../../api'
-import { PERMISSION_UUIDS } from '../../constants'
+import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
+import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { gatewayLiveStatus, formatHeartbeat } from '../../utils/gatewayStatus'
 import { effectiveSparkplugId, gatewaySparkplugId } from '../../utils/sparkplugId'
 import CopyableId from '../common/CopyableId'
@@ -60,7 +61,12 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
     }
   }, [])
 
-  usePolling(loadAll, 3000)
+  // Reconciliation loop, not the primary refresh -- see useRealtimeTable for why polling stays.
+  usePolling(loadAll, refreshInterval())
+  // gateways and devices are watched too: a cell's rendered contents come from the embed
+  // (cells -> gateways -> devices), so a device moving between gateways changes this page
+  // without touching a single `cells` row.
+  useRealtimeTable(['cells', 'gateways', 'devices'], loadAll, { enabled: REALTIME_ENABLED })
 
   const save = async () => {
     try {
@@ -127,18 +133,6 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
       <div className="section-header" style={{ marginBottom: '8px' }}>
         <h2 className="section-title">Shopfloor Cells <span className="section-count">{cells.length}</span></h2>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <div style={{ display: 'flex', gap: '4px', background: 'var(--bg-glass)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border)' }}>
-            <button className={`btn btn-sm ${filterMode === 'all' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setFilterMode('all')} title="Show all cells">
-              All ({cells.length})
-            </button>
-            <button className={`btn btn-sm ${filterMode === 'active' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setFilterMode('active')} title="Show active cells only">
-              Active ({cells.filter(c => !c.is_archived).length})
-            </button>
-            <button className={`btn btn-sm ${filterMode === 'archived' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setFilterMode('archived')} title="Show decommissioned archived cells">
-              Archived ({cells.filter(c => c.is_archived).length})
-            </button>
-          </div>
-
           <button
             className={`btn btn-primary ${!canManage ? 'btn-disabled' : ''}`}
             disabled={!canManage}
@@ -155,6 +149,21 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
       </p>
 
       <div className="filter-bar">
+        {/* Lifecycle lives here rather than as a separate segmented control in the header: it is
+            a filter like the rest, and having two filter surfaces on one page meant the header
+            row also crowded out the primary action. Counts are kept in the option labels. */}
+        <select
+          className="form-control"
+          style={{ width: '150px' }}
+          value={filterMode}
+          onChange={e => setFilterMode(e.target.value)}
+          title="Filter by lifecycle state"
+        >
+          <option value="all">All ({cells.length})</option>
+          <option value="active">Active ({cells.filter(c => !c.is_archived).length})</option>
+          <option value="archived">Archived ({cells.filter(c => c.is_archived).length})</option>
+        </select>
+
         <input
           className="form-control"
           style={{ width: '220px' }}

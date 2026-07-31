@@ -93,8 +93,9 @@ Running `docker compose up -d` launches the entire unified application stack:
 | **`supabase-rest`** | `factoryplus_supabase_rest` | `postgrest/postgrest:v12.2.0` | — | PostgREST API engine (connects via least-privilege `authenticator` role) |
 | **`supabase-kong`** | `factoryplus_supabase_kong` | `kong:2.8.1-alpine` | `54321:8000` | Kong API Gateway (`http://127.0.0.1:54321`) |
 | **`supabase-functions`** | `factoryplus_supabase_functions` | `supabase/edge-runtime:v1.74.2` | — | Supabase Deno Edge Runtime executing serverless functions |
-| **`supabase-meta`** | `factoryplus_supabase_meta` | `supabase/postgres-meta:v0.91.0` | — | Schema introspection API backing Supabase Studio's Database pages |
-| **`supabase-studio`** | `factoryplus_supabase_studio` | `supabase/studio:latest` | `54323:3000` | Supabase Studio administrative Web UI (`http://127.0.0.1:54323`) |
+| **`supabase-realtime`** | `factoryplus_supabase_realtime` | `supabase/realtime:v2.34.47` | — | WebSocket change feed (Postgres logical replication → `/realtime/v1/`) |
+| **`supabase-meta`** | `factoryplus_supabase_meta` | `supabase/postgres-meta:v0.96.6` | — | Schema introspection API backing Supabase Studio's Database pages |
+| **`supabase-studio`** | `factoryplus_supabase_studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `54323:3000` | Supabase Studio administrative Web UI (`http://127.0.0.1:54323`) |
 | **`timescaledb`** | `factoryplus_timescaledb` | `timescale/timescaledb:latest-pg15` | `5433:5432` | Standalone TimescaleDB instance for `telemetry` hypertable (schema auto-provisioned via `timescaledb/init/`) |
 | **`mosquitto-init`** | `factoryplus_mosquitto_init` | `eclipse-mosquitto:latest` | — | One-shot init container generating Mosquitto password file from environment variables |
 | **`mosquitto`** | `factoryplus_mosquitto` | `eclipse-mosquitto:latest` | `1883:1883`, `9001:9001` | Eclipse Mosquitto MQTT broker for Sparkplug B traffic (credentials auto-generated via `mosquitto-init` from `.env`) |
@@ -159,7 +160,7 @@ This is what identity means throughout the platform:
 | `NBIRTH` | Node (gateway) | `process_node_message()` | Sets `gateways.status = ONLINE`, stamps `last_heartbeat` |
 | `NDATA` | Node (gateway) | `process_node_message()` | Same as `NBIRTH` — refreshes `last_heartbeat` so the gateway isn't marked `STALE` (`frontend/src/utils/gatewayStatus.js`, 90s threshold) |
 | `NDEATH` | Node (gateway) | `process_node_message()` | Sets `gateways.status = OFFLINE` |
-| `DBIRTH` | Device | `process_dbirth()` | Auto-registers an unrecognized device as quarantined (`is_quarantined = true`); stores birth parameters into `asset_config`; stamps `devices.first_dbirth_at` once, on the real first birth |
+| `DBIRTH` | Device | `process_dbirth()` | Auto-registers an unrecognized device as quarantined (`is_quarantined = true`); stores birth parameters into `asset_config`; records the declared metric names to `devices.last_birth_metrics` (only when the set changes); stamps `devices.first_dbirth_at` once, on the real first birth |
 | `DDATA` | Device | `process_ddata()` | Writes telemetry to the TimescaleDB `telemetry` hypertable — gated: dropped silently for quarantined/unregistered devices |
 | `DDEATH` | Device | `process_ddeath()` | Sets `devices.status = OFFLINE` |
 
@@ -226,6 +227,114 @@ Supabase Auth is the authoritative identity provider for the application. User p
 > [!IMPORTANT]
 > Edge Functions and RLS policies enforce **fail-closed** authorization. Any token missing a valid role claim or containing an unprivileged role (e.g. `Operator`) will receive `403 Forbidden` on administrative mutations such as device quarantine approval.
 
+### Single Sign-On for Grafana
+
+Grafana authenticates against Supabase Auth's OAuth 2.1 server rather than keeping its own
+accounts. Roles map from the same `public.user_roles` tables the dashboard and RLS use:
+
+| Supabase role | Grafana org role |
+| :--- | :--- |
+| `Administrator` | `Admin` |
+| `Shopfloor_Manager` | `Editor` |
+| `Operator`, `Auditor` | `Viewer` |
+
+`Operator` and `Auditor` both map to `Viewer` because Grafana has no read-only-plus-audit tier;
+the Auditor's real privilege is over `digital_thread`, enforced by RLS in Supabase.
+
+Four things about this integration are non-obvious and are load-bearing:
+
+- **`GOTRUE_OAUTH_SERVER_ENABLED` must be `true`.** GoTrue serves
+  `/.well-known/openid-configuration` whether or not the OAuth server is on, so a `200` there
+  proves nothing — with it off, every endpoint the document advertises returns
+  `404 "OAuth server is disabled"`.
+- **GoTrue ships no consent UI.** It redirects to `GOTRUE_SITE_URL +
+  GOTRUE_OAUTH_SERVER_AUTHORIZATION_PATH?authorization_id=…` and expects the *application* to
+  render consent. That page is [`frontend/src/pages/OAuthConsent.jsx`](frontend/src/pages/OAuthConsent.jsx),
+  served at `/oauth/consent`. **A user must already be signed in to the Factory+ dashboard for
+  Grafana SSO to work**, because approving requires their Supabase access token.
+- **The `openid` scope is deliberately not requested.** Asking for it makes GoTrue mint an ID
+  token, which it refuses to do: `HS256 is not supported for ID token signing`. This stack is
+  HS256 on a shared secret throughout — Kong, PostgREST, Realtime and the pre-minted
+  anon/service-role keys all depend on it. Grafana takes identity from `api_url` instead, so
+  this is a plain OAuth2 authorization-code flow with PKCE, not strict OIDC.
+- **`auth_style = InHeader` is required.** Left to auto-detect, Grafana sends the client secret
+  in the POST body and GoTrue rejects it — the client is registered `client_secret_basic`. The
+  browser only reports `could not get a token from the provider`.
+
+Role mapping does not come from the token. GoTrue's OIDC claims omit `app_metadata`, so the
+`grafana-userinfo` Edge Function reads `public.user_roles` directly. It omits the `role` key
+entirely for an unmapped role, which — with `role_attribute_strict = true` — makes Grafana
+**refuse** the login rather than silently granting `Viewer`.
+
+---
+
+## Realtime Change Feed
+
+`supabase-realtime` tails the Postgres write-ahead log and pushes changes to subscribed
+browsers over `/realtime/v1/`. This replaced a 3-second polling loop on four tabs.
+
+| | Before | After |
+| :--- | :--- | :--- |
+| Update visible in UI | 0–3000 ms | 42–139 ms (median 110) |
+| Quarantine alert | 0–10 000 ms | ~100 ms |
+| PostgREST requests per idle dashboard | ~100/min | ~5/min |
+
+Scope is deliberately narrow — the publication carries `cells`, `gateways`, `devices` and
+`digital_thread` only:
+
+- **`telemetry` can never be published.** It is a `postgres_fdw` foreign table; its rows enter
+  TimescaleDB's WAL, never Supabase's. Adding it would not error, it would silently emit
+  nothing. The Telemetry tab keeps paged reads and its explicit refresh control.
+- **Realtime evaluates RLS per change, per subscriber.** Metadata churn is fine; anything at
+  device message rate is not.
+- **`usePolling` is retained at 60 s, not deleted.** Realtime has no replay, so a dropped socket
+  loses every change in the gap, and the poll also carries the 401 stop and exponential backoff
+  a channel subscription has no equivalent for.
+- **The replication slot is created lazily, *after* the client reports `SUBSCRIBED`.** There is
+  a brief window in which a client is subscribed and receiving nothing, so `useRealtimeTable`
+  reloads once on `SUBSCRIBED` to close it.
+- **Wall-clock state still needs a tick.** A gateway going quiet writes nothing, so it emits no
+  event; `useClockTick` re-renders every 15 s so staleness is noticed without a refetch.
+
+Set `VITE_ENABLE_REALTIME=false` and rebuild the frontend image to fall back to 3 s polling.
+The flag is inlined by Vite at build time — restarting the container is not enough.
+
+---
+
+## Scheduled Maintenance & Event Dispatch
+
+**`pg_cron`** ([`20260101000025_pg_cron_maintenance.sql`](supabase/migrations/20260101000025_pg_cron_maintenance.sql))
+runs three janitorial jobs: pruning `net._http_response`, pruning `cron.job_run_details`, and
+honouring the archive retention timer. Nothing in it derives application state.
+
+> The archive purge is not a new policy. `auto_delete_at` is set per row by the Archive dialog
+> and the UI already promises it (*"Purges: `<date>`"*); nothing had ever implemented it.
+> `auto_delete_at IS NULL` means **permanent retention** and is respected.
+
+Gateway staleness is deliberately a **view**, not a cron writer —
+[`public.gateway_status`](supabase/migrations/20260101000024_gateway_status_view.sql). A sweep
+that wrote `STALE` would append to the immutable `digital_thread` audit table on every tick and
+would be correct only between ticks.
+
+> A failing `pg_cron` job is silent. Check it:
+> ```sql
+> SELECT j.jobname, d.status, d.return_message, d.start_time
+> FROM cron.job_run_details d JOIN cron.job j USING (jobid)
+> WHERE d.status <> 'succeeded' ORDER BY d.start_time DESC;
+> ```
+
+**`pg_net`** fires a webhook when a device *enters* quarantine, delivered to Node-RED at
+`POST /hooks/quarantine`. The trigger is split across INSERT and UPDATE and fires only on the
+transition — verified not to fire on gateway heartbeats, device renames, approvals, or
+re-saving an already-quarantined device.
+
+**Supabase Vault** holds the one secret that must be readable from SQL (the Node-RED admin
+token, attached by the webhook dispatcher). Infrastructure credentials — `MQTT_PASSWORD`,
+`POSTGRES_PASSWORD` — stay in `.env`: they are needed before the database is accepting
+connections, and duplicating them into Vault would create two sources of truth. Vault encrypts
+at rest with a key derived from the database; it defeats casual `.env` leakage, not an attacker
+holding the data directory.
+
 ---
 
 ## Database Migrations & Row Level Security (RLS)
@@ -235,6 +344,8 @@ All database migrations are stored in `supabase/migrations/`:
   - **Tables**: `cells`, `gateways`, `devices`, `digital_thread`.
   - **Triggers**: PL/pgSQL function `log_digital_thread_event()` automatically logs audit events on `cells`, `gateways`, and `devices` mutations.
   - **RLS Policies**: Enforces `SELECT` permissions for `authenticated` users, and `INSERT`/`UPDATE`/`DELETE` for `Administrator` and `Shopfloor_Manager` roles.
+- **`20260101000001_add_archival_columns.sql`**:
+  - **Soft deletion**: Adds `is_archived`, `archived_at` and `auto_delete_at` to `cells`, `gateways` and `devices`. Decommissioning an asset hides it rather than deleting it, so its `digital_thread` history stays attached to a row that still exists. The Archives tab restores them.
 - **`20260101000002_add_documents_and_config.sql`**:
   - **Tables**: `documents`, `asset_config`, `schemas`, `directory_services`.
   - **RLS Policies**: Enforces RLS permissions for entity document links, asset parameter configurations, schema registry definitions, and directory services.
@@ -272,6 +383,137 @@ All database migrations are stored in `supabase/migrations/`:
 - **`20260101000013_metric_catalog.sql`**:
   - **Metric catalog**: A registry of individually-defined Sparkplug B metrics (name, Sparkplug datatype, description) that schemas are built from via the Schemas tab's **Build Schema from Catalog** flow — pick metrics, then either download a JSON spec sheet (the metric list plus the exact topic string an integrator's device should publish to) or provision a device with the resulting schema already attached.
   - **Append-only by design**: a metric's `name`/`datatype` are immutable once created, enforced by a `BEFORE UPDATE` trigger (not just the UI) — a physical device is already configured to publish under that exact name, so "editing" a metric means deprecating it and adding a new catalog entry, never rewriting one in place. Mirrors `digital_thread`'s append-only philosophy.
+- **`20260101000015_birth_metric_observation.sql`**:
+  - **Birth-declared metrics**: Adds `devices.last_birth_metrics` (plus `last_birth_metrics_at`), the metric names a device declared in its most recent `DBIRTH`, written by the ingestion daemon. Whether any of them fall outside the device's assigned schema is **derived at read time** (`frontend/src/utils/deviceTags.js`), never stored — so adding the metric to the schema clears the finding on the next poll rather than at the device's next birth, which for a stable device could be weeks away.
+  - **Written only on change**: `log_digital_thread_event()` fires on every UPDATE to `devices`, so rewriting an unchanged array on every rebirth would append an audit row each time to a deliberately append-only table. Each entry in the thread therefore marks a real change in what the device publishes.
+  - **Distinct from `asset_config`**, which is a per-metric upsert of birth parameter *values* and is never pruned — it accumulates every metric ever seen and omits metrics declared without a value. This column is a faithful snapshot of the names declared at the most recent birth. `NULL` means no birth observed; `[]` means a birth that declared nothing.
+  - A device with **no schema**, or one whose `schema_definition` declares neither `properties` nor `required`, is never flagged: "publishes beyond its model" and "has no model" are different findings, and conflating them would flag every unschematised device until the tag meant nothing.
+  - The Devices tab shows an **N unmodelled** marker on such a device, counts it under **Needs attention**, and offers a *Publishing unmodelled metrics* status filter; the Config modal lists the offending metrics as **Unmodelled** alongside the schema's `Present`/`Missing` rows.
+- **`20260101000016_metric_group.sql`**:
+  - **Metric grouping**: Adds `metric_catalog.metric_group`, a `GENERATED ALWAYS ... STORED` column holding the first path segment of the metric name — `Axes/C/ANGLE` and `Axes/X/POSITION` both group under `Axes`. The Schemas page's catalog table and the **Build Schema from Catalog** picker both render by group, so the registry stays navigable as it grows.
+  - **The separator is `/`, not `.`**, because that is what everything this platform interoperates with already uses for hierarchy: Sparkplug B's own reserved names (`Node Control/Rebirth`, `Properties/Hardware Make`), Factory+ folders (which forbid `.` in a metric name segment outright), and MTConnect component paths (`Axes/C/ANGULAR_VELOCITY`). Metric names are immutable once issued, so this had to be settled before any were created. The migration detects a column generated by an earlier `.`-based revision of itself and rebuilds it, since `ADD COLUMN IF NOT EXISTS` would otherwise silently leave a stale definition in place on a stack that had already been started.
+  - **The group lives in the name, not a column of its own.** The name is the wire contract, so a name-carried group is visible everywhere the metric is — raw MQTT, `telemetry.metric_name` in TimescaleDB, and **Grafana, which queries TimescaleDB directly and can never see a Supabase-side category column**. Generated rather than written, matching `sparkplug_id` (migration 0014): it cannot drift from the name, and needs no trigger to keep it honest.
+  - **Recategorising costs what renaming costs.** `enforce_metric_catalog_immutability()` already makes `name` immutable, so a metric's group is immutable too — moving one means deprecating the entry and adding a new one. That is the correct price for a change that alters what a physical device must publish.
+  - **Not constrained**: no `CHECK` requires a separator. Metric names are immutable, and a device may legitimately publish an ungrouped one — the two local extensions seeded by migration 0013 (`safety_interlock`, `max_temp_threshold`) are exactly that. A name with no separator yields `NULL` and is listed under **Ungrouped**; only the *first* segment is load-bearing, or the vocabulary would be unbounded — the thing grouping exists to fix.
+
+- **`20260101000017_metric_group_vocabulary.sql`**:
+  - **Group vocabulary**: Adds `metric_groups`, a curated registry of approved group *spellings* seeded with `Robot`, `Environmental`, `Process`, `OEE`, `Safety`, `Diagnostics`, `Energy`. It does **not** store any metric's group — that is still derived from the metric's name by migration 0016's generated column. The registry exists so the Add Metric form has a vocabulary to offer before any metric uses a group, and so there is an authority on how each group is spelled.
+  - **Composed, not typed**: the Add Metric form now builds the name from a group picker plus the rest of the name, previewing the composed result (`Axes` + `C/ANGLE` → `Axes/C/ANGLE`) because that string is what devices publish and can never be edited afterwards.
+  - **Spelling guard, enforced in the database**: `enforce_metric_group_spelling()` rejects a metric whose group differs only in case from one already known — checking both the registry *and* groups already in use, so a group that arrived via the API still governs what follows it. The error names the corrected name to use. Because metric names are immutable, letting `Robot` and `robot` both land would fork the taxonomy permanently, fixable only by deprecating every metric on one side and reconfiguring the physical devices behind them — too costly a mistake to leave to a UI-only check. Ungrouped names remain permitted.
+  - `metric_groups.name` is `UNIQUE` on `lower(name)` and `CHECK`-constrained to a single segment (no separator, not blank).
+
+- **`20260101000018_mtconnect_vocabulary.sql`** *(generated — `node scripts/generate-mtconnect-vocabulary.mjs`)*:
+  - **MTConnect vocabularies**: Seeds `mtconnect_vocabulary` from the Apache-2.0 [mtconnect/schema](https://github.com/mtconnect/schema) repository — **249 data item types** (96 `SAMPLE`, 147 `EVENT`, 6 `CONDITION`), 123 subtypes, 100 units, and 126 component types. Adds `category`, `units`, `sub_type` and `standard` to `metric_catalog`.
+  - **A vocabulary, not a catalog.** An MTConnect data item type is not a metric name: `ANGLE` is a *type*, and the metric a device publishes is a component path plus that type — `Axes/C/ANGLE`. Which axes exist is per-device, so the standard can enumerate the words, never the metrics. `metric_catalog` keeps its meaning (what this deployment's devices actually publish, immutable and append-only) and the Add Metric form composes names from this table.
+  - **Generated, not transcribed**: the migration is emitted by a committed script, so adopting a newer MTConnect release is a re-run rather than a re-typing, and the provenance of all 598 rows is auditable.
+  - **Group vocabulary repointed** at MTConnect's component types, replacing the seven hand-picked placeholders from 0017. `Environmental` and `Process` are genuine MTConnect components and survive; `OEE` is retained under **ISO 22400**. The others are removed only if nothing uses them — a group with metrics behind it has immutable names that must not be pulled out from under it.
+  - **Local extensions stay possible.** MTConnect permits extension, so `standard` is nullable and the form offers a *Not in MTConnect…* escape. Only `category` is `CHECK`-constrained, to its three legal values.
+
+> [!IMPORTANT]
+> **MTConnect's `AVAILABILITY` is not ISO 22400 availability.** MTConnect defines it as an `EVENT`
+> meaning *the device is connected and reporting*; the catalog's `availability` is the OEE
+> availability **ratio**. Mapping one onto the other would silently corrupt the Grafana OEE
+> dashboards and alert rules. MTConnect deliberately reports raw machine state and leaves KPI
+> computation out, so `availability` / `performance` / `quality` stay on ISO 22400.
+
+> [!NOTE]
+> Adopting the vocabulary is **not a claim of MTConnect compliance**, which requires the MTConnect
+> Implementer License. The Apache-2.0 schema repository is the source of these values; the
+> specification documents carry separate terms.
+
+- **`20260101000019_mtconnect_catalog_migration.sql`**:
+  - **Moves the starter catalog onto MTConnect**, and the OEE metrics onto ISO 22400.
+  - **Not a rename — a deprecation.** `metric_catalog.name` is immutable, because a physical device is already configured to publish that exact string. Each old entry is marked `deprecated` with `superseded_by` pointing at its replacement, so the Schemas tab shows it struck through with the successor named. That is the migration instruction for anyone with a device still publishing the old name.
+
+| Was | Now | Category | Confidence |
+| :--- | :--- | :--- | :--- |
+| `temperature` | `Systems/TEMPERATURE` | `SAMPLE` | exact |
+| `firmware_version` | `Controller/FIRMWARE` | `EVENT` | exact |
+| `serial_number` | `SERIAL_NUMBER` | `EVENT` | exact (device-level identity, so no component) |
+| `vibration` | `Axes/DISPLACEMENT` | `SAMPLE` | **judgement** — MTConnect has no `VIBRATION`; the catalog described this as amplitude, which is a displacement. If the reading is really rate-of-change, `ACCELERATION` is correct instead. |
+| `status` | `Controller/EXECUTION` | `EVENT` | **judgement** — values change too |
+| `safety_ok` | `Controller/EMERGENCY_STOP` | `EVENT` | **judgement** — values change and the sense inverts |
+| `availability` | `OEE/AVAILABILITY` | — | ISO 22400, **not** MTConnect |
+| `performance` | `OEE/PERFORMANCE` | — | ISO 22400 |
+| `quality` | `OEE/QUALITY` | — | ISO 22400 |
+| `safety_interlock` | *(unchanged)* | `EVENT` | local extension — MTConnect has only `AXIS_`/`CHUCK_`/`SPINDLE_INTERLOCK` |
+| `max_temp_threshold` | *(unchanged)* | `SAMPLE` | local extension — MTConnect models limits as constraints on a data item, not as data items |
+
+> [!WARNING]
+> **Two of these change the value vocabulary, not just the name.** MTConnect constrains
+> `EXECUTION` to `READY`/`ACTIVE`/`INTERRUPTED`/`FEED_HOLD`/`STOPPED`/… and `EMERGENCY_STOP` to
+> `ARMED`/`TRIGGERED` — and `EMERGENCY_STOP` **inverts the sense** of `safety_ok` (`true` becomes
+> `ARMED`) while changing Sparkplug datatype 11 (Boolean) to 12 (String). Renaming without moving
+> the values would produce metrics that *look* standard and are not, which is worse than the
+> ad-hoc names they replace. `node_red_flow.json`, the Grafana alert rule, and the Overview tab's
+> device-health logic all read these values and were updated together — the boolean tests against
+> them would otherwise have compared `NULL`, evaluated false, and silently stopped alerting.
+
+- **`20260101000020_drop_superseded_metrics.sql`**:
+  - **Deletes the nine superseded entries outright**, rather than leaving them deprecated-but-present. Deprecation with `superseded_by` is the right treatment for a platform with devices in the field — an integrator whose hardware still publishes `temperature` needs to find that name and be told what it became. This is a development deployment with no production data, so they are noise instead. Migration 0013's seed is trimmed to match, so a fresh stack never creates them and the delete is not re-fighting an insert on every restart.
+  - Safe by construction: the only foreign key into `metric_catalog` is its own `superseded_by`, and `schemas`, `asset_config` and `telemetry` all key on the metric *name* as free text.
+- **`20260101000021_register_simulated_device.sql`**:
+  - **Pins the demo device's identity.** `Simulated_CNC_01` is registered with UUID `20000000-0000-4000-8000-000000000002`, the one behind the documented wire id `dev200000000000400080000`. Previously it was auto-discovered, and since `sparkplug_id` is generated from the primary key, every rediscovery minted a *new* wire identity and therefore a new `telemetry.asset_id` — silently detaching all previously recorded samples from the device that produced them. Same pinning rationale as the `Virtual_Gateway_NodeRED` edge node in migration 0009.
+  - **Assigns it a schema.** Device type tags, the unmodelled-metric finding, and the tag filters on the Devices, Telemetry and Digital Thread pages are all derived from the assigned schema. With none assigned they were all correctly empty — which left every one of those features invisible on a fresh stack, looking broken rather than unused.
+  - **Still quarantined.** `is_quarantined = TRUE` preserves the Zero-Touch onboarding demo: an Administrator still approves the device before its telemetry is stored. The difference is the row now exists up front *with its schema attached*, so approving it lights up tags, unmodelled detection, telemetry and the Grafana dashboards together.
+
+### The Schemas Page
+
+Three stacked panels, in order of how specific they are to this deployment:
+
+| Panel | What it is |
+| :--- | :--- |
+| **Metric Catalog** | The metrics **your devices actually publish** — deployment state, immutable and append-only, grouped by component. |
+| **MTConnect Vocabulary** | The **standard's list of available words**: 249 data item types (by category), 126 components, 123 subtypes, 100 units. Read-only reference, collapsible, searchable. Entries already used by a catalog metric are ticked, and clicking a data item type starts a new catalog entry from it. |
+| **Registered Schemas** | The JSON Schema documents devices are provisioned against. |
+
+The distinction between the first two is the one that trips people up: an MTConnect data item type
+is **not** a metric name. `ANGLE` is a type; the metric a device publishes is a component path plus
+that type — `Axes/C/ANGLE`. Which axes exist is per-device, so the standard can enumerate the
+words but never the metrics. That is why the catalog holds a handful of entries while the
+vocabulary holds hundreds.
+
+### Filtering Conventions
+
+Every asset page (**Cells**, **Gateways**, **Devices**) puts all of its filters in one bar below
+the page description — including the **All / Active / Archived** lifecycle selector, which used to
+be a separate segmented control up in the header. One filter surface, not two, and the header row
+is left for the page's primary action. The **Clear filters (N)** button counts every active filter,
+lifecycle included.
+
+### Device Tags & Filtering
+
+A device's classification is **derived from its schema**, not typed in. The distinct metric groups
+that schema models become its tags — a schema covering `Axes/C/ANGLE` and
+`Environmental/HUMIDITY_RELATIVE` tags its devices both `Axes` and `Environmental`, so multiple tags never
+required multiple schemas. A device publishing metrics its schema does not model additionally
+carries `Unmodelled`.
+
+Tags are drawn from the schema rather than from observed telemetry, which has two consequences,
+both intended: a provisioned device is taggable **before its first birth**, so it can be found by
+type while you are still waiting for it to appear; and a metric published outside the schema
+confers no tag — it reports as `Unmodelled`, the signal to fix the schema, rather than quietly
+earning its group and hiding the drift.
+
+Tags drive filters on three pages:
+
+| Page | Filter | Notes |
+| :--- | :--- | :--- |
+| **Devices** | *Any type* | Also feeds the **Needs attention** count and the CSV export's `device_tags` column. |
+| **Telemetry** | *All Types* | Streams every device of a type. Requires a time window — see below. |
+| **Digital Thread** | *Any device type* | Matches devices that carry the tag **now**. |
+
+> [!NOTE]
+> Selecting a device type on the Telemetry page **requires a time window** and removes the *All
+> History* option. A tag expands to an `IN` list over every matching device, and `postgres_fdw`
+> pushes the `WHERE` down to TimescaleDB but not the `LIMIT` (Known Issue #4) — so an unbounded
+> tag query would materialise the whole matching range before trimming.
+
+> [!NOTE]
+> Filtering the Digital Thread by tag shows the **full audit history of devices that currently
+> carry that tag**, including events recorded before they did. It is not "events that happened
+> while the device was a Robot" — the log records what was true then, and tags are derived from
+> the schema as it stands now. The UI states this whenever the filter is active.
 
 ### Asset Relationship Model
 
@@ -358,26 +600,61 @@ the running stack — `supabase/kong.yml` allows the Swagger UI origin through C
 The GitHub Actions CI workflow ([`.github/workflows/ci.yml`](file:///.github/workflows/ci.yml)) executes automated testing and verification across three parallel jobs:
 
 1. **`frontend-build` (Frontend Build & Test)**: Installs Node.js dependencies, runs the Vitest unit test suite (`npm test`), and builds the Vite production bundle (`npm run build`).
-2. **`edge-function-auth-test` (Edge Function Authorization Unit Tests)**: Runs unit tests (`test_approve_quarantine.py`, `test_deploy_nodered.py`, `test_user_roles_rls.py`) to verify fail-closed role authorization for missing claims and non-privileged roles.
+2. **`edge-function-auth-test` (Edge Function Authorization Unit Tests)**: Runs unit tests (`test_approve_quarantine.py`, `test_deploy_nodered.py`, `test_user_roles_rls.py`) to verify fail-closed role authorization for missing claims and non-privileged roles, plus `ingestion/test_declared_metrics.py`, which exercises the shipped birth-metric observation functions directly (protobuf/MQTT/psycopg2 are stubbed, so it needs neither `protoc` nor the Docker stack).
 3. **`e2e-validation` (End-to-End Ingestion Validation)**: Installs Python dependencies, installs `protobuf-compiler`, compiles `sparkplug_b.proto` via `protoc --python_out=. sparkplug_b.proto`, launches the unified Docker Compose stack (`docker compose up -d`), polls service health, and executes `python ingestion/validate.py`.
 
 ---
 
 ## End-to-End Validation
 
-Running `ingestion/validate.py` outside of Docker requires `protobuf-compiler` (`protoc`) installed on your host system to compile the Sparkplug B protobuf definition:
+`ingestion/validate.py` runs from the **host**, against the published ports of a running stack.
+It needs the compiled Sparkplug B protobuf module and the Python client libraries:
 
 ```bash
-# 1. Compile Sparkplug B Protobuf module (prerequisite outside Docker)
-protoc --python_out=. sparkplug_b.proto
-cp sparkplug_b_pb2.py ingestion/
+# 1. Start the stack
+docker compose up --build -d
 
-# 2. Execute the end-to-end integration test suite
+# 2. Compile the Sparkplug B protobuf module
+npm run proto
+
+# 3. Install the host-side Python dependencies
+pip install -r ingestion/requirements.txt
+
+# 4. Run the end-to-end suite (see the note below about environment variables)
 python ingestion/validate.py
 ```
 
 > [!NOTE]
-> When running the stack in Docker (`docker compose up --build -d`), `sparkplug_b_pb2.py` is compiled automatically inside the container build step.
+> **`npm run proto` needs no system `protoc`.** It uses `protoc` if it happens to be on `PATH`
+> (which is what CI does), and otherwise extracts `sparkplug_b_pb2.py` from the already-built
+> `ingestion` image — whose `protoc` is version-matched to the pinned `protobuf==4.25.3` by
+> construction. Since the stack requires Docker anyway, that removes the only step that previously
+> needed a manual system install, and is why this suite could not realistically be run outside CI
+> before. See [`scripts/generate-proto.mjs`](scripts/generate-proto.mjs). The output is gitignored.
+
+> [!IMPORTANT]
+> `validate.py` reads its configuration from the environment but does **not** load `.env` itself,
+> and `.env` describes the *inside* of the compose network. Source the credentials, then point the
+> topology at the published ports:
+> ```bash
+> set -a && . ./.env && set +a
+> export DB_HOST=localhost DB_PORT=5433 MQTT_HOST=localhost MQTT_PORT=1883
+> export SUPABASE_URL=http://127.0.0.1:54321
+> ```
+> Without this the Supabase client fails to initialise and the registered test device is never
+> seeded — check 3 fails while check 4 passes vacuously. The script prints its resolved targets
+> before doing anything, so a misconfiguration is visible in the first few lines of output.
+
+> [!IMPORTANT]
+> **Changing `node_red_flow.json` takes two steps, and neither is `docker compose up -d`.**
+> ```bash
+> docker compose up -d node-red-init --force-recreate   # rewrites /data/flows.json
+> docker compose restart node-red                       # Node-RED only reads flows at boot
+> ```
+> Compose will not re-run `node-red-init` or restart `node-red` when nothing about *those*
+> containers changed — the flow file is a bind-mounted input, not part of their image — so the
+> simulator silently keeps publishing the previous flow. Restarting `node-red` alone is **not**
+> enough: it reloads the old `flows.json` that the init container has not yet replaced.
 
 The validation script verifies:
 1. **MQTT Payload Publishing**: Sends Sparkplug B `DBIRTH` and `DDATA` messages to Mosquitto.
@@ -385,6 +662,8 @@ The validation script verifies:
 3. **Digital Thread Audit Triggers**: Confirms PostgreSQL triggers automatically populate `digital_thread`.
 4. **TimescaleDB Telemetry**: Confirms metric ingestion for registered devices into the TimescaleDB `telemetry` hypertable.
 5. **Quarantine Telemetry Gating**: Confirms telemetry (`DDATA`) published by quarantined or unregistered devices is gated and dropped, ensuring zero records reach TimescaleDB until approved.
+6. **DBIRTH Parameters**: Confirms birth certificate metrics reach `asset_config` — the regression guard for the Config view silently emptying if `store_birth_parameters()` throws.
+7. **Birth-Metric Observation**: Confirms `devices.last_birth_metrics` records the declared metric set (excluding `Asset_ID`/`Asset_Name`), that an *identical* rebirth writes nothing at all, that a metric outside the device's schema is reported as unmodelled, and that widening the schema clears that finding **with no rebirth and no write to the device row** — the acceptance test for deriving the verdict rather than storing it.
 
 ---
 
@@ -397,11 +676,14 @@ lost. Each entry names the offending code so it can be picked up directly.
 
 | # | Issue | Location | Impact |
 | :-- | :--- | :--- | :--- |
-| 1 | **Real-time subscriptions are disabled.** No `realtime` service is deployed and `kong.yml` has no `/realtime/v1/` route, so `postgres_changes` can never fire. The subscription is now behind `VITE_ENABLE_REALTIME` (default off) rather than opening a WebSocket that fails and retries forever. | [`frontend/src/App.jsx`](frontend/src/App.jsx) | Every tab refreshes on a 3s `usePolling` cycle. Set `VITE_ENABLE_REALTIME=true` once a realtime service is actually deployed. |
+| 1 | ~~**Real-time subscriptions are disabled.**~~ **RESOLVED.** `supabase-realtime` is deployed, `kong.yml` routes `/realtime/v1/`, and the tabs subscribe through `useRealtimeTable`. See [Realtime Change Feed](#realtime-change-feed). | — | Median update latency measured at 110 ms (was 0–3000 ms). `usePolling` is retained at 60 s as a reconciliation loop — Realtime has no replay, so a dropped socket loses every change in the gap. |
 | 2 | **GitOps status is hardcoded stub data.** `gitops_status`, `active_commit_sha` and `repository_url` are literals, not real values. | [`frontend/src/api.js`](frontend/src/api.js) | The Directory tab banner always shows `SYNCED` / commit `a8f3e4b` regardless of actual state. |
 | 3 | **Node-RED editor changes are discarded on restart.** `node-red-init` copies `node_red_flow.json` over `/data/flows.json` on every `docker compose up`. | [`docker-compose.yml`](docker-compose.yml) (`node-red-init`) | Flows edited at `localhost:1880` are lost on the next stack restart. Edit `node_red_flow.json` in the repo instead — it is the source of truth (see `deploy-nodered`). |
 | 4 | **`LIMIT` is not pushed down to TimescaleDB.** `postgres_fdw` pushes `WHERE` clauses to the remote but never `LIMIT`, so a telemetry query without a time filter materialises the whole matching range in Supabase before trimming. | [`supabase/migrations/20260101000010_telemetry_foreign_table.sql`](supabase/migrations/20260101000010_telemetry_foreign_table.sql) | Fine at demo volumes. At scale, narrow the time window or replace the view with a `dblink`-based RPC that builds the remote `LIMIT`. |
-| 5 | **Device `asset_type` / `connection_method` are free text.** They are stored but not validated against the schema registry. | [`supabase/migrations/20260101000009_gateway_heartbeat_and_service_directory.sql`](supabase/migrations/20260101000009_gateway_heartbeat_and_service_directory.sql) | Cosmetic; no feature depends on their values. |
+| 5 | **Device `connection_method` is free text.** Stored but not validated. (`asset_type` was too — it is now superseded by schema-derived device tags and is no longer written; existing values still display.) | [`supabase/migrations/20260101000009_gateway_heartbeat_and_service_directory.sql`](supabase/migrations/20260101000009_gateway_heartbeat_and_service_directory.sql) | Cosmetic; no feature depends on its value. |
+| 9 | **`public.roles` cannot accept a new row.** `seed.sql` inserts roles with explicit integer ids but never advances `roles_id_seq`, so the sequence still returns `1` while `max(id)` is `4`. Any `INSERT INTO public.roles (name, ...)` without an explicit id fails with `duplicate key value violates unique constraint "roles_pkey"`. Found incidentally while testing Grafana role mapping. | [`supabase/seed.sql`](supabase/seed.sql) | Creating a **new RBAC role** is impossible via SQL or PostgREST until fixed. The four seeded roles are unaffected, so nothing in the running product breaks. One-line fix: `SELECT setval('public.roles_id_seq', (SELECT max(id) FROM public.roles));`. `public.permissions` uses UUID ids and is not affected. |
+| 10 | **`pg_net` webhooks are fire-and-forget.** No retries, no backoff, no dead-letter queue, no ordering guarantee. A failed POST leaves an error row in `net._http_response` and nothing else happens. | [`supabase/migrations/20260101000027_quarantine_webhook.sql`](supabase/migrations/20260101000027_quarantine_webhook.sql) | Acceptable for an advisory notification. Anything needing guaranteed delivery should publish from the ingestion daemon to MQTT instead — the broker is already running. |
+| 11 | **Telemetry retention is a placeholder, not a policy.** Chunks older than 90 days are dropped and chunks older than 7 days are compressed (and therefore effectively read-only, so badly clock-skewed late data is rejected). | [`timescaledb/init/002_retention.sql`](timescaledb/init/002_retention.sql) | Review both intervals before this stack carries production or regulated data. Dropping a chunk is not reversible. |
 
 ### Security / hardening
 
@@ -409,7 +691,9 @@ lost. Each entry names the offending code so it can be picked up directly.
 | :-- | :--- | :--- | :--- |
 | 6 | **Kong does not validate the `apikey` header.** There is no `key-auth` plugin and no consumers, unlike the stock Supabase gateway config. | [`supabase/kong.yml`](supabase/kong.yml) | Authorisation is enforced only downstream by PostgREST JWT verification and RLS. Acceptable for local dev; **must be addressed before any non-local deployment.** |
 | 7 | **`.env.example` contains working development secrets** (`SUPABASE_JWT_SECRET`, the demo anon/service-role JWTs, `MQTT_PASSWORD`) and is committed to the repository. | [`.env.example`](.env.example) | These are the standard Supabase demo values and are safe for local use only. **Generate fresh secrets for any shared or hosted environment.** |
-| 8 | **Node-RED admin API is unauthenticated.** The generated `settings.js` sets only `credentialSecret`; no `adminAuth` is configured, so `http://localhost:1880` and its `/flows` API are open. | `scripts/node-red-init.mjs` | Anyone with network access to port 1880 can read or replace edge flows. `deploy-nodered` sends an `Authorization` header only when `NODERED_ADMIN_TOKEN` is set, so enabling `adminAuth` is a config-only change. |
+| 8 | **Node-RED admin API is unauthenticated.** The generated `settings.js` sets only `credentialSecret`; no `adminAuth` is configured, so `http://localhost:1880` and its `/flows` API are open. | `scripts/node-red-init.mjs` | Anyone with network access to port 1880 can read or replace edge flows. `deploy-nodered` sends an `Authorization` header only when `NODERED_ADMIN_TOKEN` is set, so enabling `adminAuth` is a config-only change. The quarantine webhook receiver (`POST /hooks/quarantine`) is therefore also open. |
+| 12 | **An unauthenticated Realtime subscriber still receives the event envelope.** Row data is protected — Realtime redacts the payload to `{}` and attaches `errors: ["Error 401: Unauthorized"]` — but the fact that a table changed, and when, is observable. | [`frontend/src/hooks/useRealtimeTable.js`](frontend/src/hooks/useRealtimeTable.js) | Mitigated in the client: the hook checks `supabase.auth.getSession()` and opens no channel without one. The side channel remains available to anything that connects directly with the anon key. |
+| 13 | **Grafana SSO is inert on a stack built from `.env.example`.** `GRAFANA_OAUTH_CLIENT_SECRET` ships as a `change-me-…` placeholder, so migration `0028` logs a warning and registers no OAuth client. | [`.env.example`](.env.example) | Deliberate — the alternative is a working shared credential in git. CI therefore does not exercise the SSO path. Set a real value and restart `supabase-db-init` and `grafana` to enable it. |
 
 ### Expected behaviour (not defects)
 

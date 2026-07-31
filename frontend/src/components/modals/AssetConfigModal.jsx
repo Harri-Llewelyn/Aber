@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { api } from '../../api'
 import { SPARKPLUG_TYPES } from '../../constants'
+import { modelledMetrics, schemaForDevice } from '../../utils/deviceTags'
 import { IconClipboardList, IconShieldAlert, IconFileCode, IconCheck, IconAlertTriangle } from '../common/Icons'
 
 export function AssetConfigModal({ asset, schemas, onClose }) {
@@ -23,23 +24,32 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
   }
 
   const isOffline = asset.status === 'OFFLINE'
-  const schema = (schemas || []).find(s => s.schema_uuid === asset.schema_id)
+  const schema = schemaForDevice(asset, schemas)
 
-  // Expected-vs-actual: every metric the schema requires (present or missing), plus anything the
-  // device actually reported that the schema doesn't account for.
+  // Expected-vs-actual: every metric the schema models (present or missing), plus anything the
+  // device reported that the schema doesn't account for.
+  //
+  // "Reported" is the union of asset_config and devices.last_birth_metrics, because the two
+  // differ deliberately: asset_config holds birth parameter *values* and so omits any metric
+  // declared without one, while last_birth_metrics is the full declared name set. Taking only
+  // the former would let a valueless unmodelled metric show as a badge on the Devices list and
+  // then be missing from this table.
   let comparisonRows = []
   if (schema) {
     const configByName = new Map(config.map(row => [row.metric_name, row]))
-    const requiredMetrics = Array.isArray(schema.schema_definition?.required) ? schema.schema_definition.required : []
+    const modelled = modelledMetrics(schema) || new Set()
+    const declared = Array.isArray(asset.last_birth_metrics) ? asset.last_birth_metrics : []
+    const reported = new Set([...configByName.keys(), ...declared])
+
     comparisonRows = [
-      ...requiredMetrics.map(name => ({
+      ...[...modelled].map(name => ({
         metric_name: name,
         reported: configByName.get(name) || null,
-        status: configByName.has(name) ? 'present' : 'missing'
+        status: reported.has(name) ? 'present' : 'missing'
       })),
-      ...config.filter(row => !requiredMetrics.includes(row.metric_name)).map(row => ({
-        metric_name: row.metric_name,
-        reported: row,
+      ...[...reported].filter(name => !modelled.has(name)).sort().map(name => ({
+        metric_name: name,
+        reported: configByName.get(name) || null,
         status: 'extra'
       }))
     ]
@@ -56,7 +66,7 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
         </span>
       )
     }
-    return <span className="badge badge-neutral" title="Reported by the device but not part of its assigned schema">Unmodeled</span>
+    return <span className="badge badge-neutral" title="Declared by the device but not part of its assigned schema">Unmodelled</span>
   }
 
   return (

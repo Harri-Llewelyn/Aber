@@ -50,10 +50,13 @@ CREATE TABLE IF NOT EXISTS public.directory_services (
 
 -- Seed Standard Schemas
 INSERT INTO public.schemas (id, schema_name, description, schema_definition) VALUES
-  ('e1111111-2222-3333-4444-555555555555', 'SparkplugB-Telemetry-Standard-Schema', 'Standard Sparkplug B metric schema for temperature, status, and safety interlock',
-   '{"type": "object", "properties": {"temperature": {"type": "number"}, "status": {"type": "string"}, "safety_ok": {"type": "boolean"}}, "required": ["temperature", "status"]}'),
+-- Metric names follow the MTConnect vocabulary (see 20260101000018/0019). Migration 0019 also
+-- UPDATEs these two rows, because this INSERT is ON CONFLICT DO NOTHING and so would never reach
+-- a database that had already been started before the vocabulary was adopted.
+  ('e1111111-2222-3333-4444-555555555555', 'SparkplugB-Telemetry-Standard-Schema', 'Standard Sparkplug B metric schema using MTConnect data item types',
+   '{"type": "object", "properties": {"Systems/TEMPERATURE": {"type": "number"}, "Controller/EXECUTION": {"type": "string"}, "Controller/EMERGENCY_STOP": {"type": "string"}}, "required": ["Systems/TEMPERATURE", "Controller/EXECUTION"]}'),
   ('e2222222-3333-4444-5555-666666666666', 'ISO-22400-OEE-Schema', 'ISO 22400 standard OEE metrics for industrial machinery',
-   '{"type": "object", "properties": {"availability": {"type": "number"}, "performance": {"type": "number"}, "quality": {"type": "number"}}, "required": ["availability"]}')
+   '{"type": "object", "properties": {"OEE/AVAILABILITY": {"type": "number"}, "OEE/PERFORMANCE": {"type": "number"}, "OEE/QUALITY": {"type": "number"}}, "required": ["OEE/AVAILABILITY"]}')
 ON CONFLICT (schema_name) DO NOTHING;
 
 -- Seed Stack Service Directory

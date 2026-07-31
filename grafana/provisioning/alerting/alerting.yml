@@ -16,7 +16,7 @@ groups:
               from: 300
               to: 0
             model:
-              rawSql: "SELECT time AS \"time\", val_double AS \"value\" FROM telemetry WHERE metric_name = 'temperature' ORDER BY time DESC LIMIT 1"
+              rawSql: "SELECT time AS \"time\", val_double AS \"value\" FROM telemetry WHERE metric_name = 'Systems/TEMPERATURE' ORDER BY time DESC LIMIT 1"
               format: time_series
           - refId: B
             datasourceUid: __expr__
@@ -41,7 +41,10 @@ groups:
               from: 300
               to: 0
             model:
-              rawSql: "SELECT time AS \"time\", CASE WHEN val_bool = false THEN 1 ELSE 0 END AS \"value\" FROM telemetry WHERE metric_name = 'safety_ok' ORDER BY time DESC LIMIT 1"
+              # MTConnect EMERGENCY_STOP is a two-value string (ARMED / TRIGGERED), not a boolean,
+              # so this reads val_string. Leaving the old `val_bool = false` test against the new
+              # metric would have compared NULL, yielded 0, and silently never fired.
+              rawSql: "SELECT time AS \"time\", CASE WHEN val_string = 'TRIGGERED' THEN 1 ELSE 0 END AS \"value\" FROM telemetry WHERE metric_name = 'Controller/EMERGENCY_STOP' ORDER BY time DESC LIMIT 1"
               format: time_series
           - refId: B
             datasourceUid: __expr__

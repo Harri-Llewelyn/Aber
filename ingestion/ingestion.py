@@ -114,7 +114,10 @@ UNKNOWN_GATEWAY_WARN_INTERVAL_SECONDS = 300
 _legacy_identity_warned = {}
 LEGACY_IDENTITY_WARN_INTERVAL_SECONDS = 300
 
-_DEVICE_COLUMNS = "id,name,sparkplug_id,reported_identity,gateway_id,is_quarantined,first_dbirth_at"
+_DEVICE_COLUMNS = (
+    "id,name,sparkplug_id,reported_identity,gateway_id,is_quarantined,first_dbirth_at,"
+    "last_birth_metrics"
+)
 
 
 def diagnose_device_identity(wire_id: str):
@@ -302,7 +305,7 @@ def store_birth_parameters(sparkplug_id: str, payload):
             continue
 
         row = {
-            "asset_id": asset_id,
+            "asset_id": sparkplug_id,
             "metric_name": metric.name,
             "val_double": None,
             "val_string": None,
@@ -337,9 +340,68 @@ def store_birth_parameters(sparkplug_id: str, payload):
         supabase_client.table("asset_config").upsert(
             rows, on_conflict="asset_id,metric_name"
         ).execute()
-        logger.info("DBIRTH: Stored %d birth parameters for device '%s'", len(rows), asset_id)
+        logger.info("DBIRTH: Stored %d birth parameters for device '%s'", len(rows), sparkplug_id)
     except Exception as e:
-        logger.error("Error storing DBIRTH parameters for '%s': %s", asset_id, e, exc_info=True)
+        logger.error("Error storing DBIRTH parameters for '%s': %s", sparkplug_id, e, exc_info=True)
+
+
+def extract_declared_metrics(payload):
+    """
+    The set of metric names a birth certificate declares, sorted, minus the identity metrics.
+
+    Deliberately a separate pass from `store_birth_parameters`, which filters differently: it
+    skips any metric carrying no recognised value field, because it is building a table of
+    parameter *values*. Here the question is which metrics the device says it has, so a metric
+    declared with no value still counts -- it is exactly the kind of thing a schema should
+    account for.
+
+    This is a record of what was observed, not a verdict on it. Whether any of these metrics
+    fall outside the device's assigned schema is derived at read time, so that editing a schema
+    reclassifies its devices immediately rather than at their next birth (which for a stable
+    device could be weeks away).
+    """
+    return sorted({
+        metric.name for metric in payload.metrics
+        if metric.name and metric.name not in IDENTITY_METRICS
+    })
+
+
+def record_declared_metrics(device: dict, payload):
+    """
+    Persist the birth-declared metric names onto the device row, but only when the set has
+    actually changed.
+
+    The change check is not an optimisation. `log_digital_thread_event()` fires on every UPDATE
+    to `devices`, so writing an unchanged array on every rebirth would append an audit row each
+    time to a table that is deliberately immutable and append-only. Writing only on change means
+    each entry in the thread marks a real change in what the device publishes -- which is
+    precisely the event worth auditing.
+    """
+    if not supabase_client or not device:
+        return
+
+    declared = extract_declared_metrics(payload)
+    if device.get("last_birth_metrics") == declared:
+        return
+
+    try:
+        supabase_client.table("devices").update({
+            "last_birth_metrics": declared,
+            "last_birth_metrics_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", device["id"]).execute()
+
+        # resolve_device caches this same dict, so updating it in place keeps the cached copy
+        # in step and stops the next birth inside the TTL from re-detecting the same change.
+        device["last_birth_metrics"] = declared
+
+        logger.info(
+            "DBIRTH: device '%s' declared metric set changed -> %d metric(s): %s",
+            device.get("name"), len(declared), ", ".join(declared) or "(none)"
+        )
+    except Exception as e:
+        logger.error(
+            "Error recording declared metrics for '%s': %s", device.get("name"), e, exc_info=True
+        )
 
 
 def extract_name_hint(payload):
@@ -372,15 +434,21 @@ def quarantine_new_device(wire_id: str, gateway_wire_id: str, reason: str, paylo
             "assigned until one is chosen at approval.", wire_id, gateway_wire_id
         )
 
+    now = datetime.now(timezone.utc).isoformat()
     record = {
         "name": extract_name_hint(payload) or wire_id,
         "status": "ONLINE",
         "is_quarantined": True,
-        "first_dbirth_at": datetime.now(timezone.utc).isoformat(),
+        "first_dbirth_at": now,
         "reported_identity": wire_id,
         "quarantine_reason": reason,
         "identity_source": SOURCE_REPORTED_IDENTITY,
         "gateway_id": gateway["id"] if gateway else None,
+        # Carried on the INSERT rather than left to record_declared_metrics' UPDATE, so a newly
+        # discovered device produces one digital_thread entry instead of an insert immediately
+        # chased by an update saying the same thing.
+        "last_birth_metrics": extract_declared_metrics(payload),
+        "last_birth_metrics_at": now,
     }
 
     res = supabase_client.table("devices").insert(record).execute()
@@ -453,7 +521,11 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
             supabase_client.table("devices").update(update_fields).eq("id", device["id"]).execute()
             logger.info("DBIRTH: verified registered device '%s' (%s)", device.get("name"), wire_id)
 
+        # Both run for quarantined devices too: they record what the device *claims*, which is
+        # exactly what an administrator needs to inspect before approving it. DDATA telemetry
+        # stays gated.
         store_birth_parameters(device["sparkplug_id"], payload)
+        record_declared_metrics(device, payload)
     except Exception as e:
         logger.error("Error checking/updating Supabase devices for DBIRTH: %s", e, exc_info=True)
 

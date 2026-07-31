@@ -497,6 +497,79 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/DirectoryService' }
 
+  /rest/v1/metric_catalog:
+    get:
+      tags: [Registry]
+      summary: List the metrics this deployment's devices publish
+      description: |
+        The metric catalog is deployment state, not the standard. Filter with
+        `?deprecated=is.false` for the active set, or `?metric_group=eq.Axes` for one component.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - name: metric_group
+          in: query
+          schema: { type: string }
+          description: 'Filter by derived group, e.g. `eq.Axes` or `is.null` for ungrouped.'
+        - name: deprecated
+          in: query
+          schema: { type: string }
+          description: 'e.g. `is.false`'
+      responses:
+        '200':
+          description: Catalog entries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MetricCatalogEntry' }
+
+  /rest/v1/metric_groups:
+    get:
+      tags: [Registry]
+      summary: List approved metric-group spellings
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+      responses:
+        '200':
+          description: Group registry entries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MetricGroup' }
+
+  /rest/v1/mtconnect_vocabulary:
+    get:
+      tags: [Registry]
+      summary: Read the MTConnect controlled vocabularies
+      description: |
+        Reference data, read-only. 249 data item types, 123 subtypes, 100 units and 126 component
+        types. Filter by `?kind=eq.DATA_ITEM_TYPE&category=eq.SAMPLE`.
+        `anon` receives `401`; `authenticated` may read but not write.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - name: kind
+          in: query
+          schema: { type: string }
+          description: '`eq.DATA_ITEM_TYPE` | `eq.SUB_TYPE` | `eq.UNIT` | `eq.NATIVE_UNIT` | `eq.COMPONENT`'
+        - name: category
+          in: query
+          schema: { type: string }
+          description: 'DATA_ITEM_TYPE rows only, e.g. `eq.SAMPLE`.'
+      responses:
+        '200':
+          description: Vocabulary entries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MTConnectVocabularyEntry' }
+        '401':
+          description: Not authenticated.
+
   /rest/v1/schemas:
     get:
       tags: [Registry]
@@ -800,8 +873,30 @@ components:
           type: boolean
           default: false
           description: True for auto-discovered devices awaiting approval. Their DDATA telemetry is dropped.
-        asset_type: { type: string, nullable: true, example: CNC }
+        asset_type:
+          type: string
+          nullable: true
+          deprecated: true
+          example: CNC
+          description: >-
+            Legacy free-text classification. The dashboard no longer writes this field: a device's
+            type is derived from the metric groups its assigned schema models (e.g. a schema
+            covering Robot.* metrics tags its devices "Robot"). Existing values are still read and
+            displayed so nothing is lost, but new devices leave this null.
         connection_method: { type: string, nullable: true, example: Sparkplug B }
+        last_birth_metrics:
+          type: array
+          nullable: true
+          readOnly: true
+          items: { type: string }
+          example: [temperature, status, safety_ok]
+          description: >-
+            Metric names declared in the device's most recent DBIRTH, written by the ingestion
+            daemon and only when the set changes. null means no birth has been observed; an empty
+            array means a birth that declared no non-identity metrics. Which of these fall outside
+            the device's assigned schema is derived by the client, never stored, so that editing a
+            schema reclassifies its devices without waiting for them to rebirth.
+        last_birth_metrics_at: { type: string, format: date-time, nullable: true, readOnly: true }
         is_archived: { type: boolean, default: false }
         created_at: { type: string, format: date-time, readOnly: true }
 
@@ -812,7 +907,11 @@ components:
         gateway_id: { type: string, format: uuid, nullable: true }
         status: { type: string, enum: [ONLINE, OFFLINE] }
         is_quarantined: { type: boolean }
-        asset_type: { type: string, nullable: true }
+        asset_type:
+          type: string
+          nullable: true
+          deprecated: true
+          description: Still accepted for compatibility; the dashboard no longer sends it. See Device.asset_type.
         connection_method: { type: string, nullable: true }
         is_archived: { type: boolean }
 
@@ -822,7 +921,7 @@ components:
       properties:
         time: { type: string, format: date-time }
         asset_id: { type: string, example: dev200000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
-        metric_name: { type: string, example: temperature }
+        metric_name: { type: string, example: Systems/TEMPERATURE }
         val_double: { type: number, nullable: true }
         val_string: { type: string, nullable: true }
         val_bool: { type: boolean, nullable: true }
@@ -833,7 +932,7 @@ components:
       properties:
         id: { type: string, format: uuid, readOnly: true }
         asset_id: { type: string, example: dev200000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
-        metric_name: { type: string, example: firmware_version }
+        metric_name: { type: string, example: Controller/FIRMWARE }
         val_double: { type: number, nullable: true }
         val_string: { type: string, nullable: true }
         val_bool: { type: boolean, nullable: true }
@@ -875,6 +974,77 @@ components:
         description: { type: string, nullable: true }
         schema_definition: { type: object, description: JSON Schema document. }
         created_at: { type: string, format: date-time, readOnly: true }
+
+    MetricCatalogEntry:
+      type: object
+      description: >-
+        A metric this deployment's devices actually publish. Distinct from mtconnect_vocabulary,
+        which is the standard's list of available words: an MTConnect data item type such as ANGLE
+        is not a metric name — the metric is a component path plus that type, e.g. Axes/C/ANGLE.
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        name:
+          type: string
+          example: Axes/C/ANGULAR_VELOCITY/ACTUAL
+          description: >-
+            The literal Sparkplug B metric name. Immutable once created — a device is already
+            configured to publish this exact string, so changing a metric means deprecating this
+            entry and creating a new one.
+        metric_group:
+          type: string
+          nullable: true
+          readOnly: true
+          example: Axes
+          description: Generated column — the first '/'-delimited segment of the name, NULL when there is none.
+        datatype: { type: integer, example: 10, description: Sparkplug B datatype code. }
+        category:
+          type: string
+          nullable: true
+          enum: [SAMPLE, EVENT, CONDITION]
+          description: MTConnect observation category. SAMPLE is the only one carrying units.
+        units: { type: string, nullable: true, example: DEGREE/SECOND }
+        sub_type: { type: string, nullable: true, example: ACTUAL }
+        standard:
+          type: string
+          nullable: true
+          example: MTConnect
+          description: "Provenance: 'MTConnect', 'ISO 22400', or null for a local extension (which MTConnect permits)."
+        description: { type: string, nullable: true }
+        deprecated: { type: boolean, default: false }
+        superseded_by: { type: string, format: uuid, nullable: true }
+        created_at: { type: string, format: date-time, readOnly: true }
+
+    MetricGroup:
+      type: object
+      description: >-
+        Registry of approved metric-group spellings, seeded from MTConnect's component types. It
+        does not store any metric's group — that is always derived from the metric name. It exists
+        so the Add Metric form has a vocabulary before any metric uses one, and so
+        enforce_metric_group_spelling() has an authority for how each group is spelled.
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        name: { type: string, example: Axes, description: A single name segment — no '/', not blank. Unique case-insensitively. }
+        description: { type: string, nullable: true }
+        standard: { type: string, nullable: true, example: MTConnect }
+        created_at: { type: string, format: date-time, readOnly: true }
+
+    MTConnectVocabularyEntry:
+      type: object
+      readOnly: true
+      description: >-
+        MTConnect controlled vocabularies, generated into the database from the Apache-2.0
+        mtconnect/schema repository by scripts/generate-mtconnect-vocabulary.mjs. Reference data:
+        readable by authenticated users, never written by the application.
+      properties:
+        kind:
+          type: string
+          enum: [DATA_ITEM_TYPE, SUB_TYPE, UNIT, NATIVE_UNIT, COMPONENT]
+        name: { type: string, example: ANGULAR_VELOCITY }
+        category:
+          type: string
+          nullable: true
+          enum: [SAMPLE, EVENT, CONDITION]
+          description: Populated for DATA_ITEM_TYPE rows only.
 
     Document:
       type: object

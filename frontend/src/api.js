@@ -70,7 +70,7 @@ function toTelemetryKey(assetId) {
  * TimescaleDB hypertable, exposed through PostgREST (see
  * supabase/migrations/20260101000010_telemetry_foreign_table.sql).
  */
-async function queryTelemetry({ assetId, metricName, minutes, limit, offset } = {}) {
+async function queryTelemetry({ assetId, assetIds, metricName, minutes, limit, offset } = {}) {
   const pageSize = Math.min(
     Number.isFinite(limit) && limit > 0 ? limit : TELEMETRY_PAGE_SIZE,
     TELEMETRY_MAX_ROWS
@@ -78,9 +78,19 @@ async function queryTelemetry({ assetId, metricName, minutes, limit, offset } = 
   const from = Number.isFinite(offset) && offset > 0 ? offset : 0;
 
   const telemetryKey = toTelemetryKey(assetId);
+  // Set by a tag filter, which resolves to a whole group of devices. The IN list grows with the
+  // fleet, and postgres_fdw pushes the WHERE down but not the LIMIT (README known issue #4), so
+  // the Telemetry tab requires a time window whenever this path is used.
+  const telemetryKeys = (assetIds || []).map(toTelemetryKey).filter(Boolean);
+
+  // An empty set means "a tag that matches no device", which must return nothing rather than
+  // silently widening to the whole fleet. Checked before the query is built so no request is
+  // issued at all.
+  if (!telemetryKey && assetIds && telemetryKeys.length === 0) return [];
 
   let query = supabase.from('telemetry').select('*');
   if (telemetryKey) query = query.eq('asset_id', telemetryKey);
+  else if (assetIds) query = query.in('asset_id', telemetryKeys);
   if (metricName) query = query.eq('metric_name', metricName);
   if (Number.isFinite(minutes) && minutes > 0) {
     query = query.gte('time', new Date(Date.now() - minutes * 60000).toISOString());
@@ -226,9 +236,45 @@ export const api = {
     }
 
     if (path.includes('/digital-thread')) {
-      const { data, error } = await supabase.from('digital_thread').select('*').order('recorded_at', { ascending: false });
+      // Every one of these parameters was previously parsed by the caller, appended to the path,
+      // and then dropped on the floor here -- the Digital Thread tab's entity dropdown, search box
+      // and row limit all had no effect at all. They are honoured now.
+      const url = new URL(path, window.location.origin);
+      const entityType = url.searchParams.get('entity_type');
+      const search = (url.searchParams.get('entity_id') || '').trim();
+      const entityIds = url.searchParams.has('entity_ids')
+        ? url.searchParams.get('entity_ids').split(',').filter(Boolean)
+        : undefined;
+      const limit = Number.parseInt(url.searchParams.get('limit') || '', 10);
+
+      // A tag that matches no device must return nothing rather than everything.
+      if (entityIds && entityIds.length === 0) return [];
+
+      let query = supabase.from('digital_thread').select('*');
+
+      if (entityType) {
+        // The trigger writes TG_TABLE_NAME -- 'cells' / 'gateways' / 'devices'. The UI has always
+        // offered 'CELL' / 'GATEWAY' / 'DEVICE', so even an honoured exact match would never have
+        // hit. Normalise to the stored form.
+        const stored = { CELL: 'cells', GATEWAY: 'gateways', DEVICE: 'devices' }[entityType.toUpperCase()];
+        query = query.eq('entity_type', stored || entityType);
+      }
+      if (entityIds) query = query.in('entity_id', entityIds);
+      if (Number.isFinite(limit) && limit > 0) query = query.limit(limit);
+
+      const { data, error } = await query.order('recorded_at', { ascending: false });
       if (error) throw error;
-      return (data || []).map(mapDigitalThreadRow);
+
+      const rows = (data || []).map(mapDigitalThreadRow);
+      if (!search) return rows;
+
+      // Substring match, applied after mapping so it searches the rendered description rather
+      // than the raw columns -- that is what the field's placeholder promises.
+      const needle = search.toLowerCase();
+      return rows.filter(r =>
+        String(r.entity_id || '').toLowerCase().includes(needle) ||
+        String(r.description || '').toLowerCase().includes(needle)
+      );
     }
 
     if (path.startsWith('/api/v1/quarantine')) {
@@ -287,13 +333,49 @@ export const api = {
       return (data || []).map(d => ({ ...d, id: d.id }));
     }
 
+    if (path.startsWith('/api/v1/mtconnect-vocabulary')) {
+      // Reference data (generated into the DB by 20260101000018), read-only to the app. Returned
+      // flat and bucketed by the caller -- it is ~600 short rows, fetched once per Schemas visit.
+      const { data, error } = await supabase
+        .from('mtconnect_vocabulary')
+        .select('*')
+        .order('name', { ascending: true });
+      if (error) throw error;
+      return (data || []).map(v => ({ kind: v.kind, name: v.name, category: v.category }));
+    }
+
+    // Checked before /metric-catalog: startsWith on the shorter path would otherwise not match,
+    // but keeping the more specific route first makes the ordering intent explicit.
+    if (path.startsWith('/api/v1/metric-groups')) {
+      const { data, error } = await supabase.from('metric_groups').select('*').order('name', { ascending: true });
+      if (error) throw error;
+      return (data || []).map(g => ({
+        group_uuid: g.id,
+        name: g.name,
+        description: g.description,
+        // 'MTConnect' / 'ISO 22400' / null for a local group. Drives the picker's grouping, so
+        // 126 component types don't arrive as one undifferentiated list.
+        standard: g.standard ?? null,
+        created_at: g.created_at
+      }));
+    }
+
     if (path.startsWith('/api/v1/metric-catalog')) {
       const { data, error } = await supabase.from('metric_catalog').select('*').order('name', { ascending: true });
       if (error) throw error;
       return (data || []).map(m => ({
         metric_uuid: m.id,
         name: m.name,
+        // Generated column: the first dotted segment of the name, NULL when there isn't one.
+        // See utils/metricGroup.js, which mirrors the derivation.
+        metric_group: m.metric_group ?? null,
         datatype: m.datatype,
+        // MTConnect facets. `standard` is provenance: 'MTConnect' for a standard data item type,
+        // null for a local extension, which the standard itself permits.
+        category: m.category ?? null,
+        units: m.units ?? null,
+        sub_type: m.sub_type ?? null,
+        standard: m.standard ?? null,
         description: m.description,
         deprecated: m.deprecated,
         superseded_by: m.superseded_by,
@@ -364,8 +446,14 @@ export const api = {
 
     if (path.startsWith('/api/v1/telemetry')) {
       const url = new URL(path, window.location.origin);
+      // asset_ids (plural) is how a tag filter asks for a whole group of devices at once. Absent
+      // means "no device restriction"; present but empty means "a tag nobody matches".
+      const assetIds = url.searchParams.has('asset_ids')
+        ? url.searchParams.get('asset_ids').split(',').filter(Boolean)
+        : undefined;
       return queryTelemetry({
         assetId: url.searchParams.get('asset_id'),
+        assetIds,
         metricName: url.searchParams.get('metric_name'),
         minutes: Number.parseInt(url.searchParams.get('minutes') || '', 10),
         limit: Number.parseInt(url.searchParams.get('limit') || '', 10),
@@ -470,10 +558,23 @@ export const api = {
       return data?.[0] || {};
     }
 
+    if (path === '/api/v1/metric-groups') {
+      const { data, error } = await supabase.from('metric_groups').insert({
+        name: body.name,
+        description: emptyToNull(body.description)
+      }).select().single();
+      if (error) throw error;
+      return { group_uuid: data.id, name: data.name, description: data.description };
+    }
+
     if (path === '/api/v1/metric-catalog') {
       const { data, error } = await supabase.from('metric_catalog').insert({
         name: body.name,
         datatype: body.datatype,
+        category: emptyToNull(body.category),
+        units: emptyToNull(body.units),
+        sub_type: emptyToNull(body.sub_type),
+        standard: emptyToNull(body.standard),
         description: body.description || null
       }).select();
       if (error) throw error;

@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api'
-import { PERMISSION_UUIDS } from '../../constants'
+import { PERMISSION_UUIDS, REALTIME_ENABLED, STALENESS_TICK_MS, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
+import { useRealtimeTable } from '../../hooks/useRealtimeTable'
+import { useClockTick } from '../../hooks/useClockTick'
 import { gatewayLiveStatus, formatHeartbeat } from '../../utils/gatewayStatus'
 import { gatewaySparkplugId } from '../../utils/sparkplugId'
 import CopyableId from '../common/CopyableId'
@@ -101,7 +103,19 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
     }
   }, [])
 
-  usePolling(load, 3000)
+  // Reconciliation loop, not the primary refresh -- see useRealtimeTable for why polling stays.
+  //
+  // Worth knowing: ingestion stamps gateways.last_heartbeat on every NBIRTH/NDATA/NDEATH, so
+  // this page receives a change event roughly every 30s per gateway from the simulator alone.
+  // That is the highest-traffic subscription in the app and the reason the hook debounces.
+  //
+  usePolling(load, refreshInterval())
+  useRealtimeTable(['gateways', 'devices', 'cells'], load, { enabled: REALTIME_ENABLED })
+  // Heartbeat staleness is derived from the wall clock by gatewayLiveStatus(), and a gateway
+  // going quiet produces no database change and therefore no Realtime event. Without this
+  // tick, a silent gateway would keep its last-rendered status until the 60s reconciliation
+  // poll. Re-renders only; issues no requests.
+  useClockTick(STALENESS_TICK_MS)
 
   const save = async () => {
     try {
@@ -163,18 +177,6 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
       <div className="section-header" style={{ marginBottom: '8px' }}>
         <h2 className="section-title">Edge Gateways <span className="section-count">{gateways.length}</span></h2>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <div style={{ display: 'flex', gap: '4px', background: 'var(--bg-glass)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border)' }}>
-            <button className={`btn btn-sm ${filterMode === 'all' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setFilterMode('all')} title="Show all edge gateways">
-              All ({gateways.length})
-            </button>
-            <button className={`btn btn-sm ${filterMode === 'active' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setFilterMode('active')} title="Show active edge gateways only">
-              Active ({gateways.filter(g => !g.is_archived).length})
-            </button>
-            <button className={`btn btn-sm ${filterMode === 'archived' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setFilterMode('archived')} title="Show decommissioned archived gateways">
-              Archived ({gateways.filter(g => g.is_archived).length})
-            </button>
-          </div>
-
           <button
             className={`btn btn-primary ${!canManage ? 'btn-disabled' : ''}`}
             disabled={!canManage}
@@ -191,6 +193,21 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
       </p>
 
       <div className="filter-bar">
+        {/* Lifecycle lives here rather than as a separate segmented control in the header: it is
+            a filter like the rest, and having two filter surfaces on one page meant the header
+            row also crowded out the primary action. Counts are kept in the option labels. */}
+        <select
+          className="form-control"
+          style={{ width: '150px' }}
+          value={filterMode}
+          onChange={e => setFilterMode(e.target.value)}
+          title="Filter by lifecycle state"
+        >
+          <option value="all">All ({gateways.length})</option>
+          <option value="active">Active ({gateways.filter(g => !g.is_archived).length})</option>
+          <option value="archived">Archived ({gateways.filter(g => g.is_archived).length})</option>
+        </select>
+
         <input
           className="form-control"
           style={{ width: '220px' }}

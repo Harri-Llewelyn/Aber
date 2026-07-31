@@ -4,7 +4,9 @@ import { IconCheck } from '../common/Icons'
 
 export function ValidatePayloadModal({ schemas, onClose }) {
   const [selectedSchemaUuid, setSelectedSchemaUuid] = useState(schemas[0]?.schema_uuid || '')
-  const defaultPayload = `{\n  "temperature": 42.5,\n  "status": "RUNNING",\n  "safety_ok": true\n}`
+  // MTConnect names and value vocabularies: EXECUTION is READY/ACTIVE/INTERRUPTED/…,
+  // EMERGENCY_STOP is ARMED/TRIGGERED. See migration 20260101000019.
+  const defaultPayload = `{\n  "Systems/TEMPERATURE": 42.5,\n  "Controller/EXECUTION": "ACTIVE",\n  "Controller/EMERGENCY_STOP": "ARMED"\n}`
   const [payloadText, setPayloadText] = useState(defaultPayload)
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)

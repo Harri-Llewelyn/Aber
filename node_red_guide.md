@@ -82,10 +82,10 @@ for display only; the platform never overwrites its own record's name from it.
   "metrics": [
     { "name": "Asset_ID",    "datatype": 12, "string_value": "dev200000000000400080000" },
     { "name": "Asset_Name",  "datatype": 12, "string_value": "Simulated_CNC_01" },
-    { "name": "temperature", "datatype": 10, "double_value": 42.5 },
-    { "name": "vibration",   "datatype": 10, "double_value": 1.35 },
-    { "name": "status",      "datatype": 12, "string_value": "RUNNING" },
-    { "name": "safety_ok",   "datatype": 11, "boolean_value": true }
+    { "name": "Systems/TEMPERATURE",       "datatype": 10, "double_value": 42.5 },
+    { "name": "Axes/DISPLACEMENT",         "datatype": 10, "double_value": 1.35 },
+    { "name": "Controller/EXECUTION",      "datatype": 12, "string_value": "ACTIVE" },
+    { "name": "Controller/EMERGENCY_STOP", "datatype": 12, "string_value": "ARMED" }
   ]
 }
 ```

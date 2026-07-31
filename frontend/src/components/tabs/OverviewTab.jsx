@@ -1,7 +1,9 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import { api } from '../../api'
-import { PERMISSION_UUIDS } from '../../constants'
+import { PERMISSION_UUIDS, REALTIME_ENABLED, STALENESS_TICK_MS, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
+import { useRealtimeTable } from '../../hooks/useRealtimeTable'
+import { useClockTick } from '../../hooks/useClockTick'
 import { gatewayLiveStatus, isGatewayOnline, formatHeartbeat } from '../../utils/gatewayStatus'
 import { effectiveSparkplugId } from '../../utils/sparkplugId'
 import {
@@ -46,7 +48,16 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPer
     }
   }, [])
 
-  usePolling(loadAll, 3000)
+  // Reconciliation loop, not the primary refresh: Realtime carries the updates and this
+  // catches whatever a dropped socket missed. Falls back to the 3s poll when Realtime is off.
+  usePolling(loadAll, refreshInterval())
+  // Telemetry is deliberately absent -- it is a postgres_fdw foreign table and can never emit
+  // Postgres changes here. The telemetry count on this page therefore refreshes on the loop
+  // above, not on notification.
+  useRealtimeTable(['cells', 'gateways', 'devices'], loadAll, { enabled: REALTIME_ENABLED })
+  // This page renders gatewayLiveStatus()/isGatewayOnline() too, so it needs the same
+  // wall-clock tick as GatewaysTab to notice a gateway that has simply gone quiet.
+  useClockTick(STALENESS_TICK_MS)
 
   const canManageDevice = hasPermission(PERMISSION_UUIDS.DEVICE_MANAGE)
 
@@ -114,15 +125,20 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPer
     if (asset.is_archived) return 'chip-warning'
     if (asset.status === 'OFFLINE') return 'chip-offline'
     const latest = telemetryBySparkplugId.get(effectiveSparkplugId(asset)) || []
-    const statusMetric = latest.find(t => t.metric_name === 'status')
-    if (statusMetric && (statusMetric.val_string === 'OFFLINE' || statusMetric.val_string === 'DDEATH_RECEIVED')) return 'chip-offline'
+    // MTConnect vocabularies (migration 20260101000019): EXECUTION is
+    // READY/ACTIVE/INTERRUPTED/FEED_HOLD/STOPPED/…, EMERGENCY_STOP is ARMED/TRIGGERED. The latter
+    // is a string, not the boolean safety_ok it replaced -- reading val_bool here would compare
+    // undefined and silently never show the danger state.
+    const executionMetric = latest.find(t => t.metric_name === 'Controller/EXECUTION')
+    if (executionMetric && executionMetric.val_string === 'STOPPED') return 'chip-offline'
 
-    const tempMetric = latest.find(t => t.metric_name === 'temperature')
-    const safetyMetric = latest.find(t => t.metric_name === 'safety_ok')
+    const tempMetric = latest.find(t => t.metric_name === 'Systems/TEMPERATURE')
+    const estopMetric = latest.find(t => t.metric_name === 'Controller/EMERGENCY_STOP')
 
-    if (safetyMetric && safetyMetric.val_bool === false) return 'chip-danger'
+    if (estopMetric && estopMetric.val_string === 'TRIGGERED') return 'chip-danger'
+    if (executionMetric && executionMetric.val_string === 'INTERRUPTED') return 'chip-danger'
     if (tempMetric && tempMetric.val_double > 80.0) return 'chip-danger'
-    if (statusMetric && (statusMetric.val_string === 'MAINTENANCE' || statusMetric.val_string === 'IDLE')) return 'chip-warning'
+    if (executionMetric && (executionMetric.val_string === 'FEED_HOLD' || executionMetric.val_string === 'READY')) return 'chip-warning'
     return 'chip-success'
   }, [telemetryBySparkplugId])
 

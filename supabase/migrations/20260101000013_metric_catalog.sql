@@ -52,20 +52,17 @@ CREATE POLICY "metric_catalog_update_privileged" ON public.metric_catalog
 
 REVOKE ALL ON public.metric_catalog FROM PUBLIC, anon;
 
--- Starter catalog matching metrics the demo simulator and seeded schemas already use, so the
--- schema builder isn't empty on first use.
+-- Starter catalog. Only the two local extensions are seeded here: everything else the demo
+-- publishes is an MTConnect data item type, seeded by 20260101000019 under its standard name
+-- (`temperature` -> `Systems/TEMPERATURE`, and so on). The original ad-hoc names were removed
+-- from this seed by 20260101000020 so a fresh stack never creates them.
+--
+-- These two have no MTConnect equivalent and are deliberately local: the standard defines only
+-- AXIS_/CHUCK_/SPINDLE_INTERLOCK rather than a generic interlock, and it models a threshold as a
+-- Constraint on a data item rather than as a data item of its own.
 INSERT INTO public.metric_catalog (name, datatype, description) VALUES
-  ('temperature', 10, 'Temperature reading, degrees Celsius'),
-  ('vibration', 10, 'Vibration amplitude'),
-  ('status', 12, 'Device operational status string'),
-  ('safety_ok', 11, 'Safety interlock satisfied'),
-  ('firmware_version', 12, 'Reported firmware version'),
-  ('serial_number', 12, 'Manufacturer serial number'),
-  ('max_temp_threshold', 10, 'Configured maximum temperature threshold'),
-  ('safety_interlock', 11, 'Safety interlock present/enabled'),
-  ('availability', 10, 'ISO 22400 OEE availability metric'),
-  ('performance', 10, 'ISO 22400 OEE performance metric'),
-  ('quality', 10, 'ISO 22400 OEE quality metric')
+  ('max_temp_threshold', 10, 'Configured maximum temperature threshold (local extension)'),
+  ('safety_interlock', 11, 'Safety interlock present/enabled (local extension)')
 ON CONFLICT (name) DO NOTHING;
 
 NOTIFY pgrst, 'reload schema';

@@ -41,6 +41,46 @@ jobs:
           fi
           echo "isUuid UUID_REGEX definitions are byte-identical across frontend and Deno edge function."
 
+      # The metric-group separator is mirrored in four places: the generated column (0016), the
+      # spelling trigger (0017), deriveMetricGroup() in the frontend, and validate.py's Python
+      # mirror. Metric names are immutable once issued, so a silent divergence here would be
+      # unfixable in place -- names would be created under one convention and read under another.
+      # Same guard rail as the isUuid check above, for the same reason.
+      - name: Verify Metric Group Separator Sync
+        run: |
+          fail=0
+          check() {
+            if ! grep -qF "$2" "$1"; then
+              echo "::error::$1 does not use the '/' metric group separator ($3)"
+              fail=1
+            fi
+          }
+          check supabase/migrations/20260101000016_metric_group.sql \
+                "split_part(name, '/', 1)" "generated column"
+          check supabase/migrations/20260101000017_metric_group_vocabulary.sql \
+                "split_part(NEW.name, '/', 1)" "spelling trigger"
+          check frontend/src/utils/metricGroup.js \
+                "METRIC_GROUP_SEPARATOR = '/'" "frontend mirror"
+          if grep -rnE "split_part\((NEW\.)?name, '\.'" supabase/migrations/ >/dev/null 2>&1; then
+            echo "::error::a migration still derives the metric group on the '.' separator"
+            fail=1
+          fi
+          [ "$fail" -eq 0 ] && echo "Metric group separator is '/' in every mirrored definition."
+          exit $fail
+
+      # The MTConnect vocabulary migration is generated. Hand-editing it would be silently lost on
+      # the next regeneration, so confirm the committed file is what the generator still produces.
+      - name: Verify Generated MTConnect Vocabulary Is In Sync
+        run: |
+          cp supabase/migrations/20260101000018_mtconnect_vocabulary.sql /tmp/committed.sql
+          node scripts/generate-mtconnect-vocabulary.mjs
+          if ! diff -q /tmp/committed.sql supabase/migrations/20260101000018_mtconnect_vocabulary.sql; then
+            echo "::error::20260101000018_mtconnect_vocabulary.sql differs from generator output. Run: node scripts/generate-mtconnect-vocabulary.mjs"
+            diff /tmp/committed.sql supabase/migrations/20260101000018_mtconnect_vocabulary.sql | head -20
+            exit 1
+          fi
+          echo "Generated vocabulary migration matches the generator."
+
       # vite.config.js fails fast if these are unset. Docker passes them as build
       # args; a bare `npm run build` in CI has to supply them explicitly. These are
       # the local-dev demo values from .env.example and are baked into a throwaway
@@ -134,6 +174,13 @@ jobs:
           python supabase/functions/deploy-nodered/test_deploy_nodered.py
           python supabase/migrations/test_user_roles_rls.py
 
+      # Runs here rather than in e2e-validation because it needs no stack: the suite stubs
+      # protobuf/MQTT/psycopg2 before importing ingestion.py, so a pure-logic test does not
+      # depend on `protoc` being installed or on Docker being up.
+      - name: Run Ingestion Birth-Metric Observation Unit Tests
+        run: |
+          python ingestion/test_declared_metrics.py
+
   e2e-validation:
     name: End-to-End Unified Stack Ingestion Validation
     runs-on: ubuntu-latest
@@ -181,6 +228,45 @@ jobs:
             done
           '
           echo "All core services report healthy!"
+
+      # Realtime boots slower than the core services -- it applies its own _realtime
+      # migrations and seeds the self-hosted tenant first. Polled separately so a slow
+      # boot cannot race the validation step, and on its own timeout so a Realtime
+      # failure is reported as such rather than as a generic stack timeout.
+      # Probed inside the container, not through Kong: the /realtime/v1/ route rewrites
+      # to /socket/, so the tenant API is deliberately not routable from outside. The
+      # tenant is `realtime-dev` (SEED_SELF_HOST's own name, not TENANT_NAME) and the
+      # endpoint requires a bearer token -- an unauthenticated probe returns 403 forever.
+      - name: Wait for Supabase Realtime
+        run: |
+          set -a && . ./.env && set +a
+          timeout 90s bash -c '
+            until docker compose exec -T supabase-realtime \
+                  curl -sf -H "Authorization: Bearer '"$SUPABASE_ANON_KEY"'" \
+                  http://localhost:4000/api/tenants/realtime-dev/health >/dev/null 2>&1; do
+              echo "Waiting for Supabase Realtime to become ready..."
+              sleep 3
+            done
+          '
+          echo "Supabase Realtime reports healthy!"
+
+      # The WebSocket route is what the dashboard actually uses; a healthy container
+      # behind a misconfigured Kong route would otherwise pass CI and fail in the browser.
+      # Kong's global cors plugin runs on the upgrade request, so this is the guard against
+      # it rejecting the handshake.
+      - name: Verify Realtime WebSocket Upgrade Through Kong
+        run: |
+          set -a && . ./.env && set +a
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "Connection: Upgrade" -H "Upgrade: websocket" \
+            -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+            "http://127.0.0.1:54321/realtime/v1/websocket?apikey=$SUPABASE_ANON_KEY&vsn=1.0.0")
+          if [ "$CODE" != "101" ]; then
+            echo "::error::Realtime WebSocket upgrade through Kong returned $CODE, expected 101"
+            docker compose logs --tail 50 supabase-realtime supabase-kong
+            exit 1
+          fi
+          echo "Realtime WebSocket upgrade through Kong returned 101."
 
       # validate.py reads config via os.getenv, and Python does not load .env by
       # itself. Without sourcing it, SUPABASE_SERVICE_ROLE_KEY is empty, the Supabase

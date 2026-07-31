@@ -31,3 +31,28 @@ export const PERSONAS = [
   { id: 'operator@factoryplus.local', label: 'Operator (Read-Only View)' },
   { id: 'auditor@factoryplus.local',  label: 'Auditor (Digital Thread Trace)' },
 ];
+
+// Realtime rollout flag and the polling intervals paired with it.
+//
+// REALTIME_ENABLED gates every supabase.channel() subscription in the app. When it is off the
+// tabs fall back to the original 3s poll, so the feature can be turned off in a deployment
+// without a code change.
+//
+// The two intervals are the point of the migration: with Realtime carrying updates, polling
+// stops being the refresh mechanism and becomes a reconciliation loop. It is NOT deleted --
+// Realtime has no replay, so a dropped socket loses every change in the gap, and usePolling
+// also carries the 401 stop and exponential backoff a channel subscription has no equivalent
+// for. See frontend/src/hooks/useRealtimeTable.js.
+export const REALTIME_ENABLED = import.meta.env.VITE_ENABLE_REALTIME === 'true';
+export const POLL_INTERVAL_MS = 3000;
+export const RECONCILE_INTERVAL_MS = 60000;
+
+// How often tabs that render wall-clock-derived state re-render (see hooks/useClockTick.js).
+// Gateway heartbeat staleness is the case: a gateway going quiet writes nothing, so it emits
+// no Realtime event, and at a 60s reconciliation it would otherwise show STALE up to ~120s
+// late. 15s keeps detection close to the pre-Realtime behaviour at no network cost.
+export const STALENESS_TICK_MS = 15000;
+
+/** Refresh interval a tab should use given whether Realtime is carrying its updates. */
+export const refreshInterval = (realtimeEnabled = REALTIME_ENABLED) =>
+  (realtimeEnabled ? RECONCILE_INTERVAL_MS : POLL_INTERVAL_MS);

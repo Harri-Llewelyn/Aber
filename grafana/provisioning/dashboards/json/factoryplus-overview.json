@@ -60,7 +60,7 @@
       "gridPos": { "h": 9, "w": 12, "x": 0, "y": 6 },
       "datasource": { "type": "postgres", "uid": "timescaledb" },
       "targets": [{
-        "rawSql": "SELECT time AS \"time\", asset_id AS metric, val_double AS \"value\" FROM telemetry WHERE metric_name = 'temperature' AND asset_id IN (${asset_id:sqlstring}) ORDER BY time",
+        "rawSql": "SELECT time AS \"time\", asset_id AS metric, val_double AS \"value\" FROM telemetry WHERE metric_name = 'Systems/TEMPERATURE' AND asset_id IN (${asset_id:sqlstring}) ORDER BY time",
         "format": "time_series",
         "refId": "A"
       }],
@@ -71,7 +71,7 @@
       "gridPos": { "h": 9, "w": 12, "x": 12, "y": 6 },
       "datasource": { "type": "postgres", "uid": "timescaledb" },
       "targets": [{
-        "rawSql": "SELECT time AS \"time\", asset_id AS metric, val_string AS \"value\" FROM telemetry WHERE metric_name = 'status' AND asset_id IN (${asset_id:sqlstring}) ORDER BY time",
+        "rawSql": "SELECT time AS \"time\", asset_id AS metric, val_string AS \"value\" FROM telemetry WHERE metric_name = 'Controller/EXECUTION' AND asset_id IN (${asset_id:sqlstring}) ORDER BY time",
         "format": "time_series",
         "refId": "A"
       }],

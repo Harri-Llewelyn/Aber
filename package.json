@@ -5,6 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "setup": "node scripts/setup.mjs"
+    "setup": "node scripts/setup.mjs",
+    "proto": "node scripts/generate-proto.mjs"
   }
 }
