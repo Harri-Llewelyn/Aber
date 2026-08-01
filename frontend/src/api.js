@@ -1,6 +1,7 @@
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './lib/supabaseClient';
 import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId } from './utils/sparkplugId';
+import { resolveDeviceLocation, SCOPE_SITE_WIDE } from './utils/cellResolution';
 import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
 import {
   MODEL_3D_EXTENSIONS,
@@ -9,25 +10,45 @@ import {
   modelStoragePath
 } from './utils/model3d';
 
-// Devices are related to cells *through* gateways (devices.gateway_id -> gateways.id ->
-// gateways.cell_id -> cells.id). There is no devices.cell_id column, so anything that
-// wants "the devices in this cell" has to walk the embed rather than filter on a field.
+// A device has TWO relationships to a cell and they answer different questions.
+//
+//   * `devices.gateway_id -> gateways.cell_id` is the DATA PATH. It is what the Sparkplug topic
+//     carries and what the Gateways page lists by.
+//   * `devices.cell_id` (migration 0036) is an explicit LOCATION override. NULL means inherit
+//     from the gateway; it is not a stored "unassigned".
+//
+// The effective cell is resolved by public.device_locations and merged onto each row as
+// `effective_cell_id` / `location_source` / `cell_mismatch`. `cell_id` on a mapped row stays the
+// raw column, so a form that round-trips a device cannot turn an inherited cell into an explicit
+// one just by saving. Read `effective_cell_id` to display, `cell_id` to edit.
+//
+// This is deliberately not an embed. `cells?select=*,gateways(devices(...))` returns devices by
+// inheritance only, so a device explicitly placed in cell B whose gateway serves cell A comes
+// back under A, and no combination of embeds can express "unless the child overrides".
 //
 // `asset_id` is always the device UUID -- including for quarantined devices, which used to
 // carry the Sparkplug name here instead. That one exception was why the UI and the
 // approve-quarantine edge function both had to sniff whether an id was a UUID or a name
 // before they knew which column to address.
-const mapDeviceRow = (d, gateway) => ({
-  ...d,
-  asset_id: d.id,
-  asset_name: d.name,
-  sparkplug_id: d.sparkplug_id ?? deviceSparkplugId(d.id),
-  active_gateway_id: d.gateway_id ?? gateway?.id ?? null,
-  gateway_name: gateway?.name ?? null
-});
+const mapDeviceRow = (d, gateway, location) => {
+  const loc = location || resolveDeviceLocation(d, gateway);
+  return {
+    ...d,
+    asset_id: d.id,
+    asset_name: d.name,
+    sparkplug_id: d.sparkplug_id ?? deviceSparkplugId(d.id),
+    active_gateway_id: d.gateway_id ?? gateway?.id ?? null,
+    gateway_name: gateway?.name ?? null,
+    effective_cell_id: loc.effective_cell_id,
+    gateway_cell_id: loc.gateway_cell_id,
+    location_scope: loc.location_scope,
+    location_source: loc.location_source,
+    cell_mismatch: loc.cell_mismatch
+  };
+};
 
-const mapGatewayRow = (g) => {
-  const devices = (g.devices || []).map(d => mapDeviceRow(d, g));
+const mapGatewayRow = (g, locations) => {
+  const devices = (g.devices || []).map(d => mapDeviceRow(d, g, locations?.get(d.id)));
   return {
     ...g,
     gateway_id: g.id,
@@ -38,12 +59,27 @@ const mapGatewayRow = (g) => {
 };
 
 // PostgREST embeds. Kept as constants so the Cells and Gateways queries stay in step.
+// cell_id and location_scope are selected so that local resolution still works when the
+// device_locations read fails -- see loadDeviceLocations().
 const DEVICE_EMBED =
   'id, name, sparkplug_id, reported_identity, identity_source, status, is_quarantined, ' +
-  'is_archived, gateway_id, created_at, model_3d_path';
+  'is_archived, gateway_id, cell_id, location_scope, created_at, model_3d_path';
 const GATEWAY_EMBED =
-  `id, name, sparkplug_id, cell_id, access_url, status, last_heartbeat, ip_address, is_virtual, ` +
-  `is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
+  `id, name, sparkplug_id, cell_id, location_scope, access_url, status, last_heartbeat, ` +
+  `ip_address, is_virtual, is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
+
+/**
+ * Effective cell per device, keyed by device id, read from public.device_locations.
+ *
+ * Non-fatal by design, exactly like the device_schemas read below it: on failure the callers
+ * fall back to resolveDeviceLocation(), which is the same expression evaluated locally, so the
+ * page degrades to deriving what it could not fetch rather than rendering no devices at all.
+ */
+async function loadDeviceLocations() {
+  const { data, error } = await supabase.from('device_locations').select('*');
+  if (error) return null;
+  return new Map((data || []).map(row => [row.device_id, row]));
+}
 
 // PostgREST rejects '' for a UUID/foreign-key column; the UI's "unassigned" option
 // submits exactly that.
@@ -51,6 +87,26 @@ const emptyToNull = (v) => (v === '' || v === undefined ? null : v);
 
 // The UI carries a device's gateway as `active_gateway_id`; the column is `gateway_id`.
 const gatewayIdFrom = (body) => emptyToNull(body.active_gateway_id ?? body.gateway_id);
+
+/**
+ * The location columns a request is actually trying to set -- `{}` when it mentions neither, so
+ * a partial update cannot blank a field it never sent.
+ *
+ * THE PAIR IS NEVER LEFT CONTRADICTORY. devices_site_wide_has_no_cell / gateways_site_wide_has_no_cell
+ * (migration 0036) reject a site-wide asset that also names a cell, because "it is in no
+ * particular cell" and "it is in Bay 4" cannot both be true. Clearing the cell here means
+ * marking something Site-Wide is one action in the UI rather than a 400 the user has to decode
+ * -- the same discipline api.js already applies to semantic_id / semantic_id_type.
+ */
+function locationFieldsFrom(body) {
+  const fields = {};
+  if ('cell_id' in body) fields.cell_id = emptyToNull(body.cell_id);
+  if ('location_scope' in body) {
+    fields.location_scope = body.location_scope === SCOPE_SITE_WIDE ? SCOPE_SITE_WIDE : 'cell';
+    if (fields.location_scope === SCOPE_SITE_WIDE) fields.cell_id = null;
+  }
+  return fields;
+}
 
 export const TELEMETRY_PAGE_SIZE = 500;
 // postgres_fdw pushes WHERE clauses to TimescaleDB but not LIMIT, so an unbounded
@@ -268,34 +324,49 @@ export const api = {
     if (path.startsWith('/api/v1/cells')) {
       // Nested embed so each cell arrives with its gateways, and each gateway with its
       // devices, in one round trip.
+      //
+      // A cell's GATEWAYS come from the embed -- that relationship is a plain foreign key. Its
+      // DEVICES are NOT returned here at all: membership is the resolved effective cell, which
+      // no embed can express (a device explicitly placed here whose gateway serves another cell
+      // would be missing, and one placed elsewhere wrongly included). Fetching every device
+      // here to bucket them server-side worked, but every caller of this endpoint already loads
+      // the device list for its own purposes, so it read the same table twice per refresh --
+      // and Overview polls at 3s. Callers group what they already hold with
+      // groupDevicesByCell() from utils/cellResolution.js instead.
+      //
+      // `devices`/`device_count` are omitted rather than returned empty, so a consumer that
+      // still expects them fails visibly instead of quietly rendering an empty cell.
       const { data, error } = await supabase
         .from('cells')
         .select(`*, gateways(${GATEWAY_EMBED})`)
         .order('created_at', { ascending: false });
       if (error) throw error;
+
       return (data || []).map(c => {
-        const gateways = (c.gateways || []).map(mapGatewayRow);
-        const devices = gateways.flatMap(g => g.devices);
+        // No locations map: every embedded device carries its own cell_id and location_scope,
+        // and its gateway is the row it is embedded under, so local resolution is exact here.
+        const gateways = (c.gateways || []).map(g => mapGatewayRow(g));
         return {
           ...c,
           cell_id: c.id,
           cell_name: c.name,
           access_url: c.grafana_url,
           gateways,
-          devices,
-          gateway_count: gateways.length,
-          device_count: devices.length
+          gateway_count: gateways.length
         };
       });
     }
 
     if (path.startsWith('/api/v1/gateways')) {
-      const { data, error } = await supabase
-        .from('gateways')
-        .select(`*, devices(${DEVICE_EMBED})`)
-        .order('created_at', { ascending: false });
+      const [{ data, error }, locations] = await Promise.all([
+        supabase.from('gateways').select(`*, devices(${DEVICE_EMBED})`).order('created_at', { ascending: false }),
+        loadDeviceLocations()
+      ]);
       if (error) throw error;
-      return (data || []).map(mapGatewayRow);
+      // A gateway lists the devices it SERVES -- the data path -- which is the embed and is
+      // unaffected by location overrides. The locations only decorate each device with where it
+      // resolved to, so the page can show that a device it serves sits in another cell.
+      return (data || []).map(g => mapGatewayRow(g, locations));
     }
 
     if (path.match(/\/api\/v1\/devices\/(.+)\/config/)) {
@@ -312,12 +383,17 @@ export const api = {
     }
 
     if (path.startsWith('/api/v1/devices') || path.startsWith('/api/v1/assets')) {
-      // Embed the serving gateway so each device carries its resolved gateway name and
-      // the cell it belongs to -- a device's cell is the cell of its gateway.
-      const { data, error } = await supabase
-        .from('devices')
-        .select('*, gateways(id, name, cell_id, status, is_archived)')
-        .order('created_at', { ascending: false });
+      // Embed the serving gateway so each device carries its resolved gateway name, and read
+      // device_locations for the effective cell. The gateway's own cell is still selected: it is
+      // what the local fallback resolves from, and what tells the UI that an explicit cell
+      // disagrees with the data path.
+      const [{ data, error }, locations] = await Promise.all([
+        supabase
+          .from('devices')
+          .select('*, gateways(id, name, cell_id, location_scope, status, is_archived)')
+          .order('created_at', { ascending: false }),
+        loadDeviceLocations()
+      ]);
       if (error) throw error;
 
       // The schemas attached through device_submodels (migration 0034), one AAS Submodel each.
@@ -332,9 +408,12 @@ export const api = {
         schemasByDevice.get(link.device_id).push(link.schema_id);
       }
 
+      // No `cell_id:` override here. It used to be set to the gateway's cell AFTER the spread,
+      // which -- now that devices have a cell_id of their own -- would silently discard the
+      // column it is named after. The resolved value is `effective_cell_id`; `cell_id` is the
+      // device's own explicit override, or null meaning inherit.
       return (data || []).map(d => ({
-        ...mapDeviceRow(d, d.gateways),
-        cell_id: d.gateways?.cell_id || null,
+        ...mapDeviceRow(d, d.gateways, locations?.get(d.id)),
         submodel_schema_ids: schemasByDevice.get(d.id) || []
       }));
     }
@@ -382,9 +461,13 @@ export const api = {
     }
 
     if (path.startsWith('/api/v1/quarantine')) {
+      // The gateway's cell and scope are selected, not just its name: mapDeviceRow resolves the
+      // device's location from them, and an embed that omitted them would report every
+      // quarantined device as unassigned even when the edge node it arrived on has a cell. That
+      // is what the approval modal has to show to be worth showing at all.
       const { data, error } = await supabase
         .from('devices')
-        .select('*, gateways(id, name)')
+        .select('*, gateways(id, name, cell_id, location_scope)')
         .eq('is_quarantined', true);
       if (error) throw error;
 
@@ -669,10 +752,10 @@ export const api = {
       const { data, error } = await supabase.from('gateways').insert({
         name: body.gateway_name,
         access_url: body.access_url,
-        cell_id: emptyToNull(body.cell_id),
         ip_address: emptyToNull(body.ip_address),
         is_virtual: !!body.is_virtual,
-        status: body.status || 'OFFLINE'
+        status: body.status || 'OFFLINE',
+        ...locationFieldsFrom(body)
       }).select();
       if (error) throw error;
       return data?.[0] || {};
@@ -685,7 +768,12 @@ export const api = {
         asset_type: emptyToNull(body.asset_type),
         connection_method: emptyToNull(body.connection_method),
         schema_id: emptyToNull(body.schema_id),
-        status: body.status || 'ONLINE'
+        status: body.status || 'ONLINE',
+        // Omitted entirely when the caller sends nothing: cell_id has no column default, and
+        // that is load-bearing. NULL means "inherit from the gateway", so writing an explicit
+        // value here on behalf of a caller who did not choose one would make inheritance
+        // unreachable for every device this form creates.
+        ...locationFieldsFrom(body)
       }).select();
       if (error) throw error;
       return data?.[0] || {};
@@ -895,9 +983,13 @@ export const api = {
         name: body.gateway_name,
         access_url: body.access_url
       };
-      if ('cell_id' in body)     patch.cell_id = emptyToNull(body.cell_id);
       if ('ip_address' in body)  patch.ip_address = emptyToNull(body.ip_address);
       if ('is_virtual' in body)  patch.is_virtual = !!body.is_virtual;
+      // Same pairing rule as devices: marking a gateway Site-Wide clears its cell rather than
+      // letting the CHECK reject the write. is_virtual is NOT what decides this -- a virtual
+      // gateway is a deployment fact, site-wide is an operator's assertion about location, and
+      // conflating them would relocate assets on a checkbox.
+      Object.assign(patch, locationFieldsFrom(body));
 
       const { data, error } = await supabase.from('gateways').update(patch).eq('id', id).select();
       if (error) throw error;
@@ -922,6 +1014,10 @@ export const api = {
       if ('active_gateway_id' in body || 'gateway_id' in body) {
         patch.gateway_id = gatewayIdFrom(body);
       }
+      // Reassigning a gateway deliberately does NOT touch cell_id. An explicit location is the
+      // operator's answer about where the machine is; moving which connector reaches it is a
+      // data-path change and must not silently relocate the asset.
+      Object.assign(patch, locationFieldsFrom(body));
       const { data, error } = await supabase.from('devices').update(patch).eq('id', id).select();
       if (error) throw error;
       return data[0];

@@ -6,6 +6,7 @@ import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
 import { gatewayLiveStatus, formatHeartbeat } from '../../utils/gatewayStatus'
 import { gatewaySparkplugId } from '../../utils/sparkplugId'
+import { SCOPE_CELL, SCOPE_SITE_WIDE } from '../../utils/cellResolution'
 import CopyableId from '../common/CopyableId'
 import { ActionMenu } from '../common/ActionMenu'
 import { TagList } from '../common/TagList'
@@ -36,7 +37,11 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing]   = useState(null)
   const [archiveTarget, setArchiveTarget] = useState(null)
-  const blank = { gateway_id: '', gateway_name: '', ip_address: '', status: 'OFFLINE', is_virtual: false, access_url: '', cell_id: '' }
+  // location_scope defaults to 'cell' -- an edge node belongs in some cell until someone says
+  // otherwise. is_virtual is deliberately NOT the same question: virtual is a deployment fact
+  // (this connector runs on the app host), site-wide is a claim about location. A virtual
+  // gateway is usually site-wide, but conflating them would relocate assets on a checkbox.
+  const blank = { gateway_id: '', gateway_name: '', ip_address: '', status: 'OFFLINE', is_virtual: false, access_url: '', cell_id: '', location_scope: SCOPE_CELL }
   const [form, setForm]         = useState(blank)
   const [threadFor, setThreadFor] = useState(null)
   const [docsForGw, setDocsForGw] = useState(null)
@@ -303,9 +308,14 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
                          <td><CopyableId value={g.sparkplug_id || gatewaySparkplugId(g.gateway_id)} label="Sparkplug edge node id" onNotify={showToast} /></td>
                          <td><span className="mono" style={{ color: 'var(--text-muted)' }}>{g.ip_address || '—'}</span></td>
                          <td>
-                           {g.cell_id
-                             ? (cells.find(c => c.cell_id === g.cell_id)?.cell_name || <span className="mono">{g.cell_id}</span>)
-                             : <span style={{ fontSize: '11px', color: 'var(--warning-text)', fontStyle: 'italic' }} title="Devices on this gateway will not appear under any cell">Unassigned</span>}
+                           {/* Three states, not two. Site-Wide is an answer -- a host-run
+                               connector serving the facility -- and must not read as the
+                               unanswered case, or nobody ever stops trying to "fix" it. */}
+                           {g.location_scope === SCOPE_SITE_WIDE
+                             ? <span className="badge badge-neutral" style={{ fontSize: '10px' }} title="Serves the whole facility rather than one cell. Its devices need their own cell.">Site-Wide</span>
+                             : g.cell_id
+                               ? (cells.find(c => c.cell_id === g.cell_id)?.cell_name || <span className="mono">{g.cell_id}</span>)
+                               : <span style={{ fontSize: '11px', color: 'var(--warning-text)', fontStyle: 'italic' }} title="Devices on this gateway inherit no cell, so they land in the Unassigned queue">No cell</span>}
                          </td>
                          <td>
                            {g.is_archived ? (
@@ -472,8 +482,18 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
               {editing ? (
                 <>
                   <CopyableId value={editing.sparkplug_id || gatewaySparkplugId(editing.gateway_id)} label="Sparkplug edge node id" onNotify={showToast} />
+                  {/* Copyable in its own right -- see the matching comment in DevicesTab. */}
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', marginBottom: '4px' }}>
+                    Configure this edge node to publish on:
+                  </div>
+                  <CopyableId
+                    value={`spBv1.0/<group>/NDATA/${editing.sparkplug_id || gatewaySparkplugId(editing.gateway_id)}`}
+                    label="Sparkplug topic"
+                    onNotify={showToast}
+                    className="copyable-id-wrap"
+                  />
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    Configure this edge node to publish on <span className="mono">spBv1.0/&lt;group&gt;/NDATA/{editing.sparkplug_id || gatewaySparkplugId(editing.gateway_id)}</span>. Click to copy.
+                    Replace <span className="mono">&lt;group&gt;</span> with the Sparkplug group id configured on the edge node.
                   </div>
                 </>
               ) : (
@@ -488,14 +508,43 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
             </div>
             <div className="form-group">
               <label className="form-label">Shopfloor Cell Zone</label>
-              <select className="form-control" value={form.cell_id || ''} onChange={e => setForm(f => ({ ...f, cell_id: e.target.value }))} title="Cell this gateway serves — devices inherit their cell from their gateway">
-                <option value="">— Unassigned Zone —</option>
+              <select
+                className="form-control"
+                value={form.location_scope === SCOPE_SITE_WIDE ? '' : (form.cell_id || '')}
+                disabled={form.location_scope === SCOPE_SITE_WIDE}
+                onChange={e => setForm(f => ({ ...f, cell_id: e.target.value }))}
+                title="Cell this gateway serves — its devices inherit this cell unless they carry one of their own"
+              >
+                <option value="">— No cell assigned —</option>
                 {cells.filter(c => !c.is_archived).map(c => (
                   <option key={c.cell_id} value={c.cell_id}>{c.cell_name}</option>
                 ))}
               </select>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                Devices served by this gateway appear under this cell on the Cells and Overview pages.
+
+              {/* Site-Wide is what a host-run or central connector actually is: it serves the
+                  facility, not a bay. Ticking it clears the cell, mirroring
+                  gateways_site_wide_has_no_cell -- "it is in no particular cell" and "it is in
+                  Bay 4" cannot both be true. */}
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px', fontSize: '12px', cursor: 'pointer' }}
+                     title="For a host-run or central gateway that serves the whole facility rather than one cell">
+                <input
+                  type="checkbox"
+                  checked={form.location_scope === SCOPE_SITE_WIDE}
+                  onChange={e => setForm(f => ({
+                    ...f,
+                    location_scope: e.target.checked ? SCOPE_SITE_WIDE : SCOPE_CELL,
+                    cell_id: e.target.checked ? '' : f.cell_id
+                  }))}
+                />
+                <span>Site-Wide — this gateway serves no single cell</span>
+              </label>
+
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                {form.location_scope === SCOPE_SITE_WIDE
+                  ? 'Its devices inherit nothing from it, so each one needs its own cell — or its own Site-Wide mark. Scope is not inherited: a machine reached through a host-run connector is still in a cell.'
+                  : form.cell_id
+                    ? 'Devices served by this gateway appear under this cell, unless a device carries a cell of its own.'
+                    : 'With no cell here, devices served by this gateway land in the Unassigned queue unless each is given one. If this connector serves the whole facility, mark it Site-Wide instead.'}
               </div>
             </div>
             <div className="form-group">

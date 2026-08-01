@@ -322,6 +322,44 @@ is seeded from MTConnect's component types, with `standard` recording provenance
 - The picker's vocabulary is `knownGroupNames(registry, catalog)` — the union of both sources.
   Registry casing wins, because that is what the trigger treats as canonical.
 
+### Asset Location
+
+`devices.cell_id` (nullable) plus `location_scope` on devices *and* gateways
+(`20260101000036_device_location.sql`) separate **where an asset is** from **how its data gets
+here**. `public.device_locations` resolves the effective cell; `utils/cellResolution.js` mirrors it.
+
+- **`device → gateway` is the data path** (in the Sparkplug topic, keys telemetry);
+  **`device → cell` is a location overlay** that appears in no topic and no payload. Inheriting
+  the second through the first cannot express a virtual gateway (a host-run proxy with no honest
+  cell) or a site-scoped asset (BMS, AGV, ambient sensor) that has no single cell at all.
+- **NULL means inherit, and `cell_id` has NO default.** Resolution is
+  `COALESCE(device.cell_id, gateway.cell_id)`, so an explicit value always *wins* — a default
+  makes every value explicit and inheritance unreachable. Ingestion inserts discovered devices
+  with no cell and `approve-quarantine` sets `gateway_id`, not `cell_id`, so a default would pin
+  every approved device in Unassigned forever. **Inheritance is the absence of a decision.**
+- **`ON DELETE SET NULL`, never `CASCADE`.** A device is not a child of its location.
+- **Unassigned and Site-Wide are derived lanes, not `cells` rows.** A magic cell would put
+  semantics in a free-text `name` (the `devices.asset_type` trap) and the pg_cron purge job runs
+  as superuser, past any RLS guard. They are also **different states that must not merge**:
+  Unassigned is an absence (a queue that should drain), Site-Wide an operator's assertion (a
+  permanent home). That is what `location_scope` records.
+- **Scope does not inherit; only `cell_id` does.** A device behind a Site-Wide gateway resolves to
+  *Unassigned* — inheriting the connector's scope would answer the question for the operator and
+  hide the device from the queue that would have prompted them.
+- A **CHECK forbids `site_wide` with a populated `cell_id`** on both tables, so the view's CASE
+  can never silently discard a stored value. `api.js` (`locationFieldsFrom`) and
+  `approve-quarantine` both clear the cell when the scope is set, so the UI never sees a 400.
+- **Ingestion never writes location.** `ingestion/test_device_location.py` pins that across every
+  write path; a regression would be silent — devices would just stop inheriting.
+- **`/api/v1/cells` returns gateways only.** Membership is the *resolved* cell, which no embed can
+  express, and fetching devices there made every consumer read the table twice per refresh
+  (Overview polls at 3s). Callers group what they hold with `groupDevicesByCell()`.
+- **`device_locations` is read flat and merged by id**, the same shape as `device_schemas`. Mapped
+  rows carry `effective_cell_id` (display) *and* `cell_id` (edit) — never collapse the two, or a
+  form round-trip converts an inherited cell into an explicit override.
+- Adding a column to `gateways` requires calling `ensure_gateway_status_view()` — see migration
+  0024's header for why `CREATE OR REPLACE VIEW` cannot widen a `g.*` view in place.
+
 ### Device Tags
 
 A device's type is **derived, never stored**: the distinct metric groups its assigned schema models
@@ -440,22 +478,59 @@ need them before the database accepts connections, and duplicating them would cr
 truth. The `deploy-nodered` edge function reads `NODERED_ADMIN_TOKEN` from its own environment, not
 from Vault — Vault is only for the SQL-side consumer.
 
-### Node-RED Credentials
+### Node-RED Seeding & Credentials
 
-Node-RED's broker credentials are **not** the Vault-held admin token — they are `MQTT_USER` /
-`MQTT_PASSWORD`, written to `/data/flows_cred.json` by `scripts/node-red-init.mjs`, encrypted under
-`NODERED_CREDENTIAL_SECRET` (aes-256-ctr, key = `sha256(secret)`, 32-hex IV prefix).
+`scripts/node-red-init.mjs` provisions `/data` on the `nodered_data` volume. It makes **three
+writes with three different lifetimes**, and collapsing them behind one guard is what broke the
+stack twice: the *flow* is user content (seed once), while *settings.js* and the *credentials* are
+stack configuration that must be reconciled on every boot — a volume outlives a fix, and the old
+single guard exited before reaching the repair.
 
+- **`flowFile` must be declared in `settings.js`, and its absence is silent.** Node-RED does not
+  fall back to `flows.json` — it falls back to **`flows_<hostname>.json`**
+  (`@node-red/runtime/lib/storage/localfilesystem/projects/index.js`), and a container's hostname
+  is a random id. The seeded `/data/flows.json` is then simply never read: Node-RED opens a blank
+  canvas and writes its own empty flow beside ours. The credentials file is derived from the same
+  basename, so `flows_cred.json` is missed in the same breath and the broker node comes up with no
+  username. One omitted line, two unrelated-looking symptoms.
+- **The image SHIPS `/data/flows.json`, so "does it exist" cannot mean "is it provisioned".**
+  `nodered/node-red:latest` contains a two-node `Flow 1` placeholder, and Docker pre-populates a
+  fresh named volume from the image's directory contents — so the file exists before the init
+  script has ever run. Guarding the seed on it meant the repo flow was **never** seeded on a fresh
+  stack, while the script announced it was "preserving editor changes" that did not exist. The
+  guard is now `/data/.factoryplus-seeded`, which records what the script *did*. Anything it
+  overwrites is backed up to `flows.json.pre-seed` first.
 - **`_credentialSecret` in `/data/.config.runtime.json` silently defeats the seed.** Node-RED mints
   that key for itself whenever `settings.js` has no `credentialSecret`, and thereafter prefers it:
   it fails to decrypt the seeded file, **discards the credentials**, and rewrites the file empty
-  under its own key. The broker node ends up with no username and Mosquitto answers
-  `not authorised`. The init script clears it on the seed path — do not remove that step.
-- **Only on the seed path.** Credentials a user entered through the editor really are encrypted
-  under `_credentialSecret`, so clearing it on an existing volume would destroy them.
-- **Diagnose from Mosquitto's log, not Node-RED's.** Node-RED logs only a generic
-  `Connection failed to broker: <clientId>@<url>` — note that is the *client id*, not the username.
-  `docker logs factoryplus_mosquitto` says `disconnected: not authorised` outright.
+  under its own key. The broker node ends up with no username, and Mosquitto — running
+  `allow_anonymous false` — refuses the connection with CONNACK 5.
+- **Clearing that key is gated on "are there credentials to lose", not on the seed path.**
+  Credentials a user entered through the editor really are encrypted under `_credentialSecret`, so
+  clearing it while `flows_cred.json` holds content would destroy them. But tying the clear to the
+  seed made an already-broken volume unrepairable: the credentials were long gone and the stale key
+  survived in a file the script never touched.
+- **`settings.js` is checked by LOADING it, not by grepping it.** Node-RED's own default is 26 KB
+  and mentions `credentialSecret` in a commented-out example, so a substring test reports a file
+  that declares nothing as correctly configured. The previous file is backed up to `settings.js.bak`
+  before replacement.
+- **Diagnose from the client side, not from Mosquitto's log.** Node-RED logs only a generic
+  `Connection failed to broker: <clientId>@<url>` — note that is the *client id*, not the username
+  — and Mosquitto's stdout is not a reliable witness here: a connection refused with CONNACK 5 was
+  observed with **no** corresponding `not authorised` line, so its absence proves nothing. Settle it
+  from inside the Node-RED container, where a two-line probe separates network from auth outright:
+
+  ```bash
+  docker exec factoryplus_node_red node -e "
+    const mqtt=require('/usr/src/node-red/node_modules/mqtt');
+    const c=mqtt.connect('mqtt://mosquitto:1883',{reconnectPeriod:0});
+    c.on('connect',()=>{console.log('CONNECTED');c.end()});
+    c.on('error',e=>{console.log('ERROR code='+e.code,e.message);c.end()});"
+  ```
+
+  `code=5 Not authorized` means the credentials never reached the node — look at `settings.js`,
+  `_credentialSecret` and `flows_cred.json`, in that order. A connect failure with no code at all
+  is a network or DNS problem instead.
 
 ### Grafana SSO
 
@@ -510,6 +585,20 @@ python ingestion/validate.py
 
 # Or via Docker (protoc compiled automatically):
 docker compose up -d
+python ingestion/validate.py
+```
+
+**`validate.py` needs `SUPABASE_SERVICE_ROLE_KEY` in its environment but must NOT inherit the
+rest of `.env`.** Without the key it seeds nothing and fails ~12 of 20 checks in a way that
+reads like a schema fault ("no quarantined device reported", "no telemetry records"), with the
+real cause one line up: `Service role key: MISSING`. But sourcing `.env` wholesale breaks it a
+second way — `MQTT_HOST=mosquitto` and `DB_HOST=timescaledb` are compose-internal names that do
+not resolve from the host, and the script's own defaults (`localhost:1883`, `localhost:5433`)
+are the correct ones there. Export the key alone, or source `.env` and unset `MQTT_HOST`,
+`DB_HOST` and `DB_PORT`:
+
+```bash
+set -a && . ./.env && set +a && unset MQTT_HOST DB_HOST DB_PORT
 python ingestion/validate.py
 ```
 
@@ -595,14 +684,24 @@ python ingestion/validate.py
 - `utils/deviceTags.js` — schema-derived device tags and unmodelled-metric detection
 - `utils/model3d.js` — 3D model extension/media-type table, path composition and size formatting;
   mirrored by `functions/aas-export/model3dContentType.ts`
+- `utils/cellResolution.js` — effective-cell resolution, the two lane sources, `needsCellAssignment`
+  and `groupDevicesByCell`; mirrors `public.device_locations`
 - `utils/deviceProvisioning.js`, `utils/gatewayStatus.js`, `utils/sparkplugId.js`
 - `components/common/Model3DUploader.jsx` — the 3D model dropzone, rendered by `AssetConfigModal`
 - `components/common/ActionMenu.jsx` — portalled row-overflow menu (see Key Patterns for why)
 - `components/common/TagList.jsx` — collapsing tag list with pinned `priority` entries
 
 ### Tab Components
-- `OverviewTab` — Asset summary cards with quick filters
-- `CellsTab` — Factory cell management
+- `OverviewTab` — Asset summary cards, plus the shopfloor map. The **Site-Wide and Unassigned
+  lanes stack full-width above the cell grid**, not inside it: they are not cells, and inside the
+  grid they reflowed between the bays as cells were added, so the queue moved on every stack.
+  Each lists gateways *and* devices — a cell-scoped gateway with no cell is usually *why* the
+  devices behind it are stranded. Dropping onto a cell or Site-Wide sets location directly;
+  dropping onto **Unassigned clears the override and reports where the device actually landed**,
+  because Unassigned is derived and cannot be set. Unassigned collapses to one line when empty
+  **while staying a drop target** — an empty queue is exactly when you want to drag into it
+- `CellsTab` — Factory cell management. Device membership is grouped from its own `/api/v1/devices`
+  load; the cells endpoint no longer carries it
 - `GatewaysTab` — Gateway configuration and status. Same row shape as Devices: **Launch UI** and
   **Edit** visible, the rest in an `ActionMenu`, **Restore replacing Edit** on an archived row.
   Launch UI stays prominent because it is the only action that leaves the dashboard, and it is
@@ -636,11 +735,14 @@ python ingestion/validate.py
 
 ### Core Tables
 - `cells` — Factory cell/groupings (`name` is still `UNIQUE`; cells are not addressed on the wire)
-- `gateways` — Edge gateways linked to cells; `sparkplug_id` generated column
+- `gateways` — Edge gateways linked to cells; `sparkplug_id` generated column, plus
+  `location_scope` (`cell` | `site_wide`)
 - `devices` — Devices linked to gateways, `is_quarantined` flag; `sparkplug_id` generated column,
   plus `reported_identity` / `quarantine_reason` / `identity_source` for quarantine diagnostics,
   and `last_birth_metrics` / `last_birth_metrics_at` for birth-metric observation (see below),
-  plus `model_3d_path` (an object key in `asset-3d-models`, never a URL)
+  plus `model_3d_path` (an object key in `asset-3d-models`, never a URL), and
+  `cell_id` / `location_scope` for location (see **Asset Location** above)
+- `device_locations` (view) — a device's effective cell, resolved at read time
 - `digital_thread` — Auto-populated audit log via triggers
 - `documents`, `asset_config`, `schemas`, `directory_services` — Extended metadata.
   `schemas` and `metric_catalog` carry `semantic_id` / `semantic_id_type` (AAS Phase 1)

@@ -1,10 +1,11 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useMemo } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { gatewayLiveStatus, formatHeartbeat } from '../../utils/gatewayStatus'
 import { effectiveSparkplugId, gatewaySparkplugId } from '../../utils/sparkplugId'
+import { groupDevicesByCell, SOURCE_SITE_WIDE } from '../../utils/cellResolution'
 import CopyableId from '../common/CopyableId'
 import { InlineDocumentAccordion } from '../common/InlineDocumentAccordion'
 import { StatusBadge } from '../common/StatusBadge'
@@ -44,9 +45,10 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
 
   const loadAll = useCallback(async (signal) => {
     try {
-      // /api/v1/cells embeds each cell's gateways and, through them, its devices --
-      // devices have no cell_id of their own, so the relationship only exists via the
-      // gateway. `assets` stays loaded for the unassigned-device counter below.
+      // /api/v1/cells embeds each cell's gateways only. Device membership is the resolved
+      // effective cell (devices.cell_id, else the gateway's), which is grouped from `assets`
+      // by groupDevicesByCell -- so this list is the source for both the cell cards and the
+      // unassigned counter, and is read once rather than once per view.
       const [c, a] = await Promise.all([
         api.get('/api/v1/cells', { signal }),
         api.get('/api/v1/devices', { signal }),
@@ -93,15 +95,30 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
   const canManage = hasPermission(PERMISSION_UUIDS.CELL_MANAGE)
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
 
-  // A device with no gateway -- or whose gateway is not assigned to a cell -- appears on
-  // no cell card at all. Surface those rather than letting them silently vanish.
-  const unlinkedDevices = assets.filter(a => !a.is_archived && !a.cell_id)
+  // A device that resolves to no cell appears on no cell card, so surface it rather than letting
+  // it silently vanish -- but ONLY when that is an unanswered question.
+  //
+  // A Site-Wide device also resolves to no cell, and it is excluded here: that is the operator's
+  // deliberate answer, not an omission. Flagging it produced a permanent warning that no action
+  // could ever clear, which is worse than no warning at all -- it trains people to ignore the
+  // banner, and this is the same distinction the Devices page's "Needs attention" filter makes.
+  //
+  // `effective_cell_id`, not `cell_id`: the latter is the explicit override and is NULL for every
+  // device that merely inherits its cell.
+  const unlinkedDevices = assets.filter(a =>
+    !a.is_archived && !a.effective_cell_id && a.location_source !== SOURCE_SITE_WIDE
+  )
 
-  // Cell-level rollups. A cell has no state of its own worth filtering on -- what matters is the
-  // condition of the gateways and devices reachable through it. /api/v1/cells already embeds both
-  // (see the comment on loadAll), so these read straight off the cell rather than re-querying.
+  // Cell membership, grouped from the device list this page already holds.
+  //
+  // /api/v1/cells deliberately does NOT return devices: a cell's devices are those that RESOLVE
+  // to it, which no PostgREST embed can express, and having the endpoint fetch them meant this
+  // page read the whole device table twice on every poll. Grouping here costs one pass over a
+  // list already in memory.
+  const devicesByCell = useMemo(() => groupDevicesByCell(assets), [assets])
+
   const liveGateways = (c) => (c.gateways || []).filter(g => !g.is_archived)
-  const liveDevices = (c) => (c.devices || []).filter(a => !a.is_archived)
+  const liveDevices = (c) => (devicesByCell.get(c.cell_id) || []).filter(a => !a.is_archived)
 
   const cellNeedsAttention = (c) =>
     liveGateways(c).some(g => gatewayLiveStatus(g) !== 'ONLINE') ||
@@ -145,7 +162,7 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
       </div>
       <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '16px' }}>
         Manage physical and logical shopfloor cell zones, inspect assigned edge gateways and devices, and monitor zone lifecycle audit history.
-        A device belongs to a cell through its edge gateway.
+        A device belongs to the cell set on it, or to its gateway's cell if it has none of its own.
       </p>
 
       <div className="filter-bar">
@@ -206,7 +223,8 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
           <div>
             <strong>{unlinkedDevices.length} device{unlinkedDevices.length === 1 ? '' : 's'} not linked to any cell zone:</strong>{' '}
             {unlinkedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unlinkedDevices.length > 5 ? ', …' : ''}.
-            Assign each device to a gateway on the Devices page, and assign that gateway to a cell on the Gateways page.
+            Set a cell on each device from the Devices page, give its gateway a cell on the Gateways page,
+            or mark it Site-Wide if it belongs to no single cell.
           </div>
         </div>
       )}
@@ -223,7 +241,8 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
       ) : (
         filteredCells.map(c => {
           const cellGateways = c.gateways || []
-          const cellAssets = c.devices || []
+          // Devices that RESOLVE to this cell, not those merely reachable through its gateways.
+          const cellAssets = devicesByCell.get(c.cell_id) || []
 
           return (
             <div key={c.cell_id} className="cell-card" style={{ opacity: c.is_archived ? 0.9 : 1, border: c.is_archived ? '1px solid var(--warning)' : '1px solid var(--border)' }}>
@@ -233,7 +252,7 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
                   <span>{c.cell_name}</span>
                   <span className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>ID: {c.cell_id}</span>
                   <span className="badge badge-neutral" title="Count of edge gateways assigned to this cell">{cellGateways.length} Gateways</span>
-                  <span className="badge badge-neutral" title="Count of devices reachable through this cell's gateways">{cellAssets.length} Devices</span>
+                  <span className="badge badge-neutral" title="Count of devices located in this cell — its gateways' devices, plus any device filed here explicitly">{cellAssets.length} Devices</span>
                   {c.is_archived && (
                     <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Cell decommissioned and archived">
                       <IconArchive size={11} /> ARCHIVED (OUT OF COMMISSION)
@@ -297,7 +316,7 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
                   <div className="nested-box-title">Assigned Edge Gateways ({cellGateways.length})</div>
                   {cellGateways.length === 0 ? (
                     <div style={{ fontStyle: 'italic', fontSize: '12px', color: 'var(--text-dim)' }}>
-                      No gateways assigned to this cell zone. Assign a gateway to this cell on the Gateways page — devices reach a cell through their gateway.
+                      No gateways assigned to this cell zone. Assign one on the Gateways page — its devices then inherit this cell unless they carry one of their own.
                     </div>
                   ) : (
                     <div className="table-wrap">
@@ -325,7 +344,7 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
 
                 <div className="nested-box">
                   <div className="nested-box-title">Assigned Devices ({cellAssets.length})</div>
-                  {cellAssets.length === 0 ? <div style={{ fontStyle: 'italic', fontSize: '12px', color: 'var(--text-dim)' }}>No devices reachable through this cell zone's gateways.</div> : (
+                  {cellAssets.length === 0 ? <div style={{ fontStyle: 'italic', fontSize: '12px', color: 'var(--text-dim)' }}>No devices located in this cell zone.</div> : (
                     <div className="table-wrap">
                       <table>
                         <thead><tr><th title="Device Name">Name</th><th title="Sparkplug B device id">Sparkplug ID</th><th title="Status">Status</th><th title="Connected Edge Gateway">Gateway</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>

@@ -5,11 +5,28 @@
  * credentials ENCRYPTED AT REST, using Node-RED's own credential runtime so the
  * on-disk format is exactly what Node-RED expects to read back.
  *
- * Seeding is FIRST-RUN ONLY. /data is a durable named volume (nodered_data), so
- * an existing flows.json is the user's work, not a stale copy of ours -- this
- * script used to overwrite it on every `docker compose up`, silently discarding
- * everything built in the Node-RED editor. Set NODE_RED_FORCE_SEED=true to
- * deliberately reset the volume back to the repo's flow.
+ * THREE WRITES, THREE DIFFERENT LIFETIMES. An earlier version guarded all of
+ * them behind a single "does flows.json exist" check, which is correct for
+ * exactly one of them:
+ *
+ *   - the FLOW is user content. /data is a durable named volume, so an existing
+ *     flows.json is work done in the editor, not a stale copy of ours. Seeded
+ *     first-run only; NODE_RED_FORCE_SEED=true resets it deliberately.
+ *   - settings.js is STACK CONFIGURATION. It must be reconciled on every boot,
+ *     because a volume can outlive a fix to it -- and did: a volume provisioned
+ *     before `flowFile` was declared here could never be repaired, since the
+ *     one guard exited before reaching the repair.
+ *   - the CREDENTIALS are stack configuration too, but only while there are
+ *     none to lose. See the `_credentialSecret` note below.
+ *
+ * `flowFile` IS LOAD-BEARING AND ITS ABSENCE IS SILENT. Without it Node-RED does
+ * not fall back to flows.json -- it falls back to `flows_<hostname>.json`
+ * (@node-red/runtime/lib/storage/localfilesystem/projects/index.js), and a
+ * container's hostname is a random id. So a seeded /data/flows.json is simply
+ * never read: Node-RED starts with a BLANK CANVAS and writes its own empty flow
+ * beside ours. The credentials file is derived from the same basename, so the
+ * seeded flows_cred.json is missed in the same breath and the MQTT node comes up
+ * with no username. One omitted line, two unrelated-looking symptoms.
  *
  * Why this is not a plain JSON write: Node-RED encrypts flows_cred.json with
  * aes-256-ctr under sha256(credentialSecret). Writing plaintext leaves broker
@@ -27,6 +44,11 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+
+// settings.js is CommonJS and has to be evaluated, not parsed, to see what it actually declares
+// -- see settingsAreCorrect(). This module is ESM, so `require` has to be constructed.
+const require = createRequire(import.meta.url);
 
 const DATA_DIR = process.env.NODE_RED_DATA_DIR || '/data';
 const SEED_FLOW = process.env.NODE_RED_SEED_FLOW || '/seed/flows.json';
@@ -43,19 +65,9 @@ function fail(message) {
   process.exit(1);
 }
 
-// Bail out before anything is written if the volume is already provisioned.
-// This is checked ahead of the credential guards below because those protect a
-// write, and on an existing volume there is no write to protect.
-const flowsPath = path.join(DATA_DIR, 'flows.json');
-if (fs.existsSync(flowsPath) && !forceSeed) {
-  console.log(
-    `[node-red-init] ${flowsPath} already exists; preserving Node-RED editor changes. ` +
-      'Set NODE_RED_FORCE_SEED=true to reset the volume to the repo flow.'
-  );
-  process.exit(0);
-}
-
 // Fail closed. A missing secret previously degraded to plaintext-on-disk silently.
+// Checked before any write, and unconditionally: settings.js is now reconciled on every boot,
+// so there is no longer a path that legitimately runs without these.
 if (!credentialSecret) {
   fail('NODERED_CREDENTIAL_SECRET is not set; refusing to write credentials unencrypted.');
 }
@@ -63,33 +75,137 @@ if (!mqttPassword) {
   fail('MQTT_PASSWORD is not set; refusing to seed empty broker credentials.');
 }
 
-// 1. Seed the flow definition from the repo. Reached only on a fresh volume, or
-//    when NODE_RED_FORCE_SEED asks for a deliberate reset.
-if (!fs.existsSync(SEED_FLOW)) {
-  fail(`seed flow not found at ${SEED_FLOW}`);
-}
-fs.mkdirSync(DATA_DIR, { recursive: true });
-fs.copyFileSync(SEED_FLOW, flowsPath);
-
-// 1b. Drop any credential key Node-RED generated for itself on an earlier boot.
-//
-// This is what made the seeded broker credentials unusable. When settings.js carries no
-// `credentialSecret`, Node-RED mints a random one and stores it as `_credentialSecret` in
-// .config.runtime.json. That stored key then wins over settings.js on every subsequent start:
-// Node-RED tries it against the flows_cred.json this script wrote under NODERED_CREDENTIAL_SECRET,
-// fails to decrypt, silently DISCARDS the credentials, and rewrites the file empty under its own
-// key. The mqtt-broker node is then left with no username, and Mosquitto -- which runs
-// `allow_anonymous false` -- answers every connection with "not authorised".
-//
-// The failure is silent from both ends: Node-RED logs only a generic "Connection failed to
-// broker", and re-running this script does not help, because the stale key survives in a file the
-// script never touched. Removing the key here is what makes a seed actually stick.
-//
-// Only ever reached on the seed path. On an existing volume the script has already exited above,
-// so credentials a user entered through the editor -- which really are encrypted under
-// `_credentialSecret` -- are never invalidated by this.
+// The flow file name is declared in settings.js below, and the credentials file name is derived
+// from it by Node-RED (`<basename>_cred.json`). Both are pinned here so the two agree by
+// construction -- a mismatch is exactly the failure this script exists to prevent.
+const FLOW_FILE = 'flows.json';
+const flowsPath = path.join(DATA_DIR, FLOW_FILE);
+const credentialsPath = path.join(DATA_DIR, 'flows_cred.json');
+const settingsPath = path.join(DATA_DIR, 'settings.js');
 const runtimeConfigPath = path.join(DATA_DIR, '.config.runtime.json');
-if (fs.existsSync(runtimeConfigPath)) {
+
+fs.mkdirSync(DATA_DIR, { recursive: true });
+
+// 1. Seed the flow definition from the repo -- FIRST RUN ONLY.
+//
+// The only one of this script's writes that is user content. An existing flows.json may be work
+// done in the editor, and overwriting it silently discarded everything built there.
+//
+// THE GUARD IS A MARKER FILE, NOT `flows.json` EXISTING, and that distinction is the whole
+// reason Node-RED came up blank. `nodered/node-red:latest` SHIPS a /data/flows.json in the image
+// -- a two-node "Flow 1" placeholder -- and Docker pre-populates a fresh named volume from the
+// image's directory contents. So flows.json exists before this script has ever run, on a volume
+// that is empty by every meaningful definition. Guarding on it meant the repo flow was never
+// seeded at all: the script announced it was "preserving Node-RED editor changes" that did not
+// exist, and the editor opened on the image's placeholder.
+//
+// A marker records what this script DID, which is the actual question. It cannot be forged by an
+// image, and it survives the user editing or deleting the flow.
+const SEED_MARKER = path.join(DATA_DIR, '.factoryplus-seeded');
+const seededBefore = fs.existsSync(SEED_MARKER);
+const seededFlow = !seededBefore || forceSeed;
+
+if (seededFlow) {
+  if (!fs.existsSync(SEED_FLOW)) {
+    fail(`seed flow not found at ${SEED_FLOW}`);
+  }
+  // Anything already here is either the image's placeholder or -- on a volume provisioned before
+  // this marker existed -- possibly real work. Backed up rather than assumed worthless, the same
+  // courtesy settings.js gets above.
+  if (fs.existsSync(flowsPath)) {
+    fs.copyFileSync(flowsPath, `${flowsPath}.pre-seed`);
+    console.log(`[node-red-init] existing flow backed up to ${flowsPath}.pre-seed`);
+  }
+  fs.copyFileSync(SEED_FLOW, flowsPath);
+  fs.writeFileSync(
+    SEED_MARKER,
+    JSON.stringify({
+      seeded_at: new Date().toISOString(),
+      source: SEED_FLOW,
+      sha256: crypto.createHash('sha256').update(fs.readFileSync(SEED_FLOW)).digest('hex')
+    }, null, 2)
+  );
+  console.log(`[node-red-init] flow ${forceSeed ? 're-seeded (forced)' : 'seeded'} to ${flowsPath}.`);
+} else {
+  console.log(
+    `[node-red-init] flow already seeded (${SEED_MARKER}); preserving Node-RED editor changes. ` +
+      'Set NODE_RED_FORCE_SEED=true to reset the volume to the repo flow.'
+  );
+}
+
+// 2. Reconcile settings.js -- EVERY BOOT.
+//
+// Stack configuration, not user content, and the file a broken volume needs repaired. It is
+// only rewritten when it does not already declare both keys correctly, so a settings.js this
+// script previously wrote is left untouched.
+//
+// The check LOADS the module rather than grepping it. Node-RED's own default settings.js is 26KB
+// and mentions `credentialSecret` in a commented-out example, so a substring test reports a file
+// that declares nothing as correctly configured -- which is precisely the state a volume ends up
+// in when Node-RED writes its default before this script ever gets to it.
+function settingsAreCorrect() {
+  if (!fs.existsSync(settingsPath)) return false;
+  try {
+    const loaded = require(settingsPath);
+    return loaded?.credentialSecret === credentialSecret && loaded?.flowFile === FLOW_FILE;
+  } catch (err) {
+    // Unloadable settings cannot be trusted to declare anything. Replaced (with a backup).
+    console.warn(`[node-red-init] settings.js could not be loaded (${err.message}); replacing it.`);
+    return false;
+  }
+}
+
+if (!settingsAreCorrect()) {
+  // Never destroyed outright: a user may have hand-edited this file, and a .bak beside it is the
+  // difference between a recoverable surprise and a lost afternoon.
+  if (fs.existsSync(settingsPath)) {
+    fs.copyFileSync(settingsPath, `${settingsPath}.bak`);
+    console.log(`[node-red-init] previous settings.js backed up to ${settingsPath}.bak`);
+  }
+  fs.writeFileSync(
+    settingsPath,
+    'module.exports = {\n' +
+      `  flowFile: ${JSON.stringify(FLOW_FILE)},\n` +
+      `  credentialSecret: ${JSON.stringify(credentialSecret)}\n` +
+      '};\n'
+  );
+  console.log(`[node-red-init] settings.js written (flowFile=${FLOW_FILE}, credentialSecret set).`);
+}
+
+// 3. Decide whether the broker credentials may be (re)written.
+//
+// "Only while there are none to lose." Credentials that exist and carry content were entered
+// through the editor and are encrypted under whatever key Node-RED was using; rewriting them --
+// or clearing the key that decrypts them, below -- would destroy them. An absent or empty file
+// means there is nothing to protect, which is the state a volume is left in after Node-RED
+// discards credentials it could not decrypt.
+function credentialsWorthKeeping() {
+  if (!fs.existsSync(credentialsPath)) return false;
+  try {
+    const existing = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
+    if (typeof existing?.$ === 'string') return existing.$.length > 0;
+    return Object.keys(existing || {}).length > 0;
+  } catch {
+    return false;  // Unparseable is not worth keeping.
+  }
+}
+
+const writeCredentials = seededFlow || !credentialsWorthKeeping();
+
+// 3b. Drop any credential key Node-RED generated for itself on an earlier boot.
+//
+// When settings.js carries no `credentialSecret`, Node-RED mints a random one and stores it as
+// `_credentialSecret` in .config.runtime.json. That stored key then wins on every subsequent
+// start: Node-RED tries it against the flows_cred.json this script wrote under
+// NODERED_CREDENTIAL_SECRET, fails to decrypt, silently DISCARDS the credentials, and rewrites
+// the file empty under its own key. The mqtt-broker node is left with no username, and
+// Mosquitto -- which runs `allow_anonymous false` -- refuses the connection with CONNACK 5.
+//
+// Guarded by writeCredentials rather than by the seed path: the point is not "is this a fresh
+// volume" but "is there ciphertext that only this key can open". Tying it to the seed was what
+// made an already-broken volume unrepairable, since the credentials were long gone but the stale
+// key survived in a file the script never touched.
+if (writeCredentials && fs.existsSync(runtimeConfigPath)) {
   try {
     const runtimeConfig = JSON.parse(fs.readFileSync(runtimeConfigPath, 'utf8'));
     if (Object.prototype.hasOwnProperty.call(runtimeConfig, '_credentialSecret')) {
@@ -110,13 +226,15 @@ if (fs.existsSync(runtimeConfigPath)) {
   }
 }
 
-// 2. settings.js supplies the key Node-RED derives its decryption key from.
-fs.writeFileSync(
-  path.join(DATA_DIR, 'settings.js'),
-  `module.exports = { credentialSecret: ${JSON.stringify(credentialSecret)} };\n`
-);
+if (!writeCredentials) {
+  console.log(
+    '[node-red-init] existing flows_cred.json holds credentials; leaving them and the ' +
+      'credential key untouched.'
+  );
+  process.exit(0);
+}
 
-// 3. Encrypt the credentials via Node-RED's own runtime module.
+// 4. Encrypt the credentials via Node-RED's own runtime module.
 const credentials = (
   await import(`${RUNTIME_DIR}/@node-red/runtime/lib/nodes/credentials.js`)
 ).default;
@@ -137,7 +255,7 @@ await credentials.add('mqtt-broker-config', {
 
 const exported = await credentials.export();
 
-// 4. Assert we really produced ciphertext. This is the guard that the previous
+// 5. Assert we really produced ciphertext. This is the guard that the previous
 //    implementation lacked -- it failed open and wrote readable passwords.
 if (!Object.prototype.hasOwnProperty.call(exported, '$')) {
   fail(
@@ -146,7 +264,7 @@ if (!Object.prototype.hasOwnProperty.call(exported, '$')) {
   );
 }
 
-// 5. Prove Node-RED will be able to read it back before we commit it to disk.
+// 6. Prove Node-RED will be able to read it back before we commit it to disk.
 try {
   const key = crypto.createHash('sha256').update(credentialSecret).digest();
   const blob = exported.$;
@@ -162,12 +280,9 @@ try {
   fail(`credential round-trip failed: ${err.message}`);
 }
 
-fs.writeFileSync(
-  path.join(DATA_DIR, 'flows_cred.json'),
-  JSON.stringify(exported)
-);
+fs.writeFileSync(credentialsPath, JSON.stringify(exported));
 
 console.log(
-  `[node-red-init] Flow ${forceSeed ? 're-seeded (forced)' : 'seeded'} ` +
-    'and credentials written encrypted (aes-256-ctr).'
+  `[node-red-init] broker credentials written encrypted (aes-256-ctr) to ${credentialsPath} ` +
+    `for user '${mqttUser}'.`
 );

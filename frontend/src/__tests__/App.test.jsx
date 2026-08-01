@@ -69,7 +69,7 @@ describe('App Component', () => {
       expect(screen.getByText('Factory+ Asset Tracking Platform')).toBeInTheDocument()
     })
 
-    expect(screen.getByText('Supabase BaaS + Standalone TimescaleDB Architecture')).toBeInTheDocument()
+    expect(screen.getByText('Supabase BaaS + Standalone TimescaleDB + AAS Architecture')).toBeInTheDocument()
     expect(screen.getByText('admin@factoryplus.local')).toBeInTheDocument()
   })
 

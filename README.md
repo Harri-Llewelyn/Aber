@@ -578,6 +578,19 @@ All database migrations are stored in `supabase/migrations/`:
   - **Writes are gated on `device:manage` roles, not on "authenticated"** — see the Storage design note above.
   - The migration **asserts its own constraint**: a `DO` block inserts a probe device, confirms the CHECK *rejects* a malformed path and *accepts* a well-formed one, then removes both the row and the `digital_thread` entries its own trigger wrote — an append-only table must not grow by a row per boot.
 
+- **`20260101000036_device_location.sql`** *(asset location)*:
+  - Adds **`devices.cell_id`** (nullable), **`location_scope`** on devices *and* gateways, and the **`device_locations`** view that resolves a device's effective cell in SQL.
+  - **It separates where an asset IS from how its data gets here.** `device → gateway` is a data path: it is in the Sparkplug topic and it is what telemetry is keyed through. `device → cell` is a location overlay that appears in no topic and no payload. Inheriting the second through the first could not express either case that motivated this — a virtual gateway is a host-level proxy with no honest cell, and a site-scoped asset (BMS, AGV, ambient sensor) has no single cell at all. Saying such an asset is in Bay 4 because its connector happens to live there was a lie the schema had no way to avoid telling.
+  - **NULL means inherit, and the column has NO default.** This is the load-bearing decision. Resolution is `COALESCE(device.cell_id, gateway.cell_id)`, so an explicit value always *wins* — and a default makes every value explicit. Concretely: ingestion inserts every auto-discovered device without a cell and `approve-quarantine` sets `gateway_id`, not `cell_id`, so a default would pin every approved device in Unassigned forever while appearing to have filed it correctly. Inheritance has to be the **absence** of a decision, not a precedence rule competing with one.
+  - **`ON DELETE SET NULL`, not `CASCADE`.** `gateways.cell_id` cascades because a gateway serving a demolished cell is genuinely orphaned. A device is not a child of its location: deleting a cell must return its devices to the queue, not destroy the asset records, their birth history and their attached 3D models.
+  - **Unassigned and Site-Wide are derived lanes, not rows in `cells`.** Pinned system cells were considered and rejected: `cells` is a full CRUD surface with archive, restore, retention purge, Grafana URLs and attached documents, a renameable `UNIQUE` name carrying semantics is the trap `devices.asset_type` was retired for, and the `pg_cron` purge job (0025) runs as superuser and would sail past any RLS guard protecting such a row.
+  - **The two lanes are different states and must not merge.** Unassigned is an absence — a work queue that should drain. Site-Wide is an operator's assertion that an asset has no single cell — a permanent home. That is what `location_scope` records, and why it is a marker rather than another cell.
+  - **Scope does not inherit; only `cell_id` does.** A device behind a Site-Wide gateway resolves to *Unassigned*, not Site-Wide. Site-Wide is a claim about a specific asset, and a physically-located machine reached through a host-run connector is exactly the case this migration exists to make expressible — inheriting the connector's scope would answer the question on the operator's behalf and hide the device from the queue that would have prompted them.
+  - A **CHECK forbids `site_wide` with a populated `cell_id`** on both tables, so the view's `CASE` can never silently discard a stored value. `api.js` and `approve-quarantine` both clear the cell when the scope is set, so the UI never has to surface a constraint violation.
+  - **No immutability trigger, deliberately.** Where an asset sits is ordinary reconfiguration: reversible, and changing no wire contract — the opposite of `metric_catalog.name`.
+  - The migration **asserts its own resolution**: a `DO` block builds two cells, a gateway and four devices, exercises all four branches of the view (inherited / explicit-with-mismatch / unassigned / site-wide), confirms the contradiction CHECK rejects, then removes the fixtures and their `digital_thread` rows. A wrong `CASE` here would not surface as an error anywhere — it would surface as assets quietly filed in the wrong cell.
+  - Migration **0024 was rewritten** as part of this. `gateway_status` selects `g.*`, which is expanded at creation time, and `CREATE OR REPLACE VIEW` only tolerates new columns *appended* to the end — so adding any column to `gateways` made replaying 0024 fail the boot with `cannot change name of view column "live_status"`. It now drop-and-recreates through `public.ensure_gateway_status_view()`, which 0036 calls after adding its column so the view is correct on the *first* boot rather than one behind.
+
 ### The Schemas Page
 
 Three stacked cards, in order of how specific they are to this deployment:
@@ -685,11 +698,51 @@ Tags drive filters on three pages:
 
 ### Asset Relationship Model
 
-`cells → gateways → devices` is a strict chain. **Devices have no `cell_id`**: a device belongs to
-the cell that its edge gateway is assigned to. The dashboard reads this with nested PostgREST
-embeds (`cells?select=*,gateways(...,devices(...))`), and the Gateways page is where a gateway is
-attached to a cell. A gateway with no cell — or a device with no gateway — is flagged in the UI
-rather than silently disappearing from the Cells and Overview pages.
+**A device has two relationships to a cell, and they answer different questions.**
+
+`devices.gateway_id → gateways.cell_id` is the **data path** — it is what the Sparkplug topic
+carries and what telemetry is keyed through. `devices.cell_id` (migration 0036) is an explicit
+**location** override. `NULL` there means *inherit from the gateway*; it is not a stored
+"unassigned". A device's **effective cell** is therefore its own cell if it has one, otherwise its
+gateway's, otherwise nothing — and a **Site-Wide** asset has none by assertion.
+
+That resolution lives in one place, `public.device_locations`, mirrored locally by
+`frontend/src/utils/cellResolution.js` (the same keep-in-step obligation as `sparkplugId.js` and
+`gatewayStatus.js`). Every consumer reads `effective_cell_id` to display and `cell_id` to edit, so
+a form that round-trips a device cannot turn an inherited cell into an explicit one just by saving.
+
+> [!IMPORTANT]
+> **Cell membership is not a PostgREST embed, and cannot be.**
+> `cells?select=*,gateways(...,devices(...))` returns devices by *inheritance* only, so a device
+> explicitly placed in cell B whose gateway serves cell A comes back under A — and no combination
+> of embeds expresses "unless the child overrides". `/api/v1/cells` therefore returns **gateways
+> only**; callers group the device list they already hold with `groupDevicesByCell()`. Having the
+> endpoint fetch every device to bucket them server-side worked, but made each consumer read the
+> device table twice per refresh, and the Overview page polls at 3s.
+
+Two **derived lanes** hold the assets that resolve to no cell. They are computed at read time and
+are not rows in `cells`:
+
+| Lane | Meaning | What it is |
+|------|---------|------------|
+| **Site-Wide** | `location_scope = 'site_wide'` | An operator's assertion that an asset belongs to no single cell — a BMS, an AGV, an ambient sensor. A permanent home. |
+| **Unassigned** | resolves to no cell, scope still `'cell'` | Nobody has decided yet. A work queue that should drain. |
+
+The distinction is load-bearing: collapsing the two would make the queue undrainable. Gateways
+carry `location_scope` too — a host-run or central connector is Site-Wide, and a **cell-scoped
+gateway with no cell** is itself Unassigned, which is usually *why* the devices behind it are
+stranded, since they had nothing to inherit.
+
+On the **Overview** page both lanes render full-width above the cell grid, each listing its
+gateways *and* its devices, with drag-and-drop in and out. Dropping onto Site-Wide sets the scope
+and clears the cell. Dropping onto **Unassigned clears the explicit cell and then reports where the
+device actually landed** — a device whose gateway serves a cell inherits it again and visibly
+springs back, because Unassigned is derived and cannot be *set*. Forcing it by detaching the
+gateway would express a location intent by changing the data path, which is the coupling this model
+removed. The lane collapses to a single line when nothing is stranded, while staying a drop target.
+
+Devices needing a location decision — unassigned, filed in a cell their gateway does not serve, or
+pointing at an archived cell — are surfaced by the Devices page's **Needs attention** filter.
 
 > [!NOTE]
 > All migrations are idempotent and are re-applied by `supabase-db-init` on every stack start. `supabase-db-init` runs with `set -e` and `psql -v ON_ERROR_STOP=1`, so a failing migration aborts startup loudly instead of being silently skipped.
@@ -886,7 +939,9 @@ the running stack — `supabase/kong.yml` allows the Swagger UI origin through C
 The GitHub Actions CI workflow ([`.github/workflows/ci.yml`](file:///.github/workflows/ci.yml)) executes automated testing and verification across three parallel jobs:
 
 1. **`frontend-build` (Frontend Build & Test)**: Installs Node.js dependencies, runs the Vitest unit test suite (`npm test`), and builds the Vite production bundle (`npm run build`).
-2. **`edge-function-auth-test` (Edge Function Authorization Unit Tests)**: Runs unit tests (`test_approve_quarantine.py`, `test_deploy_nodered.py`, `test_user_roles_rls.py`) to verify fail-closed role authorization for missing claims and non-privileged roles, plus `ingestion/test_declared_metrics.py`, which exercises the shipped birth-metric observation functions directly (protobuf/MQTT/psycopg2 are stubbed, so it needs neither `protoc` nor the Docker stack).
+2. **`edge-function-auth-test` (Edge Function Authorization Unit Tests)**: Runs unit tests (`test_approve_quarantine.py`, `test_deploy_nodered.py`, `test_user_roles_rls.py`) to verify fail-closed role authorization for missing claims and non-privileged roles, plus `ingestion/test_declared_metrics.py` and `ingestion/test_device_location.py`, which exercise the shipped ingestion functions directly (protobuf/MQTT/psycopg2 are stubbed, so they need neither `protoc` nor the Docker stack).
+   - `test_approve_quarantine.py` also covers the **location patch composition** — that an unanswered cell is *omitted* rather than defaulted, which is what keeps `devices.cell_id`'s NULL-means-inherit intact — and carries drift guards that read `index.ts` and assert its branches still exist, the same discipline `test_aas_export.py` applies to its duplicated mapper.
+   - `test_device_location.py` pins one invariant: **the ingestion daemon never writes an asset's location.** It sweeps every write path (quarantine insert, verified `DBIRTH`, re-quarantine, `DDEATH`, gateway heartbeat) and asserts no payload names `cell_id` or `location_scope`. A regression here would be silent — devices would simply stop inheriting and the Unassigned queue would stop filling.
 3. **`e2e-validation` (End-to-End Ingestion Validation)**: Installs Python dependencies, installs `protobuf-compiler`, compiles `sparkplug_b.proto` via `protoc --python_out=. sparkplug_b.proto`, launches the unified Docker Compose stack (`docker compose up -d`), polls service health, and executes `python ingestion/validate.py`.
 
 ---
@@ -943,10 +998,53 @@ python ingestion/validate.py
 > enough: it reloads the old `flows.json` that the init container has not yet replaced.
 >
 > `NODE_RED_FORCE_SEED=true` is required because seeding is **first-run only** — without it the
-> init container finds an existing `/data/flows.json` and deliberately leaves it alone, so that
-> work done in the Node-RED editor survives a restart. Forcing the seed **discards** any such
-> edits. The same overwrite is available without a restart from the Directory tab's
-> *Sync Edge Flows via GitOps* button.
+> init container finds its own marker at `/data/.factoryplus-seeded` and deliberately leaves the
+> flow alone, so that work done in the Node-RED editor survives a restart. Forcing the seed
+> **discards** any such edits (the previous flow is copied to `flows.json.pre-seed` first). The
+> same overwrite is available without a restart from the Directory tab's *Sync Edge Flows via
+> GitOps* button.
+
+> [!NOTE]
+> **Why the seed guard is a marker file and not "does `flows.json` exist".**
+> `nodered/node-red:latest` **ships its own `/data/flows.json`** — a two-node `Flow 1` placeholder
+> — and Docker pre-populates a fresh named volume from the image's directory contents. So the file
+> exists before `node-red-init` has ever run. Guarding on it meant the repo flow was **never seeded
+> on a fresh stack**: Node-RED opened on the image's placeholder, the script logged that it was
+> "preserving Node-RED editor changes" that did not exist, and the simulator had to be imported by
+> hand through the editor's hamburger menu. The marker records what the script *did*, which is the
+> question actually being asked, and no image can fabricate it.
+>
+> The same fix closed a second, unrelated-looking symptom. `scripts/node-red-init.mjs` writes
+> `/data/settings.js`, and **`flowFile` must be declared there**: without it Node-RED does not fall
+> back to `flows.json` but to **`flows_<hostname>.json`**
+> (`@node-red/runtime/lib/storage/localfilesystem/projects/index.js`), and a container's hostname is
+> a random id. The credentials file is derived from the same basename, so a seeded `flows_cred.json`
+> is missed in the same breath and the MQTT node comes up with **no username** — which Mosquitto,
+> running `allow_anonymous false`, refuses with CONNACK 5.
+>
+> The script's three writes now have three lifetimes: the **flow** is seeded once (user content),
+> while **`settings.js`** and the **credentials** are reconciled on every boot (stack configuration,
+> and a volume outlives a fix to them). Clearing Node-RED's self-generated `_credentialSecret` is
+> gated on *whether there are credentials to lose*, not on the seed path — credentials entered
+> through the editor really are encrypted under that key, but tying the clear to the seed made an
+> already-broken volume unrepairable.
+
+> [!TIP]
+> **Diagnose broker auth from the client side, not from Mosquitto's log.** Node-RED logs only a
+> generic `Connection failed to broker: <clientId>@<url>` — note that is the *client id*, not the
+> username — and Mosquitto's stdout is not a reliable witness: a CONNACK 5 rejection was observed
+> with **no** corresponding `not authorised` line, so its absence proves nothing. Settle it from
+> inside the container:
+> ```bash
+> docker exec factoryplus_node_red node -e "
+>   const mqtt=require('/usr/src/node-red/node_modules/mqtt');
+>   const c=mqtt.connect('mqtt://mosquitto:1883',{reconnectPeriod:0});
+>   c.on('connect',()=>{console.log('CONNECTED');c.end()});
+>   c.on('error',e=>{console.log('ERROR code='+e.code,e.message);c.end()});"
+> ```
+> `code=5 Not authorized` means the credentials never reached the node — check `settings.js`,
+> `_credentialSecret` and `flows_cred.json`, in that order. A failure with no code at all is a
+> network or DNS problem instead.
 
 The validation script verifies:
 1. **MQTT Payload Publishing**: Sends Sparkplug B `DBIRTH` and `DDATA` messages to Mosquitto.
@@ -970,9 +1068,10 @@ lost. Each entry names the offending code so it can be picked up directly.
 | :-- | :--- | :--- | :--- |
 | 1 | ~~**Real-time subscriptions are disabled.**~~ **RESOLVED.** `supabase-realtime` is deployed, `kong.yml` routes `/realtime/v1/`, and the tabs subscribe through `useRealtimeTable`. See [Realtime Change Feed](#realtime-change-feed). | — | Median update latency measured at 110 ms (was 0–3000 ms). `usePolling` is retained at 60 s as a reconciliation loop — Realtime has no replay, so a dropped socket loses every change in the gap. |
 | 2 | ~~**GitOps status is hardcoded stub data.**~~ **RESOLVED by removal.** The status badge, commit SHA and repository URL were literals; they and the `/api/v1/gitops/status` endpoint behind them are deleted. | — | The Directory card no longer claims a deployment state. Nothing in the stack observes what Node-RED is actually running, so a badge asserting one was fabricated — and a `SYNCED` that cannot detect drift is worse than no badge, because it stops you looking. The card is now a labelled, confirmed, `gitops:manage`-gated push of the repo flow, with no status claim attached. |
-| 3 | ~~**Node-RED editor changes are discarded on restart.**~~ **RESOLVED.** Seeding is now first-run only: [`scripts/node-red-init.mjs`](scripts/node-red-init.mjs) skips the copy when `/data/flows.json` already exists, and `/data` is the durable `nodered_data` named volume. | — | Editor changes survive `docker compose up`. Resetting to the repo flow is now explicit — `NODE_RED_FORCE_SEED=true`, or the Directory tab's GitOps sync button. `docker compose down -v` still destroys the volume. |
-| 14 | ~~**Node-RED could not authenticate to Mosquitto**, so the demo device published nothing.~~ **RESOLVED.** When `settings.js` carries no `credentialSecret`, Node-RED mints a random one and stores it as `_credentialSecret` in `/data/.config.runtime.json`. That stored key then wins on every later start: Node-RED tried it against the `flows_cred.json` the seed script had written under `NODERED_CREDENTIAL_SECRET`, failed to decrypt, **silently discarded the credentials**, and rewrote the file empty under its own key. The `mqtt-broker` node was left with no username, and Mosquitto — running `allow_anonymous false` — answered `not authorised`. [`scripts/node-red-init.mjs`](scripts/node-red-init.mjs) now clears `_credentialSecret` on the seed path. | [`scripts/node-red-init.mjs`](scripts/node-red-init.mjs) | Silent from both ends: Node-RED logged only a generic `Connection failed to broker`, and re-running the seed did not help because the stale key lived in a file the script never touched. Diagnosed from Mosquitto's own log (`disconnected: not authorised`) plus decrypting `flows_cred.json` with each candidate key. Only the seed path clears it, so credentials entered through the editor — which genuinely are encrypted under `_credentialSecret` — are never invalidated. |
+| 3 | ~~**Node-RED editor changes are discarded on restart.**~~ **RESOLVED.** Seeding is first-run only, guarded by the marker `/data/.factoryplus-seeded` written by [`scripts/node-red-init.mjs`](scripts/node-red-init.mjs); `/data` is the durable `nodered_data` named volume. (The guard was originally "does `/data/flows.json` exist", which issue 16 shows was never a correct test of that.) | — | Editor changes survive `docker compose up`. Resetting to the repo flow is now explicit — `NODE_RED_FORCE_SEED=true`, or the Directory tab's GitOps sync button. `docker compose down -v` still destroys the volume. |
+| 14 | ~~**Node-RED could not authenticate to Mosquitto**, so the demo device published nothing.~~ **RESOLVED.** When `settings.js` carries no `credentialSecret`, Node-RED mints a random one and stores it as `_credentialSecret` in `/data/.config.runtime.json`. That stored key then wins on every later start: Node-RED tried it against the `flows_cred.json` the seed script had written under `NODERED_CREDENTIAL_SECRET`, failed to decrypt, **silently discarded the credentials**, and rewrote the file empty under its own key. The `mqtt-broker` node was left with no username, and Mosquitto — running `allow_anonymous false` — answered `not authorised`. [`scripts/node-red-init.mjs`](scripts/node-red-init.mjs) clears `_credentialSecret` — gated on *whether there are credentials to lose*, not on the seed path, which is the correction issue 16 forced. | [`scripts/node-red-init.mjs`](scripts/node-red-init.mjs) | Silent from both ends: Node-RED logged only a generic `Connection failed to broker`, and re-running the seed did not help because the stale key lived in a file the script never touched. **Mosquitto's log is not a reliable witness** — a CONNACK 5 rejection was later observed with no `not authorised` line at all, so diagnose from the client side (see the probe under End-to-End Validation). Credentials entered through the editor genuinely are encrypted under `_credentialSecret` and are never invalidated, because a non-empty `flows_cred.json` suppresses the clear. |
 | 15 | ~~**The end-to-end validator's Digital Thread check was vacuous, and its audit cleanup was dead code.**~~ **RESOLVED.** Check 2 selected the *whole* `digital_thread` table and passed on `len(logs) > 0`, so it could never fail once the table was non-empty for any reason — a migration, the demo device booting, an edit in the UI — and never verified that *this run's* trigger fired. Separately, the cleanup filtered `entity_type LIKE '%VALIDATE%'`, but `log_digital_thread_event()` only ever writes `devices` / `gateways` / `cells` into that column, so it matched nothing and every run's audit rows were left behind in an append-only table. | [`ingestion/validate.py`](ingestion/validate.py) | Check 2 is now scoped to the run's own entity ids and asserts both `INSERT` and `UPDATE` were logged. Cleanup collects those ids *before* deleting the entities — the audit rows are keyed by `entity_id`, so deleting the named rows first destroys the only link back — and the delete is guarded against an empty `in_` list, which would otherwise wipe the entire audit history. Orphans from before the fix cannot be attributed and were cleared by hand. |
+| 16 | ~~**Node-RED booted with a blank canvas on every fresh stack**, so the simulator flow had to be imported by hand.~~ **RESOLVED.** Two independent causes, both silent. First, `nodered/node-red:latest` **ships its own `/data/flows.json`** (a two-node `Flow 1` placeholder) and Docker pre-populates a fresh named volume from the image's contents — so the seed guard's "does `flows.json` exist" test was true before the init script had ever run, and the repo flow was never seeded while the log claimed it was "preserving Node-RED editor changes". Second, the seeded `settings.js` omitted **`flowFile`**, and Node-RED falls back not to `flows.json` but to **`flows_<hostname>.json`** — a random container id — so a correctly seeded flow would still not have been read, and the credentials file (derived from the same basename) was missed with it. | [`scripts/node-red-init.mjs`](scripts/node-red-init.mjs) | The guard is now the marker `/data/.factoryplus-seeded`, which records what the script *did* rather than testing a file an image also creates; `settings.js` declares `flowFile` and is reconciled on every boot rather than only on the seed path, so a volume broken by the old behaviour repairs itself without `down -v`. Verified on a wiped volume: the 26-node Gateway Simulator loads, the broker connects, and telemetry flows. |
 | 4 | **`LIMIT` is not pushed down to TimescaleDB.** `postgres_fdw` pushes `WHERE` clauses to the remote but never `LIMIT`, so a telemetry query without a time filter materialises the whole matching range in Supabase before trimming. | [`supabase/migrations/20260101000010_telemetry_foreign_table.sql`](supabase/migrations/20260101000010_telemetry_foreign_table.sql) | Fine at demo volumes. At scale, narrow the time window or replace the view with a `dblink`-based RPC that builds the remote `LIMIT`. |
 | 5 | **Device `connection_method` is free text.** Stored but not validated. (`asset_type` was too — it is now superseded by schema-derived device tags and is no longer written; existing values still display.) | [`supabase/migrations/20260101000009_gateway_heartbeat_and_service_directory.sql`](supabase/migrations/20260101000009_gateway_heartbeat_and_service_directory.sql) | Cosmetic; no feature depends on its value. |
 | 9 | **`public.roles` cannot accept a new row.** `seed.sql` inserts roles with explicit integer ids but never advances `roles_id_seq`, so the sequence still returns `1` while `max(id)` is `4`. Any `INSERT INTO public.roles (name, ...)` without an explicit id fails with `duplicate key value violates unique constraint "roles_pkey"`. Found incidentally while testing Grafana role mapping. | [`supabase/seed.sql`](supabase/seed.sql) | Creating a **new RBAC role** is impossible via SQL or PostgREST until fixed. The four seeded roles are unaffected, so nothing in the running product breaks. One-line fix: `SELECT setval('public.roles_id_seq', (SELECT max(id) FROM public.roles));`. `public.permissions` uses UUID ids and is not affected. |

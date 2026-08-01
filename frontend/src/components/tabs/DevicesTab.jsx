@@ -22,6 +22,10 @@ import { DigitalThreadModal } from '../modals/DigitalThreadModal'
 import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
 import { isProvisioningOverdue, isNeverSeen } from '../../utils/deviceProvisioning'
 import {
+  SCOPE_CELL, SCOPE_SITE_WIDE, SOURCE_EXPLICIT, SOURCE_SITE_WIDE,
+  resolveDeviceLocation, needsCellAssignment, unassignedHint
+} from '../../utils/cellResolution'
+import {
   unmodelledMetrics, schemasForDevice, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG
 } from '../../utils/deviceTags'
 import { suggestMatches } from '../../utils/quarantineMatching'
@@ -42,6 +46,11 @@ import {
   IconX
 } from '../common/Icons'
 
+// Sentinel values for the cell filter's two derived lanes. Prefixed so they can never collide
+// with a cell UUID, and kept out of `cells` because neither lane is a row in that table.
+const CELL_FILTER_UNASSIGNED = '__unassigned__'
+const CELL_FILTER_SITE_WIDE = '__site_wide__'
+
 export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter }) {
   const [assets, setAssets]     = useState([])
   const [cells, setCells]       = useState([])
@@ -61,7 +70,10 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
   // No asset_type: a device's classification is now derived from the metric groups its schema
   // models (see utils/deviceTags.js), not typed in by hand. The column is left in place so
   // legacy values keep displaying, but nothing writes it any more.
-  const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_id: '' })
+  // cell_id starts EMPTY, not at some default cell: empty means "inherit from the gateway"
+  // (migration 0036), so a device registered without anyone choosing a location follows its
+  // gateway rather than being pinned wherever the form happened to default.
+  const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_id: '', cell_id: '', location_scope: SCOPE_CELL })
   const [form, setForm]         = useState(blank)
   const [filterMode, setFilterMode] = useState('all')
 
@@ -175,13 +187,6 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
   // resolved through the gateway.
   useRealtimeTable(['devices', 'gateways', 'cells'], loadAll, { enabled: REALTIME_ENABLED })
 
-  // A device's cell is whatever cell its gateway belongs to; there is no direct link.
-  const cellNameForGateway = (gatewayId) => {
-    const gw = gateways.find(g => g.gateway_id === gatewayId)
-    if (!gw?.cell_id) return ''
-    return cells.find(c => c.cell_id === gw.cell_id)?.cell_name || ''
-  }
-
   const save = async () => {
     try {
       // asset_type is deliberately not sent: omitting it leaves any legacy value intact
@@ -191,6 +196,11 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
         connection_method: form.connection_method || null,
         active_gateway_id: form.active_gateway_id || null,
         schema_id: form.schema_id || null,
+        // '' is the inherit option, which api.js turns into NULL. Both keys are always sent
+        // from this form because the form always shows both -- a partial send would be a
+        // silent no-op on whichever one the user had just changed.
+        cell_id: form.cell_id || '',
+        location_scope: form.location_scope || SCOPE_CELL,
       }
       if (editing) {
         await api.put(`/api/v1/devices/${editing.asset_id}`, payload)
@@ -268,7 +278,17 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
       const { data, error } = await supabase.functions.invoke('approve-quarantine', {
         // asset_name carries the operator's correction to the label the device announced
         // itself under. It was collected by the modal and then dropped on the floor here.
-        body: { device_id: assetId, gateway_id: targetGateway, asset_name: body?.asset_name }
+        //
+        // cell_id/location_scope are the modal's location answer. '' is the Inherit option and
+        // is forwarded as such -- the edge function writes NULL for it, which is what keeps the
+        // device following its gateway.
+        body: {
+          device_id: assetId,
+          gateway_id: targetGateway,
+          asset_name: body?.asset_name,
+          cell_id: body?.cell_id ?? '',
+          location_scope: body?.location_scope || 'cell'
+        }
       })
 
       if (error) {
@@ -359,9 +379,19 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
   // table below never renders a quarantined device -- both callers now exclude them first.
   // It stays so this predicate remains true to its name if it is ever reused somewhere the
   // quarantine banner is not present.
+  // A cell that has been archived is still a valid foreign key, so a device can go on pointing
+  // at a decommissioned cell indefinitely with nothing to show for it. Derived, not enforced:
+  // archiving a cell should not fail because something still references it.
+  const pointsAtArchivedCell = (a) =>
+    !!a.effective_cell_id && !!cells.find(c => c.cell_id === a.effective_cell_id)?.is_archived
+
   const needsAttention = (a) =>
     a.is_quarantined || isProvisioningOverdue(a) || a.identity_source === 'legacy_name' ||
-    unmodelledFor(a).length > 0
+    unmodelledFor(a).length > 0 ||
+    // Location findings. Unassigned is the work queue that should drain; a mismatch and an
+    // archived cell are both "this resolved to something, but look at it".
+    needsCellAssignment(a, gateways.find(g => g.gateway_id === a.active_gateway_id) || null) ||
+    a.cell_mismatch || pointsAtArchivedCell(a)
 
   const filteredAssets = assets.filter(a => {
     // Quarantined devices belong to the Zero-Touch Onboarding Quarantine Queue above and
@@ -381,7 +411,15 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
     if (schemaFilter && !schemasForDevice(a, schemas).some(s => s.schema_uuid === schemaFilter)) return false
     if (tagFilter && !deviceHasTag(a, schemasForDevice(a, schemas), tagFilter)) return false
     if (gatewayFilter && (a.active_gateway_id || '') !== gatewayFilter) return false
-    if (cellFilter && (a.cell_id || '') !== cellFilter) return false
+    // The resolved cell, not the explicit override -- filtering on cell_id would match only
+    // devices someone had explicitly filed and silently hide every inherited one. The two
+    // synthetic values are lanes, not cells: Unassigned is the queue that should drain and
+    // Site-Wide is a permanent home, and neither is a row in `cells`.
+    if (cellFilter === CELL_FILTER_UNASSIGNED) {
+      if (!needsCellAssignment(a, gateways.find(g => g.gateway_id === a.active_gateway_id) || null)) return false
+    } else if (cellFilter === CELL_FILTER_SITE_WIDE) {
+      if (a.location_source !== SOURCE_SITE_WIDE) return false
+    } else if (cellFilter && (a.effective_cell_id || '') !== cellFilter) return false
     if (attentionOnly && !needsAttention(a)) return false
 
     if (statusFilter === 'online'   && (a.status === 'OFFLINE' || a.is_archived)) return false
@@ -500,16 +538,18 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
           {gateways.map(g => <option key={g.gateway_id} value={g.gateway_id}>{g.gateway_name}</option>)}
         </select>
 
-        {/* A device's cell is its gateway's cell -- there is no devices.cell_id column. */}
-        <select className="form-control" style={{ width: '170px' }} value={cellFilter} onChange={e => setCellFilter(e.target.value)} title="Filter by cell zone, derived from the device's gateway">
+        {/* Filters on the RESOLVED cell, plus the two derived lanes. */}
+        <select className="form-control" style={{ width: '170px' }} value={cellFilter} onChange={e => setCellFilter(e.target.value)} title="Filter by the cell a device resolves to — its own if set, otherwise its gateway's">
           <option value="">Any cell</option>
+          <option value={CELL_FILTER_UNASSIGNED}>Unassigned (needs a cell)</option>
+          <option value={CELL_FILTER_SITE_WIDE}>Site-Wide</option>
           {cells.map(c => <option key={c.cell_id} value={c.cell_id}>{c.cell_name}</option>)}
         </select>
 
         <button
           className={`btn btn-sm ${attentionOnly ? 'btn-primary' : 'btn-ghost'}`}
           onClick={() => setAttentionOnly(v => !v)}
-          title="Show only devices that are overdue their first birth, still matched by legacy name, or publishing metrics their schema does not model. Quarantined devices are listed separately in the onboarding queue above."
+          title="Show only devices that are overdue their first birth, still matched by legacy name, publishing metrics their schema does not model, or needing a cell — unassigned, filed in a cell their gateway does not serve, or pointing at an archived cell. Quarantined devices are listed separately in the onboarding queue above."
         >
           <IconAlertTriangle size={13} /> Needs attention ({attentionCount})
         </button>
@@ -690,7 +730,45 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                             return <TagList tags={entries} limit={2} />
                           })()}
                         </td>
-                        <td>{cells.find(c => c.cell_id == a.cell_id)?.cell_name || '—'}</td>
+                        <td style={{ maxWidth: '170px' }}>
+                          {(() => {
+                            // The resolved cell, plus how it was resolved. "Inherited" and
+                            // "set on device" render the same name but behave differently when
+                            // the gateway is reassigned, so the distinction has to be visible.
+                            const gw = gateways.find(g => g.gateway_id === a.active_gateway_id) || null
+                            const cellName = cells.find(c => c.cell_id === a.effective_cell_id)?.cell_name
+
+                            if (a.location_source === SOURCE_SITE_WIDE) {
+                              return <span className="badge badge-neutral" style={{ fontSize: '10px' }} title="Asserted to have no single cell — facility-wide or mobile">Site-Wide</span>
+                            }
+                            if (!cellName) {
+                              return (
+                                <span className="badge badge-warning"
+                                      style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', fontSize: '10px' }}
+                                      title={unassignedHint(a, gw) || 'No cell resolved'}>
+                                  <IconAlertTriangle size={10} /> Unassigned
+                                </span>
+                              )
+                            }
+                            return (
+                              <>
+                                <div>{cellName}</div>
+                                {a.location_source === SOURCE_EXPLICIT && (
+                                  <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}
+                                       title="Set on the device itself — it will not move if the gateway is reassigned">
+                                    Set on device
+                                  </div>
+                                )}
+                                {a.cell_mismatch && (
+                                  <div style={{ fontSize: '10px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '3px' }}
+                                       title={`Its gateway serves ${cells.find(c => c.cell_id === a.gateway_cell_id)?.cell_name || 'another cell'}`}>
+                                    <IconAlertTriangle size={10} /> Gateway elsewhere
+                                  </div>
+                                )}
+                              </>
+                            )
+                          })()}
+                        </td>
                         <td>
                           <select className="form-control form-control-sm" style={{ width: '100%' }} value={a.active_gateway_id || ''} onChange={e => reassignGatewayInline(a, e.target.value)} disabled={!canManage || a.is_archived}>
                             <option value="">Unassigned</option>
@@ -839,8 +917,25 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
               {editing ? (
                 <>
                   <CopyableId value={effectiveSparkplugId(editing)} label="Sparkplug device id" onNotify={showToast} />
+                  {/* The topic is its own copy target. It used to be a plain <span> with the words
+                      "Click to copy" beneath it, which promised an affordance that did not exist --
+                      only the id above was ever clickable, and the sentence sat under the topic.
+                      The edge node segment is filled in from the assigned gateway when there is
+                      one, so what gets copied is a topic you can actually use rather than a
+                      template with two holes in it. */}
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', marginBottom: '4px' }}>
+                    Configure the gateway to publish this device on:
+                  </div>
+                  <CopyableId
+                    value={`spBv1.0/<group>/DDATA/${
+                      gateways.find(g => g.gateway_id === form.active_gateway_id)?.sparkplug_id || '<edge node>'
+                    }/${effectiveSparkplugId(editing)}`}
+                    label="Sparkplug topic"
+                    onNotify={showToast}
+                    className="copyable-id-wrap"
+                  />
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    Configure the gateway to publish this device on <span className="mono">spBv1.0/&lt;group&gt;/DDATA/&lt;edge node&gt;/{effectiveSparkplugId(editing)}</span>. Click to copy.
+                    Replace <span className="mono">&lt;group&gt;</span> with the Sparkplug group id configured on the edge node.
                   </div>
                 </>
               ) : (
@@ -870,26 +965,93 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
               </select>
             </div>
 
-            <div className="form-group">
-              <label className="form-label">Shopfloor Cell Zone</label>
-              {/* Derived, not editable: a device's cell is the cell of its gateway.
-                  This used to be a select whose value PostgREST silently discarded,
-                  because devices have no cell_id column. */}
-              <input
-                className="form-control"
-                value={cellNameForGateway(form.active_gateway_id) || '— follows the assigned gateway —'}
-                disabled
-                readOnly
-                title="A device belongs to the cell its edge gateway is assigned to"
-              />
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                Set by the gateway above. To move this device to another cell, pick a gateway in that cell — or assign this gateway to a cell on the Gateways page.
-              </div>
-            </div>
+            {/* WHERE the device is, which is not the same question as how its data reaches us.
+                Leaving the picker on "Inherit" is the normal case and stores NULL; picking a cell
+                stores an override that wins over the gateway's. See migration 0036. */}
+            {(() => {
+              const formGateway = gateways.find(g => g.gateway_id === form.active_gateway_id) || null
+              const siteWide = form.location_scope === SCOPE_SITE_WIDE
+              const location = resolveDeviceLocation(
+                { cell_id: siteWide ? null : form.cell_id, location_scope: form.location_scope },
+                formGateway
+              )
+              const nameOf = (id) => cells.find(c => c.cell_id === id)?.cell_name
+              const inheritedName = nameOf(location.gateway_cell_id)
+              const chosenCell = cells.find(c => c.cell_id === form.cell_id)
+
+              return (
+                <div className="form-group">
+                  <label className="form-label">Shopfloor Cell Zone</label>
+                  <select
+                    className="form-control"
+                    value={siteWide ? '' : (form.cell_id || '')}
+                    disabled={siteWide}
+                    onChange={e => setForm(f => ({ ...f, cell_id: e.target.value }))}
+                    title="Where this device physically sits. Leave on Inherit to follow its gateway."
+                  >
+                    {/* Named after what it resolves to, not "None" -- the empty value is a
+                        deliberate "follow the gateway", not an absence. */}
+                    <option value="">
+                      {inheritedName ? `— Inherit from gateway (${inheritedName}) —` : '— Inherit from gateway (gateway has no cell) —'}
+                    </option>
+                    {cells.filter(c => !c.is_archived).map(c => (
+                      <option key={c.cell_id} value={c.cell_id}>{c.cell_name}</option>
+                    ))}
+                    {/* An archived cell is not offered, but one already stored stays visible:
+                        silently dropping it would relocate the device on the next save. */}
+                    {chosenCell?.is_archived && (
+                      <option value={chosenCell.cell_id}>{chosenCell.cell_name} (archived)</option>
+                    )}
+                  </select>
+
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px', fontSize: '12px', cursor: 'pointer' }}
+                         title="For assets with no single cell — a BMS, an AGV, an ambient sensor. Different from leaving it unassigned.">
+                    <input
+                      type="checkbox"
+                      checked={siteWide}
+                      onChange={e => setForm(f => ({
+                        ...f,
+                        location_scope: e.target.checked ? SCOPE_SITE_WIDE : SCOPE_CELL,
+                        // Cleared together, mirroring devices_site_wide_has_no_cell: "it is in no
+                        // particular cell" and "it is in Bay 4" cannot both be true.
+                        cell_id: e.target.checked ? '' : f.cell_id
+                      }))}
+                    />
+                    <span>Site-Wide — this asset has no single cell</span>
+                  </label>
+
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                    {siteWide
+                      ? 'Reported as Site-Wide rather than under any cell. Use this for facility-wide or mobile assets.'
+                      : location.location_source === SOURCE_EXPLICIT
+                        ? `Set on this device — it stays in ${nameOf(location.effective_cell_id) || 'this cell'} even if its gateway moves.`
+                        : inheritedName
+                          ? `Follows the gateway above. Reassigning the gateway moves this device with it.`
+                          : 'Neither this device nor its gateway has a cell, so it will appear in the Unassigned queue. Pick a cell here, set one on the gateway, or mark it Site-Wide.'}
+                  </div>
+
+                  {location.cell_mismatch && (
+                    <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '6px', display: 'flex', alignItems: 'flex-start', gap: '5px' }}>
+                      <IconAlertTriangle size={12} style={{ flexShrink: 0, marginTop: '1px' }} />
+                      <span>
+                        This device is filed in <strong>{nameOf(location.effective_cell_id)}</strong> but its
+                        gateway serves <strong>{inheritedName}</strong>. That is allowed — a shared or host-run
+                        connector often reaches across cells — but check it is what you meant.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
 
             <div className="form-group">
               <label className="form-label">Device Type / Classification <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '11px' }}>(derived)</span></label>
-              <div className="form-control" style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-muted)', background: 'var(--bg-glass)' }} title="Derived from the metric groups the assigned schema models — not typed in by hand">
+              {/* flexWrap is load-bearing, not tidiness: the tri-standard schema derives six tags
+                  (Axes, Controller, Machine, MotionDevice, OEE, Systems) and an unwrapped row
+                  pushed the last of them outside the modal, where it was unreadable and could not
+                  be scrolled to. The count grows with the schema, so there is no width at which
+                  a single row is safe. */}
+              <div className="form-control" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px', color: 'var(--text-muted)', background: 'var(--bg-glass)' }} title="Derived from the metric groups the assigned schema models — not typed in by hand">
                 {(() => {
                   const preview = deviceTagList(editing, schemas.find(s => s.schema_uuid === form.schema_id) || null)
                   if (preview.length === 0) {

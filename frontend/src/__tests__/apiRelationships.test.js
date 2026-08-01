@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
  * Regression tests for the asset relationship + telemetry read/write paths:
- *  - cells -> gateways -> devices arrive as nested embeds (devices have no cell_id)
+ *  - cells -> gateways arrive as a nested embed; a cell's DEVICES are bucketed by their
+ *    effective cell instead, since an explicit devices.cell_id can override the data path
+ *  - `cell_id` on a mapped device row is the explicit override; `effective_cell_id` is resolved
  *  - a device's gateway is written from `active_gateway_id`, the key the UI actually sends
  *  - telemetry is read from the TimescaleDB-backed `telemetry` view with real filters
  */
@@ -55,7 +57,7 @@ describe('cell -> gateway -> device relationships', () => {
     expect(callFor('cells').select).toMatch(/gateways\(.*devices\(.*\).*\)/s);
   });
 
-  it('flattens each cell to its gateways and the devices reachable through them', async () => {
+  it('flattens each cell to its gateways, and does not fetch devices to do it', async () => {
     state.responses.cells = {
       data: [{
         id: 'cell-1',
@@ -75,13 +77,18 @@ describe('cell -> gateway -> device relationships', () => {
 
     expect(cell.cell_id).toBe('cell-1');
     expect(cell.gateway_count).toBe(2);
-    expect(cell.device_count).toBe(2);
     expect(cell.gateways.map(g => g.gateway_name)).toEqual(['GW One', 'GW Two']);
+    // The gateway's own devices ARE the embed -- that is the data path, and it is a plain FK.
     expect(cell.gateways[0].device_count).toBe(2);
-    // Devices carry their resolved gateway, which the cell card renders instead of a UUID.
-    expect(cell.devices.map(d => d.asset_name)).toEqual(['CNC_01', 'CNC_02']);
-    expect(cell.devices[0].gateway_name).toBe('GW One');
-    expect(cell.devices[0].active_gateway_id).toBe('gw-1');
+    expect(cell.gateways[0].devices[0].gateway_name).toBe('GW One');
+
+    // A cell's device MEMBERSHIP is not returned: it is the resolved effective cell, which no
+    // embed can express, and fetching every device here made each consumer read the device
+    // table twice per refresh. Callers group what they already hold, via groupDevicesByCell().
+    expect(cell.devices).toBeUndefined();
+    expect(cell.device_count).toBeUndefined();
+    expect(callFor('devices')).toBeUndefined();
+    expect(callFor('device_locations')).toBeUndefined();
   });
 
   it('returns each gateway with its assigned devices and a device count', async () => {
@@ -101,17 +108,83 @@ describe('cell -> gateway -> device relationships', () => {
     expect(gateway.last_heartbeat).toBe('2026-01-01T00:00:00Z');
   });
 
-  it('derives a device cell from its gateway', async () => {
+  it('derives a device cell from its gateway when it has no explicit one', async () => {
     state.responses.devices = {
-      data: [{ id: 'dev-1', name: 'CNC_01', gateway_id: 'gw-1', gateways: { id: 'gw-1', name: 'GW One', cell_id: 'cell-1' } }],
+      data: [{ id: 'dev-1', name: 'CNC_01', gateway_id: 'gw-1', cell_id: null, gateways: { id: 'gw-1', name: 'GW One', cell_id: 'cell-1' } }],
       error: null
     };
 
     const [device] = await api.get('/api/v1/devices');
 
-    expect(device.cell_id).toBe('cell-1');
+    expect(device.effective_cell_id).toBe('cell-1');
+    expect(device.location_source).toBe('inherited');
+    // The explicit column stays null. It used to be overwritten with the gateway's cell after
+    // the row spread, which would now discard the very column it is named after -- and a form
+    // round-trip would write the inherited value back as an explicit override.
+    expect(device.cell_id).toBeNull();
     expect(device.gateway_name).toBe('GW One');
     expect(device.active_gateway_id).toBe('gw-1');
+  });
+
+  it('lets an explicit device cell override the gateway, and flags the disagreement', async () => {
+    state.responses.devices = {
+      data: [{ id: 'dev-1', name: 'CNC_01', gateway_id: 'gw-1', cell_id: 'cell-9', gateways: { id: 'gw-1', name: 'GW One', cell_id: 'cell-1' } }],
+      error: null
+    };
+
+    const [device] = await api.get('/api/v1/devices');
+
+    expect(device.effective_cell_id).toBe('cell-9');
+    expect(device.cell_id).toBe('cell-9');
+    expect(device.location_source).toBe('explicit');
+    expect(device.cell_mismatch).toBe(true);
+  });
+
+});
+
+describe('writing an asset location', () => {
+  it('writes an explicit cell on update', async () => {
+    await api.put('/api/v1/devices/dev-1', { asset_name: 'CNC_01', cell_id: 'cell-9' });
+    expect(callFor('devices').payload).toMatchObject({ cell_id: 'cell-9' });
+  });
+
+  it('clears the cell back to inherit rather than sending an empty string', async () => {
+    await api.put('/api/v1/devices/dev-1', { asset_name: 'CNC_01', cell_id: '' });
+    expect(callFor('devices').payload.cell_id).toBeNull();
+  });
+
+  it('never touches cell_id when the caller does not mention it', async () => {
+    // Reassigning a gateway must not silently relocate the asset.
+    await api.put('/api/v1/devices/dev-1', { asset_name: 'CNC_01', active_gateway_id: 'gw-9' });
+    expect('cell_id' in callFor('devices').payload).toBe(false);
+    expect('location_scope' in callFor('devices').payload).toBe(false);
+  });
+
+  it('omits cell_id entirely on insert when none was chosen, so inheritance stays reachable', async () => {
+    await api.post('/api/v1/devices', { asset_name: 'CNC_02', active_gateway_id: 'gw-9' });
+    expect('cell_id' in callFor('devices').payload).toBe(false);
+  });
+
+  it('clears the cell when an asset is marked Site-Wide, rather than letting the CHECK reject it', async () => {
+    await api.put('/api/v1/devices/dev-1', { asset_name: 'BMS', location_scope: 'site_wide', cell_id: 'cell-9' });
+    expect(callFor('devices').payload).toMatchObject({ location_scope: 'site_wide', cell_id: null });
+  });
+
+  it('applies the same pairing rule to gateways', async () => {
+    await api.put('/api/v1/gateways/gw-1', { gateway_name: 'Virtual', location_scope: 'site_wide', cell_id: 'cell-1' });
+    expect(callFor('gateways').payload).toMatchObject({ location_scope: 'site_wide', cell_id: null });
+  });
+
+  it('normalises an unrecognised scope to cell rather than writing it through', async () => {
+    await api.put('/api/v1/devices/dev-1', { asset_name: 'CNC_01', location_scope: 'nonsense' });
+    expect(callFor('devices').payload.location_scope).toBe('cell');
+  });
+
+  it('does not treat is_virtual as a location assertion', async () => {
+    // A virtual gateway is a deployment fact; site-wide is an operator's claim about location.
+    await api.put('/api/v1/gateways/gw-1', { gateway_name: 'Virtual', is_virtual: true, cell_id: 'cell-1' });
+    expect(callFor('gateways').payload).toMatchObject({ is_virtual: true, cell_id: 'cell-1' });
+    expect('location_scope' in callFor('gateways').payload).toBe(false);
   });
 });
 

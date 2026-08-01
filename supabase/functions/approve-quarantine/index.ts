@@ -77,7 +77,9 @@ export default async function handler(req: Request): Promise<Response> {
       );
     }
 
-    const { device_id, gateway_id, merge_into_device_id, asset_name } = await req.json();
+    const {
+      device_id, gateway_id, merge_into_device_id, asset_name, cell_id, location_scope
+    } = await req.json();
 
     if (!device_id) {
       return new Response(
@@ -227,6 +229,41 @@ export default async function handler(req: Request): Promise<Response> {
     // The operator may correct the label the device announced itself under.
     if (typeof asset_name === "string" && asset_name.trim()) {
       patch.name = asset_name.trim();
+    }
+
+    // LOCATION IS OPTIONAL AND OMITTED WHEN NOT ANSWERED, not defaulted.
+    //
+    // devices.cell_id (migration 0036) is NULL-means-inherit with no column default, so a
+    // device approved onto a gateway that has a cell needs no answer here -- it inherits, and
+    // keeps tracking that gateway. Writing a value the operator did not choose would turn
+    // inheritance off permanently for every device approved through this path, which is exactly
+    // the failure the column was designed without a default to avoid.
+    //
+    // An explicitly empty cell_id is still meaningful: it is the picker's "Inherit" option, so
+    // it is written as NULL rather than skipped.
+    if (cell_id !== undefined) {
+      const trimmed = typeof cell_id === "string" ? cell_id.trim() : cell_id;
+      if (trimmed && !isUuid(trimmed)) {
+        return new Response(
+          JSON.stringify({ error: "cell_id must be a cell UUID" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      patch.cell_id = trimmed || null;
+    }
+
+    if (location_scope !== undefined) {
+      if (location_scope !== "cell" && location_scope !== "site_wide") {
+        return new Response(
+          JSON.stringify({ error: "location_scope must be 'cell' or 'site_wide'" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      patch.location_scope = location_scope;
+      // Mirrors devices_site_wide_has_no_cell: a site-wide asset cannot also name a cell. The
+      // CHECK would reject the write; clearing it here means the caller gets an approval rather
+      // than a constraint violation it has no way to interpret.
+      if (location_scope === "site_wide") patch.cell_id = null;
     }
 
     const { data, error: updateError } = await supabaseAdmin

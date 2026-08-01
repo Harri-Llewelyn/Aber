@@ -185,6 +185,14 @@ jobs:
         run: |
           python ingestion/test_declared_metrics.py
 
+      # Pins the invariant that the daemon never writes an asset's location. devices.cell_id is
+      # NULL-means-inherit with no column default (migration 0036), which only holds while
+      # nothing writes a value on an operator's behalf -- and a regression here would be silent:
+      # devices would simply stop inheriting and the Unassigned queue would stop filling.
+      - name: Run Ingestion Device Location Invariant Tests
+        run: |
+          python ingestion/test_device_location.py
+
   e2e-validation:
     name: End-to-End Unified Stack Ingestion Validation
     runs-on: ubuntu-latest
