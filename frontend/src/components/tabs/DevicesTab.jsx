@@ -11,6 +11,8 @@ import { edgeFunctionErrorMessage } from '../../utils/edgeFunctionError'
 import { describeAuthFailure } from '../../utils/sessionError'
 import CopyableId from '../common/CopyableId'
 import { effectiveSparkplugId } from '../../utils/sparkplugId'
+import { ActionMenu } from '../common/ActionMenu'
+import { TagList } from '../common/TagList'
 import { InlineDocumentAccordion } from '../common/InlineDocumentAccordion'
 import { QuarantinePayloadCell } from '../common/QuarantinePayloadCell'
 import { ApproveQuarantineModal } from '../modals/ApproveQuarantineModal'
@@ -33,8 +35,6 @@ import {
   IconHistory,
   IconClipboardList,
   IconFileText,
-  IconChevronDown,
-  IconChevronUp,
   IconShieldAlert,
   IconAlertTriangle,
   IconLock,
@@ -656,31 +656,38 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                             const tags = deviceTagList(a, schema)
                             const extra = unmodelledMetrics(a, schema)
                             if (tags.length === 0 && !a.asset_type) return '—'
-                            return (
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
-                                {tags.map(tag => tag === UNMODELLED_TAG ? (
-                                  <span
-                                    key={tag}
-                                    className="badge badge-warning"
-                                    style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', fontSize: '10px' }}
-                                    title={`Declared at its last birth but absent from schema '${schema?.schema_name}': ${extra.join(', ')}`}
-                                  >
-                                    <IconAlertTriangle size={10} /> {tag} ({extra.length})
-                                  </span>
-                                ) : (
-                                  <span key={tag} className="badge badge-neutral" style={{ fontSize: '10px' }} title={`This device's schema models ${tag}.* metrics`}>
-                                    {tag}
-                                  </span>
-                                ))}
-                                {/* Free-text classification from before types were derived. Shown
-                                    so the value is not silently lost, but nothing writes it now. */}
-                                {a.asset_type && (
-                                  <span style={{ fontSize: '10px', color: 'var(--text-dim)', fontStyle: 'italic' }} title="Legacy free-text classification. Assign a schema to derive this instead.">
-                                    {a.asset_type}
-                                  </span>
-                                )}
-                              </div>
-                            )
+
+                            // Collapsed past two: a tri-standard schema yields six or more tags,
+                            // which was making every row three lines tall. `priority` keeps
+                            // Unmodelled visible -- deviceTagList() appends it LAST, so a plain
+                            // truncation would hide the only tag that calls for action.
+                            const entries = tags.map(tag => tag === UNMODELLED_TAG ? {
+                              key: tag,
+                              priority: true,
+                              className: 'badge badge-warning',
+                              style: { background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', fontSize: '10px' },
+                              title: `Declared at its last birth but absent from schema '${schema?.schema_name}': ${extra.join(', ')}`,
+                              content: <><IconAlertTriangle size={10} /> {tag} ({extra.length})</>
+                            } : {
+                              key: tag,
+                              className: 'badge badge-neutral',
+                              style: { fontSize: '10px' },
+                              title: `This device's schema models ${tag}.* metrics`,
+                              content: tag
+                            })
+
+                            // Free-text classification from before types were derived. Shown so
+                            // the value is not silently lost, but nothing writes it now.
+                            if (a.asset_type) {
+                              entries.push({
+                                key: a.asset_type,
+                                style: { fontSize: '10px', color: 'var(--text-dim)', fontStyle: 'italic' },
+                                title: 'Legacy free-text classification. Assign a schema to derive this instead.',
+                                content: a.asset_type
+                              })
+                            }
+
+                            return <TagList tags={entries} limit={2} />
                           })()}
                         </td>
                         <td>{cells.find(c => c.cell_id == a.cell_id)?.cell_name || '—'}</td>
@@ -691,41 +698,17 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                           </select>
                         </td>
                         <td style={{ textAlign: 'right' }}>
+                          {/* Two primary actions stay visible; the rest live in the overflow menu.
+                              The cell previously held seven controls and took more than half the
+                              row's width, and every feature added landed here.
+
+                              Which two: Telemetry is the most-reached-for read, Edit the
+                              most-reached-for write. RESTORE REPLACES EDIT on an archived row --
+                              it is the only action that means anything there, and burying it
+                              would make archived devices harder to work with, not easier. */}
                           <div className="btn-group" style={{ justifyContent: 'flex-end' }}>
-                            <button className="btn btn-ghost btn-sm" onClick={() => toggleDeviceDocExpand(a.asset_id)} title="Toggle attached document links accordion">
-                              <IconFileText size={13} /> Docs {expandedDeviceDocs[a.asset_id] ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
-                            </button>
                             <button className="btn btn-ghost btn-sm" onClick={() => onSelectDevice(a.asset_id)} title="View live telemetry for this device">
                               <IconActivity size={13} /> Telemetry
-                            </button>
-                            <button className="btn btn-ghost btn-sm" onClick={() => setThreadFor(a)} title="View device Digital Thread audit trace"><IconHistory size={13} /> Thread</button>
-                            {/* Read-only and available to every role that can see the device: an
-                                export is a read, and handing a partner a shell is the point.
-                                Two formats, one control: JSON is the AAS Part 5 Environment every
-                                tool reads, AASX the OPC package it is normally shipped in. A
-                                select rather than two buttons keeps the already-crowded row from
-                                growing, and makes them read as one action with a choice. */}
-                            <select
-                              className="form-control form-control-sm"
-                              style={{ width: 'auto', display: 'inline-block' }}
-                              value=""
-                              disabled={exportingAas === a.asset_id}
-                              onChange={e => { if (e.target.value) { exportAas(a, e.target.value); e.target.value = '' } }}
-                              title="Download this device's Asset Administration Shell (IEC 63278)"
-                            >
-                              <option value="">
-                                {exportingAas === a.asset_id ? 'Exporting…' : 'Export AAS ▾'}
-                              </option>
-                              <option value="json">Export JSON (AAS V3)</option>
-                              <option value="aasx">Export AASX Package</option>
-                            </select>
-                            <button
-                              className={`btn btn-ghost btn-sm ${!canManage || a.is_archived ? 'btn-disabled' : ''}`}
-                              disabled={!canManage || a.is_archived}
-                              onClick={() => canManage && !a.is_archived && setConfigAsset(a)}
-                              title={!canManage ? 'Requires Admin permissions' : a.is_archived ? 'Device is archived' : 'Inspect DBIRTH metric parameters'}
-                            >
-                              <IconClipboardList size={13} /> Config
                             </button>
 
                             {a.is_archived ? (
@@ -739,23 +722,76 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                               </button>
                             ) : (
                               <button
-                                className={`btn btn-ghost btn-sm ${!canArchive ? 'btn-disabled' : ''}`}
-                                disabled={!canArchive}
-                                onClick={() => canArchive && setArchiveTarget(a)}
-                                title={!canArchive ? 'Requires Admin permissions' : 'Decommission & Archive Device'}
+                                className={`btn btn-ghost btn-sm ${!canManage || isOff ? 'btn-disabled' : ''}`}
+                                disabled={!canManage || isOff}
+                                onClick={() => canManage && !isOff && (setEditing(a), setForm(a), setShowForm(true))}
+                                title={!canManage ? 'Requires Admin permissions' : isOff ? 'Device is offline (DDEATH received)' : 'Edit device parameters'}
                               >
-                                <IconArchive size={13} /> Archive
+                                <IconPencil size={13} /> Edit
                               </button>
                             )}
 
-                            <button
-                              className={`btn btn-ghost btn-sm ${!canManage || isOff || a.is_archived ? 'btn-disabled' : ''}`}
-                              disabled={!canManage || isOff || a.is_archived}
-                              onClick={() => canManage && !isOff && !a.is_archived && (setEditing(a), setForm(a), setShowForm(true))}
-                              title={!canManage ? 'Requires Admin permissions' : a.is_archived ? 'Device is archived' : isOff ? 'Device is offline (DDEATH received)' : 'Edit device parameters'}
-                            >
-                              <IconPencil size={13} /> Edit
-                            </button>
+                            <ActionMenu
+                              label={exportingAas === a.asset_id ? 'Exporting…' : 'More'}
+                              disabled={exportingAas === a.asset_id}
+                              testId={`device-actions-${a.asset_id}`}
+                              items={[
+                                {
+                                  key: 'docs',
+                                  icon: <IconFileText size={13} />,
+                                  label: expandedDeviceDocs[a.asset_id] ? 'Hide documents' : 'Show documents',
+                                  title: 'Toggle attached document links accordion',
+                                  onClick: () => toggleDeviceDocExpand(a.asset_id)
+                                },
+                                {
+                                  key: 'thread',
+                                  icon: <IconHistory size={13} />,
+                                  label: 'Digital Thread',
+                                  title: 'View device Digital Thread audit trace',
+                                  onClick: () => setThreadFor(a)
+                                },
+                                {
+                                  key: 'config',
+                                  icon: <IconClipboardList size={13} />,
+                                  label: 'Configuration & 3D model',
+                                  disabled: !canManage || a.is_archived,
+                                  title: !canManage ? 'Requires Admin permissions' : a.is_archived ? 'Device is archived' : 'Inspect DBIRTH metric parameters and attach a 3D model',
+                                  onClick: () => setConfigAsset(a)
+                                },
+                                { separator: true },
+                                /* Two menu items rather than the <select> this used to be. That
+                                   control set value="" and reset itself on change to fake a menu;
+                                   inside a real one it is just two actions. Available to every
+                                   role that can see the device -- an export is a read, and handing
+                                   a partner a shell is the point. */
+                                {
+                                  key: 'export-json',
+                                  icon: <IconDownload size={13} />,
+                                  label: 'Export AAS JSON (V3)',
+                                  title: "Download this device's Asset Administration Shell as AAS Part 5 JSON",
+                                  onClick: () => exportAas(a, 'json')
+                                },
+                                {
+                                  key: 'export-aasx',
+                                  icon: <IconDownload size={13} />,
+                                  label: 'Export AASX package',
+                                  title: 'Download an AASX (OPC) package, with any attached 3D model bundled in',
+                                  onClick: () => exportAas(a, 'aasx')
+                                },
+                                { separator: true },
+                                // Archive only: Restore is promoted out to the row above, so the
+                                // menu never carries both.
+                                !a.is_archived && {
+                                  key: 'archive',
+                                  icon: <IconArchive size={13} />,
+                                  label: 'Archive device',
+                                  danger: true,
+                                  disabled: !canArchive,
+                                  title: !canArchive ? 'Requires Admin permissions' : 'Decommission & Archive Device',
+                                  onClick: () => setArchiveTarget(a)
+                                }
+                              ]}
+                            />
                           </div>
                         </td>
                       </tr>
@@ -907,7 +943,17 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
         />
       )}
       {archiveTarget && <ArchiveModal entityType="devices" entityId={archiveTarget.asset_id} displayName={archiveTarget.asset_name} onArchive={archiveDevice} onCancel={() => setArchiveTarget(null)} />}
-      {configAsset && <AssetConfigModal asset={configAsset} schemas={schemas} onClose={() => setConfigAsset(null)} />}
+      {configAsset && (
+        <AssetConfigModal
+          asset={configAsset}
+          schemas={schemas}
+          showToast={showToast}
+          hasPermission={hasPermission}
+          // Reload on close: the modal can attach or remove a 3D model, and the row's own copy of
+          // model_3d_path would otherwise be stale until the next poll.
+          onClose={() => { setConfigAsset(null); loadAll() }}
+        />
+      )}
       {threadFor && <DigitalThreadModal entityType="devices" entityId={threadFor.asset_id} displayName={threadFor.asset_name} onClose={() => setThreadFor(null)} />}
       {docsForDevice && (
         <EntityDocumentsModal entityType="device" entityId={docsForDevice.asset_id} entityName={docsForDevice.asset_name} onClose={() => { setDocsForDevice(null); setDocRefreshKey(k => k + 1) }} showToast={showToast} hasPermission={hasPermission} />

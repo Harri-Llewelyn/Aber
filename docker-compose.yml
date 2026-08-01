@@ -57,6 +57,7 @@ services:
       echo 'Setting passwords for scoped Supabase roles...';
       psql -h supabase-db -U supabase_admin -d postgres -c \"ALTER USER supabase_auth_admin WITH PASSWORD '${POSTGRES_PASSWORD:-postgres}';\";
       psql -h supabase-db -U supabase_admin -d postgres -c \"ALTER USER authenticator WITH PASSWORD '${POSTGRES_PASSWORD:-postgres}';\";
+      psql -h supabase-db -U supabase_admin -d postgres -c \"ALTER USER supabase_storage_admin WITH PASSWORD '${POSTGRES_PASSWORD:-postgres}';\";
       echo 'Scoped role passwords set successfully.';
       "
     depends_on:
@@ -245,6 +246,72 @@ services:
       supabase-db-init:
         condition: service_completed_successfully
 
+  # Object storage for binary asset artefacts -- today, the 3D visual models an AAS
+  # `VisualRepresentation` submodel points at (migration 0035).
+  #
+  # It owns the `storage` schema, which the supabase/postgres image ships only a stub of
+  # (buckets/objects/migrations, no `public` or `file_size_limit` columns). storage-api runs
+  # its OWN migrations against that schema on boot and upgrades it. That is why the bucket is
+  # created by supabase-storage-init afterwards rather than by a SQL migration: supabase-db-init
+  # finishes long before this service starts, so a migration inserting into storage.buckets would
+  # run against the stub schema on a fresh stack and could not set `public` at all.
+  #
+  # Pinned rather than :latest for the same reason as supabase-realtime -- it migrates a shared
+  # schema on boot and is coupled to the Postgres image version.
+  supabase-storage:
+    container_name: factoryplus_supabase_storage
+    image: supabase/storage-api:v1.11.13
+    restart: always
+    environment:
+      ANON_KEY: ${SUPABASE_ANON_KEY}
+      SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      PGRST_JWT_SECRET: ${SUPABASE_JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD:-postgres}@supabase-db:5432/postgres
+      # Storage evaluates RLS on storage.objects by impersonating the caller's role, so it needs
+      # the same PostgREST URL the rest of the stack uses to resolve the JWT's claims.
+      POSTGREST_URL: http://supabase-rest:3000
+      FILE_SIZE_LIMIT: ${STORAGE_FILE_SIZE_LIMIT:-52428800}
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: stub
+      # Required by the S3 code path even on the file backend; unused here.
+      REGION: stub
+      GLOBAL_S3_BUCKET: stub
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+    volumes:
+      - storage_data:/var/lib/storage
+    healthcheck:
+      # 127.0.0.1, not localhost: the image's musl resolver answers `localhost` with ::1 first and
+      # storage-api binds 0.0.0.0 (IPv4 only), so the probe gets ECONNREFUSED against a healthy
+      # server and the container never leaves `starting`.
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5000/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    depends_on:
+      supabase-db-init:
+        condition: service_completed_successfully
+
+  # Creates the `asset-3d-models` bucket through the Storage REST API rather than by writing to
+  # storage.buckets directly: the API is the supported entry point and is indifferent to which
+  # columns this storage-api version's schema actually has. Idempotent -- see the script.
+  supabase-storage-init:
+    container_name: factoryplus_supabase_storage_init
+    image: node:20-alpine
+    environment:
+      STORAGE_URL: http://supabase-storage:5000
+      SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      STORAGE_BUCKET: ${STORAGE_MODEL_BUCKET:-asset-3d-models}
+      STORAGE_FILE_SIZE_LIMIT: ${STORAGE_FILE_SIZE_LIMIT:-52428800}
+    volumes:
+      - ./scripts/storage-init.mjs:/app/storage-init.mjs:ro
+    command: ["node", "/app/storage-init.mjs"]
+    restart: "no"
+    depends_on:
+      supabase-storage:
+        condition: service_healthy
+
   supabase-kong:
     container_name: factoryplus_supabase_kong
     image: kong:2.8.1-alpine
@@ -269,6 +336,8 @@ services:
       # not block stack startup on Realtime finishing its _realtime migrations.
       supabase-realtime:
         condition: service_started
+      supabase-storage:
+        condition: service_started
 
   supabase-functions:
     container_name: factoryplus_supabase_functions
@@ -290,6 +359,14 @@ services:
       # Where a consumer fetches the samples a Time Series LinkedSegment points at. Never the rows
       # themselves -- the shell references the historian, it does not embed it.
       AAS_HISTORIAN_ENDPOINT: ${AAS_HISTORIAN_ENDPOINT:-http://localhost:54321/rest/v1/telemetry}
+      # Public base for the 3D models a VisualRepresentation submodel points at. It CANNOT be
+      # derived from SUPABASE_URL: inside this network that is http://supabase-kong:8000, which
+      # resolves for the worker and for nothing outside Docker, so a shell handed to a partner
+      # would carry a dead link. Same reasoning as AAS_BASE_IRI -- an outbound reference has to
+      # name an address the recipient can actually reach.
+      AAS_MODEL_PUBLIC_BASE: ${AAS_MODEL_PUBLIC_BASE:-http://localhost:54321/storage/v1/object/public/asset-3d-models}
+      STORAGE_MODEL_BUCKET: ${STORAGE_MODEL_BUCKET:-asset-3d-models}
+      AAS_MAX_BUNDLED_MODEL_BYTES: ${AAS_MAX_BUNDLED_MODEL_BYTES:-33554432}
     volumes:
       - ./supabase/functions:/home/deno/functions:ro
       # The canonical Node-RED flow - the "git" side of the GitOps sync that
@@ -572,3 +649,4 @@ volumes:
   supabase_db_data:
   studio_snippets:
   deno_cache:
+  storage_data:

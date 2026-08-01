@@ -18,6 +18,7 @@ Factory+ Asset Tracking Platform is an industrial manufacturing management syste
 | **MQTT** | Mosquitto | 1883/9001 | Sparkplug B message broker |
 | **Ingestion** | Python daemon | - | MQTT→Supabase/TimescaleDB |
 | **Realtime** | Supabase Realtime | - | WAL → WebSocket change feed via `/realtime/v1/` |
+| **Storage** | Supabase storage-api | - | 3D asset models via `/storage/v1/`; one public bucket |
 | **Edge** | Node-RED | 1880 | Edge flow automation |
 | **Monitoring** | Grafana | 3002 | Time-series dashboards (SSO via Supabase Auth) |
 
@@ -227,6 +228,52 @@ byte-identical to the JSON export, and a test asserts it.
   is not JSON or octet-stream as *text*, which corrupts a ZIP. `api.js` builds that request itself
   and asks for a Blob; counts ride back in an `X-AAS-Stats` header because a binary body has
   nowhere to carry them.
+
+### 3D Asset Models (Supabase Storage)
+
+`supabase-storage` runs, serving exactly one bucket: `asset-3d-models`. A device's model becomes an
+AAS `File` in a `VisualRepresentation` submodel (`devices.model_3d_path`, migration 0035).
+
+- **The column stores an object KEY, never a URL.** A stored URL bakes in the origin of whichever
+  stack uploaded it and is wrong the moment the deployment moves. The public URL is composed at
+  read time from `AAS_MODEL_PUBLIC_BASE` — same arrangement as `AAS_BASE_IRI` and
+  `AAS_HISTORIAN_ENDPOINT`, and it **cannot** be derived from `SUPABASE_URL`, which inside compose
+  is `http://supabase-kong:8000` and resolves for nothing outside Docker.
+- **The bucket is public-read because an AAS `File` URL must be dereferenceable by a viewer holding
+  no session**; a signed URL would expire and break every shell already handed out. So anything in
+  it is world-readable to whoever learns the path. **Writes are gated on `device:manage`
+  (Administrator/Shopfloor_Manager), not on `authenticated`** — an upload changes what a shell
+  publishes *and* puts bytes at a public URL, which is exactly that authority. Verified: Operator
+  and Auditor are refused by RLS, not merely by a hidden button.
+- **The extension is authoritative, never the browser's `File.type`.** No mainstream OS maps `.obj`
+  or `.stl`, so they arrive as `application/octet-stream` or as an empty string, varying by
+  machine. The bucket must therefore accept octet-stream, which leaves the extension — constrained
+  by `model_3d_path`'s CHECK — as the real control, and as what the exporter derives `contentType`
+  from. `model3dContentType.ts` mirrors `utils/model3d.js`; `test_aas_export.py` fails on drift.
+- **The bucket is created by `scripts/storage-init.mjs`, not by a migration.** storage-api owns the
+  `storage` schema and migrates it on boot; the supabase/postgres image ships a stub with no
+  `public` column, and `supabase-db-init` replays migrations long before storage-api starts — so a
+  migration could create the row but not mark it public, and the bucket would come up private on
+  first boot. The policies on `storage.objects` *do* live in 0035; that table exists from the stub
+  onward. **storage-api answers both "already exists" and "not found" with HTTP 400**, so the
+  script matches on the payload, not the status.
+- **`supabase_storage_admin` has no password until `supabase-db-roles-init` sets one.** Without it
+  storage-api crash-loops on `28P01` and nothing else reports a problem.
+- **The healthcheck must use `127.0.0.1`.** `localhost` resolves to `::1` in that image and
+  storage-api binds IPv4 only, so the probe fails against a healthy server.
+- **`idShort` is `Model3D`.** The metamodel requires a **leading letter**, so `3DModel` is invalid
+  and `_3DModel` does not rescue it. This also fixed `toIdShort()`, which prefixed `_` to
+  digit-leading names — wrong for any device called *3-Axis Mill*.
+- **AASX bundles the model** under `aasx/files/…` with an `aas-suppl` relationship **from the spec
+  part** (`aasx/_rels/aasenv-root.json.rels`), not from the origin, plus a `[Content_Types]`
+  Override. `File.value` is rewritten to the part name — the only difference between the packaged
+  Environment and the JSON export, asserted by whole-document diff. Bundling is best-effort: a
+  fetch failure or a model over `AAS_MAX_BUNDLED_MODEL_BYTES` falls back to the URL rather than
+  failing the export.
+- **The submodel is omitted when no model is attached** — same rule as an unmapped `semanticId`.
+- Upload writes the object *then* the row (a row pointing at nothing exports a dead link; an
+  unreferenced object is merely litter) and rolls the object back if the row write fails. Removal
+  is the reverse order, for the same reason read backwards.
 
 ### Multi-Submodel Attachment (Phase 5)
 
@@ -504,6 +551,25 @@ python ingestion/validate.py
 - **Constrain table cells that hold variable-length data.** `.table-wrap` scrolls horizontally, so
   an unconstrained cell pushes the row's action buttons off-screen. This has bitten the quarantine
   queue twice (the birth payload, then the malformed-identity reason).
+- **A popover in a table row must be portalled.** Same cause, third symptom: `.table-wrap` is
+  `overflow-x: auto`, so a menu positioned inside the row is *clipped* to a sliver. `ActionMenu`
+  renders into `document.body` at `position: fixed`, which means it no longer moves with the row —
+  hence closing on scroll and resize rather than trying to follow. Its `z-index` (900) sits under
+  `.modal-overlay` (1000) deliberately; a menu floating over an open modal is unreachable.
+- **Row actions belong in `common/ActionMenu.jsx`, not in the row.** The Devices cell reached seven
+  controls and over half the row's width because each feature added one more button. Keep one or
+  two primary actions visible and put the rest in the menu; it also lets a disabled item carry
+  *why* ("Requires Admin permissions"), which reads far better than a greyed-out button.
+- **`common/TagList.jsx` collapses long tag lists**, with `priority` entries pinned ahead of the
+  cut. Both users need that and for the same reason — the entry that matters most is not the one
+  that sorts first. Devices: `deviceTagList()` appends `Unmodelled` **last**, so a plain truncation
+  hides the only tag that calls for action. Gateways' Connected Devices pins two things — the
+  Online/Offline summary (the question the column exists to answer) and any **quarantined** device.
+  That column is the more important of the two: its length grows with the *fleet*, not with a fixed
+  vocabulary, so it has no natural ceiling at all.
+  Entries carry `key` (React identity) and optionally `label` (what the overflow tooltip shows).
+  They differ on Gateways, where entries are keyed by device UUID and a tooltip of UUIDs would be
+  worse than none.
 
 ### Theming
 - **Colours come from CSS variables in `App.css`** (`:root` / `[data-theme="light"]`). There is
@@ -527,16 +593,28 @@ python ingestion/validate.py
 - `utils/opcua.js` — ExpandedNodeId parsing, browse-path→group derivation, OPC UA→Sparkplug
   datatype mapping
 - `utils/deviceTags.js` — schema-derived device tags and unmodelled-metric detection
+- `utils/model3d.js` — 3D model extension/media-type table, path composition and size formatting;
+  mirrored by `functions/aas-export/model3dContentType.ts`
 - `utils/deviceProvisioning.js`, `utils/gatewayStatus.js`, `utils/sparkplugId.js`
+- `components/common/Model3DUploader.jsx` — the 3D model dropzone, rendered by `AssetConfigModal`
+- `components/common/ActionMenu.jsx` — portalled row-overflow menu (see Key Patterns for why)
+- `components/common/TagList.jsx` — collapsing tag list with pinned `priority` entries
 
 ### Tab Components
 - `OverviewTab` — Asset summary cards with quick filters
 - `CellsTab` — Factory cell management
-- `GatewaysTab` — Gateway configuration and status
+- `GatewaysTab` — Gateway configuration and status. Same row shape as Devices: **Launch UI** and
+  **Edit** visible, the rest in an `ActionMenu`, **Restore replacing Edit** on an archived row.
+  Launch UI stays prominent because it is the only action that leaves the dashboard, and it is
+  omitted rather than disabled when a gateway has no `access_url`
 - `DevicesTab` — Device listing. **Quarantined devices render in the onboarding queue banner
   only**; `filteredAssets` excludes `is_quarantined` before every other filter, so no filter
   combination can list one twice. `attentionCount` excludes them for the same reason (the queue
-  has its own badge)
+  has its own badge).
+  **The row carries two actions, not seven**: Telemetry and Edit stay visible, everything else is
+  in an `ActionMenu`. **Restore replaces Edit on an archived row** — it is the only action that
+  means anything there, so it is never buried. Adding a device feature means adding a menu item,
+  not another button
 - `DigitalThreadTab` — Audit trail of all metadata changes
 - `TelemetryTab` — Time-series data viewer (connects to TimescaleDB)
 - `SchemasTab` — Metric catalog (what devices publish), one **Standard Vocabulary Reference** card
@@ -561,7 +639,8 @@ python ingestion/validate.py
 - `gateways` — Edge gateways linked to cells; `sparkplug_id` generated column
 - `devices` — Devices linked to gateways, `is_quarantined` flag; `sparkplug_id` generated column,
   plus `reported_identity` / `quarantine_reason` / `identity_source` for quarantine diagnostics,
-  and `last_birth_metrics` / `last_birth_metrics_at` for birth-metric observation (see below)
+  and `last_birth_metrics` / `last_birth_metrics_at` for birth-metric observation (see below),
+  plus `model_3d_path` (an object key in `asset-3d-models`, never a URL)
 - `digital_thread` — Auto-populated audit log via triggers
 - `documents`, `asset_config`, `schemas`, `directory_services` — Extended metadata.
   `schemas` and `metric_catalog` carry `semantic_id` / `semantic_id_type` (AAS Phase 1)

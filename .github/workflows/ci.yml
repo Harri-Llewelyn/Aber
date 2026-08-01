@@ -235,6 +235,24 @@ jobs:
           '
           echo "All core services report healthy!"
 
+      # Storage boots after supabase-db-init and runs its OWN migrations against the `storage`
+      # schema, then supabase-storage-init creates the asset-3d-models bucket through the Storage
+      # REST API. The AAS export suite uploads a real 3D model, so it needs BOTH to have finished
+      # -- polled on the bucket itself rather than on the container's health, because a healthy
+      # storage-api with no bucket yet would still fail the upload.
+      - name: Wait for Storage and the 3D model bucket
+        run: |
+          set -a && . ./.env && set +a
+          timeout 120s bash -c '
+            until curl -sf -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+                       -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+                       http://127.0.0.1:54321/storage/v1/bucket/asset-3d-models >/dev/null 2>&1; do
+              echo "Waiting for the asset-3d-models bucket..."
+              sleep 3
+            done
+          '
+          echo "Storage is up and the asset-3d-models bucket exists!"
+
       # Realtime boots slower than the core services -- it applies its own _realtime
       # migrations and seeds the self-hosted tenant first. Polled separately so a slow
       # boot cannot race the validation step, and on its own timeout so a Realtime

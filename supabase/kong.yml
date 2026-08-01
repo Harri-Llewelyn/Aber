@@ -35,6 +35,21 @@ services:
           - http
           - https
 
+  # Object storage. Uploads go through here rather than straight to supabase-storage so the
+  # browser talks to exactly one origin (and one CORS policy) for auth, REST and files alike --
+  # and so a public model URL embedded in an exported AAS shell names the gateway, which is the
+  # only address that is reachable from outside the compose network.
+  #
+  # storage-api serves its routes at the ROOT (/bucket, /object/...), so the /storage/v1 prefix
+  # is ours and must be stripped.
+  - name: storage-v1
+    url: http://supabase-storage:5000/
+    routes:
+      - name: storage-v1-routes
+        strip_path: true
+        paths:
+          - /storage/v1/
+
   - name: functions-v1
     url: http://supabase-functions:9000/
     routes:

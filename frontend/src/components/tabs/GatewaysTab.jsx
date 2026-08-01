@@ -7,6 +7,8 @@ import { useClockTick } from '../../hooks/useClockTick'
 import { gatewayLiveStatus, formatHeartbeat } from '../../utils/gatewayStatus'
 import { gatewaySparkplugId } from '../../utils/sparkplugId'
 import CopyableId from '../common/CopyableId'
+import { ActionMenu } from '../common/ActionMenu'
+import { TagList } from '../common/TagList'
 import { InlineDocumentAccordion } from '../common/InlineDocumentAccordion'
 import { StatusBadge } from '../common/StatusBadge'
 import { ArchiveModal } from '../modals/ArchiveModal'
@@ -21,8 +23,6 @@ import {
   IconHistory,
   IconExternalLink,
   IconFileText,
-  IconChevronDown,
-  IconChevronUp,
   IconZap,
   IconShieldAlert,
   IconX
@@ -326,36 +326,57 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
                            ) : gwAssets.length === 0 ? (
                              <span style={{ fontSize: '11px', color: 'var(--text-dim)', fontStyle: 'italic' }}>No devices assigned</span>
                            ) : (
-                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' }}>
-                               <span className="badge badge-neutral" title="Connected devices breakdown">
-                                 {onlineCount} Online / {offlineCount} Offline
-                               </span>
-                               {gwAssets.map(a => (
-                                 <span
-                                   key={a.asset_id}
-                                   className={`badge ${a.status === 'OFFLINE' ? 'badge-neutral' : 'badge-online'}`}
-                                   style={{ fontSize: '10px' }}
-                                   title={`${a.asset_name} — ${a.is_quarantined ? 'QUARANTINED' : a.status || 'ONLINE'}`}
-                                 >
-                                   {a.asset_name}{a.is_quarantined ? ' (quarantined)' : ''}
-                                 </span>
-                               ))}
-                             </div>
+                             /* Collapsed past three, as the Devices Type column is. A gateway
+                                serving twenty devices rendered twenty-one chips and a row several
+                                lines tall -- and the count is unbounded, since it grows with the
+                                fleet rather than with a fixed vocabulary.
+
+                                TWO KINDS OF ENTRY ARE PINNED. The Online/Offline summary is the
+                                answer to "is this gateway healthy", which is the question the
+                                column exists to answer, so hiding it behind a "+18" would defeat
+                                the column. A QUARANTINED device is pinned for the same reason
+                                Unmodelled is on Devices: it is the one entry that calls for
+                                action, and it would otherwise be lost among the healthy ones. */
+                             <TagList
+                               limit={3}
+                               tags={[
+                                 {
+                                   key: '__summary__',
+                                   priority: true,
+                                   className: 'badge badge-neutral',
+                                   title: 'Connected devices breakdown',
+                                   content: `${onlineCount} Online / ${offlineCount} Offline`
+                                 },
+                                 ...gwAssets.map(a => ({
+                                   key: a.asset_id,
+                                   // The tooltip on "+N" lists names, not the UUIDs these are keyed by.
+                                   label: a.asset_name,
+                                   priority: a.is_quarantined,
+                                   className: `badge ${a.status === 'OFFLINE' ? 'badge-neutral' : 'badge-online'}`,
+                                   style: { fontSize: '10px' },
+                                   title: `${a.asset_name} — ${a.is_quarantined ? 'QUARANTINED' : a.status || 'ONLINE'}`,
+                                   content: `${a.asset_name}${a.is_quarantined ? ' (quarantined)' : ''}`
+                                 }))
+                               ]}
+                             />
                            )}
                          </td>
                          <td>
+                           {/* Same shape as the Devices row: the primary actions stay visible and
+                               the rest go in the overflow menu. Launch UI keeps its prominence --
+                               it is the one action here that leaves the dashboard entirely, and on
+                               a virtual gateway it is the whole point of the row.
+
+                               RESTORE REPLACES EDIT on an archived gateway, as on Devices: Edit
+                               was already disabled there, so nothing is lost, and Restore is the
+                               only action that means anything on an archived row. */}
                            <div className="btn-group" style={{ justifyContent: 'flex-end' }}>
                              {g.access_url && (
                                <a href={g.access_url} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm" style={{ textDecoration: 'none', gap: '4px', padding: '4px 10px' }} title="Open Node-RED / Virtual Gateway Editor">
                                  <IconExternalLink size={12} /> Launch UI
                                </a>
                              )}
-                             <button className="btn btn-ghost btn-sm" onClick={() => toggleGwDocExpand(g.gateway_id)} title="Toggle attached document links accordion">
-                               <IconFileText size={13} /> Docs {expandedGwDocs[g.gateway_id] ? <IconChevronUp size={12} /> : <IconChevronDown size={12} />}
-                             </button>
-                             <button className="btn btn-ghost btn-sm" onClick={() => setThreadFor(g)} title="View gateway Digital Thread audit trace">
-                               <IconHistory size={13} /> Thread
-                             </button>
+
                              {g.is_archived ? (
                                <button
                                  className={`btn btn-primary btn-sm ${!canArchive ? 'btn-disabled' : ''}`}
@@ -367,22 +388,46 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
                                </button>
                              ) : (
                                <button
-                                 className={`btn btn-ghost btn-sm ${!canArchive ? 'btn-disabled' : ''}`}
-                                 disabled={!canArchive}
-                                 onClick={() => canArchive && setArchiveTarget(g)}
-                                 title={!canArchive ? 'Requires Admin permissions' : 'Decommission & Archive Gateway'}
+                                 className={`btn btn-ghost btn-sm ${!canManage ? 'btn-disabled' : ''}`}
+                                 disabled={!canManage}
+                                 onClick={() => canManage && (setEditing(g), setForm(g), setShowForm(true))}
+                                 title={!canManage ? 'Requires Admin permissions' : 'Edit gateway properties'}
                                >
-                                 <IconArchive size={13} /> Archive
+                                 <IconPencil size={13} /> Edit
                                </button>
                              )}
-                             <button
-                               className={`btn btn-ghost btn-sm ${!canManage || g.is_archived ? 'btn-disabled' : ''}`}
-                               disabled={!canManage || g.is_archived}
-                               onClick={() => canManage && !g.is_archived && (setEditing(g), setForm(g), setShowForm(true))}
-                               title={!canManage ? 'Requires Admin permissions' : g.is_archived ? 'Gateway is archived' : 'Edit gateway properties'}
-                             >
-                               <IconPencil size={13} /> Edit
-                             </button>
+
+                             <ActionMenu
+                               testId={`gateway-actions-${g.gateway_id}`}
+                               items={[
+                                 {
+                                   key: 'docs',
+                                   icon: <IconFileText size={13} />,
+                                   label: expandedGwDocs[g.gateway_id] ? 'Hide documents' : 'Show documents',
+                                   title: 'Toggle attached document links accordion',
+                                   onClick: () => toggleGwDocExpand(g.gateway_id)
+                                 },
+                                 {
+                                   key: 'thread',
+                                   icon: <IconHistory size={13} />,
+                                   label: 'Digital Thread',
+                                   title: 'View gateway Digital Thread audit trace',
+                                   onClick: () => setThreadFor(g)
+                                 },
+                                 { separator: true },
+                                 // Archive only: Restore is promoted into the row above, so the
+                                 // menu never carries both.
+                                 !g.is_archived && {
+                                   key: 'archive',
+                                   icon: <IconArchive size={13} />,
+                                   label: 'Archive gateway',
+                                   danger: true,
+                                   disabled: !canArchive,
+                                   title: !canArchive ? 'Requires Admin permissions' : 'Decommission & Archive Gateway',
+                                   onClick: () => setArchiveTarget(g)
+                                 }
+                               ]}
+                             />
                            </div>
                          </td>
                        </tr>

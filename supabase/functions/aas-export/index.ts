@@ -31,6 +31,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { zipSync, strToU8 } from "https://esm.sh/fflate@0.8.2";
 import { sparkplugToXsd } from "./sparkplugToXsd.ts";
+import { modelContentType, modelFileName } from "./model3dContentType.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -52,6 +53,35 @@ const BASE_IRI = (Deno.env.get("AAS_BASE_IRI") ?? "https://factoryplus.local/ids
 /** Where a consumer fetches the actual samples. The shell points at this; it never embeds them. */
 const HISTORIAN_ENDPOINT =
   Deno.env.get("AAS_HISTORIAN_ENDPOINT") ?? "http://localhost:54321/rest/v1/telemetry";
+
+/**
+ * Public base for 3D model objects. `devices.model_3d_path` stores an object KEY, never a URL, so
+ * the absolute URL is composed here -- the same arrangement as the historian endpoint above, and
+ * for the same reason: a URL baked into a row is wrong the moment the deployment moves.
+ *
+ * It cannot be derived from SUPABASE_URL. Inside the compose network that is
+ * `http://supabase-kong:8000`, which resolves for this worker and for nothing outside Docker; a
+ * shell handed to a partner would carry an unreachable link. So it defaults to the published
+ * gateway address and is overridden per deployment, exactly like AAS_BASE_IRI.
+ */
+const MODEL_PUBLIC_BASE = (
+  Deno.env.get("AAS_MODEL_PUBLIC_BASE") ??
+    "http://localhost:54321/storage/v1/object/public/asset-3d-models"
+).replace(/\/+$/, "");
+
+/** The bucket 3D models live in. Matches scripts/storage-init.mjs and migration 0035's policies. */
+const MODEL_BUCKET = Deno.env.get("STORAGE_MODEL_BUCKET") ?? "asset-3d-models";
+
+/**
+ * Cap on a model bundled into an AASX. The bucket's own limit is 50 MB, but that governs what may
+ * be *stored*; this governs what may be held in memory, deflated and concatenated inside a single
+ * edge worker. Over the cap the export falls back to the URL reference, which is still a valid
+ * shell -- degraded, not failed.
+ */
+const MAX_BUNDLED_MODEL_BYTES = Number.parseInt(
+  Deno.env.get("AAS_MAX_BUNDLED_MODEL_BYTES") ?? "33554432",
+  10,
+);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -88,11 +118,26 @@ function semanticReference(semanticId?: string | null) {
   };
 }
 
-/** AAS idShort: a restricted identifier -- letters, digits and underscore, not starting a digit. */
+/**
+ * AAS idShort: a restricted identifier. The metamodel's pattern is
+ *
+ *     ^[a-zA-Z][a-zA-Z0-9_-]*[a-zA-Z0-9_]+$
+ *
+ * which is stricter than "letters, digits and underscore" in two ways that are easy to miss and
+ * that the official schema rejects outright:
+ *
+ *   * it must START WITH A LETTER. Prefixing a digit-leading name with `_` -- the obvious fix, and
+ *     what this function used to do -- produces an idShort that is still invalid, just differently.
+ *     Entirely reachable here: a device called "3-Axis Mill" or "3D Printer 01" is ordinary.
+ *   * it is at least TWO characters, so a one-character name needs padding rather than passing
+ *     through.
+ */
 function toIdShort(value: string, fallback: string): string {
-  const cleaned = (value || "").replace(/[^A-Za-z0-9_]/g, "_").replace(/^_+|_+$/g, "");
+  let cleaned = (value || "").replace(/[^A-Za-z0-9_]/g, "_").replace(/^_+|_+$/g, "");
   if (!cleaned) return fallback;
-  return /^[0-9]/.test(cleaned) ? `_${cleaned}` : cleaned;
+  if (!/^[A-Za-z]/.test(cleaned)) cleaned = `Id_${cleaned}`;
+  if (cleaned.length < 2) cleaned = `${cleaned}_`;
+  return cleaned;
 }
 
 function property(
@@ -135,6 +180,24 @@ function collection(idShort: string, value: unknown[], description?: string) {
 }
 
 /**
+ * An AAS `File` submodel element -- a reference to a document or artefact held outside the shell.
+ *
+ * `contentType` is not optional in practice even though the schema does not require it: it is how
+ * a consumer picks a loader, and a 3D model whose type it cannot determine is a model it will not
+ * render. Derived from the extension rather than from whatever MIME type the browser reported at
+ * upload time -- see model3dContentType.ts for why those disagree across machines.
+ */
+function file(idShort: string, value: string, contentType: string, description?: string) {
+  return {
+    modelType: "File",
+    idShort,
+    contentType,
+    value,
+    description: description ? [{ language: "en", text: description }] : undefined,
+  };
+}
+
+/**
  * AAS Part 5 media type for an AASX package. The `+xml` suffix looks wrong for a ZIP and is not --
  * an AASX *is* an Open Packaging Conventions container, and OPC's registered types carry it.
  */
@@ -160,13 +223,32 @@ const AASX_SPEC_PART = "aasx/aasenv-root.json";
  *
  * Stored uncompressed (`level: 0`) for [Content_Types].xml is not required by OPC, so everything is
  * simply deflated; readers handle both.
+ *
+ * SUPPLEMENTARY FILES extend the chain by one more link. A 3D model bundled into the package is a
+ * part in its own right, and needs all three of:
+ *
+ *   an `aas-suppl` relationship FROM THE SPEC PART, not from the origin -- a supplementary file
+ *     belongs to the Environment that references it, so its relationship lives in
+ *     aasx/_rels/aasenv-root.json.rels;
+ *   a [Content_Types] entry for its extension, or the package is malformed (OPC requires every
+ *     extension in the archive to be declared, and .glb is not one of the defaults);
+ *   a `File.value` rewritten to the part name, since a package-relative reference is the point of
+ *     bundling. That rewrite happens in the caller, not here.
  */
-function buildAasxPackage(environment: unknown): Uint8Array {
+type SupplementaryFile = { part: string; bytes: Uint8Array; contentType: string };
+
+function buildAasxPackage(environment: unknown, supplements: SupplementaryFile[] = []): Uint8Array {
+  // One Override per supplementary part rather than a Default per extension: two models could
+  // share an extension, and an Override names the part exactly. Deduplicated by part name.
+  const overrides = supplements
+    .map((s) => `  <Override PartName="/${s.part}" ContentType="${s.contentType}"/>`)
+    .join("\n");
+
   const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="json" ContentType="application/json"/>
-  <Override PartName="/aasx/aasx-origin" ContentType="text/plain"/>
+  <Override PartName="/aasx/aasx-origin" ContentType="text/plain"/>${overrides ? "\n" + overrides : ""}
 </Types>
 `;
 
@@ -182,14 +264,35 @@ function buildAasxPackage(environment: unknown): Uint8Array {
 </Relationships>
 `;
 
-  return zipSync({
+  const specRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+${
+    supplements
+      .map((s, i) =>
+        `  <Relationship Id="rId${i + 100}" Type="http://admin-shell.io/aasx/relationships/aas-suppl" Target="/${s.part}"/>`
+      )
+      .join("\n")
+  }
+</Relationships>
+`;
+
+  const entries: Record<string, Uint8Array> = {
     "[Content_Types].xml": strToU8(contentTypes),
     "_rels/.rels": strToU8(packageRels),
     // Empty by design -- see the chain described above.
     "aasx/aasx-origin": strToU8(""),
     "aasx/_rels/aasx-origin.rels": strToU8(originRels),
     [AASX_SPEC_PART]: strToU8(JSON.stringify(environment, null, 2)),
-  });
+  };
+
+  if (supplements.length > 0) {
+    // Only written when there is something to relate. An empty <Relationships/> part is legal but
+    // pointless, and its presence would suggest to a reader that supplements were expected.
+    entries["aasx/_rels/aasenv-root.json.rels"] = strToU8(specRels);
+    for (const s of supplements) entries[s.part] = s.bytes;
+  }
+
+  return zipSync(entries);
 }
 
 /** The metric names a schema models -- the union of `properties` keys and `required`.
@@ -439,6 +542,38 @@ export default async function handler(req: Request): Promise<Response> {
       }
     }
 
+    // ---- Submodel: VisualRepresentation (3D model) -------------------------------------------
+    // Emitted only when the device actually carries a model. An empty submodel would assert the
+    // aspect exists and then fail to describe it -- the same rule as the omitted `semanticId` and
+    // the omitted empty collection, and the reason `submodelElements` is not padded with a blank
+    // File element instead.
+    //
+    // `model_3d_path` holds an object KEY. The absolute URL is composed here from a configurable
+    // base, so the same row exports a localhost link on a dev stack and a real one in production
+    // without the database knowing which it is.
+    const modelPath = (device.model_3d_path as string | null) ?? null;
+    const modelUrl = modelPath ? `${MODEL_PUBLIC_BASE}/${modelPath}` : null;
+
+    if (modelPath && modelUrl) {
+      submodels.push({
+        modelType: "Submodel",
+        id: submodelId("VisualRepresentation"),
+        idShort: "VisualRepresentation",
+        kind: "Instance",
+        submodelElements: [
+          file(
+            // NOT "3DModel", which is what it reads as and what the AAS metamodel forbids: an
+            // idShort must start with a letter. The official schema rejects "3DModel" and equally
+            // rejects "_3DModel", so there is no prefixing fix -- the name has to lead with a letter.
+            "Model3D",
+            modelUrl,
+            modelContentType(modelPath),
+            `3D visual model for this asset (${modelFileName(modelPath)}).`,
+          ),
+        ],
+      });
+    }
+
     const environment = {
       // AAS Part 5 "Environment": the container serialisation, which is what an AASX package holds
       // and what every AAS tool accepts as a JSON drop-in.
@@ -469,12 +604,62 @@ export default async function handler(req: Request): Promise<Response> {
       telemetry_metrics: telemetryTotal,
       kpi_metrics: kpiTotal,
       unmapped_semantic_ids: unmappedCount,
+      has_3d_model: Boolean(modelPath),
     };
 
     // ---- AASX packaging (Open Packaging Conventions / ISO 29500) ------------------------------
     if (format === "aasx") {
       const filename = `${toIdShort(device.name, "device")}.aasx`;
-      return new Response(buildAasxPackage(environment), {
+      const supplements: SupplementaryFile[] = [];
+      let bundled3dModel = false;
+
+      // Bundle the model INTO the package rather than leaving a URL in it. Self-containment is the
+      // whole reason AASX exists: a package handed to a partner on removable media has to render
+      // without reaching back to a host they may have no route to.
+      //
+      // Best-effort, deliberately. If the object cannot be fetched -- Storage down, object deleted
+      // out from under the row -- the export still succeeds with the URL form it would have used
+      // anyway. Failing the whole shell because one artefact is unavailable would be the wrong
+      // trade: everything else in it is still accurate and useful.
+      if (modelPath && modelUrl) {
+        try {
+          const { data: blob, error: dlError } = await supabaseAdmin.storage
+            .from(MODEL_BUCKET)
+            .download(modelPath);
+
+          if (dlError || !blob) throw new Error(dlError?.message ?? "empty object");
+
+          const bytes = new Uint8Array(await blob.arrayBuffer());
+          if (bytes.byteLength > MAX_BUNDLED_MODEL_BYTES) {
+            // Zipping happens in memory in this isolate. Past the cap the reference form is the
+            // only one that will not take the worker down with it.
+            throw new Error(`model is ${bytes.byteLength} bytes, over the bundling cap`);
+          }
+
+          const part = `aasx/files/${modelPath}`;
+          supplements.push({ part, bytes, contentType: modelContentType(modelPath) });
+
+          // Rewrite the reference to the part name. This is the ONE element where the packaged
+          // Environment deliberately differs from the JSON export: a package-relative path is what
+          // makes the bundle self-contained, and is what AAS Part 5 specifies for a supplementary
+          // file. The test asserts that this is the only difference.
+          for (const submodel of environment.submodels) {
+            if ((submodel as { idShort?: string }).idShort !== "VisualRepresentation") continue;
+            for (const element of (submodel as { submodelElements: { idShort: string; value: string }[] }).submodelElements) {
+              if (element.idShort === "Model3D") element.value = `/${part}`;
+            }
+          }
+          bundled3dModel = true;
+        } catch (err) {
+          console.warn(
+            `[aas-export] not bundling 3D model for ${device.id}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
+
+      return new Response(buildAasxPackage(environment, supplements), {
         status: 200,
         headers: {
           ...corsHeaders,
@@ -482,7 +667,7 @@ export default async function handler(req: Request): Promise<Response> {
           "Content-Disposition": `attachment; filename="${filename}"`,
           // Read by the browser so the UI can report the same counts the JSON path returns in its
           // body -- a binary response has nowhere else to carry them.
-          "X-AAS-Stats": JSON.stringify(stats),
+          "X-AAS-Stats": JSON.stringify({ ...stats, bundled_3d_model: bundled3dModel }),
           "Access-Control-Expose-Headers": "X-AAS-Stats, Content-Disposition",
         },
       });

@@ -2,6 +2,12 @@ import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './lib/supabaseClient'
 import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId } from './utils/sparkplugId';
 import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
+import {
+  MODEL_3D_EXTENSIONS,
+  isAcceptedModelFile,
+  modelContentType,
+  modelStoragePath
+} from './utils/model3d';
 
 // Devices are related to cells *through* gateways (devices.gateway_id -> gateways.id ->
 // gateways.cell_id -> cells.id). There is no devices.cell_id column, so anything that
@@ -34,7 +40,7 @@ const mapGatewayRow = (g) => {
 // PostgREST embeds. Kept as constants so the Cells and Gateways queries stay in step.
 const DEVICE_EMBED =
   'id, name, sparkplug_id, reported_identity, identity_source, status, is_quarantined, ' +
-  'is_archived, gateway_id, created_at';
+  'is_archived, gateway_id, created_at, model_3d_path';
 const GATEWAY_EMBED =
   `id, name, sparkplug_id, cell_id, access_url, status, last_heartbeat, ip_address, is_virtual, ` +
   `is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
@@ -113,7 +119,91 @@ const mapDigitalThreadRow = (t) => ({
   metadata: t.metadata || { old_data: t.old_data, new_data: t.new_data, changed_by: t.changed_by }
 });
 
+/**
+ * The 3D-model bucket. Public-read by design -- an exported AAS `File` element has to be
+ * dereferenceable by a viewer holding no Factory+ session, which a signed URL would not be.
+ * Writes are gated by RLS to Administrator/Shopfloor_Manager (migration 0035).
+ */
+export const MODEL_3D_BUCKET = 'asset-3d-models';
+
+/** The public URL for a stored model path. Composed, never stored -- see migration 0035. */
+export function model3dPublicUrl(path) {
+  if (!path) return null;
+  return supabase.storage.from(MODEL_3D_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+
 export const api = {
+  /**
+   * Upload a 3D model for a device and record its path on the row.
+   *
+   * TWO WRITES, AND THE ORDER MATTERS. The object goes up first, then `model_3d_path` is set: a
+   * row pointing at an object that does not exist would export a shell with a dead `File` URL,
+   * whereas an object with no row pointing at it is merely unreferenced. If the second write
+   * fails the upload is rolled back, so the failure does not silently leave the bucket holding
+   * an orphan that nothing will ever clean up.
+   *
+   * `upsert: true` makes replacing a model overwrite rather than accumulate -- the path is derived
+   * from the filename, so re-uploading the same file would otherwise be a no-op that left the old
+   * bytes in place.
+   */
+  uploadDeviceModel: async (deviceId, file) => {
+    if (!isAcceptedModelFile(file?.name)) {
+      throw new Error(`Unsupported format. Accepted: ${MODEL_3D_EXTENSIONS.join(', ')}`);
+    }
+
+    const path = modelStoragePath(deviceId, file.name);
+    const { error: uploadError } = await supabase.storage
+      .from(MODEL_3D_BUCKET)
+      .upload(path, file, { upsert: true, contentType: modelContentType(file.name) });
+
+    if (uploadError) {
+      // RLS rejections arrive as a generic row-level-security message, which tells an operator
+      // nothing actionable. Name the actual cause.
+      if (/row-level security|Unauthorized/i.test(uploadError.message || '')) {
+        throw new Error('You do not have permission to upload a 3D model for this device.');
+      }
+      throw new Error(uploadError.message || 'Upload failed');
+    }
+
+    const { data, error } = await supabase
+      .from('devices')
+      .update({ model_3d_path: path })
+      .eq('id', deviceId)
+      .select();
+
+    if (error) {
+      await supabase.storage.from(MODEL_3D_BUCKET).remove([path]);
+      throw new Error(error.message || 'Could not attach the model to the device');
+    }
+
+    return { path, device: data?.[0] ?? null };
+  },
+
+  /**
+   * Detach a device's 3D model.
+   *
+   * The row is cleared BEFORE the object is deleted -- the reverse of upload, and for the same
+   * reason read the other way round. Clearing first means the worst case is an orphaned object;
+   * deleting first would leave the row briefly pointing at nothing, and an export in that window
+   * would publish a broken link. A failure to delete the object is therefore not fatal: the
+   * device is already detached, which is what the operator asked for.
+   */
+  removeDeviceModel: async (deviceId, path) => {
+    const { error } = await supabase
+      .from('devices')
+      .update({ model_3d_path: null })
+      .eq('id', deviceId);
+
+    if (error) {
+      if (/row-level security/i.test(error.message || '')) {
+        throw new Error('You do not have permission to change this device.');
+      }
+      throw new Error(error.message || 'Could not detach the model');
+    }
+
+    if (path) await supabase.storage.from(MODEL_3D_BUCKET).remove([path]);
+  },
+
   get: async (path, options = {}) => {
     const entityDigitalThreadMatch = path.match(/\/api\/v1\/(cells|gateways|devices|assets)\/([^/]+)\/digital-thread/);
     if (entityDigitalThreadMatch) {

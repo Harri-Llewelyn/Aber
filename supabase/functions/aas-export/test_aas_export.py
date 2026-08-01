@@ -29,6 +29,14 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 AAS_SCHEMA_PATH = REPO_ROOT / "tests" / "schemas" / "AAS_V3_0_JSON_Schema.json"
 TS_MAPPER = REPO_ROOT / "supabase" / "functions" / "aas-export" / "sparkplugToXsd.ts"
 JS_MAPPER = REPO_ROOT / "frontend" / "src" / "utils" / "sparkplugDatatype.js"
+TS_MODEL_TYPES = REPO_ROOT / "supabase" / "functions" / "aas-export" / "model3dContentType.ts"
+JS_MODEL_TYPES = REPO_ROOT / "frontend" / "src" / "utils" / "model3d.js"
+
+MODEL_BUCKET = os.getenv("STORAGE_MODEL_BUCKET", "asset-3d-models")
+# The AAS metamodel's idShort pattern, transcribed from the vendored schema. Stricter than it
+# looks: it must START WITH A LETTER and be at least two characters, which is why "3DModel" -- the
+# obvious name for the element -- is invalid, and why prefixing it with "_" does not rescue it.
+ID_SHORT_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*[a-zA-Z0-9_]+$")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
@@ -63,6 +71,33 @@ def parse_xsd_map(path: Path) -> dict:
         int(code): xsd
         for code, xsd in re.findall(r"(\d+)\s*:\s*['\"](xs:[A-Za-z]+)['\"]", block.group(1))
     }
+
+
+def parse_model_content_types(path: Path) -> dict:
+    """Extract the `<ext>: "<media type>"` table from either 3D content-type module."""
+    text = path.read_text(encoding="utf-8")
+    block = re.search(r"MODEL_3D_CONTENT_TYPES[^{]*\{(.*?)\}", text, re.S)
+    if not block:
+        raise AssertionError(f"MODEL_3D_CONTENT_TYPES not found in {path}")
+    return dict(re.findall(r"(\w+)\s*:\s*['\"]([\w.+/-]+)['\"]", block.group(1)))
+
+
+def without_model_reference(environment: dict) -> dict:
+    """
+    A copy of the Environment with the 3D model's `File.value` removed.
+
+    Bundling a model into an AASX rewrites that one value to a package-relative part name, so the
+    packaged Environment is byte-identical to the JSON export EXCEPT there. Comparing with it
+    stripped keeps "the package matches the export" assertable without weakening it to a spot
+    check -- any other divergence still fails.
+    """
+    copy = json.loads(json.dumps(environment))
+    for submodel in copy.get("submodels", []):
+        if submodel.get("idShort") != "VisualRepresentation":
+            continue
+        for element in submodel.get("submodelElements", []):
+            element.pop("value", None)
+    return copy
 
 
 def lower_headers(raw) -> dict:
@@ -153,6 +188,34 @@ class TestSparkplugXsdMapperParity(unittest.TestCase):
         mapping = parse_xsd_map(TS_MAPPER)
         self.assertEqual(mapping[3], "xs:int")
         self.assertNotIn("xs:int32", mapping.values())
+
+
+class TestModel3DContentTypeParity(unittest.TestCase):
+    """
+    The Deno copy and the frontend copy of the 3D media-type table must agree.
+
+    Same arrangement -- and same hazard -- as the Sparkplug/XSD mappers above: an edge worker
+    cannot import the frontend bundle, so the table is duplicated, and nothing at runtime would
+    notice a drift. A disagreement is not cosmetic here: the browser labels the stored object with
+    one type and the exporter publishes another, so a consumer picks the wrong loader.
+    """
+
+    def test_both_tables_agree(self):
+        ts = parse_model_content_types(TS_MODEL_TYPES)
+        js = parse_model_content_types(JS_MODEL_TYPES)
+        self.assertTrue(ts, "TypeScript content-type table parsed empty")
+        self.assertEqual(ts, js, "model3dContentType.ts and model3d.js have drifted")
+
+    def test_covers_every_format_the_ui_accepts(self):
+        table = parse_model_content_types(TS_MODEL_TYPES)
+        self.assertEqual(set(table), {"glb", "gltf", "obj", "stl"})
+
+    def test_gltf_types_are_the_registered_ones(self):
+        # RFC 9245. The binary and JSON forms are DIFFERENT media types, and swapping them makes a
+        # viewer try to parse a binary container as text.
+        table = parse_model_content_types(TS_MODEL_TYPES)
+        self.assertEqual(table["glb"], "model/gltf-binary")
+        self.assertEqual(table["gltf"], "model/gltf+json")
 
 
 class TestAasExportAuthorization(unittest.TestCase):
@@ -440,7 +503,10 @@ class TestAasxPackage(unittest.TestCase):
             {"device_id": DEVICE_ID},
             {"apikey": ANON_KEY, "Authorization": f"Bearer {TOKEN}"},
         )
-        self.assertEqual(packaged, body.get("aas"),
+        # Compared with the 3D model's File.value stripped: bundling deliberately rewrites that
+        # one value to a package-relative path (TestVisualRepresentation asserts it is the only
+        # such difference). Everything else must still match exactly.
+        self.assertEqual(without_model_reference(packaged), without_model_reference(body.get("aas", {})),
                          "the packaged Environment differs from the JSON export")
 
     @unittest.skipUnless(HAVE_JSONSCHEMA, "jsonschema not installed")
@@ -488,6 +554,238 @@ class TestMultiSubmodel(unittest.TestCase):
         # Two schemas attached to one device must not both claim `OperationalTelemetry`.
         shorts = [s["idShort"] for s in self.body["aas"]["submodels"]]
         self.assertEqual(len(shorts), len(set(shorts)), "two submodels share an idShort")
+
+
+def _storage_request(method: str, path: str, data=None, content_type=None):
+    req = urllib.request.Request(f"{SUPABASE_URL}/storage/v1{path}", data=data, method=method)
+    req.add_header("apikey", ANON_KEY)
+    req.add_header("Authorization", f"Bearer {TOKEN}")
+    if content_type:
+        req.add_header("Content-Type", content_type)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as res:
+            return res.status, res.read()
+    except urllib.error.HTTPError as err:
+        return err.code, err.read()
+
+
+def _patch_device(payload: dict):
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/rest/v1/devices?id=eq.{DEVICE_ID}",
+        data=json.dumps(payload).encode(),
+        method="PATCH",
+    )
+    req.add_header("apikey", ANON_KEY)
+    req.add_header("Authorization", f"Bearer {TOKEN}")
+    req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=20) as res:
+        return res.status
+
+
+@unittest.skipUnless(LIVE, SKIP_REASON)
+class TestVisualRepresentation(unittest.TestCase):
+    """
+    A device carrying a 3D model exports a VisualRepresentation submodel holding an AAS `File`.
+
+    This attaches a real object to the real device and removes it again, rather than asserting
+    against a fixture: the point is that Storage, the RLS policies, the column's CHECK and the
+    exporter's URL composition all line up, and only an end-to-end attachment exercises that.
+    Scoped to this run's own artefact and cleaned up in tearDownClass, per the discipline
+    validate.py is held to.
+    """
+
+    MODEL_NAME = "test_visual_model.glb"
+    # A minimal glTF binary header. Not a loadable model -- nothing here parses it -- but it makes
+    # the object's bytes recognisably what they claim to be rather than arbitrary filler.
+    MODEL_BYTES = b"glTF" + (2).to_bytes(4, "little") + (20).to_bytes(4, "little") + bytes(8)
+
+    @classmethod
+    def setUpClass(cls):
+        cls.path = f"{DEVICE_ID}/{cls.MODEL_NAME}"
+        cls.previous = None
+
+        status, body = _storage_request(
+            "POST", f"/object/{MODEL_BUCKET}/{cls.path}",
+            data=cls.MODEL_BYTES, content_type="model/gltf-binary",
+        )
+        if status not in (200, 201):
+            # x-upsert lets a leftover from an interrupted run be replaced rather than blocking it.
+            req = urllib.request.Request(
+                f"{SUPABASE_URL}/storage/v1/object/{MODEL_BUCKET}/{cls.path}",
+                data=cls.MODEL_BYTES, method="PUT",
+            )
+            req.add_header("apikey", ANON_KEY)
+            req.add_header("Authorization", f"Bearer {TOKEN}")
+            req.add_header("Content-Type", "model/gltf-binary")
+            with urllib.request.urlopen(req, timeout=30) as res:
+                status = res.status
+        cls.upload_status = status
+
+        _patch_device({"model_3d_path": cls.path})
+
+        _, cls.body, _ = post_json(
+            f"{SUPABASE_URL}/functions/v1/aas-export",
+            {"device_id": DEVICE_ID},
+            {"apikey": ANON_KEY, "Authorization": f"Bearer {TOKEN}"},
+        )
+
+        req = urllib.request.Request(
+            f"{SUPABASE_URL}/functions/v1/aas-export?format=aasx",
+            data=json.dumps({"device_id": DEVICE_ID}).encode(), method="POST",
+        )
+        req.add_header("apikey", ANON_KEY)
+        req.add_header("Authorization", f"Bearer {TOKEN}")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=60) as res:
+            cls.aasx_headers = lower_headers(res.headers)
+            cls.zip = zipfile.ZipFile(io.BytesIO(res.read()))
+
+    @classmethod
+    def tearDownClass(cls):
+        # Detach BEFORE deleting the object, the same order the UI uses: the reverse would leave
+        # the row briefly pointing at nothing, and an export in that window publishes a dead link.
+        try:
+            _patch_device({"model_3d_path": None})
+            _storage_request("DELETE", f"/object/{MODEL_BUCKET}/{cls.path}")
+        except Exception:  # pragma: no cover - cleanup must not mask a real failure
+            pass
+
+    # -- the JSON export -------------------------------------------------------------------
+
+    def test_the_model_uploaded(self):
+        self.assertIn(self.upload_status, (200, 201), "could not place the test model in Storage")
+
+    def test_emits_a_visual_representation_submodel(self):
+        shorts = [s["idShort"] for s in self.body["aas"]["submodels"]]
+        self.assertIn("VisualRepresentation", shorts)
+
+    def test_carries_a_file_element_with_the_right_media_type(self):
+        submodel = next(s for s in self.body["aas"]["submodels"] if s["idShort"] == "VisualRepresentation")
+        element = submodel["submodelElements"][0]
+        self.assertEqual(element["modelType"], "File")
+        self.assertEqual(element["contentType"], "model/gltf-binary")
+
+    def test_the_file_id_short_is_valid_aas(self):
+        # "3DModel" reads as the obvious name and is INVALID: an idShort must start with a letter.
+        # Asserted directly so a regression names the cause rather than surfacing as a generic
+        # schema failure, and so nobody "fixes" it back to a leading digit.
+        submodel = next(s for s in self.body["aas"]["submodels"] if s["idShort"] == "VisualRepresentation")
+        id_short = submodel["submodelElements"][0]["idShort"]
+        self.assertEqual(id_short, "Model3D")
+        self.assertRegex(id_short, ID_SHORT_RE)
+        self.assertNotRegex("3DModel", ID_SHORT_RE)
+
+    def test_every_id_short_in_the_document_is_valid(self):
+        for node in TestAasExportLive.walk(self.body.get("aas", {})):
+            if "idShort" in node:
+                self.assertRegex(node["idShort"], ID_SHORT_RE, f"invalid idShort {node['idShort']!r}")
+
+    def test_json_export_references_an_absolute_public_url(self):
+        # The JSON form has no package to be relative to, so the value must be dereferenceable on
+        # its own -- and must be built from the configured public base, not from SUPABASE_URL,
+        # which inside Docker is a hostname no external consumer can resolve.
+        submodel = next(s for s in self.body["aas"]["submodels"] if s["idShort"] == "VisualRepresentation")
+        value = submodel["submodelElements"][0]["value"]
+        self.assertTrue(value.startswith("http"), value)
+        self.assertIn(MODEL_BUCKET, value)
+        self.assertTrue(value.endswith(self.MODEL_NAME), value)
+        self.assertNotIn("supabase-kong", value)
+
+    def test_reports_the_model_in_stats(self):
+        self.assertTrue(self.body["stats"]["has_3d_model"])
+
+    @unittest.skipUnless(HAVE_JSONSCHEMA, "jsonschema not installed")
+    def test_json_export_still_validates_against_the_official_schema(self):
+        schema = json.loads(AAS_SCHEMA_PATH.read_text(encoding="utf-8"))
+        errors = list(Draft201909Validator(schema).iter_errors(self.body["aas"]))
+        detail = "\n".join(
+            f"  {'/'.join(str(x) for x in e.absolute_path) or '<root>'}: {e.message[:180]}"
+            for e in errors[:10]
+        )
+        self.assertEqual(len(errors), 0, f"AAS V3 schema violations:\n{detail}")
+
+    # -- the AASX package ------------------------------------------------------------------
+
+    def test_bundles_the_model_into_the_package(self):
+        self.assertIn(f"aasx/files/{self.path}", self.zip.namelist())
+        self.assertEqual(self.zip.read(f"aasx/files/{self.path}"), self.MODEL_BYTES)
+
+    def test_declares_the_supplementary_relationship_from_the_spec_part(self):
+        # A supplementary file belongs to the Environment that references it, so its relationship
+        # lives in the SPEC part's rels -- not the origin's. A reader following the chain from the
+        # origin would never reach it otherwise.
+        self.assertIn("aasx/_rels/aasenv-root.json.rels", self.zip.namelist())
+        rels = self.zip.read("aasx/_rels/aasenv-root.json.rels").decode()
+        self.assertIn("aas-suppl", rels)
+        self.assertIn(f"/aasx/files/{self.path}", rels)
+
+    def test_content_types_declares_the_bundled_part(self):
+        # OPC requires a media type for every part. .glb is not one of the defaults, so without an
+        # Override the package is malformed.
+        content_types = self.zip.read("[Content_Types].xml").decode()
+        self.assertIn(f'PartName="/aasx/files/{self.path}"', content_types)
+        self.assertIn('ContentType="model/gltf-binary"', content_types)
+
+    def test_packaged_reference_is_package_relative(self):
+        packaged = json.loads(self.zip.read("aasx/aasenv-root.json"))
+        submodel = next(s for s in packaged["submodels"] if s["idShort"] == "VisualRepresentation")
+        self.assertEqual(submodel["submodelElements"][0]["value"], f"/aasx/files/{self.path}")
+
+    def test_the_model_reference_is_the_only_difference_from_the_json_export(self):
+        # Bundling rewrites exactly one value. Asserted as a whole-document diff rather than by
+        # checking that one field, so a second unintended divergence cannot slip past.
+        packaged = json.loads(self.zip.read("aasx/aasenv-root.json"))
+
+        self.assertEqual(without_model_reference(packaged), without_model_reference(self.body["aas"]))
+        # And that the values really did differ, so the comparison above is not passing because
+        # both sides were stripped of something that was already identical.
+        packaged_value = next(
+            s for s in packaged["submodels"] if s["idShort"] == "VisualRepresentation"
+        )["submodelElements"][0]["value"]
+        json_value = next(
+            s for s in self.body["aas"]["submodels"] if s["idShort"] == "VisualRepresentation"
+        )["submodelElements"][0]["value"]
+        self.assertNotEqual(packaged_value, json_value)
+
+    def test_reports_the_bundling_in_the_stats_header(self):
+        stats = json.loads(self.aasx_headers.get("x-aas-stats", "{}"))
+        self.assertTrue(stats.get("has_3d_model"))
+        self.assertTrue(stats.get("bundled_3d_model"))
+
+    @unittest.skipUnless(HAVE_JSONSCHEMA, "jsonschema not installed")
+    def test_packaged_payload_validates_against_the_official_schema(self):
+        schema = json.loads(AAS_SCHEMA_PATH.read_text(encoding="utf-8"))
+        packaged = json.loads(self.zip.read("aasx/aasenv-root.json"))
+        errors = list(Draft201909Validator(schema).iter_errors(packaged))
+        self.assertEqual(len(errors), 0, f"{[e.message[:160] for e in errors[:5]]}")
+
+
+@unittest.skipUnless(LIVE, SKIP_REASON)
+class TestNoVisualRepresentationWithoutAModel(unittest.TestCase):
+    """
+    A device with no model emits NO VisualRepresentation submodel.
+
+    An empty one would assert the aspect exists and then fail to describe it -- the same rule that
+    omits an unmapped `semanticId` and drops an empty collection, and the reason a blank File
+    element is not emitted as a placeholder instead.
+    """
+
+    def test_absent_when_no_model_is_attached(self):
+        # Detach explicitly rather than assuming the fixture's state. Test classes run in
+        # alphabetical order, which puts this one before TestVisualRepresentation today -- but
+        # depending on that would make the test order-fragile, and a developer who attached a
+        # model through the UI would see a spurious failure here.
+        _patch_device({"model_3d_path": None})
+
+        _, body, _ = post_json(
+            f"{SUPABASE_URL}/functions/v1/aas-export",
+            {"device_id": DEVICE_ID},
+            {"apikey": ANON_KEY, "Authorization": f"Bearer {TOKEN}"},
+        )
+        shorts = [s["idShort"] for s in body["aas"]["submodels"]]
+        # Guards the premise: if the fixture left a model attached this test would pass vacuously.
+        self.assertFalse(body["stats"]["has_3d_model"], "fixture left a 3D model attached")
+        self.assertNotIn("VisualRepresentation", shorts)
 
 
 if __name__ == "__main__":

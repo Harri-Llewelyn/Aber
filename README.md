@@ -17,23 +17,49 @@ The platform uses a decoupled architecture combining **Supabase Backend-as-a-Ser
 * **Python Ingestion Engine**: Consumes Sparkplug B industrial MQTT messages (`DBIRTH`, `DDATA`), verifying asset registration in Supabase (auto-quarantining unregistered devices) and streaming telemetry metrics directly to TimescaleDB.
 * **React Web Dashboard**: React 18 SPA powered by Supabase JS SDK, utilizing direct PostgREST queries, real-time database change channels (`supabase.channel`), and Supabase Auth session management.
 
-### Design Decision: Supabase Storage is Deliberately Not Deployed
+### Design Decision: Supabase Storage is Scoped to 3D Asset Models
 
-This platform stores **no binary objects**, so `supabase-storage` (storage-api) and `imgproxy` are
-intentionally omitted from `docker-compose.yml`. This is a deliberate design decision, not a gap.
+`supabase-storage` (storage-api) **is** deployed, serving exactly one bucket: `asset-3d-models`,
+which holds the 3D visual model a device may carry. That model becomes an AAS `File` element in a
+`VisualRepresentation` submodel on export, which is the whole reason binary storage exists here —
+a shell that named a model it could not serve would be a broken reference.
 
-Document management is a **link registry, not a file store**. The `documents` table holds a
-`url TEXT` column pointing at an external system (SharePoint, Google Drive, or any HTTP(S) URL) —
-there is no upload path anywhere in the UI, and no bucket is ever created.
+> [!IMPORTANT]
+> **The bucket is public-read, and that follows from what it is for.** An exported AAS `File`
+> element carries a URL that an arbitrary AAS viewer — one holding no Factory+ session — has to be
+> able to dereference; a signed URL would expire and turn every shell already handed out into a
+> time bomb. So anything placed in this bucket is readable by whoever learns its path, and must
+> carry nothing more sensitive than the geometry of the machine.
+>
+> **Writes are not merely "authenticated."** Uploading a model changes what an exported shell
+> publishes *and* puts bytes at a public URL — exactly the authority `device:manage` grants, so
+> migration 0035's policies restrict writes to `Administrator` and `Shopfloor_Manager`. A
+> read-only `Operator` or `Auditor` is refused by RLS, not merely by a hidden button.
 
-> [!NOTE]
-> **Supabase Studio's Storage page will therefore report an error** (`API error happened while trying
-> to communicate with the server`) in this stack. This is expected and can be ignored — no
-> application feature depends on it. If binary object storage is ever required, add the official
-> `storage-api` and `imgproxy` services plus a `/storage/v1/` route in `supabase/kong.yml`.
+**Document management remains a link registry, not a file store.** The `documents` table still
+holds a `url TEXT` column pointing at an external system (SharePoint, Google Drive, any HTTP(S)
+URL). Storage was added for 3D models specifically, and widening it to general document upload
+would be a separate decision with a different threat model — a public bucket is the wrong home for
+arbitrary operational documents.
 
-For the same reason, the `storage` entry in `PGRST_DB_SCHEMAS` is vestigial. It is harmless and left
-in place so the setting matches upstream Supabase defaults.
+Three implementation details are load-bearing and each one breaks the feature silently if changed:
+
+* **`supabase_storage_admin` needs a password.** The supabase/postgres image creates the role
+  without one; `supabase-db-roles-init` sets it alongside `authenticator` and
+  `supabase_auth_admin`. Without it storage-api crash-loops on `28P01 password authentication
+  failed` and nothing else reports a problem.
+* **The bucket is created by `supabase-storage-init`, not by a SQL migration.** storage-api owns
+  the `storage` schema and runs its *own* migrations on boot; the image ships only a stub of it
+  with no `public` column at all. `supabase-db-init` replays our migrations long before that, so a
+  migration creating the bucket would run against the stub and could not mark it public. The
+  policies on `storage.objects` *are* in migration 0035 — that table exists from the stub onward,
+  and access control belongs beside the rest of the RLS.
+* **The health probe uses `127.0.0.1`, not `localhost`.** The image's resolver answers `localhost`
+  with `::1` and storage-api binds IPv4 only, so the probe gets `ECONNREFUSED` against a perfectly
+  healthy server and the container never leaves `starting`.
+
+The `storage` entry in `PGRST_DB_SCHEMAS` is no longer vestigial, and Supabase Studio's Storage
+page now works.
 
 ### System Topology Diagram
 
@@ -94,6 +120,8 @@ Running `docker compose up -d` launches the entire unified application stack:
 | **`supabase-kong`** | `factoryplus_supabase_kong` | `kong:2.8.1-alpine` | `54321:8000` | Kong API Gateway (`http://127.0.0.1:54321`) |
 | **`supabase-functions`** | `factoryplus_supabase_functions` | `supabase/edge-runtime:v1.74.2` | — | Supabase Deno Edge Runtime executing serverless functions |
 | **`supabase-realtime`** | `factoryplus_supabase_realtime` | `supabase/realtime:v2.34.47` | — | WebSocket change feed (Postgres logical replication → `/realtime/v1/`) |
+| **`supabase-storage`** | `factoryplus_supabase_storage` | `supabase/storage-api:v1.11.13` | — | Object storage for 3D asset models (`/storage/v1/`); owns and migrates the `storage` schema |
+| **`supabase-storage-init`** | `factoryplus_supabase_storage_init` | `node:20-alpine` | — | One-shot init container creating the public `asset-3d-models` bucket via the Storage REST API |
 | **`supabase-meta`** | `factoryplus_supabase_meta` | `supabase/postgres-meta:v0.96.6` | — | Schema introspection API backing Supabase Studio's Database pages |
 | **`supabase-studio`** | `factoryplus_supabase_studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `54323:3000` | Supabase Studio administrative Web UI (`http://127.0.0.1:54323`) |
 | **`timescaledb`** | `factoryplus_timescaledb` | `timescale/timescaledb:latest-pg15` | `5433:5432` | Standalone TimescaleDB instance for `telemetry` hypertable (schema auto-provisioned via `timescaledb/init/`) |
@@ -542,6 +570,14 @@ All database migrations are stored in `supabase/migrations/`:
   - **No immutability trigger, and that is a decision.** `metric_catalog.name` is immutable because a physical device is configured against that exact string; attaching or detaching a submodel is the opposite — ordinary reconfiguration that must stay reversible and changes no wire contract.
   - The migration **asserts its own backfill**: a `DO` block raises if any device carrying `schema_id` failed to carry over, because a silently missed one would report every metric it publishes as Unmodelled.
 
+- **`20260101000035_asset_3d_models.sql`** *(3D visual models)*:
+  - Adds **`devices.model_3d_path`** and the RLS policies governing the `asset-3d-models` bucket.
+  - **It stores an object KEY, never a URL**, and that is the design decision the rest follows from. A stored URL bakes in the origin of whichever stack performed the upload, so the row is wrong the moment the deployment moves behind a real hostname — and every consumer serves dead links with no way to tell which part went stale. The public URL is composed at read time from `AAS_MODEL_PUBLIC_BASE`, exactly as `AAS_BASE_IRI` and `AAS_HISTORIAN_ENDPOINT` already are for the shell's other outbound references.
+  - **The CHECK constrains the extension, and it is the real control on what can be referenced.** The bucket's `allowed_mime_types` cannot be: browsers report `.obj` and `.stl` inconsistently — usually as `application/octet-stream`, sometimes as nothing at all, because no mainstream OS maps them — so the bucket has to accept octet-stream and the extension is what remains to discriminate on. It is also what the exporter derives the AAS `contentType` from, so an unrecognised extension would become an unresolvable media type in a published shell.
+  - **The path must lead with the device UUID**, because the storage policies authorise writes on that segment. A path that did not would let a writer place an object under another device's prefix.
+  - **Writes are gated on `device:manage` roles, not on "authenticated"** — see the Storage design note above.
+  - The migration **asserts its own constraint**: a `DO` block inserts a probe device, confirms the CHECK *rejects* a malformed path and *accepts* a well-formed one, then removes both the row and the `digital_thread` entries its own trigger wrote — an append-only table must not grow by a row per boot.
+
 ### The Schemas Page
 
 Three stacked cards, in order of how specific they are to this deployment:
@@ -739,11 +775,63 @@ than guessing filenames:
 _rels/.rels                    package relationships → points at the origin part
 aasx/aasx-origin               a deliberately EMPTY marker; it exists only to be the anchor
 aasx/_rels/aasx-origin.rels    origin relationships → points at the payload
-aasx/aasenv-root.json          the Environment, byte-identical to the JSON export
+aasx/aasenv-root.json          the Environment, byte-identical to the JSON export¹
 ```
+
+¹ *Except for one value when a 3D model is bundled — see below.*
 
 Served as `application/asset-administration-shell-package+xml` with a `Content-Disposition`
 filename. The `+xml` suffix on a ZIP is not a mistake — OPC's registered media types carry it.
+
+#### 3D visual models (`VisualRepresentation` submodel)
+
+A device carrying a `model_3d_path` exports one more submodel, holding an AAS `File`:
+
+```jsonc
+{
+  "modelType": "Submodel", "idShort": "VisualRepresentation", "kind": "Instance",
+  "submodelElements": [{
+    "modelType": "File",
+    "idShort": "Model3D",
+    "contentType": "model/gltf-binary",
+    "value": "http://localhost:54321/storage/v1/object/public/asset-3d-models/<device>/cnc_machine.glb"
+  }]
+}
+```
+
+> [!WARNING]
+> **The idShort is `Model3D`, not `3DModel`.** The metamodel's pattern is
+> `^[a-zA-Z][a-zA-Z0-9_-]*[a-zA-Z0-9_]+$` — it must **start with a letter**, so `3DModel` is
+> invalid and `_3DModel` is invalid too. There is no prefixing fix; the name has to lead with a
+> letter. The vendored schema catches it, and a test asserts it directly so a regression names the
+> cause. The same rule made `toIdShort()` wrong for any device named e.g. *3-Axis Mill*, which is
+> now fixed.
+
+**The submodel is omitted entirely when no model is attached** — an empty one would assert the
+aspect exists and then fail to describe it, the same rule that omits an unmapped `semanticId` and
+drops an empty collection.
+
+**In an AASX the model is bundled into the package**, because self-containment is the point of the
+container format: a package handed over on removable media has to render without reaching back to
+a host the recipient may have no route to. That adds one more link to the discovery chain:
+
+```
+aasx/files/<device>/<model>          the bytes
+aasx/_rels/aasenv-root.json.rels     aas-suppl relationship, FROM THE SPEC PART
+[Content_Types].xml                  an Override for the part (.glb is not a default extension)
+```
+
+The `aas-suppl` relationship belongs to the **spec** part, not the origin — a supplementary file
+belongs to the Environment that references it, and a reader walking from the origin would never
+reach it otherwise. `File.value` is rewritten to the package-relative part name, which is the
+**only** difference between the packaged Environment and the JSON export; a test asserts that by
+whole-document diff rather than by spot-checking that one field.
+
+Bundling is **best-effort**: if the object cannot be fetched, the export still succeeds carrying
+the URL form, and `X-AAS-Stats` reports `bundled_3d_model: false`. Failing an entire shell because
+one artefact is unavailable would be the wrong trade — everything else in it is still accurate.
+Models above `AAS_MAX_BUNDLED_MODEL_BYTES` (32 MB) take the same fallback, since zipping happens in
+the edge worker's memory.
 
 > [!NOTE]
 > The browser **cannot** fetch AASX through `supabase.functions.invoke()`: supabase-js decodes any
@@ -914,10 +1002,10 @@ lost. Each entry names the offending code so it can be picked up directly.
   `docs/openapi.yaml` (`Assembly Line 1`, `Simulated_CNC_01`, ...) appear whether or not
   those records exist. Press **Execute** and read the **Response body** panel for real data.
 
-- **Supabase Studio's Storage page reports an error.** Storage is deliberately not deployed — see
-  [Design Decision: Supabase Storage is Deliberately Not Deployed](#design-decision-supabase-storage-is-deliberately-not-deployed).
-- **`PGRST_DB_SCHEMAS` still lists `storage`.** Vestigial while no storage-api runs; kept to match
-  upstream Supabase defaults.
+- **The `asset-3d-models` bucket is world-readable.** Not a defect — an exported AAS `File` URL has
+  to be dereferenceable by a viewer holding no session. Upload nothing to it beyond machine
+  geometry. See
+  [Design Decision: Supabase Storage is Scoped to 3D Asset Models](#design-decision-supabase-storage-is-scoped-to-3d-asset-models).
 - **Simulated devices appear quarantined on first start.** `Simulated_CNC_01` (Sparkplug ID
   `dev200000000000400080000`) is auto-registered with `is_quarantined = true` by design; an
   `Administrator` must approve it before telemetry is stored.

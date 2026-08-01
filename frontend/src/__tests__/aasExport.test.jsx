@@ -47,10 +47,16 @@ const routeGet = (path) => {
   return Promise.resolve([])
 }
 
-// The action is a <select> so both formats fit in an already-crowded row; choosing an option
-// fires the export and the control resets itself.
-const exportControl = () => screen.getByTitle(/Asset Administration Shell/)
-const chooseFormat = (format) => fireEvent.change(exportControl(), { target: { value: format } })
+// Both export formats live in the row's overflow menu. They used to be a <select> that faked a
+// menu (value="" plus a self-resetting onChange); inside a real one they are just two items.
+const openMenu = () => fireEvent.click(screen.getByTestId(`device-actions-${DEVICE.asset_id}`))
+const menu = () => screen.getByRole('menu')
+const chooseFormat = (format) => {
+  openMenu()
+  fireEvent.click(within(menu()).getByRole('menuitem', {
+    name: format === 'aasx' ? /Export AASX package/i : /Export AAS JSON/i
+  }))
+}
 
 const renderDevices = (showToast = vi.fn()) => {
   render(<DevicesTab showToast={showToast} onSelectDevice={() => {}} hasPermission={() => true} />)
@@ -67,15 +73,21 @@ describe('Export AAS action', () => {
   it('offers both formats on every device row', async () => {
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
-    const options = within(exportControl()).getAllByRole('option').map(o => o.value)
-    expect(options).toContain('json')
-    expect(options).toContain('aasx')
+    openMenu()
+    const items = within(menu()).getAllByRole('menuitem').map(i => i.textContent)
+    expect(items.some(t => /Export AAS JSON/i.test(t))).toBe(true)
+    expect(items.some(t => /Export AASX package/i.test(t))).toBe(true)
   })
 
   it('is available without the manage permission — an export is a read', async () => {
     render(<DevicesTab showToast={vi.fn()} onSelectDevice={() => {}} hasPermission={() => false} />)
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
-    expect(exportControl().disabled).toBe(false)
+
+    openMenu()
+    // Enabled even for a role that cannot manage the device, unlike Config and Archive beside it.
+    for (const name of [/Export AAS JSON/i, /Export AASX package/i]) {
+      expect(within(menu()).getByRole('menuitem', { name }).disabled).toBe(false)
+    }
   })
 
   it('composes the document server-side rather than in the browser', async () => {
@@ -157,14 +169,17 @@ describe('Export AAS action', () => {
     expect(downloadJSON).not.toHaveBeenCalled()
   })
 
-  it('re-enables the button after a failure, so the export can be retried', async () => {
+  it('re-enables the menu after a failure, so the export can be retried', async () => {
     api.post.mockRejectedValue(new Error('boom'))
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
     chooseFormat('json')
 
-    await waitFor(() => expect(exportControl().disabled).toBe(false))
+    // The trigger is disabled while exporting (and labelled "Exporting…"); a failure must clear
+    // that rather than leaving the row permanently unable to retry.
+    await waitFor(() =>
+      expect(screen.getByTestId(`device-actions-${DEVICE.asset_id}`).disabled).toBe(false))
   })
 })
 
