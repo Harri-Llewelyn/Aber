@@ -66,7 +66,7 @@ const DEVICE_EMBED =
   'is_archived, gateway_id, cell_id, location_scope, created_at, model_3d_path';
 const GATEWAY_EMBED =
   `id, name, sparkplug_id, cell_id, location_scope, access_url, status, last_heartbeat, ` +
-  `ip_address, is_virtual, is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
+  `is_virtual, is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
 
 /**
  * Effective cell per device, keyed by device id, read from public.device_locations.
@@ -114,6 +114,18 @@ export const TELEMETRY_PAGE_SIZE = 500;
 const TELEMETRY_MAX_ROWS = 5000;
 
 /**
+ * Ceiling on a single CSV export, across all selected metrics.
+ *
+ * Higher than TELEMETRY_MAX_ROWS because an export is a deliberate act with a progress bar in
+ * front of it, not a page render -- but still bounded, for the same postgres_fdw reason: a
+ * 30-day range over several metrics has no natural limit and the FDW will happily materialise
+ * all of it. On reaching this the export still downloads, carrying the most recent rows and
+ * saying plainly that it was truncated. Silently returning a partial file from a button
+ * labelled "Export" would be the worse failure.
+ */
+export const TELEMETRY_EXPORT_MAX_ROWS = 50000;
+
+/**
  * `telemetry.asset_id` and `asset_config.asset_id` are keyed by the device's immutable
  * `sparkplug_id`, while the UI works in device UUIDs. Translate before querying either.
  *
@@ -132,7 +144,15 @@ function toTelemetryKey(assetId) {
  * TimescaleDB hypertable, exposed through PostgREST (see
  * 0001_baseline_schema.sql; rationale in archive/20260101000010_telemetry_foreign_table.sql).
  */
-async function queryTelemetry({ assetId, assetIds, metricName, minutes, limit, offset } = {}) {
+/**
+ * @param minutes  Relative window, "the last N minutes". Kept as the primary form because every
+ *                 existing caller uses it and it needs no clock arithmetic at the call site.
+ * @param from,to  Absolute ISO bounds, for the export dialog's custom range. `minutes` and
+ *                 `from`/`to` are not combined -- an explicit bound wins, because a caller that
+ *                 supplies both has contradicted itself and the narrower reading of intent is
+ *                 the one they typed.
+ */
+async function queryTelemetry({ assetId, assetIds, metricName, minutes, from: fromTime, to: toTime, limit, offset } = {}) {
   const pageSize = Math.min(
     Number.isFinite(limit) && limit > 0 ? limit : TELEMETRY_PAGE_SIZE,
     TELEMETRY_MAX_ROWS
@@ -154,7 +174,12 @@ async function queryTelemetry({ assetId, assetIds, metricName, minutes, limit, o
   if (telemetryKey) query = query.eq('asset_id', telemetryKey);
   else if (assetIds) query = query.in('asset_id', telemetryKeys);
   if (metricName) query = query.eq('metric_name', metricName);
-  if (Number.isFinite(minutes) && minutes > 0) {
+
+  // Absolute bounds win over the relative window -- see the parameter note above.
+  if (fromTime || toTime) {
+    if (fromTime) query = query.gte('time', fromTime);
+    if (toTime)   query = query.lte('time', toTime);
+  } else if (Number.isFinite(minutes) && minutes > 0) {
     query = query.gte('time', new Date(Date.now() - minutes * 60000).toISOString());
   }
 
@@ -164,6 +189,23 @@ async function queryTelemetry({ assetId, assetIds, metricName, minutes, limit, o
 
   if (error) throw error;
   return data || [];
+}
+
+/**
+ * Collapse a newest-first telemetry page to one row per (asset, metric).
+ *
+ * Relies on queryTelemetry ordering `time` descending, so the FIRST row seen for a key is the
+ * most recent one. Shared by the fleet-wide `/telemetry/latest` (the Overview map) and the
+ * device-scoped one (the Devices page's telemetry drawer) so the two cannot disagree about what
+ * "latest" means.
+ */
+function newestPerMetric(rows) {
+  const latest = new Map();
+  for (const row of rows || []) {
+    const key = `${row.asset_id}::${row.metric_name}`;
+    if (!latest.has(key)) latest.set(key, row);
+  }
+  return [...latest.values()];
 }
 
 const mapDigitalThreadRow = (t) => ({
@@ -369,6 +411,30 @@ export const api = {
       return (data || []).map(g => mapGatewayRow(g, locations));
     }
 
+    /**
+     * Latest value per metric for ONE device -- what the Devices page's telemetry drawer shows.
+     *
+     * Checked before the /config route below and before the collection route, because both
+     * would otherwise match this path first.
+     *
+     * Scoped to a single asset, unlike the fleet-wide /telemetry/latest above, so the bounded
+     * page it reads is spent entirely on this device: a shared fleet query with limit 1000
+     * would silently omit metrics from a busy shopfloor. The window is generous by default
+     * (24h) because the drawer's job is to say what a metric last read, and a machine that
+     * reports hourly should not appear to have no data.
+     */
+    if (path.match(/\/api\/v1\/devices\/(.+)\/telemetry\/latest/)) {
+      const match = path.match(/\/api\/v1\/devices\/(.+)\/telemetry\/latest/);
+      const url = new URL(path, window.location.origin);
+      const minutes = Number.parseInt(url.searchParams.get('minutes') || '1440', 10);
+      const rows = await queryTelemetry({
+        assetId: match[1],
+        minutes,
+        limit: TELEMETRY_MAX_ROWS
+      });
+      return newestPerMetric(rows);
+    }
+
     if (path.match(/\/api\/v1\/devices\/(.+)\/config/)) {
       const match = path.match(/\/api\/v1\/devices\/(.+)\/config/);
       // asset_config is keyed by the device's sparkplug_id, written by the ingestion daemon
@@ -428,6 +494,10 @@ export const api = {
       const entityIds = url.searchParams.has('entity_ids')
         ? url.searchParams.get('entity_ids').split(',').filter(Boolean)
         : undefined;
+      // INSERT / UPDATE / DELETE. Filtered in SQL rather than client-side because the row limit
+      // is applied by the database: filtering after the fact would page through 200 mixed rows
+      // and then show whatever fraction of them happened to be deletions.
+      const action = (url.searchParams.get('action') || '').trim().toUpperCase();
       const limit = Number.parseInt(url.searchParams.get('limit') || '', 10);
 
       // A tag that matches no device must return nothing rather than everything.
@@ -443,6 +513,7 @@ export const api = {
         query = query.eq('entity_type', stored || entityType);
       }
       if (entityIds) query = query.in('entity_id', entityIds);
+      if (['INSERT', 'UPDATE', 'DELETE'].includes(action)) query = query.eq('action', action);
       if (Number.isFinite(limit) && limit > 0) query = query.limit(limit);
 
       const { data, error } = await query.order('recorded_at', { ascending: false });
@@ -665,19 +736,12 @@ export const api = {
 
     // Latest value per (device, metric) inside a bounded recent window. Used by the
     // Overview map, which only needs current state -- not the full history the
-    // Telemetry tab pages through.
+    // export dialog pages through.
     if (path.startsWith('/api/v1/telemetry/latest')) {
       const url = new URL(path, window.location.origin);
       const minutes = Number.parseInt(url.searchParams.get('minutes') || '60', 10);
       const rows = await queryTelemetry({ minutes, limit: 1000 });
-
-      const latest = new Map();
-      for (const row of rows) {
-        const key = `${row.asset_id}::${row.metric_name}`;
-        // queryTelemetry returns newest-first, so the first hit for a key wins.
-        if (!latest.has(key)) latest.set(key, row);
-      }
-      return [...latest.values()];
+      return newestPerMetric(rows);
     }
 
     if (path.startsWith('/api/v1/telemetry')) {
@@ -692,6 +756,10 @@ export const api = {
         assetIds,
         metricName: url.searchParams.get('metric_name'),
         minutes: Number.parseInt(url.searchParams.get('minutes') || '', 10),
+        // Absolute bounds, used by the CSV export's custom range. Null when absent, so the
+        // relative `minutes` form still applies for every other caller.
+        from: url.searchParams.get('from'),
+        to: url.searchParams.get('to'),
         limit: Number.parseInt(url.searchParams.get('limit') || '', 10),
         offset: Number.parseInt(url.searchParams.get('offset') || '', 10)
       });
@@ -760,7 +828,6 @@ export const api = {
       const { data, error } = await supabase.from('gateways').insert({
         name: body.gateway_name,
         access_url: body.access_url,
-        ip_address: emptyToNull(body.ip_address),
         is_virtual: !!body.is_virtual,
         status: body.status || 'OFFLINE',
         ...locationFieldsFrom(body)
@@ -800,12 +867,24 @@ export const api = {
     }
 
     if (path === '/api/v1/metric-groups') {
+      // `standard` records which vocabulary a group came from. It was dropped here, so every
+      // group created through the Add Metric form landed with standard = NULL and filed under
+      // "Local" -- invisible while the picker merely bucketed groups, but wrong the moment it
+      // FILTERS by standard: a group you had just created under MTConnect would vanish from the
+      // MTConnect list. Empty string is the Custom standard, which is stored as NULL by design
+      // (see STANDARDS.CUSTOM in utils/standards.js), so emptyToNull is the correct mapping.
       const { data, error } = await supabase.from('metric_groups').insert({
         name: body.name,
-        description: emptyToNull(body.description)
+        description: emptyToNull(body.description),
+        standard: emptyToNull(body.standard)
       }).select().single();
       if (error) throw error;
-      return { group_uuid: data.id, name: data.name, description: data.description };
+      return {
+        group_uuid: data.id,
+        name: data.name,
+        description: data.description,
+        standard: data.standard ?? null
+      };
     }
 
     if (path === '/api/v1/metric-catalog') {
@@ -1053,7 +1132,6 @@ export const api = {
         name: body.gateway_name,
         access_url: body.access_url
       };
-      if ('ip_address' in body)  patch.ip_address = emptyToNull(body.ip_address);
       if ('is_virtual' in body)  patch.is_virtual = !!body.is_virtual;
       // Same pairing rule as devices: marking a gateway Site-Wide clears its cell rather than
       // letting the CHECK reject the write. is_virtual is NOT what decides this -- a virtual

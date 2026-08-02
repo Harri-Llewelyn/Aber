@@ -887,7 +887,10 @@ CREATE TABLE IF NOT EXISTS public.gateways (
     archived_at timestamp with time zone,
     auto_delete_at timestamp with time zone,
     last_heartbeat timestamp with time zone,
-    ip_address text,
+    -- ip_address was removed by 0004. Nothing in the monitoring flow read it: it is not part of
+    -- the gateway search haystack, no view or function derives from it, ingestion resolves edge
+    -- nodes by sparkplug_id, and the AAS exporter does not emit it. Dropped here as well as in
+    -- 0004 so a fresh install never creates it -- see 0004's header for why both are needed.
     is_virtual boolean DEFAULT false NOT NULL,
     sparkplug_id text GENERATED ALWAYS AS (('gwy'::text || substr(encode(uuid_send(id), 'hex'::text), 1, 21))) STORED,
     location_scope text DEFAULT 'cell'::text NOT NULL,
@@ -1023,7 +1026,10 @@ CREATE OR REPLACE VIEW public.gateway_status WITH (security_invoker='true') AS
     g.archived_at,
     g.auto_delete_at,
     g.last_heartbeat,
-    g.ip_address,
+    -- g.ip_address removed alongside the column above. pg_dump expanded this view into an
+    -- explicit column list rather than the `g.*` that ensure_gateway_status_view() uses, so the
+    -- two have to be kept in step by hand -- leaving it here would fail a FRESH install with
+    -- "column g.ip_address does not exist" while every existing database carried on working.
     g.is_virtual,
     g.sparkplug_id,
     g.location_scope,

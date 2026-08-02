@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { GITHUB_REPO_URL } from '../../constants'
 import { IconBug, IconExternalLink } from '../common/Icons'
 
 export function BugReportModal({ onClose, showToast, persona, activeTab }) {
@@ -29,10 +30,14 @@ ${desc || 'No detailed steps provided.'}
 ---
 *Generated via Factory+ Asset Tracking Dashboard Bug Reporter.*`
 
-    const repoUrl = 'https://github.com/Harri-Llewelyn/factoryplus-asset-tracking/issues/new'
-    const fullUrl = `${repoUrl}?title=${encodeURIComponent(issueTitle)}&body=${encodeURIComponent(issueBody)}`
+    // Composed from the configured repository rather than a hardcoded one -- see
+    // GITHUB_REPO_URL in constants.js for why this was wrong and why it keeps a fallback.
+    const fullUrl = `${GITHUB_REPO_URL}/issues/new` +
+      `?title=${encodeURIComponent(issueTitle)}&body=${encodeURIComponent(issueBody)}`
 
-    window.open(fullUrl, '_blank')
+    // noopener: window.open without it leaves the new tab holding a reference to this one
+    // through window.opener, which it can use to navigate the dashboard elsewhere.
+    window.open(fullUrl, '_blank', 'noopener,noreferrer')
     showToast('Redirected to GitHub Issue creation', 'success')
     onClose()
   }

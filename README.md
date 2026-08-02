@@ -117,6 +117,11 @@ every later start.
 | Node-RED | http://localhost:1880 |
 | Grafana | http://localhost:3002 |
 
+Node-RED and Grafana both sign in through Supabase Auth. **Sign in to the React dashboard first** —
+the consent step needs your dashboard session, so going straight to either one shows a "sign in
+required" prompt rather than a login form. In Node-RED, click **Sign in with Factory+**;
+Administrator and Shopfloor_Manager can deploy, Operator and Auditor get a read-only editor.
+
 ### Demo accounts
 
 Seeded by [`supabase/seed.sql`](supabase/seed.sql), password `factoryplus123`:
@@ -182,8 +187,8 @@ docker compose down -v          # also drops volumes, invalidating every logged-
 | `mosquitto` | `factoryplus_mosquitto` | `eclipse-mosquitto:latest` | `1883`, `9001` |
 | `frontend` | `factoryplus_frontend` | `./frontend/Dockerfile` | `3000:3000` |
 | `ingestion` | `factoryplus_ingestion` | `./Dockerfile` | — |
-| `node-red-init` | `factoryplus_node_red_init` | `nodered/node-red:latest` | — |
-| `node-red` | `factoryplus_node_red` | `nodered/node-red:latest` | `1880:1880` |
+| `node-red-init` | `factoryplus_node_red_init` | `./node-red/Dockerfile` | — |
+| `node-red` | `factoryplus_node_red` | `./node-red/Dockerfile` | `1880:1880` |
 | `grafana` | `factoryplus_grafana` | `grafana/grafana:latest` | `3002:3000` |
 | `swagger-ui` | `factoryplus_swagger_ui` | `swaggerapi/swagger-ui:v5.17.14` | `8088:8080` |
 
@@ -202,6 +207,26 @@ unrecognised role produces `403`.
 | **API** | PostgREST JWT verification plus RLS on every table |
 | **Database** | `has_role()` reads `user_roles` directly, so revocation is immediate; `digital_thread` is append-only against `service_role` too |
 | **Edge functions** | Explicit router allow-list; per-function secret scoping; role resolved from the database, never from a stale JWT claim |
+| **Edge automation** | Node-RED's editor, admin API and webhook receiver all authenticate — see below |
+
+### Node-RED is not an open port
+
+The editor and the `/flows` admin API sign in through **Supabase Auth** (OAuth2 + PKCE), and
+`POST /hooks/quarantine` requires a signed token. Three separate things, because Node-RED serves
+them on separate mounts and securing only the admin API leaves the webhook receiver open.
+
+> **This matters more than it looks.** A Node-RED `function` node runs arbitrary JavaScript inside
+> a container that holds the MQTT credential and can reach Mosquitto, Supabase and TimescaleDB.
+> Anyone who could replace a flow had remote code execution on the edge host.
+
+Machine callers never share a password. `deploy-nodered` forwards **the operator's own access
+token**, which Node-RED re-checks against `user_roles` — so revoking a role takes effect on both
+sides at once, without waiting for a token to expire. The quarantine webhook carries a **60-second
+token signed per event** by the database, scoped to that one endpoint: a flow can read it out of
+`msg.req.headers`, which is exactly why it is not the admin credential and expires in a minute.
+
+`NODERED_ADMIN_TOKEN` remains as opt-in break-glass, empty by default — SSO being down is when you
+most need the thing SSO protects.
 
 ### Storage is scoped to 3D asset models
 

@@ -680,25 +680,27 @@ paths:
       tags: [Edge Functions]
       summary: Deploy edge flows to Node-RED (GitOps sync)
       description: |
-        The repository is the source of truth. Sending `{ "commit_message": "..." }`
-        deploys the canonical `node_red_flow.json` committed to the repo; sending a
-        Node-RED flow **array** instead deploys that payload verbatim.
+        The repository is the source of truth: this deploys the canonical
+        `node_red_flow.json` committed to the repo, and nothing else.
 
-        Requires the `Administrator` or `Shopfloor_Manager` role.
+        A Node-RED flow **array** in the request body is **refused with 400**. A `function`
+        node runs arbitrary JavaScript inside the Node-RED container, which holds the MQTT
+        credential and can reach Mosquitto, Supabase and TimescaleDB — so accepting a caller's
+        flow would be remote code execution on the edge host. Edit flows in the Node-RED
+        editor; promote an edit with a commit.
+
+        Requires the `Administrator` or `Shopfloor_Manager` role. The caller's access token is
+        forwarded to Node-RED's admin API, which re-derives their role from `user_roles`.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              oneOf:
-                - type: object
-                  properties:
-                    commit_message:
-                      type: string
-                      example: Manual GitOps Flow Sync from Dashboard UI
-                - type: array
-                  items: { type: object }
-                  description: A Node-RED flow array, deployed as sent.
+              type: object
+              properties:
+                commit_message:
+                  type: string
+                  example: Manual GitOps Flow Sync from Dashboard UI
       responses:
         '200':
           description: Deployed.
@@ -710,8 +712,41 @@ paths:
                   status: { type: string, example: DEPLOYED }
                   nodes_deployed: { type: integer }
                   source: { type: string }
+        '400': { description: An inline flow array was sent; only the committed flow is deployable. }
         '401': { description: Missing Authorization header. }
         '403': { description: 'Forbidden: insufficient privileges.' }
+        '502': { description: Node-RED rejected the deployment (including 401 if its admin auth refused the forwarded token). }
+
+  /functions/v1/nodered-userinfo:
+    get:
+      tags: [Edge Functions]
+      summary: Identity and Node-RED permissions for the bearer token
+      description: |
+        Called by Node-RED's `adminAuth` — during an editor sign-in and when validating a
+        forwarded service token. Returns the standard identity claims plus `permissions`,
+        read from `public.user_roles`: `Administrator` and `Shopfloor_Manager` map to `*`,
+        `Operator` and `Auditor` to `read`.
+
+        **`permissions` is omitted entirely when the role is unmapped, absent or unreadable**,
+        which is what makes Node-RED refuse the login. It is never defaulted to `read` — an
+        unmapped role is a provisioning error, and a revoked one must not stay usable.
+      responses:
+        '200':
+          description: Identity resolved.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sub: { type: string, format: uuid }
+                  email: { type: string }
+                  email_verified: { type: boolean }
+                  supabase_role: { type: string, nullable: true, example: Administrator }
+                  permissions:
+                    type: string
+                    enum: ['*', read]
+                    description: Absent when the role could not be mapped.
+        '401': { description: Missing or invalid Authorization header. }
 
 components:
 
@@ -814,7 +849,6 @@ components:
           nullable: true
           readOnly: true
           description: Receipt time of the last node-level Sparkplug B message. Null means none has ever arrived.
-        ip_address: { type: string, nullable: true }
         is_virtual: { type: boolean, default: false }
         is_archived: { type: boolean, default: false }
         created_at: { type: string, format: date-time, readOnly: true }
@@ -830,7 +864,6 @@ components:
         cell_id: { type: string, format: uuid, nullable: true }
         access_url: { type: string, nullable: true }
         status: { type: string, enum: [ONLINE, OFFLINE] }
-        ip_address: { type: string, nullable: true }
         is_virtual: { type: boolean }
         is_archived: { type: boolean }
 

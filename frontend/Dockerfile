@@ -16,6 +16,10 @@ ENV VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY
 # container; flipping it requires rebuilding the frontend image.
 ARG VITE_ENABLE_REALTIME
 ENV VITE_ENABLE_REALTIME=$VITE_ENABLE_REALTIME
+# Where the Report Bug button files issues. Unset is survivable -- constants.js falls back to
+# this repository -- but a fork that leaves it unset sends its reports to the wrong tracker.
+ARG VITE_GITHUB_REPO_URL
+ENV VITE_GITHUB_REPO_URL=$VITE_GITHUB_REPO_URL
 
 RUN npm run build
 

@@ -55,7 +55,12 @@ const OPCUA_VOCABULARY = [
 const routes = {
   '/api/v1/schemas': [],
   '/api/v1/metric-catalog': CATALOG,
-  '/api/v1/metric-groups': [{ group_uuid: 'g1', name: 'Axes', standard: 'MTConnect' }],
+  '/api/v1/metric-groups': [
+    { group_uuid: 'g1', name: 'Axes', standard: 'MTConnect' },
+    { group_uuid: 'g2', name: 'OEE', standard: 'ISO 22400' },
+    { group_uuid: 'g3', name: 'Machine', standard: 'OPC UA' },
+    { group_uuid: 'g4', name: 'Hydraulic', standard: null }
+  ],
   '/api/v1/mtconnect-vocabulary': VOCABULARY,
   '/api/v1/iso22400-vocabulary': ISO_VOCABULARY,
   '/api/v1/opcua-vocabulary': OPCUA_VOCABULARY,
@@ -70,6 +75,25 @@ const renderTab = () => render(
 /** The catalog table is the first one on the page; the vocabulary panel below it is not a table. */
 const catalogTable = () => document.querySelector('table')
 
+/**
+ * Waits for the catalog to render, then opens every group.
+ *
+ * The catalog's groups now default to COLLAPSED, so `getByText('Axes/DISPLACEMENT')` -- which
+ * this suite used throughout as its "page is ready" gate -- no longer resolves on arrival. The
+ * group HEADERS render first and stay visible when shut, so the gate waits on one of those and
+ * then expands the sections the assertions below read.
+ *
+ * Scoped to the catalog table: the vocabulary panel underneath has its own collapsible sections
+ * ("Expand this section"), and a loose title match would drive those too.
+ */
+const waitForCatalog = async () => {
+  await waitFor(() => expect(catalogTable()).toBeTruthy())
+  await waitFor(() => expect(within(catalogTable()).getAllByTitle(/^Expand /).length).toBeGreaterThan(0))
+  for (const header of within(catalogTable()).queryAllByTitle(/^Expand /)) {
+    fireEvent.click(header)
+  }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   api.get.mockImplementation((path) => {
@@ -79,51 +103,48 @@ beforeEach(() => {
 })
 
 describe('Metric Catalog — collapsible groups', () => {
-  it('opens with every group expanded, so the catalog still shows its contents on arrival', async () => {
-    // Deliberately the opposite default to the MTConnect vocabulary panel: this is deployment
-    // state someone came here to read, not ~600 reference entries.
+  it('opens COLLAPSED, showing each group header and its count rather than every row', async () => {
+    // Inverted from the original default. The catalog outgrew being unrolled on arrival: it
+    // pushed the schema registry below the fold, and the header count already says what is
+    // inside. The vocabulary panel below has always defaulted this way.
     renderTab()
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
-    expect(screen.getByText('Controller/EXECUTION')).toBeTruthy()
-    expect(screen.getByText('safety_interlock')).toBeTruthy()
-  })
 
-  it('collapses a single group without touching the others', async () => {
-    renderTab()
-    await waitFor(() => expect(screen.getByText('Controller/EXECUTION')).toBeTruthy())
-
-    fireEvent.click(screen.getByTitle('Collapse Controller'))
-
+    await waitFor(() => expect(screen.getByTitle('Expand Controller (2 metrics)')).toBeTruthy())
+    expect(screen.queryByText('Axes/DISPLACEMENT')).toBeNull()
     expect(screen.queryByText('Controller/EXECUTION')).toBeNull()
-    expect(screen.queryByText('Controller/FIRMWARE')).toBeNull()
-    // Other groups are unaffected -- collapse state is per group, not a single global toggle.
-    expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy()
-  })
+    expect(screen.queryByText('safety_interlock')).toBeNull()
 
-  it('keeps the group header and its count visible while collapsed', async () => {
-    renderTab()
-    await waitFor(() => expect(screen.getByText('Controller/EXECUTION')).toBeTruthy())
-
-    fireEvent.click(screen.getByTitle('Collapse Controller'))
-
+    // Collapsed is not uninformative: the header carries the group and how many metrics it has.
     const header = screen.getByTitle('Expand Controller (2 metrics)')
     expect(within(header).getByText('Controller')).toBeTruthy()
     expect(within(header).getByText('2')).toBeTruthy()
   })
 
-  it('expands again on a second click', async () => {
+  it('expands a single group without touching the others', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByText('Controller/EXECUTION')).toBeTruthy())
+    await waitFor(() => expect(screen.getByTitle('Expand Controller (2 metrics)')).toBeTruthy())
 
-    fireEvent.click(screen.getByTitle('Collapse Controller'))
     fireEvent.click(screen.getByTitle('Expand Controller (2 metrics)'))
 
     expect(screen.getByText('Controller/EXECUTION')).toBeTruthy()
+    expect(screen.getByText('Controller/FIRMWARE')).toBeTruthy()
+    // Expansion is per group, not a single global toggle.
+    expect(screen.queryByText('Axes/DISPLACEMENT')).toBeNull()
+  })
+
+  it('collapses again on a second click', async () => {
+    renderTab()
+    await waitFor(() => expect(screen.getByTitle('Expand Controller (2 metrics)')).toBeTruthy())
+
+    fireEvent.click(screen.getByTitle('Expand Controller (2 metrics)'))
+    fireEvent.click(screen.getByTitle('Collapse Controller'))
+
+    expect(screen.queryByText('Controller/EXECUTION')).toBeNull()
   })
 
   it('collapses deprecated metrics by default — they are context, not the working set', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     expect(screen.queryByText('temperature')).toBeNull()
     fireEvent.click(screen.getByTitle(/Show metrics that have been retired/))
@@ -137,15 +158,15 @@ describe('Metric Catalog — collapsible groups', () => {
         : (routes[Object.keys(routes).find(r => path.startsWith(r))] || [])))
 
     renderTab()
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
     expect(screen.queryByText('Deprecated')).toBeNull()
   })
 
   it('leaves the rest of the row intact when expanded', async () => {
-    // Guards the table rendering itself, not just visibility: collapsing is a row-level condition
+    // Guards the table rendering itself, not just visibility: expansion is a row-level condition
     // inside the same <tbody>, so a mistake here silently drops columns.
     renderTab()
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     const row = screen.getByText('Axes/DISPLACEMENT').closest('tr')
     expect(within(row).getByText('SAMPLE')).toBeTruthy()
@@ -154,12 +175,55 @@ describe('Metric Catalog — collapsible groups', () => {
   })
 })
 
+describe('Metric Catalog — search', () => {
+  const search = () => screen.getByLabelText('Search the metric catalog')
+
+  it('auto-expands matching groups, so a search is not a list of shut headers', async () => {
+    renderTab()
+    await waitFor(() => expect(screen.getByTitle('Expand Controller (2 metrics)')).toBeTruthy())
+
+    fireEvent.change(search(), { target: { value: 'EXECUTION' } })
+
+    // Revealed without anyone clicking a header -- the whole point of the override.
+    expect(screen.getByText('Controller/EXECUTION')).toBeTruthy()
+    expect(screen.queryByText('Controller/FIRMWARE')).toBeNull()
+    expect(screen.queryByText('Axes/DISPLACEMENT')).toBeNull()
+  })
+
+  it('matches case-insensitively on the metric name', async () => {
+    renderTab()
+    await waitFor(() => expect(screen.getByTitle('Expand Controller (2 metrics)')).toBeTruthy())
+
+    fireEvent.change(search(), { target: { value: 'axes/' } })
+    expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy()
+  })
+
+  it('says so when nothing matches, rather than rendering a bare table header', async () => {
+    renderTab()
+    await waitFor(() => expect(screen.getByTitle('Expand Controller (2 metrics)')).toBeTruthy())
+
+    fireEvent.change(search(), { target: { value: 'no-such-metric' } })
+    expect(screen.getByText(/No metric matches/)).toBeTruthy()
+  })
+
+  it('restores the collapsed view when the search is cleared', async () => {
+    renderTab()
+    await waitFor(() => expect(screen.getByTitle('Expand Controller (2 metrics)')).toBeTruthy())
+
+    fireEvent.change(search(), { target: { value: 'EXECUTION' } })
+    expect(screen.getByText('Controller/EXECUTION')).toBeTruthy()
+
+    fireEvent.change(search(), { target: { value: '' } })
+    expect(screen.queryByText('Controller/EXECUTION')).toBeNull()
+  })
+})
+
 describe('Metric Catalog — Add Metric toggle', () => {
   const addButton = () => screen.getByRole('button', { name: /Add Metric|Cancel/ })
 
   it('reads "Add Metric" while the form is closed', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     expect(addButton().textContent).toContain('Add Metric')
     expect(addButton().getAttribute('aria-expanded')).toBe('false')
@@ -168,7 +232,7 @@ describe('Metric Catalog — Add Metric toggle', () => {
 
   it('reads "Cancel" once the form is open', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     fireEvent.click(addButton())
 
@@ -179,7 +243,7 @@ describe('Metric Catalog — Add Metric toggle', () => {
 
   it('closes the form again and returns the label', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     fireEvent.click(addButton())
     fireEvent.click(addButton())
@@ -191,7 +255,7 @@ describe('Metric Catalog — Add Metric toggle', () => {
   it('discards what was typed, so a reopened form does not inherit stale input', async () => {
     // The label says Cancel, so it has to mean cancel.
     renderTab()
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     fireEvent.click(addButton())
     const description = screen.getByPlaceholderText('What this metric represents')
@@ -206,7 +270,7 @@ describe('Metric Catalog — Add Metric toggle', () => {
 
   it('disables the control without the manage permission, in either state', async () => {
     render(<SchemasTab showToast={vi.fn()} hasPermission={() => false} onSelectSchema={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     const button = screen.getByRole('button', { name: /Add Metric/ })
     expect(button.disabled).toBe(true)
@@ -242,7 +306,7 @@ const namePreview = () => screen.getByText(/Devices will publish this metric as/
 
 const openForm = async () => {
   renderTab()
-  await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+  await waitForCatalog()
   fireEvent.click(screen.getByRole('button', { name: /Add Metric/ }))
 }
 
@@ -440,7 +504,7 @@ describe('Metric builder — MTConnect semantic id derivation', () => {
 describe('Metric Catalog table — standard and semantic id columns', () => {
   it('shows the standard a metric was named from, and names the absence of one', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     const mtconnectRow = screen.getByText('Axes/DISPLACEMENT').closest('tr')
     expect(within(mtconnectRow).getByText('MTConnect')).toBeTruthy()
@@ -451,7 +515,7 @@ describe('Metric Catalog table — standard and semantic id columns', () => {
 
   it('renders an unmapped metric as a dash rather than an empty cell', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     const row = screen.getByText('Axes/DISPLACEMENT').closest('tr')
     expect(within(row).getByTitle(/Not mapped to a standard concept/)).toBeTruthy()
@@ -471,6 +535,8 @@ describe('Metric Catalog table — standard and semantic id columns', () => {
 
     renderTab()
     const catalog = () => within(cardFor(/Metric Catalog/))
+    // Groups start collapsed, so the row has to be revealed before it can be read.
+    await waitForCatalog()
     await waitFor(() => expect(catalog().getByText('OEE/AVAILABILITY')).toBeTruthy())
 
     const row = catalog().getByText('OEE/AVAILABILITY').closest('tr')
@@ -484,7 +550,7 @@ describe('Standard Vocabulary Reference', () => {
 
   it('renders one card for all three standards, not three cards', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     expect(screen.getAllByRole('heading', { name: /Standard Vocabulary Reference/ })).toHaveLength(1)
     expect(screen.queryByRole('heading', { name: /MTConnect Vocabulary/ })).toBeNull()
@@ -496,7 +562,7 @@ describe('Standard Vocabulary Reference', () => {
     // All three counts visible at once is the point of a segmented control over a dropdown: it is
     // what shows the vocabularies are different sizes and different kinds of thing.
     renderTab()
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     expect(within(standardTab(/MTConnect/)).getByText('4')).toBeTruthy()
     expect(within(standardTab(/ISO 22400/)).getByText('2')).toBeTruthy()
@@ -505,7 +571,7 @@ describe('Standard Vocabulary Reference', () => {
 
   it('opens on MTConnect and marks only that tab selected', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     expect(standardTab(/MTConnect/).getAttribute('aria-selected')).toBe('true')
     expect(standardTab(/ISO 22400/).getAttribute('aria-selected')).toBe('false')
@@ -513,7 +579,7 @@ describe('Standard Vocabulary Reference', () => {
 
   it('swaps the rendered dataset when a tab is selected', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     // MTConnect sections are data item types and components; ISO 22400's are KPI families.
     expect(card().queryByRole('button', { name: /OEE/ })).toBeNull()
@@ -524,7 +590,7 @@ describe('Standard Vocabulary Reference', () => {
 
   it('starts every section collapsed - the vocabularies are reference, not the working set', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     fireEvent.click(standardTab(/ISO 22400/))
     // Chips are found by title: the tab's own blurb quotes AVAILABILITY in the same markup a chip
@@ -536,7 +602,7 @@ describe('Standard Vocabulary Reference', () => {
   it('keeps the search text across a tab switch', async () => {
     // "Which standard has a word for this?" should be one query, not three.
     renderTab()
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     fireEvent.change(card().getByPlaceholderText(/Search/), { target: { value: 'availability' } })
     fireEvent.click(standardTab(/ISO 22400/))
@@ -547,7 +613,7 @@ describe('Standard Vocabulary Reference', () => {
 
   it('starts a metric from a KPI chip, switching the form to ISO 22400', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     fireEvent.click(standardTab(/ISO 22400/))
     fireEvent.click(card().getByRole('button', { name: /OEE/ }))
@@ -560,7 +626,7 @@ describe('Standard Vocabulary Reference', () => {
 
   it('starts a metric from an OPC UA data point chip', async () => {
     renderTab()
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     fireEvent.click(standardTab(/OPC UA/))
     fireEvent.click(card().getByRole('button', { name: /OPC 40010 Robotics/ }))
@@ -572,7 +638,7 @@ describe('Standard Vocabulary Reference', () => {
 
   it('does not offer the chips as actions without the manage permission', async () => {
     render(<SchemasTab showToast={vi.fn()} hasPermission={() => false} onSelectSchema={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     fireEvent.click(standardTab(/ISO 22400/))
     fireEvent.click(card().getByRole('button', { name: /OEE/ }))
@@ -589,7 +655,7 @@ describe('Schema actions', () => {
     // that were not in the catalog, had no standard and carried no semantic id - and every derived
     // feature reads schemas.
     renderTab()
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     expect(screen.getByRole('button', { name: /Build Schema from Catalog/ })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Register New Schema/ })).toBeNull()
@@ -597,8 +663,89 @@ describe('Schema actions', () => {
 
   it('gates the builder behind the manage permission', async () => {
     render(<SchemasTab showToast={vi.fn()} hasPermission={() => false} onSelectSchema={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText('Axes/DISPLACEMENT')).toBeTruthy())
+    await waitForCatalog()
 
     expect(screen.getByRole('button', { name: /Build Schema from Catalog/ }).disabled).toBe(true)
+  })
+})
+
+// The Group picker follows the Standard selector. Offering ISO 22400's KPI families while the
+// form is set to MTConnect invites a group that contradicts the metric's own provenance -- and
+// `standard` is what an AAS export reads to choose a namespace.
+describe('Add Metric — Group picker follows the Standard', () => {
+  const openForm = async () => {
+    renderTab()
+    await waitForCatalog()
+    fireEvent.click(screen.getByRole('button', { name: /Add Metric/ }))
+  }
+  const groupSelect = () => screen.getByTitle(/The category this metric belongs to/)
+  // The catalog table also has a Standard column header, so match the form control's own text.
+  const standardSelect = () => screen.getByTitle(/Which vocabulary this metric is named from/)
+  const groupNames = () =>
+    [...groupSelect().querySelectorAll('option')].map(o => o.textContent)
+
+  it('offers MTConnect groups and local ones, but not another standard\'s', async () => {
+    await openForm()
+
+    expect(groupNames()).toContain('Axes')
+    expect(groupNames()).toContain('Hydraulic')   // local: always available
+    expect(groupNames()).not.toContain('OEE')
+    expect(groupNames()).not.toContain('Machine')
+  })
+
+  it('swaps the options when the standard changes', async () => {
+    await openForm()
+    fireEvent.change(standardSelect(), { target: { value: 'ISO 22400' } })
+
+    expect(groupNames()).toContain('OEE')
+    expect(groupNames()).toContain('Hydraulic')
+    expect(groupNames()).not.toContain('Axes')
+  })
+
+  it('leaves only local groups for a custom metric', async () => {
+    await openForm()
+    fireEvent.change(standardSelect(), { target: { value: '' } })
+
+    expect(groupNames()).toContain('Hydraulic')
+    expect(groupNames()).not.toContain('Axes')
+    expect(groupNames()).not.toContain('OEE')
+  })
+
+  // Without this the selected group survives into a standard that does not offer it: the select
+  // renders blank while the composed name silently keeps the old prefix, so the metric is created
+  // under a group the form appears not to have selected.
+  it('clears a group the new standard does not offer', async () => {
+    await openForm()
+    fireEvent.change(groupSelect(), { target: { value: 'Axes' } })
+    expect(groupSelect().value).toBe('Axes')
+
+    fireEvent.change(standardSelect(), { target: { value: 'ISO 22400' } })
+    expect(groupSelect().value).toBe('')
+  })
+
+  it('keeps a group the new standard still offers', async () => {
+    await openForm()
+    fireEvent.change(groupSelect(), { target: { value: 'Hydraulic' } })
+
+    fireEvent.change(standardSelect(), { target: { value: 'ISO 22400' } })
+    // Local groups appear under every standard, so re-picking would be pointless friction.
+    expect(groupSelect().value).toBe('Hydraulic')
+  })
+
+  it('records the standard on a group it registers, so the group files under it', async () => {
+    // api.js used to drop `standard` here, so every group created through this form landed as
+    // Local -- invisible while the picker merely bucketed, wrong once it filters.
+    await openForm()
+    api.post.mockResolvedValue({})
+
+    fireEvent.change(groupSelect(), { target: { value: '__new__' } })
+    fireEvent.change(screen.getByPlaceholderText('e.g. Hydraulic'), { target: { value: 'Coolant' } })
+    fireEvent.change(screen.getByTitle(/MTConnect data item type/), { target: { value: 'ANGLE' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Add$/ }))
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/api/v1/metric-groups',
+      expect.objectContaining({ name: 'Coolant', standard: 'MTConnect' })
+    ))
   })
 })

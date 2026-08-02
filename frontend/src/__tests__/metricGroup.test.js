@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   deriveMetricGroup, metricGroupOf, groupCatalog, catalogGroups, UNGROUPED_LABEL,
   knownGroupNames, canonicaliseGroup, isValidMetricName,
-  groupOptionsByStandard, LOCAL_STANDARD_LABEL
+  groupOptionsByStandard, LOCAL_STANDARD_LABEL, groupOptionsForStandard
 } from '../utils/metricGroup'
 
 const metric = (name, extra = {}) => ({ metric_uuid: name, name, ...extra })
@@ -243,5 +243,57 @@ describe('isValidMetricName', () => {
       expect(isValidMetricName(name)).toBe(true)
       expect(deriveMetricGroup(name)).toBe('Axes')
     }
+  })
+})
+
+// The Add Metric form's Group picker filters by the selected Standard. Kept as its own function
+// rather than a parameter on groupOptionsByStandard(), whose contract is "every known group,
+// bucketed" -- a property the tests above assert directly.
+describe('groupOptionsForStandard', () => {
+  const registry = [
+    { name: 'Axes', standard: 'MTConnect' },
+    { name: 'Controller', standard: 'MTConnect' },
+    { name: 'OEE', standard: 'ISO 22400' },
+    { name: 'MotionDevice', standard: 'OPC UA' },
+    { name: 'Hydraulic', standard: null }
+  ]
+  const metrics = []
+  const namesFor = (standard) =>
+    groupOptionsForStandard(registry, metrics, standard).flatMap(b => b.names).sort()
+
+  it('offers only the selected standard, plus local groups', () => {
+    expect(namesFor('MTConnect')).toEqual(['Axes', 'Controller', 'Hydraulic'])
+    expect(namesFor('ISO 22400')).toEqual(['Hydraulic', 'OEE'])
+    expect(namesFor('OPC UA')).toEqual(['Hydraulic', 'MotionDevice'])
+  })
+
+  it('always includes local groups, whatever the standard', () => {
+    // Nothing ties a group to a standard: metric_groups.standard records where a group came
+    // from, not what may use it, and the metric name derives its group by string prefix with no
+    // knowledge of provenance. A deployment that invented `Hydraulic` must be able to file an
+    // MTConnect data item under it.
+    for (const standard of ['MTConnect', 'ISO 22400', 'OPC UA']) {
+      expect(namesFor(standard)).toContain('Hydraulic')
+    }
+  })
+
+  it('leaves only local groups for the Custom standard, which is the empty string', () => {
+    // STANDARDS.CUSTOM is '' -- a custom metric is by definition not drawn from a vocabulary.
+    expect(namesFor('')).toEqual(['Hydraulic'])
+  })
+
+  it('never offers a group belonging to a different standard', () => {
+    expect(namesFor('MTConnect')).not.toContain('OEE')
+    expect(namesFor('ISO 22400')).not.toContain('Axes')
+  })
+
+  it('keeps the bucket labels, so the picker still groups its optgroups', () => {
+    const buckets = groupOptionsForStandard(registry, metrics, 'MTConnect')
+    expect(buckets.map(b => b.label)).toEqual(['MTConnect', LOCAL_STANDARD_LABEL])
+  })
+
+  it('files an unregistered in-use group under Local, so it stays reachable', () => {
+    const withUsed = groupOptionsForStandard(registry, [{ name: 'Spindle/SPEED' }], 'MTConnect')
+    expect(withUsed.flatMap(b => b.names)).toContain('Spindle')
   })
 })

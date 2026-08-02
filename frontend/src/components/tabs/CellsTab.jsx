@@ -438,7 +438,7 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission, initialSear
                                 </td>
                                 <td><span className="mono" style={{ color: 'var(--warning-text)' }} title={a.active_gateway_id || 'No gateway assigned'}>{a.gateway_name || a.active_gateway_id || '—'}</span></td>
                                 <td style={{ textAlign: 'right' }}>
-                                  <button className="btn btn-ghost btn-sm" onClick={() => onSelectDevice(a.asset_id)} title="View live telemetry for this device">
+                                  <button className="btn btn-ghost btn-sm" onClick={() => onSelectDevice(a.asset_id)} title="Show this device on the Devices page, where its telemetry drawer lives">
                                     <IconActivity size={12} /> Telemetry
                                   </button>
                                 </td>

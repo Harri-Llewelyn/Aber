@@ -131,6 +131,32 @@ export function groupOptionsByStandard(registry, metrics) {
 }
 
 /**
+ * The group picker's options NARROWED to one standard, plus local groups.
+ *
+ * WHY A SEPARATE FUNCTION rather than a parameter on groupOptionsByStandard(). That function's
+ * contract is "every known group, bucketed" -- a property its tests assert directly ("returns
+ * exactly the names knownGroupNames does"). Filtering is a different question, and folding it in
+ * would mean one function whose result set depends on an argument, which is the shape that makes
+ * a caller passing the wrong thing hard to notice.
+ *
+ * LOCAL GROUPS ARE ALWAYS INCLUDED, and that is deliberate. Nothing in the schema ties a group to
+ * a standard: `metric_groups.standard` records where a group CAME FROM, not what may use it, and
+ * the metric name derives its group by string prefix with no knowledge of provenance at all. A
+ * deployment that invented `Hydraulic` for its own equipment must still be able to file an
+ * MTConnect data item under it -- excluding local groups would make the picker narrower than the
+ * database, and the operator's only recourse would be to re-create a group that already exists
+ * under a second spelling, which the spelling trigger then rejects.
+ *
+ * An empty `standard` is the Custom option (STANDARDS.CUSTOM is ''), which leaves local groups
+ * only -- exactly right, since a custom metric is by definition not drawn from a vocabulary.
+ */
+export function groupOptionsForStandard(registry, metrics, standard) {
+  const buckets = groupOptionsByStandard(registry, metrics)
+  if (!standard) return buckets.filter(b => b.label === LOCAL_STANDARD_LABEL)
+  return buckets.filter(b => b.label === standard || b.label === LOCAL_STANDARD_LABEL)
+}
+
+/**
  * Resolve a typed group name against the known vocabulary, case-insensitively.
  *
  * Returns the *existing* spelling when one matches, so typing `robot` where `Robot` is already

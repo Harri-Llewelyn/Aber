@@ -9,7 +9,7 @@ import { DeprecateMetricModal } from '../modals/DeprecateMetricModal'
 import { downloadJSON } from '../../utils/downloadJSON'
 import { datatypeLabel, SPARKPLUG_DATATYPES } from '../../utils/sparkplugDatatype'
 import {
-  groupCatalog, knownGroupNames, groupOptionsByStandard, canonicaliseGroup, isValidMetricName,
+  groupCatalog, knownGroupNames, groupOptionsForStandard, canonicaliseGroup, isValidMetricName,
   composeMetricName
 } from '../../utils/metricGroup'
 import { modelledMetrics } from '../../utils/deviceTags'
@@ -87,11 +87,17 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
   // permits extension, so those escapes have to exist.
   const [newMetric, setNewMetric] = useState(BLANK_METRIC)
   const [deprecateTarget, setDeprecateTarget] = useState(null)
-  // Collapse state for the catalog's group sections, keyed by group label. Absent means expanded:
-  // the catalog is deployment state an operator came here to read, so it opens showing its
-  // contents and collapsing is the deliberate act. (The MTConnect vocabulary panel defaults the
-  // other way because it is ~600 reference entries nobody wants unrolled on arrival.)
-  const [collapsedGroups, setCollapsedGroups] = useState({})
+  // Expansion state for the catalog's group sections, keyed by group label. Absent means
+  // COLLAPSED -- inverted from the original, which stored collapse and opened everything.
+  //
+  // The catalog outgrew the old default. Unrolled it is a wall of rows that pushes the schema
+  // registry below the fold, and the group headers carry a count, so a collapsed catalog still
+  // says what is in it. Same treatment the vocabulary panel already had.
+  const [expandedGroups, setExpandedGroups] = useState({})
+  // Filters the catalog by metric name. It exists BECAUSE the groups now start collapsed:
+  // without it, finding one metric means opening each group in turn, which is worse than the
+  // wall of rows the collapse was meant to fix.
+  const [catalogSearch, setCatalogSearch] = useState('')
   const [showDeprecated, setShowDeprecated] = useState(false)
   // Version lifecycle (migration 0037). `detailSchema` is the version being read or edited;
   // `forkTarget` is the one a new version is being cut from. Two states rather than one mode flag,
@@ -102,9 +108,17 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
   // with the working set stops being readable.
   const [showArchivedVersions, setShowArchivedVersions] = useState(false)
 
-  const isGroupOpen = (label) => collapsedGroups[label] !== true
+  /**
+   * A group is open when the operator opened it, OR when a search is narrowing the catalog.
+   *
+   * The search override is not a convenience. With groups collapsed by default, a search that
+   * left them shut would render a list of headers and no matches -- the page would look like it
+   * had found nothing, when in fact every row it found is one click away inside a closed
+   * section. Auto-expanding is what makes the collapsed default survivable.
+   */
+  const isGroupOpen = (label) => Boolean(catalogSearch) || expandedGroups[label] === true
   const toggleGroup = (label) =>
-    setCollapsedGroups(prev => ({ ...prev, [label]: isGroupOpen(label) }))
+    setExpandedGroups(prev => ({ ...prev, [label]: !isGroupOpen(label) }))
 
   // "Cancel" means discard, so closing the form clears it. That also stops half-finished input
   // leaking into the next open -- including the one the vocabulary panel triggers.
@@ -207,9 +221,22 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
    * than cosmetic. The group and description survive because they are the operator's own input.
    */
   const handleStandardChange = (value) => {
+    // The group survives a standard switch when the new standard still offers it -- the operator
+    // typed it, and re-picking `Axes` after correcting the standard is pointless friction. But
+    // the picker now FILTERS by standard, so a group the new standard does not offer would sit
+    // in `newMetric.group` while being absent from the options: the select renders blank, the
+    // composed name silently keeps the old prefix, and the metric is created under a group the
+    // form appears not to have selected.
+    const stillOffered = groupOptionsForStandard(groups, catalog, value)
+      .some(bucket => bucket.names.includes(newMetric.group))
+    // The "+ New group…" sentinel is not a group name and is always available.
+    const keepGroup = newMetric.group === NEW_GROUP || stillOffered
+
     setNewMetric(m => ({
       ...m,
       standard: value,
+      group: keepGroup ? m.group : '',
+      newGroup: keepGroup ? m.newGroup : '',
       type: '', customType: '', subType: '', units: '',
       vocabCategory: '', semanticId: '', semanticIdType: '', semanticIdManual: false
     }))
@@ -222,7 +249,10 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
       // stays complete even if the metric insert is then rejected. A group with no metrics is
       // harmless; a metric whose group nobody can find in the picker is not.
       if (effectiveGroup && !knownGroups.includes(effectiveGroup)) {
-        await api.post('/api/v1/metric-groups', { name: effectiveGroup })
+        // Carries the standard so the group files under it in the picker rather than under
+        // Local -- which, now that the picker filters, would hide it from the very standard it
+        // was created for.
+        await api.post('/api/v1/metric-groups', { name: effectiveGroup, standard: effectiveStandard })
       }
 
       await api.post('/api/v1/metric-catalog', {
@@ -414,8 +444,18 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
   // it. See isCurrentSchema().
   const archivedCount = schemas.filter(s => !isCurrentSchema(s)).length
   const visibleSchemas = showArchivedVersions ? schemas : schemas.filter(isCurrentSchema)
-  const activeCatalog = catalog.filter(m => !m.deprecated)
-  const deprecatedCatalog = catalog.filter(m => m.deprecated)
+  /**
+   * Narrows the catalog by metric name, and by nothing else.
+   *
+   * Name only, deliberately: it is the immutable wire contract and the thing an operator arrives
+   * knowing. Matching description or units as well would return rows whose reason for matching is
+   * invisible in the table, which reads as a bug.
+   */
+  const matchesCatalogSearch = (m) =>
+    !catalogSearch || (m.name || '').toLowerCase().includes(catalogSearch.trim().toLowerCase())
+
+  const activeCatalog = catalog.filter(m => !m.deprecated).filter(matchesCatalogSearch)
+  const deprecatedCatalog = catalog.filter(m => m.deprecated).filter(matchesCatalogSearch)
   // Grouped by the first dotted segment of the name; ungrouped metrics fall into a trailing
   // bucket rather than being hidden. Deprecated metrics stay a flat tail -- they are retired,
   // so filing them by category would just add noise to every group.
@@ -424,8 +464,10 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
   // The vocabulary the picker offers: the curated registry (now MTConnect's component types)
   // plus anything already in use.
   const knownGroups = knownGroupNames(groups, catalog)
-  // Bucketed by standard: 126 MTConnect component types in one flat list is not navigable.
-  const groupOptions = groupOptionsByStandard(groups, catalog)
+  // Narrowed to the selected standard, plus local groups -- 126 MTConnect component types in
+  // one flat list is not navigable, and offering ISO 22400's KPI families while the form is set
+  // to MTConnect invites a group that contradicts the metric's own provenance.
+  const groupOptions = groupOptionsForStandard(groups, catalog, newMetric.standard)
   const effectiveGroup = newMetric.group === NEW_GROUP
     ? canonicaliseGroup(newMetric.newGroup, knownGroups)
     : newMetric.group
@@ -543,6 +585,18 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
             section header would sit flush against its borders. */}
         <div className="card-header">
           <h3 className="section-title">Metric Catalog <span className="section-count">{activeCatalog.length}</span></h3>
+          {/* Sits beside Add Metric because the groups now start collapsed: search is how you
+              reach a known metric without opening every section. Typing auto-expands the groups
+              that matched -- see isGroupOpen(). */}
+          <input
+            className="form-control"
+            style={{ width: '200px', marginLeft: 'auto', marginRight: '10px' }}
+            value={catalogSearch}
+            onChange={e => setCatalogSearch(e.target.value)}
+            placeholder="Search metrics…"
+            aria-label="Search the metric catalog"
+            title="Filter the catalog by metric name"
+          />
           {/* The label follows the form's state rather than naming a fixed action, so the control
               always says what pressing it will do. */}
           <button
@@ -858,7 +912,15 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
           </div>
         )}
 
-        {loading ? <div className="loading-wrap"><div className="spinner" /> Loading catalog…</div> : (
+        {loading ? <div className="loading-wrap"><div className="spinner" /> Loading catalog…</div> : catalogGroups.length === 0 ? (
+          <div className="empty-state" style={{ padding: '24px 20px' }}>
+            <div className="empty-text">
+              {catalogSearch
+                ? <>No metric matches <strong>{catalogSearch}</strong>.</>
+                : 'No metrics in the catalog yet.'}
+            </div>
+          </div>
+        ) : (
           <div className="table-wrap">
             <table>
               <thead><tr><th>Name</th><th title="Which standard vocabulary this metric was named from">Standard</th><th title="MTConnect observation category">Category</th><th title="MTConnect units — SAMPLE data items only">Units</th><th>Datatype</th><th title="AAS (IEC 63278) semanticId — the resolvable identity of the concept this metric measures">Semantic ID</th><th>Description</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>

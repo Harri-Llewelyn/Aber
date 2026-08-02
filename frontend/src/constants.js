@@ -22,7 +22,7 @@ export const PERMISSION_UUIDS = {
 };
 
 export const VALID_TABS = [
-  'overview', 'cells', 'gateways', 'devices', 'digital-thread', 'telemetry', 'schemas', 'directory', 'archives'
+  'overview', 'cells', 'gateways', 'devices', 'digital-thread', 'schemas', 'directory', 'archives'
 ];
 
 export const PERSONAS = [
@@ -46,6 +46,26 @@ export const PERSONAS = [
 export const REALTIME_ENABLED = import.meta.env.VITE_ENABLE_REALTIME === 'true';
 export const POLL_INTERVAL_MS = 3000;
 export const RECONCILE_INTERVAL_MS = 60000;
+
+/**
+ * Where the Report Bug button files an issue.
+ *
+ * Configurable because a fork does not want its bug reports landing on the upstream tracker --
+ * which is exactly what was happening: the URL was hardcoded to
+ * `Harri-Llewelyn/factoryplus-asset-tracking`, a repository that is not this one, so every report
+ * filed through that button went somewhere nobody working on this code was reading.
+ *
+ * A FALLBACK IS KEPT, unlike VITE_SUPABASE_URL which throws when missing. The distinction is what
+ * breaks: a missing Supabase URL means the app cannot function and should say so loudly, whereas
+ * a missing repo URL should never leave someone trying to report a bug staring at a dead button.
+ * A wrong-but-present default is recoverable; a broken reporting path hides every other defect.
+ *
+ * Vite inlines import.meta.env at BUILD time, so changing this needs the frontend image rebuilt,
+ * not the container restarted -- same caveat as VITE_ENABLE_REALTIME above.
+ */
+export const GITHUB_REPO_URL =
+  (import.meta.env.VITE_GITHUB_REPO_URL || 'https://github.com/Harri-Llewelyn/ACS-Cymru')
+    .replace(/\/+$/, '');
 
 // How often tabs that render wall-clock-derived state re-render (see hooks/useClockTick.js).
 // Gateway heartbeat staleness is the case: a gateway going quiet writes nothing, so it emits

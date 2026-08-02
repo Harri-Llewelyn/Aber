@@ -1,46 +1,87 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../api'
-import { deviceHasTag, schemasForDevice, availableTags } from '../../utils/deviceTags'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { AutoRefreshControl } from '../common/AutoRefreshControl'
 import { IconHistory, IconDownload, IconX } from '../common/Icons'
+
+/**
+ * How a machine-originated change is described. `changed_by` names WHICH user and is NULL for
+ * every write no person made; `actor_source` (migration 0005) names WHAT KIND of actor it was,
+ * so a blank author is no longer ambiguous between "a gateway did this" and "we lost track".
+ */
+const ACTOR_LABELS = {
+  user:      { label: 'User',              title: 'Made by a signed-in operator' },
+  ingestion: { label: 'Ingestion daemon',  title: 'Written by the Sparkplug B ingestion daemon' },
+  migration: { label: 'Database migration', title: 'Written by a migration or an owner connection' },
+  service:   { label: 'Service',           title: 'Written by an automated service on the service-role key' }
+}
 
 export function DigitalThreadTab() {
   const [events, setEvents]           = useState([])
   const [loading, setLoading]         = useState(true)
   const [entityTypeFilter, setEntityTypeFilter] = useState('')
-  const [entityIdFilter, setEntityIdFilter]     = useState('')
-  const [tagFilter, setTagFilter]     = useState('')
+  const [nameFilter, setNameFilter]   = useState('')
+  const [actionFilter, setActionFilter] = useState('')
   const [devices, setDevices]         = useState([])
-  const [schemas, setSchemas]         = useState([])
+  const [gateways, setGateways]       = useState([])
+  const [cells, setCells]             = useState([])
 
   useEffect(() => {
-    // Device tags are derived from each device's schema, so both lists are needed to turn a tag
-    // into the set of entity ids to trace.
-    Promise.all([api.get('/api/v1/devices'), api.get('/api/v1/schemas')])
-      .then(([d, s]) => { setDevices(d); setSchemas(s) })
+    // Cells and gateways join devices here so the audit log can be searched by the NAME an
+    // operator knows an asset by. The log itself stores only entity_id -- names live on the
+    // entity, and deliberately carry no identity of their own (they are editable), so resolving
+    // one is a client-side join rather than something the audit row could have recorded.
+    Promise.all([
+      api.get('/api/v1/devices'),
+      api.get('/api/v1/gateways'),
+      api.get('/api/v1/cells')
+    ])
+      .then(([d, g, c]) => { setDevices(d); setGateways(g); setCells(c) })
       .catch(() => {})
   }, [])
 
-  const tagOptions = useMemo(() => availableTags(devices, schemas), [devices, schemas])
+  /** entity_id -> display name, across all three audited tables. */
+  const entityNames = useMemo(() => {
+    const m = new Map()
+    for (const c of cells)    m.set(c.cell_id, c.cell_name)
+    for (const g of gateways) m.set(g.gateway_id, g.gateway_name)
+    for (const d of devices)  m.set(d.asset_id, d.asset_name)
+    return m
+  }, [cells, gateways, devices])
 
-  const taggedDeviceIds = useMemo(() => {
-    if (!tagFilter) return null
-    return devices
-      .filter(d => deviceHasTag(d, schemasForDevice(d, schemas), tagFilter))
-      .map(d => d.asset_id)
-  }, [tagFilter, devices, schemas])
+  /**
+   * A name search resolves to the ids that match it, rather than filtering the fetched page.
+   *
+   * The row limit is applied by the database, so filtering after the fact would page through 200
+   * mixed rows and then show whichever fraction happened to match -- the same reason the action
+   * filter is a SQL predicate. Resolving to ids first keeps the limit meaningful.
+   */
+  const namedEntityIds = useMemo(() => {
+    const q = nameFilter.trim().toLowerCase()
+    if (!q) return null
+    return [...entityNames.entries()]
+      .filter(([id, name]) =>
+        String(name || '').toLowerCase().includes(q) || String(id).toLowerCase().includes(q))
+      .map(([id]) => id)
+  }, [nameFilter, entityNames])
 
   const load = useCallback((isInitial = false) => {
     if (isInitial) setLoading(true)
     let url = '/api/v1/digital-thread?limit=200'
     if (entityTypeFilter) url += `&entity_type=${encodeURIComponent(entityTypeFilter)}`
-    if (entityIdFilter)   url += `&entity_id=${encodeURIComponent(entityIdFilter)}`
-    if (taggedDeviceIds)  url += `&entity_ids=${encodeURIComponent(taggedDeviceIds.join(','))}`
+    if (actionFilter)     url += `&action=${encodeURIComponent(actionFilter)}`
+    if (namedEntityIds)   url += `&entity_ids=${encodeURIComponent(namedEntityIds.join(','))}`
     api.get(url)
       .then(d => { setEvents(d); setLoading(false) })
       .catch(() => setLoading(false))
-  }, [entityTypeFilter, entityIdFilter, taggedDeviceIds])
+  }, [entityTypeFilter, actionFilter, namedEntityIds])
+
+  const activeFilterCount =
+    (entityTypeFilter ? 1 : 0) + (nameFilter ? 1 : 0) + (actionFilter ? 1 : 0)
+
+  const resetFilters = () => {
+    setEntityTypeFilter(''); setNameFilter(''); setActionFilter('')
+  }
 
   // Same wrapper TelemetryTab needs: AutoRefreshControl wires onRefresh straight to onClick, so
   // passing `load` directly hands the click event in as `isInitial` -- truthy -- and blanks the
@@ -56,54 +97,59 @@ export function DigitalThreadTab() {
       <div className="section-header" style={{ marginBottom: '8px' }}>
         <h2 className="section-title">Digital Thread Audit Trace Timeline <span className="section-count">{events.length}</span></h2>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <select className="form-control" style={{ width: '160px' }} value={entityTypeFilter} onChange={e => setEntityTypeFilter(e.target.value)} title="Filter by entity type">
-            <option value="">All Entities</option>
-            <option value="CELL">Cells</option>
-            <option value="GATEWAY">Gateways</option>
-            <option value="DEVICE">Devices</option>
-          </select>
-          <input
-            className="form-control"
-            style={{ width: '220px' }}
-            value={entityIdFilter}
-            onChange={e => setEntityIdFilter(e.target.value)}
-            placeholder="Search Entity ID or keyword…"
-            title="Type to search audit events by Entity ID or description keyword"
-          />
-          <select
-            className="form-control"
-            style={{ width: '170px' }}
-            value={tagFilter}
-            onChange={e => setTagFilter(e.target.value)}
-            disabled={tagOptions.length === 0}
-            title={tagOptions.length === 0
-              ? 'No device carries a tag yet — tags come from the metric groups a device\'s schema models'
-              : 'Trace only devices that currently carry this tag'}
-          >
-            <option value="">Any device type</option>
-            {tagOptions.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
-          {(entityIdFilter || entityTypeFilter || tagFilter) && (
-            <button className="btn btn-ghost btn-sm" onClick={() => { setEntityIdFilter(''); setEntityTypeFilter(''); setTagFilter(''); }} title="Clear search filters">
-              <IconX size={13} /> Clear
-            </button>
-          )}
           <button className="btn btn-ghost btn-sm" onClick={() => downloadCSV(events, 'digital-thread-export.csv')} title="Download audit events as CSV"><IconDownload size={13} /> Export CSV</button>
           <AutoRefreshControl onRefresh={handleRefresh} defaultInterval={0} />
         </div>
       </div>
+
+      {/* Moved out of the section header into the same `.filter-bar` the Gateways and Devices
+          pages use. Two filter surfaces on one page crowded the header and put the filters in a
+          different place on every tab; this is the one shape an operator learns once. */}
+      <div className="filter-bar">
+        <select
+          className="form-control"
+          style={{ width: '150px' }}
+          value={entityTypeFilter}
+          onChange={e => setEntityTypeFilter(e.target.value)}
+          title="Show only events against one kind of asset"
+        >
+          <option value="">All entities</option>
+          <option value="CELL">Cells</option>
+          <option value="GATEWAY">Gateways</option>
+          <option value="DEVICE">Devices</option>
+        </select>
+
+        <input
+          className="form-control"
+          style={{ width: '220px' }}
+          value={nameFilter}
+          onChange={e => setNameFilter(e.target.value)}
+          placeholder="Search by entity name or ID…"
+          title="Filter by the asset's name, or by its id"
+        />
+
+        <select
+          className="form-control"
+          style={{ width: '150px' }}
+          value={actionFilter}
+          onChange={e => setActionFilter(e.target.value)}
+          title="Show only one kind of audit event"
+        >
+          <option value="">Any event</option>
+          <option value="INSERT">Created</option>
+          <option value="UPDATE">Updated</option>
+          <option value="DELETE">Deleted</option>
+        </select>
+
+        {activeFilterCount > 0 && (
+          <button className="btn btn-ghost btn-sm filter-bar-spacer" onClick={resetFilters} title="Clear every filter">
+            <IconX size={13} /> Clear filters ({activeFilterCount})
+          </button>
+        )}
+      </div>
       <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
         Complete immutable historical audit trace timeline across Cells, Gateways, and Devices with case-insensitive search and metadata inspection.
       </p>
-      {tagFilter && (
-        // Said plainly because the distinction is real: tags are derived from a device's schema
-        // as it stands now, and the log records what was true then. This shows the history of
-        // devices that are Robots today -- not events that happened while they were Robots.
-        <p style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '-12px', marginBottom: '20px' }}>
-          Showing the full audit history of devices that <strong>currently</strong> carry the{' '}
-          <span className="mono">{tagFilter}</span> tag — including events recorded before they did.
-        </p>
-      )}
 
       <div className="card" style={{ padding: '24px' }}>
         {loading ? (
@@ -122,8 +168,27 @@ export function DigitalThreadTab() {
                   <div className="timeline-header">
                     <div className="timeline-title">
                       <span className="badge badge-neutral" title="Entity category">{e.entity_type}</span>
-                      <span className="mono" style={{ color: 'var(--accent)' }} title="Target Entity ID">[{e.entity_id}]</span>
+                      {/* The name leads and the id follows: an operator recognises the asset, not
+                          its UUID. A deleted entity has no name left to resolve, so the id is
+                          what remains and is shown alone. */}
+                      {entityNames.get(e.entity_id)
+                        ? <strong title="Asset name">{entityNames.get(e.entity_id)}</strong>
+                        : null}
+                      <span className="mono" style={{ color: 'var(--accent)', fontSize: '11px' }} title="Target Entity ID">[{e.entity_id}]</span>
                       <span className="badge badge-warning" title="Audit event type">{e.event_type}</span>
+                      {/* Who, or failing that what. actor_source is never null on a row written
+                          since migration 0005, so "Unattributed" now means a real gap rather
+                          than the ordinary case it used to be. */}
+                      <span
+                        className="badge badge-neutral"
+                        title={e.changed_by
+                          ? `Changed by user ${e.changed_by}`
+                          : (ACTOR_LABELS[e.actor_source]?.title || 'No actor recorded for this change')}
+                      >
+                        {e.actor_source === 'user' || e.changed_by
+                          ? (ACTOR_LABELS.user.label)
+                          : (ACTOR_LABELS[e.actor_source]?.label || '⚠ Unattributed')}
+                      </span>
                     </div>
                     <div className="timeline-time" title="Event timestamp">{new Date(e.timestamp).toLocaleString()}</div>
                   </div>

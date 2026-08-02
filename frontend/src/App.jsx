@@ -43,7 +43,6 @@ const DevicesTab       = lazy(() => import('./components/tabs/DevicesTab').then(
 const DigitalThreadTab = lazy(() => import('./components/tabs/DigitalThreadTab').then(m => ({ default: m.DigitalThreadTab })))
 // Reached only via GoTrue's OAuth redirect, so it is never in the main bundle's critical path.
 const OAuthConsent     = lazy(() => import('./pages/OAuthConsent').then(m => ({ default: m.OAuthConsent })))
-const TelemetryTab     = lazy(() => import('./components/tabs/TelemetryTab').then(m => ({ default: m.TelemetryTab })))
 const SchemasTab       = lazy(() => import('./components/tabs/SchemasTab').then(m => ({ default: m.SchemasTab })))
 const DirectoryTab     = lazy(() => import('./components/tabs/DirectoryTab').then(m => ({ default: m.DirectoryTab })))
 const ArchivesTab      = lazy(() => import('./components/tabs/ArchivesTab').then(m => ({ default: m.ArchivesTab })))
@@ -54,7 +53,6 @@ const TABS = [
   { id: 'gateways',       label: 'Gateways',          icon: <IconRadio size={15} /> },
   { id: 'devices',        label: 'Devices',           icon: <IconCpu size={15} /> },
   { id: 'digital-thread', label: 'Digital Thread',    icon: <IconHistory size={15} /> },
-  { id: 'telemetry',      label: 'Telemetry',         icon: <IconActivity size={15} /> },
   { id: 'schemas',        label: 'Schemas',           icon: <IconClipboardList size={15} /> },
   { id: 'directory',      label: 'Directory',         icon: <IconBookOpen size={15} /> },
   { id: 'archives',       label: 'Archives',          icon: <IconArchive size={15} />, permission: PERMISSION_UUIDS.ARCHIVE_MANAGE },
@@ -268,11 +266,10 @@ function Dashboard({ session, onSignOut }) {
       <main className="content">
         <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
           {tab === 'overview'       && <OverviewTab onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }} onSelectGateway={id => { setSelectedGatewayFilter(id); setTab('gateways', { search: id }) }} onSelectCell={id => { setSelectedCellFilter(id); setTab('cells', { search: id }) }} showToast={showToast} hasPermission={hasPermission} onNavigateTab={t => setTab(t)} />}
-          {tab === 'cells'          && <CellsTab showToast={showToast} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('telemetry', { asset_id: id }) }} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
+          {tab === 'cells'          && <CellsTab showToast={showToast} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
           {tab === 'gateways'       && <GatewaysTab showToast={showToast} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
-          {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('telemetry', { asset_id: id }) }} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} />}
+          {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} />}
           {tab === 'digital-thread' && <DigitalThreadTab />}
-          {tab === 'telemetry'      && <TelemetryTab initialAssetFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} hasPermission={hasPermission} />}
           {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={uuid => { setSelectedSchemaFilter(uuid); setTab('devices', { schema: uuid }) }} />}
           {tab === 'directory'      && <DirectoryTab showToast={showToast} hasPermission={hasPermission} />}
           {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} />}

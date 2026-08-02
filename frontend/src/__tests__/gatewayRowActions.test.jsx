@@ -15,7 +15,6 @@ const gateway = (overrides = {}) => ({
   sparkplug_id: 'gwy100000000000400080000',
   cell_id: 'cell-1',
   status: 'ONLINE',
-  ip_address: '192.168.1.50',
   is_virtual: true,
   is_archived: false,
   access_url: 'http://localhost:1880',

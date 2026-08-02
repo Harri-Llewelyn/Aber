@@ -2,6 +2,8 @@ import os
 import sys
 import time
 import argparse
+import urllib.error
+import urllib.request
 import psycopg2
 import paho.mqtt.client as mqtt
 import sparkplug_b_pb2
@@ -39,6 +41,11 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+
+# Node-RED, as reached from the HOST -- the published port, not the compose-internal name, for
+# the same reason MQTT_HOST and DB_HOST default to localhost here. Check 7 asserts this address
+# refuses unauthenticated callers.
+NODERED_BASE_URL = os.getenv("NODERED_BASE_URL", "http://localhost:1880")
 
 # Identifiers for validation.
 #
@@ -802,6 +809,59 @@ def verify_results():
         conn.close()
     except Exception as e:
         print(f"❌ 4. QUARANTINE TELEMETRY GATING ERROR: {e}")
+        passed = False
+
+    # 7. Verify Node-RED refuses unauthenticated callers
+    #
+    # WHY THIS IS AN END-TO-END CHECK AND NOT A UNIT TEST. Node-RED's editor, its /flows admin
+    # API and its http-in nodes were open to anyone who could reach port 1880: flows could be
+    # read or replaced, which is arbitrary code execution on the edge host (a `function` node
+    # runs JavaScript in a container holding the MQTT credential), and POST /hooks/quarantine
+    # accepted anything. The fix is spread across a generated settings.js, an image that carries
+    # the modules it requires, and an init script that must reconcile the file onto an existing
+    # volume -- so every part of it is a runtime property of the assembled stack. Nothing short
+    # of asking the running port can tell you it holds.
+    #
+    # THE THREE PROBES ARE NOT REDUNDANT. adminAuth covers httpAdminRoot; httpNodeAuth covers
+    # httpNodeRoot. They are separate Express mounts, so a settings.js declaring only the first
+    # secures /flows and leaves the webhook receiver wide open -- which is exactly the shape the
+    # original report described and the state a partial fix would leave behind.
+    try:
+        probes = [
+            ("GET", "/flows", None, "admin API read"),
+            ("POST", "/flows", b"[]", "admin API write"),
+            ("POST", "/hooks/quarantine", b"{}", "quarantine webhook receiver"),
+        ]
+        unauthenticated = []
+        for method, path, body, label in probes:
+            req = urllib.request.Request(
+                f"{NODERED_BASE_URL}{path}", data=body, method=method,
+                headers={"Content-Type": "application/json"},
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    status = resp.status
+            except urllib.error.HTTPError as http_err:
+                status = http_err.code
+            # 401 is the expected answer. Anything in the 2xx range means the endpoint served an
+            # unauthenticated caller; a 5xx is not a pass either, since it says the request got
+            # past authentication and failed somewhere behind it.
+            if status != 401:
+                unauthenticated.append(f"{method} {path} -> {status} ({label})")
+
+        if not unauthenticated:
+            print("✅ 7. NODE-RED AUTHENTICATION: admin API and webhook receiver both answer 401 "
+                  "to unauthenticated callers.")
+        else:
+            print("❌ 7. NODE-RED AUTHENTICATION FAIL: " + "; ".join(unauthenticated))
+            print("      Expected 401 from each. Check that node-red and node-red-init both build "
+                  "from node-red/Dockerfile, and that /data/settings.js declares adminAuth AND "
+                  "httpNodeAuth (node-red-init rewrites it when they are missing).")
+            passed = False
+    except Exception as e:
+        # Distinguished from a failed assertion on purpose: this is "could not reach Node-RED",
+        # which is a different finding from "Node-RED let me in".
+        print(f"❌ 7. NODE-RED AUTHENTICATION ERROR: could not probe {NODERED_BASE_URL}: {e}")
         passed = False
 
     print("==========================================")

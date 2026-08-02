@@ -1,17 +1,15 @@
 import React, { useState, useEffect } from 'react'
 import { api } from '../../api'
-import { SPARKPLUG_TYPES, PERMISSION_UUIDS } from '../../constants'
+import { SPARKPLUG_TYPES } from '../../constants'
 import { modelledMetricsAcross, schemasForDevice } from '../../utils/deviceTags'
-import { Model3DUploader } from '../common/Model3DUploader'
 import { IconClipboardList, IconShieldAlert, IconFileCode, IconCheck, IconAlertTriangle } from '../common/Icons'
 
-export function AssetConfigModal({ asset, schemas, onClose, showToast, hasPermission }) {
+// showToast/hasPermission are gone with the 3D uploader: this modal now only reads. Everything
+// it displays comes from asset_config and the device's own row.
+export function AssetConfigModal({ asset, schemas, onClose }) {
   const [config, setConfig]   = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
-  // Held locally so attaching or removing a model updates this modal immediately, rather than
-  // waiting for the Devices list to refetch behind it.
-  const [modelPath, setModelPath] = useState(asset.model_3d_path || null)
 
   useEffect(() => {
     api.get(`/api/v1/devices/${asset.asset_id}/config`)
@@ -163,12 +161,10 @@ export function AssetConfigModal({ asset, schemas, onClose, showToast, hasPermis
           </div>
         )}
 
-        <Model3DUploader
-          device={{ ...asset, model_3d_path: modelPath }}
-          canManage={hasPermission ? hasPermission(PERMISSION_UUIDS.DEVICE_MANAGE) : false}
-          showToast={showToast}
-          onChange={setModelPath}
-        />
+        {/* The 3D model uploader moved to the device row's Attached Document Links accordion.
+            It is an attachment alongside the document links, and it was the only control in
+            this modal that WROTE anything -- everything else here is a read-only view of what
+            the device reported at birth. */}
 
         <div className="modal-actions">
           <button className="btn btn-ghost" onClick={onClose} title="Close modal">Close</button>

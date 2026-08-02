@@ -33,8 +33,11 @@ export const IconCpu = ({ size = 16, className = "" }) => (
   </svg>
 )
 
-export const IconActivity = ({ size = 16, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+// Accepts `style` like IconFileText: the telemetry drawer tints it with var(--accent) to match
+// the document drawer's header icon, and a dropped style prop would leave the two subtly
+// different colours with nothing to explain why.
+export const IconActivity = ({ size = 16, className = "", style = {} }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style}>
     <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
   </svg>
 )

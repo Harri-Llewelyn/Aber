@@ -162,16 +162,27 @@ export default async function handler(req: Request): Promise<Response> {
     const nodeRedUrl = Deno.env.get("NODERED_URL") || "http://node-red:1880/flows";
     const nodeRedAdminToken = Deno.env.get("NODERED_ADMIN_TOKEN");
 
-    // Only send credentials when Node-RED is actually secured. Requiring a token
-    // unconditionally made every deploy fail with a 500 on the default stack,
-    // where Node-RED runs without adminAuth.
+    // THE REQUEST IS ALWAYS AUTHENTICATED. This used to attach a bearer token only when
+    // NODERED_ADMIN_TOKEN was set and send the flow bare otherwise -- which was correct while
+    // Node-RED ran without adminAuth, and is exactly the hole that has now been closed. An
+    // "only when secured" branch here would keep working against an unsecured Node-RED, so
+    // there would be nothing to notice if the settings.js guard ever regressed.
+    //
+    // The default path forwards THE CALLER'S OWN access token. They were checked against
+    // ALLOWED_ROLES above, but Node-RED's adminAuth.tokens() does not take that on trust: it
+    // re-derives the role from public.user_roles through the nodered-userinfo edge function, so
+    // a revocation takes effect on both sides at once and a token obtained by any other route
+    // is judged identically. No shared secret has to exist for the default stack to work.
+    //
+    // NODERED_ADMIN_TOKEN remains as break-glass, and takes precedence when set: it is what
+    // reaches the flows when Supabase Auth, Kong or the edge runtime is down -- which is
+    // precisely when the caller's token cannot be validated. Same reasoning as
+    // disable_login_form = false in grafana/grafana.ini.
     const nodeRedHeaders: Record<string, string> = {
       "Content-Type": "application/json",
       "Node-RED-Deployment-Type": "full",
+      Authorization: nodeRedAdminToken ? `Bearer ${nodeRedAdminToken}` : authHeader,
     };
-    if (nodeRedAdminToken) {
-      nodeRedHeaders.Authorization = `Bearer ${nodeRedAdminToken}`;
-    }
 
     const response = await fetch(nodeRedUrl, {
       method: "POST",

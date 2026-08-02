@@ -1979,7 +1979,20 @@ ON CONFLICT (schema_name) DO NOTHING;
 -- from the primary key, so an auto-discovered gateway would get a different wire identity on every
 -- rebuild, silently detaching previously recorded telemetry from the asset that produced it.
 
-INSERT INTO public.gateways VALUES ('10000000-0000-4000-8000-000000000001', 'Virtual_Gateway_NodeRED', NULL, 'http://localhost:1880', 'OFFLINE', '2026-08-02 05:44:29.274898+00', false, NULL, NULL, NULL, NULL, true, DEFAULT, 'cell')
+-- NAMED COLUMNS, not positional. pg_dump emits `INSERT INTO t VALUES (...)`, which binds to the
+-- column ORDER of the table as it stood when the dump was taken -- so dropping a column (0004
+-- removed `ip_address`) makes this fail with "INSERT has more expressions than target columns",
+-- and, far worse, ADDING one in the middle would silently shift every value one column left
+-- without erroring at all. Naming the columns makes the statement independent of the table's
+-- shape. `sparkplug_id` is omitted because it is GENERATED ALWAYS ... STORED and cannot be
+-- written; it derives from the pinned id above.
+INSERT INTO public.gateways (
+  id, name, cell_id, access_url, status, created_at,
+  is_archived, archived_at, auto_delete_at, last_heartbeat, is_virtual, location_scope
+) VALUES (
+  '10000000-0000-4000-8000-000000000001', 'Virtual_Gateway_NodeRED', NULL, 'http://localhost:1880',
+  'OFFLINE', '2026-08-02 05:44:29.274898+00', false, NULL, NULL, NULL, true, 'cell'
+)
 ON CONFLICT (id) DO NOTHING;
 
 

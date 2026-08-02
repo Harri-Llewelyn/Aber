@@ -51,12 +51,15 @@ const menuLabels = () =>
 beforeEach(() => vi.clearAllMocks())
 
 describe('device row actions', () => {
-  it('keeps only the two primary actions in the row itself', async () => {
+  it('keeps only the primary action in the row itself', async () => {
     // The cell used to carry seven controls and take over half the row's width.
     await show([device()])
 
-    expect(screen.getByRole('button', { name: /Telemetry/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Edit/i })).toBeInTheDocument()
+    // Telemetry is no longer a button here: it navigated to a separate page and made you
+    // re-select the device you were already looking at. It is now a drawer on the row below.
+    expect(screen.queryByRole('button', { name: /^Telemetry$/i })).not.toBeInTheDocument()
+    expect(screen.getByText('Telemetry')).toBeInTheDocument()
     // Everything else moved behind the overflow menu.
     expect(screen.queryByRole('button', { name: /^Config/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Thread/i })).not.toBeInTheDocument()
@@ -68,7 +71,7 @@ describe('device row actions', () => {
     openMenu()
 
     const labels = menuLabels().join('|')
-    for (const expected of [/Digital Thread/i, /Configuration & 3D model/i,
+    for (const expected of [/Digital Thread/i, /Configuration Parameters/i,
       /Export AAS JSON/i, /Export AASX package/i, /Archive device/i]) {
       expect(labels).toMatch(expected)
     }
@@ -100,11 +103,13 @@ describe('device row actions', () => {
     openMenu()
 
     const menu = within(screen.getByRole('menu'))
-    expect(menu.getByRole('menuitem', { name: /Configuration & 3D model/i }).disabled).toBe(true)
     expect(menu.getByRole('menuitem', { name: /Archive device/i }).disabled).toBe(true)
-    // Reads are not gated: an export is a read, and so is the audit trace.
+    // Reads are not gated: an export is a read, and so is the audit trace -- and so, now that
+    // the 3D uploader has moved out of it, is Configuration Parameters. It shows what the
+    // device declared at birth and writes nothing.
     expect(menu.getByRole('menuitem', { name: /Digital Thread/i }).disabled).toBe(false)
     expect(menu.getByRole('menuitem', { name: /Export AAS JSON/i }).disabled).toBe(false)
+    expect(menu.getByRole('menuitem', { name: /Configuration Parameters/i }).disabled).toBe(false)
   })
 
   // Standardised on the Cells page's treatment: the accordion is part of the row, collapsed,
@@ -126,5 +131,63 @@ describe('device row actions', () => {
     await waitFor(() =>
       expect(screen.getByText(/No external document links attached to this device/)).toBeInTheDocument()
     )
+  })
+})
+
+// The 3D model moved out of the Configuration modal and into the row's document accordion. It is
+// an attachment, like a document link -- and it was the only control in that modal that wrote
+// anything, which is why the modal is now open to every role.
+describe('device 3D model attachment', () => {
+  it('offers the uploader inside the expanded documents accordion', async () => {
+    await show([device()])
+
+    // Collapsed: the uploader is part of the accordion body, so it is not mounted yet.
+    expect(screen.queryByTestId('model-3d-input')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('Attached Document Links'))
+
+    await waitFor(() => expect(screen.getByTestId('model-3d-input')).toBeInTheDocument())
+  })
+
+  it('shows the uploader even when the device has no document links', async () => {
+    // The footer renders alongside the empty state, not instead of it -- otherwise a device with
+    // a model but no links would have nowhere to show the model.
+    await show([device()])
+
+    fireEvent.click(screen.getByText('Attached Document Links'))
+
+    await waitFor(() =>
+      expect(screen.getByText(/No external document links attached to this device/)).toBeInTheDocument()
+    )
+    expect(screen.getByTestId('model-3d-input')).toBeInTheDocument()
+  })
+
+  it('no longer advertises the 3D model from the Configuration menu item', async () => {
+    await show([device()])
+    openMenu()
+
+    const labels = menuLabels().join('|')
+    expect(labels).toMatch(/Configuration Parameters/i)
+    expect(labels).not.toMatch(/3D model/i)
+  })
+
+  it('withholds the upload controls from a role that cannot manage devices', async () => {
+    await show([device()], () => false)
+
+    fireEvent.click(screen.getByText('Attached Document Links'))
+
+    // Both sides asserted, so this cannot pass just because the copy changed: a read-only role
+    // is told the state ("No 3D model attached") and is NOT offered the drop prompt. RLS refuses
+    // the write regardless -- this is the affordance, not the gate.
+    await waitFor(() => expect(screen.getByText('No 3D model attached')).toBeInTheDocument())
+    expect(screen.queryByText(/Drop a 3D model here/i)).not.toBeInTheDocument()
+  })
+
+  it('offers the drop prompt to a role that can manage devices', async () => {
+    await show([device()])
+
+    fireEvent.click(screen.getByText('Attached Document Links'))
+
+    await waitFor(() => expect(screen.getByText(/Drop a 3D model here/i)).toBeInTheDocument())
   })
 })

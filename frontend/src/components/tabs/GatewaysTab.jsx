@@ -40,7 +40,7 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
   // otherwise. is_virtual is deliberately NOT the same question: virtual is a deployment fact
   // (this connector runs on the app host), site-wide is a claim about location. A virtual
   // gateway is usually site-wide, but conflating them would relocate assets on a checkbox.
-  const blank = { gateway_id: '', gateway_name: '', ip_address: '', status: 'OFFLINE', is_virtual: false, access_url: '', cell_id: '', location_scope: SCOPE_CELL }
+  const blank = { gateway_id: '', gateway_name: '', status: 'OFFLINE', is_virtual: false, access_url: '', cell_id: '', location_scope: SCOPE_CELL }
   const [form, setForm]         = useState(blank)
   const [threadFor, setThreadFor] = useState(null)
   const [docsForGw, setDocsForGw] = useState(null)
@@ -299,7 +299,6 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
                  <tr>
                    <th title="Human-readable gateway name">Gateway Name</th>
                    <th title="Sparkplug B edge node id this gateway publishes under">Sparkplug ID</th>
-                   <th title="Network IP address">IP Address</th>
                    <th title="Shopfloor cell zone this gateway serves">Cell Zone</th>
                    <th title="Network connectivity status">Gateway Status</th>
                    <th title="Age of the last Sparkplug B node heartbeat (NBIRTH/NDATA/NDEATH)">Last Heartbeat</th>
@@ -331,7 +330,6 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
                            )}
                          </td>
                          <td><CopyableId value={g.sparkplug_id || gatewaySparkplugId(g.gateway_id)} label="Sparkplug edge node id" onNotify={showToast} /></td>
-                         <td><span className="mono" style={{ color: 'var(--text-muted)' }}>{g.ip_address || '—'}</span></td>
                          <td>
                            {/* Three states, not two. Site-Wide is an answer -- a host-run
                                connector serving the facility -- and must not read as the
@@ -467,7 +465,9 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
                            first expand, so a permanently-present row costs one badge and no
                            request until someone opens it. */}
                        <tr key={`docs-${g.gateway_id}`} style={{ background: 'rgba(0,0,0,0.2)' }}>
-                         <td colSpan={8} style={{ padding: '8px 16px' }}>
+                         {/* 7, not 8: the IP Address column was removed by 0004. A colSpan wider
+                             than the table leaves the accordion row overhanging its own header. */}
+                         <td colSpan={7} style={{ padding: '8px 16px' }}>
                            <InlineDocumentAccordion
                              entityType="gateway"
                              entityId={g.gateway_id}
@@ -570,10 +570,6 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
                     ? 'Devices served by this gateway appear under this cell, unless a device carries a cell of its own.'
                     : 'With no cell here, devices served by this gateway land in the Unassigned queue unless each is given one. If this connector serves the whole facility, mark it Site-Wide instead.'}
               </div>
-            </div>
-            <div className="form-group">
-              <label className="form-label">IP Address</label>
-              <input className="form-control" value={form.ip_address || ''} onChange={e => setForm(f => ({ ...f, ip_address: e.target.value }))} title="Network IP address" />
             </div>
             <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', marginBottom: '12px' }}>
               <input type="checkbox" id="is_virtual" checked={form.is_virtual || false} onChange={e => setForm(f => ({ ...f, is_virtual: e.target.checked }))} style={{ cursor: 'pointer' }} />

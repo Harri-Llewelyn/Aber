@@ -72,6 +72,12 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
 
   // Resolves a role from public.user_roles for Grafana's OIDC `api_url`.
   "grafana-userinfo": ["SUPABASE_SERVICE_ROLE_KEY"],
+
+  // The same lookup for Node-RED, answering in Node-RED's permission vocabulary ('*' / 'read')
+  // rather than Grafana's org roles. Separate from grafana-userinfo because the mapping is an
+  // authorisation decision, and one endpoint serving both would let a change made for one
+  // product's role model silently move the other's.
+  "nodered-userinfo": ["SUPABASE_SERVICE_ROLE_KEY"],
 };
 
 /**

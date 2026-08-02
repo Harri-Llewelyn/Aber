@@ -33,7 +33,10 @@ online?") — exactly what to do about it. Read those first if you are skimming 
 
 To inspect, reset, or re-import by hand:
 
-1. Open `http://localhost:1880`.
+1. Sign in to the dashboard at `http://localhost:3000`, then open `http://localhost:1880` and
+   click **Sign in with Factory+**. The editor authenticates against Supabase Auth; the dashboard
+   session is needed first because GoTrue ships no consent UI. Import and Deploy need
+   Administrator or Shopfloor_Manager — Operator and Auditor get a read-only editor.
 2. **☰ menu → Import**.
 3. Paste the contents of [`../node_red_flow.json`](../node_red_flow.json).
 4. **Import**, then **Deploy**.
@@ -67,6 +70,15 @@ Four failure modes worth knowing, because each is silent:
 - **`settings.js` is checked by LOADING it, not by grepping it.** Node-RED's own default is 26 KB
   and mentions `credentialSecret` in a commented-out example, so a substring test reports a file
   that declares nothing as correctly configured.
+
+A fifth, added when `settings.js` became the security boundary as well:
+
+- **`node-red` and `node-red-init` build from the same image** ([`../node-red/Dockerfile`](../node-red/Dockerfile)).
+  The load check above evaluates a `settings.js` that now requires `passport-oauth2`, so an init
+  container without that module concludes the settings are wrong and rewrites the file —
+  overwriting `settings.js.bak` — on every boot. If the log says `settings.js written` on anything
+  but the first boot, that is the cause. `factoryplusSettingsVersion` is what lets a change to the
+  generated *body* reach a volume whose file already has the right keys.
 
 ---
 
@@ -254,7 +266,7 @@ The pre-seeded `Virtual_Gateway_NodeRED` row already exists with the pinned id
 | :--- | :--- |
 | Binary Sparkplug B encoding | Install `node-red-contrib-sparkplug-b` |
 | Per-gateway MQTT credentials | `node scripts/mosquitto-provision-gateway.mjs <sparkplug_id>` for every physical gateway |
-| Node-RED admin auth | Not configured by default — port 1880 is open ([issue #6](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/6)) |
+| Node-RED admin auth | Configured by default (Supabase Auth SSO). Set `NODERED_PUBLIC_URL` to the address browsers actually use, or `/oauth/authorize` answers `invalid redirect_uri` |
 | Broker credentials | Rotate `MQTT_PASSWORD`; ingestion refuses to start without it |
 | Poll interval | Adjust the Inject node repeat interval to match your scan rate |
 | Real OPC-UA / Modbus devices | Use `node-red-contrib-opcua` or `node-red-contrib-modbus` in place of the Function nodes |

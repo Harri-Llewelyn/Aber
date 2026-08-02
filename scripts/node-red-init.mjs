@@ -19,6 +19,14 @@
  *   - the CREDENTIALS are stack configuration too, but only while there are
  *     none to lose. See the `_credentialSecret` note below.
  *
+ * settings.js IS ALSO THE SECURITY BOUNDARY, which strengthens the rule above rather than
+ * adding a fourth case. Before this it declared only flowFile and credentialSecret, so the
+ * editor and the /flows admin API on port 1880 were reachable by anyone who could open the
+ * port, and so was the quarantine webhook receiver. It now declares adminAuth (Supabase Auth
+ * SSO for humans, bearer tokens for services) and httpNodeAuth (the http-in nodes). A volume
+ * carrying the old two-key file must therefore be REPAIRED, not left alone -- which is what
+ * settingsAreCorrect() checking the new keys, and SETTINGS_VERSION, are for.
+ *
  * `flowFile` IS LOAD-BEARING AND ITS ABSENCE IS SILENT. Without it Node-RED does
  * not fall back to flows.json -- it falls back to `flows_<hostname>.json`
  * (@node-red/runtime/lib/storage/localfilesystem/projects/index.js), and a
@@ -60,6 +68,12 @@ const mqttUser = process.env.MQTT_USER || 'factoryplus';
 const mqttPassword = process.env.MQTT_PASSWORD;
 const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
 
+// Bumped whenever the BODY of the generated settings.js changes in a way an existing volume
+// needs. Without it, a settings.js that merely *has* an adminAuth passes settingsAreCorrect()
+// forever, and a fix to the token validation below would never reach a deployed stack -- the
+// same class of trap as the `flowFile` omission this script was written to prevent.
+const SETTINGS_VERSION = 1;
+
 function fail(message) {
   console.error(`[node-red-init] ERROR: ${message}`);
   process.exit(1);
@@ -73,6 +87,32 @@ if (!credentialSecret) {
 }
 if (!mqttPassword) {
   fail('MQTT_PASSWORD is not set; refusing to seed empty broker credentials.');
+}
+
+// Same posture, applied to authentication. THE PREVIOUS DEFAULT WAS AN OPEN ADMIN API, so a
+// missing variable has to stop the boot rather than quietly fall back to it -- an "auth
+// optional" branch here would reintroduce exactly the hole this exists to close. Node-RED
+// reads these from its own environment at settings-load time; they are checked here so the
+// failure is one legible message from the init container instead of a login that never works.
+const REQUIRED_AUTH_ENV = [
+  'NODERED_OAUTH_CLIENT_ID',
+  'NODERED_OAUTH_CLIENT_SECRET',
+  'NODERED_OAUTH_AUTH_URL',
+  'NODERED_OAUTH_TOKEN_URL',
+  'NODERED_OAUTH_CALLBACK_URL',
+  'NODERED_USERINFO_URL',
+  'SUPABASE_JWT_SECRET',
+  'SUPABASE_ANON_KEY',
+  'NODERED_WEBHOOK_JWT_SECRET'
+];
+
+const missingAuthEnv = REQUIRED_AUTH_ENV.filter((name) => !process.env[name]);
+if (missingAuthEnv.length > 0) {
+  fail(
+    `${missingAuthEnv.join(', ')} not set; refusing to write a settings.js with no adminAuth. ` +
+      'Node-RED would come up with its editor and /flows admin API open on port 1880. ' +
+      'See the Node-RED section of .env.example.'
+  );
 }
 
 // The flow file name is declared in settings.js below, and the credentials file name is derived
@@ -143,17 +183,297 @@ if (seededFlow) {
 // and mentions `credentialSecret` in a commented-out example, so a substring test reports a file
 // that declares nothing as correctly configured -- which is precisely the state a volume ends up
 // in when Node-RED writes its default before this script ever gets to it.
+//
+// THE AUTH KEYS ARE CHECKED TOO, and that is what lets an already-deployed volume be repaired.
+// A stack that ran before authentication existed carries a settings.js declaring exactly
+// flowFile and credentialSecret -- correct by the old test, and an open admin API by the new
+// one. Testing only for the keys' PRESENCE would in turn freeze their contents, hence
+// SETTINGS_VERSION.
 function settingsAreCorrect() {
   if (!fs.existsSync(settingsPath)) return false;
   try {
     const loaded = require(settingsPath);
-    return loaded?.credentialSecret === credentialSecret && loaded?.flowFile === FLOW_FILE;
+    return (
+      loaded?.credentialSecret === credentialSecret &&
+      loaded?.flowFile === FLOW_FILE &&
+      loaded?.factoryplusSettingsVersion === SETTINGS_VERSION &&
+      loaded?.adminAuth?.type === 'strategy' &&
+      typeof loaded?.adminAuth?.tokens === 'function' &&
+      typeof loaded?.adminAuth?.authenticate === 'function' &&
+      // adminAuth.default re-opens the anonymous path wholesale. Treat its presence as a
+      // broken file rather than as a preference to preserve.
+      loaded?.adminAuth?.default === undefined &&
+      typeof loaded?.httpNodeAuth === 'function'
+    );
   } catch (err) {
     // Unloadable settings cannot be trusted to declare anything. Replaced (with a backup).
+    //
+    // If this fires on EVERY boot, the init container is missing the modules settings.js
+    // requires -- i.e. node-red-init is not building from node-red/Dockerfile. See its header.
     console.warn(`[node-red-init] settings.js could not be loaded (${err.message}); replacing it.`);
     return false;
   }
 }
+
+// 2b. The generated settings.js.
+//
+// CONFIGURATION IS READ FROM process.env AT NODE-RED LOAD TIME, not baked in as literals. This
+// file sits on a durable volume that every flow author can read, so the OAuth client secret,
+// the Supabase JWT secret and the webhook signing key stay in the container environment. The
+// one exception is credentialSecret, which node-red-init has to be able to COMPARE against
+// above to decide whether the file needs rewriting -- and which is already recoverable from
+// flows_cred.json's key derivation anyway.
+//
+// The require()s are ABSOLUTE. Node resolves modules from the requiring file's location, and
+// this file lives at /data -- so a bare require('passport-oauth2') would search /data/
+// node_modules and /node_modules, never the image's /usr/src/node-red/node_modules. Same idiom
+// this script already uses for @node-red/runtime's credentials module.
+const SETTINGS_JS = `/**
+ * GENERATED by scripts/node-red-init.mjs -- do not edit.
+ *
+ * Hand edits are detected by settingsAreCorrect() and overwritten on the next boot; the
+ * previous file is kept as settings.js.bak. Change the generator instead, and bump its
+ * SETTINGS_VERSION so deployed volumes pick the change up.
+ *
+ * THREE INDEPENDENT AUTH SURFACES, none of which overlaps another:
+ *
+ *   adminAuth.strategy  -- humans, in a browser. OAuth2 + PKCE against GoTrue, identity and
+ *                          role from the nodered-userinfo edge function.
+ *   adminAuth.tokens    -- services calling the admin API. Verifies the Supabase access token
+ *                          that deploy-nodered forwards from the operator who triggered it.
+ *   httpNodeAuth        -- the http-in nodes (POST /hooks/quarantine). adminAuth does NOT
+ *                          cover these: they mount under httpNodeRoot, a separate Express
+ *                          mount (node-red/red.js:426), which is why the webhook stayed open
+ *                          in every design that only set adminAuth.
+ */
+const OAuth2Strategy = require(${JSON.stringify(`${RUNTIME_DIR}/passport-oauth2`)});
+const jwt = require(${JSON.stringify(`${RUNTIME_DIR}/jsonwebtoken`)});
+
+const env = process.env;
+
+/**
+ * Supabase RBAC role -> Node-RED permissions.
+ *
+ * Node-RED only has '*' and 'read'. Operator and Auditor both map to 'read': neither should be
+ * able to deploy a flow, and a flow \`function\` node executes arbitrary JavaScript inside this
+ * container -- which holds the MQTT credential and can reach Mosquitto, Supabase and
+ * TimescaleDB. The mapping itself lives server-side in the nodered-userinfo edge function; this
+ * comment records what it does, and the code below trusts nothing that endpoint did not say.
+ */
+
+/**
+ * Resolve identity and permissions for a Supabase access token.
+ *
+ * NOT read from the token's own claims. GoTrue's OIDC claims omit app_metadata entirely, and
+ * app_metadata.role goes stale on revocation -- deleting a user's public.user_roles row IS how
+ * a role is revoked, so a claim-based path would keep granting the old privilege for as long as
+ * the token lived. The edge function reads public.user_roles, the same table RLS uses.
+ */
+async function userinfo(accessToken) {
+  try {
+    const res = await fetch(env.NODERED_USERINFO_URL, {
+      headers: {
+        Authorization: 'Bearer ' + accessToken,
+        apikey: env.SUPABASE_ANON_KEY
+      }
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    // A userinfo endpoint that cannot be reached is not evidence of a role. Fail closed.
+    console.warn('[factoryplus] userinfo lookup failed: ' + err.message);
+    return null;
+  }
+}
+
+// Short-lived cache so an admin API burst is not one HTTP round trip per request. Keyed by the
+// token, so it expires with the token and cannot outlive a revocation by more than TTL_MS.
+const roleCache = new Map();
+const CACHE_TTL_MS = 30000;
+
+function cacheGet(token) {
+  const hit = roleCache.get(token);
+  if (!hit) return null;
+  if (hit.at < Date.now() - CACHE_TTL_MS) {
+    roleCache.delete(token);
+    return null;
+  }
+  return hit.user;
+}
+
+function cachePut(token, user) {
+  // Bounded: an unauthenticated flood of distinct valid-looking tokens must not grow this
+  // without limit. Entries are worthless once expired, so the oldest insert is the right evict.
+  if (roleCache.size > 256) roleCache.delete(roleCache.keys().next().value);
+  roleCache.set(token, { user: user, at: Date.now() });
+}
+
+module.exports = {
+  factoryplusSettingsVersion: ${SETTINGS_VERSION},
+
+  flowFile: ${JSON.stringify(FLOW_FILE)},
+  credentialSecret: ${JSON.stringify(credentialSecret)},
+
+  adminAuth: {
+    type: 'strategy',
+
+    strategy: {
+      name: 'oauth2',
+      label: 'Sign in with Factory+',
+      icon: 'fa-cube',
+      strategy: OAuth2Strategy,
+      options: {
+        authorizationURL: env.NODERED_OAUTH_AUTH_URL,
+        tokenURL: env.NODERED_OAUTH_TOKEN_URL,
+        clientID: env.NODERED_OAUTH_CLIENT_ID,
+        clientSecret: env.NODERED_OAUTH_CLIENT_SECRET,
+        callbackURL: env.NODERED_OAUTH_CALLBACK_URL,
+
+        // NOTE THE ABSENT 'openid' SCOPE. This is required, not an oversight. Requesting it
+        // makes GoTrue try to mint an ID token and refuse:
+        //   HS256 is not supported for ID token signing
+        // The whole stack is HS256 on SUPABASE_JWT_SECRET, which Kong, PostgREST, Realtime and
+        // the pre-minted anon/service_role keys all depend on. Identity comes from userinfo()
+        // instead, so no ID token is needed. Same decision as grafana.ini:23-34 -- do not
+        // "fix" a login problem by adding it back.
+        scope: ['email', 'profile'],
+
+        // GoTrue's OAuth server REQUIRES PKCE; without it /oauth/authorize fails with
+        //   invalid_request: PKCE flow requires both code_challenge and code_challenge_method
+        // pkce implies state, and state needs a session store -- which Node-RED's
+        // genericStrategy installs (express-session + MemoryStore) before passport.initialize().
+        pkce: true,
+        state: true,
+
+        // The client is registered token_endpoint_auth_method = 'client_secret_post' in
+        // auth.oauth_clients (migration 0003), which is what passport-oauth2 does by default.
+        // Grafana's client is 'client_secret_basic' instead only because its Go OAuth2 client
+        // needs auth_style pinned; GoTrue enforces whichever is registered, exactly.
+
+        /**
+         * Node-RED calls this with the strategy's own verify arguments and replaces the final
+         * callback, expecting (err, profile). The profile it gets is handed straight to
+         * adminAuth.authenticate below.
+         */
+        async verify(accessToken, refreshToken, profile, done) {
+          try {
+            const info = await userinfo(accessToken);
+            // No permissions key means the edge function could not map this user's role -- an
+            // unmapped or revoked role. Refuse the login rather than admitting them read-only:
+            // a provisioning error should be visible as one.
+            if (!info || !info.permissions) {
+              return done(null, false);
+            }
+            return done(null, {
+              username: info.email || info.sub,
+              email: info.email,
+              permissions: info.permissions,
+              supabase_role: info.supabase_role
+            });
+          } catch (err) {
+            return done(err);
+          }
+        }
+      }
+    },
+
+    /**
+     * adminAuth.users receives only a USERNAME STRING; adminAuth.authenticate receives the whole
+     * profile (@node-red/editor-api/lib/auth/users.js -- completeVerify calls
+     * Users.authenticate(profile)). The role has to ride through here or it is lost between
+     * verify() and the session Node-RED mints.
+     *
+     * It is variadic because the same hook backs the OAuth2 password grant on POST /auth/token,
+     * which is called with (username, password). That path is refused outright: there are no
+     * local passwords here, and silently accepting it would be a second, undocumented way in.
+     */
+    authenticate: async function (profile, password) {
+      if (password !== undefined) return null;
+      if (!profile || !profile.permissions) return null;
+      return { username: profile.username, permissions: profile.permissions };
+    },
+
+    /**
+     * Machine-to-machine access to the admin API, read from Authorization: Bearer.
+     *
+     * deploy-nodered forwards the access token of the operator who triggered the deploy, having
+     * already checked their role. This re-derives the role from public.user_roles rather than
+     * trusting that check, so a revocation takes effect on both sides at once and a token
+     * obtained any other way is judged identically.
+     */
+    tokenHeader: 'authorization',
+    tokens: async function (token) {
+      if (!token) return null;
+
+      // Break-glass. Empty by default. If Supabase Auth, Kong or the edge runtime is down then
+      // SSO is down with them, and Node-RED may be exactly what you need to reach. Same
+      // reasoning as disable_login_form = false in grafana/grafana.ini.
+      if (env.NODERED_ADMIN_TOKEN && token === env.NODERED_ADMIN_TOKEN) {
+        return { username: 'factoryplus-break-glass', permissions: '*' };
+      }
+
+      // Signature, expiry and audience first, so an unverified token never reaches the network.
+      try {
+        jwt.verify(token, env.SUPABASE_JWT_SECRET, {
+          algorithms: ['HS256'],
+          audience: 'authenticated'
+        });
+      } catch (err) {
+        return null;
+      }
+
+      const cached = cacheGet(token);
+      if (cached) return cached;
+
+      const info = await userinfo(token);
+      if (!info || !info.permissions) return null;
+
+      const user = { username: info.email || info.sub, permissions: info.permissions };
+      cachePut(token, user);
+      return user;
+    }
+
+    // adminAuth.default IS DELIBERATELY ABSENT. Setting it grants an anonymous identity to every
+    // unauthenticated request, which is precisely the state this file exists to end. Node-RED's
+    // needsPermission() runs passport.authenticate(['bearer','tokens','anon']) -- with no
+    // default, the 'anon' arm has nothing to return and the request is refused.
+  },
+
+  /**
+   * Authentication for the http-in nodes, i.e. POST /hooks/quarantine.
+   *
+   * A FUNCTION, NOT {user, pass}. Node-RED accepts Express middleware here
+   * (node-red/red.js:427), which is what allows a bearer check instead of HTTP Basic against a
+   * bcrypt hash. pg_net sends Bearer, and a static password would be one more shared secret to
+   * rotate by hand.
+   *
+   * THE TOKEN IS NOT THE ADMIN CREDENTIAL, and must never be made so.
+   * public.dispatch_device_quarantine_webhook() mints a fresh 60-second JWT per event, scoped
+   * aud=node-red-hooks. A flow author can read msg.req.headers, so anything sent here is
+   * readable by every flow in this instance -- an admin token here would hand every flow the
+   * admin API. What leaks instead is a capability to post a fake quarantine notice, for a
+   * minute.
+   */
+  httpNodeAuth: function (req, res, next) {
+    const header = req.headers.authorization || '';
+    const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+    if (!token) {
+      res.set('WWW-Authenticate', 'Bearer');
+      return res.status(401).end();
+    }
+    try {
+      jwt.verify(token, env.NODERED_WEBHOOK_JWT_SECRET, {
+        algorithms: ['HS256'],
+        audience: 'node-red-hooks',
+        issuer: 'factoryplus-supabase'
+      });
+      return next();
+    } catch (err) {
+      return res.status(401).end();
+    }
+  }
+};
+`;
 
 if (!settingsAreCorrect()) {
   // Never destroyed outright: a user may have hand-edited this file, and a .bak beside it is the
@@ -162,14 +482,13 @@ if (!settingsAreCorrect()) {
     fs.copyFileSync(settingsPath, `${settingsPath}.bak`);
     console.log(`[node-red-init] previous settings.js backed up to ${settingsPath}.bak`);
   }
-  fs.writeFileSync(
-    settingsPath,
-    'module.exports = {\n' +
-      `  flowFile: ${JSON.stringify(FLOW_FILE)},\n` +
-      `  credentialSecret: ${JSON.stringify(credentialSecret)}\n` +
-      '};\n'
+  fs.writeFileSync(settingsPath, SETTINGS_JS);
+  console.log(
+    `[node-red-init] settings.js written (v${SETTINGS_VERSION}, flowFile=${FLOW_FILE}, ` +
+      'credentialSecret set, adminAuth=strategy+tokens, httpNodeAuth=bearer).'
   );
-  console.log(`[node-red-init] settings.js written (flowFile=${FLOW_FILE}, credentialSecret set).`);
+} else {
+  console.log(`[node-red-init] settings.js already correct (v${SETTINGS_VERSION}); left untouched.`);
 }
 
 // 3. Decide whether the broker credentials may be (re)written.

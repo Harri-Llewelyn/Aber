@@ -4,7 +4,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { CellsTab } from '../components/tabs/CellsTab'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { DevicesTab } from '../components/tabs/DevicesTab'
-import { TelemetryTab } from '../components/tabs/TelemetryTab'
 import { PERMISSION_UUIDS } from '../constants'
 import { api } from '../api'
 
@@ -311,37 +310,6 @@ describe('CellsTab filters', () => {
   })
 })
 
-describe('TelemetryTab metric filter', () => {
-  it('offers registered catalog metrics even when none have arrived in the stream', async () => {
-    api.get.mockImplementation(routeGet({ telemetry: [] }))
-    render(<TelemetryTab hasPermission={() => true} />)
-
-    const select = await screen.findByTitle(/registered catalog metric/i)
-    await waitFor(() => expect(within(select).queryByRole('option', { name: 'temperature' })).toBeTruthy())
-    expect(within(select).queryByRole('option', { name: 'vibration' })).toBeTruthy()
-  })
-
-  it('omits deprecated catalog metrics', async () => {
-    api.get.mockImplementation(routeGet({ telemetry: [] }))
-    render(<TelemetryTab hasPermission={() => true} />)
-
-    const select = await screen.findByTitle(/registered catalog metric/i)
-    await waitFor(() => expect(within(select).queryByRole('option', { name: 'temperature' })).toBeTruthy())
-    expect(within(select).queryByRole('option', { name: 'legacy_rpm' })).toBeNull()
-  })
-
-  it('separates metrics seen in the stream that no catalog entry covers', async () => {
-    api.get.mockImplementation(routeGet({
-      telemetry: [
-        { time: new Date(NOW).toISOString(), asset_id: 'devaaaaaaaa000040008000', metric_name: 'tempreature', val_double: 42 }
-      ]
-    }))
-    render(<TelemetryTab hasPermission={() => true} />)
-
-    const select = await screen.findByTitle(/registered catalog metric/i)
-    // A typo'd metric name is exactly what this grouping is meant to expose.
-    await waitFor(() => expect(within(select).queryByRole('option', { name: 'tempreature' })).toBeTruthy())
-    const groups = select.querySelectorAll('optgroup')
-    expect([...groups].map(g => g.label)).toEqual(['Metric catalog', 'Uncatalogued (seen in stream)'])
-  })
-})
+// The TelemetryTab metric-filter tests lived here. That page was dissolved into the Devices
+// page's per-device telemetry drawer, which has no fleet-wide metric picker to test -- the row
+// IS the device. Its replacement coverage is in deviceTelemetryAccordion.test.jsx.

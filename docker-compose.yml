@@ -1,3 +1,45 @@
+# =============================================================================================
+# Node-RED authentication -- shared by node-red-init (which WRITES settings.js) and node-red
+# (which LOADS it). settings.js reads all of this from process.env at load time rather than
+# having it baked in as literals, so the secrets stay in the container environment instead of
+# sitting in a file on a shared volume that every flow author can read.
+#
+# The two services must agree exactly. node-red-init's settingsAreCorrect() evaluates the file
+# it wrote; a variable present in one container and absent from the other makes settings.js
+# look wrong on every boot and get rewritten forever.
+# =============================================================================================
+x-nodered-auth-env: &nodered-auth-env
+  NODERED_CREDENTIAL_SECRET: ${NODERED_CREDENTIAL_SECRET}
+
+  # --- Human auth: OAuth2 + PKCE against GoTrue's OAuth server -------------------------------
+  NODERED_OAUTH_CLIENT_ID: ${NODERED_OAUTH_CLIENT_ID:-c0ffee00-0000-4000-8000-000000000002}
+  # Hashed into auth.oauth_clients by migration 0003. Rotating it means changing .env and
+  # restarting supabase-db-init as well as these two services.
+  NODERED_OAUTH_CLIENT_SECRET: ${NODERED_OAUTH_CLIENT_SECRET}
+  # auth_url is followed by the BROWSER, so it must be the host-facing Kong address; token_url
+  # and the userinfo endpoint are called by the CONTAINER, so they must be compose-internal.
+  # Using one for both is the classic way this breaks -- see grafana.ini:36-42.
+  NODERED_OAUTH_AUTH_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}/auth/v1/oauth/authorize
+  NODERED_OAUTH_TOKEN_URL: http://supabase-kong:8000/auth/v1/oauth/token
+  NODERED_USERINFO_URL: http://supabase-kong:8000/functions/v1/nodered-userinfo
+  # Must match redirect_uris in auth.oauth_clients, or /oauth/authorize answers
+  # "invalid redirect_uri". /auth/strategy/callback is Node-RED's own fixed route.
+  NODERED_OAUTH_CALLBACK_URL: ${NODERED_PUBLIC_URL:-http://localhost:1880}/auth/strategy/callback
+
+  # --- Machine auth ---------------------------------------------------------------------------
+  # Verifies the Supabase access token deploy-nodered forwards. The same secret Kong, PostgREST,
+  # Realtime and GoTrue sign and verify with.
+  SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET}
+  SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+  # Verifies the 60-second token dispatch_device_quarantine_webhook() mints per event. A SIGNING
+  # KEY, deliberately not a bearer credential and deliberately not the admin token: /hooks/
+  # quarantine is an http-in node, so any flow author can read msg.req.headers.
+  NODERED_WEBHOOK_JWT_SECRET: ${NODERED_WEBHOOK_JWT_SECRET}
+  # Break-glass only, empty by default. A static token that bypasses Supabase entirely, for when
+  # Supabase Auth is down and the flows still have to be reachable. Same reasoning as
+  # disable_login_form = false in grafana/grafana.ini.
+  NODERED_ADMIN_TOKEN: ${NODERED_ADMIN_TOKEN:-}
+
 services:
   # ---------------------------------------------------------------------------
   # Standalone TimescaleDB (Telemetry Hypertable Storage)
@@ -85,6 +127,16 @@ services:
       # Hashed into auth.oauth_clients by 0002_seed_data.sql. Grafana
       # reads the same plaintext from its own environment via grafana.ini.
       GRAFANA_OAUTH_CLIENT_SECRET: ${GRAFANA_OAUTH_CLIENT_SECRET:-}
+      # Node-RED's own OAuth client, hashed into auth.oauth_clients by 0003. Node-RED reads the
+      # same plaintext from its own environment (see the x-nodered-auth-env anchor above).
+      NODERED_OAUTH_CLIENT_SECRET: ${NODERED_OAUTH_CLIENT_SECRET:-}
+      # Seeded into Vault by 0003 and read by dispatch_device_quarantine_webhook() to SIGN the
+      # per-event webhook token. Node-RED holds the same key to verify it.
+      NODERED_WEBHOOK_JWT_SECRET: ${NODERED_WEBHOOK_JWT_SECRET:-}
+      # Registered as redirect_uris on the Node-RED OAuth client by 0003. Built from the same
+      # NODERED_PUBLIC_URL as the callbackURL settings.js uses, so the two cannot drift apart --
+      # they must match exactly or /oauth/authorize answers "invalid redirect_uri".
+      NODERED_OAUTH_CALLBACK_URL: ${NODERED_PUBLIC_URL:-http://localhost:1880}/auth/strategy/callback
     volumes:
       - ./supabase/migrations:/migrations:ro
       - ./supabase/seed.sql:/seed.sql:ro
@@ -96,7 +148,7 @@ services:
       for f in /migrations/*.sql; do
         if [ -f \"$$f\" ]; then
           echo \"Executing migration $$f...\";
-          psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -h supabase-db -U postgres -d postgres -f \"$$f\";
+          psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -h supabase-db -U postgres -d postgres -f \"$$f\";
         fi
       done;
       if [ -f /seed.sql ]; then
@@ -583,6 +635,7 @@ services:
         VITE_SUPABASE_URL: ${SUPABASE_URL:-http://127.0.0.1:54321}
         VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
         VITE_ENABLE_REALTIME: ${VITE_ENABLE_REALTIME:-true}
+        VITE_GITHUB_REPO_URL: ${VITE_GITHUB_REPO_URL:-https://github.com/Harri-Llewelyn/ACS-Cymru}
     restart: always
     ports:
       - "3000:3000"
@@ -616,10 +669,14 @@ services:
 
   node-red-init:
     container_name: factoryplus_node_red_init
-    image: nodered/node-red:latest
+    # Built, not pulled, and from the SAME context as node-red below. settingsAreCorrect()
+    # evaluates settings.js, which requires passport-oauth2 -- an init container without it
+    # concludes the settings are wrong and rewrites them on every boot. See node-red/Dockerfile.
+    build:
+      context: ./node-red
     user: "0"
     environment:
-      NODERED_CREDENTIAL_SECRET: ${NODERED_CREDENTIAL_SECRET}
+      <<: *nodered-auth-env
       MQTT_USER: ${MQTT_USER:-factoryplus}
       MQTT_PASSWORD: ${MQTT_PASSWORD}
       # Seeding is first-run only, so editor changes survive `docker compose up`.
@@ -639,8 +696,15 @@ services:
 
   node-red:
     container_name: factoryplus_node_red
-    image: nodered/node-red:latest
+    build:
+      context: ./node-red
     restart: always
+    # settings.js resolves every one of these from process.env when Node-RED loads it, so the
+    # runtime container needs the same block the init container was given. A value present at
+    # write time but absent at load time yields an adminAuth whose strategy has no clientID --
+    # which fails at login rather than at boot.
+    environment:
+      <<: *nodered-auth-env
     ports:
       - "1880:1880"
     volumes:

@@ -44,7 +44,30 @@ supabase_client = None
 try:
     from supabase import create_client, Client
     if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
+        # Declares the daemon as the actor behind its writes, so digital_thread rows say
+        # "ingestion" rather than the generic "service".
+        #
+        # A HEADER, because the daemon and the edge functions arrive on the SAME service-role
+        # key -- the connection alone cannot tell them apart. PostgREST exposes request headers
+        # as the `request.headers` GUC, which log_digital_thread_event() reads.
+        #
+        # The trigger accepts only 'ingestion' / 'service' / 'migration' from this header and
+        # never 'user': a client asserting a human author for its own writes is precisely the
+        # claim it must not be able to make.
+        #
+        # Set on the PostgREST session rather than through ClientOptions(headers=...) -- that
+        # constructor is incomplete in supabase-py 2.x and raises on an attribute the Auth client
+        # then expects ("'ClientOptions' object has no attribute 'storage'"). Mutating the
+        # session's headers is the path that actually reaches PostgREST, verified end to end.
         supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+        try:
+            supabase_client.postgrest.session.headers["X-FactoryPlus-Actor"] = "ingestion"
+        except Exception as header_err:
+            # Losing the label is not worth losing ingestion over: without it the trigger falls
+            # back to 'service', which is still attributed, just less specific.
+            logger.warning(
+                "Could not set the actor header (%s); audit rows will read 'service'.", header_err
+            )
         logger.info("Supabase client initialized successfully.")
     else:
         logger.warning("SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing. Supabase integration disabled.")

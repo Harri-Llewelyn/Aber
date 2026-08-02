@@ -195,6 +195,9 @@ jobs:
         run: |
           python supabase/functions/approve-quarantine/test_approve_quarantine.py
           python supabase/functions/deploy-nodered/test_deploy_nodered.py
+          # Node-RED's authorization: an unmapped or revoked role must yield NO `permissions`
+          # key, because settings.js keys its refusal on the key's absence.
+          python supabase/functions/nodered-userinfo/test_nodered_userinfo.py
           python supabase/migrations/test_user_roles_rls.py
           # Schema versioning (migration 0037). Runs its assertions as `authenticated` with
           # simulated JWT claims, because the immutability guard deliberately exempts the owner --

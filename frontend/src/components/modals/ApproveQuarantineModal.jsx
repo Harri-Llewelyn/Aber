@@ -7,7 +7,6 @@ export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onAp
   const [assetName, setAssetName] = useState(item.asset_name)
   const [connMethod, setConnMethod] = useState('Sparkplug B')
   const [gatewayId, setGatewayId] = useState(item.gateway_id || (gateways[0] ? gateways[0].gateway_id : ''))
-  const [ipAddress, setIpAddress] = useState('')
 
   // The cell IS chosen here again (migration 0036). It was removed with the note that "the old
   // cell picker wrote a value nothing could store" -- devices had no cell_id column. They do
@@ -35,7 +34,6 @@ export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onAp
       asset_name: assetName,
       connection_method: connMethod,
       active_gateway_id: gatewayId,
-      ip_address: ipAddress,
       cell_id: siteWide ? '' : cellId,
       location_scope: siteWide ? 'site_wide' : 'cell'
     })
@@ -89,12 +87,10 @@ export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onAp
           <input className="form-control" value={assetName} onChange={e => setAssetName(e.target.value)} title={`Enter human-readable ${isGateway ? 'gateway' : 'device'} name`} />
         </div>
 
-        {isGateway ? (
-          <div className="form-group">
-            <label className="form-label">IP Address</label>
-            <input className="form-control" value={ipAddress} onChange={e => setIpAddress(e.target.value)} title="Enter gateway IP address (optional)" placeholder="e.g. 192.168.1.100" />
-          </div>
-        ) : (
+        {/* A gateway needs nothing further here. It used to be asked for an IP address, which
+            0004 removed -- nothing in the monitoring flow read it. A device still needs its
+            serving gateway and its location, neither of which applies to a gateway itself. */}
+        {!isGateway && (
           <>
             <div className="form-group">
               <label className="form-label">Active Edge Gateway Selection</label>

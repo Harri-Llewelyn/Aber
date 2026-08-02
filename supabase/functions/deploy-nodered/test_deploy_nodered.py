@@ -139,5 +139,55 @@ class TestOnlyTheCanonicalFlowIsDeployable(unittest.TestCase):
             )
 
 
+class TestTheDeployRequestIsAlwaysAuthenticated(unittest.TestCase):
+    """
+    Guards the fix for "Node-RED admin API and editor are unauthenticated on port 1880".
+
+    The old code attached a bearer token to the outbound POST /flows only when
+    NODERED_ADMIN_TOKEN was set, and sent the flow bare otherwise. That was correct while
+    Node-RED ran without adminAuth -- and it is exactly what made the hole survivable, because
+    a deploy kept working against an unsecured Node-RED and nothing ever failed to signal it.
+
+    Now the header is unconditional: the break-glass token when one is configured, otherwise the
+    caller's own Supabase access token, which Node-RED's adminAuth.tokens() re-validates against
+    public.user_roles. A regression to a conditional header would silently restore the tolerance
+    for an unauthenticated Node-RED, so it is asserted at the source level -- the same approach
+    TestOnlyTheCanonicalFlowIsDeployable and test_aas_export.py use.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.source = INDEX_TS.read_text(encoding="utf-8")
+
+    def test_authorization_is_set_unconditionally_not_inside_an_if(self):
+        """The header must be a plain property of nodeRedHeaders, not a conditional assignment."""
+        self.assertNotRegex(
+            self.source,
+            r"if\s*\(\s*nodeRedAdminToken\s*\)\s*\{\s*\n\s*nodeRedHeaders\.Authorization",
+            "deploy-nodered attaches Authorization only when NODERED_ADMIN_TOKEN is set. That "
+            "makes a deploy succeed against an unauthenticated Node-RED, which is the "
+            "regression this test exists to catch.",
+        )
+        self.assertRegex(
+            self.source,
+            r"Authorization:\s*nodeRedAdminToken\s*\?\s*`Bearer \$\{nodeRedAdminToken\}`\s*:\s*authHeader",
+            "the outbound request must carry the break-glass token when configured and the "
+            "caller's own Authorization header otherwise.",
+        )
+
+    def test_the_caller_token_is_the_default_path(self):
+        """authHeader -- the caller's token -- must reach the Node-RED request."""
+        headers_block = re.search(
+            r"const nodeRedHeaders[^;]+?;", self.source, re.DOTALL
+        )
+        self.assertIsNotNone(headers_block, "nodeRedHeaders declaration not found -- has it moved?")
+        self.assertIn(
+            "authHeader",
+            headers_block.group(0),
+            "the default (no break-glass token) path must forward the caller's access token; "
+            "without it the default stack falls back to an unauthenticated deploy.",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

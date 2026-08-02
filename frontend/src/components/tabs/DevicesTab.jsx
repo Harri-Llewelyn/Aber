@@ -14,12 +14,15 @@ import { effectiveSparkplugId } from '../../utils/sparkplugId'
 import { ActionMenu } from '../common/ActionMenu'
 import { TagList } from '../common/TagList'
 import { InlineDocumentAccordion } from '../common/InlineDocumentAccordion'
+import { Model3DUploader } from '../common/Model3DUploader'
+import { InlineTelemetryAccordion } from '../common/InlineTelemetryAccordion'
 import { QuarantinePayloadCell } from '../common/QuarantinePayloadCell'
 import { ApproveQuarantineModal } from '../modals/ApproveQuarantineModal'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { AssetConfigModal } from '../modals/AssetConfigModal'
 import { DigitalThreadModal } from '../modals/DigitalThreadModal'
 import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
+import { TelemetryExportModal } from '../modals/TelemetryExportModal'
 import { isProvisioningOverdue, isNeverSeen } from '../../utils/deviceProvisioning'
 import {
   SCOPE_CELL, SCOPE_SITE_WIDE, SOURCE_EXPLICIT, SOURCE_SITE_WIDE,
@@ -68,6 +71,8 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
   // Document link counts for the collapsed accordion badge, keyed by device id. One request for
   // the whole page -- /api/v1/documents accepts entity_type on its own.
   const [docCounts, setDocCounts] = useState({})
+  // { device, metricNames } while the telemetry CSV export dialog is open.
+  const [exportTelemetry, setExportTelemetry] = useState(null)
   // No asset_type: a device's classification is now derived from the metric groups its schema
   // models (see utils/deviceTags.js), not typed in by hand. The column is left in place so
   // legacy values keep displaying, but nothing writes it any more.
@@ -806,9 +811,10 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                               it is the only action that means anything there, and burying it
                               would make archived devices harder to work with, not easier. */}
                           <div className="btn-group" style={{ justifyContent: 'flex-end' }}>
-                            <button className="btn btn-ghost btn-sm" onClick={() => onSelectDevice(a.asset_id)} title="View live telemetry for this device">
-                              <IconActivity size={13} /> Telemetry
-                            </button>
+                            {/* Telemetry is no longer a button that leaves this page -- it is a
+                                drawer on the row below. The button navigated to a separate
+                                Telemetry tab and then made you re-select the device you were
+                                already looking at. */}
 
                             {a.is_archived ? (
                               <button
@@ -849,9 +855,14 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                                 {
                                   key: 'config',
                                   icon: <IconClipboardList size={13} />,
-                                  label: 'Configuration & 3D model',
-                                  disabled: !canManage || a.is_archived,
-                                  title: !canManage ? 'Requires Admin permissions' : a.is_archived ? 'Device is archived' : 'Inspect DBIRTH metric parameters and attach a 3D model',
+                                  // No longer "& 3D model": the uploader moved to the document
+                                  // accordion on this row. What is left is a read of what the
+                                  // device declared at birth, so it is no longer gated on
+                                  // device:manage or refused for an archived device -- same
+                                  // reasoning as the AAS export and the schema download, both of
+                                  // which are open to any role because a read is a read.
+                                  label: 'Configuration Parameters',
+                                  title: 'Inspect the DBIRTH metric parameters this device reported',
                                   onClick: () => setConfigAsset(a)
                                 },
                                 { separator: true },
@@ -904,6 +915,28 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                             hasPermission={hasPermission}
                             refreshKey={docRefreshKey}
                             documentCount={docCounts[a.asset_id] || 0}
+                            footer={
+                              /* The 3D model lives here rather than inside the Configuration
+                                 modal. It is an attachment, like a document link -- the config
+                                 modal is a read-only view of what the device REPORTED, and an
+                                 upload control was the one thing in it that wrote anything.
+                                 onChange reloads so the row's model_3d_path cannot go stale,
+                                 which is what the modal's onClose used to guarantee. */
+                              <Model3DUploader
+                                device={a}
+                                canManage={canManage && !a.is_archived}
+                                showToast={showToast}
+                                onChange={() => loadAll()}
+                              />
+                            }
+                          />
+
+                          {/* Beneath the documents drawer, as its own collapsed row. Both are
+                              lazy: neither issues a request until it is opened. */}
+                          <InlineTelemetryAccordion
+                            device={a}
+                            hasPermission={hasPermission}
+                            onExport={(dev, names) => setExportTelemetry({ device: dev, metricNames: names })}
                           />
                         </td>
                       </tr>
@@ -1128,16 +1161,22 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
         <AssetConfigModal
           asset={configAsset}
           schemas={schemas}
-          showToast={showToast}
-          hasPermission={hasPermission}
-          // Reload on close: the modal can attach or remove a 3D model, and the row's own copy of
-          // model_3d_path would otherwise be stale until the next poll.
-          onClose={() => { setConfigAsset(null); loadAll() }}
+          // Read-only now that the 3D uploader has moved to the row's document accordion, so no
+          // reload is needed on close -- the uploader reloads for itself when it writes.
+          onClose={() => setConfigAsset(null)}
         />
       )}
       {threadFor && <DigitalThreadModal entityType="devices" entityId={threadFor.asset_id} displayName={threadFor.asset_name} onClose={() => setThreadFor(null)} />}
       {docsForDevice && (
         <EntityDocumentsModal entityType="device" entityId={docsForDevice.asset_id} entityName={docsForDevice.asset_name} onClose={() => { setDocsForDevice(null); setDocRefreshKey(k => k + 1) }} showToast={showToast} hasPermission={hasPermission} />
+      )}
+      {exportTelemetry && (
+        <TelemetryExportModal
+          device={exportTelemetry.device}
+          metricNames={exportTelemetry.metricNames}
+          onClose={() => setExportTelemetry(null)}
+          showToast={showToast}
+        />
       )}
     </>
   )

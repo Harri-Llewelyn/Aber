@@ -4,7 +4,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { CellsTab } from '../components/tabs/CellsTab'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { OverviewTab } from '../components/tabs/OverviewTab'
-import { TelemetryTab } from '../components/tabs/TelemetryTab'
 import { PERMISSION_UUIDS } from '../constants'
 import { api } from '../api'
 
@@ -26,7 +25,6 @@ const gateway = {
   // site-wide are independent: this fixture is a virtual gateway that has been given a cell.
   location_scope: 'cell',
   status: 'ONLINE',
-  ip_address: '192.168.1.50',
   is_virtual: true,
   is_archived: false,
   last_heartbeat: new Date(NOW - 20_000).toISOString(),
@@ -826,56 +824,9 @@ describe('OverviewTab shopfloor map', () => {
   })
 })
 
-describe('TelemetryTab renders the full stream', () => {
-  const page = (n, metric = 'temperature') =>
-    Array.from({ length: n }, (_, i) => ({
-      time: new Date(NOW - i * 1000).toISOString(),
-      asset_id: 'Simulated_CNC_01',
-      metric_name: i % 2 === 0 ? metric : 'vibration',
-      val_double: i
-    }))
-
-  it('offers a Load More control while full pages keep coming back', async () => {
-    api.get.mockImplementation((path) =>
-      path.startsWith('/api/v1/telemetry') ? Promise.resolve(page(500)) : Promise.resolve([])
-    )
-
-    render(<TelemetryTab initialAssetFilter="" onClearFilter={vi.fn()} hasPermission={() => true} />)
-
-    await waitFor(() => expect(screen.getByText(/Showing 500 records/)).toBeInTheDocument())
-    expect(screen.getByText(/more available/)).toBeInTheDocument()
-
-    // Metric options come from the data, so a metric the old hardcoded list omitted is selectable.
-    expect(screen.getByRole('option', { name: 'vibration' })).toBeInTheDocument()
-
-    api.get.mockImplementation((path) =>
-      path.startsWith('/api/v1/telemetry') ? Promise.resolve(page(20)) : Promise.resolve([])
-    )
-    fireEvent.click(screen.getByRole('button', { name: /Load 500 More/ }))
-
-    await waitFor(() => expect(screen.getByText(/Showing 520 records/)).toBeInTheDocument())
-    expect(screen.getByText(/end of stream/)).toBeInTheDocument()
-  })
-
-  it('surfaces a failed telemetry query instead of showing an empty table', async () => {
-    api.get.mockImplementation((path) =>
-      path.startsWith('/api/v1/telemetry')
-        ? Promise.reject(new Error('relation "telemetry" does not exist'))
-        : Promise.resolve([])
-    )
-
-    render(<TelemetryTab initialAssetFilter="" onClearFilter={vi.fn()} hasPermission={() => true} />)
-
-    await waitFor(() => expect(screen.getByText(/Telemetry query failed/)).toBeInTheDocument())
-    expect(screen.getByText(/relation "telemetry" does not exist/)).toBeInTheDocument()
-  })
-
-  it('still gates on the telemetry:read permission', () => {
-    api.get.mockResolvedValue([])
-    render(<TelemetryTab initialAssetFilter="" onClearFilter={vi.fn()} hasPermission={(p) => p !== PERMISSION_UUIDS.TELEMETRY_READ} />)
-    expect(screen.getByText('Access Restricted')).toBeInTheDocument()
-  })
-})
+// The TelemetryTab stream tests lived here. Paging a fleet-wide stream is not something the
+// per-device drawer that replaced it does: it shows the latest value per metric and defers
+// history to the CSV export. See deviceTelemetryAccordion.test.jsx.
 
 // ---------------------------------------------------------------------------------------------
 // Overview -> Cells hand-over

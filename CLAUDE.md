@@ -540,12 +540,17 @@ unbound on INSERT, which is why it is two triggers sharing one function.
 - `webhook_endpoints` has **no write RLS policy by design** — a writable endpoint table is an
   SSRF primitive. `anon` is revoked at the grant level too.
 
-**Vault** holds only secrets read *from SQL* — in practice just `nodered_admin_token`, which
-`dispatch_device_quarantine_webhook()` attaches to its outbound pg_net request (migration 0026).
-`MQTT_PASSWORD` / `DB_PASSWORD` / `POSTGRES_PASSWORD` stay in `.env`: mosquitto-init and supabase-db
-need them before the database accepts connections, and duplicating them would create two sources of
-truth. The `deploy-nodered` edge function reads `NODERED_ADMIN_TOKEN` from its own environment, not
-from Vault — Vault is only for the SQL-side consumer.
+**Vault** holds only secrets read *from SQL* — in practice `nodered_webhook_jwt_secret`, which
+`dispatch_device_quarantine_webhook()` **signs** its outbound pg_net request with (migration 0003),
+and `nodered_admin_token`, now break-glass only. `MQTT_PASSWORD` / `DB_PASSWORD` /
+`POSTGRES_PASSWORD` stay in `.env`: mosquitto-init and supabase-db need them before the database
+accepts connections, and duplicating them would create two sources of truth. The `deploy-nodered`
+edge function reads `NODERED_ADMIN_TOKEN` from its own environment, not from Vault — Vault is only
+for the SQL-side consumer.
+
+- **The webhook secret is a signing key, not a bearer credential**, and the two must not be
+  merged back. See **Node-RED Authentication** below for why sharing the admin token with the
+  webhook hands every flow the admin API.
 
 ### Node-RED Seeding & Credentials
 
@@ -620,6 +625,61 @@ Grafana is an OAuth client of GoTrue's OAuth 2.1 server; `grafana-userinfo` maps
 
 Role mapping never reads the token: GoTrue's OIDC claims omit `app_metadata`. The edge function
 omits `role` entirely when unmapped so `role_attribute_strict` refuses the login.
+
+### Node-RED Authentication
+
+The generated `settings.js` declares **three independent auth surfaces**, and they are separate
+because Node-RED mounts them separately — `adminAuth` guards `httpAdminRoot`, `httpNodeAuth`
+guards `httpNodeRoot` (`node-red/red.js:426`). Before this, it declared neither: the editor, the
+`/flows` admin API and `POST /hooks/quarantine` were open to anyone who could reach port 1880.
+
+- **`adminAuth.strategy`** — humans, via `passport-oauth2` against GoTrue. **Not
+  `passport-openidconnect`**, which always requests `openid` and requires an `id_token` GoTrue
+  refuses to sign under HS256; its discovery document also reports `issuer: ""` with relative
+  paths. Same OAuth2-not-OIDC arrangement as Grafana, and the same consent prerequisite: the
+  user must already be signed in to the dashboard.
+- **`adminAuth.tokens`** — services. `deploy-nodered` forwards **the caller's own access token**;
+  no shared secret exists on the default stack. Verified as HS256 against `SUPABASE_JWT_SECRET`
+  with `aud=authenticated`, then resolved through `nodered-userinfo`. `NODERED_ADMIN_TOKEN`
+  remains as opt-in break-glass, empty by default.
+- **`httpNodeAuth`** — the `http in` nodes. **A function, not `{user, pass}`**: Node-RED accepts
+  Express middleware here, which is what allows a bearer check instead of Basic auth against a
+  bcrypt hash.
+
+Load-bearing details, each of which fails in a way that does not look like its cause:
+
+- **`adminAuth.users` receives only a username string; `adminAuth.authenticate` receives the whole
+  profile.** The role is resolved in the strategy's `verify` and must ride through `authenticate`
+  or it is lost between login and the session Node-RED mints. `authenticate` is variadic because
+  the same hook backs the password grant on `POST /auth/token`, which is refused outright.
+- **`adminAuth.default` must stay absent.** `needsPermission()` runs
+  `passport.authenticate(['bearer','tokens','anon'])`; with no default the `anon` arm has nothing
+  to return. Setting it reopens the hole wholesale, so `settingsAreCorrect()` treats its presence
+  as a broken file rather than a preference to preserve.
+- **The webhook token is a capability, not the admin credential.**
+  `dispatch_device_quarantine_webhook()` mints a fresh 60-second HS256 JWT per event
+  (`aud=node-red-hooks`) with a key held only for signing. A flow author can read
+  `msg.req.headers`, so an admin token here would hand every flow the admin API — which is
+  remote code execution on the edge host by way of a `function` node.
+- **Both `node-red` and `node-red-init` build from `node-red/Dockerfile`.** `settingsAreCorrect()`
+  *evaluates* settings.js, which requires `passport-oauth2`; an init container without it
+  concludes the settings are wrong and rewrites the file — clobbering `settings.js.bak` — on
+  every boot, silently, because that throw is already handled as "unloadable, replace it". If the
+  log says `settings.js written` on more than the first boot, this is why.
+- **`settingsAreCorrect()` checks the auth keys *and* `factoryplusSettingsVersion`.** Checking
+  only that they exist would freeze their contents on every already-deployed volume; bump
+  `SETTINGS_VERSION` in `node-red-init.mjs` whenever the generated body changes.
+- **The client is registered `client_secret_post`**, unlike Grafana's `client_secret_basic` —
+  that is what `passport-oauth2` sends by default, and GoTrue enforces whichever is registered,
+  exactly. `NODERED_PUBLIC_URL` feeds both the registered `redirect_uris` and the strategy's
+  `callbackURL`, so the two cannot drift; a mismatch is `invalid redirect_uri`.
+- Adding an edge function means registering it in `functions/main/index.ts` — the allow-list is
+  the one place stating what a function may reach. An unregistered name 404s before a worker
+  starts, which reads as "function not found" rather than as a missing entry.
+
+`ingestion/validate.py` check 7 probes all three surfaces from the running stack. It has to be an
+end-to-end check: the fix is a runtime property of the assembled stack, and a settings.js
+declaring only `adminAuth` would secure `/flows` while leaving the webhook receiver open.
 
 ## Development Commands
 
@@ -717,12 +777,22 @@ baseline files are guarded to be no-ops once applied, so editing them reaches a 
 
 ### Edge Functions
 - `supabase/functions/approve-quarantine/` — Validates role claims (`Administrator`/`Shopfloor_Manager`) before approving quarantined devices
-- `supabase/functions/deploy-nodered/` — Validates role claims before proxying Node-RED flow deployments
+- `supabase/functions/deploy-nodered/` — Validates role claims before proxying Node-RED flow
+  deployments, then **forwards the caller's own access token** to Node-RED's admin API. The
+  header is unconditional: attaching it only when `NODERED_ADMIN_TOKEN` was set is what made a
+  deploy keep working against an unauthenticated Node-RED
 - `supabase/functions/aas-export/` — Composes an AAS V3 Environment for one device (Phase 3);
   read-scoped roles, telemetry referenced not inlined. See **AAS Export** above
 - `supabase/functions/grafana-userinfo/` — OIDC userinfo for Grafana's `api_url`; returns the
   standard identity claims plus `role` read from `public.user_roles`, and **omits `role`
   entirely** when unmapped so `role_attribute_strict` refuses the login
+- `supabase/functions/nodered-userinfo/` — the same lookup for Node-RED, answering in Node-RED's
+  permission vocabulary (`*` / `read`) and omitting `permissions` when unmapped. **Separate from
+  `grafana-userinfo` deliberately**: the mapping is an authorisation decision, and one endpoint
+  serving both would let a change made for one product's role model silently move the other's
+
+Every function must be registered in `supabase/functions/main/index.ts` — the allow-list that
+states what each one may reach. An unregistered name 404s before a worker spawns.
 
 ## Frontend Architecture
 

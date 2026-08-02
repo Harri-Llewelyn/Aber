@@ -48,7 +48,19 @@ function getDomainBadgeIcon(url = '') {
   return <span className="badge badge-neutral" style={{ gap: '4px' }}><IconGlobe size={12} /> External Link</span>
 }
 
-export function InlineDocumentAccordion({ entityType, entityId, entityName, onOpenModal, hasPermission, refreshKey, documentCount = 0 }) {
+/**
+ * @param footer  Optional content rendered inside the expanded body, beneath the links.
+ *
+ * A SLOT RATHER THAN A DEVICE-SPECIFIC SECTION. This component serves cells, gateways and
+ * devices; only devices carry a 3D model, and hardcoding that here would put an entity type's
+ * concern inside a component that is deliberately generic about entity type (it takes
+ * `entityType` as a free string and does nothing with it but query and label). Callers that
+ * pass nothing are unchanged.
+ *
+ * It sits INSIDE the expanded body, not below the header, so the collapsed row stays one line
+ * -- the whole reason the accordion is collapsed by default on a table of many rows.
+ */
+export function InlineDocumentAccordion({ entityType, entityId, entityName, onOpenModal, hasPermission, refreshKey, documentCount = 0, footer = null }) {
   const [expanded, setExpanded] = useState(false)
   const [docs, setDocs]         = useState([])
   const [loading, setLoading]   = useState(false)
@@ -138,6 +150,10 @@ export function InlineDocumentAccordion({ entityType, entityId, entityName, onOp
               ))}
             </div>
           )}
+
+          {/* Rendered whether or not there are links: on a device with no documents but a 3D
+              model attached, hiding this would hide the model too. */}
+          {footer}
         </div>
       )}
     </div>
