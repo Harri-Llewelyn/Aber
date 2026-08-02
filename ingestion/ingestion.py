@@ -18,13 +18,20 @@ DB_HOST = os.getenv("DB_HOST", "timescaledb")
 DB_PORT = os.getenv("DB_PORT", "5433" if os.getenv("DB_HOST") is None else "5432")
 DB_NAME = os.getenv("DB_NAME", "postgres")
 DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres")
+# NO DEFAULT, deliberately. A published default ("postgres" / "factoryplus123") means a
+# deployment with the variable missing connects with a known-weak credential instead of
+# failing -- the failure mode is silence, which is the worst one. These are validated in
+# main(), matching how SUPABASE_SERVICE_ROLE_KEY has always been treated: refuse to start.
+#
+# Validation lives in main() rather than at import so the pure-logic unit suites, which
+# import this module with a stubbed environment and never open a connection, keep working.
+DB_PASSWORD = os.getenv("DB_PASSWORD")
 
 # MQTT Broker configuration
 MQTT_HOST = os.getenv("MQTT_HOST", "mosquitto")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 MQTT_USER = os.getenv("MQTT_USER", "factoryplus")
-MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "factoryplus123")
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 
 # Supabase configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
@@ -90,6 +97,19 @@ IDENTITY_METRICS = ("Asset_ID", "Asset_Name")
 REASON_UNKNOWN_DEVICE = "UNKNOWN_DEVICE"
 REASON_MALFORMED_IDENTITY = "MALFORMED_IDENTITY"
 REASON_IDENTITY_MISMATCH = "IDENTITY_MISMATCH"
+REASON_GATEWAY_MISMATCH = "GATEWAY_MISMATCH"
+
+# Telemetry sanity window. A device supplies its own metric timestamps and they are trusted
+# for ordering, but not unconditionally: a clock-skewed or hostile gateway would otherwise
+# write rows arbitrarily far into the past or future, landing them outside the retention
+# window or in a compressed chunk that rejects the write.
+#
+# Asymmetric on purpose. Late data is normal -- a gateway buffers through a network outage
+# and flushes on reconnect -- so the backward tolerance is generous. Data from the future is
+# never legitimate; it is always a clock fault, so the forward tolerance covers ordinary NTP
+# skew and nothing more.
+TELEMETRY_MAX_AGE_SECONDS = 24 * 60 * 60   # 24 hours behind now
+TELEMETRY_MAX_FUTURE_SECONDS = 5 * 60      # 5 minutes ahead of now
 
 # Recorded on devices.identity_source.
 SOURCE_SPARKPLUG_ID = "sparkplug_id"
@@ -281,6 +301,76 @@ def resolve_gateway(wire_id: str):
 # -----------------------------------------------------------------------------
 # Sparkplug B Ingestion Handlers
 # -----------------------------------------------------------------------------
+def _timestamp_is_sane(dt: datetime, now: datetime = None) -> bool:
+    """
+    True if `dt` falls inside the telemetry sanity window.
+
+    Devices supply their own metric timestamps and are trusted for ordering, but a value far
+    outside this window is a clock fault or a forgery, not an observation: it lands the row
+    outside the retention policy, or inside an already-compressed chunk that rejects the
+    write, or arbitrarily far in the future where it distorts every dashboard's axis.
+    """
+    now = now or datetime.now(timezone.utc)
+    delta = (dt - now).total_seconds()
+    return -TELEMETRY_MAX_AGE_SECONDS <= delta <= TELEMETRY_MAX_FUTURE_SECONDS
+
+
+def verify_gateway_binding(device: dict, gateway_wire_id: str):
+    """
+    Check that the edge node publishing this message is the one the device is bound to.
+
+    Returns None when the message may be trusted, or a quarantine reason string when it may
+    not. Never raises: a lookup failure is reported as a mismatch, which is the fail-closed
+    answer.
+
+    WHY THIS EXISTS. The topic's device segment was previously the *only* thing consulted, so
+    any edge node authenticated to the broker could publish under any device's sparkplug_id
+    and have it recorded as that device. A sparkplug_id is an identifier, not a secret -- it
+    is derived from the row's UUID, shown in the dashboard and present in every topic. That
+    made three things possible: forging another machine's telemetry into the historian,
+    flipping another machine ONLINE, and -- worst -- publishing a contradictory Asset_ID for a
+    device you do not own to force it into quarantine, which silently stops its real telemetry
+    being stored. This closes all three at the application tier; `mosquitto.acl` closes them
+    at the broker tier, and neither is sufficient alone.
+
+    THREE CASES ARE NOT A MISMATCH, and each is load bearing:
+
+      * A device with no `gateway_id`. Binding is established by an operator at approval, not
+        by ingestion -- `devices.gateway_id` is deliberately not written on the telemetry
+        path. An unbound device is unbound, not mis-bound.
+      * A device resolved by legacy `name`. During the migration window a device may still be
+        addressed by name, and its row may predate any gateway assignment. Enforcing binding
+        there would break exactly the deployments the fallback exists to carry.
+      * A node-level message. Those carry no device segment and are handled elsewhere.
+    """
+    if not device:
+        return None
+
+    bound_gateway_id = device.get("gateway_id")
+    if not bound_gateway_id:
+        return None
+
+    if device.get("_identity_source") == SOURCE_LEGACY_NAME:
+        return None
+
+    gateway = resolve_gateway(gateway_wire_id)
+
+    # An unregistered edge node speaking for a *registered, bound* device. resolve_gateway()'s
+    # contract is that unregistered edge nodes are dropped; that was only ever enforced on the
+    # node-level path, so a device message via an unknown edge node was accepted.
+    if gateway is None:
+        return "%s: device is bound to a gateway but the publishing edge node '%s' is not registered" % (
+            REASON_GATEWAY_MISMATCH, gateway_wire_id
+        )
+
+    if gateway["id"] != bound_gateway_id:
+        return "%s: device is bound to gateway '%s' but the message was published by '%s'" % (
+            REASON_GATEWAY_MISMATCH, device.get("gateway_id"), gateway.get("sparkplug_id") or gateway_wire_id
+        )
+
+    return None
+
+
 def store_birth_parameters(sparkplug_id: str, payload):
     """
     Persist the metrics carried by a DBIRTH birth certificate to `asset_config`, so the
@@ -481,6 +571,11 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
     to be faulty (malformed, or contradicting the payload's Asset_ID claim). Such a device is
     still admitted to the queue rather than dropped -- silently discarding it would make a
     misconfigured gateway invisible instead of diagnosable.
+
+    A registered device is additionally checked against the edge node that published for it
+    (see verify_gateway_binding). A device announced by a gateway it is not bound to is held
+    in the same way and for the same reason: what is on the wire no longer reliably
+    identifies the asset.
     """
     logger.info("Processing DBIRTH for device '%s' via edge node '%s'", wire_id, gateway_wire_id)
     if not supabase_client:
@@ -499,27 +594,33 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
                 return
         elif device.get("is_quarantined"):
             logger.warning("QUARANTINE NOTICE: DBIRTH received for quarantined device '%s'", device.get("name"))
-        elif quarantine_reason:
-            # A registered device that has started publishing a faulty identity. Re-quarantine
-            # it: whatever is on the wire no longer reliably identifies this asset.
-            supabase_client.table("devices").update({
-                "is_quarantined": True,
-                "quarantine_reason": quarantine_reason,
-                "reported_identity": wire_id,
-            }).eq("id", device["id"]).execute()
-            _device_cache.pop(wire_id, None)
-            logger.warning(
-                "QUARANTINE ALERT: registered device '%s' published a faulty identity and was "
-                "re-quarantined (%s).", device.get("name"), quarantine_reason
-            )
         else:
-            # first_dbirth_at is write-once: only set it the first time this row sees a
-            # real birth, so a later rebirth never overwrites the original timestamp.
-            update_fields = {"status": "ONLINE", "identity_source": device["_identity_source"]}
-            if not device.get("first_dbirth_at"):
-                update_fields["first_dbirth_at"] = datetime.now(timezone.utc).isoformat()
-            supabase_client.table("devices").update(update_fields).eq("id", device["id"]).execute()
-            logger.info("DBIRTH: verified registered device '%s' (%s)", device.get("name"), wire_id)
+            # An identity fault already diagnosed by the caller takes precedence: it describes
+            # the id itself, which is the more fundamental problem of the two.
+            hold_reason = quarantine_reason or verify_gateway_binding(device, gateway_wire_id)
+
+            if hold_reason:
+                # A registered device publishing a faulty identity, or announced by a gateway
+                # it is not bound to. Re-quarantine it: whatever is on the wire no longer
+                # reliably identifies this asset.
+                supabase_client.table("devices").update({
+                    "is_quarantined": True,
+                    "quarantine_reason": hold_reason,
+                    "reported_identity": wire_id,
+                }).eq("id", device["id"]).execute()
+                _device_cache.pop(wire_id, None)
+                logger.warning(
+                    "QUARANTINE ALERT: registered device '%s' was re-quarantined (%s).",
+                    device.get("name"), hold_reason
+                )
+            else:
+                # first_dbirth_at is write-once: only set it the first time this row sees a
+                # real birth, so a later rebirth never overwrites the original timestamp.
+                update_fields = {"status": "ONLINE", "identity_source": device["_identity_source"]}
+                if not device.get("first_dbirth_at"):
+                    update_fields["first_dbirth_at"] = datetime.now(timezone.utc).isoformat()
+                supabase_client.table("devices").update(update_fields).eq("id", device["id"]).execute()
+                logger.info("DBIRTH: verified registered device '%s' (%s)", device.get("name"), wire_id)
 
         # Both run for quarantined devices too: they record what the device *claims*, which is
         # exactly what an administrator needs to inspect before approving it. DDATA telemetry
@@ -606,14 +707,28 @@ def process_node_message(edge_node_id: str, msg_type: str, payload):
 def process_ddata(wire_id: str, gateway_wire_id: str, payload):
     """
     On Sparkplug B DDATA:
-    Verify device registration & quarantine status in Supabase.
-    If quarantined or missing, drop DDATA telemetry.
+    Verify device registration, quarantine status and gateway binding in Supabase.
+    If quarantined, missing, or announced by a gateway the device is not bound to, drop the
+    DDATA telemetry.
     Otherwise, insert metric timestamps and values into TimescaleDB telemetry hypertable,
     keyed by the device's immutable `sparkplug_id` so a rename never breaks the series.
     """
     device = resolve_device(wire_id)
     if device is None or device.get("is_quarantined"):
         logger.warning("Dropping DDATA for quarantined/unregistered device '%s'", wire_id)
+        return
+
+    # The telemetry half of the spoofing fix. Dropped rather than quarantined here: a DDATA
+    # stream carries no birth certificate, so there is nothing for an operator to inspect, and
+    # letting an unbound publisher quarantine a healthy device would hand it the denial of
+    # service this check exists to prevent. The device's own gateway keeps being believed and
+    # its DBIRTH path is what raises the alarm.
+    binding_fault = verify_gateway_binding(device, gateway_wire_id)
+    if binding_fault:
+        logger.warning(
+            "Dropping DDATA for device '%s' published via edge node '%s': %s",
+            wire_id, gateway_wire_id, binding_fault
+        )
         return
 
     asset_id = device["sparkplug_id"]
@@ -642,6 +757,7 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload):
                 )
 
                 metric_count = 0
+                rejected_timestamps = 0
                 for metric in payload.metrics:
                     if metric.name in IDENTITY_METRICS:
                         continue
@@ -650,6 +766,15 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload):
                         metric_dt = datetime.fromtimestamp(metric.timestamp / 1000.0, timezone.utc)
                     else:
                         metric_dt = payload_dt
+
+                    # Reject rather than clamp. Clamping to the window edge would silently
+                    # relabel a reading as having happened at a time it did not, which is a
+                    # worse corruption of a historian than dropping it -- and it would pile
+                    # every sample from a broken clock onto one timestamp, where the primary
+                    # key would collapse them into a single row anyway.
+                    if not _timestamp_is_sane(metric_dt):
+                        rejected_timestamps += 1
+                        continue
 
                     val_double = None
                     val_string = None
@@ -670,18 +795,28 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload):
                     else:
                         continue
 
+                    # DO NOTHING, not DO UPDATE. The historian is an append-only record of what
+                    # was observed; an upsert let any publisher rewrite history at a timestamp
+                    # of its choosing, which is not a capability a time-series store should
+                    # offer to the devices feeding it. A genuine duplicate is a redelivered
+                    # MQTT message and the first write already recorded it.
                     cur.execute(
                         """
                         INSERT INTO telemetry (time, asset_id, metric_name, val_double, val_string, val_bool)
                         VALUES (%s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (time, asset_id, metric_name) DO UPDATE SET
-                            val_double = EXCLUDED.val_double,
-                            val_string = EXCLUDED.val_string,
-                            val_bool = EXCLUDED.val_bool
+                        ON CONFLICT (time, asset_id, metric_name) DO NOTHING
                         """,
                         (metric_dt, asset_id, metric.name, val_double, val_string, val_bool)
                     )
                     metric_count += 1
+
+                if rejected_timestamps:
+                    logger.warning(
+                        "Rejected %d metric(s) for asset '%s' with timestamps outside the sanity "
+                        "window (-%ds/+%ds). Check the gateway's clock.",
+                        rejected_timestamps, asset_id,
+                        TELEMETRY_MAX_AGE_SECONDS, TELEMETRY_MAX_FUTURE_SECONDS
+                    )
 
                 logger.info("INGESTED DDATA: Ingested %d metrics for asset '%s' into TimescaleDB", metric_count, asset_id)
     except Exception as e:
@@ -832,8 +967,36 @@ def on_message(client, userdata, msg):
         logger.info("Received %s message for device '%s' via edge node '%s'", msg_type, wire_id, edge_node_id)
 
 
+def _require_credentials():
+    """
+    Refuse to start without the broker and database credentials.
+
+    Same posture as the Supabase check below, and for the same reason: these previously
+    carried published defaults ("factoryplus123" / "postgres"), so a deployment with the
+    variable missing came up connected with a known-weak credential and reported nothing.
+    A missing secret must be a startup failure, not a silent downgrade.
+    """
+    missing = []
+    if not MQTT_PASSWORD:
+        missing.append("MQTT_PASSWORD")
+    # TIMESCALEDB_URL carries its own credentials, so DB_PASSWORD is only required when the
+    # connection is assembled from the discrete settings.
+    if not TIMESCALEDB_URL and not DB_PASSWORD:
+        missing.append("DB_PASSWORD")
+
+    if missing:
+        logger.critical(
+            "CRITICAL CONFIGURATION ERROR: %s not set. The ingestion daemon no longer falls back "
+            "to built-in default credentials -- a published default is a silent security "
+            "downgrade. Set them in the environment and restart.",
+            ", ".join(missing)
+        )
+        raise SystemExit(1)
+
+
 def main():
     logger.info("Initializing Supabase + TimescaleDB Ingestion Daemon...")
+    _require_credentials()
     if supabase_client is None:
         logger.critical(
             "CRITICAL SECURITY ERROR: Supabase client is uninitialized! SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing or invalid. "

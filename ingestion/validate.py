@@ -5,7 +5,7 @@ import argparse
 import psycopg2
 import paho.mqtt.client as mqtt
 import sparkplug_b_pb2
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 # The report is written with ✅/❌ markers. A Windows console defaults to cp1252, where printing
 # those raises UnicodeEncodeError -- which surfaces as a crash inside the *reporting* code and
@@ -23,6 +23,16 @@ TIMESCALEDB_PORT = os.getenv("DB_PORT", "5433" if os.getenv("DB_HOST") is None e
 TIMESCALEDB_NAME = os.getenv("DB_NAME", "postgres")
 TIMESCALEDB_USER = os.getenv("DB_USER", "postgres")
 TIMESCALEDB_PASS = os.getenv("DB_PASSWORD", "postgres")
+
+# Supabase's own PostgreSQL, addressed directly rather than through PostgREST. Needed only by
+# the audit-row cleanup, which migration 0003 deliberately put out of reach of `service_role`.
+# Defaults match the published port in docker-compose.yml, so the script keeps working from the
+# host with no extra configuration.
+SUPABASE_DB_HOST = os.getenv("SUPABASE_DB_HOST", "localhost")
+SUPABASE_DB_PORT = os.getenv("SUPABASE_DB_PORT", "54322")
+SUPABASE_DB_NAME = os.getenv("SUPABASE_DB_NAME", "postgres")
+SUPABASE_DB_USER = os.getenv("SUPABASE_DB_USER", "postgres")
+SUPABASE_DB_PASS = os.getenv("POSTGRES_PASSWORD", "postgres")
 
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
@@ -152,6 +162,29 @@ def get_timescaledb_connection():
         password=TIMESCALEDB_PASS
     )
 
+
+def get_supabase_admin_connection():
+    """
+    A direct owner connection to the Supabase database, used only to clear this run's audit rows.
+
+    WHY NOT THROUGH POSTGREST, WHICH IS HOW EVERYTHING ELSE HERE IS DONE. Migration 0003 makes
+    public.digital_thread genuinely append-only: a BEFORE UPDATE OR DELETE trigger rejects the
+    operation for every application role, `service_role` included. That is the point of the
+    change -- the service key ships in .env and is held by ingestion and all four edge functions,
+    so an audit trail that key could rewrite was not much of an audit trail.
+
+    Clearing fixture rows is therefore, deliberately, an act that needs owner authority. The
+    trigger exempts `postgres` because a role that can issue DDL can drop the trigger anyway, so
+    pretending otherwise would be theatre.
+    """
+    return psycopg2.connect(
+        host=SUPABASE_DB_HOST,
+        port=SUPABASE_DB_PORT,
+        database=SUPABASE_DB_NAME,
+        user=SUPABASE_DB_USER,
+        password=SUPABASE_DB_PASS,
+    )
+
 def cleanup_validation_data():
     print("Cleaning up validation data...")
     if supabase_client:
@@ -185,8 +218,20 @@ def cleanup_validation_data():
 
             # Guarded: an empty `in_` list is not a no-op filter, and an unfiltered delete against
             # digital_thread would wipe the whole audit history.
+            #
+            # Routed through an owner connection rather than PostgREST because 0003's append-only
+            # trigger refuses DELETE for service_role -- see get_supabase_admin_connection().
             if stale_ids:
-                supabase_client.table("digital_thread").delete().in_("entity_id", stale_ids).execute()
+                audit_conn = get_supabase_admin_connection()
+                try:
+                    audit_conn.autocommit = True
+                    with audit_conn.cursor() as cur:
+                        cur.execute(
+                            "DELETE FROM public.digital_thread WHERE entity_id = ANY(%s::uuid[])",
+                            (stale_ids,),
+                        )
+                finally:
+                    audit_conn.close()
         except Exception as e:
             print(f"Supabase cleanup warning: {e}")
 
@@ -281,9 +326,18 @@ def seed_supabase():
     # something to be judged against. Without an assigned schema a device is deliberately never
     # flagged as unmodelled -- "publishes beyond its model" and "has no model" are different
     # findings -- so this is a prerequisite of checks 6c/6d, not decoration.
+    #
+    # SEEDED AS A DRAFT, deliberately. Migration 0037 freezes every column but `status` on an
+    # `active` or `archived` schema, and that guard applies to `service_role` as well as to
+    # `authenticated` -- deliberately, since a trusted key is still not a reason to redefine a
+    # contract devices are provisioned against. Check 6d widens this schema in place to prove the
+    # unmodelled verdict is derived rather than stored, so the fixture has to be in the one state
+    # that is editable. A fixture that had to be forked to be edited would be testing versioning,
+    # not derivation.
     s_res = supabase_client.table("schemas").insert({
         "schema_name": VAL_SCHEMA_NAME,
         "description": "End-to-end validation schema",
+        "status": "draft",
         "schema_definition": {
             "type": "object",
             # SAMPLE data items are numeric; EVENT data items carry a controlled string.
@@ -301,6 +355,8 @@ def seed_supabase():
     k_res = supabase_client.table("schemas").insert({
         "schema_name": VAL_KPI_SCHEMA_NAME,
         "description": "End-to-end validation KPI submodel",
+        # Same reason as the schema above: a draft is the editable state (migration 0037).
+        "status": "draft",
         "schema_definition": {
             "type": "object",
             "properties": {name: {"type": "number"} for name in VAL_KPI_SCHEMA_METRICS},

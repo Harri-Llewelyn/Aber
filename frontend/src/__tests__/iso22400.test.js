@@ -5,7 +5,7 @@ import {
 import { STANDARDS } from '../utils/standards'
 import { composeMetricName } from '../utils/metricGroup'
 
-// A slice of what iso22400_vocabulary holds after migration 20260101000030.
+// A slice of what iso22400_vocabulary holds once 0002_seed_data.sql has run.
 const vocabulary = [
   { name: 'QUALITY', kpi_id: 'Q', category: 'OEE', unit: 'PERCENT', formula: 'Q = GQ / PQ', description: 'Quality ratio', semantic_id: 'https://factoryplus.local/semantics/iso22400/QUALITY' },
   // ISO 22400-2's own term for the factor industry calls Performance. The catalog's

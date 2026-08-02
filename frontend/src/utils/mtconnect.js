@@ -2,7 +2,7 @@
  * The MTConnect controlled vocabularies, as served from `mtconnect_vocabulary`.
  *
  * Reference data generated into the database from the Apache-2.0 mtconnect/schema repository
- * (migration 20260101000018, regenerate with scripts/generate-mtconnect-vocabulary.mjs). The app
+ * (seeded by 0002_seed_data.sql; regenerate with scripts/generate-mtconnect-vocabulary.mjs). The app
  * only ever reads it.
  *
  * A metric name is composed, not picked whole: MTConnect identifies an observation by component

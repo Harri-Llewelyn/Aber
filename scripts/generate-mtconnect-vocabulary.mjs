@@ -25,7 +25,7 @@ const SCHEMA_URL =
 
 const OUT = join(
   dirname(fileURLToPath(import.meta.url)),
-  '..', 'supabase', 'migrations', '20260101000018_mtconnect_vocabulary.sql'
+  '..', 'supabase', 'migrations', 'archive', '20260101000018_mtconnect_vocabulary.sql'
 );
 
 /** Enum values sometimes carry regex escaping (e.g. "DEGREE/SECOND\\^2"). */

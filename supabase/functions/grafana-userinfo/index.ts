@@ -84,16 +84,26 @@ export default async function handler(req: Request): Promise<Response> {
     // caller would couple this endpoint to the exact shape of that policy. The user id is
     // already authenticated above, so this is a lookup, not an authorisation decision.
     const supabaseAdmin = createClient(supabaseUrl, serviceKey);
-    const { data: roleRow } = await supabaseAdmin
+    const { data: roleRow, error: roleError } = await supabaseAdmin
       .from("user_roles")
       .select("roles(name)")
       .eq("user_id", user.id)
       .maybeSingle();
 
+    // A failed lookup is not evidence of a role. Returning no role lets Grafana's
+    // role_attribute_strict refuse the login, which is the correct answer to "we could not
+    // determine this user's privileges".
+    if (roleError) {
+      console.error(`role lookup failed for user ${user.id}: ${roleError.message}`);
+    }
+
     const dbRole = (roleRow as { roles?: { name?: string } } | null)?.roles?.name;
-    // Fall back to the JWT claim only if there is no mapping row -- handle_new_user()
-    // (migration 0008) writes both, so a disagreement means the row was edited directly.
-    const supabaseRole = dbRole ?? (user.app_metadata?.role as string | undefined) ?? null;
+    // public.user_roles is the ONLY source. This used to fall back to the JWT's
+    // app_metadata.role when no row was found, on the reasoning that handle_new_user() writes
+    // both -- but deleting the row is exactly how a role is revoked, so the fallback re-granted
+    // the privilege the user held before the revocation and kept granting it at every
+    // subsequent Grafana login. An absent row means no role.
+    const supabaseRole = dbRole ?? null;
     const grafanaRole = supabaseRole ? ROLE_MAP[supabaseRole] : undefined;
 
     // Fail closed. Returning no `role` key at all (rather than guessing "Viewer") is what lets

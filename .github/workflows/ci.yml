@@ -41,11 +41,15 @@ jobs:
           fi
           echo "isUuid UUID_REGEX definitions are byte-identical across frontend and Deno edge function."
 
-      # The metric-group separator is mirrored in four places: the generated column (0016), the
-      # spelling trigger (0017), deriveMetricGroup() in the frontend, and validate.py's Python
-      # mirror. Metric names are immutable once issued, so a silent divergence here would be
-      # unfixable in place -- names would be created under one convention and read under another.
-      # Same guard rail as the isUuid check above, for the same reason.
+      # The metric-group separator is mirrored in three places that must agree: the generated column
+      # and the spelling trigger (both now in 0001_baseline_schema.sql), deriveMetricGroup() in the
+      # frontend, and validate.py's Python mirror. Metric names are immutable once issued, so a
+      # silent divergence here would be unfixable in place -- names would be created under one
+      # convention and read under another. Same guard rail as the isUuid check above.
+      #
+      # The two SQL forms differ because of how they reach the baseline: the generated column comes
+      # through pg_dump, which fully qualifies the literal's type, while the trigger body is carried
+      # over verbatim. Both are checked rather than one, since either could drift alone.
       - name: Verify Metric Group Separator Sync
         run: |
           fail=0
@@ -55,31 +59,49 @@ jobs:
               fail=1
             fi
           }
-          check supabase/migrations/20260101000016_metric_group.sql \
-                "split_part(name, '/', 1)" "generated column"
-          check supabase/migrations/20260101000017_metric_group_vocabulary.sql \
+          check supabase/migrations/0001_baseline_schema.sql \
+                "split_part(name, '/'::text, 1)" "generated column"
+          check supabase/migrations/0001_baseline_schema.sql \
                 "split_part(NEW.name, '/', 1)" "spelling trigger"
           check frontend/src/utils/metricGroup.js \
                 "METRIC_GROUP_SEPARATOR = '/'" "frontend mirror"
-          if grep -rnE "split_part\((NEW\.)?name, '\.'" supabase/migrations/ >/dev/null 2>&1; then
-            echo "::error::a migration still derives the metric group on the '.' separator"
+          # Scoped to the applied migrations, not the tree: supabase/migrations/archive/ holds the
+          # pre-beta chain for reference and is deliberately never executed.
+          if grep -nE "split_part\((NEW\.)?name, '\.'" supabase/migrations/*.sql >/dev/null 2>&1; then
+            echo "::error::an applied migration derives the metric group on the '.' separator"
             fail=1
           fi
           [ "$fail" -eq 0 ] && echo "Metric group separator is '/' in every mirrored definition."
           exit $fail
 
-      # The MTConnect vocabulary migration is generated. Hand-editing it would be silently lost on
-      # the next regeneration, so confirm the committed file is what the generator still produces.
-      - name: Verify Generated MTConnect Vocabulary Is In Sync
+      # A schema version's name is derived by stripping a trailing `_v<n>`, in two places: the SQL
+      # function public.schema_version_base_name() and baseSchemaName() in the frontend. Unlike the
+      # metric-group separator this cannot corrupt data -- the server always names the row -- but a
+      # divergence makes the Create Version button promise a name the server will not choose, which
+      # is a lie in the UI rather than a bug that announces itself. Same guard rail, cheaper stakes.
+      - name: Verify Schema Version Name Derivation Sync
         run: |
-          cp supabase/migrations/20260101000018_mtconnect_vocabulary.sql /tmp/committed.sql
-          node scripts/generate-mtconnect-vocabulary.mjs
-          if ! diff -q /tmp/committed.sql supabase/migrations/20260101000018_mtconnect_vocabulary.sql; then
-            echo "::error::20260101000018_mtconnect_vocabulary.sql differs from generator output. Run: node scripts/generate-mtconnect-vocabulary.mjs"
-            diff /tmp/committed.sql supabase/migrations/20260101000018_mtconnect_vocabulary.sql | head -20
-            exit 1
+          fail=0
+          if ! grep -qF "'_v[0-9]+\$'" supabase/migrations/0001_baseline_schema.sql; then
+            echo "::error::schema_version_base_name() no longer strips a trailing _v<n>"
+            fail=1
           fi
-          echo "Generated vocabulary migration matches the generator."
+          if ! grep -qF '/_v\d+$/' frontend/src/utils/schemaVersion.js; then
+            echo "::error::baseSchemaName() no longer strips a trailing _v<n>"
+            fail=1
+          fi
+          [ "$fail" -eq 0 ] && echo "Schema version name derivation matches across SQL and frontend."
+          exit $fail
+
+      # The MTConnect vocabulary is generated, and now lives inside 0002_seed_data.sql rather than
+      # in a migration of its own. A plain file diff no longer has anything to compare, so the check
+      # compares the (kind, name, category) triples instead -- see the script's header for why the
+      # generator cannot simply write the seed section (it emits no semantic_id, which the seed
+      # carries).
+      - name: Verify MTConnect Vocabulary Seed Is In Sync
+        run: |
+          node scripts/generate-mtconnect-vocabulary.mjs
+          node scripts/check-mtconnect-seed-sync.mjs
 
       # vite.config.js fails fast if these are unset. Docker passes them as build
       # args; a bare `npm run build` in CI has to supply them explicitly. These are
@@ -174,6 +196,10 @@ jobs:
           python supabase/functions/approve-quarantine/test_approve_quarantine.py
           python supabase/functions/deploy-nodered/test_deploy_nodered.py
           python supabase/migrations/test_user_roles_rls.py
+          # Schema versioning (migration 0037). Runs its assertions as `authenticated` with
+          # simulated JWT claims, because the immutability guard deliberately exempts the owner --
+          # a suite connecting as `postgres` would pass against a database with the trigger dropped.
+          python supabase/migrations/test_schema_versioning.py
           # No stack here, so this run covers the authorization ladder and the Sparkplug -> XSD
           # mapper parity guard; its live export checks skip themselves and run in e2e-validation.
           python supabase/functions/aas-export/test_aas_export.py
@@ -192,6 +218,15 @@ jobs:
       - name: Run Ingestion Device Location Invariant Tests
         run: |
           python ingestion/test_device_location.py
+
+      # Audit blocker B1. A sparkplug_id is an identifier, not a secret, so before the binding
+      # check any credentialed edge node could publish under another device's id -- forging
+      # telemetry, forging ONLINE state, or forcing a healthy device into quarantine (a denial
+      # of service against a production asset). Also pins the telemetry sanity window and that
+      # the historian insert stays DO NOTHING rather than DO UPDATE.
+      - name: Run Ingestion Gateway Binding & Telemetry Integrity Tests
+        run: |
+          python ingestion/test_gateway_binding.py
 
   e2e-validation:
     name: End-to-End Unified Stack Ingestion Validation

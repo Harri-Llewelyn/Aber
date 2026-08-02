@@ -77,9 +77,11 @@ describe('gateway row actions', () => {
     openMenu()
 
     const labels = menuLabels().join('|')
-    expect(labels).toMatch(/documents/i)
     expect(labels).toMatch(/Digital Thread/i)
     expect(labels).toMatch(/Archive gateway/i)
+    // Documents left the menu: the accordion is rendered inline on every row, so there is
+    // nothing here to toggle. Asserted negatively so a reinstated menu item is caught.
+    expect(labels).not.toMatch(/documents/i)
   })
 
   it('promotes Restore into the row for an archived gateway', async () => {
@@ -108,13 +110,80 @@ describe('gateway row actions', () => {
     expect(menu.getByRole('menuitem', { name: /Digital Thread/i }).disabled).toBe(false)
   })
 
-  it('toggles the documents accordion from the menu', async () => {
+  // Standardised on the Cells page's treatment: the accordion is part of the row, collapsed,
+  // rather than something to be revealed through an overflow menu first. Reaching a document
+  // link used to take two clicks and a menu nobody would think to open for it.
+  it('renders the documents accordion inline on every row, with no menu step', async () => {
     await show([gateway()])
 
-    openMenu()
-    fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: /Show documents/i }))
+    expect(screen.getByText('Attached Document Links')).toBeInTheDocument()
+    // Present but closed: the accordion fetches only on first expand, so an always-mounted row
+    // costs no request.
+    expect(screen.queryByText(/No external document links attached/)).not.toBeInTheDocument()
+  })
 
-    openMenu()
-    expect(menuLabels().join('|')).toMatch(/Hide documents/i)
+  it('expands in place to reveal the links', async () => {
+    await show([gateway()])
+
+    fireEvent.click(screen.getByText('Attached Document Links'))
+
+    await waitFor(() =>
+      expect(screen.getByText(/No external document links attached to this gateway/)).toBeInTheDocument()
+    )
+  })
+})
+
+// The collapsed badge used to read 0 on every row for every entity type, because it was fed
+// `g.document_count` / `c.document_count` / `a.document_count` -- a field api.js has never
+// produced for any of them. It only became correct after expanding, when the accordion could
+// count its own fetch. Harmless while the accordion was hidden behind a menu; visibly wrong once
+// it is on every row. The count is now fetched once per page and grouped by entity id.
+describe('gateway document link counts', () => {
+  const withDocs = (rows, docs) => (path) => {
+    if (path.startsWith('/api/v1/documents')) return Promise.resolve(docs)
+    if (path.startsWith('/api/v1/cells')) return Promise.resolve([{ cell_id: 'cell-1', cell_name: 'Assembly Line 1' }])
+    if (path.startsWith('/api/v1/gateways')) return Promise.resolve(rows)
+    if (path.startsWith('/api/v1/devices')) return Promise.resolve([])
+    return Promise.resolve([])
+  }
+
+  it('shows the attached link count before the accordion is ever expanded', async () => {
+    api.get.mockImplementation(withDocs([gateway()], [
+      { id: 'd1', entity_type: 'gateway', entity_id: 'gw-1', display_name: 'Manual', url: 'https://x/1' },
+      { id: 'd2', entity_type: 'gateway', entity_id: 'gw-1', display_name: 'Schematic', url: 'https://x/2' }
+    ]))
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('Attached Document Links')).toBeInTheDocument())
+    await waitFor(() => {
+      const badge = screen.getByText('Attached Document Links').parentElement.querySelector('.badge')
+      expect(badge.textContent).toBe('2')
+    })
+  })
+
+  it('counts only the links belonging to that gateway', async () => {
+    api.get.mockImplementation(withDocs([gateway()], [
+      { id: 'd1', entity_type: 'gateway', entity_id: 'gw-1', display_name: 'Manual', url: 'https://x/1' },
+      { id: 'd2', entity_type: 'gateway', entity_id: 'gw-OTHER', display_name: 'Elsewhere', url: 'https://x/2' }
+    ]))
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('Attached Document Links')).toBeInTheDocument())
+    await waitFor(() => {
+      const badge = screen.getByText('Attached Document Links').parentElement.querySelector('.badge')
+      expect(badge.textContent).toBe('1')
+    })
+  })
+
+  it('leaves the badge at zero when the count cannot be fetched, rather than failing the page', async () => {
+    api.get.mockImplementation((path) => {
+      if (path.startsWith('/api/v1/documents')) return Promise.reject(new Error('boom'))
+      return withDocs([gateway()], [])(path)
+    })
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    const badge = screen.getByText('Attached Document Links').parentElement.querySelector('.badge')
+    expect(badge.textContent).toBe('0')
   })
 })

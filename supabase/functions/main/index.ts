@@ -24,6 +24,73 @@ const corsHeaders = {
 
 const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
 
+/**
+ * Environment every worker needs regardless of what it does: how to reach Supabase, and the
+ * anon key, which is public by construction.
+ *
+ * SUPABASE_SERVICE_ROLE_KEY is deliberately NOT here. It is granted per function below, to the
+ * three that genuinely need to act outside the caller's RLS context.
+ */
+const COMMON_ENV = ["SUPABASE_URL", "SUPABASE_ANON_KEY"];
+
+/**
+ * The function allow-list, and the secrets each function may see.
+ *
+ * WHY AN ALLOW-LIST. `serviceName` comes from the request path. Without this map, any directory
+ * under /home/deno/functions was bootable by name -- including one added later whose author
+ * forgot the role check. Kong does not pre-verify the JWT for this service
+ * (VERIFY_JWT="false"), so "reachable" means reachable by anyone who can reach the gateway.
+ * An unknown name must be a 404 decided here, not a worker that starts and then decides.
+ *
+ * WHY PER-FUNCTION ENV. This router previously forwarded `Deno.env.toObject()` -- the COMPLETE
+ * environment -- to every worker it spawned. That handed SUPABASE_SERVICE_ROLE_KEY,
+ * NODERED_ADMIN_TOKEN, POSTGRES_PASSWORD and GRAFANA_OAUTH_CLIENT_SECRET to every function
+ * whether or not it had any use for them, so a single compromised or careless function leaked
+ * the credentials of all the others. Each entry below lists only what that function reads.
+ *
+ * Adding a function means adding it here. That is the intended friction: it is the one place
+ * where "what may this code reach" is stated.
+ */
+const FUNCTION_REGISTRY: Record<string, string[]> = {
+  // Writes to `devices` outside the caller's RLS context after checking the caller's role.
+  "approve-quarantine": ["SUPABASE_SERVICE_ROLE_KEY"],
+
+  // Reads the committed flow from the environment and pushes it to Node-RED's admin API.
+  // No service-role key: it makes no privileged database write.
+  "deploy-nodered": ["NODERED_URL", "NODERED_ADMIN_TOKEN", "NODERED_FLOW_JSON"],
+
+  // Composes an AAS shell. Needs the service-role key to read across the tables a shell
+  // aggregates, plus the identifiers and endpoints the document embeds.
+  "aas-export": [
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "AAS_BASE_IRI",
+    "AAS_HISTORIAN_ENDPOINT",
+    "AAS_MODEL_PUBLIC_BASE",
+    "AAS_MAX_BUNDLED_MODEL_BYTES",
+    "STORAGE_MODEL_BUCKET",
+  ],
+
+  // Resolves a role from public.user_roles for Grafana's OIDC `api_url`.
+  "grafana-userinfo": ["SUPABASE_SERVICE_ROLE_KEY"],
+};
+
+/**
+ * Build the environment for one worker: the common set plus that function's declared secrets.
+ * A declared variable that is unset in this deployment is skipped rather than forwarded as an
+ * empty string, so a function's own "is it configured" check still sees the truth.
+ */
+function envForFunction(serviceName: string): string[][] {
+  const allowed = [...COMMON_ENV, ...(FUNCTION_REGISTRY[serviceName] ?? [])];
+  const env: string[][] = [];
+
+  for (const key of allowed) {
+    const value = Deno.env.get(key);
+    if (value !== undefined) env.push([key, value]);
+  }
+
+  return env;
+}
+
 // Declared by the edge-runtime host.
 declare const EdgeRuntime: {
   userWorkers: {
@@ -54,11 +121,20 @@ Deno.serve(async (req: Request) => {
     );
   }
 
+  // Refuse anything not on the allow-list before a worker is spawned. Answering 404 (rather
+  // than 403) discloses nothing about which names exist.
+  if (!Object.hasOwn(FUNCTION_REGISTRY, serviceName)) {
+    console.warn(`rejected request for unregistered function '${serviceName}'`);
+    return new Response(
+      JSON.stringify({ error: `Function '${serviceName}' not found` }),
+      { status: 404, headers: jsonHeaders }
+    );
+  }
+
   const servicePath = `/home/deno/functions/${serviceName}`;
   console.log(`serving the request with ${servicePath}`);
 
-  const envVarsObj = Deno.env.toObject();
-  const envVars = Object.keys(envVarsObj).map((k) => [k, envVarsObj[k]]);
+  const envVars = envForFunction(serviceName);
 
   try {
     const worker = await EdgeRuntime.userWorkers.create({

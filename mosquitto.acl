@@ -1,0 +1,69 @@
+# =============================================================================================
+# Mosquitto access control list -- Factory+ Asset Tracking Platform
+# =============================================================================================
+#
+# WHY THIS FILE EXISTS. Before it, `mosquitto.conf` set `allow_anonymous false` and a single
+# shared `password_file`, and stopped there -- so every authenticated client could publish to
+# every topic. A Sparkplug `sparkplug_id` is an identifier, not a secret (it is derived from the
+# row's UUID, shown in the dashboard, and present in every topic), so any gateway holding the
+# shared credential could publish under another gateway's edge-node id. That made three attacks
+# possible: forging another machine's telemetry into the historian, flipping another machine
+# ONLINE, and publishing a contradictory Asset_ID for a device you do not own in order to force
+# it into quarantine -- which silently stops its real telemetry being stored.
+#
+# DEFENCE IN DEPTH, TWO TIERS. This file is the broker tier. The application tier is
+# `verify_gateway_binding()` in ingestion/ingestion.py, which rejects a message whose publishing
+# edge node is not the one the device is bound to. Neither is sufficient alone: the broker
+# cannot know which device belongs to which gateway (that lives in Supabase), and the daemon
+# cannot stop a forged message being delivered to other subscribers.
+#
+# DEFAULT IS DENY. Mosquitto grants nothing that is not matched by a rule below, and
+# `allow_anonymous false` in mosquitto.conf means every client authenticates first.
+#
+# HOW `pattern` WORKS: `%u` is substituted with the connecting client's username. So a gateway
+# whose MQTT username is its own `sparkplug_id` can publish only beneath its own edge-node
+# segment, and to no other. This is the rule that does the actual work.
+# =============================================================================================
+
+
+# ---------------------------------------------------------------------------------------------
+# Per-gateway confinement
+# ---------------------------------------------------------------------------------------------
+# The Sparkplug B topic is spBv1.0/<group_id>/<message_type>/<edge_node_id>/<device_id>, so
+# `spBv1.0/+/+/%u/#` pins the FOURTH segment to the client's own username while leaving the
+# group and message type free. A gateway provisioned with username == its `sparkplug_id`
+# (see scripts/mosquitto-provision-gateway.mjs) therefore cannot address any other edge node.
+#
+# Read is granted on the same subtree so a gateway can receive its own Sparkplug command
+# topics (NCMD/DCMD) -- and, deliberately, on nothing else: one gateway has no business
+# subscribing to another's telemetry.
+pattern readwrite spBv1.0/+/+/%u/#
+
+# Sparkplug primary-host STATE topics are a broadcast birth/death for host applications. Every
+# edge node needs to read them to know whether the primary host is online; none may write one.
+#
+# Declared as a global `topic` rule, not a `pattern`: it is the same subtree for every client,
+# and Mosquitto warns at startup about a `pattern` carrying no %u/%c substitution -- correctly,
+# since such a pattern is just a global rule written misleadingly.
+topic read spBv1.0/STATE/#
+
+
+# ---------------------------------------------------------------------------------------------
+# Backend principal
+# ---------------------------------------------------------------------------------------------
+# The ingestion daemon subscribes to the whole `spBv1.0/#` tree -- that is its job, and it is a
+# consumer, not a publisher of asset data.
+#
+# THIS ACCOUNT IS ALSO STILL USED BY THE DEMO SIMULATOR AND THE E2E VALIDATOR, both of which
+# publish as gateways whose credentials cannot be pre-provisioned (validate.py creates its
+# gateways at runtime). It therefore retains write access, and is a TRUSTED PRINCIPAL: its
+# credential must not be issued to a physical gateway. Moving the simulator and validator onto
+# per-gateway credentials is tracked as a follow-up; until then the application tier
+# (`verify_gateway_binding`) is what constrains anything using this account.
+user factoryplus
+topic readwrite spBv1.0/#
+# `#` does not match topics beginning with `$`, so the broker-status tree needs naming
+# explicitly. The mosquitto healthcheck in docker-compose.yml subscribes to
+# `$SYS/broker/version` as this user -- without this line the container never reports healthy
+# and every service that depends on it fails to start.
+topic read $SYS/#

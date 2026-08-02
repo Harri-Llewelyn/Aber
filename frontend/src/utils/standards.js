@@ -52,7 +52,7 @@ export const STANDARD_OPTIONS = [
 /**
  * The AAS (IEC 63278) Reference types `semantic_id_type` may take.
  *
- * Mirrors the CHECK constraint in migration 20260101000029 -- keep the two in step, same obligation
+ * Mirrors the CHECK constraint in 0001_baseline_schema.sql -- keep the two in step, same obligation
  * as utils/sparkplugId.js and utils/metricGroup.js carry against their own migrations. An
  * unconstrained value would produce an invalid AAS Reference at export time rather than an error
  * here, which is the expensive place to discover it.
@@ -90,7 +90,7 @@ export const ISO22400_SEMANTIC_NAMESPACE = `${LOCAL_SEMANTIC_NAMESPACE}/iso22400
 /**
  * The semantic id for an MTConnect metric, derived from its full name.
  *
- * Mirror of the SQL in migration 20260101000032:
+ * Mirror of the SQL in archive/20260101000032 (folded into 0002_seed_data.sql):
  *   'https://factoryplus.local/semantics/mtconnect/v2.0/' || name
  * Keep the two in step -- same obligation as utils/metricGroup.js and utils/sparkplugId.js carry.
  *

@@ -68,10 +68,13 @@ describe('device row actions', () => {
     openMenu()
 
     const labels = menuLabels().join('|')
-    for (const expected of [/documents/i, /Digital Thread/i, /Configuration & 3D model/i,
+    for (const expected of [/Digital Thread/i, /Configuration & 3D model/i,
       /Export AAS JSON/i, /Export AASX package/i, /Archive device/i]) {
       expect(labels).toMatch(expected)
     }
+    // Documents left the menu: the accordion is rendered inline on every row, so there is
+    // nothing here to toggle. This also returns a slot to a menu that had grown to seven items.
+    expect(labels).not.toMatch(/documents/i)
   })
 
   it('promotes Restore into the row for an archived device', async () => {
@@ -104,13 +107,24 @@ describe('device row actions', () => {
     expect(menu.getByRole('menuitem', { name: /Export AAS JSON/i }).disabled).toBe(false)
   })
 
-  it('toggles the documents accordion from the menu, and says which way it will go', async () => {
+  // Standardised on the Cells page's treatment: the accordion is part of the row, collapsed,
+  // rather than something to be revealed through an overflow menu first.
+  it('renders the documents accordion inline on every row, with no menu step', async () => {
     await show([device()])
 
-    openMenu()
-    fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: /Show documents/i }))
+    expect(screen.getByText('Attached Document Links')).toBeInTheDocument()
+    // Present but closed: it fetches only on first expand, so an always-mounted row costs
+    // no request.
+    expect(screen.queryByText(/No external document links attached/)).not.toBeInTheDocument()
+  })
 
-    openMenu()
-    expect(menuLabels().join('|')).toMatch(/Hide documents/i)
+  it('expands in place to reveal the links', async () => {
+    await show([device()])
+
+    fireEvent.click(screen.getByText('Attached Document Links'))
+
+    await waitFor(() =>
+      expect(screen.getByText(/No external document links attached to this device/)).toBeInTheDocument()
+    )
   })
 })

@@ -33,6 +33,11 @@
      tokens exist so call sites express intent and the light theme can diverge. */
   --warning-text: #ffb300;
   --success-text: #00e896;
+  /* Completes the trio. --danger (#ff4d6d) clears AA on a bare card (6.6:1) but only 4.45:1 on
+     the 0.15 rose tint the error toast and .badge-offline sit on -- just under the bar, and the
+     error toast is the message a user most needs to read. One step lighter clears it at 5.3:1
+     while staying the same signal hue. */
+  --danger-text:  #ff6b85;
   --radius:       12px;
   --radius-sm:    8px;
   --shadow:       0 4px 24px rgba(0, 0, 0, 0.5);
@@ -72,6 +77,9 @@
      4.99:1 respectively. */
   --warning-text: #b45309;
   --success-text: #047857;
+  /* --danger (#e11d48) measures 4.72:1 on a white card -- a pass -- but drops to 3.94:1 once the
+     0.15 rose tint lightens the surface under it. Rose-700 clears that at 5.21:1. */
+  --danger-text:  #be123c;
   --shadow:       0 4px 20px rgba(0, 0, 0, 0.06);
 }
 
@@ -835,6 +843,21 @@ tbody tr:hover { background: var(--bg-glass); }
 .val-bool-false { color: var(--danger); }
 
 /* ===== Toast ===== */
+/*
+ * THE BACKGROUND MUST BE OPAQUE. A toast is `position: fixed` over whatever the user happens to
+ * be looking at, so the 15% tint these variants use was compositing against a data table, not
+ * against a surface -- 85% of the row behind it showed through and the message became unreadable.
+ *
+ * The tint itself is right and is kept: it is the same 0.15 fill the badges use, and the
+ * --success-text / --danger-text tokens are calibrated against exactly that fill. What was missing
+ * is something for it to composite ONTO. Painting it as a background-image over an opaque
+ * background-color of --bg-card reproduces the colour the contrast analysis assumed, so the
+ * measured ratios in __tests__/themeContrast.test.js are the ratios that actually render.
+ *
+ * Keep them as separate background-image / background-color properties rather than folding them
+ * into a `background:` shorthand -- the shorthand resets background-color, which is how the
+ * transparency would come straight back.
+ */
 .toast {
   position: fixed;
   bottom: 28px;
@@ -850,10 +873,22 @@ tbody tr:hover { background: var(--bg-glass); }
   align-items: center;
   gap: 10px;
   box-shadow: var(--shadow);
+  background-color: var(--bg-card);
 }
 
-.toast-success { background: rgba(0, 232, 150, 0.15); border: 1px solid var(--success); color: var(--success-text); }
-.toast-error   { background: rgba(255, 77, 109, 0.15); border: 1px solid var(--danger);  color: var(--danger);  }
+.toast-success {
+  background-image: linear-gradient(rgba(0, 232, 150, 0.15), rgba(0, 232, 150, 0.15));
+  border: 1px solid var(--success);
+  color: var(--success-text);
+}
+
+/* --danger-text, not --danger: the bare signal colour is a border/icon tone and measures below
+   AA once the 0.15 rose fill lightens the surface beneath it. */
+.toast-error {
+  background-image: linear-gradient(rgba(255, 77, 109, 0.15), rgba(255, 77, 109, 0.15));
+  border: 1px solid var(--danger);
+  color: var(--danger-text);
+}
 
 @keyframes slideInRight {
   from { opacity: 0; transform: translateX(20px); }

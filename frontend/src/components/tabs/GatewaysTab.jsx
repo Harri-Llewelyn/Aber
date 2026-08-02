@@ -23,7 +23,6 @@ import {
   IconRefreshCw,
   IconHistory,
   IconExternalLink,
-  IconFileText,
   IconZap,
   IconShieldAlert,
   IconX
@@ -45,11 +44,12 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
   const [form, setForm]         = useState(blank)
   const [threadFor, setThreadFor] = useState(null)
   const [docsForGw, setDocsForGw] = useState(null)
-  const [expandedGwDocs, setExpandedGwDocs] = useState({})
   const [docRefreshKey, setDocRefreshKey] = useState(0)
   const [filterMode, setFilterMode] = useState('all')
-
-  const toggleGwDocExpand = id => setExpandedGwDocs(prev => ({ ...prev, [id]: !prev[id] }))
+  // Document link counts for the collapsed accordion badge, keyed by gateway id. Fetched once
+  // for the whole page rather than per row: /api/v1/documents accepts entity_type on its own,
+  // so one request answers every row instead of one request each.
+  const [docCounts, setDocCounts] = useState({})
 
   const getInitialSearch = () => {
     const params = new URLSearchParams(window.location.search)
@@ -107,6 +107,31 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
       throw e
     }
   }, [])
+
+  /**
+   * Document-link counts for the collapsed accordion badges.
+   *
+   * Deliberately NOT part of load() above. That runs on the poll and on every Realtime event,
+   * and ingestion stamps last_heartbeat roughly every 30s per gateway -- so folding this in
+   * would issue a documents query on the busiest subscription in the app to refresh a number
+   * that changes when a human edits a link. Keyed on docRefreshKey instead: once on mount, and
+   * again when EntityDocumentsModal closes.
+   *
+   * Non-fatal: a failure leaves the badges at zero, which is what they read before this
+   * existed. A page of gateways must not fail to render because a count could not be had.
+   */
+  useEffect(() => {
+    let cancelled = false
+    api.get('/api/v1/documents?entity_type=gateway')
+      .then(docs => {
+        if (cancelled) return
+        const counts = {}
+        for (const d of docs || []) counts[d.entity_id] = (counts[d.entity_id] || 0) + 1
+        setDocCounts(counts)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [docRefreshKey])
 
   // Reconciliation loop, not the primary refresh -- see useRealtimeTable for why polling stays.
   //
@@ -410,13 +435,10 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
                              <ActionMenu
                                testId={`gateway-actions-${g.gateway_id}`}
                                items={[
-                                 {
-                                   key: 'docs',
-                                   icon: <IconFileText size={13} />,
-                                   label: expandedGwDocs[g.gateway_id] ? 'Hide documents' : 'Show documents',
-                                   title: 'Toggle attached document links accordion',
-                                   onClick: () => toggleGwDocExpand(g.gateway_id)
-                                 },
+                                 // No 'Show documents' item: the accordion below is always
+                                 // mounted, so there is nothing to toggle from here. It was the
+                                 // only asset page where reaching a document link took two
+                                 // clicks through a menu -- Cells has shown it inline all along.
                                  {
                                    key: 'thread',
                                    icon: <IconHistory size={13} />,
@@ -441,20 +463,22 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
                            </div>
                          </td>
                        </tr>
-                       {expandedGwDocs[g.gateway_id] && (
-                         <tr key={`docs-${g.gateway_id}`} style={{ background: 'rgba(0,0,0,0.2)' }}>
-                           <td colSpan={8} style={{ padding: '8px 16px' }}>
-                             <InlineDocumentAccordion
-                               entityType="gateway"
-                               entityId={g.gateway_id}
-                               entityName={g.gateway_name}
-                               onOpenModal={() => setDocsForGw(g)}
-                               hasPermission={hasPermission}
-                               refreshKey={docRefreshKey}
-                             />
-                           </td>
-                         </tr>
-                       )}
+                       {/* Always mounted, collapsed by default. The accordion fetches lazily on
+                           first expand, so a permanently-present row costs one badge and no
+                           request until someone opens it. */}
+                       <tr key={`docs-${g.gateway_id}`} style={{ background: 'rgba(0,0,0,0.2)' }}>
+                         <td colSpan={8} style={{ padding: '8px 16px' }}>
+                           <InlineDocumentAccordion
+                             entityType="gateway"
+                             entityId={g.gateway_id}
+                             entityName={g.gateway_name}
+                             onOpenModal={() => setDocsForGw(g)}
+                             hasPermission={hasPermission}
+                             refreshKey={docRefreshKey}
+                             documentCount={docCounts[g.gateway_id] || 0}
+                           />
+                         </td>
+                       </tr>
                      </React.Fragment>
                    )
                  })}

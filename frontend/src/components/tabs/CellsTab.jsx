@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
@@ -26,7 +26,23 @@ import {
   IconX
 } from '../common/Icons'
 
-export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
+export function CellsTab({ showToast, onSelectDevice, hasPermission, initialSearchFilter, onClearFilter }) {
+  /**
+   * A cell handed over from the Overview shopfloor map arrives as `?search=<cell_id>`.
+   *
+   * The URL wins over the prop, and both are read: the query string survives a reload and a
+   * shared link, while the prop covers a navigation that did not push one. Same arrangement as
+   * GatewaysTab and DevicesTab -- this page was the only drill-down target that implemented
+   * neither half, so clicking a cell on Overview landed on an unfiltered list.
+   *
+   * No new filter control is needed: the existing predicate below already matches cell_id OR
+   * cell_name, so an id drops straight into the search box.
+   */
+  const getInitialSearch = () => {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('search') || initialSearchFilter || ''
+  }
+
   const [cells, setCells]       = useState([])
   const [assets, setAssets]     = useState([])
   const [loading, setLoading]   = useState(true)
@@ -38,10 +54,55 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
   const [threadFor, setThreadFor] = useState(null)
   const [docsForCell, setDocsForCell] = useState(null)
   const [docRefreshKey, setDocRefreshKey] = useState(0)
+  // Document link counts for the collapsed accordion badge, keyed by cell id. `c.document_count`
+  // was read here before, but nothing ever produced that field -- api.js does not select it for
+  // any entity type -- so the badge read 0 until the accordion was expanded and could count its
+  // own fetch. One request per page answers every row.
+  const [docCounts, setDocCounts] = useState({})
   const [filterMode, setFilterMode] = useState('all')
-  const [searchQuery, setSearchQuery] = useState('')
+  const [searchQuery, setSearchQuery] = useState(getInitialSearch)
   const [attentionOnly, setAttentionOnly] = useState(false)
   const [emptyOnly, setEmptyOnly] = useState(false)
+
+  // Re-reads on a later hand-over: the tab stays mounted across an Overview -> Cells -> Overview
+  // -> Cells round trip, so the initial state above only fires once.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const urlSearch = params.get('search')
+    if (urlSearch) setSearchQuery(urlSearch)
+    else if (initialSearchFilter) setSearchQuery(initialSearchFilter)
+  }, [initialSearchFilter])
+
+  /**
+   * Document-link counts for the collapsed accordion badges. Keyed on docRefreshKey rather than
+   * folded into loadAll(), which runs on the poll and on every Realtime event -- this number
+   * changes only when a human edits a link. Non-fatal: a failure leaves the badges at zero.
+   */
+  useEffect(() => {
+    let cancelled = false
+    api.get('/api/v1/documents?entity_type=cell')
+      .then(docs => {
+        if (cancelled) return
+        const counts = {}
+        for (const d of docs || []) counts[d.entity_id] = (counts[d.entity_id] || 0) + 1
+        setDocCounts(counts)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [docRefreshKey])
+
+  /**
+   * Clearing the search also strips `?search=` from the address bar and releases the lifted
+   * filter in App. Without both, a reload or a Back would silently re-apply a filter the user
+   * had just cleared.
+   */
+  const clearSearch = useCallback(() => {
+    setSearchQuery('')
+    if (window.location.search) {
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+    if (onClearFilter) onClearFilter()
+  }, [onClearFilter])
 
   const loadAll = useCallback(async (signal) => {
     try {
@@ -185,7 +246,7 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
           className="form-control"
           style={{ width: '220px' }}
           value={searchQuery}
-          onChange={e => setSearchQuery(e.target.value)}
+          onChange={e => { const v = e.target.value; v ? setSearchQuery(v) : clearSearch() }}
           placeholder="Search by Cell ID or name…"
           title="Filter cells by ID or name"
         />
@@ -209,7 +270,7 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
         {activeFilterCount > 0 && (
           <button
             className="btn btn-ghost btn-sm filter-bar-spacer"
-            onClick={() => { setSearchQuery(''); setAttentionOnly(false); setEmptyOnly(false); setFilterMode('all') }}
+            onClick={() => { clearSearch(); setAttentionOnly(false); setEmptyOnly(false); setFilterMode('all') }}
             title="Clear every filter"
           >
             <IconX size={13} /> Clear filters ({activeFilterCount})
@@ -397,7 +458,7 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission }) {
                   onOpenModal={() => setDocsForCell(c)}
                   hasPermission={hasPermission}
                   refreshKey={docRefreshKey}
-                  documentCount={c.document_count}
+                  documentCount={docCounts[c.cell_id] || 0}
                 />
               </div>
             </div>

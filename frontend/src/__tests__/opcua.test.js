@@ -6,7 +6,7 @@ import {
 import { STANDARDS } from '../utils/standards'
 import { composeMetricName, deriveMetricGroup } from '../utils/metricGroup'
 
-// A slice of what opcua_vocabulary holds after migration 20260101000031.
+// A slice of what opcua_vocabulary holds once 0002_seed_data.sql has run.
 const vocabulary = [
   {
     name: 'ActualPosition', companion_spec: 'OPC 40010 Robotics',

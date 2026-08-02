@@ -1,8 +1,13 @@
 """
 Unit test suite for deploy-nodered Supabase Edge Function authorization logic.
-Verifies fail-closed behavior for missing or non-privileged role claims.
+Verifies fail-closed behavior for missing or non-privileged role claims, and that the
+endpoint deploys only the flow committed to the repository.
 """
+import re
 import unittest
+from pathlib import Path
+
+INDEX_TS = Path(__file__).resolve().parent / "index.ts"
 
 def evaluate_deploy_nodered_authorization(user: dict, auth_header: str = None) -> tuple[int, str]:
     """
@@ -89,6 +94,50 @@ class TestDeployNoderedAuth(unittest.TestCase):
         }
         status, message = evaluate_deploy_nodered_authorization(user, auth_header="Bearer valid_token")
         self.assertEqual(status, 200)
+
+class TestOnlyTheCanonicalFlowIsDeployable(unittest.TestCase):
+    """
+    Guards the GitOps contract at the source level.
+
+    A Node-RED `function` node runs arbitrary JavaScript inside the Node-RED container, which
+    holds the MQTT credential and can reach Mosquitto, Supabase and TimescaleDB. The endpoint
+    therefore must never deploy a flow supplied by the caller -- doing so hands remote code
+    execution on the edge host to every role allowed through the authorization ladder above.
+
+    Asserted against the source because there is no Deno runtime in this suite, the same
+    approach test_aas_export.py uses to guard the Sparkplug -> XSD mapper against drift.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.source = INDEX_TS.read_text(encoding="utf-8")
+
+    def test_an_inline_flow_array_is_rejected_not_deployed(self):
+        """A request body that is a flow array must be refused, never assigned to `flow`."""
+        self.assertNotRegex(
+            self.source,
+            r"flow\s*=\s*body\b",
+            "deploy-nodered assigns the request body to the deployed flow -- this is the "
+            "arbitrary-code-execution path that was removed; it must not come back.",
+        )
+        self.assertIn(
+            "Inline flow deployment is not supported",
+            self.source,
+            "deploy-nodered must explicitly refuse an inline flow array.",
+        )
+
+    def test_the_deployed_flow_comes_only_from_the_canonical_loader(self):
+        """`flow` must be populated from loadCanonicalFlow() and from nothing else."""
+        assignments = re.findall(r"^\s*flow\s*=\s*(.+?);", self.source, re.MULTILINE)
+        self.assertTrue(assignments, "no assignment to `flow` found -- has the file moved?")
+        for assigned in assignments:
+            self.assertEqual(
+                assigned.strip(),
+                "loadCanonicalFlow()",
+                f"`flow` is assigned from '{assigned.strip()}'; the only permitted source is "
+                "loadCanonicalFlow().",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

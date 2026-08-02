@@ -38,7 +38,6 @@ import {
   IconActivity,
   IconHistory,
   IconClipboardList,
-  IconFileText,
   IconShieldAlert,
   IconAlertTriangle,
   IconLock,
@@ -65,8 +64,10 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
   const [configAsset, setConfigAsset] = useState(null)
   const [threadFor, setThreadFor] = useState(null)
   const [docsForDevice, setDocsForDevice] = useState(null)
-  const [expandedDeviceDocs, setExpandedDeviceDocs] = useState({})
   const [docRefreshKey, setDocRefreshKey] = useState(0)
+  // Document link counts for the collapsed accordion badge, keyed by device id. One request for
+  // the whole page -- /api/v1/documents accepts entity_type on its own.
+  const [docCounts, setDocCounts] = useState({})
   // No asset_type: a device's classification is now derived from the metric groups its schema
   // models (see utils/deviceTags.js), not typed in by hand. The column is left in place so
   // legacy values keep displaying, but nothing writes it any more.
@@ -77,7 +78,27 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
   const [form, setForm]         = useState(blank)
   const [filterMode, setFilterMode] = useState('all')
 
-  const toggleDeviceDocExpand = id => setExpandedDeviceDocs(prev => ({ ...prev, [id]: !prev[id] }))
+  /**
+   * Document-link counts for the collapsed accordion badges.
+   *
+   * Deliberately not part of loadAll(): that runs on the poll and on every Realtime event for
+   * devices, gateways and cells, whereas this number changes only when a human edits a link.
+   * Keyed on docRefreshKey -- once on mount, again when EntityDocumentsModal closes.
+   *
+   * Non-fatal: a failure leaves the badges at zero rather than failing the device list.
+   */
+  useEffect(() => {
+    let cancelled = false
+    api.get('/api/v1/documents?entity_type=device')
+      .then(docs => {
+        if (cancelled) return
+        const counts = {}
+        for (const d of docs || []) counts[d.entity_id] = (counts[d.entity_id] || 0) + 1
+        setDocCounts(counts)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [docRefreshKey])
 
   const getInitialSearch = () => {
     const params = new URLSearchParams(window.location.search)
@@ -814,13 +835,10 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                               disabled={exportingAas === a.asset_id}
                               testId={`device-actions-${a.asset_id}`}
                               items={[
-                                {
-                                  key: 'docs',
-                                  icon: <IconFileText size={13} />,
-                                  label: expandedDeviceDocs[a.asset_id] ? 'Hide documents' : 'Show documents',
-                                  title: 'Toggle attached document links accordion',
-                                  onClick: () => toggleDeviceDocExpand(a.asset_id)
-                                },
+                                // No 'Show documents' item: the accordion below is always
+                                // mounted, so there is nothing to toggle from here. This also
+                                // returns one slot to a menu the row comment above calls out as
+                                // having grown too long.
                                 {
                                   key: 'thread',
                                   icon: <IconHistory size={13} />,
@@ -873,21 +891,22 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                           </div>
                         </td>
                       </tr>
-                      {expandedDeviceDocs[a.asset_id] && (
-                        <tr key={`docs-${a.asset_id}`} style={{ background: 'rgba(0,0,0,0.2)' }}>
-                          <td colSpan={7} style={{ padding: '8px 16px' }}>
-                            <InlineDocumentAccordion
-                              entityType="device"
-                              entityId={a.asset_id}
-                              entityName={a.asset_name}
-                              onOpenModal={() => setDocsForDevice(a)}
-                              hasPermission={hasPermission}
-                              refreshKey={docRefreshKey}
-                              documentCount={a.document_count}
-                            />
-                          </td>
-                        </tr>
-                      )}
+                      {/* Always mounted, collapsed by default. The accordion fetches lazily on
+                          first expand, so a permanently-present row costs one badge and no
+                          request until someone opens it. */}
+                      <tr key={`docs-${a.asset_id}`} style={{ background: 'rgba(0,0,0,0.2)' }}>
+                        <td colSpan={7} style={{ padding: '8px 16px' }}>
+                          <InlineDocumentAccordion
+                            entityType="device"
+                            entityId={a.asset_id}
+                            entityName={a.asset_name}
+                            onOpenModal={() => setDocsForDevice(a)}
+                            hasPermission={hasPermission}
+                            refreshKey={docRefreshKey}
+                            documentCount={docCounts[a.asset_id] || 0}
+                          />
+                        </td>
+                      </tr>
                     </React.Fragment>
                   )
                 })}

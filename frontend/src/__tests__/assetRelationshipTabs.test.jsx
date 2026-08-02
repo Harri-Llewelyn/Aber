@@ -876,3 +876,103 @@ describe('TelemetryTab renders the full stream', () => {
     expect(screen.getByText('Access Restricted')).toBeInTheDocument()
   })
 })
+
+// ---------------------------------------------------------------------------------------------
+// Overview -> Cells hand-over
+// ---------------------------------------------------------------------------------------------
+// The cell zone title has always carried the tooltip "Click to view Cell 'X' on Cells page" and
+// then called onNavigateTab('cells'), which drops the identity -- so it landed on an unfiltered
+// list and the tooltip was a promise the UI did not keep. These pin both halves: Overview emits
+// the id, and Cells consumes it the same way Gateways and Devices already consume theirs.
+describe('Overview hands a cell over to the Cells page', () => {
+  const renderOverview = (props = {}) => render(
+    <OverviewTab
+      onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} showToast={vi.fn()}
+      hasPermission={() => true} onNavigateTab={vi.fn()} {...props}
+    />
+  )
+
+  it('passes the clicked cell id to onSelectCell', async () => {
+    api.get.mockImplementation(routeGet({ telemetry: [] }))
+    const onSelectCell = vi.fn()
+    renderOverview({ onSelectCell })
+
+    await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
+    fireEvent.click(screen.getByTitle("Click to view Cell 'Assembly Line 1' on Cells page"))
+
+    // The id, not the name: it is stable and unique, and CellsTab's predicate matches either.
+    expect(onSelectCell).toHaveBeenCalledWith('cell-1')
+  })
+
+  it('still navigates when no onSelectCell is wired, rather than doing nothing', async () => {
+    api.get.mockImplementation(routeGet({ telemetry: [] }))
+    const onNavigateTab = vi.fn()
+    renderOverview({ onNavigateTab })
+
+    await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
+    fireEvent.click(screen.getByTitle("Click to view Cell 'Assembly Line 1' on Cells page"))
+
+    expect(onNavigateTab).toHaveBeenCalledWith('cells')
+  })
+})
+
+describe('CellsTab consumes a handed-over cell filter', () => {
+  const otherCell = { cell_id: 'cell-2', cell_name: 'Weld Bay 2', is_archived: false, gateways: [], gateway_count: 0 }
+  const bothCells = routeGet({ cells: [cell, otherCell] })
+
+  afterEach(() => {
+    window.history.replaceState({}, '', '/')
+  })
+
+  it('isolates the cell named by ?search=', async () => {
+    window.history.replaceState({}, '', '/cells?search=cell-1')
+    api.get.mockImplementation(bothCells)
+
+    render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
+
+    await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
+    expect(screen.queryByText('Weld Bay 2')).not.toBeInTheDocument()
+    // The existing affordance is what tells the user the list is narrowed.
+    expect(screen.getByText(/Clear filters \(1\)/)).toBeInTheDocument()
+  })
+
+  it('falls back to the lifted initialSearchFilter prop when no query param was pushed', async () => {
+    api.get.mockImplementation(bothCells)
+
+    render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true}
+                     initialSearchFilter="cell-2" onClearFilter={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('Weld Bay 2')).toBeInTheDocument())
+    expect(screen.queryByText('Assembly Line 1')).not.toBeInTheDocument()
+  })
+
+  it('matches on cell name too, so the search box keeps working by hand', async () => {
+    api.get.mockImplementation(bothCells)
+
+    render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
+
+    await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
+    fireEvent.change(screen.getByPlaceholderText(/Search by Cell ID or name/), { target: { value: 'Weld' } })
+
+    expect(screen.getByText('Weld Bay 2')).toBeInTheDocument()
+    expect(screen.queryByText('Assembly Line 1')).not.toBeInTheDocument()
+  })
+
+  // Without this, a reload or a Back re-applies a filter the user just cleared -- the query
+  // string outlives the component state.
+  it('strips ?search= from the URL and releases the lifted filter when cleared', async () => {
+    window.history.replaceState({}, '', '/cells?search=cell-1')
+    api.get.mockImplementation(bothCells)
+    const onClearFilter = vi.fn()
+
+    render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true}
+                     initialSearchFilter="cell-1" onClearFilter={onClearFilter} />)
+
+    await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
+    fireEvent.click(screen.getByText(/Clear filters/))
+
+    expect(window.location.search).toBe('')
+    expect(onClearFilter).toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByText('Weld Bay 2')).toBeInTheDocument())
+  })
+})

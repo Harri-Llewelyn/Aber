@@ -4,7 +4,7 @@
     "type": "tab",
     "label": "Gateway Simulator",
     "disabled": false,
-    "info": "Simulates Edge Gateway A publishing Sparkplug B NBIRTH, DBIRTH, DDATA, and DDEATH lifecycle telemetry messages to Mosquitto MQTT broker. Read the on-canvas comment nodes for a walkthrough of how to onboard your own device, register a gateway, and approve a quarantined device -- see node_red_guide.md for the full write-up."
+    "info": "Simulates Edge Gateway A publishing Sparkplug B NBIRTH, DBIRTH, DDATA, and DDEATH lifecycle telemetry messages to Mosquitto MQTT broker. Read the on-canvas comment nodes for a walkthrough of how to onboard your own device, register a gateway, and approve a quarantined device -- see simulators/README.md for the full write-up."
   },
   {
     "id": "eb74e7d1698084b8",

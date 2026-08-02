@@ -46,12 +46,20 @@ VALUES (
 )
 ON CONFLICT (id) DO UPDATE SET
   gateway_id = EXCLUDED.gateway_id,
-  schema_id  = EXCLUDED.schema_id
+  -- COALESCE, NOT EXCLUDED: this assigns a schema to a device that has none, it does not impose
+  -- one on a device that already has one. Schema versioning (migration 0037) is what made the
+  -- difference matter. Once a v2 of this schema is published, the name above still resolves to the
+  -- ARCHIVED v1, so an unconditional assignment dragged the demo device back onto a superseded
+  -- version on every db-init replay -- and 0037's reconciliation then forwarded it again, so the
+  -- pair churned two rows per boot into an append-only audit table while the end state looked
+  -- correct. Leaving an existing binding alone is both the fix and the more honest behaviour: the
+  -- purpose here is pre-registration, not re-provisioning.
+  schema_id  = COALESCE(public.devices.schema_id, EXCLUDED.schema_id)
 -- Write only on change. An UPDATE fires log_digital_thread_event() whether or not any value
 -- actually differs, so an unguarded DO UPDATE appended one audit row to an append-only table on
 -- every single boot -- the same trap record_declared_metrics() avoids in ingestion.py.
 WHERE public.devices.gateway_id IS DISTINCT FROM EXCLUDED.gateway_id
-   OR public.devices.schema_id  IS DISTINCT FROM EXCLUDED.schema_id;
+   OR (public.devices.schema_id IS NULL AND EXCLUDED.schema_id IS NOT NULL);
 
 -- A device auto-discovered by an earlier run holds the same wire identity under a different UUID.
 -- Its telemetry is keyed by that old sparkplug_id and cannot be moved (the id is generated), so the

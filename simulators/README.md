@@ -1,0 +1,267 @@
+# Simulators & Edge Automation
+
+Node-RED runs the **Gateway Simulator** — a self-contained, zero-dependency flow that publishes the
+full Sparkplug B lifecycle so the platform can be exercised end to end with no physical hardware.
+
+| Artefact | Location |
+| :--- | :--- |
+| Flow definition | [`../node_red_flow.json`](../node_red_flow.json) |
+| Provisioning script | [`../scripts/node-red-init.mjs`](../scripts/node-red-init.mjs) |
+| Broker config | [`../mosquitto.conf`](../mosquitto.conf), [`../mosquitto.acl`](../mosquitto.acl) |
+| Gateway credential tool | [`../scripts/mosquitto-provision-gateway.mjs`](../scripts/mosquitto-provision-gateway.mjs) |
+| Editor | `http://localhost:1880` |
+
+---
+
+## Overview
+
+The flow provides a **Gateway Simulator** tab in the Node-RED editor. It publishes `NBIRTH`,
+`DBIRTH`, periodic `DDATA` (5 s), `DDEATH`, and a periodic `NDATA` gateway heartbeat (30 s), plus
+interactive test controls (overheat alarm at 95 °C / reset to 42 °C) for exercising alerts and UI
+state transitions.
+
+Every node group carries an on-canvas comment explaining what it does, and — for the two most
+common new-user questions ("how do I add my own device?" and "why doesn't my gateway show as
+online?") — exactly what to do about it. Read those first if you are skimming the flow.
+
+---
+
+## Flow Provisioning
+
+> `docker compose up -d` runs `node-red-init`, which copies the flow into Node-RED and configures
+> credentials on startup. **Manual import is not required.**
+
+To inspect, reset, or re-import by hand:
+
+1. Open `http://localhost:1880`.
+2. **☰ menu → Import**.
+3. Paste the contents of [`../node_red_flow.json`](../node_red_flow.json).
+4. **Import**, then **Deploy**.
+
+To force a re-seed over editor changes, set `NODE_RED_FORCE_SEED=true` and restart, or use the
+Directory tab's GitOps sync button.
+
+### Three writes, three lifetimes
+
+`scripts/node-red-init.mjs` makes three writes to the `nodered_data` volume, and collapsing them
+behind one guard broke the stack twice. The *flow* is user content (seed once); *settings.js* and
+the *credentials* are stack configuration that must be reconciled on **every** boot — a volume
+outlives a fix, and the old single guard exited before reaching the repair.
+
+Four failure modes worth knowing, because each is silent:
+
+- **`flowFile` must be declared in `settings.js`.** Node-RED does not fall back to `flows.json` —
+  it falls back to **`flows_<hostname>.json`**, and a container's hostname is a random id. The
+  seeded flow is then simply never read: Node-RED opens a blank canvas. The credentials file is
+  derived from the same basename, so `flows_cred.json` is missed in the same breath and the broker
+  node comes up with no username. One omitted line, two unrelated-looking symptoms.
+- **The image ships `/data/flows.json`**, a two-node placeholder, and Docker pre-populates a fresh
+  named volume from the image's contents — so the file exists before the init script has ever run.
+  Guarding the seed on it meant the repo flow was **never** seeded on a fresh stack while the
+  script announced it was "preserving editor changes" that did not exist. The guard is now
+  `/data/.factoryplus-seeded`, which records what the script *did*.
+- **`_credentialSecret` in `/data/.config.runtime.json` silently defeats the seed.** Node-RED mints
+  that key whenever `settings.js` has no `credentialSecret`, and thereafter prefers it: it fails to
+  decrypt the seeded file, **discards the credentials**, and rewrites the file empty under its own
+  key. Clearing it is gated on *whether there are credentials to lose*, not on the seed path.
+- **`settings.js` is checked by LOADING it, not by grepping it.** Node-RED's own default is 26 KB
+  and mentions `credentialSecret` in a commented-out example, so a substring test reports a file
+  that declares nothing as correctly configured.
+
+---
+
+## Broker Connection
+
+| Field | Value |
+| :--- | :--- |
+| Server | `mosquitto` (compose service name), or `localhost` from the host |
+| Port | `1883` (TCP) / `9001` (WebSocket) |
+| Client ID | `node-red-simulator` |
+| Protocol | MQTT v3.1.1 |
+| Auth | Username/password — `allow_anonymous false` |
+
+### Diagnose from the client side, not from Mosquitto's log
+
+Node-RED logs only a generic `Connection failed to broker: <clientId>@<url>` — note that is the
+*client id*, not the username. And Mosquitto's stdout is **not a reliable witness**: a connection
+refused with CONNACK 5 has been observed with no corresponding `not authorised` line, so its
+absence proves nothing.
+
+Settle it from inside the Node-RED container:
+
+```bash
+docker exec factoryplus_node_red node -e "
+  const mqtt=require('/usr/src/node-red/node_modules/mqtt');
+  const c=mqtt.connect('mqtt://mosquitto:1883',{reconnectPeriod:0});
+  c.on('connect',()=>{console.log('CONNECTED');c.end()});
+  c.on('error',e=>{console.log('ERROR code='+e.code,e.message);c.end()});"
+```
+
+`code=5 Not authorized` means the credentials never reached the node — look at `settings.js`,
+`_credentialSecret` and `flows_cred.json`, in that order. A connect failure with no code at all is
+a network or DNS problem instead.
+
+---
+
+## Topic Structure & Lifecycle
+
+```text
+spBv1.0/{GroupID}/{MessageType}/{EdgeNodeID}[/{DeviceID}]
+```
+
+`{EdgeNodeID}` and `{DeviceID}` are **Sparkplug IDs, not names**: a 3-character type prefix (`gwy`
+for gateways, `dev` for devices) followed by 21 hex characters, 24 in total. The platform issues
+one to every gateway and device, derived from its database id, and shows it on that asset's page —
+click it to copy. It never changes, so an asset can be renamed freely without breaking anything.
+
+The two ids used by the shipped flow (`gwy100000000000400080000` and `dev200000000000400080000`)
+belong to the pre-seeded `Virtual_Gateway_NodeRED` row and this simulator's device. They are pinned
+in [`0002_seed_data.sql`](../supabase/migrations/0002_seed_data.sql) precisely so the flow can
+hardcode them.
+
+| Order | Type | Topic | Purpose |
+| :-- | :--- | :--- | :--- |
+| 1 | `NBIRTH` | `spBv1.0/FactoryPlus/NBIRTH/gwy1000…` | The edge node's own birth certificate, once at startup, before any device birth |
+| 2 | `DBIRTH` | `spBv1.0/FactoryPlus/DBIRTH/gwy1000…/dev2000…` | The metric names, types and config the device will report. Re-sent every 60 s |
+| 3 | `DDATA` | `spBv1.0/FactoryPlus/DDATA/gwy1000…/dev2000…` | Streaming telemetry, every 5 s |
+| 4 | `DDEATH` | `spBv1.0/FactoryPlus/DDEATH/gwy1000…/dev2000…` | Manually triggered — marks the device offline |
+| 5 | `NDATA` | `spBv1.0/FactoryPlus/NDATA/gwy1000…` | Gateway heartbeat, every 30 s |
+
+### Payload
+
+`Asset_ID` repeats the device's Sparkplug ID as a **cross-check** — the topic is what identifies
+the device, and if the two disagree the device is quarantined rather than one silently winning.
+`Asset_Name` is a display label; the platform never overwrites its own record's name from it.
+
+```json
+{
+  "timestamp": 1721399123456,
+  "seq": 42,
+  "metrics": [
+    { "name": "Asset_ID",    "datatype": 12, "string_value": "dev200000000000400080000" },
+    { "name": "Asset_Name",  "datatype": 12, "string_value": "Simulated_CNC_01" },
+    { "name": "Systems/TEMPERATURE",       "datatype": 10, "double_value": 42.5 },
+    { "name": "Axes/DISPLACEMENT",         "datatype": 10, "double_value": 1.35 },
+    { "name": "Controller/EXECUTION",      "datatype": 12, "string_value": "ACTIVE" },
+    { "name": "Controller/EMERGENCY_STOP", "datatype": 12, "string_value": "ARMED" }
+  ]
+}
+```
+
+> This flow uses JSON-encoded payloads for simplicity. `ingestion/ingestion.py` tries real Sparkplug
+> B protobuf decoding first and falls back to this encoding, so the simulator's messages are handled
+> identically to a real device's once parsed. For **production binary encoding**, install the
+> `node-red-contrib-sparkplug-b` palette and replace the MQTT out node with a Sparkplug B encoder.
+
+---
+
+## Broker Topic Authorisation
+
+[`../mosquitto.acl`](../mosquitto.acl) confines each client to its own edge-node subtree:
+
+```
+pattern readwrite spBv1.0/+/+/%u/#
+```
+
+`%u` is the connecting username, so a gateway provisioned with **username == its `sparkplug_id`**
+can publish only beneath its own segment and to no other. Verified: a publish to another gateway's
+subtree is dropped by the broker.
+
+Issue a credential with:
+
+```bash
+node scripts/mosquitto-provision-gateway.mjs gwy100000000000400080000
+```
+
+The password is printed **once** — `mosquitto_passwd` stores only a hash.
+
+> **The shared `factoryplus` account is still exempt** and retains broad publish rights, because
+> the simulator and the E2E validator both publish under it (the validator creates its gateways at
+> runtime and cannot use a pre-provisioned credential). Anything using that account is constrained
+> instead by the application tier — `verify_gateway_binding()` in `ingestion/ingestion.py`. Moving
+> the simulator and validator onto per-gateway credentials is tracked as
+> [issue #3](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/3).
+
+---
+
+## Onboarding Your Own Device
+
+Edit the **"Build DBIRTH Certificate"** and **"Build DDATA Telemetry"** function nodes (see the
+"ADD YOUR OWN DEVICE" comment node beside them):
+
+1. Register the device in the **Devices** tab and copy its issued **Sparkplug ID**.
+2. Put that id in the topic's last path segment **and** in the `Asset_ID` metric of both nodes.
+3. Set `Asset_Name` to whatever you want it called. It is a label only.
+4. Replace the metric list with your device's real telemetry (`name` / `datatype` / value field).
+5. Deploy.
+
+You can skip step 1 and invent a well-formed id — the device lands in the quarantine queue for
+approval, which is the zero-touch path.
+
+### If you mistype the ID
+
+A device id of the right *shape* but unknown is treated as a new discovery. One of the **wrong**
+shape — truncated, padded, or containing non-hex characters — is quarantined with a message saying
+exactly what is wrong:
+
+> `MALFORMED_IDENTITY: device id 'devfffffffffffffffffff' is 23 characters; expected 24 ('dev'
+> followed by 21 hex characters). The id is most likely truncated or padded in the gateway
+> configuration — copy it again from the device's page in the dashboard.`
+
+That distinction is why the format is fixed-width: a misconfigured gateway is diagnosable rather
+than anonymous. Either way it appears in the queue — it is never silently dropped.
+
+---
+
+## Approving a Quarantined Device
+
+The first time a `DBIRTH` arrives for an unrecognised Sparkplug ID, ingestion auto-inserts it with
+`is_quarantined = true`, and its `DDATA` is dropped until approved. This is the zero-touch
+onboarding flow, not an error.
+
+1. Open the **Devices** tab.
+2. Find the **Zero-Touch Onboarding Quarantine Queue** banner — the device is listed with the id it
+   published under and why it was held.
+3. As **Administrator** or **Shopfloor_Manager**, approve it (assigning a gateway, and optionally a
+   cell) or reject it.
+4. Subsequent `DDATA` starts flowing into TimescaleDB.
+
+The device keeps publishing under the id it announced; the platform records that on the row rather
+than demanding the device be reconfigured. Approval runs through the atomic
+`public.approve_quarantined_device()` RPC, so a merge cannot half-complete, and the approving
+operator is recorded in the Digital Thread.
+
+---
+
+## Registering the Gateway
+
+**Gateways are never auto-created.** Create one in the **Gateways** tab, copy its issued Sparkplug
+ID, and publish `NBIRTH`/`NDATA` under it as `{EdgeNodeID}`. Otherwise heartbeats are logged as
+"unregistered edge node" and dropped, and the gateway never shows `ONLINE`.
+
+This matters more than it used to: a **registered device bound to a gateway** now has its messages
+rejected when they arrive via a different (or unregistered) edge node. Registering the gateway is
+what makes that binding resolvable.
+
+The pre-seeded `Virtual_Gateway_NodeRED` row already exists with the pinned id
+`gwy100000000000400080000`, so the shipped flow works with no setup.
+
+---
+
+## Production Checklist
+
+| Item | Recommendation |
+| :--- | :--- |
+| Binary Sparkplug B encoding | Install `node-red-contrib-sparkplug-b` |
+| Per-gateway MQTT credentials | `node scripts/mosquitto-provision-gateway.mjs <sparkplug_id>` for every physical gateway |
+| Node-RED admin auth | Not configured by default — port 1880 is open ([issue #6](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/6)) |
+| Broker credentials | Rotate `MQTT_PASSWORD`; ingestion refuses to start without it |
+| Poll interval | Adjust the Inject node repeat interval to match your scan rate |
+| Real OPC-UA / Modbus devices | Use `node-red-contrib-opcua` or `node-red-contrib-modbus` in place of the Function nodes |
+
+---
+
+## Related
+
+- [`../ingestion/README.md`](../ingestion/README.md) — how these messages are parsed and gated
+- [`../supabase/README.md`](../supabase/README.md) — quarantine approval and the audit trail

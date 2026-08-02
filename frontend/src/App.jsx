@@ -189,10 +189,12 @@ function Dashboard({ session, onSignOut }) {
   const [selectedGatewayFilter, setSelectedGatewayFilter] = useState('')
   // Set when a schema's device count is clicked on the Schemas page; consumed by DevicesTab.
   const [selectedSchemaFilter, setSelectedSchemaFilter] = useState('')
+  // Set when a cell zone is clicked on the Overview shopfloor map; consumed by CellsTab.
+  const [selectedCellFilter, setSelectedCellFilter] = useState('')
   const [showBugReport, setShowBugReport] = useState(false)
 
   const { tab, setTab, handleNavClick } = useAppRouting(
-    setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter
+    setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter
   )
   const { theme, toggleTheme } = useTheme()
   const { toast, showToast, clearToast } = useToast()
@@ -222,7 +224,7 @@ function Dashboard({ session, onSignOut }) {
           <div className="brand-icon" title="Factory+ Platform Logo"><IconCog size={20} /></div>
           <div>
             <div className="brand-name">Factory+ Asset Tracking Platform</div>
-            <div className="brand-sub">Supabase BaaS + Standalone TimescaleDB Architecture</div>
+            <div className="brand-sub">Supabase BaaS + Standalone TimescaleDB + AAS Architecture</div>
           </div>
         </div>
 
@@ -265,8 +267,8 @@ function Dashboard({ session, onSignOut }) {
       {/* Main Content */}
       <main className="content">
         <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
-          {tab === 'overview'       && <OverviewTab onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }} onSelectGateway={id => { setSelectedGatewayFilter(id); setTab('gateways', { search: id }) }} showToast={showToast} hasPermission={hasPermission} onNavigateTab={t => setTab(t)} />}
-          {tab === 'cells'          && <CellsTab showToast={showToast} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('telemetry', { asset_id: id }) }} hasPermission={hasPermission} />}
+          {tab === 'overview'       && <OverviewTab onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }} onSelectGateway={id => { setSelectedGatewayFilter(id); setTab('gateways', { search: id }) }} onSelectCell={id => { setSelectedCellFilter(id); setTab('cells', { search: id }) }} showToast={showToast} hasPermission={hasPermission} onNavigateTab={t => setTab(t)} />}
+          {tab === 'cells'          && <CellsTab showToast={showToast} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('telemetry', { asset_id: id }) }} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
           {tab === 'gateways'       && <GatewaysTab showToast={showToast} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
           {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('telemetry', { asset_id: id }) }} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} />}
           {tab === 'digital-thread' && <DigitalThreadTab />}

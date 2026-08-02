@@ -11,8 +11,9 @@ const getTabFromPath = () => {
  * @param {Function} setSelectedDeviceFilter - State setter for device search filter
  * @param {Function} setSelectedGatewayFilter - State setter for gateway search filter
  * @param {Function} setSelectedSchemaFilter - State setter for the Devices page's schema filter
+ * @param {Function} setSelectedCellFilter - State setter for the Cells page's search filter
  */
-export function useAppRouting(setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter) {
+export function useAppRouting(setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter) {
   const [tab, setTabState] = useState(getTabFromPath)
 
   const setTab = useCallback((newTab, queryParams = {}) => {
@@ -35,8 +36,9 @@ export function useAppRouting(setSelectedDeviceFilter, setSelectedGatewayFilter,
     if (setSelectedDeviceFilter) setSelectedDeviceFilter('')
     if (setSelectedGatewayFilter) setSelectedGatewayFilter('')
     if (setSelectedSchemaFilter) setSelectedSchemaFilter('')
+    if (setSelectedCellFilter) setSelectedCellFilter('')
     setTab(tabId)
-  }, [setTab, setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter])
+  }, [setTab, setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter])
 
   useEffect(() => {
     if (window.location.search.includes('code=') || window.location.search.includes('state=')) return

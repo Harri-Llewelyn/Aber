@@ -70,19 +70,19 @@ services:
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
       # TimescaleDB connection settings, handed to the migrations as psql variables so
-      # 20260101000010_telemetry_foreign_table.sql can build its postgres_fdw link
+      # 0001_baseline_schema.sql can build its postgres_fdw link
       # without hardcoding credentials. Host/port are the compose-internal ones.
       TS_HOST: timescaledb
       TS_PORT: "5432"
       TS_DBNAME: ${DB_NAME:-postgres}
       TS_USER: ${DB_USER:-postgres}
       TS_PASSWORD: ${DB_PASSWORD:-postgres}
-      # Seeded into Supabase Vault by 20260101000026_vault_secrets.sql, which is the only
+      # Seeded into Supabase Vault by 0002_seed_data.sql, which is the only
       # place it can live: the quarantine webhook trigger has to read it from SQL. Empty on
       # the default stack, where Node-RED runs without adminAuth -- the migration then leaves
       # the secret unset and the webhook goes out unauthenticated.
       NODERED_ADMIN_TOKEN: ${NODERED_ADMIN_TOKEN:-}
-      # Hashed into auth.oauth_clients by 20260101000028_grafana_oauth_client.sql. Grafana
+      # Hashed into auth.oauth_clients by 0002_seed_data.sql. Grafana
       # reads the same plaintext from its own environment via grafana.ini.
       GRAFANA_OAUTH_CLIENT_SECRET: ${GRAFANA_OAUTH_CLIENT_SECRET:-}
     volumes:
@@ -312,6 +312,41 @@ services:
       supabase-storage:
         condition: service_healthy
 
+  # Renders supabase/kong.yml (a template) into the config volume with the real API keys
+  # substituted. Kong 2.8 cannot read environment variables from declarative config, and
+  # committing the keys into the template would put a copy of the service-role key in git and
+  # make .env no longer authoritative. sed is safe here: a Supabase JWT is base64url, so it
+  # contains no character that could be read as a sed delimiter or backreference.
+  supabase-kong-init:
+    container_name: factoryplus_supabase_kong_init
+    image: alpine:3.20
+    environment:
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+    volumes:
+      - ./supabase/kong.yml:/template/kong.yml:ro
+      - kong_config:/config
+    # Exec form with a literal block, NOT the folded `>` string form. Compose shell-tokenizes a
+    # string entrypoint, and the nested quotes the sed expressions need do not survive that
+    # round trip -- the `-e` flags ended up as arguments to sh itself ("sh: -e: not found").
+    entrypoint:
+      - /bin/sh
+      - -e
+      - -c
+      - |
+        if [ -z "$$SUPABASE_ANON_KEY" ] || [ -z "$$SUPABASE_SERVICE_ROLE_KEY" ]; then
+          echo 'SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY must be set -- Kong would otherwise register empty API keys, which key-auth accepts.' >&2
+          exit 1
+        fi
+        sed -e "s|__SUPABASE_ANON_KEY__|$$SUPABASE_ANON_KEY|g" \
+            -e "s|__SUPABASE_SERVICE_ROLE_KEY__|$$SUPABASE_SERVICE_ROLE_KEY|g" \
+            /template/kong.yml > /config/kong.yml
+        if grep -q '__SUPABASE_' /config/kong.yml; then
+          echo 'Kong config still contains unsubstituted placeholders.' >&2
+          exit 1
+        fi
+        echo 'Rendered Kong declarative config with API key consumers.'
+
   supabase-kong:
     container_name: factoryplus_supabase_kong
     image: kong:2.8.1-alpine
@@ -322,10 +357,15 @@ services:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /usr/local/kong/declarative/kong.yml
       KONG_DNS_ORDER: LAST,A,CNAME
-      KONG_PLUGINS: request-transformer,cors
+      # key-auth had to be added explicitly: naming any plugin in KONG_PLUGINS REPLACES the
+      # default `bundled` set rather than adding to it, so key-auth was not merely unused --
+      # it was unavailable, and referencing it in kong.yml would have failed Kong's startup.
+      KONG_PLUGINS: request-transformer,cors,key-auth
     volumes:
-      - ./supabase/kong.yml:/usr/local/kong/declarative/kong.yml:ro
+      - kong_config:/usr/local/kong/declarative:ro
     depends_on:
+      supabase-kong-init:
+        condition: service_completed_successfully
       supabase-auth:
         condition: service_started
       supabase-rest:
@@ -517,6 +557,9 @@ services:
     volumes:
       - mosquitto_data:/mosquitto/config
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      # Topic authorisation. Bind-mounted read-only alongside the config for the same reason:
+      # it is repository-managed policy, not runtime state, and must not drift on the volume.
+      - ./mosquitto.acl:/mosquitto/config/mosquitto.acl:ro
     healthcheck:
       test: ["CMD-SHELL", "mosquitto_sub -u $${MQTT_USER:-factoryplus} -P $${MQTT_PASSWORD} -t '$$SYS/broker/version' -C 1 || exit 1"]
       interval: 5s
@@ -624,7 +667,7 @@ services:
       GF_INSTALL_PLUGINS: ""
       DB_PASSWORD: ${DB_PASSWORD}
       # Read by grafana.ini through $__env{GRAFANA_OAUTH_CLIENT_SECRET}, so the secret is not
-      # committed. Must match what 20260101000028 hashed into auth.oauth_clients.
+      # committed. Must match what 0002_seed_data.sql hashed into auth.oauth_clients.
       GRAFANA_OAUTH_CLIENT_SECRET: ${GRAFANA_OAUTH_CLIENT_SECRET:-}
     ports:
       - "3002:3000"
@@ -650,3 +693,6 @@ volumes:
   studio_snippets:
   deno_cache:
   storage_data:
+  # Holds the rendered Kong declarative config produced by supabase-kong-init. Not a bind mount:
+  # the rendered file contains the service-role key and must not be written into the repository.
+  kong_config:

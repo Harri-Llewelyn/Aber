@@ -5,7 +5,7 @@ import {
 } from '../utils/mtconnect'
 import { deriveMetricGroup, composeMetricName } from '../utils/metricGroup'
 
-// A slice of what mtconnect_vocabulary actually holds after migration 20260101000018.
+// A slice of what mtconnect_vocabulary actually holds once 0002_seed_data.sql has run.
 const vocabulary = [
   { kind: 'DATA_ITEM_TYPE', name: 'ANGULAR_VELOCITY', category: 'SAMPLE' },
   { kind: 'DATA_ITEM_TYPE', name: 'TEMPERATURE', category: 'SAMPLE' },

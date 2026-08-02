@@ -7,7 +7,7 @@
  * and only the instance ("which axis?") is left for the operator.
  *
  * ⚠ `node_id` holds a browse path in ExpandedNodeId string form, not a resolvable numeric NodeId.
- * See the header of migration 20260101000031 -- the numeric identifiers live in the published
+ * See the header of archive/20260101000031_opcua_vocabulary.sql -- the numeric identifiers live in the published
  * NodeSet2 XML, which is not vendored here, and were not invented.
  */
 

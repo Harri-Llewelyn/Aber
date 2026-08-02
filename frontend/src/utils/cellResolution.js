@@ -6,7 +6,7 @@
  * A device's effective cell is its own `cell_id` when it has one, otherwise its gateway's,
  * otherwise nothing -- and a site-wide asset has none by assertion.
  *
- * KEEP IN STEP WITH public.device_locations (supabase/migrations/20260101000036_device_location.sql).
+ * KEEP IN STEP WITH public.device_locations (supabase/migrations/0001_baseline_schema.sql).
  * The view is the authority; this is the local mirror, the same obligation utils/sparkplugId.js,
  * utils/metricGroup.js and utils/gatewayStatus.js already carry against their SQL. The returned
  * field names are deliberately the view's own snake_case rather than a second camelCase

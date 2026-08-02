@@ -167,19 +167,73 @@ class TestApproveQuarantineMirrorsSource(unittest.TestCase):
     """
 
     def setUp(self):
-        source_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.ts")
-        with open(source_path, "r", encoding="utf-8") as handle:
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "index.ts"), "r", encoding="utf-8") as handle:
             self.source = handle.read()
 
+        # The write itself moved into an atomic RPC, so half of what this class guards now lives
+        # in SQL. Both halves are still checked -- the invariant did not change, only its home.
+        migration = os.path.join(
+            here, "..", "..", "migrations", "0003_audit_immutability_and_quarantine_rpc.sql"
+        )
+        with open(migration, "r", encoding="utf-8") as handle:
+            self.rpc_sql = handle.read()
+
     def test_source_still_omits_location_when_not_supplied(self):
+        """
+        `undefined` (not supplied) and an explicit empty value (the picker's "Inherit") are
+        different answers, and devices.cell_id is NULL-means-inherit with no column default --
+        so writing a value the operator did not choose would disable inheritance permanently.
+        """
         self.assertIn("cell_id !== undefined", self.source)
         self.assertIn("location_scope !== undefined", self.source)
 
-    def test_source_still_clears_the_cell_for_site_wide(self):
-        self.assertIn('if (location_scope === "site_wide") patch.cell_id = null;', self.source)
+    def test_the_set_flags_carry_the_supplied_distinction_into_sql(self):
+        """
+        A plain NULL argument cannot express "supplied, and cleared" separately from "not
+        supplied", which is why the RPC takes explicit p_set_* booleans.
+        """
+        self.assertIn("p_set_cell: setCell", self.source)
+        self.assertIn("p_set_location_scope: setLocationScope", self.source)
+        self.assertIn("WHEN p_set_cell", self.rpc_sql)
+        self.assertIn("WHEN p_set_location_scope", self.rpc_sql)
+
+    def test_the_cell_is_still_cleared_for_site_wide(self):
+        """
+        Mirrors the devices_site_wide_has_no_cell CHECK. Clearing it means the caller gets an
+        approval rather than a constraint violation it has no way to interpret.
+        """
+        self.assertIn(
+            "IF p_set_location_scope AND p_location_scope = 'site_wide' THEN", self.rpc_sql
+        )
+        self.assertIn("v_cell := NULL;", self.rpc_sql)
 
     def test_source_still_constrains_the_scope_to_the_check_constraint_values(self):
         self.assertIn('location_scope !== "cell" && location_scope !== "site_wide"', self.source)
+
+    def test_the_actor_is_passed_so_the_audit_trail_can_attribute_the_approval(self):
+        """
+        log_digital_thread_event() records auth.uid(), and this function acts through the
+        service-role client whose JWT carries no `sub`. Without an explicit actor every
+        approval and merge is logged with changed_by = NULL.
+        """
+        self.assertIn("p_actor_id: user.id", self.source)
+        self.assertIn("factoryplus.actor_id", self.rpc_sql)
+
+    def test_the_merge_is_a_single_atomic_call(self):
+        """
+        The merge was four sequential PostgREST requests with no transaction: re-key
+        asset_config, update the survivor, delete the duplicate. A failure partway left two
+        un-quarantined rows claiming one physical asset.
+        """
+        self.assertIn('supabaseAdmin.rpc("approve_quarantined_device"', self.source)
+        self.assertNotIn('.from("asset_config")', self.source)
+        self.assertNotIn('.delete()', self.source)
+
+    def test_database_errors_are_not_relayed_to_the_caller(self):
+        """A raw Postgres message discloses table, column and constraint names."""
+        self.assertNotIn("rpcError.message }", self.source)
+        self.assertIn("Approval failed", self.source)
 
 
 if __name__ == "__main__":

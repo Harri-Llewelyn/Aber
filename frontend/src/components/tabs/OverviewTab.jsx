@@ -23,7 +23,7 @@ import {
   IconCog
 } from '../common/Icons'
 
-export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPermission, onNavigateTab }) {
+export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, showToast, hasPermission, onNavigateTab }) {
   const [stats, setStats]     = useState({ cells: 0, gateways: 0, assets: 0, telemetry: 0 })
   const [cells, setCells]     = useState([])
   const [gwList, setGwList]   = useState([])
@@ -222,7 +222,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPer
     if (asset.is_archived) return 'chip-warning'
     if (asset.status === 'OFFLINE') return 'chip-offline'
     const latest = telemetryBySparkplugId.get(effectiveSparkplugId(asset)) || []
-    // MTConnect vocabularies (migration 20260101000019): EXECUTION is
+    // MTConnect vocabularies (archive/20260101000019, now in 0002_seed_data.sql): EXECUTION is
     // READY/ACTIVE/INTERRUPTED/FEED_HOLD/STOPPED/…, EMERGENCY_STOP is ARMED/TRIGGERED. The latter
     // is a string, not the boolean safety_ok it replaced -- reading val_bool here would compare
     // undefined and silently never show the danger state.
@@ -567,7 +567,13 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, showToast, hasPer
                     title={c.is_archived ? `Cell Zone #${c.cell_id} (Archived / Out of Commission)` : `Cell Zone #${c.cell_id}: Drag device node here to reassign`}
                   >
                     <div className="zone-header">
-                      <div className="zone-title" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }} onClick={() => onNavigateTab && onNavigateTab('cells')} title={`Click to view Cell '${c.cell_name}' on Cells page`}>
+                      {/* Hands the cell's id over so the Cells page arrives filtered to it. This
+                          used to call onNavigateTab('cells'), which dropped the identity and
+                          landed on an unfiltered list -- while the title below promised
+                          otherwise. onSelectCell mirrors onSelectDevice/onSelectGateway above;
+                          it falls back to a plain navigation so the card still works if a
+                          caller wires only the tab handler. */}
+                      <div className="zone-title" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }} onClick={() => onSelectCell ? onSelectCell(c.cell_id) : onNavigateTab && onNavigateTab('cells')} title={`Click to view Cell '${c.cell_name}' on Cells page`}>
                         <IconFactory size={16} /> <span>{c.cell_name}</span>
                         {c.is_archived && (
                           <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', padding: '1px 6px', fontSize: '9px', display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Shopfloor Cell zone archived">

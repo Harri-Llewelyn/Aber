@@ -130,7 +130,7 @@ function toTelemetryKey(assetId) {
 /**
  * Query the `telemetry` view -- a postgres_fdw projection of the standalone
  * TimescaleDB hypertable, exposed through PostgREST (see
- * supabase/migrations/20260101000010_telemetry_foreign_table.sql).
+ * 0001_baseline_schema.sql; rationale in archive/20260101000010_telemetry_foreign_table.sql).
  */
 async function queryTelemetry({ assetId, assetIds, metricName, minutes, limit, offset } = {}) {
   const pageSize = Math.min(
@@ -521,7 +521,7 @@ export const api = {
     }
 
     if (path.startsWith('/api/v1/mtconnect-vocabulary')) {
-      // Reference data (generated into the DB by 20260101000018), read-only to the app. Returned
+      // Reference data (generated; seeded by 0002_seed_data.sql), read-only to the app. Returned
       // flat and bucketed by the caller -- it is ~600 short rows, fetched once per Schemas visit.
       const { data, error } = await supabase
         .from('mtconnect_vocabulary')
@@ -536,7 +536,7 @@ export const api = {
     }
 
     if (path.startsWith('/api/v1/iso22400-vocabulary')) {
-      // Reference data (migration 20260101000030), read-only to the app -- there is no write
+      // Reference data (seeded by 0002_seed_data.sql), read-only to the app -- there is no write
       // policy on the table, so a POST here would fail at the database regardless.
       const { data, error } = await supabase
         .from('iso22400_vocabulary')
@@ -555,7 +555,7 @@ export const api = {
     }
 
     if (path.startsWith('/api/v1/opcua-vocabulary')) {
-      // Reference data (migration 20260101000031). Ordered by spec then name so the panel's
+      // Reference data (seeded by 0002_seed_data.sql). Ordered by spec then name so the panel's
       // sections arrive already grouped. `node_id` is a browse path, not a numeric NodeId.
       const { data, error } = await supabase
         .from('opcua_vocabulary')
@@ -606,7 +606,7 @@ export const api = {
         units: m.units ?? null,
         sub_type: m.sub_type ?? null,
         standard: m.standard ?? null,
-        // AAS (IEC 63278) semanticId -- migration 20260101000029. NULL means unmapped, which is a
+        // AAS (IEC 63278) semanticId -- see 0001_baseline_schema.sql. NULL means unmapped, which is a
         // legitimate state: MTConnect publishes no per-type identifier, so those stay NULL.
         semantic_id: m.semantic_id ?? null,
         semantic_id_type: m.semantic_id_type ?? null,
@@ -627,6 +627,14 @@ export const api = {
         schema_definition: s.schema_definition,
         semantic_id: s.semantic_id ?? null,
         semantic_id_type: s.semantic_id_type ?? null,
+        // Versioning (migration 0037). Defaulted here as well as in the column, so a client
+        // pointed at a database that has not replayed 0037 renders v1/Active rather than
+        // `vundefined · ` -- and so `isSchemaEditable()` fails closed on a row it cannot read a
+        // status from, rather than opening an editor over a schema devices are attached to.
+        version: s.version ?? 1,
+        status: s.status ?? 'active',
+        parent_schema_id: s.parent_schema_id ?? null,
+        change_description: s.change_description ?? null,
         created_at: s.created_at
       }));
     }
@@ -847,13 +855,53 @@ export const api = {
       return { valid: true, message: 'Payload strictly conforms to target JSON schema' };
     }
 
+    // Versioning (migration 0037). Both of these are RPCs rather than table writes, and that is
+    // the point: `version` is computed from the parent and `publish` has to repoint every device
+    // and archive the predecessor in one transaction. A client that could do either through
+    // PostgREST could renumber history or leave a fleet half-rebound, so the database refuses
+    // both -- `enforce_schema_version_provenance()` rejects a directly-inserted version, and
+    // `prevent_active_schema_mutation()` rejects a directly-flipped status.
+    if (/^\/api\/v1\/schemas\/[^/]+\/versions$/.test(path)) {
+      const parentId = path.split('/')[4];
+      const { data, error } = await supabase.rpc('fork_schema', {
+        parent_schema_id: parentId,
+        // Optional by design. Sent as null rather than '' so the column records "not given"
+        // instead of an empty string that reads as a description nobody wrote.
+        change_description: emptyToNull(body?.change_description)
+      });
+      if (error) throw error;
+      return { schema_uuid: data?.id || '', ...(data || {}) };
+    }
+
+    if (/^\/api\/v1\/schemas\/[^/]+\/publish$/.test(path)) {
+      const draftId = path.split('/')[4];
+      const { data, error } = await supabase.rpc('publish_schema_version', {
+        draft_schema_id: draftId
+      });
+      if (error) throw error;
+      // The counts ride back beside the row: publishing rebinds devices, and an operator who is
+      // not told how many has no way to know whether it did what they expected.
+      return {
+        schema_uuid: data?.schema?.id || '',
+        ...(data?.schema || {}),
+        archived_schema_id: data?.archived_schema_id ?? null,
+        archived_schema_name: data?.archived_schema_name ?? null,
+        devices_rebound: data?.devices_rebound ?? 0
+      };
+    }
+
     if (path === '/api/v1/schemas') {
       const { data, error } = await supabase.from('schemas').insert({
         schema_name: body.schema_name,
         description: body.description,
         schema_definition: body.schema_definition,
         semantic_id: emptyToNull(body.semantic_id),
-        semantic_id_type: emptyToNull(body.semantic_id) ? emptyToNull(body.semantic_id_type) : null
+        semantic_id_type: emptyToNull(body.semantic_id) ? emptyToNull(body.semantic_id_type) : null,
+        // A newly built schema is v1 and in force immediately -- `version` and `status` are left
+        // to their column defaults rather than sent, because sending them is exactly what the
+        // provenance trigger refuses. The wording is stated here as well as in 0037's backfill so
+        // a schema created today reads the same as one created before versioning existed.
+        change_description: emptyToNull(body.change_description) || 'Initial release'
       }).select();
       if (error) throw error;
       const item = data?.[0] || {};
@@ -966,6 +1014,28 @@ export const api = {
 
     const parts = path.split('/');
     const id = parts[parts.length - 1];
+
+    // Editing a DRAFT version's metric set. There is deliberately no status guard here beyond
+    // sending only the editable keys: `prevent_active_schema_mutation()` (migration 0037) is what
+    // refuses this write against an active or archived row, and duplicating that decision
+    // client-side would be a second source of truth that could disagree with the first. The UI
+    // does not offer the editor for a non-draft; the database is what makes that hold.
+    if (path.startsWith('/api/v1/schemas/')) {
+      const patch = {};
+      if ('schema_definition' in body) patch.schema_definition = body.schema_definition;
+      if ('description' in body) patch.description = body.description;
+      if ('change_description' in body) patch.change_description = emptyToNull(body.change_description);
+
+      const { data, error } = await supabase.from('schemas').update(patch).eq('id', id).select();
+      if (error) throw error;
+      // RLS filters a forbidden update to zero rows instead of erroring, so an empty result is a
+      // permission failure rather than a success with nothing to report. Saying so beats returning
+      // `undefined` and letting the caller render a blank success toast.
+      if (!data?.length) {
+        throw new Error('Schema not updated — it may have been published, or you may not have permission to edit it.');
+      }
+      return data[0];
+    }
 
     if (path.startsWith('/api/v1/cells/')) {
       const { data, error } = await supabase.from('cells').update({

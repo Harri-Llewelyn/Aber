@@ -2,7 +2,7 @@
  * Top-level grouping of catalog metrics by their path-style name.
  *
  * `metric_catalog.metric_group` is a generated column deriving the first path segment of the
- * metric name (migration 20260101000016). This module mirrors that expression locally so the UI
+ * metric name (0001_baseline_schema.sql). This module mirrors that expression locally so the UI
  * can group rows that have not been round-tripped through the database yet, and falls back to the
  * stored column whenever it is present -- the same arrangement as utils/sparkplugId.js. Keep
  * deriveMetricGroup() in step with the SQL.

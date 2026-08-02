@@ -116,10 +116,18 @@ describe.each(Object.keys(THEMES))('theme contrast: %s', (themeName) => {
     ['--success-text on 0.12 tint',   '--success-text', tint([0,232,150], 0.12, card),     AA_TEXT],
     ['--success-text on 0.15 tint',   '--success-text', tint([0,232,150], 0.15, card),     AA_TEXT],
     ['--success-text on base',        '--success-text', base,                              AA_TEXT],
+    // And again for danger. --danger clears AA on a bare card in both themes, which is why it was
+    // used as toast text -- but the error toast paints rgba(255,77,109,0.15) underneath it, and on
+    // that fill the light theme measured 3.94:1. --danger-text is the readable equivalent, and the
+    // tinted case is the one that actually renders.
+    ['--danger-text on card',         '--danger-text',  card,                              AA_TEXT],
+    ['--danger-text on base',         '--danger-text',  base,                              AA_TEXT],
+    ['--danger-text on 0.15 tint',    '--danger-text',  tint([255,77,109], 0.15, card),    AA_TEXT],
     // --warning/--success remain the border/icon colours, where 3:1 is the bar.
     ['--warning icon on card',        '--warning',      card,                              AA_LARGE],
     ['--success icon on card',        '--success',      card,                              AA_LARGE],
     ['--danger as text on card',      '--danger',       card,                              AA_TEXT],
+    ['--danger border on card',       '--danger',       card,                              AA_LARGE],
     ['--accent on card',              '--accent',       card,                              AA_LARGE],
   ]
 
@@ -165,6 +173,52 @@ describe.each(Object.keys(THEMES))('filled buttons: %s', (themeName) => {
       ).not.toMatch(/^#(000000|0b0e14|0f172a)$/)
     }
   })
+})
+
+/**
+ * The toast is the one surface in the app that floats over arbitrary content, so a translucent
+ * background there does not composite against a known colour -- it composites against whatever
+ * table happened to be underneath. Every contrast figure computed in this file assumes an opaque
+ * base, so these guard the assumption rather than the appearance.
+ */
+describe('toast opacity', () => {
+  const ruleFor = (selector) => {
+    const i = APP_CSS.indexOf(selector + ' {')
+    if (i < 0) throw new Error(`rule not found: ${selector}`)
+    return APP_CSS.slice(i, APP_CSS.indexOf('}', i))
+  }
+
+  it('gives .toast an opaque background-color', () => {
+    const rule = ruleFor('.toast')
+    const match = rule.match(/background-color\s*:\s*([^;]+);/)
+    expect(match, '.toast must set an opaque background-color, or its tint composites over the page')
+      .toBeTruthy()
+    // A var() reference is only opaque if the token behind it is. --bg-card is a hex in both
+    // themes; --bg-glass, for instance, is rgba and would reintroduce the bug.
+    const token = match[1].trim().match(/^var\((--[a-z0-9-]+)\)$/)
+    expect(token, `.toast background-color should be a theme token, got ${match[1].trim()}`).toBeTruthy()
+    for (const [themeName, t] of Object.entries(THEMES)) {
+      expect(t[token[1]], `${token[1]} is not defined in ${themeName}`).toBeTruthy()
+      expect(
+        t[token[1]].trim(),
+        `${themeName}: ${token[1]} is ${t[token[1]]}, which is translucent -- the toast would show the page through it`
+      ).toMatch(/^#[0-9a-f]{6}$/i)
+    }
+  })
+
+  it.each(['.toast-success', '.toast-error'])(
+    '%s tints with background-image and never resets the opaque colour',
+    (selector) => {
+      const rule = ruleFor(selector)
+      expect(rule, `${selector} should paint its tint as a background-image`).toMatch(/background-image\s*:/)
+      // `background:` is the shorthand, and it resets background-color to transparent -- which is
+      // exactly how the original bug was written.
+      expect(
+        rule,
+        `${selector} must not use the \`background\` shorthand: it resets background-color and the toast goes translucent again`
+      ).not.toMatch(/(^|[;{\s])background\s*:/)
+    }
+  )
 })
 
 describe('theme token hygiene', () => {

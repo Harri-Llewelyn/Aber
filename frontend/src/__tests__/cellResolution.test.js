@@ -25,7 +25,7 @@ import {
 
 /**
  * These mirror the DO probe at the end of
- * supabase/migrations/20260101000036_device_location.sql case for case. Both sides assert the
+ * supabase/migrations/0001_baseline_schema.sql case for case. Both sides assert the
  * same four resolution branches against the same shaped data, which is what makes a drift
  * between public.device_locations and this module fail somewhere rather than nowhere.
  */

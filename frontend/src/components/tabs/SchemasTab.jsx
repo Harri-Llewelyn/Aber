@@ -3,6 +3,8 @@ import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import { ValidatePayloadModal } from '../modals/ValidatePayloadModal'
 import { SchemaBuilderModal } from '../modals/SchemaBuilderModal'
+import { SchemaDetailModal } from '../modals/SchemaDetailModal'
+import { SchemaForkModal } from '../modals/SchemaForkModal'
 import { DeprecateMetricModal } from '../modals/DeprecateMetricModal'
 import { downloadJSON } from '../../utils/downloadJSON'
 import { datatypeLabel, SPARKPLUG_DATATYPES } from '../../utils/sparkplugDatatype'
@@ -51,6 +53,10 @@ const BLANK_METRIC = {
   vocabCategory: ''
 }
 import { deviceSparkplugId, gatewaySparkplugId } from '../../utils/sparkplugId'
+import {
+  schemaVersionLabel, schemaStatus, statusBadgeClass, statusLabel, isSchemaEditable,
+  canForkSchema, nextVersion, isCurrentSchema, SCHEMA_STATUS
+} from '../../utils/schemaVersion'
 import CopyableId from '../common/CopyableId'
 import { VocabularyPanel } from '../common/VocabularyPanel'
 import { mtconnectVocabularyTab } from '../common/MTConnectVocabularyPanel'
@@ -58,8 +64,9 @@ import { iso22400VocabularyTab } from '../common/ISO22400VocabularyPanel'
 import { opcuaVocabularyTab } from '../common/OPCUAVocabularyPanel'
 import {
   IconCheck, IconPlus, IconFileCode, IconAlertTriangle, IconArchive,
-  IconChevronDown, IconChevronUp, IconX
+  IconChevronDown, IconChevronUp, IconX, IconLock, IconGitBranch, IconPencil, IconDownload
 } from '../common/Icons'
+import { ActionMenu } from '../common/ActionMenu'
 
 export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
   const [schemas, setSchemas]         = useState([])
@@ -86,6 +93,14 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
   // other way because it is ~600 reference entries nobody wants unrolled on arrival.)
   const [collapsedGroups, setCollapsedGroups] = useState({})
   const [showDeprecated, setShowDeprecated] = useState(false)
+  // Version lifecycle (migration 0037). `detailSchema` is the version being read or edited;
+  // `forkTarget` is the one a new version is being cut from. Two states rather than one mode flag,
+  // because forking is reachable both from the table and from inside the detail modal.
+  const [detailSchema, setDetailSchema] = useState(null)
+  const [forkTarget, setForkTarget] = useState(null)
+  // Archived versions are hidden by default -- see isCurrentSchema() for why history interleaved
+  // with the working set stops being readable.
+  const [showArchivedVersions, setShowArchivedVersions] = useState(false)
 
   const isGroupOpen = (label) => collapsedGroups[label] !== true
   const toggleGroup = (label) =>
@@ -308,8 +323,97 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
     }
   }
 
+  /**
+   * Fork an active schema into the next draft version.
+   *
+   * The version number is not sent and there is no field for it: `fork_schema()` derives it from
+   * the parent, and `enforce_schema_version_provenance()` refuses an insert that names one. The
+   * draft is opened immediately afterwards -- forking with nothing to edit is never the goal, so
+   * landing back on the table would just mean a second click to get where the operator was going.
+   */
+  const handleFork = async (changeDescription) => {
+    const parent = forkTarget
+    try {
+      const draft = await api.post(`/api/v1/schemas/${parent.schema_uuid}/versions`, {
+        change_description: changeDescription
+      })
+      setForkTarget(null)
+      const refreshed = await api.get('/api/v1/schemas')
+      setSchemas(refreshed)
+      setDetailSchema(refreshed.find(s => s.schema_uuid === draft.schema_uuid) || null)
+      showToast(`Draft v${draft.version} created as '${draft.schema_name}'`, 'success')
+    } catch (e) {
+      showToast(e.message, 'error')
+    }
+  }
+
+  const handleSaveDraft = async (patch) => {
+    if (!detailSchema) return
+    try {
+      await api.put(`/api/v1/schemas/${detailSchema.schema_uuid}`, patch)
+      const refreshed = await api.get('/api/v1/schemas')
+      setSchemas(refreshed)
+      setDetailSchema(refreshed.find(s => s.schema_uuid === detailSchema.schema_uuid) || null)
+      showToast(`Draft '${detailSchema.schema_name}' saved`, 'success')
+    } catch (e) {
+      showToast(e.message, 'error')
+      // Rethrown so the modal's publish path does not go on to activate a version whose edits
+      // were rejected. A publish that silently dropped the changes it was shown saving would be
+      // the worst failure this feature has.
+      throw e
+    }
+  }
+
+  const handlePublish = async () => {
+    if (!detailSchema) return
+    try {
+      const result = await api.post(`/api/v1/schemas/${detailSchema.schema_uuid}/publish`, {})
+      setDetailSchema(null)
+      // Devices carry the schema binding, so both lists are stale after a publish.
+      load()
+      const moved = result.devices_rebound || 0
+      showToast(
+        `v${result.version} published${result.archived_schema_name ? `, v${result.version - 1} archived` : ''}` +
+        (moved > 0 ? ` — ${moved} device binding${moved === 1 ? '' : 's'} moved across` : ''),
+        'success'
+      )
+    } catch (e) {
+      showToast(e.message, 'error')
+    }
+  }
+
+  /**
+   * Download a version's definition as a standalone `.schema.json` file.
+   *
+   * WRITES THE STORED DOCUMENT VERBATIM -- no wrapper object, no injected `title`, no version
+   * banner. It is tempting to enrich it, and wrong: a published version is immutable, so the
+   * point of having the file is being able to diff it against what the database holds and against
+   * the previous version. Anything added here would show up in every one of those diffs as noise
+   * that exists nowhere in the schema. The identity rides on the filename instead, which already
+   * carries the version because each version has its own `schema_name` (`Foo_v2`).
+   *
+   * `.schema.json` rather than `.json`: editors and JSON Schema tooling recognise it, which is the
+   * whole reason to open the file somewhere else.
+   */
+  const handleDownloadSchema = (sch) => {
+    if (!sch?.schema_definition) {
+      // downloadJSON() returns silently on falsy data, so an empty definition would look like a
+      // button that does nothing. Say what happened instead.
+      showToast(`Schema '${sch?.schema_name || 'unknown'}' has no definition to download`, 'error')
+      return
+    }
+    const filename = `${sch.schema_name}.schema.json`
+    downloadJSON(sch.schema_definition, filename)
+    showToast(`Downloaded ${filename}`, 'success')
+  }
+
   const canManageSchema = hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)
   const canDeprecateMetric = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
+  // Superseded versions are history and stay out of the working list until asked for. Drafts do
+  // not: an unfinished draft has to stay reachable, because opening it is the only way to finish
+  // it. See isCurrentSchema().
+  const archivedCount = schemas.filter(s => !isCurrentSchema(s)).length
+  const visibleSchemas = showArchivedVersions ? schemas : schemas.filter(isCurrentSchema)
   const activeCatalog = catalog.filter(m => !m.deprecated)
   const deprecatedCatalog = catalog.filter(m => m.deprecated)
   // Grouped by the first dotted segment of the name; ungrouped metrics fall into a trailing
@@ -919,20 +1023,74 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
 
       <div className="card">
         <div className="card-header">
-          <h3 className="section-title">Registered Schemas <span className="section-count">{schemas.length}</span></h3>
+          <h3 className="section-title">
+            Registered Schemas <span className="section-count">{visibleSchemas.length}</span>
+          </h3>
+          {archivedCount > 0 && (
+            <button
+              className="btn btn-ghost btn-sm"
+              aria-expanded={showArchivedVersions}
+              onClick={() => setShowArchivedVersions(v => !v)}
+              title={showArchivedVersions
+                ? 'Hide superseded versions'
+                : `Show the ${archivedCount} archived version${archivedCount === 1 ? '' : 's'} kept as history`}
+            >
+              {showArchivedVersions ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
+              {' '}Archived Versions <span className="section-count">{archivedCount}</span>
+            </button>
+          )}
         </div>
+        <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '12px 20px 0' }}>
+          A published schema is <strong>read-only</strong>. Devices are provisioned against the exact metric names it
+          models, so changing one in place would silently redefine the contract a fleet is judged against. Changes are
+          made by creating the next version — <span className="mono">v1 → v2 → v3</span> — which forks the definition into
+          an editable draft. Publishing a draft activates it, archives its predecessor, and moves every device across in
+          one transaction. Version numbers are assigned by the database and cannot be chosen.
+        </p>
         {loading ? <div className="loading-wrap"><div className="spinner" /> Loading schemas…</div> : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th title="Schema descriptive name">Schema Name</th><th title="Schema unique UUID">Schema UUID</th><th title="Industrial standard description">Description</th><th title="Devices provisioned with this schema">Devices</th><th title="JSON Schema definition specs">Definition Specs</th></tr></thead>
+              <thead><tr><th title="Schema descriptive name">Schema Name</th><th title="Lineage position and lifecycle state. Only a draft is editable.">Version</th><th title="Why this version exists, recorded when it was created">Change Description</th><th title="Schema unique UUID">Schema UUID</th><th title="Devices provisioned with this schema">Devices</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
               <tbody>
-                {schemas.map(sch => {
+                {visibleSchemas.map(sch => {
                   const count = deviceCountFor(sch.schema_uuid)
+                  const status = schemaStatus(sch)
+                  const draft = schemas.find(s =>
+                    s.parent_schema_id === sch.schema_uuid && schemaStatus(s) === SCHEMA_STATUS.DRAFT
+                  )
+                  const forkBlocked = !canManageSchema || !!draft
                   return (
-                    <tr key={sch.schema_uuid}>
-                      <td><strong>{sch.schema_name}</strong></td>
+                    <tr key={sch.schema_uuid} style={status === SCHEMA_STATUS.ARCHIVED ? { opacity: 0.6 } : undefined}>
+                      <td>
+                        <strong>{sch.schema_name}</strong>
+                        {/* A published version is read-only, and the lock says so on the row
+                            rather than only once the modal is open. */}
+                        {!isSchemaEditable(sch) && (
+                          <span
+                            style={{ marginLeft: '6px', color: 'var(--text-dim)', verticalAlign: 'middle' }}
+                            title={`Read-only — this version is ${statusLabel(status)}`}
+                          >
+                            <IconLock size={11} />
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <span
+                          className={`badge ${statusBadgeClass(status)}`}
+                          title={isSchemaEditable(sch)
+                            ? 'Draft — editable until published'
+                            : `${statusLabel(status)} and immutable`}
+                        >
+                          {schemaVersionLabel(sch)}
+                        </span>
+                      </td>
+                      {/* Constrained: a change description is free text and `.table-wrap` scrolls
+                          horizontally, so an unbounded cell pushes the action buttons off-screen.
+                          Third time this table shape has taught that lesson. */}
+                      <td style={{ maxWidth: '280px', color: sch.change_description ? 'var(--text-muted)' : 'var(--text-dim)', fontSize: '12px' }}>
+                        {sch.change_description || '—'}
+                      </td>
                       <td><CopyableId value={sch.schema_uuid} label="schema UUID" onNotify={showToast} /></td>
-                      <td style={{ color: 'var(--text-muted)' }}>{sch.description || '—'}</td>
                       <td>
                         {/* The count is the natural entry point to "which devices are these?",
                             so it navigates to the Devices page filtered to this schema. */}
@@ -948,7 +1106,58 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
                           <span className="section-count">{count}</span>
                         </button>
                       </td>
-                      <td><code style={{ fontSize: '11px', color: 'var(--accent)' }}>{JSON.stringify(sch.schema_definition)}</code></td>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setDetailSchema(sch)}
+                          title={isSchemaEditable(sch)
+                            ? 'Edit this draft version and publish it'
+                            : 'View this version — its definition, change description and lineage'}
+                        >
+                          {isSchemaEditable(sch) ? <><IconPencil size={12} /> Edit Draft</> : <>View</>}
+                        </button>
+                        {/* One primary action per published version. Disabled with a reason rather
+                            than hidden, so "why can I not change this?" is answerable in place. */}
+                        {canForkSchema(sch) && (
+                          <button
+                            className={`btn btn-primary btn-sm ${forkBlocked ? 'btn-disabled' : ''}`}
+                            style={{ marginLeft: '6px' }}
+                            disabled={forkBlocked}
+                            onClick={() => !forkBlocked && setForkTarget(sch)}
+                            title={!canManageSchema
+                              ? 'Requires Admin permissions'
+                              : draft
+                                ? `A draft (${draft.schema_name}) already exists — publish or discard it first`
+                                : `Fork this schema into an editable draft at v${nextVersion(sch)}`}
+                          >
+                            <IconGitBranch size={12} /> Create Version (v{nextVersion(sch)})
+                          </button>
+                        )}
+                        {/* Download lives in the overflow menu, not beside the other two. It is a
+                            secondary action, and this is the row shape Devices and Gateways
+                            already use -- two primary controls visible, everything else behind
+                            "More". That rule exists because the Devices cell reached seven
+                            buttons one feature at a time; the menu is where the next schema
+                            action goes, so this one starts it rather than adding a third button. */}
+                        <span style={{ marginLeft: '6px', display: 'inline-block', verticalAlign: 'middle' }}>
+                          <ActionMenu
+                            label="More"
+                            testId={`schema-actions-${sch.schema_uuid}`}
+                            items={[
+                              {
+                                key: 'download',
+                                icon: <IconDownload size={13} />,
+                                label: 'Download definition (JSON)',
+                                title: sch.schema_definition
+                                  ? `Save ${sch.schema_name}.schema.json to open in an editor or JSON Schema tool`
+                                  : 'This version has no definition to download',
+                                disabled: !sch.schema_definition,
+                                onClick: () => handleDownloadSchema(sch)
+                              }
+                            ]}
+                          />
+                        </span>
+                      </td>
                     </tr>
                   )
                 })}
@@ -957,6 +1166,35 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
           </div>
         )}
       </div>
+
+      {/* Keyed on the schema UUID so switching between versions remounts the modal. Without it,
+          the editor's seeded state (which metrics are ticked) would survive the switch and the
+          operator would be editing v3 while looking at v2's metric set. */}
+      {detailSchema && (
+        <SchemaDetailModal
+          key={detailSchema.schema_uuid}
+          schema={detailSchema}
+          schemas={schemas}
+          catalog={catalog}
+          deviceCount={deviceCountFor(detailSchema.schema_uuid)}
+          canManage={canManageSchema}
+          showToast={showToast}
+          onFork={() => { setForkTarget(detailSchema); setDetailSchema(null) }}
+          onDownload={() => handleDownloadSchema(detailSchema)}
+          onSaveDraft={handleSaveDraft}
+          onPublish={handlePublish}
+          onClose={() => setDetailSchema(null)}
+        />
+      )}
+
+      {forkTarget && (
+        <SchemaForkModal
+          schema={forkTarget}
+          deviceCount={deviceCountFor(forkTarget.schema_uuid)}
+          onConfirm={handleFork}
+          onCancel={() => setForkTarget(null)}
+        />
+      )}
 
       {showValidateModal && <ValidatePayloadModal schemas={schemas} onClose={() => setShowValidateModal(false)} />}
       {showBuilderModal && <SchemaBuilderModal catalog={catalog} gateways={gateways} onSubmit={handleBuilderSubmit} onCancel={() => setShowBuilderModal(false)} />}

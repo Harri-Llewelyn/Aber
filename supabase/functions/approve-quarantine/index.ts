@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { isUuid } from "./isUuid.ts";
 
 const corsHeaders = {
@@ -9,20 +9,59 @@ const corsHeaders = {
 
 const ALLOWED_ROLES = ["Administrator", "Shopfloor_Manager"];
 
+function jsonResponse(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+/**
+ * A 400 describing what the CALLER got wrong.
+ *
+ * Distinct from the server-side errors below, which deliberately say nothing specific: a
+ * validation message is about the request the caller just sent, so it discloses nothing they
+ * did not already know, whereas a database error describes the schema.
+ */
+function badRequest(message: string): Response {
+  return jsonResponse({ error: message }, 400);
+}
+
+/**
+ * Resolve the caller's RBAC role from public.user_roles, or null.
+ *
+ * public.user_roles IS THE ONLY SOURCE, and the absence of a row means no role.
+ *
+ * This used to fall back to the `app_metadata.role` claim in the caller's JWT whenever the
+ * lookup produced nothing -- which inverted the meaning of a revocation. Deleting a user's
+ * user_roles row IS how a role is revoked, so the fallback answered every revocation with the
+ * privilege the user held before it, for as long as their existing token remained valid. RLS
+ * was unaffected (public.has_role() reads the table), so the database and the edge functions
+ * disagreed about who was privileged.
+ *
+ * The query error is honoured rather than discarded, for the same reason: a failed lookup is
+ * not evidence of a role. Both failure modes return null and the caller answers 403.
+ *
+ * The caller reads its own row under "user_roles_select_own_or_privileged", so an empty result
+ * is a real absence and not a policy artefact.
+ */
 async function resolveUserRole(
-  supabaseUser: ReturnType<typeof createClient>,
-  userId: string,
-  jwtRole: string | null
+  supabaseUser: SupabaseClient<any, any, any>,
+  userId: string
 ): Promise<string | null> {
-  const { data } = await supabaseUser
+  const { data, error } = await supabaseUser
     .from("user_roles")
     .select("roles(name)")
     .eq("user_id", userId)
     .maybeSingle();
 
+  if (error) {
+    console.error(`role lookup failed for user ${userId}: ${error.message}`);
+    return null;
+  }
+
   const dbRole = (data as { roles?: { name?: string } } | null)?.roles?.name;
-  if (typeof dbRole === "string") return dbRole;
-  return jwtRole;
+  return typeof dbRole === "string" ? dbRole : null;
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -33,10 +72,7 @@ export default async function handler(req: Request): Promise<Response> {
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: "Missing Authorization header" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ error: "Missing Authorization header" }, 401);
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
@@ -44,10 +80,7 @@ export default async function handler(req: Request): Promise<Response> {
     const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
     if (!supabaseServiceRoleKey) {
-      return new Response(
-        JSON.stringify({ error: "Server misconfiguration" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ error: "Server misconfiguration" }, 500);
     }
 
     const supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
@@ -58,236 +91,138 @@ export default async function handler(req: Request): Promise<Response> {
     const { data: { user }, error: userError } = await supabaseUser.auth.getUser(token);
 
     if (userError || !user) {
-      return new Response(
-        JSON.stringify({ error: "Invalid user token", details: userError?.message }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ error: "Invalid user token", details: userError?.message }, 401);
     }
 
-    const userRole = await resolveUserRole(
-      supabaseUser,
-      user.id,
-      user.app_metadata?.role || null
-    );
+    const userRole = await resolveUserRole(supabaseUser, user.id);
 
     if (!userRole || !ALLOWED_ROLES.includes(userRole)) {
-      return new Response(
-        JSON.stringify({ error: "Forbidden: Insufficient privileges" }),
-        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonResponse({ error: "Forbidden: Insufficient privileges" }, 403);
     }
+
 
     const {
       device_id, gateway_id, merge_into_device_id, asset_name, cell_id, location_scope
     } = await req.json();
 
     if (!device_id) {
-      return new Response(
-        JSON.stringify({ error: "Missing required parameter: device_id" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return badRequest("Missing required parameter: device_id");
     }
 
     // Devices are addressed by their UUID primary key. This used to accept either a UUID or a
     // Sparkplug B name, because the quarantine list handed out names; identity now lives on
     // `sparkplug_id` and the list returns UUIDs like every other device view.
     if (!isUuid(device_id)) {
-      return new Response(
-        JSON.stringify({ error: "device_id must be a device UUID" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return badRequest("device_id must be a device UUID");
     }
 
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
-
-    // Suggested-match acceptance: the quarantined row is a device that was already
-    // provisioned in the dashboard, whose gateway then came online announcing a different
-    // Sparkplug id than the one it was issued. Rather than un-quarantining the discovered
-    // row, absorb its runtime state into the provisioned row (which may already carry a
-    // gateway/schema assignment worth keeping) and discard the duplicate.
-    if (merge_into_device_id) {
+    // Validated for the same reason device_id is. Previously it was passed straight through to
+    // the query, so a malformed value surfaced as a 500 carrying a raw Postgres message rather
+    // than as the 400 it actually is.
+    if (merge_into_device_id !== undefined && merge_into_device_id !== null) {
+      if (!isUuid(merge_into_device_id)) {
+        return badRequest("merge_into_device_id must be a device UUID");
+      }
       if (merge_into_device_id === device_id) {
-        return new Response(
-          JSON.stringify({ error: "merge_into_device_id must differ from device_id" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return badRequest("merge_into_device_id must differ from device_id");
       }
-
-      const { data: quarantinedRows, error: quarantinedError } = await supabaseAdmin
-        .from("devices")
-        .select("*")
-        .eq("id", device_id);
-
-      if (quarantinedError) {
-        return new Response(
-          JSON.stringify({ error: quarantinedError.message }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      const quarantined = quarantinedRows?.[0];
-      if (!quarantined) {
-        return new Response(
-          JSON.stringify({ error: "Quarantined device not found" }),
-          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      const { data: candidateRows, error: candidateError } = await supabaseAdmin
-        .from("devices")
-        .select("*")
-        .eq("id", merge_into_device_id);
-
-      if (candidateError) {
-        return new Response(
-          JSON.stringify({ error: candidateError.message }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      const candidate = candidateRows?.[0];
-      if (!candidate) {
-        return new Response(
-          JSON.stringify({ error: "Target device not found" }),
-          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      if (candidate.id === quarantined.id) {
-        return new Response(
-          JSON.stringify({ error: "Cannot merge a device into itself" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      // asset_config is keyed by sparkplug_id, not by the row id -- re-key the quarantined
-      // device's recorded birth parameters onto the candidate.
-      const { error: rekeyError } = await supabaseAdmin
-        .from("asset_config")
-        .update({ asset_id: candidate.sparkplug_id })
-        .eq("asset_id", quarantined.sparkplug_id);
-
-      if (rekeyError) {
-        return new Response(
-          JSON.stringify({ error: rekeyError.message }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      // Absorb the quarantined row's now-known runtime state; leave the candidate's
-      // deliberately-provisioned fields (gateway_id, asset_type, connection_method,
-      // schema_id) untouched.
-      //
-      // reported_identity carries over: the physical device will keep publishing under the id
-      // it announced, and that is what ingestion has to keep resolving. Without this the
-      // merged device would be re-quarantined on its very next birth.
-      const { data: mergedData, error: mergeError } = await supabaseAdmin
-        .from("devices")
-        .update({
-          status: quarantined.status,
-          first_dbirth_at: candidate.first_dbirth_at || quarantined.first_dbirth_at,
-          reported_identity: quarantined.reported_identity,
-          identity_source: quarantined.identity_source,
-          quarantine_reason: null,
-          is_quarantined: false
-        })
-        .eq("id", candidate.id)
-        .select();
-
-      if (mergeError) {
-        return new Response(
-          JSON.stringify({ error: mergeError.message }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      const { error: deleteError } = await supabaseAdmin
-        .from("devices")
-        .delete()
-        .eq("id", quarantined.id);
-
-      if (deleteError) {
-        return new Response(
-          JSON.stringify({ error: deleteError.message }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      return new Response(
-        JSON.stringify({ success: true, data: mergedData }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Straight approval. quarantine_reason is cleared so a device held for a malformed or
-    // contradictory identifier does not keep displaying that diagnosis after it is accepted.
-    const patch: Record<string, unknown> = {
-      is_quarantined: false,
-      quarantine_reason: null,
-      gateway_id: gateway_id || null
-    };
-    // The operator may correct the label the device announced itself under.
-    if (typeof asset_name === "string" && asset_name.trim()) {
-      patch.name = asset_name.trim();
     }
 
     // LOCATION IS OPTIONAL AND OMITTED WHEN NOT ANSWERED, not defaulted.
     //
-    // devices.cell_id (migration 0036) is NULL-means-inherit with no column default, so a
-    // device approved onto a gateway that has a cell needs no answer here -- it inherits, and
-    // keeps tracking that gateway. Writing a value the operator did not choose would turn
-    // inheritance off permanently for every device approved through this path, which is exactly
-    // the failure the column was designed without a default to avoid.
+    // devices.cell_id is NULL-means-inherit with no column default, so a device approved onto a
+    // gateway that has a cell needs no answer here -- it inherits, and keeps tracking that
+    // gateway. Writing a value the operator did not choose would turn inheritance off
+    // permanently for every device approved through this path, which is exactly the failure the
+    // column was designed without a default to avoid.
     //
-    // An explicitly empty cell_id is still meaningful: it is the picker's "Inherit" option, so
-    // it is written as NULL rather than skipped.
-    if (cell_id !== undefined) {
+    // An explicitly empty cell_id is still meaningful: it is the picker's "Inherit" option. The
+    // `p_set_*` flags below are what carry that distinction into SQL, where a plain NULL
+    // argument cannot express "supplied, and cleared" separately from "not supplied".
+    const setCell = cell_id !== undefined;
+    let normalisedCell: string | null = null;
+    if (setCell) {
       const trimmed = typeof cell_id === "string" ? cell_id.trim() : cell_id;
       if (trimmed && !isUuid(trimmed)) {
-        return new Response(
-          JSON.stringify({ error: "cell_id must be a cell UUID" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return badRequest("cell_id must be a cell UUID");
       }
-      patch.cell_id = trimmed || null;
+      normalisedCell = trimmed || null;
     }
 
-    if (location_scope !== undefined) {
-      if (location_scope !== "cell" && location_scope !== "site_wide") {
-        return new Response(
-          JSON.stringify({ error: "location_scope must be 'cell' or 'site_wide'" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      patch.location_scope = location_scope;
-      // Mirrors devices_site_wide_has_no_cell: a site-wide asset cannot also name a cell. The
-      // CHECK would reject the write; clearing it here means the caller gets an approval rather
-      // than a constraint violation it has no way to interpret.
-      if (location_scope === "site_wide") patch.cell_id = null;
+    const setLocationScope = location_scope !== undefined;
+    if (setLocationScope && location_scope !== "cell" && location_scope !== "site_wide") {
+      return badRequest("location_scope must be 'cell' or 'site_wide'");
     }
 
-    const { data, error: updateError } = await supabaseAdmin
-      .from("devices")
-      .update(patch)
-      .eq("id", device_id)
-      .select();
+    if (gateway_id !== undefined && gateway_id !== null && gateway_id !== "" && !isUuid(gateway_id)) {
+      return badRequest("gateway_id must be a gateway UUID");
+    }
 
-    if (updateError) {
-      return new Response(
-        JSON.stringify({ error: updateError.message }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
+
+    // ONE ATOMIC CALL, replacing four sequential PostgREST requests.
+    //
+    // The merge path used to re-key asset_config, update the surviving device, then delete the
+    // duplicate -- as three separate round trips with no transaction and no compensating
+    // rollback. A failure partway left asset_config pointing at a device that was never merged,
+    // or two un-quarantined rows claiming one physical asset. Postgres already gives us
+    // atomicity, so the orchestration is gone rather than wrapped in retries.
+    //
+    // `user.id` is passed explicitly because log_digital_thread_event() records auth.uid(), and
+    // this client authenticates as service_role, whose JWT carries no `sub`. Every approval and
+    // every merge was therefore logged with changed_by = NULL -- the audit trail could not say
+    // who admitted a device to the network. The RPC sets the actor for the transaction, and
+    // re-checks their role against public.user_roles so authorization does not rest solely on
+    // the check above.
+    const { data, error: rpcError } = await supabaseAdmin.rpc("approve_quarantined_device", {
+      p_device_id: device_id,
+      p_actor_id: user.id,
+      p_gateway_id: gateway_id || null,
+      p_merge_into_device_id: merge_into_device_id || null,
+      p_asset_name: typeof asset_name === "string" ? asset_name : null,
+      p_cell_id: normalisedCell,
+      p_location_scope: setLocationScope ? location_scope : null,
+      p_set_cell: setCell,
+      p_set_location_scope: setLocationScope,
+    });
+
+    if (rpcError) {
+      // Map the RPC's own SQLSTATEs onto honest HTTP codes, and do not relay the driver's
+      // message. A raw Postgres error discloses table, column and constraint names to whoever
+      // can reach the endpoint; the codes below are the ones this RPC raises deliberately.
+      const status = rpcError.code === "P0002" || rpcError.code === "no_data_found"
+        ? 404
+        : rpcError.code === "42501"
+        ? 403
+        : rpcError.code === "22023"
+        ? 400
+        : 500;
+
+      console.error(
+        `approve_quarantined_device failed for device ${device_id} ` +
+          `(actor ${user.id}, code ${rpcError.code}): ${rpcError.message}`
+      );
+
+      return jsonResponse(
+        {
+          error: status === 404
+            ? "Device not found"
+            : status === 403
+            ? "Forbidden: Insufficient privileges"
+            : status === 400
+            ? "Invalid approval request"
+            : "Approval failed",
+        },
+        status
       );
     }
 
-    return new Response(
-      JSON.stringify({ success: true, data }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  } catch (err: any) {
-    return new Response(
-      JSON.stringify({ error: err.message || "Internal server error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({ success: true, data }, 200);
+  } catch (err) {
+    // The caller gets a generic message; the detail goes to the function log, where an operator
+    // can see it and an anonymous caller cannot.
+    console.error(`approve-quarantine unhandled error: ${err instanceof Error ? err.stack : String(err)}`);
+    return jsonResponse({ error: "Internal server error" }, 500);
   }
 }
 

@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -39,20 +39,41 @@ function loadCanonicalFlow(): unknown[] {
   return parsed;
 }
 
+/**
+ * Resolve the caller's RBAC role from public.user_roles, or null.
+ *
+ * public.user_roles IS THE ONLY SOURCE, and the absence of a row means no role.
+ *
+ * This used to fall back to the `app_metadata.role` claim in the caller's JWT whenever the
+ * lookup produced nothing -- which inverted the meaning of a revocation. Deleting a user's
+ * user_roles row IS how a role is revoked, so the fallback answered every revocation with the
+ * privilege the user held before it, for as long as their existing token remained valid. RLS
+ * was unaffected (public.has_role() reads the table), so the database and the edge functions
+ * disagreed about who was privileged.
+ *
+ * The query error is honoured rather than discarded, for the same reason: a failed lookup is
+ * not evidence of a role. Both failure modes return null and the caller answers 403.
+ *
+ * The caller reads its own row under "user_roles_select_own_or_privileged", so an empty result
+ * is a real absence and not a policy artefact.
+ */
 async function resolveUserRole(
-  supabaseUser: ReturnType<typeof createClient>,
-  userId: string,
-  jwtRole: string | null
+  supabaseUser: SupabaseClient<any, any, any>,
+  userId: string
 ): Promise<string | null> {
-  const { data } = await supabaseUser
+  const { data, error } = await supabaseUser
     .from("user_roles")
     .select("roles(name)")
     .eq("user_id", userId)
     .maybeSingle();
 
+  if (error) {
+    console.error(`role lookup failed for user ${userId}: ${error.message}`);
+    return null;
+  }
+
   const dbRole = (data as { roles?: { name?: string } } | null)?.roles?.name;
-  if (typeof dbRole === "string") return dbRole;
-  return jwtRole;
+  return typeof dbRole === "string" ? dbRole : null;
 }
 
 export default async function handler(req: Request): Promise<Response> {
@@ -86,11 +107,7 @@ export default async function handler(req: Request): Promise<Response> {
       );
     }
 
-    const userRole = await resolveUserRole(
-      supabaseUser,
-      user.id,
-      user.app_metadata?.role || null
-    );
+    const userRole = await resolveUserRole(supabaseUser, user.id);
 
     if (!userRole || !ALLOWED_ROLES.includes(userRole)) {
       return new Response(
@@ -101,30 +118,45 @@ export default async function handler(req: Request): Promise<Response> {
 
     const body = await req.json().catch(() => ({}));
 
-    // Resolve what to deploy.
-    //   * An explicit Node-RED flow array is deployed as-is.
-    //   * Anything else (the dashboard sends { commit_message }) deploys the
-    //     canonical flow committed to the repository. That is the GitOps
-    //     contract: git is the source of truth and this syncs Node-RED to it.
-    let flow: unknown[];
-    let source: string;
+    // ONLY the canonical flow committed to the repository is ever deployed. That is the
+    // GitOps contract: git is the source of truth and this endpoint syncs Node-RED to it.
+    //
+    // THIS USED TO ACCEPT AN ARBITRARY FLOW ARRAY FROM THE REQUEST BODY, which negated the
+    // contract stated in the line above it. A Node-RED `function` node executes arbitrary
+    // JavaScript inside the Node-RED container -- which holds the MQTT credential and can
+    // reach Mosquitto, Supabase and TimescaleDB -- so that branch gave every
+    // `Shopfloor_Manager` remote code execution on the edge automation host, and gave it to
+    // anyone who could reach the endpoint at all for as long as Kong did not authenticate.
+    //
+    // Deploying something other than the committed flow is not a capability this endpoint is
+    // supposed to have. Editing flows is what the Node-RED editor is for; promoting an edit
+    // is what a commit is for.
+    const requestedInlineFlow = Array.isArray(body);
+    if (requestedInlineFlow) {
+      return new Response(
+        JSON.stringify({
+          error: "Inline flow deployment is not supported",
+          details:
+            `This endpoint deploys only ${CANONICAL_FLOW_SOURCE} as committed to the ` +
+            "repository. Commit the flow and redeploy, or edit it directly in the Node-RED editor.",
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
-    if (Array.isArray(body)) {
-      flow = body;
-      source = "request payload";
-    } else {
-      try {
-        flow = loadCanonicalFlow();
-        source = CANONICAL_FLOW_SOURCE;
-      } catch (readErr) {
-        return new Response(
-          JSON.stringify({
-            error: "Canonical Node-RED flow is unavailable",
-            details: readErr instanceof Error ? readErr.message : String(readErr),
-          }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
+    let flow: unknown[];
+    const source = CANONICAL_FLOW_SOURCE;
+
+    try {
+      flow = loadCanonicalFlow();
+    } catch (readErr) {
+      return new Response(
+        JSON.stringify({
+          error: "Canonical Node-RED flow is unavailable",
+          details: readErr instanceof Error ? readErr.message : String(readErr),
+        }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     const nodeRedUrl = Deno.env.get("NODERED_URL") || "http://node-red:1880/flows";

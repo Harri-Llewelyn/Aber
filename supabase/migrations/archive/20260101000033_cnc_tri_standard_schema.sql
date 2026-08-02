@@ -122,10 +122,27 @@ ON CONFLICT (schema_name) DO UPDATE SET
 -- Guarded so this is a genuine no-op on replay. 0021 now resolves the same schema by name, so it
 -- normally arrives here already correct; without the guard, log_digital_thread_event() would append
 -- an audit row to an append-only table on every boot.
-UPDATE public.devices
+--
+-- THE SECOND CLAUSE IS ABOUT SCHEMA VERSIONING (migration 0037), and it narrows this statement to
+-- what it was always actually for: MIGRATING OFF the two superseded demo schemas. Once a v2 of
+-- this schema is published, v1 -- the row pinned by the UUID below -- is `archived`, and an
+-- unconditional re-pin dragged the demo device back onto it on every db-init replay. 0037's
+-- reconciliation forwarded it again immediately afterwards, so the end state was right while the
+-- two statements churned a pair of rows per boot into an append-only audit table. Restricting the
+-- write to a device that has no schema, or is still on a superseded demo one, leaves a device
+-- sitting on a *later version of this very schema* alone -- which is the correct answer and needs
+-- no knowledge of the versioning columns, which do not exist yet when this migration runs.
+UPDATE public.devices d
    SET schema_id = 'e3333333-4444-5555-6666-777777777777'
- WHERE name = 'Simulated_CNC_01'
-   AND schema_id IS DISTINCT FROM 'e3333333-4444-5555-6666-777777777777';
+ WHERE d.name = 'Simulated_CNC_01'
+   AND d.schema_id IS DISTINCT FROM 'e3333333-4444-5555-6666-777777777777'
+   AND (
+     d.schema_id IS NULL
+     OR d.schema_id IN (
+       SELECT s.id FROM public.schemas s
+        WHERE s.schema_name IN ('SparkplugB-Telemetry-Standard-Schema', 'ISO-22400-OEE-Schema')
+     )
+   );
 
 -- ============================================================================
 -- 3. Remove the superseded demo schemas

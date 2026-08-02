@@ -1,6 +1,49 @@
+# =============================================================================================
+# Kong declarative configuration -- Factory+ API gateway
+#
+# THIS FILE IS A TEMPLATE. `supabase-kong-init` substitutes __SUPABASE_ANON_KEY__ and
+# __SUPABASE_SERVICE_ROLE_KEY__ from the environment and writes the result to a volume that Kong
+# reads. Kong 2.8 has no environment interpolation in declarative config (that arrived in 3.x),
+# and the alternative -- committing the literal keys here -- would create a second source of
+# truth that silently disagrees with .env the first time anyone rotates a key.
+#
+# API KEY VALIDATION. The gateway previously had no `key-auth` plugin and no consumers, so the
+# `apikey` header was accepted, ignored, and never checked: authorisation rested entirely on
+# PostgREST's JWT verification and RLS downstream. That is one layer where the stock Supabase
+# gateway has two, and it meant an unauthenticated request reached every upstream service
+# before being refused -- including the edge-function runtime, which runs with VERIFY_JWT
+# disabled because each function checks its own role.
+#
+# TWO ROUTES ARE DELIBERATELY LEFT OPEN, and both are load bearing:
+#
+#   * `/auth/v1/` -- GoTrue authenticates its own callers. It is also the OAuth 2.1 server
+#     Grafana talks to, and an OAuth client presents client credentials, not a Supabase apikey;
+#     gating this would break SSO at the token exchange with no obvious cause. Sign-in itself
+#     must also work before any session exists.
+#   * `/storage/v1/object/public/` -- an AAS `File` URL must be dereferenceable by a viewer
+#     holding no session. That is the entire reason the bucket is public-read; requiring a key
+#     would break every shell already handed out. Only the public object path is exempt --
+#     bucket administration and non-public objects are gated.
+# =============================================================================================
+
 _format_version: "2.1"
 
+# ---------------------------------------------------------------------------------------------
+# API key consumers
+# ---------------------------------------------------------------------------------------------
+# The anon key is public by construction -- it ships inside the frontend bundle. The service
+# role key is not, and appears here only because the gateway must be able to recognise it; the
+# rendered file lives on an internal volume, never in the repository.
+consumers:
+  - username: anon
+    keyauth_credentials:
+      - key: __SUPABASE_ANON_KEY__
+  - username: service_role
+    keyauth_credentials:
+      - key: __SUPABASE_SERVICE_ROLE_KEY__
+
 services:
+  # OPEN BY DESIGN -- see the header. GoTrue authenticates its own callers.
   - name: auth-v1
     url: http://supabase-auth:9999/
     routes:
@@ -16,6 +59,20 @@ services:
         strip_path: true
         paths:
           - /rest/v1/
+    plugins:
+      - name: key-auth
+        config:
+          key_names:
+            - apikey
+          # supabase-js sends the key as a header; the Realtime client sends it in the query
+          # string. Both forms are accepted so one plugin configuration serves every client.
+          key_in_header: true
+          key_in_query: true
+          key_in_body: false
+          # Do not forward the key upstream. PostgREST authorises on the JWT in the
+          # Authorization header, so passing the apikey on serves no purpose and would widen
+          # where the service-role key appears in logs.
+          hide_credentials: true
 
   # WebSocket change feed. Two details that are easy to get wrong:
   #   * The upstream path is /socket/ (not /), so a subscriber connecting to
@@ -34,6 +91,20 @@ services:
         protocols:
           - http
           - https
+    plugins:
+      - name: key-auth
+        config:
+          key_names:
+            - apikey
+          # The Realtime client puts the key in the query string of the WebSocket URL, which is
+          # why key_in_query matters here specifically -- there is no opportunity to set a
+          # header on a browser WebSocket handshake.
+          key_in_header: true
+          key_in_query: true
+          key_in_body: false
+          # NOT hidden here. Realtime reads the apikey from the query string itself to identify
+          # the tenant and evaluate RLS; stripping it breaks the handshake.
+          hide_credentials: false
 
   # Object storage. Uploads go through here rather than straight to supabase-storage so the
   # browser talks to exactly one origin (and one CORS policy) for auth, REST and files alike --
@@ -42,6 +113,23 @@ services:
   #
   # storage-api serves its routes at the ROOT (/bucket, /object/...), so the /storage/v1 prefix
   # is ours and must be stripped.
+  # PUBLIC OBJECTS ONLY, and deliberately unauthenticated -- see the header.
+  #
+  # Declared as its own service rather than as an exempt route on storage-v1 because the upstream
+  # path has to survive. With `strip_path: true` the matched prefix is removed, so pointing this
+  # at the storage root would forward `/asset-3d-models/x.glb` and lose the `/object/public/`
+  # segment storage-api routes on. Baking that segment into the service URL restores it.
+  #
+  # Kong prefers the longer prefix, so this route wins over `/storage/v1/` below for public
+  # object reads and only for those.
+  - name: storage-v1-public
+    url: http://supabase-storage:5000/object/public/
+    routes:
+      - name: storage-v1-public-routes
+        strip_path: true
+        paths:
+          - /storage/v1/object/public/
+
   - name: storage-v1
     url: http://supabase-storage:5000/
     routes:
@@ -49,6 +137,16 @@ services:
         strip_path: true
         paths:
           - /storage/v1/
+    plugins:
+      - name: key-auth
+        config:
+          key_names:
+            - apikey
+          key_in_header: true
+          key_in_query: true
+          key_in_body: false
+          # storage-api authorises uploads on the JWT, not the apikey.
+          hide_credentials: true
 
   - name: functions-v1
     url: http://supabase-functions:9000/
@@ -57,6 +155,20 @@ services:
         strip_path: true
         paths:
           - /functions/v1/
+    plugins:
+      - name: key-auth
+        config:
+          key_names:
+            - apikey
+          key_in_header: true
+          key_in_query: true
+          key_in_body: false
+          # THE MOST IMPORTANT OF THE FOUR. The edge runtime boots with VERIFY_JWT="false"
+          # because each function performs its own role check, so before this plugin existed an
+          # unauthenticated request could reach and start any worker. Now a caller must at least
+          # present a recognised key to get that far, and the function's own check still decides
+          # what they may do.
+          hide_credentials: true
 
 plugins:
   - name: cors

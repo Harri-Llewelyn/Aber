@@ -37,7 +37,7 @@ Factory+ Asset Tracking Platform is an industrial manufacturing management syste
 
 Every gateway and device carries an immutable **`sparkplug_id`**: a 3-character type prefix
 (`gwy` / `dev`) plus 21 lowercase hex characters, 24 in total. It is a `GENERATED ALWAYS ... STORED`
-column derived from the row's UUID primary key (`supabase/migrations/20260101000014_sparkplug_identity.sql`),
+column derived from the row's UUID primary key (`supabase/migrations/archive/20260101000014_sparkplug_identity.sql`),
 so it cannot drift and needs no immutability trigger.
 
 - **This is the identity on the wire.** It appears in the MQTT topic and keys `telemetry.asset_id`
@@ -295,6 +295,75 @@ AAS `File` in a `VisualRepresentation` submodel (`devices.model_3d_path`, migrat
   hold in either configuration.
 - `utils/standards.js` is the single source for the `standard` strings; `MTCONNECT_STANDARD` in
   `utils/mtconnect.js` re-exports from it rather than repeating the literal.
+
+### Schema Versioning
+
+`schemas` carries `version` / `parent_schema_id` / `status` / `change_description`
+(`20260101000037_schema_versioning.sql`). A published schema is **read-only**; changing one means
+forking the next version, editing the draft, and publishing it.
+
+- **Why version at all.** `metric_catalog.name` is immutable because a device is configured against
+  that exact string, and a schema says which of those names a device is *expected* to publish.
+  Editing one in place silently redefines the contract a fleet is judged against — `deviceTags.js`
+  derives Unmodelled by subtraction, so widening or narrowing reclassifies devices with no record
+  of what changed. Versioning makes that a dated, described act producing a new row.
+- **`fork_schema()` and `publish_schema_version()` are RPCs, not table writes.** `version` is
+  computed from the parent and publishing has to repoint every device and archive the predecessor
+  in one transaction. `enforce_schema_version_provenance()` rejects a directly-inserted version and
+  `prevent_active_schema_mutation()` rejects a directly-flipped status, so **no manual version
+  input is possible** — it is a database fact, not a UI convention.
+- **The freeze is deny-by-default**: the guard diffs `to_jsonb(NEW)` against `to_jsonb(OLD)` with
+  `status` removed, so a column added later is frozen when it exists, not when someone remembers.
+- **It binds app-facing roles only** (`authenticated`/`anon`/`service_role`), and that is
+  load-bearing. Migrations 0019/0033 rewrite seeded schemas by name on every boot, so a guard that
+  bound `postgres` would stop db-init the first time anyone published a v2 — the stack would break
+  because a user used the feature. The RPCs are `SECURITY DEFINER`, so mutation is *routed*, not
+  forbidden. The **status-transition check sits above that bypass** and binds everyone: history
+  that can be re-opened is not history.
+- **`schema_name` stays UNIQUE and each version gets a derived name** (`Foo` → `Foo_v2`). It cannot
+  be relaxed: 0033 uses `ON CONFLICT (schema_name) DO UPDATE`, and 0019/0021/0033 resolve schemas
+  with scalar subqueries that would start raising "more than one row" the moment two versions
+  shared a name. `schema_version_base_name()` strips a trailing `_v<n>` so suffixes never stack;
+  `baseSchemaName()` in `utils/schemaVersion.js` mirrors it, with a CI drift check.
+- **Earlier migrations re-pin bindings, and versioning turned that into a boot-time regression.**
+  0021 resolved the demo device's schema *by name* and 0033 set `devices.schema_id` to a *pinned
+  UUID* — both identify the row that was v1. Publishing a v2 was therefore silently undone on the
+  next replay, in its worst shape: `device_submodels` stayed on v2 while `devices.schema_id`
+  reverted, and the `device_schemas` view prefers the join rows, so the disagreement was invisible.
+  0021 now uses `COALESCE(devices.schema_id, EXCLUDED.schema_id)` (pre-registration, not
+  re-provisioning) and 0033 only re-pins a device that has no schema or is still on a superseded
+  demo one. **Without both, the pair churned two audit rows per boot** into an append-only table
+  while the end state looked correct.
+- **`active_schema_version()` plus a reconciliation at the end of 0037 is the general safety net** —
+  no binding may reference an archived version while a successor is in force. It works *because
+  0037 runs last*: a later migration that re-pins a schema binding must resolve the active version
+  itself or re-run the reconciliation. It never forwards onto a **draft** — that would activate an
+  unpublished version by the back door — and an archived version with no successor stays put,
+  because a stale pointer beats a NULL one that reads as "this device has no model".
+- **Publishing moves `devices.schema_id` as well as `device_submodels`.** 0034 keeps the 1:1 column
+  as the view's fallback arm; a device provisioned only through it would otherwise stay pinned to
+  an archived version and report the new version's metrics as Unmodelled. That UPDATE also fires
+  `log_digital_thread_event()`, which is where "what was this machine judged against, and when did
+  that change" belongs. A device attached to **both** versions has its redundant old attachment
+  dropped first, or the repoint would collide on `uq_device_submodels` and abort the publish.
+- **At most one open draft per parent**, by partial unique index — two forks of one parent would
+  both claim v2 with nothing to say which one publishing should archive against.
+- **`validate.py` seeds its schema fixtures as `draft`**, because check 6d widens a schema in place
+  to prove the Unmodelled verdict is derived rather than stored. The guard applies to
+  `service_role` too — a trusted key is still not a reason to redefine a live contract.
+- The UI renders a published version as a **list, not a disabled form**: offering the shape of an
+  edit that the database will reject is worse than not offering it. `isSchemaEditable()` is the
+  single predicate, and it **fails closed** on a row whose status could not be read.
+- **Download writes `schema_definition` verbatim** as `<schema_name>.schema.json` — no wrapper
+  object, no injected `title`, no version banner. A published version is immutable, so the value of
+  having the file is diffing it against the database and against the previous version; anything
+  added would appear in every one of those diffs as noise that exists nowhere in the schema. The
+  version rides on the *filename*, which already carries it because each version has its own
+  `schema_name`. It is a **read**, so it is not gated on `schema:manage` — same reasoning as the
+  AAS export being open to Operator and Auditor. On a dirty draft it downloads the last *saved*
+  state, and the button's title says so. It sits in the row's `ActionMenu` (secondary action,
+  keeping the row at two visible controls) but as a visible button in the detail modal, which is
+  the screen you are already on when you want the file.
 
 - **Changing a metric is deprecate-and-supersede, never a rename** — `name` is immutable because a
   device is configured against that exact string. Set `deprecated` + `superseded_by`.
@@ -603,9 +672,38 @@ python ingestion/validate.py
 ```
 
 ### Database Migrations
-- Located in `supabase/migrations/`
-- Auto-applied on `supabase-db-init` container startup
-- Edit existing migrations or create new timestamped `.sql` files
+
+**Squashed to a two-file baseline for the public beta.** `supabase/migrations/` now holds
+`0001_baseline_schema.sql` (pure DDL) and `0002_seed_data.sql` (pure DML), auto-applied by
+`supabase-db-init` on startup. Add schema changes as a **new** numbered file (`0003_…`) — the two
+baseline files are guarded to be no-ops once applied, so editing them reaches a fresh database only.
+
+- **The 38 original migrations are archived, not deleted**, under `supabase/migrations/archive/`
+  (the glob `*.sql` does not recurse, so nothing there runs). They are the *reasoning* — why
+  `metric_catalog.name` is immutable, why gateway staleness is a view, why the Realtime tenant must
+  be addressed as `realtime-dev.supabase-realtime`. **Every `migration NNNN` reference in this
+  document points into that directory.**
+- **Both files are idempotent, and that is not optional** — db-init replays every `*.sql` on every
+  boot and there is no applied-migrations ledger. A raw `pg_dump` baseline installs on the first
+  boot and takes the stack down on the second.
+- **The squash was verified, not asserted**: a database built from the old chain was diffed against
+  one built from the baseline — statement sets, per-table content hashes, and the `anon`/
+  `authenticated` privilege set. Three defects surfaced that inspection would not have caught, all
+  documented in `archive/README.md`: `SET check_function_bodies = false` is *required* (PL/pgSQL
+  resolves `%ROWTYPE` at CREATE time, so `fork_schema()` cannot precede `public.schemas`);
+  **pg_dump records only positive grants**, so the chain's REVOKEs vanished and `anon` silently
+  regained `GRANT ALL` on every table — hence the explicit privilege reset in `0001`; and
+  constraints must be **guarded, not dropped and re-added**, since `DROP CONSTRAINT IF EXISTS
+  cells_pkey` fails on any populated database that has foreign keys pointing at it.
+- **`0001` ends with a reconciliation** that forwards any device bound to an archived schema version
+  onto the active one. It works *because 0001 runs first and nothing after it re-pins*. A later
+  migration that re-pins a schema binding must resolve the active version itself or re-run that
+  reconciliation.
+- The MTConnect vocabulary is still generated, but now lives inside `0002`. The generator writes to
+  its historical path in `archive/` and `scripts/check-mtconnect-seed-sync.mjs` compares the
+  `(kind, name, category)` triples against the seed. **The generator cannot simply write the seed
+  section** — it emits no `semantic_id`, which the old migration 0032 backfilled separately, so
+  splicing its output in would silently drop every semantic id on a fresh database.
 
 ## Authentication & RBAC
 
@@ -663,6 +761,17 @@ python ingestion/validate.py
 ### Theming
 - **Colours come from CSS variables in `App.css`** (`:root` / `[data-theme="light"]`). There is
   no Tailwind in this project.
+- **A floating surface needs an opaque background.** The toast is `position: fixed` over arbitrary
+  page content, so its `rgba(…, 0.15)` tint was compositing against whatever table was underneath
+  and the message became unreadable. The tint is correct — it is the same fill the badges use, and
+  `--success-text` / `--danger-text` are calibrated against exactly it — what was missing was
+  something to composite *onto*. It now paints the tint as a `background-image` over an opaque
+  `background-color: var(--bg-card)`. **Never fold those into the `background:` shorthand**, which
+  resets `background-color` and brings the transparency straight back; `themeContrast.test.js`
+  asserts both halves.
+- **`--danger-text` completes the `-text` trio.** `--danger` is a border/icon tone: it clears AA on
+  a bare card but measures 3.94:1 on the 0.15 rose fill the error toast sits on — and the error
+  toast is the message a user most needs to read.
 - **Do not give `var()` a hardcoded fallback.** The sign-in card rendered white-on-white in
   light mode because it referenced `--text-main` / `--bg-main`, neither of which exists; the
   fallbacks made the typo look correct in dark mode and fail silently in light mode. The real
@@ -682,6 +791,10 @@ python ingestion/validate.py
 - `utils/opcua.js` — ExpandedNodeId parsing, browse-path→group derivation, OPC UA→Sparkplug
   datatype mapping
 - `utils/deviceTags.js` — schema-derived device tags and unmodelled-metric detection
+- `utils/schemaVersion.js` — version labels, lifecycle predicates and lineage walking; mirrors
+  `public.schema_version_base_name()`
+- `components/modals/SchemaDetailModal.jsx` — one modal, read-only or draft editor by status
+- `components/modals/SchemaForkModal.jsx` — the change-description prompt; asks for no version
 - `utils/model3d.js` — 3D model extension/media-type table, path composition and size formatting;
   mirrored by `functions/aas-export/model3dContentType.ts`
 - `utils/cellResolution.js` — effective-cell resolution, the two lane sources, `needsCellAssignment`
@@ -722,9 +835,13 @@ python ingestion/validate.py
   registry. Search text survives a tab switch on purpose. **Building from the catalog is the only
   way to create a schema** — *Register New Schema* was removed because a free-text JSON Schema could
   name metrics with no catalog entry, no standard and no semantic id, and every derived feature
-  reads schemas. The Add Metric form's **Standard** selector decides which vocabulary the type
-  picker draws from and what the prefill supplies; switching it clears the previous selection,
-  because `standard` is what an AAS export reads to pick a namespace
+  reads schemas. **Changing one is versioning, not editing**: a published row is read-only and
+  carries a single primary action, *Create Version (v{n+1})*, which prompts for a change
+  description and forks a draft. Archived versions sit behind a toggle — history interleaved with
+  the working set stops the table being a list of schemas; drafts stay visible, because opening one
+  is the only way to finish it. The Add Metric form's **Standard** selector decides which
+  vocabulary the type picker draws from and what the prefill supplies; switching it clears the
+  previous selection, because `standard` is what an AAS export reads to pick a namespace
 - `DirectoryTab` — Directory service configuration
 - `ArchivesTab` — Soft-deleted records restoration
 
@@ -745,13 +862,16 @@ python ingestion/validate.py
 - `device_locations` (view) — a device's effective cell, resolved at read time
 - `digital_thread` — Auto-populated audit log via triggers
 - `documents`, `asset_config`, `schemas`, `directory_services` — Extended metadata.
-  `schemas` and `metric_catalog` carry `semantic_id` / `semantic_id_type` (AAS Phase 1)
+  `schemas` and `metric_catalog` carry `semantic_id` / `semantic_id_type` (AAS Phase 1), and
+  `schemas` also carries `version` / `parent_schema_id` / `status` / `change_description`
+  (see **Schema Versioning** above). `schema_name` is still `UNIQUE`, so each version is named
+  `<base>_v<n>`
 - `mtconnect_vocabulary`, `iso22400_vocabulary`, `opcua_vocabulary` — reference vocabularies.
   Read-only to the app: `SELECT` for `authenticated`, everything else revoked, no write policy
 - `roles`, `permissions`, `role_permissions`, `user_roles` — RBAC tables.
-  ⚠️ `roles_id_seq` was never advanced past `seed.sql`'s explicit ids, so inserting a **new**
-  role without an explicit id fails on `roles_pkey`. Fix with
-  `SELECT setval('public.roles_id_seq', (SELECT max(id) FROM public.roles));` before adding one
+  `roles_id_seq` used to be left behind by the seed's explicit ids, so inserting a **new** role
+  without naming one failed on `roles_pkey`. `0002_seed_data.sql` now ends with a `setval`, so the
+  manual workaround is no longer needed — keep that statement if the seed is ever regenerated
 - `webhook_endpoints` — outbound webhook targets; migration-managed, **no write RLS policy**
 - `gateway_status` (view) — `gateways` plus read-time `live_status` / `is_stale`
 

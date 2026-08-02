@@ -6,7 +6,7 @@
 // labels only and can be edited without breaking any of that.
 //
 // The column is GENERATED ALWAYS from the row's UUID primary key (see
-// supabase/migrations/20260101000014_sparkplug_identity.sql), so it is a pure function of a
+// supabase/migrations/0001_baseline_schema.sql), so it is a pure function of a
 // value the UI already holds. Deriving it locally avoids a database round-trip on every
 // telemetry and device-config query.
 //
