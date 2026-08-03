@@ -613,6 +613,14 @@ Grafana is an OAuth client of GoTrue's OAuth 2.1 server; `grafana-userinfo` maps
 
 - `GOTRUE_OAUTH_SERVER_ENABLED=true`. The discovery document is served unconditionally, so a
   `200` on `/.well-known/openid-configuration` proves nothing.
+- **`api_url` must be exempt from Kong's `key-auth`.** An OAuth client presents client
+  credentials, never a Supabase `apikey`, and Grafana has no setting that adds a header to
+  `api_url` — so with `/functions/v1/` gated, the userinfo call 401s, Grafana falls back to the
+  access token's stock `role: authenticated` claim, and reports
+  `[oauth.invalid_role] invalid role: Authenticated` — which reads as an RBAC fault, not a
+  gateway refusal. `kong.yml` exempts `grafana-userinfo` and `nodered-userinfo` by **exact path**,
+  one service each: `strip_path` removes the whole matched path, so an exact-path route pointing
+  at `…:9000/` hands the runtime an empty service name and it answers **400**.
 - **GoTrue ships no consent UI.** It redirects to `GOTRUE_SITE_URL + AUTHORIZATION_PATH`; the
   app serves that page (`pages/OAuthConsent.jsx`). Users must already be signed in to the
   dashboard. The **GET** on `/oauth/authorizations/{id}` is what binds the user — `/oauth/authorize`
@@ -652,6 +660,32 @@ Load-bearing details, each of which fails in a way that does not look like its c
   profile.** The role is resolved in the strategy's `verify` and must ride through `authenticate`
   or it is lost between login and the session Node-RED mints. `authenticate` is variadic because
   the same hook backs the password grant on `POST /auth/token`, which is refused outright.
+- **BOTH are required, and they cover different halves.** `authenticate` runs at login;
+  **`users` runs on every request after it** — `bearerStrategy` does
+  `Tokens.get(token) → Users.get(token.user)` per call, and with no `users` function Node-RED
+  falls back to an internal map populated only from a static `users` *array*, finds nothing, and
+  401s. The OAuth handshake still completes and `/auth/token` still returns a session, so the
+  symptom is **an editor that signs in and then fails everything with no error shown**. The
+  machine path is untouched, because `adminAuth.tokens` never goes through `Users.get` — which is
+  why a token-based test suite passes while the editor is unusable. Ask `GET /settings` with an
+  editor session token, not just `/flows` with a Supabase token.
+- **`users` must return `permissions`, not just the username, and the map behind it is
+  PERSISTED** (`/data/.factoryplus-editor-users.json`). `runtime/lib/api/settings.js` copies
+  `permissions` off that object into the settings the editor reads, and the editor draws a
+  **padlock on Deploy** when it is absent. Sessions persist to `/data/.sessions.json` and survive
+  a restart; an in-memory map does not — so every `docker compose restart` silently turned a live
+  Administrator into a read-only editor while the API would still have accepted the deploy. It is
+  not a logout, which would at least be visible. Signing out and back in was the only cure.
+- **The last-resort branch still returns a bare `{username}`**, for a session in neither the map
+  nor the file: it keeps that session alive rather than logging everyone out, and it is safe
+  because the permissions Node-RED *enforces* come from the token's stored scope
+  (`bearerStrategy` passes `{scope: token.scope}` and `needsPermission()` reads that), not from
+  this object. Such a session renders read-only until the next sign-in. That scope is fixed at
+  login, which is why `sessionExpiryTime` is 8h rather than Node-RED's 7-day default.
+- **Asserting HTTP status is not enough anywhere in this file.** Both editor defects answered
+  `200` on the calls a status-only probe makes — the first 401'd only *after* login, the second
+  returned a perfectly healthy-looking `/settings` whose `user` object was missing one key.
+  `validate.py` check 7b therefore signs in for real and asserts the `permissions` **value**.
 - **`adminAuth.default` must stay absent.** `needsPermission()` runs
   `passport.authenticate(['bearer','tokens','anon'])`; with no default the `anon` arm has nothing
   to return. Setting it reopens the hole wholesale, so `settingsAreCorrect()` treats its presence

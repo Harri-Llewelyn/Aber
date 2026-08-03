@@ -14,12 +14,17 @@
 # before being refused -- including the edge-function runtime, which runs with VERIFY_JWT
 # disabled because each function checks its own role.
 #
-# TWO ROUTES ARE DELIBERATELY LEFT OPEN, and both are load bearing:
+# THREE ROUTES ARE DELIBERATELY LEFT OPEN, and all three are load bearing:
 #
 #   * `/auth/v1/` -- GoTrue authenticates its own callers. It is also the OAuth 2.1 server
-#     Grafana talks to, and an OAuth client presents client credentials, not a Supabase apikey;
-#     gating this would break SSO at the token exchange with no obvious cause. Sign-in itself
-#     must also work before any session exists.
+#     Grafana and Node-RED talk to, and an OAuth client presents client credentials, not a
+#     Supabase apikey; gating this would break SSO at the token exchange with no obvious cause.
+#     Sign-in itself must also work before any session exists.
+#   * `/functions/v1/{grafana,nodered}-userinfo` -- the SAME argument, one step further along the
+#     same flow. An OAuth client's identity lookup carries client credentials too, and Grafana's
+#     lands on an edge function rather than on GoTrue. This was missed when the exemption above
+#     was written, which broke Grafana SSO in a way that reads as an RBAC fault. See the service
+#     definition below for the full reasoning and for why it is two exact paths, not a prefix.
 #   * `/storage/v1/object/public/` -- an AAS `File` URL must be dereferenceable by a viewer
 #     holding no session. That is the entire reason the bucket is public-read; requiring a key
 #     would break every shell already handed out. Only the public object path is exempt --
@@ -147,6 +152,52 @@ services:
           key_in_body: false
           # storage-api authorises uploads on the JWT, not the apikey.
           hide_credentials: true
+
+  # OPEN BY DESIGN -- the third exemption, and it exists for the same reason as `/auth/v1/`.
+  #
+  # AN OAUTH CLIENT PRESENTS CLIENT CREDENTIALS, NOT A SUPABASE APIKEY -- and that is as true of
+  # the userinfo call as it is of the token exchange. The `/auth/v1/` exemption above was written
+  # for the token exchange and stopped there, but Grafana's [auth.generic_oauth] `api_url` points
+  # at an EDGE FUNCTION, so its identity lookup lands here instead and Kong answered 401.
+  #
+  # That failure is invisible at the gateway and misleading at the client: Grafana falls back to
+  # reading `role` off the Supabase access token, finds the stock `authenticated` claim, and
+  # reports
+  #   [oauth.invalid_role] invalid role: Authenticated
+  #   could not evaluate any valid roles using IdP provided data
+  # which reads as an RBAC misconfiguration rather than as a gateway refusal. There is no Grafana
+  # setting that adds a header to `api_url`, so the fix has to be here.
+  #
+  # WHAT THIS EXPOSES IS BOUNDED, and narrower than the two exemptions above. Both endpoints
+  # require a valid bearer token, resolve it through GoTrue, and return only that user's own
+  # identity and role -- to a caller who already holds their token. GoTrue's own /oauth/userinfo
+  # is already reachable under the `/auth/v1/` exemption for exactly this reason; these two are
+  # the same disclosure in the project's own vocabulary. Every other function stays gated.
+  #
+  # EXACT PATHS, NOT A PREFIX. `/functions/v1/` would re-open the whole runtime; naming the
+  # endpoints means a function added later is gated by default. Kong matches the longer prefix
+  # first, so these win over functions-v1-routes below.
+  #
+  # ONE SERVICE PER FUNCTION, and that is forced rather than stylistic. `strip_path` removes the
+  # WHOLE matched path, so an exact-path route pointing at `…:9000/` hands the runtime an empty
+  # service name and it answers 400 -- not 404, and not anything that names the cause. The
+  # upstream URL therefore has to carry the function name itself. The gated prefix route below
+  # gets away with `…:9000/` because it matches only `/functions/v1/` and the name survives.
+  - name: functions-v1-grafana-userinfo
+    url: http://supabase-functions:9000/grafana-userinfo
+    routes:
+      - name: functions-v1-grafana-userinfo-route
+        strip_path: true
+        paths:
+          - /functions/v1/grafana-userinfo
+
+  - name: functions-v1-nodered-userinfo
+    url: http://supabase-functions:9000/nodered-userinfo
+    routes:
+      - name: functions-v1-nodered-userinfo-route
+        strip_path: true
+        paths:
+          - /functions/v1/nodered-userinfo
 
   - name: functions-v1
     url: http://supabase-functions:9000/

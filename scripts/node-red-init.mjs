@@ -72,7 +72,11 @@ const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
 // needs. Without it, a settings.js that merely *has* an adminAuth passes settingsAreCorrect()
 // forever, and a fix to the token validation below would never reach a deployed stack -- the
 // same class of trap as the `flowFile` omission this script was written to prevent.
-const SETTINGS_VERSION = 1;
+// v2 added adminAuth.users. Without it the OAuth handshake completes and every editor request
+// afterwards 401s -- see the comment on `users` in the generated file.
+// v3 persisted the username -> permissions map. Holding it only in memory made every restart
+// silently downgrade live sessions to a read-only editor (padlocked Deploy).
+const SETTINGS_VERSION = 3;
 
 function fail(message) {
   console.error(`[node-red-init] ERROR: ${message}`);
@@ -200,6 +204,10 @@ function settingsAreCorrect() {
       loaded?.adminAuth?.type === 'strategy' &&
       typeof loaded?.adminAuth?.tokens === 'function' &&
       typeof loaded?.adminAuth?.authenticate === 'function' &&
+      // `users` is checked separately from `authenticate` because they cover different halves:
+      // authenticate runs at login, users runs on every request after it. A file with only the
+      // first logs in fine and then 401s the whole editor.
+      typeof loaded?.adminAuth?.users === 'function' &&
       // adminAuth.default re-opens the anonymous path wholesale. Treat its presence as a
       // broken file rather than as a preference to preserve.
       loaded?.adminAuth?.default === undefined &&
@@ -277,7 +285,17 @@ async function userinfo(accessToken) {
         apikey: env.SUPABASE_ANON_KEY
       }
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // SAY WHY. Every refusal below ends as a bare redirect back to the login screen, so
+      // without this line a failed sign-in is indistinguishable from a mis-click. 401 here
+      // means the apikey or the bearer was rejected at the gateway; 404 means the function is
+      // not registered in supabase/functions/main/index.ts.
+      console.warn(
+        '[factoryplus] userinfo ' + env.NODERED_USERINFO_URL + ' -> HTTP ' + res.status +
+        '; refusing the sign-in.'
+      );
+      return null;
+    }
     return await res.json();
   } catch (err) {
     // A userinfo endpoint that cannot be reached is not evidence of a role. Fail closed.
@@ -290,6 +308,54 @@ async function userinfo(accessToken) {
 // token, so it expires with the token and cannot outlive a revocation by more than TTL_MS.
 const roleCache = new Map();
 const CACHE_TTL_MS = 30000;
+
+/**
+ * Username -> permissions, for adminAuth.users. See the comment on \`users\` below for why this
+ * exists at all; the short version is that Node-RED re-resolves the user by USERNAME on every
+ * editor request, long after the OAuth profile has gone.
+ *
+ * IT IS PERSISTED, and that is not an optimisation. Node-RED writes editor sessions to
+ * /data/.sessions.json, so they outlive a restart -- but an in-memory map does not. The
+ * mismatch is not a logout, which would at least be obvious: the session still authenticates,
+ * \`users\` falls through to the bare-username branch, and getRuntimeSettings copies the
+ * (missing) \`permissions\` to the editor, which renders a PADLOCK ON THE DEPLOY BUTTON. An
+ * administrator silently becomes read-only in the UI after every \`docker compose restart\`,
+ * until they happen to sign out and back in.
+ *
+ * The file holds usernames and Node-RED permission strings only -- no tokens, no secrets. It is
+ * a cache of a decision already recorded in the session's scope, not a second source of truth:
+ * a role change reaches the editor at the next sign-in, exactly as the enforced scope does.
+ */
+// path.posix, not path.join: this string is baked into a file that only ever runs inside the
+// container, but the generator can be run from Windows, where join() would emit a backslash path.
+const EDITOR_USERS_FILE = ${JSON.stringify(path.posix.join(DATA_DIR, '.factoryplus-editor-users.json'))};
+const editorUsers = new Map();
+
+try {
+  const stored = JSON.parse(require('fs').readFileSync(EDITOR_USERS_FILE, 'utf8'));
+  for (const [name, permissions] of Object.entries(stored)) editorUsers.set(name, permissions);
+} catch (err) {
+  // Absent on first boot, and unreadable is no worse than absent: the fallback in \`users\`
+  // keeps existing sessions working, they just render read-only until the next sign-in.
+  if (err.code !== 'ENOENT') {
+    console.warn('[factoryplus] could not read ' + EDITOR_USERS_FILE + ': ' + err.message);
+  }
+}
+
+function rememberEditorUser(username, permissions) {
+  if (editorUsers.get(username) === permissions) return;
+  editorUsers.set(username, permissions);
+  try {
+    require('fs').writeFileSync(
+      EDITOR_USERS_FILE,
+      JSON.stringify(Object.fromEntries(editorUsers), null, 2)
+    );
+  } catch (err) {
+    // Non-fatal: the sign-in itself has already succeeded and the in-memory map still serves
+    // this process. Only the next restart would notice.
+    console.warn('[factoryplus] could not persist ' + EDITOR_USERS_FILE + ': ' + err.message);
+  }
+}
 
 function cacheGet(token) {
   const hit = roleCache.get(token);
@@ -316,6 +382,12 @@ module.exports = {
 
   adminAuth: {
     type: 'strategy',
+
+    // Node-RED's default editor session is 7 days. The role behind that session is only
+    // re-derived at login, so a revoked user would keep a working editor for a week. Eight hours
+    // bounds that to about a shift without making people re-authenticate mid-task. The machine
+    // path is unaffected -- it re-checks public.user_roles within 30s, every time.
+    sessionExpiryTime: 28800,
 
     strategy: {
       name: 'oauth2',
@@ -362,8 +434,19 @@ module.exports = {
             // unmapped or revoked role. Refuse the login rather than admitting them read-only:
             // a provisioning error should be visible as one.
             if (!info || !info.permissions) {
+              if (info) {
+                console.warn(
+                  '[factoryplus] sign-in refused for ' + (info.email || info.sub) +
+                  ': supabase_role=' + info.supabase_role + ' maps to no Node-RED permissions. ' +
+                  'Add a public.user_roles row for this user.'
+                );
+              }
               return done(null, false);
             }
+            console.log(
+              '[factoryplus] sign-in: ' + info.email + ' (' + info.supabase_role +
+              ') -> permissions=' + info.permissions
+            );
             return done(null, {
               username: info.email || info.sub,
               email: info.email,
@@ -390,7 +473,38 @@ module.exports = {
     authenticate: async function (profile, password) {
       if (password !== undefined) return null;
       if (!profile || !profile.permissions) return null;
+      rememberEditorUser(profile.username, profile.permissions);
       return { username: profile.username, permissions: profile.permissions };
+    },
+
+    /**
+     * Resolve a user BY USERNAME. Required, and its absence is the kind of failure this whole
+     * file is written to avoid: it breaks nothing at login and everything after it.
+     *
+     * Node-RED's bearerStrategy runs on EVERY editor request:
+     *     Tokens.get(accessToken) -> Users.get(token.user) -> done(null, user, {scope})
+     * With no \`users\` function, Users.get() falls back to an internal map populated only from a
+     * static \`users\` ARRAY -- empty here -- so it yields undefined and the request 401s. The
+     * OAuth handshake still completes and /auth/token still returns a session, so the symptom is
+     * an editor that logs in successfully and then fails every call with no error shown. The
+     * machine path (adminAuth.tokens) is unaffected, because it never goes through Users.get --
+     * which is exactly why a token-based test suite passes while the editor is unusable.
+     *
+     * THE PERMISSIONS MUST COME BACK WITH THE USER, not just the username.
+     * runtime/lib/api/settings.js copies \`permissions\` off this object into the settings the
+     * editor reads, and the editor renders a PADLOCK ON DEPLOY when it is absent -- so omitting
+     * it makes an administrator read-only in the UI while the API would still accept the
+     * deploy. That is why the map above is persisted rather than merely warmed at login.
+     *
+     * The last-resort branch still returns a bare username, for a session whose user is in
+     * neither the map nor the file. It keeps that session working rather than logging everyone
+     * out, and it is safe: the permissions Node-RED ENFORCES come from the token's stored scope
+     * -- bearerStrategy passes \`{scope: token.scope}\` as authInfo and needsPermission() reads
+     * that, not this object. Such a session renders read-only until the next sign-in.
+     */
+    users: async function (username) {
+      const permissions = editorUsers.get(username);
+      return permissions ? { username: username, permissions: permissions } : { username: username };
     },
 
     /**

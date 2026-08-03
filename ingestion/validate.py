@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import json
 import argparse
 import urllib.error
 import urllib.request
@@ -158,6 +159,133 @@ def device_schema_definitions(device_uuid):
         return []
     rows = supabase_client.table("schemas").select("id,schema_definition").in_("id", ids).execute()
     return [r["schema_definition"] for r in (rows.data or [])]
+
+
+def probe_nodered_editor_login():
+    """
+    Drive the browser sign-in handshake against Node-RED and use the session it mints.
+
+    Returns (ok, detail). See check 7b for why this exists as well as the 401 probes.
+
+    The demo password is the seeded one from supabase/seed.sql, documented in the README --
+    this only ever runs against a stack seeded with those accounts.
+
+    NOT parse_qs ON THE EXCHANGE CODE. Node-RED redirects with `?code=` UNENCODED
+    (completeGenericStrategyAuth), the code is base64, and parse_qs maps a literal '+' to a
+    space -- so roughly a third of runs would fail with "Invalid exchange code" and look like a
+    product bug. The editor itself is unaffected: it lifts the code with a raw regex and lets
+    jQuery re-encode it. unquote(), never unquote_plus().
+    """
+    import http.cookiejar
+    import urllib.parse as urlparse
+
+    client_secret = os.getenv("NODERED_OAUTH_CLIENT_SECRET", "")
+    if not client_secret:
+        return False, ("NODERED_OAUTH_CLIENT_SECRET is not set, so the sign-in cannot be "
+                       "exercised. Node-RED refuses to boot without it, so this is a "
+                       "configuration gap in this shell, not a passing state.")
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *_args):
+            return None
+
+    plain = urllib.request.build_opener()
+    no_redirect = urllib.request.build_opener(_NoRedirect)
+    jar = http.cookiejar.CookieJar()
+    # The state and PKCE verifier live in Node-RED's express session, so the callback has to
+    # arrive carrying the cookie the /auth/strategy request set -- exactly as a browser does.
+    browser = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar), _NoRedirect)
+
+    def fetch(url, data=None, headers=None, opener=None):
+        req = urllib.request.Request(url, data=data, headers=headers or {})
+        try:
+            return (opener or plain).open(req, timeout=15)
+        except urllib.error.HTTPError as err:
+            return err
+
+    try:
+        anon = os.getenv("SUPABASE_ANON_KEY", "")
+        token = json.loads(fetch(
+            f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
+            json.dumps({"email": "admin@factoryplus.local", "password": "factoryplus123"}).encode(),
+            {"apikey": anon, "Content-Type": "application/json"},
+        ).read())["access_token"]
+
+        res = fetch(f"{NODERED_BASE_URL}/auth/strategy", opener=browser)
+        authorize_url = res.headers.get("Location")
+        if not authorize_url:
+            return False, f"/auth/strategy did not redirect to the IdP (HTTP {res.status})."
+
+        res = fetch(authorize_url, opener=no_redirect)
+        location = res.headers.get("Location") or ""
+        if "authorization_id=" not in location:
+            return False, (f"GoTrue refused the authorize request (HTTP {res.status}). Check the "
+                           "client registration and that NODERED_PUBLIC_URL matches redirect_uris.")
+        authorization_id = location.split("authorization_id=")[1]
+
+        # The GET is what binds the user to the authorization; /oauth/authorize leaves user_id
+        # NULL. A remembered consent makes it answer with the finished redirect instead.
+        details = json.loads(fetch(
+            f"{SUPABASE_URL}/auth/v1/oauth/authorizations/{authorization_id}",
+            headers={"apikey": anon, "Authorization": f"Bearer {token}"},
+        ).read())
+        callback = details.get("redirect_url")
+        if not callback:
+            callback = json.loads(fetch(
+                f"{SUPABASE_URL}/auth/v1/oauth/authorizations/{authorization_id}/consent",
+                json.dumps({"action": "approve"}).encode(),
+                {"apikey": anon, "Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            ).read())["redirect_url"]
+
+        res = fetch(callback, opener=browser)
+        location = res.headers.get("Location") or ""
+        if "session_message" in location:
+            reason = urlparse.unquote(location.split("session_message=")[1])
+            return False, f"Node-RED refused the sign-in: {reason}"
+        if "?code=" not in location:
+            return False, f"callback did not return an exchange code (HTTP {res.status})."
+
+        code = urlparse.unquote(location.split("?code=", 1)[1])
+        res = fetch(
+            f"{NODERED_BASE_URL}/auth/token",
+            json.dumps({"client": "node-red-editor", "code": code}).encode(),
+            {"Content-Type": "application/json"}, opener=browser,
+        )
+        body = res.read().decode()
+        editor_token = json.loads(body).get("accessToken") if res.status == 200 else None
+        if not editor_token:
+            return False, f"code exchange failed (HTTP {res.status}): {body[:120]}"
+
+        # THE ASSERTIONS THAT MATTER. Everything above succeeded even with the defect that
+        # shipped; this is the first call routed through adminAuth.users.
+        settings_res = fetch(f"{NODERED_BASE_URL}/settings",
+                             headers={"Authorization": f"Bearer {editor_token}"})
+        if settings_res.status != 200:
+            return False, (f"signed in, but the editor session is unusable: GET /settings -> "
+                           f"{settings_res.status}. adminAuth.users is the usual cause -- "
+                           "bearerStrategy resolves the user by username on every request.")
+
+        # AND THAT IT CARRIES THE PERMISSIONS, not merely a username. runtime/api/settings.js
+        # copies `permissions` off whatever adminAuth.users returned, and the editor draws a
+        # PADLOCK ON DEPLOY when it is missing -- so an administrator goes read-only in the UI
+        # while the API would still accept the deploy. Status alone cannot see that: a bare
+        # {username} answers 200 here and looks entirely healthy.
+        user = json.loads(settings_res.read()).get("user") or {}
+        if user.get("permissions") != "*":
+            return False, (f"editor session reports permissions={user.get('permissions')!r} for an "
+                           "Administrator; expected '*'. The Deploy button will show a padlock. "
+                           "adminAuth.users must return permissions, and the map backing it must "
+                           "be persisted -- an in-memory one is empty after every restart.")
+
+        flows_res = fetch(f"{NODERED_BASE_URL}/flows",
+                          headers={"Authorization": f"Bearer {editor_token}"})
+        if flows_res.status != 200:
+            return False, f"editor session cannot read the flows: GET /flows -> {flows_res.status}."
+
+        return True, ("admin@factoryplus.local signed in through Supabase Auth; the editor session "
+                      "reads /settings and /flows and carries permissions='*' (Deploy enabled).")
+    except Exception as err:
+        return False, f"{type(err).__name__}: {err}"
 
 
 def get_timescaledb_connection():
@@ -852,6 +980,24 @@ def verify_results():
         if not unauthenticated:
             print("✅ 7. NODE-RED AUTHENTICATION: admin API and webhook receiver both answer 401 "
                   "to unauthenticated callers.")
+            # 7b. AND THAT A REAL SIGN-IN STILL WORKS.
+            #
+            # THIS HALF IS NOT OPTIONAL, and its absence already cost one shipped defect. Check 7
+            # above proves only that the door is shut. Node-RED's editor resolves the user twice
+            # by two different routes -- adminAuth.authenticate at login, then adminAuth.users on
+            # EVERY request after it (bearerStrategy: Tokens.get -> Users.get) -- and a
+            # settings.js providing only the first logs in successfully and then 401s the entire
+            # editor with no error displayed. The machine path (adminAuth.tokens) never touches
+            # Users.get, so probing /flows with a Supabase token passes throughout.
+            #
+            # So this drives the real browser handshake and then asks a question only a working
+            # EDITOR SESSION can answer.
+            ok_login, detail = probe_nodered_editor_login()
+            if ok_login:
+                print(f"✅ 7b. NODE-RED EDITOR SIGN-IN: {detail}")
+            else:
+                print(f"❌ 7b. NODE-RED EDITOR SIGN-IN FAIL: {detail}")
+                passed = False
         else:
             print("❌ 7. NODE-RED AUTHENTICATION FAIL: " + "; ".join(unauthenticated))
             print("      Expected 401 from each. Check that node-red and node-red-init both build "
