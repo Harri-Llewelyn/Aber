@@ -1,5 +1,7 @@
 import os
 import re
+import ssl
+import threading
 import time
 import psycopg2
 import paho.mqtt.client as mqtt
@@ -33,9 +35,56 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 MQTT_USER = os.getenv("MQTT_USER", "factoryplus")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 
+# ---------------------------------------------------------------------------------------------------
+# MQTTS. OPT-IN, and it does NOT change how the daemon authenticates -- the username and password
+# above are still what identifies it. TLS is here so that credential does not cross a network in
+# clear text, and so the daemon can tell it is talking to the real broker.
+#
+# WHY THIS IS OFF BY DEFAULT. The daemon reaches the broker over the pod network (or Docker's bridge),
+# which does not leave the host or the cluster. Requiring TLS there would make a CA bundle a hard
+# dependency of a workload that gains little from it, and the certificate's SANs would have to cover
+# the in-cluster name on every deployment. The exposure that matters is the gateways crossing the
+# plant network, and that is what mosquitto.tls.enabled addresses.
+#
+# MQTT_TLS_CA_FILE IS THE IMPORTANT ONE. With an internal CA, the system trust store knows nothing
+# about it, so leaving this empty means verification fails outright -- which is the correct failure,
+# not a silent downgrade. There is deliberately NO "skip verification" setting: encryption without
+# verification is indistinguishable on the wire from a successful interception, and a daemon that
+# accepted any certificate would report a healthy TLS connection while talking to anything at all.
+# ---------------------------------------------------------------------------------------------------
+MQTT_TLS_ENABLED = os.getenv("MQTT_TLS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+MQTT_TLS_CA_FILE = os.getenv("MQTT_TLS_CA_FILE", "").strip()
+
 # Supabase configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+
+# Liveness heartbeat. OPT-IN, empty by default: Docker Compose declares no healthcheck for this
+# service and nothing reads the file there, so writing one would be litter. Kubernetes sets it and
+# probes the file's age -- see deploy/helm/factoryplus/templates/apps/ingestion.yaml.
+#
+# WHY A HEARTBEAT AND NOT A MESSAGE COUNTER. The obvious implementation touches the file in
+# on_message, which reports the daemon dead every time the shopfloor is quiet -- nights, weekends,
+# changeovers. This writes on a timer instead and gates on client.is_connected(), so the signal is
+# "my broker connection is alive", which is the thing that actually breaks and the thing a restart
+# actually fixes. paho's loop_forever() reconnects on its own, but it cannot recover from every
+# state (a stale socket after a broker restart is the common one), and until now nothing noticed.
+INGESTION_HEALTH_FILE = os.getenv("INGESTION_HEALTH_FILE", "")
+INGESTION_HEALTH_INTERVAL = int(os.getenv("INGESTION_HEALTH_INTERVAL", "15"))
+
+# Device liveness watchdog. A device that stops publishing writes nothing and emits no DDEATH, so
+# without this it stays ONLINE forever. Set to 0 to disable -- see ingestion/README.md for when an
+# event-driven device needs the window raised instead.
+DEVICE_OFFLINE_TIMEOUT_SECONDS = int(os.getenv("DEVICE_OFFLINE_TIMEOUT_SECONDS", "300"))
+DEVICE_WATCHDOG_INTERVAL_SECONDS = int(os.getenv("DEVICE_WATCHDOG_INTERVAL_SECONDS", "30"))
+
+# Rebirth requests are rate limited per edge node. A gateway that answers a rebirth by restarting
+# would otherwise be held in a reboot loop by the very mechanism meant to recover it.
+REBIRTH_REQUEST_INTERVAL_SECONDS = int(os.getenv("REBIRTH_REQUEST_INTERVAL_SECONDS", "300"))
+
+# Bound on the per-node alias table. It is fed by whatever the broker delivers, so a gateway
+# looping births with fresh aliases would otherwise grow it without limit.
+MAX_ALIASES_PER_NODE = int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))
 
 # -----------------------------------------------------------------------------
 # Supabase Client Initialization
@@ -157,6 +206,27 @@ UNKNOWN_GATEWAY_WARN_INTERVAL_SECONDS = 300
 _legacy_identity_warned = {}
 LEGACY_IDENTITY_WARN_INTERVAL_SECONDS = 300
 
+# Sparkplug B metric alias table, keyed by EDGE NODE -- (group_id, edge_node_id) -> {alias: name}.
+#
+# Sparkplug assigns each metric an integer alias in a birth certificate and thereafter publishes
+# DATA carrying the alias alone, with no name. A daemon reading only `name` therefore ingests
+# nothing at all from an alias-optimised gateway, and reports no error while doing it.
+#
+# PER NODE, NOT PER DEVICE: Sparkplug scopes alias uniqueness to the whole edge node including its
+# devices, so a device's DDATA may legitimately carry an alias declared in that node's NBIRTH.
+# Keying per device would silently miss those.
+_alias_map = {}
+_alias_lock = threading.Lock()
+
+# Throttle for rebirth requests, keyed "<group>/<node>".
+_rebirth_requested = {}
+REBIRTH_METRIC_NAME = "Node Control/Rebirth"
+
+# Devices heard from in THIS process -- {device_uuid: {"at": monotonic, "name": label}}.
+# Deliberately in-memory and deliberately not seeded from the database: see stale_device_ids().
+_device_seen = {}
+_device_seen_lock = threading.Lock()
+
 _DEVICE_COLUMNS = (
     "id,name,sparkplug_id,reported_identity,gateway_id,is_quarantined,first_dbirth_at,"
     "last_birth_metrics"
@@ -208,6 +278,229 @@ def _throttled(store: dict, key: str, interval: int) -> bool:
         store[key] = now
         return True
     return False
+
+
+# -----------------------------------------------------------------------------
+# Sparkplug B Alias Resolution
+# -----------------------------------------------------------------------------
+def alias_key(group_id, edge_node_id):
+    """The alias table key. Normalised so a missing group and an empty one are the same node."""
+    return (group_id or "", edge_node_id or "")
+
+
+def register_birth_aliases(group_id, edge_node_id, payload, reset=False):
+    """
+    Record the alias -> name bindings a birth certificate declares. Returns the number stored.
+
+    `reset` clears the node's whole table first and is used for NBIRTH only: per Sparkplug an
+    NBIRTH invalidates all prior state for that edge node *and its devices*, so a gateway that
+    renumbers its aliases must not leave the old bindings behind to be matched against. A DBIRTH
+    merges, because it re-declares one device's metrics and must not discard its siblings'.
+    """
+    key = alias_key(group_id, edge_node_id)
+    declared = {}
+    for metric in getattr(payload, "metrics", []):
+        if not metric.name:
+            continue
+        if not metric.HasField("alias"):
+            continue
+        declared[metric.alias] = metric.name
+
+    with _alias_lock:
+        if reset:
+            _alias_map[key] = {}
+        table = _alias_map.setdefault(key, {})
+
+        stored = 0
+        for alias, name in declared.items():
+            # Overwriting an existing alias is free; only a NEW one can grow the table, so the
+            # cap is checked against additions rather than against the declaration size.
+            if alias not in table and len(table) >= MAX_ALIASES_PER_NODE:
+                logger.warning(
+                    "Alias table for edge node '%s' is at its %d-entry cap; ignoring further "
+                    "aliases. Check that the gateway is not re-birthing with fresh alias numbers.",
+                    edge_node_id, MAX_ALIASES_PER_NODE
+                )
+                break
+            table[alias] = name
+            stored += 1
+
+    if stored:
+        logger.info(
+            "Registered %d metric alias(es) from %s for edge node '%s'",
+            stored, "NBIRTH" if reset else "DBIRTH", edge_node_id
+        )
+    return stored
+
+
+def resolve_metric_name(group_id, edge_node_id, metric):
+    """
+    The metric's name, resolving an alias-only metric through its edge node's birth map.
+
+    Returns None when the metric carries neither a name nor a resolvable alias -- which the caller
+    must treat as "this node's birth has not been seen", not as "this metric is uninteresting".
+    """
+    if metric.name:
+        return metric.name
+    if not metric.HasField("alias"):
+        return None
+    with _alias_lock:
+        return _alias_map.get(alias_key(group_id, edge_node_id), {}).get(metric.alias)
+
+
+# -----------------------------------------------------------------------------
+# NCMD Rebirth Requests
+# -----------------------------------------------------------------------------
+def build_rebirth_payload():
+    """A Sparkplug NCMD payload carrying `Node Control/Rebirth` = true."""
+    payload = sparkplug_b_pb2.Payload()
+    payload.timestamp = int(time.time() * 1000)
+    metric = payload.metrics.add()
+    metric.name = REBIRTH_METRIC_NAME
+    metric.datatype = 11  # Boolean
+    metric.boolean_value = True
+    return payload.SerializeToString()
+
+
+def request_node_rebirth(client, group_id, edge_node_id):
+    """
+    Ask an edge node to republish its birth certificates. Returns True if a request was sent.
+
+    THIS IS WHAT CLOSES THE ALIAS COLD START. The alias table is in-memory, so it is empty after
+    every restart -- and a stable device may not birth again for weeks. Without a way to ask, an
+    ingestion restart would silently stop recording every alias-optimised device until someone
+    power-cycled the gateway.
+
+    RATE LIMITED PER NODE, and that is the load-bearing part. A gateway that responds to a rebirth
+    by restarting, or one that never responds at all, would otherwise be asked once per message.
+    """
+    if client is None or not edge_node_id:
+        return False
+
+    key = "%s/%s" % (group_id or "", edge_node_id)
+    if not _throttled(_rebirth_requested, key, REBIRTH_REQUEST_INTERVAL_SECONDS):
+        return False
+
+    topic = "spBv1.0/%s/NCMD/%s" % (group_id or "", edge_node_id)
+    try:
+        client.publish(topic, build_rebirth_payload(), qos=0, retain=False)
+    except Exception as e:
+        # The throttle stays consumed: a broker that refuses this publish will refuse the next
+        # one too, and retrying per message is the flood this function exists to prevent.
+        logger.error("Could not publish a rebirth request to '%s': %s", topic, e)
+        return False
+
+    logger.warning(
+        "REBIRTH REQUESTED: published '%s' to '%s'. Its alias table is unknown, so DDATA metrics "
+        "carrying only an alias cannot be resolved until it re-births. Next request no sooner "
+        "than %ds.",
+        REBIRTH_METRIC_NAME, topic, REBIRTH_REQUEST_INTERVAL_SECONDS
+    )
+    return True
+
+
+# -----------------------------------------------------------------------------
+# Device Liveness Watchdog
+# -----------------------------------------------------------------------------
+def mark_device_seen(device):
+    """Note that this device has just been heard from. In-memory only; writes nothing."""
+    if not device or not device.get("id"):
+        return
+    with _device_seen_lock:
+        _device_seen[device["id"]] = {
+            "at": time.monotonic(),
+            "name": device.get("name") or device.get("sparkplug_id") or device["id"],
+        }
+
+
+def forget_device_seen(device_id):
+    """Stop tracking a device -- it has died explicitly, or has just been flipped OFFLINE."""
+    with _device_seen_lock:
+        _device_seen.pop(device_id, None)
+
+
+def stale_device_ids(now=None, timeout=None):
+    """
+    Devices heard from in this process that have since been quiet for longer than `timeout`.
+
+    ONLY DEVICES THIS PROCESS HAS SEEN ARE CANDIDATES, and that is what makes a restart safe: an
+    empty map is an absence of evidence, not evidence of absence. Seeding it from the database
+    would mark a whole fleet OFFLINE on every restart -- one audit row each, in an append-only
+    table -- which is a far worse failure than the stale ONLINE this watchdog exists to fix.
+    """
+    timeout = DEVICE_OFFLINE_TIMEOUT_SECONDS if timeout is None else timeout
+    if timeout <= 0:
+        return []
+    now = time.monotonic() if now is None else now
+    with _device_seen_lock:
+        return [
+            (device_id, entry["name"])
+            for device_id, entry in _device_seen.items()
+            if now - entry["at"] > timeout
+        ]
+
+
+def sweep_stale_devices(now=None, timeout=None):
+    """
+    Flip quiet devices OFFLINE. Returns the ids written.
+
+    WRITE-ON-CHANGE, and it is not an optimisation. log_digital_thread_event() fires on every
+    UPDATE to `devices`, so a sweep rewriting OFFLINE each tick would append to a deliberately
+    append-only audit table forever. Two things enforce it: the UPDATE carries `status = ONLINE`
+    as a filter, so an already-OFFLINE row matches nothing and no trigger fires; and the device is
+    dropped from tracking afterwards, so it is written once per quiet period rather than per tick.
+    """
+    if not supabase_client:
+        return []
+
+    written = []
+    for device_id, name in stale_device_ids(now, timeout):
+        try:
+            supabase_client.table("devices").update({"status": "OFFLINE"}).eq(
+                "id", device_id
+            ).eq("status", "ONLINE").execute()
+            logger.warning(
+                "WATCHDOG: device '%s' has published nothing for over %ds and no DDEATH arrived; "
+                "marked OFFLINE.",
+                name, DEVICE_OFFLINE_TIMEOUT_SECONDS if timeout is None else timeout
+            )
+            written.append(device_id)
+        except Exception as e:
+            # Left in the map so the next sweep retries; a failed write must not silently
+            # convince us the device was dealt with.
+            logger.error("Watchdog could not mark device '%s' OFFLINE: %s", name, e)
+            continue
+        forget_device_seen(device_id)
+
+    return written
+
+
+def start_device_watchdog():
+    """
+    Sweep for quiet devices every DEVICE_WATCHDOG_INTERVAL_SECONDS. No-op when disabled.
+
+    A daemon thread, so it can never hold the process open, and forgiving of errors for the same
+    reason as the health heartbeat: a failing sweep should not take down a daemon that is
+    otherwise ingesting.
+    """
+    if DEVICE_OFFLINE_TIMEOUT_SECONDS <= 0:
+        logger.info("Device liveness watchdog disabled (DEVICE_OFFLINE_TIMEOUT_SECONDS=0).")
+        return
+
+    def sweep():
+        while True:
+            # Sleep first: at startup the map is empty and a sweep would do nothing anyway.
+            time.sleep(DEVICE_WATCHDOG_INTERVAL_SECONDS)
+            try:
+                sweep_stale_devices()
+            except Exception as exc:  # noqa: BLE001 - see docstring
+                logger.warning("Device watchdog sweep failed: %s", exc)
+
+    threading.Thread(target=sweep, name="device-watchdog", daemon=True).start()
+    logger.info(
+        "Device liveness watchdog running: quiet for more than %ds -> OFFLINE, swept every %ds.",
+        DEVICE_OFFLINE_TIMEOUT_SECONDS, DEVICE_WATCHDOG_INTERVAL_SECONDS
+    )
 
 
 def resolve_device(wire_id: str, use_cache: bool = True):
@@ -583,7 +876,8 @@ def quarantine_new_device(wire_id: str, gateway_wire_id: str, reason: str, paylo
     return row
 
 
-def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reason: str = None):
+def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reason: str = None,
+                   group_id: str = None):
     """
     On Sparkplug B DBIRTH:
     Resolve the device by its wire identity. If it is unregistered, insert it quarantined,
@@ -601,6 +895,12 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
     identifies the asset.
     """
     logger.info("Processing DBIRTH for device '%s' via edge node '%s'", wire_id, gateway_wire_id)
+
+    # Before the registration check, deliberately. The alias table is in-memory and keyed by edge
+    # node, so recording it costs nothing and must not depend on whether this device is registered
+    # -- a quarantined device's later DDATA still has to be *decodable* to be reported on.
+    register_birth_aliases(group_id, gateway_wire_id, payload)
+
     if not supabase_client:
         logger.warning("Supabase client unavailable. Skipping Supabase DBIRTH check for '%s'", wire_id)
         return
@@ -650,6 +950,9 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
         # stays gated.
         store_birth_parameters(device["sparkplug_id"], payload)
         record_declared_metrics(device, payload)
+
+        # A birth is evidence of life, quarantined or not, so the watchdog counts it.
+        mark_device_seen(device)
     except Exception as e:
         logger.error("Error checking/updating Supabase devices for DBIRTH: %s", e, exc_info=True)
 
@@ -671,11 +974,14 @@ def process_ddeath(wire_id: str, gateway_wire_id: str):
 
     try:
         supabase_client.table("devices").update({"status": "OFFLINE"}).eq("id", device["id"]).execute()
+        # An explicit death certificate is the authoritative answer, so the watchdog stops
+        # tracking this device rather than flipping it OFFLINE a second time later.
+        forget_device_seen(device["id"])
     except Exception as e:
         logger.error("Error applying DDEATH status update for '%s': %s", wire_id, e, exc_info=True)
 
 
-def process_node_message(edge_node_id: str, msg_type: str, payload):
+def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: str = None):
     """
     On Sparkplug B node-level messages (NBIRTH / NDATA / NDEATH):
     Update the matching `gateways` row's status and last_heartbeat in Supabase.
@@ -687,13 +993,23 @@ def process_node_message(edge_node_id: str, msg_type: str, payload):
     Gateways are never auto-created: an unregistered edge node is logged and dropped,
     mirroring the fail-closed treatment of unregistered devices.
     """
+    # An NBIRTH resets the edge node's whole alias table -- including its devices' -- because it
+    # invalidates every binding the node previously declared. Registered before the client check
+    # and before gateway resolution, for the same reason as in process_dbirth.
+    if msg_type == "NBIRTH":
+        register_birth_aliases(group_id, edge_node_id, payload, reset=True)
+
     if not supabase_client:
         logger.warning("Supabase client unavailable. Dropping %s heartbeat for edge node '%s'", msg_type, edge_node_id)
         return
 
     status = "OFFLINE" if msg_type == "NDEATH" else "ONLINE"
     for metric in payload.metrics:
-        if metric.name in ("Gateway_Status", "Node_Status") and metric.HasField("string_value"):
+        # Resolved, not read raw: NDATA is a DATA message and may carry its status metric by
+        # alias alone, in which case a raw `metric.name` test never matches and the gateway's
+        # own reported status is silently replaced by the one inferred from the message type.
+        name = resolve_metric_name(group_id, edge_node_id, metric)
+        if name in ("Gateway_Status", "Node_Status") and metric.HasField("string_value"):
             status = metric.string_value
             break
 
@@ -727,7 +1043,7 @@ def process_node_message(edge_node_id: str, msg_type: str, payload):
         logger.error("Error updating gateway heartbeat for '%s': %s", edge_node_id, e, exc_info=True)
 
 
-def process_ddata(wire_id: str, gateway_wire_id: str, payload):
+def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = None, client=None):
     """
     On Sparkplug B DDATA:
     Verify device registration, quarantine status and gateway binding in Supabase.
@@ -735,6 +1051,10 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload):
     DDATA telemetry.
     Otherwise, insert metric timestamps and values into TimescaleDB telemetry hypertable,
     keyed by the device's immutable `sparkplug_id` so a rename never breaks the series.
+
+    Metric names are resolved through the edge node's alias table, since a DATA message
+    legitimately carries an alias and no name. A metric whose alias is unknown is skipped and a
+    rebirth is requested for the node -- see request_node_rebirth().
     """
     device = resolve_device(wire_id)
     if device is None or device.get("is_quarantined"):
@@ -753,6 +1073,10 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload):
             wire_id, gateway_wire_id, binding_fault
         )
         return
+
+    # After the binding check, not before: a message from a publisher we have just refused to
+    # believe is not evidence that the real device is alive.
+    mark_device_seen(device)
 
     asset_id = device["sparkplug_id"]
     asset_name = device.get("name") or asset_id
@@ -781,8 +1105,18 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload):
 
                 metric_count = 0
                 rejected_timestamps = 0
+                unresolved_aliases = 0
                 for metric in payload.metrics:
-                    if metric.name in IDENTITY_METRICS:
+                    # The alias is the only identity an optimised DATA metric carries. Resolve
+                    # before every other test, including the identity-metric filter -- comparing
+                    # an empty name against IDENTITY_METRICS never matches, so an aliased Asset_ID
+                    # would otherwise be written to the historian as a metric.
+                    metric_name = resolve_metric_name(group_id, gateway_wire_id, metric)
+                    if metric_name is None:
+                        unresolved_aliases += 1
+                        continue
+
+                    if metric_name in IDENTITY_METRICS:
                         continue
 
                     if metric.HasField('timestamp') and metric.timestamp > 0:
@@ -829,9 +1163,24 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload):
                         VALUES (%s, %s, %s, %s, %s, %s)
                         ON CONFLICT (time, asset_id, metric_name) DO NOTHING
                         """,
-                        (metric_dt, asset_id, metric.name, val_double, val_string, val_bool)
+                        (metric_dt, asset_id, metric_name, val_double, val_string, val_bool)
                     )
                     metric_count += 1
+
+                if unresolved_aliases:
+                    # Skip the undecodable metrics, keep the rest, and ask the node to re-birth.
+                    # Dropping the whole message would discard samples that resolved perfectly
+                    # well; in the case that actually matters -- a cold start, where every metric
+                    # is alias-only -- the two are identical, because nothing resolves. This
+                    # mirrors how rejected_timestamps is handled a few lines down.
+                    requested = request_node_rebirth(client, group_id, gateway_wire_id)
+                    if requested:
+                        logger.warning(
+                            "Dropped %d metric(s) for asset '%s': their aliases are not in edge "
+                            "node '%s' alias table, so no birth certificate has been seen for it "
+                            "since this daemon started. A rebirth has been requested.",
+                            unresolved_aliases, asset_id, gateway_wire_id
+                        )
 
                 if rejected_timestamps:
                     logger.warning(
@@ -876,6 +1225,10 @@ def parse_sparkplug_payload(msg):
             for m in data.get('metrics', []):
                 metric = payload.metrics.add()
                 metric.name = m.get('name', '')
+                # Carried through so the fallback is not silently alias-blind. Assigning the field
+                # is what makes HasField('alias') true, which is what resolve_metric_name() tests.
+                if m.get('alias') is not None:
+                    metric.alias = int(m['alias'])
                 if 'string_value' in m and m['string_value'] is not None:
                     metric.string_value = str(m['string_value'])
                 if 'double_value' in m and m['double_value'] is not None:
@@ -955,6 +1308,11 @@ def on_message(client, userdata, msg):
     if len(parts) < 4 or parts[0] != 'spBv1.0':
         return
 
+    # The Sparkplug Group ID. Carried through this call only, to scope the alias table and to
+    # address a rebirth request back at the right node -- gateway and device resolution still
+    # ignore it entirely, and no column stores it. Making the group part of an asset's identity
+    # is a schema change and belongs with the rest of that work.
+    group_id = parts[1]
     msg_type = parts[2]
     edge_node_id = parts[3]
 
@@ -965,10 +1323,15 @@ def on_message(client, userdata, msg):
     if payload is None:
         return
 
+    # An NCMD we published ourselves comes straight back on the wildcard subscription. Ignoring
+    # command topics outright keeps a rebirth request from being read as edge-node traffic.
+    if msg_type in ("NCMD", "DCMD"):
+        return
+
     # Node-level topics (spBv1.0/<group>/<NBIRTH|NDATA|NDEATH>/<edge_node>) carry no
     # device component and no Asset_ID metric -- they are edge gateway heartbeats.
     if msg_type in NODE_MESSAGE_TYPES and len(parts) < 5:
-        process_node_message(edge_node_id, msg_type, payload)
+        process_node_message(edge_node_id, msg_type, payload, group_id=group_id)
         return
 
     wire_id, quarantine_reason = resolve_wire_identity(parts, payload)
@@ -976,14 +1339,14 @@ def on_message(client, userdata, msg):
         return
 
     if msg_type in ("DBIRTH", "NBIRTH"):
-        process_dbirth(wire_id, edge_node_id, payload, quarantine_reason)
+        process_dbirth(wire_id, edge_node_id, payload, quarantine_reason, group_id=group_id)
     elif msg_type == "DDATA":
         if quarantine_reason:
             # Faulty identity: the birth path is what records it for the operator. Telemetry
             # from an asset we cannot reliably identify must not reach the historian.
             logger.warning("Dropping DDATA from device '%s': %s", wire_id, quarantine_reason)
             return
-        process_ddata(wire_id, edge_node_id, payload)
+        process_ddata(wire_id, edge_node_id, payload, group_id=group_id, client=client)
     elif msg_type == "DDEATH":
         process_ddeath(wire_id, edge_node_id)
     else:
@@ -1017,6 +1380,82 @@ def _require_credentials():
         raise SystemExit(1)
 
 
+def configure_mqtt_tls(client):
+    """
+    Put the MQTT client on TLS when MQTT_TLS_ENABLED is set. No-op otherwise.
+
+    Verification is always on and there is no switch to turn it off -- see the note on
+    MQTT_TLS_CA_FILE. `cert_reqs=CERT_REQUIRED` is paho's default, and it is named here anyway so
+    that the intent is legible at the call site rather than inherited.
+
+    A CA file that is set but missing raises rather than falling back to the system store: with an
+    internal CA the system store cannot verify the broker, so the fallback would fail at connect
+    time instead, reporting a TLS handshake error that names neither this variable nor the path.
+    """
+    if not MQTT_TLS_ENABLED:
+        return False
+
+    if MQTT_TLS_CA_FILE and not os.path.isfile(MQTT_TLS_CA_FILE):
+        logger.critical(
+            "CRITICAL CONFIGURATION ERROR: MQTT_TLS_ENABLED is set and MQTT_TLS_CA_FILE=%s does not "
+            "exist. Refusing to start: falling back to the system trust store cannot verify an "
+            "internal CA, so the daemon would fail at the TLS handshake with an error naming neither "
+            "this setting nor the file.",
+            MQTT_TLS_CA_FILE,
+        )
+        raise SystemExit(1)
+
+    client.tls_set(
+        # None means "use the system trust store", which is correct for a publicly-trusted broker
+        # certificate and wrong for the internal CA this stack ships. Hence the check above.
+        ca_certs=MQTT_TLS_CA_FILE or None,
+        cert_reqs=ssl.CERT_REQUIRED,
+        tls_version=ssl.PROTOCOL_TLS_CLIENT,
+    )
+    # Hostname checking is what makes the certificate mean anything: without it any certificate
+    # signed by the CA -- including one legitimately issued for a different service -- would be
+    # accepted for the broker. paho leaves this on by default; it is set explicitly because
+    # `tls_insecure_set(True)` is the single line that would silently undo this whole function.
+    client.tls_insecure_set(False)
+    logger.info(
+        "MQTT TLS enabled; verifying the broker against %s",
+        MQTT_TLS_CA_FILE or "the system trust store",
+    )
+    return True
+
+
+def start_health_heartbeat(client):
+    """
+    Touch INGESTION_HEALTH_FILE every INGESTION_HEALTH_INTERVAL seconds while the MQTT connection
+    is up, so an external prober can tell a live daemon from a wedged one.
+
+    A daemon thread, so it can never hold the process open on shutdown. It is deliberately
+    forgiving of write errors -- a full or read-only filesystem should stop the heartbeat (which
+    correctly reports unhealthy) rather than crash a daemon that is otherwise ingesting fine.
+
+    No-op when INGESTION_HEALTH_FILE is unset, which is the Compose default.
+    """
+    if not INGESTION_HEALTH_FILE:
+        return
+
+    def beat():
+        while True:
+            try:
+                if client.is_connected():
+                    with open(INGESTION_HEALTH_FILE, "w") as fh:
+                        fh.write(str(int(time.time())))
+            except Exception as exc:  # noqa: BLE001 - see docstring
+                logger.warning("Could not write the health heartbeat: %s", exc)
+            time.sleep(INGESTION_HEALTH_INTERVAL)
+
+    threading.Thread(target=beat, name="health-heartbeat", daemon=True).start()
+    logger.info(
+        "Health heartbeat writing to %s every %ss",
+        INGESTION_HEALTH_FILE,
+        INGESTION_HEALTH_INTERVAL,
+    )
+
+
 def main():
     logger.info("Initializing Supabase + TimescaleDB Ingestion Daemon...")
     _require_credentials()
@@ -1032,8 +1471,18 @@ def main():
     # signatures (e.g. on_connect(client, userdata, flags, reason_code, properties)).
     client = mqtt.Client()
     client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
+    # Before connect(), necessarily: paho applies the TLS context when the socket is opened.
+    configure_mqtt_tls(client)
     client.on_connect = on_connect
     client.on_message = on_message
+
+    # Started before the connect loop, not after: the connect loop below retries indefinitely, so
+    # a broker that never comes up would otherwise leave the heartbeat unstarted and the file
+    # absent -- which a prober reads as "never became healthy", which is exactly right.
+    start_health_heartbeat(client)
+    # Safe to start here for the opposite reason: it sweeps only devices it has already seen, and
+    # it has seen none until the broker connects.
+    start_device_watchdog()
 
     while True:
         try:

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   deriveMetricGroup, metricGroupOf, groupCatalog, catalogGroups, UNGROUPED_LABEL,
-  knownGroupNames, canonicaliseGroup, isValidMetricName,
+  knownGroupNames, canonicaliseGroup, isValidMetricName, metricNameError,
   groupOptionsByStandard, LOCAL_STANDARD_LABEL, groupOptionsForStandard
 } from '../utils/metricGroup'
 
@@ -234,6 +234,54 @@ describe('isValidMetricName', () => {
     expect(isValidMetricName('')).toBe(false)
     expect(isValidMetricName('   ')).toBe(false)
     expect(isValidMetricName(null)).toBe(false)
+  })
+
+  it('rejects characters outside the Factory+ segment alphabet', () => {
+    // Factory+ permits only alphanumerics and the underscore inside a segment. '.' is the one
+    // worth pinning: it is the separator a reader coming from another stack reaches for first,
+    // and it is not a legal character in a Factory+ metric name at all.
+    expect(isValidMetricName('Legacy.Dotted.Name')).toBe(false)
+    expect(isValidMetricName('has spaces')).toBe(false)
+    expect(isValidMetricName('Axes/C-Axis/ANGLE')).toBe(false)
+    expect(isValidMetricName('Axes/C:1/ANGLE')).toBe(false)
+    expect(isValidMetricName('Motor#1/TEMP')).toBe(false)
+  })
+
+  it('accepts every metric the seeded catalog actually uses', () => {
+    // Migration 0007 adds the same rule as a CHECK. If these two ever disagree the operator is
+    // told one thing by the form and another by a 400 -- and `name` is immutable, so a name that
+    // slipped past the client can never be corrected, only deprecated.
+    for (const name of [
+      'Axes/C/ANGULAR_VELOCITY/ACTUAL', 'Axes/DISPLACEMENT', 'Controller/EMERGENCY_STOP',
+      'Controller/EXECUTION', 'Controller/FIRMWARE', 'Machine/OperatingMode',
+      'MotionDevice/OverridePercent', 'OEE/AVAILABILITY', 'OEE/EFFECTIVENESS', 'OEE/QUALITY',
+      'SERIAL_NUMBER', 'Systems/TEMPERATURE', 'safety_interlock', 'max_temp_threshold',
+    ]) {
+      expect(isValidMetricName(name), name).toBe(true)
+    }
+  })
+})
+
+describe('metricNameError', () => {
+  it('returns null for a valid name', () => {
+    expect(metricNameError('Axes/C/ANGLE')).toBeNull()
+    expect(metricNameError('safety_interlock')).toBeNull()
+  })
+
+  it('names the separator fault rather than the character set', () => {
+    expect(metricNameError('/ANGLE')).toMatch(/cannot start with/)
+    expect(metricNameError('Axes/')).toMatch(/cannot end with/)
+    expect(metricNameError('Axes//ANGLE')).toMatch(/empty segment/)
+  })
+
+  it('lists the offending characters', () => {
+    // The point of a message over a disabled button: it says which key to stop pressing.
+    expect(metricNameError('Legacy.Dotted')).toMatch(/"\."/)
+    expect(metricNameError('has spaces')).toMatch(/space/)
+  })
+
+  it('asks for a name rather than complaining about one when empty', () => {
+    expect(metricNameError('')).toMatch(/Enter a metric name/)
   })
 
   it('agrees with deriveMetricGroup on everything it accepts', () => {

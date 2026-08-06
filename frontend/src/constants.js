@@ -1,3 +1,5 @@
+import { readFlag, readSetting } from './config';
+
 export const SPARKPLUG_TYPES = {
   1: 'Int8', 2: 'Int16', 3: 'Int32', 4: 'Int64',
   5: 'UInt8', 6: 'UInt16', 7: 'UInt32', 8: 'UInt64',
@@ -43,7 +45,7 @@ export const PERSONAS = [
 // Realtime has no replay, so a dropped socket loses every change in the gap, and usePolling
 // also carries the 401 stop and exponential backoff a channel subscription has no equivalent
 // for. See frontend/src/hooks/useRealtimeTable.js.
-export const REALTIME_ENABLED = import.meta.env.VITE_ENABLE_REALTIME === 'true';
+export const REALTIME_ENABLED = readFlag('VITE_ENABLE_REALTIME');
 export const POLL_INTERVAL_MS = 3000;
 export const RECONCILE_INTERVAL_MS = 60000;
 
@@ -59,13 +61,11 @@ export const RECONCILE_INTERVAL_MS = 60000;
  * breaks: a missing Supabase URL means the app cannot function and should say so loudly, whereas
  * a missing repo URL should never leave someone trying to report a bug staring at a dead button.
  * A wrong-but-present default is recoverable; a broken reporting path hides every other defect.
- *
- * Vite inlines import.meta.env at BUILD time, so changing this needs the frontend image rebuilt,
- * not the container restarted -- same caveat as VITE_ENABLE_REALTIME above.
  */
-export const GITHUB_REPO_URL =
-  (import.meta.env.VITE_GITHUB_REPO_URL || 'https://github.com/Harri-Llewelyn/ACS-Cymru')
-    .replace(/\/+$/, '');
+export const GITHUB_REPO_URL = readSetting(
+  'VITE_GITHUB_REPO_URL',
+  'https://github.com/Harri-Llewelyn/ACS-Cymru'
+).replace(/\/+$/, '');
 
 // How often tabs that render wall-clock-derived state re-render (see hooks/useClockTick.js).
 // Gateway heartbeat staleness is the case: a gateway going quiet writes nothing, so it emits

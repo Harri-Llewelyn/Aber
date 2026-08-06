@@ -1,0 +1,103 @@
+{{- if .Values.swaggerUi.enabled }}
+{{- $component := "swagger-ui" -}}
+{{- $fullname := include "factoryplus.fullname" . -}}
+{{- $supabasePublic := include "factoryplus.supabaseUrl" . -}}
+---
+{{/*
+The curated API spec. Mirrored from docs/openapi.yaml by scripts/sync-helm-chart-files.mjs, same as
+the migrations -- Helm cannot read outside its chart.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-openapi" $fullname }}
+  labels:
+    {{- include "factoryplus.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+{{- $found := 0 }}
+{{- range $path, $bytes := .Files.Glob "files/docs/openapi.yaml" }}
+{{- $found = add1 $found }}
+  openapi.yaml: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- if eq $found 0 }}
+{{- fail "\n\nfactoryplus: files/docs/openapi.yaml is missing.\n\nMirror it with:  node scripts/sync-helm-chart-files.mjs\n" }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: swagger-ui
+  labels:
+    {{- include "factoryplus.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "factoryplus.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: swagger-ui
+  labels:
+    {{- include "factoryplus.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  replicas: {{ .Values.swaggerUi.replicas }}
+  selector:
+    matchLabels:
+      {{- include "factoryplus.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "factoryplus.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: swagger-ui
+          image: "{{ .Values.swaggerUi.image.repository }}:{{ .Values.swaggerUi.image.tag }}"
+          imagePullPolicy: {{ .Values.swaggerUi.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # Two entries. The curated spec is served from the mounted file; the PostgREST entry is
+            # fetched BY THE BROWSER, so it must be the ingress address and needs its origin allowed
+            # in kong.yml's cors plugin.
+            - name: URLS
+              value: >-
+                [{"url":"/openapi.yaml","name":"Factory+ Platform API"},
+                 {"url":"{{ $supabasePublic }}/rest/v1/","name":"PostgREST (live database schema)"}]
+            - name: URLS_PRIMARY_NAME
+              value: Factory+ Platform API
+            - name: DEEP_LINKING
+              value: "true"
+            - name: DISPLAY_REQUEST_DURATION
+              value: "true"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.swaggerUi.resources | nindent 12 }}
+          volumeMounts:
+            - name: openapi
+              mountPath: /usr/share/nginx/html/openapi.yaml
+              subPath: openapi.yaml
+              readOnly: true
+      volumes:
+        - name: openapi
+          configMap:
+            name: {{ printf "%s-openapi" $fullname }}
+{{- end }}

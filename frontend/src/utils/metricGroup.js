@@ -188,17 +188,52 @@ export function composeMetricName(...parts) {
 }
 
 /**
+ * The Factory+ metric-name format: '/'-delimited folders whose segments use only alphanumerics
+ * and the underscore.
+ *
+ * MIRROR OF THE SQL. `metric_catalog_name_format` (migration 0007) is the same expression, and it
+ * is the authority -- this exists so the operator is told at the form rather than by a 400. Keep
+ * the two in step, the same obligation deriveMetricGroup() and utils/sparkplugId.js carry.
+ *
+ * It subsumes the empty-segment checks this used to make by hand: a leading, trailing or doubled
+ * separator all leave a segment with nothing in it, which `[A-Za-z0-9_]+` rejects.
+ */
+export const METRIC_NAME_PATTERN = /^[A-Za-z0-9_]+(\/[A-Za-z0-9_]+)*$/
+
+/**
  * Whether a composed name is a usable metric name.
  *
- * Rejects empty segments -- a leading, trailing or doubled separator. Those are not merely untidy:
- * the SQL derives the group with `NULLIF(split_part(name, '/', 1), '')`, so `/ANGLE` would store a
- * NULL group while plainly looking grouped, and the name is immutable once created, so the
- * mismatch could never be corrected in place.
+ * The stakes are why this is enforced at all: `name` is IMMUTABLE once created, so a
+ * non-conforming name is permanent -- the row can only be deprecated and superseded, never
+ * corrected. An empty segment is also not merely untidy, since the SQL derives the group with
+ * `NULLIF(split_part(name, '/', 1), '')`: `/ANGLE` would store a NULL group while plainly looking
+ * grouped.
  */
 export function isValidMetricName(name) {
+  return METRIC_NAME_PATTERN.test((name || '').trim())
+}
+
+/**
+ * Why a name is unusable, or null when it is fine. Phrased for an operator filling in the form.
+ *
+ * Separate from isValidMetricName() because the button needs a boolean and the field needs a
+ * sentence -- and a disabled control with no stated reason is the thing this replaces.
+ */
+export function metricNameError(name) {
   const n = (name || '').trim()
-  if (!n) return false
-  return !n.startsWith(METRIC_GROUP_SEPARATOR) &&
-         !n.endsWith(METRIC_GROUP_SEPARATOR) &&
-         !n.includes(METRIC_GROUP_SEPARATOR + METRIC_GROUP_SEPARATOR)
+  if (!n) return 'Enter a metric name.'
+  if (isValidMetricName(n)) return null
+
+  if (n.startsWith(METRIC_GROUP_SEPARATOR)) return 'A metric name cannot start with "/".'
+  if (n.endsWith(METRIC_GROUP_SEPARATOR)) return 'A metric name cannot end with "/".'
+  if (n.includes(METRIC_GROUP_SEPARATOR + METRIC_GROUP_SEPARATOR)) {
+    return 'A metric name cannot contain an empty segment ("//").'
+  }
+
+  const bad = [...new Set(n.replace(/[A-Za-z0-9_/]/g, ''))]
+  if (bad.length) {
+    const shown = bad.map(c => (c === ' ' ? 'space' : `"${c}"`)).join(', ')
+    return `Only letters, numbers and "_" are allowed inside a segment; "/" separates them. Remove: ${shown}.`
+  }
+  return 'Not a valid Factory+ metric name.'
 }

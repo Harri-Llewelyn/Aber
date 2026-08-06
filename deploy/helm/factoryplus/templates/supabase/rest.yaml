@@ -1,0 +1,113 @@
+{{- if .Values.supabaseRest.enabled }}
+{{- $component := "supabase-rest" -}}
+{{- $secretName := include "factoryplus.secretName" . -}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-rest
+  labels:
+    {{- include "factoryplus.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "factoryplus.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      # storage-api reaches this as POSTGREST_URL=http://supabase-rest:3000, and kong.yml routes
+      # /rest/v1/ to it on the same address.
+      port: 3000
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supabase-rest
+  labels:
+    {{- include "factoryplus.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  replicas: {{ .Values.supabaseRest.replicas }}
+  selector:
+    matchLabels:
+      {{- include "factoryplus.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "factoryplus.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        {{/*
+          PostgREST connects as `authenticator`, whose password db-roles-init sets. It also caches
+          the schema at startup, so starting before db-init has run leaves it serving an EMPTY
+          SCHEMA -- 404 on every table, with a healthy-looking process. Waiting on the role covers
+          the credential; the schema-cache reload below covers the rest.
+        */}}
+        {{- include "factoryplus.waitForPostgres" (dict "ctx" . "name" "wait-for-authenticator" "host" (include "factoryplus.supabaseDb.host" .) "port" (include "factoryplus.supabaseDb.port" .) "user" "authenticator" "db" "postgres" "passwordKey" "POSTGRES_PASSWORD") | nindent 8 }}
+      containers:
+        - name: postgrest
+          image: "{{ .Values.supabaseRest.image.repository }}:{{ .Values.supabaseRest.image.tag }}"
+          imagePullPolicy: {{ .Values.supabaseRest.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: POSTGRES_PASSWORD
+            - name: PGRST_DB_URI
+              value: "postgres://authenticator:$(POSTGRES_PASSWORD)@{{ include "factoryplus.supabaseDb.host" . }}:{{ include "factoryplus.supabaseDb.port" . }}/postgres"
+            # `storage` is exposed because storage-api resolves the caller's claims through
+            # PostgREST; `graphql_public` because the Supabase client expects it to exist.
+            - name: PGRST_DB_SCHEMAS
+              value: public,storage,graphql_public
+            - name: PGRST_DB_ANON_ROLE
+              value: anon
+            {{- include "factoryplus.secretEnv" (dict "name" "PGRST_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
+            - name: PGRST_DB_USE_LEGACY_GUCS
+              value: "false"
+            # PostgREST caches the schema on connect and reloads on a NOTIFY. The migrations end
+            # with `NOTIFY pgrst, 'reload schema'`, which is what makes a `helm upgrade` that adds
+            # a table visible without a restart -- but only if PostgREST is listening on the right
+            # channel, which is what this declares.
+            - name: PGRST_DB_CHANNEL_ENABLED
+              value: "true"
+            - name: PGRST_DB_CHANNEL
+              value: pgrst
+            - name: PGRST_SERVER_PORT
+              value: "3000"
+            # An unauthenticated liveness probe needs SOMETHING to answer. The OpenAPI root is
+            # served to `anon` and is the cheapest endpoint that proves the schema cache is loaded.
+            - name: PGRST_OPENAPI_MODE
+              value: follow-privileges
+          startupProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 4
+          resources:
+            {{- toYaml .Values.supabaseRest.resources | nindent 12 }}
+{{- end }}

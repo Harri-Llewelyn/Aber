@@ -8,6 +8,24 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <!--
+      Deployment-supplied configuration, loaded BEFORE the bundle.
+
+      IN <head>, AND AS A PLAIN CLASSIC SCRIPT. Two independent reasons, either of which alone
+      would be enough:
+
+        * A classic script is parser-blocking and runs immediately; a `type="module"` script is
+          deferred and runs only once the document is parsed. So this executes first whatever the
+          document order -- do NOT add `type="module"`, `defer` or `async` here.
+        * `vite build` INJECTS the bundle's own <script type="module"> into <head>, which puts it
+          textually ahead of anything left in <body>. Declaring this in <head> keeps the built
+          index.html reading in the same order it executes, so the two never appear to disagree.
+
+      window.__FACTORYPLUS_CONFIG__ is therefore populated before src/config.js evaluates. On
+      Compose this is the shipped no-op placeholder and the build-time values win; on Kubernetes a
+      ConfigMap is mounted over it, which is what lets one image serve any environment.
+    -->
+    <script src="/config.js"></script>
   </head>
   <body>
     <div id="root"></div>

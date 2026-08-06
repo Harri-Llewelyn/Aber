@@ -1,0 +1,85 @@
+{{- if and .Values.initJobs.enabled .Values.supabaseStorage.enabled }}
+{{- $component := "storage-init" -}}
+{{- $fullname := include "factoryplus.fullname" . -}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-storage-init" $fullname }}
+  labels:
+    {{- include "factoryplus.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "15"
+    "helm.sh/hook-delete-policy": before-hook-creation
+data:
+{{- range $path, $bytes := .Files.Glob "files/scripts/storage-init.mjs" }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-storage-init" $fullname }}
+  labels:
+    {{- include "factoryplus.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    # WEIGHT 20 -- LAST. It calls the Storage REST API, which needs storage-api running, which
+    # needs db-init (10) to have created the schema AND db-roles-init (0) to have set
+    # supabase_storage_admin's password.
+    "helm.sh/hook-weight": "20"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: {{ .Values.initJobs.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.initJobs.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "factoryplus.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        {{/*
+          Waits on storage-api's OWN readiness, not just on the database.
+
+          storage-api runs its own migrations against the `storage` schema on boot and upgrades it
+          -- the supabase/postgres image ships only a STUB of that schema (buckets/objects/
+          migrations, with no `public` or `file_size_limit` column). That is the whole reason the
+          bucket is created here, through the REST API, rather than by a SQL migration: db-init
+          finishes long before storage-api starts, so an INSERT into storage.buckets would run
+          against the stub and could not mark the bucket public at all. It would come up PRIVATE on
+          a fresh install, and every AAS `File` URL in every exported shell would 404 for a viewer
+          holding no session.
+        */}}
+        {{- include "factoryplus.waitFor" (dict "ctx" . "name" "wait-for-storage" "image" "curlimages/curl:8.10.1" "command" "curl -sf http://supabase-storage:5000/status >/dev/null 2>&1" "describe" "supabase-storage (it migrates the storage schema on boot)") | nindent 8 }}
+      containers:
+        - name: storage-init
+          image: node:20-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: STORAGE_URL
+              value: http://supabase-storage:5000
+            {{- include "factoryplus.secretEnv" (dict "name" "SERVICE_ROLE_KEY" "secretName" (include "factoryplus.secretName" .) "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
+            - name: STORAGE_BUCKET
+              value: {{ .Values.supabaseStorage.bucket | quote }}
+            - name: STORAGE_FILE_SIZE_LIMIT
+              value: {{ .Values.supabaseStorage.fileSizeLimit | quote }}
+          command: ["node", "/app/storage-init.mjs"]
+          volumeMounts:
+            - name: script
+              mountPath: /app
+              readOnly: true
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+      volumes:
+        - name: script
+          configMap:
+            name: {{ printf "%s-storage-init" $fullname }}
+{{- end }}

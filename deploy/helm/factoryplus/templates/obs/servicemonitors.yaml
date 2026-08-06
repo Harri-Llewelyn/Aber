@@ -1,0 +1,133 @@
+{{- if .Values.telemetry.serviceMonitor.enabled }}
+{{- $fullname := include "factoryplus.fullname" . -}}
+{{/*
+=================================================================================================
+ServiceMonitors -- ONLY for endpoints that actually serve Prometheus metrics.
+
+THE POINT OF THIS FILE IS WHAT IT REFUSES TO CREATE. A ServiceMonitor naming a port that serves
+nothing does not fail: Prometheus lists the target as DOWN, or worse scrapes an endpoint that
+answers 200 with no metrics, and the dashboards built on it render empty panels. Someone then
+concludes the component is idle. That is a monitoring stack lying about the thing it was installed
+to observe, which is worse than not monitoring it at all.
+
+So each entry below was verified against the pinned image before it was written:
+
+  grafana         SERVES METRICS NATIVELY on its normal HTTP port at /metrics, unauthenticated.
+                  (grafana 11.6.1: 1250 metric series.) Nothing to enable.
+
+  supabase-kong   SERVES METRICS ONLY WITH THE PLUGIN AND THE STATUS LISTENER BOTH ON. The
+                  `prometheus` plugin is declared globally in kong.yml and named in KONG_PLUGINS;
+                  `supabaseKong.metrics.enabled` adds KONG_STATUS_LISTEN and the port.
+                  (kong 2.8.1-alpine: 57 kong_* series on :8100/metrics.)
+                  THE MOST VALUABLE TARGET HERE, because every REST, Auth, Storage, Realtime and
+                  edge-function request passes through it -- see the note on supabase-rest.
+
+  mosquitto       HAS NO HTTP METRICS SURFACE AT ALL and cannot be given one; it publishes to
+                  `$SYS/broker/#` MQTT topics. `mosquitto.metrics.enabled` runs an exporter
+                  sidecar that subscribes and re-serves them.
+                  (sapcc/mosquitto-exporter 0.8.0: 48 broker_* series -- note the `broker_`
+                  prefix, not `mosquitto_`.)
+
+DELIBERATELY ABSENT, and this is the part worth reading:
+
+  supabase-rest   POSTGREST 12.2.0 EXPOSES NO METRICS. Its admin server (`admin-server-port`)
+                  serves /ready and /live and nothing else -- there is no metrics setting in the
+                  configuration at all. A ServiceMonitor for it would be pure fiction.
+                  It is not a real gap: every PostgREST request arrives through Kong, so
+                  kong_http_requests_total and the latency histograms already carry it, labelled
+                  by service. Gateway-side measurement is one hop removed from the process but it
+                  covers the entire HTTP tier from a single target -- which is also why enabling
+                  Kong's metrics matters more than any other switch in this file.
+
+  supabase-db /   Postgres exposes nothing without postgres_exporter, which is a separate
+  timescaledb     deployment with its own credentials and its own scrape story. Worth doing, and
+                  worth doing properly rather than half-added here.
+
+  ingestion       A Python daemon with no HTTP server. Its liveness signal is the heartbeat file
+                  the kubelet probe reads (see apps/ingestion.yaml); making it serve metrics would
+                  mean adding an HTTP listener to a process whose whole design is a single MQTT
+                  loop.
+
+REQUIRES THE PROMETHEUS OPERATOR CRDs. ServiceMonitor is not a core Kubernetes type; without
+kube-prometheus-stack (or at least its CRDs) installed, `helm install` fails with
+`no matches for kind "ServiceMonitor"`. Hence opt-in, and hence the note in values.yaml.
+
+NETWORK POLICY. Under `networkPolicy.enabled` every scrape is dropped by the default-deny rule --
+the generated edges only describe flows between components of this chart, and Prometheus is not one
+of them. `networkPolicy.extraIngress` is the seam; values-prod.yaml.example carries a working rule.
+Without it the targets are simply DOWN, which reads as the pods being unreachable.
+=================================================================================================
+*/}}
+{{- $targets := list -}}
+{{- if .Values.grafana.enabled -}}
+{{- $targets = append $targets (dict
+      "name" "grafana"
+      "component" "grafana"
+      "service" "grafana"
+      "port" "http"
+      "path" "/metrics"
+      "why" "native, unauthenticated, on the normal HTTP port") -}}
+{{- end -}}
+{{- if and .Values.supabaseKong.enabled .Values.supabaseKong.metrics.enabled -}}
+{{- $targets = append $targets (dict
+      "name" "supabase-kong"
+      "component" "supabase-kong"
+      "service" "supabase-kong"
+      "port" "metrics"
+      "path" "/metrics"
+      "why" "the prometheus plugin on the status listener") -}}
+{{- end -}}
+{{- if and .Values.mosquitto.enabled .Values.mosquitto.metrics.enabled -}}
+{{- $targets = append $targets (dict
+      "name" "mosquitto"
+      "component" "mosquitto"
+      "service" "mosquitto"
+      "port" "metrics"
+      "path" "/metrics"
+      "why" "the exporter sidecar; metrics are prefixed broker_") -}}
+{{- end -}}
+{{- range $t := $targets }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ printf "%s-%s" $fullname $t.name }}
+  labels:
+    {{- include "factoryplus.componentLabels" (dict "ctx" $ "component" $t.component) | nindent 4 }}
+    {{- /* Prometheus Operator only adopts ServiceMonitors matching its own serviceMonitorSelector,
+           which kube-prometheus-stack sets to `release: <its release>` by default. A ServiceMonitor
+           with no matching label is created successfully, is visible to kubectl, and is IGNORED --
+           no target appears and nothing reports why. That is the single most common way this fails,
+           which is why the value exists rather than being assumed. */}}
+    {{- with $.Values.telemetry.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ $.Release.Namespace }}
+  selector:
+    matchLabels:
+      {{- include "factoryplus.selectorLabels" (dict "ctx" $ "component" $t.component) | nindent 6 }}
+  endpoints:
+    # {{ $t.why }}
+    - port: {{ $t.port }}
+      {{- /* BY NAME, not by number: the Service and this file would otherwise carry the same port
+             in two places and drift. The operator resolves the name against the Service. */}}
+      path: {{ $t.path }}
+      interval: {{ $.Values.telemetry.serviceMonitor.interval }}
+      scrapeTimeout: {{ $.Values.telemetry.serviceMonitor.scrapeTimeout }}
+      scheme: http
+{{- end }}
+{{- if not $targets }}
+{{/*
+Nothing to scrape: serviceMonitor.enabled is on but every metrics source is off.
+
+Rendered as a comment rather than failing, because this is a reachable and legitimate intermediate
+state -- turning the master switch on before the per-component ones, or running with grafana
+disabled. Saying so in the output beats an empty file, which reads as a broken template.
+
+To get targets: supabaseKong.metrics.enabled, mosquitto.metrics.enabled, or grafana.enabled.
+*/}}
+{{- end }}
+{{- end }}

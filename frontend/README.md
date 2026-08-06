@@ -90,8 +90,55 @@ through `hooks/useRealtimeTable.js`.
 - **Wall-clock-derived state needs `useClockTick`.** A gateway going quiet writes nothing and emits
   no event, so it would otherwise keep its last-rendered status until the next poll.
 
-`VITE_ENABLE_REALTIME` is inlined by Vite at **build** time — flipping it requires rebuilding the
-frontend image, not restarting the container.
+`VITE_ENABLE_REALTIME` is resolved by `src/config.js` — see **Configuration** below. On the Compose
+path it is still inlined at build time, so flipping it there means rebuilding the image; on Kubernetes
+it comes from a ConfigMap and flips with a `helm upgrade`.
+
+---
+
+## Configuration
+
+`src/config.js` resolves every `VITE_*` setting **at runtime first, build time second**, so one image
+can serve any environment.
+
+**Why this layer exists.** Vite inlines `import.meta.env` when the bundle is built, so every setting
+used to be frozen into the image by `Dockerfile`'s build args. Under Compose that is invisible — the
+image is built against the stack it will serve. Under Kubernetes it means **one image cannot serve two
+environments**: a bundle built for staging carries staging's Supabase URL wherever it is deployed,
+which defeats build-once/promote-the-artefact.
+
+`public/config.js` is a shipped **no-op placeholder** that a deployment replaces — on Kubernetes, a
+ConfigMap mounted over `/usr/share/nginx/html/config.js`. Both paths run the same code, so Compose
+behaves exactly as it did before this existed.
+
+| | Docker Compose | Kubernetes |
+| :--- | :--- | :--- |
+| Build | default; values inlined by Vite | `--build-arg VITE_RUNTIME_CONFIG=true`, nothing inlined |
+| Source of values | `Dockerfile` build args from `.env` | a ConfigMap mounted at `/config.js` |
+| Changing one | rebuild the image | `helm upgrade` |
+
+Five things about it are load-bearing, and each has a comment in the file saying so:
+
+- **Never read `import.meta.env` in a component again.** Go through `readSetting()` / `readFlag()` and
+  add the name to `RUNTIME_SETTING_NAMES`. Reading it directly reintroduces exactly the freezing this
+  layer exists to undo.
+- **`BUILD_TIME_SETTINGS` must spell each name out as a static property access.** Vite substitutes
+  `import.meta.env.VITE_FOO` *textually*; a dynamic `import.meta.env[name]` is not a substitution site
+  and reads `undefined` for everything in a production bundle.
+- **`/config.js` loads from `<head>` as a plain classic script.** A classic script is parser-blocking
+  and a module script is deferred, so it runs first regardless of position — adding `type`, `defer` or
+  `async` silently inverts that. It is in `<head>` because `vite build` injects the bundle's own module
+  script there, so the built `index.html` would otherwise read in the opposite order to the one it
+  executes in.
+- **An unsubstituted `${…}` / `__X__` placeholder counts as absent**, never as a value. A rendered but
+  unsubstituted config is worse than an empty one: the client constructs and every request fails
+  against a nonsense origin with nothing naming the cause.
+- **NGINX serves it `no-store`.** Fixed filename, environment-specific contents — a cached copy points
+  a redeployed dashboard at the previous environment's Supabase URL.
+
+`__tests__/runtimeConfig.test.js` pins all of it, including that the placeholder's key set matches
+`RUNTIME_SETTING_NAMES`. The anon key moving from the bundle to a ConfigMap is **not** a security
+change: it is the `anon` role, public by construction, and already readable in any built bundle.
 
 ---
 

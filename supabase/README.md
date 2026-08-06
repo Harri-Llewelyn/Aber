@@ -6,7 +6,7 @@ foreign-data-wrapper view.
 
 | Path | Purpose |
 | :--- | :--- |
-| [`migrations/`](migrations) | `0001` schema, `0002` seed data, `0003` audit immutability + approval RPC |
+| [`migrations/`](migrations) | `0001` schema, `0002` seed data, then additive migrations `0003`–`0007` |
 | [`migrations/archive/`](migrations/archive) | The 38 pre-beta migrations, preserved for their reasoning. **Never executed** |
 | [`functions/`](functions) | Deno edge functions and the worker router |
 | [`kong.yml`](kong.yml) | API gateway routes, CORS, and `key-auth` consumers. **A template** |
@@ -16,16 +16,36 @@ foreign-data-wrapper view.
 
 ## Migration Baseline
 
-Squashed to a **two-file baseline** for the public beta, plus one remediation migration:
+Squashed to a **two-file baseline** for the public beta, plus additive remediation migrations:
 
 | File | Contents |
 | :--- | :--- |
 | `0001_baseline_schema.sql` | Pure DDL. Tables, views, functions, triggers, policies, grants |
 | `0002_seed_data.sql` | Pure DML. RBAC, vocabularies, metric catalog, demo assets, cron, Vault |
 | `0003_audit_immutability_and_quarantine_rpc.sql` | Append-only enforcement and the atomic approval RPC |
+| `0004_drop_gateway_ip_address.sql` | Removes a column nothing read |
+| `0005_digital_thread_signal_and_attribution.sql` | Stops the audit trigger recording machine non-events |
+| `0006_nodered_oidc_auth.sql` | Node-RED's OAuth client and the webhook signing key |
+| `0007_metric_catalog_name_check.sql` | Constrains `metric_catalog.name` to the Factory+ format |
 
-Add schema changes as a **new numbered file** (`0004_…`). The baseline files describe the state a
+Add schema changes as a **new numbered file** (`0008_…`). The baseline files describe the state a
 fresh database is built into; a live database has already run them.
+
+### Prefixes must be unique, and the order is the filename
+
+`supabase-db-init` applies `/migrations/*.sql` in **glob order** with no applied-migrations
+ledger, so the filename *is* the execution order. Two files sharing a prefix still both run —
+lexically, by whatever follows the number — which means the order is decided by an accident of
+naming and can change under a rename that looks purely cosmetic. Nothing fails, nothing logs; the
+ordering is simply not the one anybody chose.
+
+`scripts/check-docs-drift.mjs` asserts unique prefixes across **both** `supabase/migrations/` and
+the chart mirror at `deploy/helm/factoryplus/files/migrations/`, and that the two directories hold
+the same set. `0006_nodered_oidc_auth.sql` was renumbered from `0003` for exactly this reason.
+
+> Renaming a migration means re-running `node scripts/sync-helm-chart-files.mjs`. It removes the
+> orphaned mirror copy; leaving it behind would replay one migration **twice, under two names**,
+> on the Kubernetes target only.
 
 ### Idempotency is not optional
 
@@ -51,6 +71,122 @@ have caught:
   cells_pkey` fails on any populated database with foreign keys pointing at it.
 
 See [`migrations/archive/README.md`](migrations/archive/README.md).
+
+### Dropping a `gateways` column (0004)
+
+`ip_address` was captured on the gateway form and on quarantine approval, and shown as a column,
+but nothing ever acted on it: not in the search haystack, no view or function derived anything
+from it, ingestion resolves edge nodes by `sparkplug_id`, and the AAS exporter does not read it.
+Operators were being asked to keep a field accurate for no consumer.
+
+**The view must be dropped and rebuilt, never CASCADEd.** `public.gateway_status` selects from
+`public.gateways`, so PostgreSQL refuses:
+
+```
+ERROR:  cannot drop column ip_address of table gateways because other objects depend on it
+DETAIL: view gateway_status depends on column ip_address of table gateways
+```
+
+`DROP COLUMN … CASCADE` would "work" by dropping the view with it — and the gateways page would
+404 on `gateway_status` until someone noticed. Rebuilding from `ensure_gateway_status_view()` is
+the honest form of the same operation, and is exactly what that function exists for: its body
+selects `g.*`, so it picks up the new column set on its own.
+
+`gateway_status` was confirmed to be the only dependent object:
+
+```sql
+SELECT DISTINCT dependent.relname
+FROM pg_depend d
+JOIN pg_rewrite r       ON r.oid = d.objid
+JOIN pg_class dependent ON dependent.oid = r.ev_class
+JOIN pg_class src       ON src.oid = d.refobjid
+JOIN pg_attribute a     ON a.attrelid = src.oid AND a.attnum = d.refobjsubid
+WHERE src.relname = 'gateways' AND a.attname = 'ip_address';
+```
+
+**Fresh and existing databases converge**, which is the property that matters when one file set
+serves installs *and* upgrades. `0001` no longer creates the column in either of the two places it
+appeared — the `CREATE TABLE` and the expanded column list of its inline `gateway_status`
+definition, which `pg_dump` wrote out as explicit columns rather than `g.*`. Removing only the
+first would leave `0001` failing on a fresh database with `column g.ip_address does not exist`
+while every existing database kept working, because `CREATE TABLE IF NOT EXISTS` is a no-op there.
+
+- **fresh** — `0001` builds the table without the column; `0004`'s DROP is a no-op.
+- **existing** — `0001`'s CREATE is a no-op; `0004`'s DROP removes the column.
+
+> **Adding a column to `gateways` carries the same obligation in reverse:** call
+> `ensure_gateway_status_view()`, because `CREATE OR REPLACE VIEW` cannot widen a `g.*` view in
+> place.
+
+### Audit signal and attribution (0005)
+
+On a stack running **one** simulated gateway and **one** device, `digital_thread` was taking
+**175 rows/hour**, of which 123 in the first hour had `changed_by IS NULL`:
+
+| entity | action | what actually differed | rows |
+| :--- | :--- | :--- | ---: |
+| `gateways` | UPDATE | `last_heartbeat` only | 84 |
+| `gateways` | UPDATE | `last_heartbeat`, `status` | 1 |
+| `devices` | UPDATE | **nothing at all** (`old = new`) | 33 |
+
+**Attribution alone would not have helped.** `changed_by` was NULL because these were not things a
+person did — a gateway sending a heartbeat has no author. Labelling them "the ingestion daemon"
+would have faithfully described 175 rows an hour and left the log exactly as unreadable. At 50
+gateways that is ~210k rows/day into an append-only table, burying the handful of rows that record
+an operator changing something.
+
+Two of the three sources are not events at all:
+
+- The 33 device rows had `old_data = new_data`. Ingestion re-sends `status='ONLINE'` on every
+  rebirth (60s), and an `AFTER UPDATE` trigger fires whether or not any value changed. **A write
+  that changed nothing is not a change.**
+- `last_heartbeat` is liveness telemetry, not metadata. Nothing reads it from the audit log —
+  `public.gateway_status` derives staleness from the live column at read time, which is precisely
+  why it is a view and not a stored status.
+
+This discipline was already applied to the quarantine webhook (a blanket hook would emit ~2 HTTP
+calls/min/gateway of noise) and to `record_declared_metrics`, which writes only on change. The
+audit trigger was the one place it had not been.
+
+`actor_source` is a **closed set** (`user` / `ingestion` / `migration` / `service`) because one of
+its sources is a request header a client supplies, and an audit column must not become free text
+an arbitrary caller can write into. The trigger never accepts `user` from that header — a client
+asserting a human author for its own writes is exactly the claim it must not be able to make.
+
+Once machine writes say so explicitly, `actor_source IS NULL` stops meaning "probably a heartbeat"
+and starts meaning **"we lost track of this"** — a reportable defect rather than the normal case.
+
+### Metric name format (0007)
+
+Factory+ requires a metric name to be `/`-delimited folders whose segments use only alphanumerics
+and the underscore: `^[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*$`. `.` is not a legal character.
+
+**`metric_catalog.name` is immutable**, so a non-conforming name is *permanent* — the row can only
+be deprecated and superseded, never corrected. The constraint is cheap now and impossible later.
+
+**It is added `NOT VALID`, and that is the whole design.** `supabase-db-init` runs
+`psql -v ON_ERROR_STOP=1` over every migration on every boot with no ledger, so a plain
+`ADD CONSTRAINT` that failed on one legacy row would not fail once — it would fail on **every
+boot, forever**, and the stack would never come up again. `NOT VALID` still enforces on `INSERT`
+and `UPDATE`, so new rows are constrained immediately; only the back-scan is deferred.
+
+The migration then attempts `VALIDATE CONSTRAINT` inside an exception handler. On failure it
+raises a **`WARNING`** naming the offending rows and leaves the constraint `NOT VALID`, so it
+re-checks and re-warns on the next boot. A warning that stopped appearing because the migration
+gave up would be worse than no warning.
+
+To clear one: deprecate the offending metric, add a conforming replacement, set `superseded_by`,
+then
+
+```sql
+ALTER TABLE public.metric_catalog VALIDATE CONSTRAINT metric_catalog_name_format;
+```
+
+`METRIC_NAME_PATTERN` in [`frontend/src/utils/metricGroup.js`](../frontend/src/utils/metricGroup.js)
+mirrors this expression so the operator is told at the form rather than by a `400` — the same
+keep-in-step obligation `deriveMetricGroup()` and `utils/sparkplugId.js` carry.
+
+All 15 seeded catalog names conform, so the constraint validates cleanly on a fresh database.
 
 ---
 
@@ -210,9 +346,36 @@ authenticated `p_actor_id` explicitly and **re-checking that actor's role agains
 
 ## API Gateway (`kong.yml`)
 
-**This file is a template.** `supabase-kong-init` substitutes `__SUPABASE_ANON_KEY__` and
-`__SUPABASE_SERVICE_ROLE_KEY__` into a volume Kong reads. Kong 2.8 has no environment interpolation
-in declarative config, and committing literal keys would make `.env` no longer authoritative.
+**This file is a template, and ONE template serves both deployment targets.** Kong 2.8 has no
+environment interpolation in declarative config, and committing literal keys would make `.env` no
+longer authoritative — so the `__UPPER_SNAKE__` placeholders are substituted outside the container on
+both paths:
+
+| | Substituted by | Notes |
+| :--- | :--- | :--- |
+| Docker Compose | `supabase-kong-init` (`sed` into a volume) | |
+| Kubernetes | an initContainer in the Kong pod (`sed` into an `emptyDir`) | `supabase-kong-init` has no counterpart |
+
+**Not by Helm at template time**, which is the tempting shortcut and breaks the externally-managed
+Secret path in the worst way available: with the Secret owned outside the chart the chart cannot see
+the key values, Helm would substitute **empty strings**, and Kong would register empty API keys —
+*which `key-auth` accepts*. A gateway that reports healthy with its authentication silently off.
+
+`__REALTIME_UPSTREAM_URL__` is a placeholder for the same reason but a different one: it is the only
+upstream that genuinely differs between the targets. Realtime resolves its tenant from the **leading
+hostname label**, so it is `realtime-dev.supabase-realtime` (a Compose network alias) or
+`realtime-dev` (a Kubernetes Service *named* for the tenant). Both substituters validate that label
+and refuse anything else — addressing it by the plain service name makes every WebSocket handshake
+fail with a bare 403 that mentions neither tenants nor hostnames.
+
+**Adding a placeholder means adding it to both substituters.** Each scans for surviving markers and
+fails loudly, and each skips comment lines — because the template documents the convention by name,
+so a whole-file scan would flag the documentation of the rule as a violation of it.
+
+**The edge functions are delivered differently too.** Compose bind-mounts `functions/` for hot-reload;
+Kubernetes bakes them into an image (`functions/Dockerfile`, built with the **repository root** as
+context because `node_red_flow.json` lives there). Baking is what makes "which revision of
+`aas-export` is running" a property of the deployed artefact, so a rollback rolls the functions back.
 
 `key-auth` is enabled on `/rest/v1/`, `/realtime/v1/`, `/storage/v1/` and `/functions/v1/`.
 **Two routes are deliberately open**, and both are load bearing:

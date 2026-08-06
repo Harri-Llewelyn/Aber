@@ -1,0 +1,125 @@
+# =====================================================================================================
+# Factory+ internal certificate authority.
+#
+# Apply this ONCE per cluster, before installing the chart:
+#
+#   kubectl apply -f deploy/k8s/internal-ca.yaml
+#   kubectl -n cert-manager wait --for=condition=Ready certificate/factoryplus-ca --timeout=120s
+#
+# Then point both TLS consumers at it:
+#
+#   helm upgrade --install factoryplus deploy/helm/factoryplus \
+#     --set global.scheme=https \
+#     --set ingress.tls.enabled=true \
+#     --set ingress.tls.certManager.clusterIssuer=factoryplus-ca \
+#     --set mosquitto.tls.enabled=true \
+#     --set mosquitto.tls.clusterIssuer=factoryplus-ca
+#
+# -----------------------------------------------------------------------------------------------------
+# WHY THIS IS NOT IN THE HELM CHART, AND MUST NOT BE MOVED INTO IT
+#
+# This file holds the ROOT PRIVATE KEY of the deployment's certificate authority. Three consequences:
+#
+#  1. `helm uninstall` would take it with it. Every certificate ever issued -- browsers, gateways,
+#     the broker -- becomes unverifiable, and re-issuing means redistributing a new root to every
+#     machine that trusts this one. A reinstall is a routine act; losing the CA is not.
+#  2. It is CLUSTER-SCOPED and SHARED. A ClusterIssuer is not owned by a namespace or a release, and
+#     two Factory+ installations (staging and production in one cluster, say) should share one root
+#     rather than fight over which release owns it.
+#  3. It OUTLIVES the chart. The root is a 10-year artefact; the chart is upgraded monthly.
+#
+# WHY AN INTERNAL CA RATHER THAN ACME/LET'S ENCRYPT
+#
+# The deployment target is an on-premises k3s cluster on a private domain. ACME cannot serve it:
+# HTTP-01 needs the cluster reachable from the public internet, DNS-01 needs a public zone plus
+# provider API credentials in a Secret, a wildcard requires DNS-01 specifically, and an internal-only
+# domain cannot be validated at all. ACME remains the right answer for a genuinely public domain --
+# swap the `clusterIssuer` values above for an ACME issuer and nothing else in the chart changes,
+# because the chart only ever names an issuer and never assumes what kind it is.
+#
+# THE COST IS TRUST DISTRIBUTION, AND IT IS REAL. Until the root below is in a machine's trust store,
+# every browser sees a warning on all seven subdomains. That matters more than the usual "click
+# through it" because the OAuth handshake happens IN THE BROWSER: a user who learns to dismiss a
+# warning on api.<domain> mid-login has been trained to dismiss exactly the warning that would tell
+# them they are being intercepted. Distribute the root properly -- see the runbook.
+# =====================================================================================================
+---
+# NOTE: this is a plain manifest, not a Helm template. Apply it with kubectl.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: factoryplus-selfsigned
+  labels:
+    app.kubernetes.io/part-of: factoryplus
+spec:
+  # Bootstrap only. This issuer's ONE job is to sign the root below; nothing else should reference
+  # it. A self-signed LEAF certificate would be verifiable by nobody, which is why the chain is
+  # selfSigned -> CA root -> leaves rather than selfSigned -> leaves.
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: factoryplus-ca
+  # ---------------------------------------------------------------------------------------------
+  # THE NAMESPACE IS LOAD-BEARING AND IS NOT THE APPLICATION'S.
+  #
+  # A ClusterIssuer resolves `ca.secretName` in cert-manager's own "cluster resource namespace"
+  # (--cluster-resource-namespace, `cert-manager` by default) -- NOT in the namespace of the
+  # Certificate that references it, and not in the namespace this file is applied to.
+  #
+  # Put this in `factoryplus` instead and the root is issued perfectly, the Secret appears, and the
+  # ClusterIssuer below reports `Ready: False, secret "factoryplus-ca-key-pair" not found` while the
+  # Secret is plainly visible in the other namespace. Every Certificate then sits Pending with no
+  # events of its own, so the broker comes up with no cert and the Ingress serves the ingress
+  # controller's default self-signed one -- which looks like a chart bug and is a namespace mismatch.
+  #
+  # If your cert-manager runs with a non-default --cluster-resource-namespace, change this to match.
+  # ---------------------------------------------------------------------------------------------
+  namespace: cert-manager
+  labels:
+    app.kubernetes.io/part-of: factoryplus
+spec:
+  isCA: true
+  commonName: Factory+ Internal CA
+  # The name distributed to every trust store in the plant, so it should say whose it is. It is not
+  # a hostname and is never matched against one.
+  subject:
+    organizations:
+      - Factory+
+    organizationalUnits:
+      - Asset Tracking Platform
+  secretName: factoryplus-ca-key-pair
+  # Ten years. A root is redistributed by hand to browsers, gateways and operator laptops, so its
+  # renewal is an organisational event, not an automated one -- the point of a long life is that the
+  # automated part (the leaves below) is the only part that turns over.
+  duration: 87600h
+  # Twelve months' warning. cert-manager will re-issue the root at this point; the leaves it signs
+  # are unaffected, but anything pinning the root's fingerprint needs the new one distributed before
+  # the old expires, and a year is the shortest notice that is any use for a fleet.
+  renewBefore: 8760h
+  privateKey:
+    # RSA, NOT ECDSA, and this is a compatibility decision rather than a cryptographic one.
+    # Mosquitto and every browser handle ECDSA fine, but industrial gateways run embedded TLS stacks
+    # of varying age and some support only RSA. The failure is a handshake alert on the gateway with
+    # nothing useful logged at the broker, on a subset of the fleet -- exactly the shape that gets
+    # blamed on the network. RSA costs a few milliseconds per handshake and removes the question.
+    algorithm: RSA
+    size: 4096
+    encoding: PKCS1
+    rotationPolicy: Never
+  issuerRef:
+    name: factoryplus-selfsigned
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: factoryplus-ca
+  labels:
+    app.kubernetes.io/part-of: factoryplus
+spec:
+  ca:
+    # Resolved in cert-manager's cluster resource namespace -- see the Certificate above.
+    secretName: factoryplus-ca-key-pair

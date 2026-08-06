@@ -21,7 +21,35 @@ for _stream in (sys.stdout, sys.stderr):
             pass
 
 # Configuration
+#
+# THIS SCRIPT RUNS FROM TWO PLACES, and every default below is chosen for the first:
+#
+#   1. THE HOST, against a Docker Compose stack. Services are reached on their PUBLISHED ports
+#      (localhost:5433, :54322, :1883, :54321), because compose-internal names like `timescaledb`
+#      do not resolve outside the network. This is what `python ingestion/validate.py` does and
+#      what CI's e2e job does.
+#
+#   2. INSIDE THE CLUSTER, as a Kubernetes Job in the platform's namespace. There the SERVICE
+#      NAMES are correct and the STANDARD ports apply -- and because Kubernetes Service names are
+#      kept identical to the Compose service names, that is simply:
+#
+#        DB_HOST=timescaledb           DB_PORT=5432
+#        SUPABASE_DB_HOST=supabase-db  SUPABASE_DB_PORT=5432
+#        MQTT_HOST=mosquitto           MQTT_PORT=1883
+#        SUPABASE_URL=http://supabase-kong:8000
+#        NODERED_BASE_URL=http://node-red:1880
+#
+#      No host/port rewriting, no port-forwarding: in-cluster is the SIMPLER of the two, which is
+#      the opposite of the Compose case. See docs/kubernetes-migration-plan.md §2.5 and §8.1.
+#
+# Nothing here is hardcoded -- every value is env-overridable, so both callers are served by the
+# same file. The port defaults are conditional on their host being set, so that naming a service
+# does not also require restating its standard port.
 TIMESCALEDB_HOST = os.getenv("DB_HOST", "localhost")
+# 5433 is the port docker-compose.yml PUBLISHES TimescaleDB on, to avoid colliding with a local
+# PostgreSQL. It is not the port the server listens on. So: default to 5433 only when nobody named
+# a host (i.e. we are on the host talking to Compose); once DB_HOST is set the caller is addressing
+# the service directly and 5432 is right.
 TIMESCALEDB_PORT = os.getenv("DB_PORT", "5433" if os.getenv("DB_HOST") is None else "5432")
 TIMESCALEDB_NAME = os.getenv("DB_NAME", "postgres")
 TIMESCALEDB_USER = os.getenv("DB_USER", "postgres")
@@ -29,10 +57,15 @@ TIMESCALEDB_PASS = os.getenv("DB_PASSWORD", "postgres")
 
 # Supabase's own PostgreSQL, addressed directly rather than through PostgREST. Needed only by
 # the audit-row cleanup, which migration 0003 deliberately put out of reach of `service_role`.
-# Defaults match the published port in docker-compose.yml, so the script keeps working from the
-# host with no extra configuration.
+#
+# The port default mirrors TIMESCALEDB_PORT's conditional, and for the same reason: 54322 is the
+# published port, 5432 is what the server listens on. Without this an in-cluster run that set
+# SUPABASE_DB_HOST=supabase-db would inherit 54322, and the cleanup would fail to connect -- which
+# surfaces as leftover fixture rows in an append-only audit table rather than as a config error.
 SUPABASE_DB_HOST = os.getenv("SUPABASE_DB_HOST", "localhost")
-SUPABASE_DB_PORT = os.getenv("SUPABASE_DB_PORT", "54322")
+SUPABASE_DB_PORT = os.getenv(
+    "SUPABASE_DB_PORT", "54322" if os.getenv("SUPABASE_DB_HOST") is None else "5432"
+)
 SUPABASE_DB_NAME = os.getenv("SUPABASE_DB_NAME", "postgres")
 SUPABASE_DB_USER = os.getenv("SUPABASE_DB_USER", "postgres")
 SUPABASE_DB_PASS = os.getenv("POSTGRES_PASSWORD", "postgres")
@@ -46,6 +79,10 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 # Node-RED, as reached from the HOST -- the published port, not the compose-internal name, for
 # the same reason MQTT_HOST and DB_HOST default to localhost here. Check 7 asserts this address
 # refuses unauthenticated callers.
+#
+# No conditional default here, unlike the two ports above: there is no separate host variable to
+# key off, and guessing from something like KUBERNETES_SERVICE_HOST would be magic that reads
+# worse than the one env var an in-cluster Job has to set anyway.
 NODERED_BASE_URL = os.getenv("NODERED_BASE_URL", "http://localhost:1880")
 
 # Identifiers for validation.
@@ -61,6 +98,10 @@ VAL_MISMATCH_DEVICE = "VALIDATE_Mismatch_Device_001"
 VAL_QUARANTINE_DEVICE = "VALIDATE_Quarantine_Device_001"
 VAL_MALFORMED_DEVICE = "VALIDATE_Malformed_Device_001"
 VAL_RENAMED_DEVICE = "VALIDATE_Device_001_Renamed"
+# A device of its own for the alias suite. It cannot share VAL_KNOWN_DEVICE: an extra DBIRTH there
+# would rewrite last_birth_metrics and break checks 6 and 6b, which assert an exact declared set
+# and an untouched timestamp.
+VAL_ALIAS_DEVICE = "VALIDATE_Alias_Device_001"
 VAL_SCHEMA_NAME = "VALIDATE_Schema_Robot_Standard"
 # A second schema attached to the same device through device_submodels (migration 0034). It exists
 # to prove the modelled set is the UNION across every attached submodel: VAL_KPI_METRIC is declared
@@ -79,6 +120,31 @@ VAL_KPI_SCHEMA_METRICS = [VAL_KPI_METRIC]
 UNKNOWN_DEVICE_ID = "dev" + "f" * 21
 # The same id one character short -- the truncation case the format check exists to diagnose.
 MALFORMED_DEVICE_ID = "dev" + "f" * 20
+
+# The Sparkplug Group ID every message in this run is published under. Named rather than inlined
+# because the alias table and the rebirth topic are both scoped by it.
+VAL_GROUP = "Group1"
+
+# Sparkplug metric aliases for check 8. 100 is declared by the gateway's NBIRTH and used by a
+# DEVICE's DDATA -- that pair is the whole point, since Sparkplug scopes alias uniqueness to the
+# edge node including its devices, and a per-device table would silently fail to resolve it.
+ALIAS_NODE_SCOPED = 100
+ALIAS_TEMPERATURE = 101
+ALIAS_EXECUTION = 102
+ALIAS_NODE_METRIC = "VALIDATE/NODE_SCOPED_ALIAS"
+# Never declared in any birth -- the cold-start case that must trigger a rebirth request.
+ALIAS_UNDECLARED = 9999
+ALIAS_UNDECLARED_SECOND = 9998
+
+# The daemon's watchdog window, read so check 10 can decide whether it is short enough to wait
+# for. This must match what the INGESTION CONTAINER was given, not merely what this shell has.
+WATCHDOG_TIMEOUT = int(os.getenv("DEVICE_OFFLINE_TIMEOUT_SECONDS", "300"))
+WATCHDOG_INTERVAL = int(os.getenv("DEVICE_WATCHDOG_INTERVAL_SECONDS", "30"))
+# Above this the check reports SKIP rather than stalling a CI run for minutes.
+WATCHDOG_MAX_WAIT_SECONDS = 90
+
+# NCMD rebirth requests seen on the wire, appended by the validation subscriber.
+CAPTURED_NCMD = []
 
 # Populated by seed_supabase(); the wire ids the daemon will resolve.
 SEEDED = {}
@@ -387,6 +453,19 @@ def cleanup_validation_data():
 
     print("Cleanup complete.")
 
+def set_metric_value(metric, val):
+    """Populate a Sparkplug metric's value and datatype from a Python value."""
+    if isinstance(val, bool):
+        metric.boolean_value = val
+        metric.datatype = 11
+    elif isinstance(val, (int, float)):
+        metric.double_value = float(val)
+        metric.datatype = 10
+    elif isinstance(val, str):
+        metric.string_value = val
+        metric.datatype = 12
+
+
 def make_sparkplug_payload(asset_id, metrics_dict, timestamp_ms, asset_name=None):
     payload = sparkplug_b_pb2.Payload()
     payload.timestamp = timestamp_ms
@@ -408,16 +487,67 @@ def make_sparkplug_payload(asset_id, metrics_dict, timestamp_ms, asset_name=None
         m = payload.metrics.add()
         m.name = name
         m.timestamp = timestamp_ms
+        set_metric_value(m, val)
 
-        if isinstance(val, bool):
-            m.boolean_value = val
-            m.datatype = 11
-        elif isinstance(val, (int, float)):
-            m.double_value = float(val)
-            m.datatype = 10
-        elif isinstance(val, str):
-            m.string_value = val
-            m.datatype = 12
+    return payload.SerializeToString()
+
+
+def make_aliased_birth_payload(asset_id, aliased_metrics, timestamp_ms):
+    """
+    A birth certificate that binds each metric to an integer alias, as an optimised gateway does.
+
+    `aliased_metrics` is {name: (alias, value)}. Both name and alias are present here -- that is
+    what a birth is for. The DATA that follows carries the alias alone.
+    """
+    payload = sparkplug_b_pb2.Payload()
+    payload.timestamp = timestamp_ms
+
+    m_asset = payload.metrics.add()
+    m_asset.name = "Asset_ID"
+    m_asset.string_value = asset_id
+    m_asset.datatype = 12
+
+    for name, (alias, val) in aliased_metrics.items():
+        m = payload.metrics.add()
+        m.name = name
+        m.alias = alias
+        m.timestamp = timestamp_ms
+        set_metric_value(m, val)
+
+    return payload.SerializeToString()
+
+
+def make_alias_only_payload(metrics_by_alias, timestamp_ms):
+    """
+    A DATA payload carrying aliases and NO names -- what a real Sparkplug gateway publishes once
+    it has birthed, and what this daemon used to ingest nothing at all from.
+
+    Deliberately carries no Asset_ID either: an optimised gateway does not repeat identity on
+    every DATA message, so the topic is the only identity available. That is the realistic case.
+    """
+    payload = sparkplug_b_pb2.Payload()
+    payload.timestamp = timestamp_ms
+
+    for alias, val in metrics_by_alias.items():
+        m = payload.metrics.add()
+        m.alias = alias
+        m.timestamp = timestamp_ms
+        set_metric_value(m, val)
+
+    return payload.SerializeToString()
+
+
+def make_node_birth_payload(aliased_metrics, timestamp_ms):
+    """An NBIRTH declaring node-level aliases. No Asset_ID: node topics carry no device."""
+    payload = sparkplug_b_pb2.Payload()
+    payload.timestamp = timestamp_ms
+
+    for name, (alias, val) in aliased_metrics.items():
+        m = payload.metrics.add()
+        m.name = name
+        m.alias = alias
+        m.timestamp = timestamp_ms
+        set_metric_value(m, val)
 
     return payload.SerializeToString()
 
@@ -446,6 +576,7 @@ def seed_supabase():
         (VAL_KNOWN_DEVICE, "known"),
         (VAL_LEGACY_DEVICE, "legacy"),
         (VAL_MISMATCH_DEVICE, "mismatch"),
+        (VAL_ALIAS_DEVICE, "alias"),
     ):
         res = supabase_client.table("devices").insert({
             "name": label,
@@ -531,7 +662,16 @@ def run_simulation():
     # signatures (e.g. on_connect(client, userdata, flags, reason_code, properties)).
     client = mqtt.Client()
     client.username_pw_set(os.getenv("MQTT_USER", "factoryplus"), os.getenv("MQTT_PASSWORD", "factoryplus123"))
-    
+
+    # Capture the daemon's own NCMD rebirth requests. Check 9 asserts one is issued for an
+    # unknown alias and that the second is suppressed, so both the presence and the ABSENCE of a
+    # message are assertions -- which means the subscription has to be live before either.
+    def on_ncmd(_client, _userdata, msg):
+        CAPTURED_NCMD.append((msg.topic, msg.payload))
+
+    client.message_callback_add("spBv1.0/+/NCMD/+", on_ncmd)
+    client.on_connect = lambda c, *_: c.subscribe("spBv1.0/+/NCMD/+")
+
     connected = False
     for attempt in range(5):
         try:
@@ -621,6 +761,73 @@ def run_simulation():
         # value payload the simulator was just moved off.
         publish("DDATA", SEEDED["known_id"],
                 {"Systems/TEMPERATURE": 43.5, "VALIDATE/RENAME_SENTINEL": "RUNNING_AFTER_RENAME"})
+
+    # 9. SPARKPLUG B ALIAS RESOLUTION.
+    #
+    # Sparkplug binds each metric name to an integer alias in a BIRTH and thereafter publishes
+    # DATA carrying the alias alone. Before this was implemented the daemon read only `.name`, so
+    # an alias-optimised gateway -- which is the normal production configuration -- ingested
+    # NOTHING, with no error logged. This is the end-to-end guard for that.
+    #
+    # The three-step sequence is deliberate and each step tests a different rule:
+    #   9.1 NBIRTH declares an alias at NODE level and RESETS the node's table.
+    #   9.2 DBIRTH declares two more at DEVICE level and MERGES, leaving 9.1's intact.
+    #   9.3 alias-only DDATA uses all three, including the node-declared one -- which only
+    #       resolves if the table is keyed per edge node rather than per device.
+    alias_dev = SEEDED.get("alias_id")
+    if alias_dev:
+        print(f"\n--- NBIRTH declaring a NODE-scoped alias on edge node {gw} ---")
+        client.publish(
+            f"spBv1.0/{VAL_GROUP}/NBIRTH/{gw}",
+            make_node_birth_payload(
+                {ALIAS_NODE_METRIC: (ALIAS_NODE_SCOPED, "NODE_BIRTH_VALUE")}, now_ms
+            ),
+        )
+        time.sleep(2)
+
+        print(f"\n--- DBIRTH declaring DEVICE-scoped aliases for {VAL_ALIAS_DEVICE} ---")
+        client.publish(
+            f"spBv1.0/{VAL_GROUP}/DBIRTH/{gw}/{alias_dev}",
+            make_aliased_birth_payload(alias_dev, {
+                "Systems/TEMPERATURE": (ALIAS_TEMPERATURE, 21.0),
+                "Controller/EXECUTION": (ALIAS_EXECUTION, "READY"),
+            }, now_ms),
+        )
+        time.sleep(2)
+
+        print("\n--- Alias-only DDATA: no metric names on the wire at all ---")
+        client.publish(
+            f"spBv1.0/{VAL_GROUP}/DDATA/{gw}/{alias_dev}",
+            make_alias_only_payload({
+                ALIAS_TEMPERATURE: 66.6,
+                ALIAS_EXECUTION: "ACTIVE",
+                ALIAS_NODE_SCOPED: "RESOLVED_VIA_NODE_TABLE",
+            }, now_ms + 1000),
+        )
+        time.sleep(3)
+
+        # 10. REBIRTH ON AN UNKNOWN ALIAS, AND ITS RATE LIMIT.
+        #
+        # The alias table is in-memory, so it is empty after every restart and a stable device may
+        # not birth again for weeks. Asking is the only recovery -- but asking once per message
+        # would hold a gateway that reboots on rebirth in a loop, so the second request inside the
+        # window must be suppressed. Both halves are asserted.
+        SEEDED["ncmd_baseline"] = len(CAPTURED_NCMD)
+        print(f"\n--- DDATA carrying an undeclared alias ({ALIAS_UNDECLARED}) -> expect one NCMD ---")
+        client.publish(
+            f"spBv1.0/{VAL_GROUP}/DDATA/{gw}/{alias_dev}",
+            make_alias_only_payload({ALIAS_UNDECLARED: 1.0}, now_ms + 2000),
+        )
+        time.sleep(3)
+        SEEDED["ncmd_after_first"] = len(CAPTURED_NCMD)
+
+        print(f"\n--- A second undeclared alias immediately after -> expect NO further NCMD ---")
+        client.publish(
+            f"spBv1.0/{VAL_GROUP}/DDATA/{gw}/{alias_dev}",
+            make_alias_only_payload({ALIAS_UNDECLARED_SECOND: 2.0}, now_ms + 3000),
+        )
+        time.sleep(3)
+        SEEDED["ncmd_after_second"] = len(CAPTURED_NCMD)
 
     client.loop_stop()
     client.disconnect()
@@ -846,7 +1053,8 @@ def verify_results():
         # a gateway and three devices, and the rename updates one of them.
         try:
             run_entity_ids = [
-                SEEDED[key] for key in ("cell_uuid", "gateway_uuid", "known_uuid", "legacy_uuid", "mismatch_uuid")
+                SEEDED[key] for key in ("cell_uuid", "gateway_uuid", "known_uuid", "legacy_uuid",
+                                        "mismatch_uuid", "alias_uuid")
                 if SEEDED.get(key)
             ]
             if not run_entity_ids:
@@ -1010,6 +1218,181 @@ def verify_results():
         print(f"❌ 7. NODE-RED AUTHENTICATION ERROR: could not probe {NODERED_BASE_URL}: {e}")
         passed = False
 
+    # 8. SPARKPLUG B ALIAS RESOLUTION
+    #
+    # The regression guard for a silent total data-loss path: before alias resolution the daemon
+    # read only `metric.name`, so DDATA from an alias-optimised gateway -- the normal production
+    # configuration -- ingested zero metrics and logged nothing. Every assertion below is on the
+    # RESOLVED NAME, because that is the thing that was missing; row counts alone would pass on a
+    # daemon that wrote three rows named "".
+    alias_key = SEEDED.get("alias_id")
+    if alias_key:
+        try:
+            conn = get_timescaledb_connection()
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT metric_name, val_double, val_string FROM telemetry WHERE asset_id = %s;",
+                (alias_key,)
+            )
+            rows = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
+            conn.close()
+
+            if "Systems/TEMPERATURE" in rows and rows["Systems/TEMPERATURE"][0] == 66.6:
+                print("✅ 8. ALIAS RESOLUTION: alias-only DDATA resolved to its birth-declared "
+                      "metric name and landed in the historian.")
+                print(f"      -> Systems/TEMPERATURE = {rows['Systems/TEMPERATURE'][0]} "
+                      f"(published as alias {ALIAS_TEMPERATURE}, no name on the wire)")
+            else:
+                print("❌ 8. ALIAS RESOLUTION FAIL: no 'Systems/TEMPERATURE' row for "
+                      f"'{alias_key}'. Metrics published by alias alone are being dropped; the "
+                      f"historian holds {sorted(rows)}.")
+                passed = False
+
+            # 8a. A string-valued metric through the same path, so the check is not passing on
+            # one datatype's code path alone.
+            if rows.get("Controller/EXECUTION", (None, None))[1] == "ACTIVE":
+                print("✅ 8a. ALIAS RESOLUTION (string): 'Controller/EXECUTION' resolved to ACTIVE.")
+            else:
+                print(f"❌ 8a. ALIAS RESOLUTION (string) FAIL: got "
+                      f"{rows.get('Controller/EXECUTION')}, expected 'ACTIVE'.")
+                passed = False
+
+            # 8b. THE ONE THAT PINS THE SCOPE. This alias was declared by the GATEWAY's NBIRTH and
+            # used by a DEVICE's DDATA. Sparkplug scopes alias uniqueness to the whole edge node
+            # including its devices, so a per-device table would resolve 8 and 8a perfectly and
+            # fail only here -- silently, on exactly the gateways that declare shared metrics once.
+            if rows.get(ALIAS_NODE_METRIC, (None, None))[1] == "RESOLVED_VIA_NODE_TABLE":
+                print("✅ 8b. NODE-SCOPED ALIASES: an alias declared in the gateway's NBIRTH "
+                      "resolved for a DEVICE's DDATA — the table is keyed per edge node.")
+            else:
+                print(f"❌ 8b. NODE-SCOPED ALIASES FAIL: '{ALIAS_NODE_METRIC}' is absent or wrong "
+                      f"({rows.get(ALIAS_NODE_METRIC)}). The alias table looks device-scoped; a "
+                      "device cannot then use an alias its own edge node declared.")
+                passed = False
+
+            # 8c. An undecodable metric must not become a nameless row. The daemon skips it and
+            # asks for a rebirth (check 9); writing it under an empty name would corrupt the
+            # historian with something no query could ever find again.
+            if "" not in rows and None not in rows:
+                print("✅ 8c. NO NAMELESS ROWS: unresolvable aliases were skipped, not written "
+                      "under an empty metric name.")
+            else:
+                print("❌ 8c. NO NAMELESS ROWS FAIL: the historian holds a row with no metric name.")
+                passed = False
+        except Exception as e:
+            print(f"❌ 8. ALIAS RESOLUTION ERROR: {e}")
+            passed = False
+    else:
+        print("⚠️  8. ALIAS RESOLUTION: skipped, the alias fixture device was not seeded.")
+
+    # 9. NCMD REBIRTH REQUEST, AND ITS RATE LIMIT
+    #
+    # This is what closes the alias cold start: the table is in-memory, so an ingestion restart
+    # leaves every alias-optimised device undecodable until it births again -- which for a stable
+    # device may be weeks. Both halves are assertions, and the second is an assertion about a
+    # message that must NOT appear.
+    try:
+        baseline = SEEDED.get("ncmd_baseline")
+        after_first = SEEDED.get("ncmd_after_first")
+        after_second = SEEDED.get("ncmd_after_second")
+        expected_topic = f"spBv1.0/{VAL_GROUP}/NCMD/{SEEDED.get('gateway_id')}"
+        ours = [(t, p) for t, p in CAPTURED_NCMD if t == expected_topic]
+
+        if baseline is None:
+            print("⚠️  9. REBIRTH REQUEST: skipped, the alias fixture device was not seeded.")
+        elif after_first > baseline and ours:
+            print(f"✅ 9. REBIRTH REQUEST: an unknown alias produced an NCMD on {expected_topic}.")
+
+            # 9a. It must actually be a rebirth command, not merely traffic on the topic.
+            body = sparkplug_b_pb2.Payload()
+            body.ParseFromString(ours[-1][1])
+            names = [m.name for m in body.metrics]
+            if "Node Control/Rebirth" in names:
+                print("✅ 9a. REBIRTH PAYLOAD: carries the 'Node Control/Rebirth' metric.")
+            else:
+                print(f"❌ 9a. REBIRTH PAYLOAD FAIL: metrics were {names}; expected "
+                      "'Node Control/Rebirth'.")
+                passed = False
+
+            # 9b. THE RATE LIMIT. A gateway that answers a rebirth by restarting would otherwise
+            # be asked once per message and held in a reboot loop by the mechanism meant to
+            # recover it. A second unknown alias immediately after must produce nothing.
+            if after_second == after_first:
+                print(f"✅ 9b. REBIRTH RATE LIMIT: a second unknown alias inside the "
+                      f"{os.getenv('REBIRTH_REQUEST_INTERVAL_SECONDS', '300')}s window produced "
+                      "no further request.")
+            else:
+                print(f"❌ 9b. REBIRTH RATE LIMIT FAIL: {after_second - after_first} additional "
+                      "NCMD(s) were published inside the window. An unresponsive gateway will be "
+                      "asked once per message.")
+                passed = False
+        else:
+            print("❌ 9. REBIRTH REQUEST FAIL: DDATA carrying an undeclared alias produced no "
+                  f"NCMD on {expected_topic}. Without it, an ingestion restart silently stops "
+                  "recording every alias-optimised device until its gateway is power-cycled.")
+            passed = False
+    except Exception as e:
+        print(f"❌ 9. REBIRTH REQUEST ERROR: {e}")
+        passed = False
+
+    # 10. DEVICE LIVENESS WATCHDOG
+    #
+    # A device that stops publishing writes nothing and emits no DDEATH, so without the watchdog
+    # it stays ONLINE forever. Conditional on the configured window, because the default is 300s
+    # and a CI job must not stall for five minutes waiting for it.
+    if not supabase_client or not SEEDED.get("alias_uuid"):
+        print("⚠️  10. DEVICE WATCHDOG: skipped, no Supabase client or fixture device.")
+    elif WATCHDOG_TIMEOUT <= 0:
+        print("⚠️  10. DEVICE WATCHDOG: skipped, disabled (DEVICE_OFFLINE_TIMEOUT_SECONDS=0).")
+    elif WATCHDOG_TIMEOUT > WATCHDOG_MAX_WAIT_SECONDS:
+        print(f"⚠️  10. DEVICE WATCHDOG: skipped. The configured window is {WATCHDOG_TIMEOUT}s and "
+              f"this check will only wait {WATCHDOG_MAX_WAIT_SECONDS}s. To exercise it, restart "
+              "the ingestion service with DEVICE_OFFLINE_TIMEOUT_SECONDS=45 and re-run. The sweep "
+              "logic itself is covered by ingestion/test_declared_metrics.py.")
+    else:
+        try:
+            wait = WATCHDOG_TIMEOUT + WATCHDOG_INTERVAL + 5
+            print(f"\n--- 10. Waiting {wait}s for the watchdog to notice "
+                  f"{VAL_ALIAS_DEVICE} has gone quiet ---")
+            time.sleep(wait)
+
+            res = supabase_client.table("devices").select("status").eq(
+                "id", SEEDED["alias_uuid"]
+            ).execute()
+            status = res.data[0]["status"] if res.data else None
+
+            if status == "OFFLINE":
+                print(f"✅ 10. DEVICE WATCHDOG: a device quiet for over {WATCHDOG_TIMEOUT}s with no "
+                      "DDEATH was marked OFFLINE.")
+            else:
+                print(f"❌ 10. DEVICE WATCHDOG FAIL: status is '{status}' after {wait}s of silence; "
+                      "expected OFFLINE. Check that the ingestion container has the same "
+                      "DEVICE_OFFLINE_TIMEOUT_SECONDS this shell does.")
+                passed = False
+
+            # 10a. Written once, not once per sweep tick. log_digital_thread_event() fires on
+            # every UPDATE to `devices`, so a watchdog rewriting OFFLINE each tick would append to
+            # a deliberately append-only audit table forever -- at a 30s interval, twice a minute
+            # per device, indefinitely. This is the check that would catch that.
+            audit = supabase_client.table("digital_thread").select("id,new_data").eq(
+                "entity_id", SEEDED["alias_uuid"]
+            ).eq("action", "UPDATE").execute()
+            offline_rows = [
+                r for r in (audit.data or [])
+                if (r.get("new_data") or {}).get("status") == "OFFLINE"
+            ]
+            if len(offline_rows) <= 1:
+                print(f"✅ 10a. WRITE-ON-CHANGE: {len(offline_rows)} OFFLINE audit row written, not "
+                      "one per sweep tick.")
+            else:
+                print(f"❌ 10a. WRITE-ON-CHANGE FAIL: {len(offline_rows)} OFFLINE audit rows for one "
+                      "quiet period. The watchdog is rewriting an unchanged status and filling an "
+                      "append-only table.")
+                passed = False
+        except Exception as e:
+            print(f"❌ 10. DEVICE WATCHDOG ERROR: {e}")
+            passed = False
+
     print("==========================================")
     if passed:
         print("🎉 END-TO-END VALIDATION PASSED SUCCESSFULLY!")
@@ -1024,15 +1407,25 @@ if __name__ == "__main__":
     parser.add_argument("--keep-data", action="store_true", help="Keep test data after running validation")
     args = parser.parse_args()
 
-    # Print the resolved endpoints before doing anything. This script runs from the
-    # host, so it needs published ports (localhost:5433 / 1883 / 54321) -- sourcing the
-    # compose .env instead points it at in-network service names ("timescaledb",
-    # "mosquitto") and every connection dies with "Temporary failure in name
-    # resolution". Showing the targets up front makes that obvious from the log alone.
+    # Print the resolved endpoints before doing anything, because BOTH ways of misconfiguring
+    # this script fail somewhere other than at the cause:
+    #
+    #   * From the HOST against Compose, published ports are needed (localhost:5433 / 54322 /
+    #     1883 / 54321). Sourcing the compose .env wholesale instead points it at in-network
+    #     service names ("timescaledb", "mosquitto") and every connection dies with "Temporary
+    #     failure in name resolution".
+    #   * IN-CLUSTER as a Kubernetes Job, the service names are the correct ones -- but a host
+    #     left at its default sends the script to its own pod's localhost, where nothing listens.
+    #
+    # Showing every resolved target up front makes either obvious from the log alone. Supabase's
+    # own database is listed too: it is reached separately from the API and only the cleanup path
+    # touches it, so a wrong value there surfaces late, as leftover fixture rows.
     print("Validation targets:")
     print(f"  MQTT broker  : {MQTT_HOST}:{MQTT_PORT}")
     print(f"  TimescaleDB  : {TIMESCALEDB_HOST}:{TIMESCALEDB_PORT}/{TIMESCALEDB_NAME}")
+    print(f"  Supabase DB  : {SUPABASE_DB_HOST}:{SUPABASE_DB_PORT}/{SUPABASE_DB_NAME}")
     print(f"  Supabase API : {SUPABASE_URL}")
+    print(f"  Node-RED     : {NODERED_BASE_URL}")
     print(f"  Service role key: {'set' if SUPABASE_SERVICE_ROLE_KEY else 'MISSING'}")
     print()
 

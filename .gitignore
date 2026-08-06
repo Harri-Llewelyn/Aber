@@ -26,6 +26,16 @@ mosquitto/password_file
 supabase/.branches/
 supabase/.temp/
 
+# Helm
+#
+# A filled-in production values file holds real credentials. The .example is committed and is the
+# starting point; the copy never is. deploy/helm/factoryplus/files/ IS committed on purpose --
+# those are mirrored config files a packaged chart must carry, see scripts/sync-helm-chart-files.mjs.
+deploy/helm/**/values-prod.yaml
+deploy/helm/**/values-local.yaml
+deploy/helm/**/charts/
+deploy/helm/**/*.tgz
+
 # Generated Protobuf files
 *_pb2.py
 ingestion/*_pb2.py

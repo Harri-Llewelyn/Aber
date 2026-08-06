@@ -1,0 +1,87 @@
+{{- if .Values.ingress.enabled }}
+{{- $routes := include "factoryplus.ingressRoutes" . | fromYamlArray -}}
+{{- /* Per-route opt-out: `ingress.routes.<name>: false` keeps a service running in-cluster but off
+       the public surface. Studio and the API docs are the usual candidates on a real deployment. */ -}}
+{{- $enabled := list -}}
+{{- range $routes -}}
+{{- $override := index $.Values.ingress.routes .name -}}
+{{- if and (ne $override false) .host -}}
+{{- $enabled = append $enabled . -}}
+{{- end -}}
+{{- end -}}
+{{- /*
+Renders nothing when no route resolved, rather than failing here.
+
+The ASSERTION lives in factoryplus.validateIngress (_helpers.tpl), because a `fail` inside a resource
+template pre-empts the whole validation chain -- an install with no credentials at all was being told
+about hostnames, which is true but the third-most useful thing to say. One ordered place for
+validation; this file just declines to emit an Ingress with empty `host:` fields, which the API server
+would accept and which would then match every request reaching the controller.
+*/ -}}
+{{- if $enabled -}}
+{{/*
+=================================================================================================
+Subdomain routing, one Ingress.
+
+WHY SUBDOMAINS AND NOT PATHS. Path-based routing on one host looks tidier and is not viable here:
+Grafana needs `serve_from_sub_path` plus a matching root_url, Node-RED needs BOTH httpAdminRoot and
+httpNodeRoot moved -- which changes the quarantine webhook's path, and that path is REGISTERED IN
+THE DATABASE in webhook_endpoints -- and Studio is a Next.js app with its own basePath assumptions.
+Subdomains avoid all three, and they mirror the Compose published-port layout one-for-one.
+
+EVERY HOST COMES FROM THE SAME HELPER the service itself is configured from. That is the point of
+§7's URL split: `factoryplus.grafanaUrl` feeds this Ingress rule, Grafana's GF_SERVER_ROOT_URL, and
+the redirect_uris db-init registers in auth.oauth_clients. Three consumers, one value, so an ingress
+hostname cannot disagree with what a service advertises or with what GoTrue will accept.
+
+MQTT: only 9001 (WebSockets) is here. Raw MQTT on 1883 is TCP and cannot ride an HTTP Ingress at
+all -- that is the mosquitto-external LoadBalancer's job. Traefik and ingress-nginx both carry the
+WebSocket upgrade without an annotation.
+=================================================================================================
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "factoryplus.fullname" . }}
+  labels:
+    {{- include "factoryplus.labels" . | nindent 4 }}
+  {{- $annotations := .Values.ingress.annotations | default dict }}
+  {{- if and .Values.ingress.tls.enabled .Values.ingress.tls.certManager.clusterIssuer }}
+  {{- /* Added here rather than asked for in values twice: setting a clusterIssuer IS the request
+         for cert-manager to issue, and requiring the annotation as well is a second place to
+         forget. */ -}}
+  {{- $annotations = merge (dict "cert-manager.io/cluster-issuer" .Values.ingress.tls.certManager.clusterIssuer) $annotations }}
+  {{- end }}
+  {{- with $annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    # ONE ENTRY listing every host, against one Secret. With a wildcard certificate for
+    # *.<publicBaseDomain> that is a single ACME challenge and a single renewal; a per-host block
+    # would mean seven certificates renewing independently.
+    - secretName: {{ .Values.ingress.tls.secretName }}
+      hosts:
+        {{- range $enabled }}
+        - {{ .host | quote }}
+        {{- end }}
+  {{- end }}
+  rules:
+    {{- range $enabled }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          - path: /
+            # Prefix, not Exact: every backend here serves a whole application, not one endpoint.
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .service }}
+                port:
+                  number: {{ .port }}
+    {{- end }}
+{{- end }}
+{{- end }}

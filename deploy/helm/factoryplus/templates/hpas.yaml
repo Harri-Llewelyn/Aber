@@ -1,0 +1,115 @@
+{{- if .Values.autoscaling.enabled }}
+{{- $fullname := include "factoryplus.fullname" . -}}
+{{/*
+=================================================================================================
+HorizontalPodAutoscalers -- FOUR COMPONENTS, AND ONLY THESE FOUR.
+
+  supabase-rest       PostgREST: stateless, a connection pool per replica
+  supabase-kong       the gateway: declarative config, no state
+  supabase-functions  the edge runtime: a request router, workers are per-request isolates
+  frontend            NGINX serving static files
+
+EVERYTHING ELSE IN THIS STACK IS SINGLE-WRITER, and `factoryplus.validateAutoscaling` REFUSES to
+render an HPA for one rather than warning about it. The reasons are per-component and recorded in
+each manifest, but they share a shape that makes refusal the right response: THE DAMAGE IS SILENT.
+
+  ingestion          a plain paho subscribe with no shared-subscription group, so every replica
+                     consumes every message -- duplicate telemetry rows (each stamps its own
+                     timestamp, so ON CONFLICT DO NOTHING does not dedupe them), duplicate
+                     quarantine decisions, and duplicate rows in an APPEND-ONLY audit table
+  node-red           /data holds the live flow, the encrypted credentials, editor sessions and the
+                     persisted editor-user map; two instances race on all four
+  mosquitto          does not cluster -- two brokers behind one Service split the fleet in half,
+                     each seeing only the gateways that landed on it, and Sparkplug birth/death and
+                     sequence state is per-connection
+  realtime           holds a logical replication slot, which is per-instance state
+  supabase-storage   the file backend is a single writer on a ReadWriteOnce PVC
+  grafana            SQLite on a ReadWriteOnce PVC
+  supabase-db        a single Postgres instance with no replication
+  timescaledb        likewise
+
+No error, no crash, no alert -- just wrong data. An autoscaler makes that happen under load, which
+is the worst possible moment to discover it, and by then the duplicate audit rows are permanent.
+
+REQUIRES metrics-server. Without it the HPA reports `<unknown>` for every metric and never scales,
+which looks like the HPA being ignored rather than the metrics source being absent. CI's k3d cluster
+disables metrics-server deliberately, which is one reason autoscaling is off by default.
+
+TARGET IS THE DEPLOYMENT NAME, which for these four is the plain component name -- Services and
+Deployments here are NOT release-prefixed, deliberately (see _helpers.tpl). An HPA pointed at a
+prefixed name reports `FailedGetScale` and scales nothing.
+=================================================================================================
+*/}}
+{{- $enabledOf := dict
+      "supabase-rest" .Values.supabaseRest.enabled
+      "supabase-kong" .Values.supabaseKong.enabled
+      "supabase-functions" .Values.supabaseFunctions.enabled
+      "frontend" .Values.frontend.enabled
+-}}
+{{- range .Values.autoscaling.components }}
+{{- if index $enabledOf . }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ printf "%s-%s" $fullname . }}
+  labels:
+    {{- include "factoryplus.componentLabels" (dict "ctx" $ "component" .) | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    # Not release-prefixed -- see the note above.
+    name: {{ . }}
+  minReplicas: {{ $.Values.autoscaling.minReplicas }}
+  maxReplicas: {{ $.Values.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $.Values.autoscaling.targetCPUUtilizationPercentage }}
+    {{/*
+      UTILIZATION IS A PERCENTAGE OF THE REQUEST, so a memory target only means anything because
+      every one of these components declares `resources.requests.memory`. An HPA with a utilization
+      target against a container with no request reports `<unknown>` forever and never scales.
+
+      TWO TEMPLATE-COMMENT TRAPS, both hit while writing this block:
+
+        1. A comment whose closing delimiter carries a leading dash chomps the newline after it,
+           joining the next YAML list item onto the previous line. It is reported as "mapping values
+           are not allowed in this context" at a line number in the RENDERED output, which does not
+           exist in this file. Use the non-chomping close -- as here.
+        2. A comment must not CONTAIN its own closing delimiter. Go templates end the comment at the
+           first occurrence, so an example of the syntax written literally terminates it early and
+           the remaining prose leaks into the YAML as garbage tokens. Hence this paragraph describes
+           the delimiters rather than showing them.
+    */}}
+    {{- if $.Values.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ $.Values.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+  behavior:
+    scaleDown:
+      # Five minutes, against Kubernetes' three. These sit behind an ingress serving interactive
+      # traffic, and a shopfloor dashboard's load is bursty -- a tighter window trades a little
+      # memory for repeated scale-down/scale-up cycles during a shift change.
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+{{- end }}
+{{- end }}
+{{- end }}

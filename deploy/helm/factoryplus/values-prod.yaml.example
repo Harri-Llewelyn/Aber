@@ -1,0 +1,364 @@
+# =============================================================================================
+# Production starting point. COPY, do not edit in place, and do not commit the copy.
+#
+#   cp values-prod.yaml.example values-prod.yaml   # then fill in, and keep it out of git
+#
+# Nothing here is filled in on purpose. The chart refuses to render with missing credentials
+# rather than generating them -- see the note on `secrets` in values.yaml for why the four
+# Supabase values are a matching SET and cannot be generated independently.
+# =============================================================================================
+
+global:
+  # Every ingress hostname is derived from this: app.<domain>, api.<domain>, grafana.<domain>,
+  # nodered.<domain>, studio.<domain>, docs.<domain>, mqtt.<domain>. A wildcard DNS record and a
+  # wildcard certificate for *.<domain> are the simplest way to serve them.
+  publicBaseDomain: factoryplus.example.com
+  scheme: https
+
+  # local-path is k3s's default and is NODE-LOCAL: the PVC binds to one node and there is no
+  # replication. On a single-node on-prem cluster that is the intended arrangement, but it makes
+  # backups the only recovery path -- see plan §10. On a multi-node cluster, use a storage class
+  # with real redundancy, or pin the data tier to one node deliberately.
+  storageClass: local-path
+
+  imagePullSecrets: []
+  #  - name: registry-credentials
+
+secrets:
+  # ============================================================================================
+  # PRODUCTION: SET THIS AND LEAVE EVERYTHING BELOW EMPTY.
+  #
+  # Point it at a Secret managed outside the chart. Every value below is then ignored, the chart
+  # renders no Secret of its own, and the credential validation is skipped -- because the values
+  # are no longer the chart's to see. No template change is needed; this is the seam.
+  #
+  # THE SECRET MUST CARRY THESE KEYS. They are the ENVIRONMENT VARIABLE names, not the camelCase
+  # values-file names, precisely so an externally-managed Secret has one obvious contract:
+  #
+  #   SUPABASE_JWT_SECRET          SUPABASE_ANON_KEY          SUPABASE_SERVICE_ROLE_KEY
+  #   POSTGRES_PASSWORD            DB_PASSWORD                PG_META_CRYPTO_KEY
+  #   REALTIME_DB_ENC_KEY          REALTIME_SECRET_KEY_BASE
+  #   MQTT_USER                    MQTT_PASSWORD
+  #   GRAFANA_ADMIN_USER           GRAFANA_ADMIN_PASSWORD     GRAFANA_OAUTH_CLIENT_SECRET
+  #   NODERED_CREDENTIAL_SECRET    NODERED_OAUTH_CLIENT_SECRET
+  #   NODERED_WEBHOOK_JWT_SECRET   NODERED_ADMIN_TOKEN
+  #
+  # STILL A SET. SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are HS256 JWTs signed by
+  # SUPABASE_JWT_SECRET. Rotating the signing key in your secret store WITHOUT re-minting both
+  # tokens gives a stack that reports healthy and rejects every request at the gateway -- and the
+  # chart cannot warn you, because it cannot see them. Rotate the three together, always.
+  #
+  # NODERED_ADMIN_TOKEN must be present but EMPTY. It is a break-glass static token that bypasses
+  # Supabase Auth entirely; an absent key and an empty one are the same to the chart, but some
+  # secret stores refuse to store an empty value -- if yours does, that is the one to omit.
+  #
+  # --- External Secrets Operator ---------------------------------------------------------------
+  # Create the ExternalSecret alongside this release (not from this chart -- a chart that owned it
+  # would need to own the SecretStore too, and those are cluster infrastructure):
+  #
+  #   apiVersion: external-secrets.io/v1beta1
+  #   kind: ExternalSecret
+  #   metadata:
+  #     name: factoryplus-secrets
+  #     namespace: factoryplus
+  #   spec:
+  #     refreshInterval: 1h
+  #     secretStoreRef: { name: <your-store>, kind: ClusterSecretStore }
+  #     target:
+  #       name: factoryplus-secrets     # <- the name to put in existingSecret below
+  #       creationPolicy: Owner
+  #     dataFrom:
+  #       - extract: { key: factoryplus/prod }   # one vault entry, keys as above
+  #
+  # ROTATION IS NOT AUTOMATIC EVEN WITH ESO. Most of these are read into a pod's environment at
+  # START, so a refreshed Secret reaches nothing until the pod restarts. Two need more than that:
+  #   * Kong's API keys are substituted into its config by an initContainer, so rotating them needs
+  #     `kubectl rollout restart deployment/supabase-kong`.
+  #   * The Grafana and Node-RED OAuth client secrets are HASHED INTO auth.oauth_clients by the
+  #     db-init hook, so rotating either needs a `helm upgrade` to re-run it -- and both halves must
+  #     move together or the OAuth handshake fails with `invalid_credentials`.
+  # Consider Reloader (stakater/Reloader) to automate the restarts.
+  #
+  # --- SOPS -------------------------------------------------------------------------------------
+  # If there is no vault, keep an encrypted values file instead and decrypt at deploy time:
+  #
+  #   sops -e values-prod.yaml > values-prod.enc.yaml     # commit the .enc, never the plaintext
+  #   helm secrets upgrade factoryplus . -f values-prod.enc.yaml   # helm-secrets plugin
+  #
+  # That path uses the values below rather than existingSecret, so the chart renders the Secret --
+  # which means the credentials appear in `helm get manifest` and in the release's stored revision.
+  # Acceptable for a small on-prem deployment; ESO is better where it is available.
+  # ============================================================================================
+  existingSecret: ""
+
+  # ---- Only needed when existingSecret is empty -------------------------------------------
+  #
+  # THESE THREE ARE A SET. anonKey and serviceRoleKey are HS256 JWTs signed by jwtSecret with
+  # {"iss":"supabase","role":"anon"} and {"iss":"supabase","role":"service_role"}. Changing
+  # jwtSecret alone invalidates both and every request fails at the gateway while the stack
+  # reports healthy.
+  jwtSecret: ""
+  anonKey: ""
+  serviceRoleKey: ""
+
+  postgresPassword: ""
+  timescalePassword: ""
+
+  # openssl rand -hex 8    -> exactly 16 characters (enforced)
+  realtimeDbEncKey: ""
+  # openssl rand -hex 32   -> at least 64 characters (enforced)
+  realtimeSecretKeyBase: ""
+
+  pgMetaCryptoKey: ""
+
+  mqttUser: factoryplus
+  mqttPassword: ""
+
+  grafanaAdminUser: admin
+  grafanaAdminPassword: ""
+  grafanaOAuthClientSecret: ""
+
+  noderedCredentialSecret: ""
+  noderedOAuthClientSecret: ""
+  # openssl rand -hex 32. A SIGNING key, not a bearer credential -- /hooks/quarantine is an
+  # `http in` node, so any flow author can read msg.req.headers.
+  noderedWebhookJwtSecret: ""
+  # LEAVE EMPTY. Break-glass static token that bypasses Supabase Auth entirely.
+  noderedAdminToken: ""
+
+# publicUrls are derived from global.publicBaseDomain unless set. Override only when a service
+# lives somewhere that does not follow the pattern.
+publicUrls:
+  frontend: ""
+  supabase: ""
+  # M3. Feeds the OAuth client's redirect_uris AND Grafana's GF_SERVER_ROOT_URL from one value.
+  # Changing it re-registers the client on the next `helm upgrade`, because db-init is a
+  # post-upgrade hook.
+  grafana: ""
+  nodered: ""
+
+timescaledb:
+  persistence:
+    size: 200Gi
+    # The historian grows with fleet size and retention, not with usage. Size it against the
+    # retention policy in timescaledb/init/002_retention.sql, not against today's row count.
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      memory: 8Gi
+
+supabaseDb:
+  persistence:
+    size: 50Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      memory: 8Gi
+
+# ---------------------------------------------------------------------------------------------
+# Hardening (Phase 7). All four are OFF in the chart's defaults and should be ON here.
+# ---------------------------------------------------------------------------------------------
+
+# M4. Default-deny both directions. THE TWO NAMESPACE VALUES CANNOT BE INFERRED and getting either
+# wrong produces a stack where every pod is healthy and nothing reaches anything -- so set them
+# against your cluster before enabling, and roll it out to a staging namespace first.
+networkPolicy:
+  enabled: true
+  dnsNamespace: kube-system
+  # kube-system for k3s's bundled Traefik; ingress-nginx usually has its own namespace.
+  ingressControllerNamespace: kube-system
+  # NARROW THIS, but know what it is worth: traffic arrives SNAT'd by ServiceLB, so with a narrowed
+  # CIDR the source seen is the NODE's, not the gateway's. `mosquitto.tls` below is the control that
+  # actually encrypts the fleet's credentials in flight; this is defence in depth behind it.
+  mqttAllowedCidrs:
+    - 10.0.0.0/8
+  # Your service CIDR, so the e2e Job's kubectl call is not permitted to reach the whole internet.
+  apiServerCidr: 10.43.0.0/16
+  # Flows the chart cannot express: an SMTP relay for GoTrue, the ESO webhook, an S3 endpoint for
+  # backups, a corporate proxy.
+  extraEgress: {}
+  # ---------------------------------------------------------------------------------------
+  # The INGRESS half -- and this rule is ACTIVE, not commented out, because the alternative is
+  # the failure it exists to prevent.
+  #
+  # The generated rules only cover flows BETWEEN COMPONENTS OF THIS CHART. Prometheus is not one
+  # of them, so under default-deny every scrape is dropped: the operator's targets all go DOWN,
+  # the dashboards empty, and the stack itself reports perfectly healthy throughout. It reads as
+  # a monitoring fault, and the cause is three layers away.
+  #
+  # THE THREE PORTS ARE THE THREE REAL METRICS ENDPOINTS -- see templates/obs/servicemonitors.yaml
+  # for why there is no fourth:
+  #   3000  grafana, natively
+  #   8100  supabase-kong's status listener (requires supabaseKong.metrics.enabled)
+  #   9234  the mosquitto exporter sidecar (requires mosquitto.metrics.enabled)
+  #
+  # CHANGE THE NAMESPACE to wherever your Prometheus runs. `monitoring` is the convention;
+  # kube-prometheus-stack's own chart default is its release namespace. The label
+  # `kubernetes.io/metadata.name` is set automatically by Kubernetes on every namespace, so no
+  # labelling of your monitoring namespace is required.
+  #
+  # A kubelet-probe allow belongs here too, if your CNI does not exempt them (k3s's default
+  # controller, Calico and Cilium all do) -- add an ipBlock for the node CIDR to the `from` list.
+  # ---------------------------------------------------------------------------------------
+  extraIngress:
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/part-of: factoryplus
+    policyTypes: [Ingress]
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: monitoring
+        ports:
+          - protocol: TCP
+            port: 3000
+          - protocol: TCP
+            port: 8100
+          - protocol: TCP
+            port: 9234
+
+# ---------------------------------------------------------------------------------------------
+# TLS. Requires cert-manager AND `kubectl apply -f deploy/k8s/internal-ca.yaml` FIRST -- the CA is
+# deliberately not chart-managed, because `helm uninstall` must not be able to delete the root
+# private key. See the TLS section of deploy/k8s/README.md.
+#
+# `global.scheme: https` above is what makes this mandatory rather than optional: every
+# browser-facing URL and every OAuth redirect_uri is composed from it, so advertising https while
+# terminating no TLS leaves sign-in working only behind an external terminator that also speaks it.
+# ---------------------------------------------------------------------------------------------
+ingress:
+  enabled: true
+  tls:
+    enabled: true
+    secretName: factoryplus-tls
+    certManager:
+      # `factoryplus-ca` is the internal CA. Swap for an ACME issuer (letsencrypt-prod) ONLY if the
+      # domain is genuinely public -- ACME cannot validate an internal one at all.
+      clusterIssuer: factoryplus-ca
+
+mosquitto:
+  tls:
+    enabled: true
+    clusterIssuer: factoryplus-ca
+    # ==========================================================================================
+    # SET THIS TO THE BROKER'S EXTERNAL ADDRESS. Gateways dial the broker by IP, and a certificate
+    # without an IP SAN fails verification on every one of them while the in-cluster clients --
+    # which use the name `mosquitto` -- verify perfectly. The stack reports healthy, the demo
+    # simulator keeps producing telemetry, and the fleet is silently off.
+    #
+    #   kubectl -n factoryplus get svc mosquitto-external \
+    #     -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+    #
+    # The chart refuses to render a LoadBalancer deployment with no external identity at all.
+    # ==========================================================================================
+    extraIpSans:
+      - 10.0.0.50
+    # Defence in depth for the pod network. Off in the chart's defaults because the in-cluster
+    # clients never cross a plant boundary; on here because in production they should not have to be
+    # trusted to. Both clients FAIL CLOSED if the CA is unreadable.
+    internalClients: true
+  external:
+    # LEAVE THIS TRUE UNTIL EVERY GATEWAY IS ON 8883. Setting it false withdraws plaintext 1883 from
+    # the external Service, and a Sparkplug device that cannot connect looks, at the dashboard,
+    # exactly like one that is switched off. Migrate the fleet first, then flip it.
+    plaintext: true
+  metrics:
+    # Runs an exporter sidecar subscribing to $SYS -- Mosquitto has no HTTP metrics surface of its
+    # own. Metrics are prefixed `broker_`, NOT `mosquitto_`; alerts written against the latter
+    # match nothing and fail silently.
+    enabled: true
+
+# ---------------------------------------------------------------------------------------------
+# Self-monitoring. NEEDS THE PROMETHEUS OPERATOR CRDs INSTALLED FIRST -- ServiceMonitor is not a
+# core Kubernetes type, so with them absent `helm install` fails with `no matches for kind
+# "ServiceMonitor"` rather than skipping the objects.
+#
+# The per-component switches are what make the targets real: Kong serves no metrics until its
+# status listener is on (see supabaseKong below), and Mosquitto needs the sidecar above. Grafana
+# needs neither -- it serves /metrics natively.
+# ---------------------------------------------------------------------------------------------
+telemetry:
+  serviceMonitor:
+    enabled: true
+    # MUST MATCH your Prometheus's serviceMonitorSelector or the objects are created and silently
+    # ignored -- no target, no error. Check with:
+    #   kubectl get prometheus -A -o jsonpath='{.items[*].spec.serviceMonitorSelector}'
+    labels:
+      release: kube-prometheus-stack
+    interval: 30s
+    scrapeTimeout: 10s
+
+# ---------------------------------------------------------------------------------------------
+# 3D model durability. These objects are in NO database dump, and devices.model_3d_path -- which IS
+# dumped -- points at them, so restoring the databases alone leaves rows referencing objects that
+# are gone and AAS shells exporting dead File URLs.
+#
+# Pick ONE of the two routes. Velero (or a CSI snapshotter) is the better answer where it exists;
+# backup.includeStorage is for stacks with neither.
+# ---------------------------------------------------------------------------------------------
+supabaseStorage:
+  persistence:
+    # A REPLICATED CLASS MATTERS MOST HERE of all the PVCs, because this one has no second copy in
+    # the nightly dump.
+    storageClass: longhorn
+  # Velero reads this from the POD and resolves it against the pod's volume NAMES. The volume is
+  # `data`. A name Velero cannot resolve is skipped and the backup still reports SUCCESS.
+  podAnnotations: {}
+  #  backup.velero.io/backup-volumes: data
+
+podDisruptionBudgets:
+  enabled: true
+  maxUnavailable: 1
+
+# Needs metrics-server. Only the four stateless components may be listed -- the chart refuses the
+# rest, because scaling them corrupts data silently rather than failing.
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  components: [supabase-rest, supabase-kong, supabase-functions, frontend]
+
+# THE ONLY RECOVERY PATH THIS STACK HAS: local-path is node-local with no replication, and neither
+# database is replicated. A logical dump recovers to the last nightly run and no finer -- for a real
+# RPO this wants pgBackRest or WAL archiving, which is a larger piece of work. This is the floor.
+#
+# TEST A RESTORE. An untested backup is a belief, not a capability, and the failure mode here is
+# discovering at the worst moment that the dumps were empty or missing the role scaffolding the RLS
+# policies reference.
+backup:
+  enabled: true
+  schedule: "30 2 * * *"
+  retentionDays: 30
+  # s3 needs an image carrying the aws CLI -- the supabase/postgres image has none, and the Job
+  # refuses rather than silently producing an unsigned request. pvc is the default for that reason.
+  destination: pvc
+  persistence:
+    size: 100Gi
+    storageClass: ""
+
+# Multi-replica for the stateless tier, so the PDBs above have something to protect.
+#
+# NOTE THESE ARE THE ONLY DEFINITIONS OF THESE KEYS IN THIS FILE. A duplicate top-level key in YAML
+# does not merge and does not warn -- the last one wins outright, so a second `supabaseKong:` block
+# elsewhere would silently discard everything set here, or vice versa. Keep each component in one
+# place; that is why Kong's metrics switch is here rather than beside the telemetry block it serves.
+supabaseRest:      { replicas: 2 }
+supabaseFunctions: { replicas: 2 }
+frontend:          { replicas: 3 }
+
+supabaseKong:
+  replicas: 2
+  metrics:
+    # THE SINGLE MOST VALUABLE SCRAPE IN THE STACK. Every REST, Auth, Storage, Realtime and edge
+    # function request passes through Kong, and none of those components exposes metrics of its own
+    # -- PostgREST 12.2.0 has no metrics endpoint at all, its admin server being health-only. This
+    # one target therefore covers the whole HTTP tier, labelled per service.
+    enabled: true

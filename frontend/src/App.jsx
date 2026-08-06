@@ -7,8 +7,9 @@ import { useToast } from './hooks/useToast'
 import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
 import { clearInvalidSession, isSessionRejected } from './utils/sessionError'
 import { PERMISSION_UUIDS, REALTIME_ENABLED } from './constants'
+import { readFlag } from './config'
 
-const allowSignUp = import.meta.env.VITE_ALLOW_SIGNUP === 'true'
+const allowSignUp = readFlag('VITE_ALLOW_SIGNUP')
 
 // Must match GOTRUE_OAUTH_SERVER_AUTHORIZATION_PATH in docker-compose.yml. GoTrue appends it
 // to GOTRUE_SITE_URL when redirecting an OAuth client's user here to grant consent.

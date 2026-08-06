@@ -1,0 +1,32 @@
+apiVersion: v2
+name: factoryplus
+description: Factory+ Asset Tracking Platform — Supabase BaaS, TimescaleDB historian, Sparkplug B ingestion, Node-RED edge automation and Grafana.
+type: application
+
+# The chart's own version. Bump on any template change.
+version: 0.1.0
+
+# The platform release this chart deploys. Quoted because Helm requires a string here and an
+# unquoted 0.1.0 is fine but 1.0 would become a float.
+appVersion: "0.1.0"
+
+kubeVersion: ">=1.25.0-0"
+
+home: https://github.com/Harri-Llewelyn/ACS-Cymru
+sources:
+  - https://github.com/Harri-Llewelyn/ACS-Cymru
+
+keywords:
+  - factory-plus
+  - sparkplug-b
+  - mqtt
+  - timescaledb
+  - supabase
+  - industrial-iot
+
+annotations:
+  # Phase 1 of docs/kubernetes-migration-plan.md: chart skeleton and data tier. The Supabase
+  # control plane (Phase 2), messaging (Phase 3), edge and frontend (Phase 4) and ingress
+  # (Phase 5) are not in this chart yet -- see deploy/k8s/README.md for what is and is not
+  # deployed, so a partial install is never mistaken for a broken one.
+  factoryplus.io/phase: "1"

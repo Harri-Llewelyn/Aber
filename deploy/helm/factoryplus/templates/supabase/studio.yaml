@@ -1,0 +1,119 @@
+{{- if .Values.supabaseStudio.enabled }}
+{{- $component := "supabase-studio" -}}
+{{- $secretName := include "factoryplus.secretName" . -}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-studio
+  labels:
+    {{- include "factoryplus.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "factoryplus.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supabase-studio
+  labels:
+    {{- include "factoryplus.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  replicas: {{ .Values.supabaseStudio.replicas }}
+  selector:
+    matchLabels:
+      {{- include "factoryplus.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "factoryplus.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: studio
+          image: "{{ .Values.supabaseStudio.image.repository }}:{{ .Values.supabaseStudio.image.tag }}"
+          imagePullPolicy: {{ .Values.supabaseStudio.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            # Without this Next.js binds only the container's own interface, so both the image's
+            # bundled healthcheck and any probe fail with ECONNREFUSED against a running server.
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            - name: STUDIO_PG_META_URL
+              value: http://supabase-meta:8080
+            {{- include "factoryplus.secretEnv" (dict "name" "PG_META_CRYPTO_KEY" "secretName" $secretName "key" "PG_META_CRYPTO_KEY") | nindent 12 }}
+            - name: POSTGRES_HOST
+              value: {{ include "factoryplus.supabaseDb.host" . | quote }}
+            - name: POSTGRES_PORT
+              value: {{ include "factoryplus.supabaseDb.port" . | quote }}
+            - name: POSTGRES_DB
+              value: postgres
+            {{- include "factoryplus.secretEnv" (dict "name" "POSTGRES_PASSWORD" "secretName" $secretName "key" "POSTGRES_PASSWORD") | nindent 12 }}
+            - name: POSTGRES_USER_READ_WRITE
+              value: postgres
+            # SERVER-SIDE calls run inside the container, so this is the in-cluster gateway...
+            - name: SUPABASE_URL
+              value: {{ include "factoryplus.supabase.internalUrl" . | quote }}
+            # ...while this one is followed by the BROWSER and must be the ingress address. Using
+            # one for both is the classic way this breaks: a browser cannot resolve `supabase-kong`.
+            - name: SUPABASE_PUBLIC_URL
+              value: {{ include "factoryplus.supabaseUrl" . | quote }}
+            {{- include "factoryplus.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
+            {{- include "factoryplus.secretEnv" (dict "name" "SUPABASE_SERVICE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
+            {{- include "factoryplus.secretEnv" (dict "name" "AUTH_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
+            - name: DEFAULT_ORGANIZATION_NAME
+              value: {{ .Values.supabaseStudio.organizationName | quote }}
+            - name: DEFAULT_PROJECT_NAME
+              value: {{ .Values.supabaseStudio.projectName | quote }}
+            # Studio reads Edge Functions from DISK, not over HTTP. On Compose that is a bind mount
+            # of ./supabase/functions; here there is no repository on the node, and the functions
+            # live baked inside the edge-runtime image instead. Studio therefore gets an emptyDir:
+            # its Edge Functions page lists nothing, which is correct -- the functions are not
+            # editable through Studio on this target, they ship with the image.
+            - name: EDGE_FUNCTIONS_MANAGEMENT_FOLDER
+              value: /app/edge-functions
+            - name: SNIPPETS_MANAGEMENT_FOLDER
+              value: /app/snippets
+          startupProbe:
+            httpGet:
+              path: /api/platform/profile
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            # Next.js cold start; the Compose healthcheck allows a 40s start_period.
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /api/platform/profile
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.supabaseStudio.resources | nindent 12 }}
+          volumeMounts:
+            - name: edge-functions
+              mountPath: /app/edge-functions
+            - name: snippets
+              mountPath: /app/snippets
+      volumes:
+        # Both are scratch: see EDGE_FUNCTIONS_MANAGEMENT_FOLDER above. Snippets are user SQL saved
+        # in the UI and are NOT persisted here deliberately -- a ReadWriteOnce PVC for a convenience
+        # cache would pin Studio to one node for no operational benefit.
+        - name: edge-functions
+          emptyDir: {}
+        - name: snippets
+          emptyDir: {}
+{{- end }}

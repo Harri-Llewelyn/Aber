@@ -1,0 +1,166 @@
+{{- if .Values.realtime.enabled }}
+{{- $component := "realtime" -}}
+{{- $secretName := include "factoryplus.secretName" . -}}
+{{/*
+=================================================================================================
+Realtime: the WAL change feed behind the `realtime-dev` Service.
+
+FOUR CONTAINER REQUIREMENTS, each of which crash-loops or 403s the service, and none of which
+names itself in the resulting error. All four are carried across from docker-compose.yml:
+
+  1. RLIMIT_NOFILE must be set. The image's /app/run.sh runs `ulimit -n $RLIMIT_NOFILE` under
+     `set -u`, so leaving it unset kills the container on "unbound variable" BEFORE the Elixir app
+     starts -- there is no application log to read.
+  2. The `_realtime` schema must pre-exist. Migration 0022 (now folded into 0001) creates it, which
+     is why this waits on db-init rather than merely on the database.
+  3. The tenant is `realtime-dev`, and SEED_SELF_HOST IGNORES TENANT_NAME. Probing
+     /api/tenants/realtime/health returns 404 against a perfectly healthy server.
+  4. Kong must address it as `realtime-dev...`, which here is the Service NAME -- see
+     realtime-service.yaml.
+
+Two more that are equally load-bearing:
+  * DB_USER is supabase_admin, NOT authenticator. Realtime needs REPLICATION privilege to create
+    its logical slot and the scoped PostgREST role does not have it.
+  * RLS_ENABLED is required, not optional. RLS is evaluated per change per subscriber, and
+    digital_thread is restricted to privileged roles -- that has to hold over the socket exactly as
+    it does over PostgREST.
+=================================================================================================
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supabase-realtime
+  labels:
+    {{- include "factoryplus.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  # ALWAYS ONE. Realtime holds a logical replication slot, which is per-instance state; a second
+  # node needs DNS_NODES clustering this stack does not configure. `replicas` is in values only so
+  # it can be scaled to ZERO for debugging, never up.
+  replicas: {{ .Values.realtime.replicas }}
+  strategy:
+    # Recreate, not RollingUpdate: two Realtime instances would contend for the same replication
+    # slot, and the new one fails to acquire it while the old one is still terminating.
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "factoryplus.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "factoryplus.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        {{/*
+          Waits for the `_realtime` SCHEMA, not just for the database. Realtime runs its own
+          migrations against that schema on boot and fails outright if it does not exist -- and it
+          is created by 0001, so this is really a wait on db-init having completed. Checking the
+          schema rather than the Job keeps it honest: it tests the postcondition, not the actor.
+        */}}
+        - name: wait-for-realtime-schema
+          image: "{{ .Values.supabaseDb.image.repository }}:{{ .Values.supabaseDb.image.tag }}"
+          imagePullPolicy: {{ .Values.supabaseDb.image.pullPolicy }}
+          env:
+            {{- include "factoryplus.secretEnv" (dict "name" "PGPASSWORD" "secretName" $secretName "key" "POSTGRES_PASSWORD") | nindent 12 }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              deadline=$(( $(date +%s) + {{ .Values.initJobs.waitTimeout }} ))
+              until psql -h {{ include "factoryplus.supabaseDb.host" . }} -p {{ include "factoryplus.supabaseDb.port" . }} \
+                        -U supabase_admin -d postgres -tAc \
+                        "SELECT 1 FROM information_schema.schemata WHERE schema_name = '_realtime'" \
+                    2>/dev/null | grep -q 1; do
+                if [ "$(date +%s)" -ge "$deadline" ]; then
+                  echo "timed out waiting for the _realtime schema (created by db-init via migration 0001)" >&2
+                  exit 1
+                fi
+                echo "waiting for the _realtime schema ..."
+                sleep 3
+              done
+              echo "_realtime schema exists"
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+      containers:
+        - name: realtime
+          image: "{{ .Values.realtime.image.repository }}:{{ .Values.realtime.image.tag }}"
+          imagePullPolicy: {{ .Values.realtime.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.realtime.port }}
+              protocol: TCP
+          env:
+            - name: PORT
+              value: {{ .Values.realtime.port | quote }}
+            - name: DB_HOST
+              value: {{ include "factoryplus.supabaseDb.host" . | quote }}
+            - name: DB_PORT
+              value: {{ include "factoryplus.supabaseDb.port" . | quote }}
+            # supabase_admin, NOT authenticator: creating a logical replication slot needs
+            # REPLICATION privilege, which the scoped PostgREST role does not have.
+            - name: DB_USER
+              value: supabase_admin
+            {{- include "factoryplus.secretEnv" (dict "name" "DB_PASSWORD" "secretName" $secretName "key" "POSTGRES_PASSWORD") | nindent 12 }}
+            - name: DB_NAME
+              value: postgres
+            - name: DB_AFTER_CONNECT_QUERY
+              value: "SET search_path TO _realtime"
+            {{- include "factoryplus.secretEnv" (dict "name" "DB_ENC_KEY" "secretName" $secretName "key" "REALTIME_DB_ENC_KEY") | nindent 12 }}
+            # Must be the same secret Kong, PostgREST and GoTrue verify with, or every subscriber
+            # is rejected at the socket handshake.
+            {{- include "factoryplus.secretEnv" (dict "name" "API_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
+            {{- include "factoryplus.secretEnv" (dict "name" "SECRET_KEY_BASE" "secretName" $secretName "key" "REALTIME_SECRET_KEY_BASE") | nindent 12 }}
+            {{- include "factoryplus.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
+            - name: ERL_AFLAGS
+              value: "-proto_dist inet_tcp"
+            - name: DNS_NODES
+              value: "''"
+            # NOT OPTIONAL. /app/run.sh does `ulimit -n $RLIMIT_NOFILE` under `set -u`; unset kills
+            # the container on "unbound variable" before the Elixir app starts.
+            - name: RLIMIT_NOFILE
+              value: "10000"
+            # RLS is evaluated per change, per subscriber. digital_thread is restricted to
+            # privileged roles and that must hold over the socket exactly as over PostgREST.
+            - name: RLS_ENABLED
+              value: "true"
+            - name: SEED_SELF_HOST
+              value: "true"
+            - name: RUN_JANITOR
+              value: "true"
+            - name: APP_NAME
+              value: realtime
+          # THE TENANT HEALTH ENDPOINT IS AUTHENTICATED, and the tenant is `realtime-dev` (the name
+          # SEED_SELF_HOST creates -- TENANT_NAME is ignored). An unauthenticated probe gets a flat
+          # 403 and the pod never reports ready against a healthy server; the wrong tenant name
+          # gets a 404.
+          #
+          # An `exec` probe rather than `httpGet` because the bearer token has to come from the
+          # container's environment -- an httpGet header would mean templating the anon key into
+          # the pod spec. Using the anon key here also proves API_JWT_SECRET matches what the
+          # browser will present on the socket.
+          startupProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - curl -sf -H "Authorization: Bearer $SUPABASE_ANON_KEY" http://localhost:{{ .Values.realtime.port }}/api/tenants/{{ .Values.realtime.serviceName }}/health
+            periodSeconds: 10
+            timeoutSeconds: 5
+            # Realtime applies its own _realtime migrations and seeds the tenant before answering.
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - curl -sf -H "Authorization: Bearer $SUPABASE_ANON_KEY" http://localhost:{{ .Values.realtime.port }}/api/tenants/{{ .Values.realtime.serviceName }}/health
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.realtime.resources | nindent 12 }}
+{{- end }}

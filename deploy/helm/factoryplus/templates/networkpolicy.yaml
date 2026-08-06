@@ -1,0 +1,442 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $fullname := include "factoryplus.fullname" . -}}
+{{/*
+=================================================================================================
+M4 -- default-deny, plus one explicit allow per flow.
+
+THE FLOW GRAPH IS DECLARED ONCE, BELOW, AS EDGES, and both directions are GENERATED from it. That
+is the whole design of this file, and it is not a stylistic choice: a hand-written pair of policies
+lets you allow egress from A and forget ingress on B. The packet is then dropped at the
+destination, the source sees a timeout, and NOTHING logs a policy decision -- so it reads as the
+destination being slow or down. Deriving both from one edge makes that class of mistake
+unrepresentable.
+
+WHY DEFAULT-DENY EGRESS AT ALL, given it is the risky half. `pg_net` fires outbound HTTP FROM
+INSIDE POSTGRES, and `webhook_endpoints` has no write RLS policy -- deliberately, because a
+writable endpoint table plus database egress is an SSRF primitive. The grant-level revoke on `anon`
+is one half of that mitigation; this file is the other.
+
+THE MOST DANGEROUS RULE HERE IS THE ONE THAT IS EASY TO OMIT: `supabase-db -> node-red:1880`.
+The quarantine webhook goes DIRECTLY to Node-RED -- `webhook_endpoints` seeds
+`http://node-red:1880/hooks/quarantine`, not a Kong route -- and pg_net has NO RETRIES, NO ORDERING
+AND NO DLQ. Block it and every quarantine notification is silently dropped: no error, no queue, no
+log, and the first sign is an operator noticing alerts stopped arriving weeks later.
+
+TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
+  networkPolicy.ingressControllerNamespace   where Traefik/ingress-nginx runs (kube-system on k3s)
+  networkPolicy.apiServerPorts / Cidr        for the one initContainer that calls the API server
+=================================================================================================
+*/}}
+{{- /* The port the in-cluster MQTT clients dial. `mosquitto.tls.internalClients` moves BOTH the
+     ingestion daemon and Node-RED to 8883 at once, so it must move both of their edges at once: an
+     edge left on 1883 while the client moved is a packet dropped at the destination with nothing
+     logging a policy decision, which reads as the broker being down.
+
+     Declared here rather than inline in the edge list -- a `{{ }}` comment action nested inside the
+     `$edges := list` action is a parse error ("unexpected { in operand"), reported at a line inside
+     the list rather than at the comment. */ -}}
+{{- $brokerPort := ternary 8883 1883 (and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients) -}}
+{{- /* ---------------------------------------------------------------------------------------
+     THE EDGES. `from` and `to` are component label values; `port` is the DESTINATION port.
+     Add a flow here and both policies follow. Nothing else in this file needs editing.
+--------------------------------------------------------------------------------------------- */ -}}
+{{- $edges := list
+
+  (dict "from" "supabase-auth"      "to" "supabase-db"        "port" 5432 "why" "GoTrue owns the auth schema")
+  (dict "from" "supabase-rest"      "to" "supabase-db"        "port" 5432 "why" "PostgREST as authenticator")
+  (dict "from" "supabase-storage"   "to" "supabase-db"        "port" 5432 "why" "storage-api migrates the storage schema on boot")
+  (dict "from" "supabase-meta"      "to" "supabase-db"        "port" 5432 "why" "catalogue introspection for Studio")
+  (dict "from" "realtime"           "to" "supabase-db"        "port" 5432 "why" "logical replication slot")
+  (dict "from" "supabase-studio"    "to" "supabase-db"        "port" 5432 "why" "the SQL editor connects directly")
+
+  (dict "from" "supabase-db"        "to" "timescaledb"        "port" 5432 "why" "postgres_fdw -- public.telemetry (M2)")
+  (dict "from" "ingestion"          "to" "timescaledb"        "port" 5432 "why" "telemetry writes")
+  (dict "from" "grafana"            "to" "timescaledb"        "port" 5432 "why" "the historian datasource")
+
+  (dict "from" "supabase-db"        "to" "supabase-kong"      "port" 8000 "why" "pg_net: edge functions and REST called from SQL")
+  (dict "from" "supabase-db"        "to" "node-red"           "port" 1880 "why" "pg_net: THE QUARANTINE WEBHOOK, direct, no retries/DLQ")
+
+  (dict "from" "supabase-kong"      "to" "supabase-auth"      "port" 9999 "why" "/auth/v1/")
+  (dict "from" "supabase-kong"      "to" "supabase-rest"      "port" 3000 "why" "/rest/v1/")
+  (dict "from" "supabase-kong"      "to" "realtime"           "port" 4000 "why" "/realtime/v1/ -> /socket/")
+  (dict "from" "supabase-kong"      "to" "supabase-storage"   "port" 5000 "why" "/storage/v1/")
+  (dict "from" "supabase-kong"      "to" "supabase-functions" "port" 9000 "why" "/functions/v1/")
+
+  (dict "from" "supabase-storage"   "to" "supabase-rest"      "port" 3000 "why" "resolves the caller's claims through PostgREST")
+  (dict "from" "supabase-studio"    "to" "supabase-meta"      "port" 8080 "why" "the Database pages")
+  (dict "from" "supabase-studio"    "to" "supabase-kong"      "port" 8000 "why" "server-side API calls")
+  (dict "from" "supabase-functions" "to" "supabase-kong"      "port" 8000 "why" "functions call back through the gateway")
+  (dict "from" "supabase-functions" "to" "node-red"           "port" 1880 "why" "deploy-nodered pushes to the admin API")
+
+  (dict "from" "ingestion"          "to" "mosquitto"          "port" $brokerPort "why" "the spBv1.0/# subscription")
+  (dict "from" "ingestion"          "to" "supabase-kong"      "port" 8000 "why" "device registration and quarantine")
+  (dict "from" "node-red"           "to" "mosquitto"          "port" $brokerPort "why" "the broker node")
+  (dict "from" "node-red"           "to" "supabase-kong"      "port" 8000 "why" "OAuth token exchange and nodered-userinfo")
+  (dict "from" "grafana"            "to" "supabase-kong"      "port" 8000 "why" "OAuth token_url and grafana-userinfo")
+
+  (dict "from" "db-roles-init"      "to" "supabase-db"        "port" 5432 "why" "scoped role passwords")
+  (dict "from" "db-init"            "to" "supabase-db"        "port" 5432 "why" "migrations and seed")
+  (dict "from" "db-init"            "to" "supabase-auth"      "port" 9999 "why" "waits on GoTrue: it owns the auth schema")
+  (dict "from" "storage-init"       "to" "supabase-storage"   "port" 5000 "why" "creates the bucket via the Storage REST API")
+
+  (dict "from" "test-fdw"           "to" "supabase-db"        "port" 5432 "why" "M6: queries the foreign table")
+  (dict "from" "test-fdw"           "to" "timescaledb"        "port" 5432 "why" "M6: checks the hypertable from the far side")
+  (dict "from" "e2e-validate"       "to" "supabase-db"        "port" 5432 "why" "audit-row cleanup, out of reach of service_role")
+  (dict "from" "e2e-validate"       "to" "timescaledb"        "port" 5432 "why" "telemetry assertions")
+  (dict "from" "e2e-validate"       "to" "mosquitto"          "port" 1883 "why" "publishes Sparkplug fixtures")
+  (dict "from" "e2e-validate"       "to" "supabase-kong"      "port" 8000 "why" "seeds through PostgREST")
+  (dict "from" "e2e-validate"       "to" "node-red"           "port" 1880 "why" "check 7 probes all three auth surfaces")
+  (dict "from" "e2e-aas-export"     "to" "supabase-kong"      "port" 8000 "why" "invokes aas-export and signs in")
+
+  (dict "from" "backup"             "to" "supabase-db"        "port" 5432 "why" "pg_dump")
+  (dict "from" "backup"             "to" "timescaledb"        "port" 5432 "why" "pg_dump")
+-}}
+{{- /* Filter to edges whose BOTH ends are actually deployed, so a partial install does not carry
+     rules naming absent components -- harmless, but it makes the rendered policy misleading. */ -}}
+{{- $enabledComponents := dict
+      "timescaledb" .Values.timescaledb.enabled
+      "supabase-db" .Values.supabaseDb.enabled
+      "supabase-auth" .Values.supabaseAuth.enabled
+      "supabase-rest" .Values.supabaseRest.enabled
+      "supabase-kong" .Values.supabaseKong.enabled
+      "supabase-functions" .Values.supabaseFunctions.enabled
+      "supabase-storage" .Values.supabaseStorage.enabled
+      "supabase-meta" .Values.supabaseMeta.enabled
+      "supabase-studio" .Values.supabaseStudio.enabled
+      "realtime" .Values.realtime.enabled
+      "swagger-ui" .Values.swaggerUi.enabled
+      "mosquitto" .Values.mosquitto.enabled
+      "ingestion" .Values.ingestion.enabled
+      "node-red" .Values.nodeRed.enabled
+      "frontend" .Values.frontend.enabled
+      "grafana" .Values.grafana.enabled
+      "db-roles-init" (and .Values.initJobs.enabled .Values.supabaseDb.enabled)
+      "db-init" (and .Values.initJobs.enabled .Values.supabaseDb.enabled)
+      "storage-init" (and .Values.initJobs.enabled .Values.supabaseStorage.enabled)
+      "test-fdw" (and .Values.supabaseDb.enabled .Values.timescaledb.enabled)
+      "e2e-validate" .Values.e2e.enabled
+      "e2e-aas-export" .Values.e2e.enabled
+      "backup" .Values.backup.enabled
+-}}
+{{- $live := list -}}
+{{- range $edges -}}
+{{- if and (index $enabledComponents .from) (index $enabledComponents .to) -}}
+{{- $live = append $live . -}}
+{{- end -}}
+{{- end -}}
+{{- /* Every component that is an endpoint of at least one live edge, plus those exposed publicly. */ -}}
+{{- $sources := dict -}}
+{{- $targets := dict -}}
+{{- range $live -}}
+{{- $_ := set $sources .from (append (index $sources .from | default list) .) -}}
+{{- $_ := set $targets .to (append (index $targets .to | default list) .) -}}
+{{- end -}}
+{{- /* HTTP services the ingress controller must reach. Derived from the ingress route list so the
+     policy and the Ingress cannot disagree about what is published. */ -}}
+{{- $published := dict -}}
+{{- range (include "factoryplus.ingressRoutes" . | fromYamlArray) -}}
+{{- $override := index $.Values.ingress.routes .name -}}
+{{- if ne $override false -}}
+{{- $_ := set $published .service (append (index $published .service | default list) .port) -}}
+{{- end -}}
+{{- end -}}
+{{- $componentOf := dict "frontend" "frontend" "supabase-kong" "supabase-kong" "node-red" "node-red" "grafana" "grafana" "supabase-studio" "supabase-studio" "swagger-ui" "swagger-ui" "mosquitto" "mosquitto" -}}
+---
+{{/*
+DEFAULT DENY, both directions, for every pod in the namespace.
+
+An empty podSelector selects ALL pods; naming both policyTypes with no rules denies both
+directions. Everything after this is additive -- NetworkPolicies are a union, never an override, so
+there is no ordering to reason about and no way for a later rule to widen this one by accident.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-default-deny" $fullname }}
+  labels:
+    {{- include "factoryplus.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+{{/*
+DNS, FOR EVERY POD. THE FIRST RULE TO WRITE AND THE ONE MOST OFTEN FORGOTTEN.
+
+Without it every in-cluster name fails to resolve, so nothing reaches anything -- and the symptom is
+"could not translate host name", which reads as a wrong hostname rather than a blocked packet. It
+would look exactly like the Service-naming mistakes this chart spends so much effort preventing.
+
+BOTH UDP AND TCP 53: a response over 512 bytes falls back to TCP, so a UDP-only rule works until a
+query gets large enough and then fails intermittently -- the worst possible failure shape.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-allow-dns" $fullname }}
+  labels:
+    {{- include "factoryplus.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.dnsNamespace }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+{{- range $component, $edgesFrom := $sources }}
+---
+{{/* Egress for {{ $component }}. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-egress-%s" $fullname $component }}
+  labels:
+    {{- include "factoryplus.componentLabels" (dict "ctx" $ "component" $component) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "factoryplus.selectorLabels" (dict "ctx" $ "component" $component) | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    {{- range $edgesFrom }}
+    # -> {{ .to }}:{{ .port }} — {{ .why }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "factoryplus.selectorLabels" (dict "ctx" $ "component" .to) | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .port }}
+    {{- end }}
+{{- end }}
+{{- range $component, $edgesTo := $targets }}
+---
+{{/* Ingress for {{ $component }}, generated from the same edges. */}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-ingress-%s" $fullname $component }}
+  labels:
+    {{- include "factoryplus.componentLabels" (dict "ctx" $ "component" $component) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "factoryplus.selectorLabels" (dict "ctx" $ "component" $component) | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    {{- range $edgesTo }}
+    # <- {{ .from }} on {{ .port }} — {{ .why }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "factoryplus.selectorLabels" (dict "ctx" $ "component" .from) | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .port }}
+    {{- end }}
+{{- end }}
+{{- if $published }}
+---
+{{/*
+The ingress controller reaching the published HTTP services.
+
+THE BACKEND LIST COMES FROM factoryplus.ingressRoutes, the same helper the Ingress itself uses, so
+the policy and the routing cannot disagree about what is published -- including per-route opt-outs
+(`ingress.routes.studio: false` removes it from both).
+
+THE NAMESPACE IS ENVIRONMENT-SPECIFIC AND CANNOT BE INFERRED: Traefik runs in kube-system on k3s,
+ingress-nginx usually in its own namespace. Get it wrong and every route 502s from the controller
+while every pod reports healthy -- the ingress is up, the backends are up, and the packets between
+them are dropped with nothing logging it.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-ingress-from-controller" $fullname }}
+  labels:
+    {{- include "factoryplus.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          {{- range $svc, $ports := $published }}
+          - {{ index $componentOf $svc | default $svc }}
+          {{- end }}
+      - key: app.kubernetes.io/instance
+        operator: In
+        values: [{{ .Release.Name }}]
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressControllerNamespace }}
+      ports:
+        {{- range $svc, $ports := $published }}
+        {{- range $ports }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+        {{- end }}
+{{- end }}
+{{- if and .Values.mosquitto.enabled .Values.mosquitto.external.enabled }}
+---
+{{/*
+Raw MQTT from OUTSIDE the cluster.
+
+Shopfloor gateways are not pods and have no namespace, so there is no selector that describes them:
+this has to be an ipBlock. The default is 0.0.0.0/0 because the alternative -- guessing a plant
+network CIDR -- would silently drop the fleet.
+
+NARROW IT ANYWAY, and note what that is and is not worth. Traffic arrives SNAT'd by k3s's ServiceLB
+(Klipper), so the source address seen here is the NODE's, not the gateway's -- which is why the
+default cannot be "the node", and why a narrowed CIDR is weaker evidence than it looks. TLS on 8883
+is the control that actually authenticates the broker to the gateway and encrypts the password in
+flight; the CIDR is defence in depth behind it.
+
+BOTH PORTS ARE ALLOWED WHEN TLS IS ON, for as long as `external.plaintext` publishes 1883. A fleet
+migrates gateway by gateway, so the window where both are in use is the normal state, not an edge
+case -- and a policy that allowed only 8883 while the Service still published 1883 would drop the
+un-migrated half of the fleet with nothing logging why.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-ingress-mqtt-external" $fullname }}
+  labels:
+    {{- include "factoryplus.componentLabels" (dict "ctx" . "component" "mosquitto") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "factoryplus.selectorLabels" (dict "ctx" . "component" "mosquitto") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        {{- range .Values.networkPolicy.mqttAllowedCidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        {{- if .Values.mosquitto.external.plaintext }}
+        - protocol: TCP
+          port: 1883
+        {{- end }}
+        - protocol: TCP
+          port: 9001
+        {{- if .Values.mosquitto.tls.enabled }}
+        - protocol: TCP
+          port: 8883
+        {{- end }}
+{{- end }}
+{{- if and .Values.e2e.enabled .Values.networkPolicy.apiServerCidr }}
+---
+{{/*
+The Kubernetes API server, for the one initContainer that talks to it.
+
+`e2e-aas-export`'s wait-for-validate step reads a Job's status with kubectl. Under default-deny that
+call is dropped and the initContainer sits waiting for a Job it cannot see, then times out blaming
+the Job -- which had in fact already completed.
+
+THE ADDRESS IS ENVIRONMENT-SPECIFIC. `kubernetes.default.svc` resolves to a ClusterIP in the service
+CIDR, and NetworkPolicy has no selector for "the API server", so this is an ipBlock. Default
+0.0.0.0/0 on the API ports only; set `networkPolicy.apiServerCidr` to the service CIDR to narrow it.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-egress-apiserver" $fullname }}
+  labels:
+    {{- include "factoryplus.componentLabels" (dict "ctx" . "component" "e2e-aas-export") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "factoryplus.selectorLabels" (dict "ctx" . "component" "e2e-aas-export") | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.apiServerCidr | quote }}
+      ports:
+        {{- range .Values.networkPolicy.apiServerPorts }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+{{- end }}
+{{- with .Values.networkPolicy.extraEgress }}
+---
+{{/*
+Escape hatch, and the reason one is needed.
+
+Some flows cannot be expressed from inside this chart: an off-cluster SMTP relay for GoTrue, an
+External Secrets Operator webhook, an S3 endpoint for backups, a corporate proxy. Rather than
+weaken the default-deny to accommodate them, they are declared here.
+
+ALSO: SOME CNIs DO NOT EXEMPT KUBELET PROBES from ingress policy. k3s's default controller does, and
+so do Calico and Cilium -- but if every pod goes unready the moment this is enabled, that is the
+cause, and the fix is an ingress allow from the node CIDR, added here.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-extra-egress" $fullname }}
+  labels:
+    {{- include "factoryplus.labels" $ | nindent 4 }}
+spec:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with .Values.networkPolicy.extraIngress }}
+---
+{{/*
+=================================================================================================
+The INGRESS escape hatch. `extraEgress` has existed since Phase 7; this is its missing half, and
+the asymmetry was itself a defect.
+
+WHY IT IS NEEDED AT ALL, given the edge list generates ingress automatically: the edge list can only
+describe flows between components OF THIS CHART. Anything reaching in from outside it has no
+`from` component to name --
+
+  * PROMETHEUS SCRAPING, the motivating case. Under default-deny every scrape is dropped, and the
+    symptom is a monitoring stack that reports every Factory+ target as down while the stack is
+    entirely healthy. That reads as a monitoring fault, not a policy one -- the same shape of
+    misdiagnosis the DNS and ingress-controller rules above are commented so heavily to prevent.
+    With no seam here, turning `networkPolicy.enabled` on silently stopped all scraping.
+  * an off-cluster uptime checker or load balancer health prober;
+  * a CNI whose kubelet probes are NOT exempt from ingress policy -- previously documented under
+    extraEgress, which was the wrong place for it: a probe allow is an INGRESS rule, and following
+    that note literally produced a policy that changed nothing.
+
+IT CANNOT BREAK THE SYMMETRY CHECK, and that is by construction rather than by care. CI asserts that
+every edge in the generated pairs has both directions; these rules are not edges and generate no
+egress counterpart, because there is no in-chart component at the other end to generate one for. The
+check reads the `-egress-<component>` / `-ingress-<component>` pairs, and this policy is named
+`-extra-ingress`, so it is outside that set by name.
+
+NetworkPolicies are a union, so this only ever widens -- it cannot weaken the default-deny or any
+generated rule. Same shape as extraEgress: a raw spec, so podSelector is yours to write.
+=================================================================================================
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-extra-ingress" $fullname }}
+  labels:
+    {{- include "factoryplus.labels" $ | nindent 4 }}
+spec:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}

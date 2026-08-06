@@ -1,36 +1,26 @@
 -- =============================================================================================
--- 0003_nodered_oidc_auth.sql
+-- 0006_nodered_oidc_auth.sql
 --
 -- Closes the unauthenticated Node-RED admin API and webhook receiver on port 1880.
---
--- BEFORE THIS, scripts/node-red-init.mjs wrote a settings.js declaring only `flowFile` and
--- `credentialSecret`. With no adminAuth, the editor and the /flows admin API were open to
--- anyone who could reach the port -- edge automation flows could be read or replaced, and
--- POST /hooks/quarantine accepted anything. Both the plumbing for the authenticated path
--- (deploy-nodered's bearer header, this file's outbound token) existed and both deliberately
--- fell back to unauthenticated because no credential was configured.
 --
 -- The application half lives in node-red/Dockerfile, scripts/node-red-init.mjs and
 -- supabase/functions/nodered-userinfo. This file provides the two things only the database can:
 --
---   1. The OAuth client Node-RED authenticates HUMANS with, in auth.oauth_clients. Mirrors the
---      Grafana client registered by 0002_seed_data.sql, and differs from it in one field --
---      see the token_endpoint_auth_method note below.
---   2. The signing key for the token the quarantine webhook carries, in Vault, plus the
---      dispatch function that now MINTS a short-lived token rather than replaying a static one.
+--   1. The OAuth client Node-RED authenticates HUMANS with, in auth.oauth_clients.
+--   2. The signing key for the quarantine webhook's token, in Vault, plus a dispatch function
+--      that MINTS a short-lived token per event rather than replaying a static one.
 --
--- SCOPE: this is an additive migration on top of the two-file baseline, per CLAUDE.md. It does
--- not edit 0001 or 0002; the one thing it must correct in 0002's seed is done as an explicit
--- UPDATE, because that row's ON CONFLICT is DO NOTHING and an edit there would never reach an
--- existing database.
+-- Idempotent: db-init replays every /migrations/*.sql on every boot. It is additive -- it does
+-- not edit 0001 or 0002; the one correction it must make to 0002's seed is an explicit UPDATE,
+-- because that row's ON CONFLICT is DO NOTHING and an edit there would never reach an existing
+-- database.
 --
--- IT IS IDEMPOTENT. supabase-db-init replays every /migrations/*.sql on every boot.
+-- PSQL VARIABLES: `-v nodered_oauth_client_secret`, `-v nodered_webhook_jwt_secret`,
+-- `-v nodered_redirect_uri`, all defaulted at the point of use so this file stays runnable
+-- standalone. An absent secret leaves the corresponding path SHUT, not open -- see the WARNINGs.
 --
--- PSQL VARIABLES. `supabase-db-init` passes `-v nodered_oauth_client_secret`,
--- `-v nodered_webhook_jwt_secret` and `-v nodered_redirect_uri`. All are defaulted at the point
--- of use, so this file stays runnable standalone, and the two secrets are treated as
--- absent-is-normal rather than as an error -- though see the WARNINGs: absent means the
--- corresponding path stays shut, not open.
+-- What was open before this, and why the webhook token is a capability rather than a credential:
+--   simulators/README.md -> "Node-RED authentication"
 -- =============================================================================================
 
 \if :{?nodered_oauth_client_secret} \else \set nodered_oauth_client_secret '' \endif
@@ -49,19 +39,14 @@ SELECT set_config('factoryplus.nodered_redirect_uri',        :'nodered_redirect_
 -- ---------------------------------------------------------------------------------------------
 -- 1. Node-RED OAuth client registration
 -- ---------------------------------------------------------------------------------------------
--- Node-RED is an OAuth client of GoTrue's OAuth 2.1 server, exactly as Grafana is.
 -- `client_secret_hash` is base64url(sha256(secret)) unpadded -- NOT bcrypt.
 --
 -- token_endpoint_auth_method IS 'client_secret_post', NOT the Grafana client's
--- 'client_secret_basic', and the difference is deliberate. GoTrue enforces whichever is
--- registered, exactly:
+-- 'client_secret_basic'. passport-oauth2 sends credentials in the token request body by default;
+-- GoTrue enforces whichever is registered, exactly, and a mismatch is:
 --   400 invalid_credentials -- "invalid authentication method: client is registered for
 --   'client_secret_basic' but 'client_secret_post' was used"
--- Grafana's Go oauth2 client auto-detects and must be pinned with auth_style = InHeader, so
--- Basic is the natural fit there. passport-oauth2 sends the credentials in the token request
--- body by default, and matching it avoids subclassing the strategy purely to move a header.
--- Both stay confidential clients over the compose-internal network; neither puts the secret in
--- a URL. Change this and settings.js has to change with it.
+-- Change this and settings.js has to change with it.
 DO $$
 DECLARE
   -- Pinned, not generated. settings.js carries this as NODERED_OAUTH_CLIENT_ID (defaulted in
@@ -123,25 +108,12 @@ SELECT set_config('factoryplus.nodered_oauth_client_secret', '', false);
 -- ---------------------------------------------------------------------------------------------
 -- 2. Vault: the quarantine webhook SIGNING KEY
 -- ---------------------------------------------------------------------------------------------
--- A SIGNING KEY, NOT A BEARER CREDENTIAL, and that distinction is the whole point.
+-- A SIGNING KEY, NOT A BEARER CREDENTIAL. A flow author can read msg.req.headers, so sharing the
+-- admin token with the webhook would hand every flow the admin API -- remote code execution on
+-- the edge host by way of a `function` node. HS256 because pgjwt implements only the HS family.
 --
--- The obvious design -- one `nodered_admin_token` serving both the admin API and the webhook --
--- is unsafe here for a reason specific to Node-RED: POST /hooks/quarantine is served by an
--- `http in` node, and any flow author can read msg.req.headers. Sharing the admin credential
--- with the webhook therefore hands every flow in the instance full admin API access, which is
--- remote code execution on the edge host by way of a `function` node.
---
--- So the webhook gets its own key, Node-RED holds the same key to VERIFY, and what a flow can
--- read out of a request header is a token that expires in 60 seconds and authorises nothing but
--- posting another quarantine notice.
---
--- HS256 (symmetric) because pgjwt implements only the HS family. The consequence -- Node-RED
--- can mint tokens it would itself accept -- is bounded by that same scope, and is the trade for
--- not adding an asymmetric signing dependency to a fire-and-forget notification path.
---
--- `nodered_admin_token` (0002_seed_data.sql) is deliberately left in place and untouched. It is
--- now break-glass only: settings.js accepts it on the admin API when set, for when Supabase
--- Auth is down and the flows still have to be reachable.
+-- Why the two must not be merged back, and why nodered_admin_token survives as break-glass:
+--   simulators/README.md -> "Node-RED authentication"
 DO $$
 DECLARE
   v_secret TEXT := current_setting('factoryplus.nodered_webhook_jwt_secret', true);
@@ -164,7 +136,7 @@ BEGIN
       'nodered_webhook_jwt_secret',
       'HS256 signing key for the Node-RED quarantine webhook. Read by '
       'public.dispatch_device_quarantine_webhook(), which mints a fresh 60-second token per '
-      'event. NOT a bearer credential and NOT the Node-RED admin token -- see migration 0003.'
+      'event. NOT a bearer credential and NOT the Node-RED admin token -- see migration 0006.'
     );
   ELSE
     -- update_secret rather than create: supabase-db-init replays every migration on every stack

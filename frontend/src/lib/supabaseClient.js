@@ -1,21 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error(
-    '[FATAL] Missing required build-time environment variables: VITE_SUPABASE_URL and/or VITE_SUPABASE_ANON_KEY must be provided.'
-  );
-}
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../config';
 
 // Re-exported for the one caller that cannot go through supabase-js: an AASX package is a ZIP, and
 // functions.invoke() decodes any non-JSON, non-octet-stream response as *text*, which corrupts
 // binary. That path builds the request itself and asks for a Blob.
-export const SUPABASE_URL = supabaseUrl;
-export const SUPABASE_ANON_KEY = supabaseAnonKey;
+//
+// Resolution (runtime /config.js, then the build-time inline, then a throw) lives in ../config.js.
+// Re-exporting rather than re-reading keeps this module the single import site the rest of the app
+// already uses.
+export { SUPABASE_URL, SUPABASE_ANON_KEY };
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,

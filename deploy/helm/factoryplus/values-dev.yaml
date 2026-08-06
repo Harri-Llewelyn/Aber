@@ -1,0 +1,70 @@
+# =============================================================================================
+# Local k3s development profile.
+#
+#   helm install factoryplus deploy/helm/factoryplus -f deploy/helm/factoryplus/values-dev.yaml
+#
+# EVERY CREDENTIAL BELOW IS A PUBLISHED DEMO VALUE, copied verbatim from .env.example. They are in
+# git, they are in the repository's CI logs, and they are the same on every developer's machine.
+# That is fine for a laptop k3s and is NEVER acceptable anywhere else -- values-prod.yaml.example
+# is the starting point for anything reachable by another person.
+#
+# The anon and service-role keys are JWTs signed by jwtSecret below; the three are a matching set
+# and must be replaced together. See the note on `secrets` in values.yaml.
+# =============================================================================================
+
+global:
+  # k3s ships Traefik and CoreDNS; `localhost` here means the ingress hosts resolve via /etc/hosts
+  # or nip.io during development. Phase 5 wires the Ingress objects -- until then this only feeds
+  # the browser-facing URLs the OAuth clients are registered with.
+  publicBaseDomain: 127.0.0.1.nip.io
+  scheme: http
+  # k3s's built-in provisioner. Node-local and ReadWriteOnce -- see values.yaml.
+  storageClass: local-path
+
+secrets:
+  jwtSecret: super-secret-jwt-token-with-at-least-32-characters
+  anonKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhbm9uIiwiZXhwIjoyMDAwMDAwMDAwfQ.Z7KTfqo7mvr4j40uB-6K4f_VVT-d-ISkJ7E5VJ41jt0
+  serviceRoleKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJzZXJ2aWNlX3JvbGUiLCJleHAiOjIwMDAwMDAwMDB9.GWSHLKn253lfP0FAYobjuXvQkQGcYhKVJ6Y0IJOo-lA
+  postgresPassword: postgres
+  timescalePassword: postgres
+
+  # EXACTLY 16 characters, and AT LEAST 64 characters. The chart asserts both.
+  realtimeDbEncKey: supabaserealtime
+  realtimeSecretKeyBase: 8f2c1d4b7a9e0356c8b1f4d72e5a90c3b6d8f1a4e7c025d9a3e6b8c1f4d7a0e39
+
+  pgMetaCryptoKey: factoryplus-pg-meta-crypto-key
+
+  mqttUser: factoryplus
+  mqttPassword: factoryplus123
+
+  grafanaAdminUser: admin
+  grafanaAdminPassword: admin
+  grafanaOAuthClientSecret: change-me-grafana-oauth-client-secret
+
+  noderedCredentialSecret: factoryplussecret
+  noderedOAuthClientSecret: change-me-nodered-oauth-client-secret
+  noderedWebhookJwtSecret: change-me-nodered-webhook-signing-key-min-32-chars
+  # Break-glass path stays shut by default, matching .env.example.
+  noderedAdminToken: ""
+
+# Small volumes: a laptop k3s is usually running on the same disk as everything else, and
+# local-path takes the space from the node's filesystem immediately.
+timescaledb:
+  persistence:
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 1Gi
+
+supabaseDb:
+  persistence:
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 2Gi

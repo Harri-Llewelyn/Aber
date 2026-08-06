@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { supabase } from '../lib/supabaseClient'
+import { supabase, SUPABASE_URL } from '../lib/supabaseClient'
 
 /**
  * OAuth consent screen for Supabase Auth's OIDC server.
@@ -18,7 +18,7 @@ import { supabase } from '../lib/supabaseClient'
  * without a session shows a prompt to sign in first rather than a second login form -- this
  * page is deliberately not an identity provider login screen.
  */
-const API_BASE = `${import.meta.env.VITE_SUPABASE_URL}/auth/v1`
+const API_BASE = `${SUPABASE_URL}/auth/v1`
 
 export function OAuthConsent() {
   const [state, setState] = useState({ status: 'loading' })

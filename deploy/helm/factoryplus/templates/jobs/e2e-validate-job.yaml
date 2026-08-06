@@ -1,0 +1,109 @@
+{{- if .Values.e2e.enabled }}
+{{- $component := "e2e-validate" -}}
+{{- $secretName := include "factoryplus.secretName" . -}}
+{{/*
+=================================================================================================
+`ingestion/validate.py`, run as a Job IN the namespace.
+
+THIS IS THE SIMPLER OF THE TWO TOPOLOGIES, which is worth saying because it is the opposite of the
+Compose case. On the host, CI has to override DB_HOST, DB_PORT, SUPABASE_DB_HOST, MQTT_HOST and
+SUPABASE_URL back to published ports (5433 / 54322 / 1883 / 54321) because the compose-internal names
+do not resolve outside the network. In-cluster the SERVICE NAMES ARE THE CORRECT CONFIGURATION -- and
+because they are identical to the Compose service names, the values below are the plain defaults with
+no rewriting and no port-forwarding.
+
+NOT A `helm test` HOOK, deliberately, unlike test-fdw. This suite SEEDS AND DELETES fixtures, drives
+real MQTT traffic and takes minutes; `helm test` should stay the cheap gate anyone can run against a
+live stack without thinking about it. Gated on `e2e.enabled` so it exists only when asked for.
+
+IT IS A CONFORMANCE CHECK FOR EITHER TARGET. The same 20 checks run against Compose in CI's
+e2e-validation job; if both pass, the two topologies agree where it matters. That is the drift
+control -- there is no way to automate "these describe the same system", and a check that claimed to
+would pass while they diverged.
+=================================================================================================
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-e2e-validate" (include "factoryplus.fullname" .) }}
+  labels:
+    {{- include "factoryplus.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    # A plain Job, not a hook: it is triggered on purpose, and `kubectl wait` on it is what CI does.
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  # NO RETRIES. A failed conformance run is a result to read, not a flake to paper over -- and the
+  # suite is not idempotent mid-flight: a retry starting while fixtures from the previous attempt
+  # exist reports collisions rather than the original failure.
+  backoffLimit: 0
+  ttlSecondsAfterFinished: {{ .Values.e2e.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "factoryplus.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        {{/*
+          Waits for the gateway, not just the databases. validate.py reaches Supabase through Kong
+          with the service-role key; started too early it fails on connection refused and reports
+          "no quarantined device" -- a symptom three layers from the cause.
+        */}}
+        {{- include "factoryplus.waitFor" (dict "ctx" . "name" "wait-for-kong" "image" "curlimages/curl:8.10.1" "command" (printf "curl -s -o /dev/null %s/rest/v1/" (include "factoryplus.supabase.internalUrl" .)) "describe" "supabase-kong") | nindent 8 }}
+      containers:
+        - name: validate
+          # The test-runner image: the ingestion image plus jsonschema and the AAS suite. Built from
+          # tests/Dockerfile with the REPOSITORY ROOT as context.
+          image: "{{ .Values.e2e.image.repository }}:{{ .Values.e2e.image.tag }}"
+          imagePullPolicy: {{ .Values.e2e.image.pullPolicy }}
+          command: ["python", "validate.py"]
+          env:
+            # TimescaleDB. M2: the standard port. validate.py defaults DB_PORT to 5433 only when
+            # DB_HOST is UNSET -- naming the host is what selects 5432 -- but both are set here
+            # explicitly so the Job's environment reads as a complete statement of its topology.
+            - name: DB_HOST
+              value: {{ include "factoryplus.timescale.host" . | quote }}
+            - name: DB_PORT
+              value: {{ include "factoryplus.timescale.port" . | quote }}
+            - name: DB_NAME
+              value: {{ .Values.timescaledb.database | quote }}
+            - name: DB_USER
+              value: {{ .Values.timescaledb.username | quote }}
+            {{- include "factoryplus.secretEnv" (dict "name" "DB_PASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
+            # Supabase's own database, reached directly for the audit-row cleanup that migration
+            # 0003 deliberately put out of reach of service_role. The Phase 0 fix to
+            # SUPABASE_DB_PORT's conditional default is what makes this correct in-cluster.
+            - name: SUPABASE_DB_HOST
+              value: {{ include "factoryplus.supabaseDb.host" . | quote }}
+            - name: SUPABASE_DB_PORT
+              value: {{ include "factoryplus.supabaseDb.port" . | quote }}
+            {{- include "factoryplus.secretEnv" (dict "name" "POSTGRES_PASSWORD" "secretName" $secretName "key" "POSTGRES_PASSWORD") | nindent 12 }}
+            - name: MQTT_HOST
+              value: mosquitto
+            - name: MQTT_PORT
+              value: "1883"
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_USER") | nindent 12 }}
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_PASSWORD") | nindent 12 }}
+            - name: SUPABASE_URL
+              value: {{ include "factoryplus.supabase.internalUrl" . | quote }}
+            # WITHOUT THIS the script seeds nothing and fails about 12 of 20 checks in a way that
+            # reads like a schema fault ("no quarantined device reported", "no telemetry records"),
+            # with the real cause one line up in its own banner: "Service role key: MISSING".
+            {{- include "factoryplus.secretEnv" (dict "name" "SUPABASE_SERVICE_ROLE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
+            {{- include "factoryplus.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
+            # Check 7 probes all three Node-RED auth surfaces -- the editor, the /flows admin API and
+            # the webhook receiver -- and it has to be an end-to-end check: the fix is a runtime
+            # property of the assembled stack, and a settings.js securing only /flows would leave the
+            # webhook receiver open.
+            - name: NODERED_BASE_URL
+              value: http://node-red:1880
+            {{- include "factoryplus.secretEnv" (dict "name" "NODERED_OAUTH_CLIENT_SECRET" "secretName" $secretName "key" "NODERED_OAUTH_CLIENT_SECRET") | nindent 12 }}
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          resources:
+            {{- toYaml .Values.e2e.resources | nindent 12 }}
+{{- end }}

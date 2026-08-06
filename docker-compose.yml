@@ -127,6 +127,13 @@ services:
       # Hashed into auth.oauth_clients by 0002_seed_data.sql. Grafana
       # reads the same plaintext from its own environment via grafana.ini.
       GRAFANA_OAUTH_CLIENT_SECRET: ${GRAFANA_OAUTH_CLIENT_SECRET:-}
+      # The public origin the BROWSER reaches Grafana on. 0002_seed_data.sql registers
+      # <this>/login/generic_oauth as the Grafana client's redirect_uris and sets client_uri to
+      # <this>; the grafana service builds GF_SERVER_ROOT_URL from the same value, so the row and
+      # Grafana's own idea of where it lives cannot drift. It MUST be passed here: the upsert is
+      # DO UPDATE, so a hardcoded value would be rewritten back on every boot and no manual
+      # correction would survive a restart.
+      GRAFANA_PUBLIC_URL: ${GRAFANA_PUBLIC_URL:-http://localhost:3002}
       # Node-RED's own OAuth client, hashed into auth.oauth_clients by 0003. Node-RED reads the
       # same plaintext from its own environment (see the x-nodered-auth-env anchor above).
       NODERED_OAUTH_CLIENT_SECRET: ${NODERED_OAUTH_CLIENT_SECRET:-}
@@ -148,7 +155,7 @@ services:
       for f in /migrations/*.sql; do
         if [ -f \"$$f\" ]; then
           echo \"Executing migration $$f...\";
-          psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -h supabase-db -U postgres -d postgres -f \"$$f\";
+          psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v grafana_public_url=\"$$GRAFANA_PUBLIC_URL\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -h supabase-db -U postgres -d postgres -f \"$$f\";
         fi
       done;
       if [ -f /seed.sql ]; then
@@ -364,17 +371,26 @@ services:
       supabase-storage:
         condition: service_healthy
 
-  # Renders supabase/kong.yml (a template) into the config volume with the real API keys
-  # substituted. Kong 2.8 cannot read environment variables from declarative config, and
-  # committing the keys into the template would put a copy of the service-role key in git and
-  # make .env no longer authoritative. sed is safe here: a Supabase JWT is base64url, so it
-  # contains no character that could be read as a sed delimiter or backreference.
+  # Renders supabase/kong.yml (a template) into the config volume with the real API keys and the
+  # Realtime upstream substituted. Kong 2.8 cannot read environment variables from declarative
+  # config, and committing the keys into the template would put a copy of the service-role key in
+  # git and make .env no longer authoritative. sed is safe here: a Supabase JWT is base64url, so
+  # it contains no character that could be read as a sed delimiter or backreference.
+  #
+  # THIS SERVICE HAS NO KUBERNETES COUNTERPART -- Helm renders the same template into a Secret
+  # directly. The template is shared; only the substituter differs. Adding a placeholder means
+  # adding it here AND in the chart. See docs/kubernetes-migration-plan.md §2.3.
   supabase-kong-init:
     container_name: factoryplus_supabase_kong_init
     image: alpine:3.20
     environment:
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      # Realtime resolves its tenant from the LEADING HOSTNAME LABEL, so this must begin
+      # `realtime-dev.`. On Compose that is the network alias declared on the supabase-realtime
+      # service; on Kubernetes the Service is simply named `realtime-dev` and the chart supplies
+      # `http://realtime-dev:4000/socket/` here instead.
+      REALTIME_UPSTREAM_URL: ${REALTIME_UPSTREAM_URL:-http://realtime-dev.supabase-realtime:4000/socket/}
     volumes:
       - ./supabase/kong.yml:/template/kong.yml:ro
       - kong_config:/config
@@ -390,11 +406,28 @@ services:
           echo 'SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY must be set -- Kong would otherwise register empty API keys, which key-auth accepts.' >&2
           exit 1
         fi
+        case "$$REALTIME_UPSTREAM_URL" in
+          http://realtime-dev*|https://realtime-dev*) ;;
+          *)
+            echo "REALTIME_UPSTREAM_URL must have 'realtime-dev' as its leading hostname label -- Realtime reads the tenant id from it and answers a bare 403 otherwise. Got: $$REALTIME_UPSTREAM_URL" >&2
+            exit 1
+            ;;
+        esac
         sed -e "s|__SUPABASE_ANON_KEY__|$$SUPABASE_ANON_KEY|g" \
             -e "s|__SUPABASE_SERVICE_ROLE_KEY__|$$SUPABASE_SERVICE_ROLE_KEY|g" \
+            -e "s|__REALTIME_UPSTREAM_URL__|$$REALTIME_UPSTREAM_URL|g" \
             /template/kong.yml > /config/kong.yml
-        if grep -q '__SUPABASE_' /config/kong.yml; then
-          echo 'Kong config still contains unsubstituted placeholders.' >&2
+        # Matches ANY surviving marker, not just the __SUPABASE_ ones. A placeholder added to the
+        # template and forgotten here would otherwise render literally into Kong's config, where
+        # it fails as a routing error rather than as a missing value.
+        #
+        # COMMENT LINES ARE EXCLUDED, and that is not cosmetic: kong.yml's header documents the
+        # placeholder convention by name, so a whole-file scan flags the documentation of the rule
+        # as a violation of it. A real placeholder is always in a value position.
+        LEFTOVER=$$(grep -vE '^[[:space:]]*#' /config/kong.yml | grep -noE '__[A-Z0-9_]+__' || true)
+        if [ -n "$$LEFTOVER" ]; then
+          echo 'Kong config still contains unsubstituted placeholders:' >&2
+          echo "$$LEFTOVER" >&2
           exit 1
         fi
         echo 'Rendered Kong declarative config with API key consumers.'
@@ -412,7 +445,14 @@ services:
       # key-auth had to be added explicitly: naming any plugin in KONG_PLUGINS REPLACES the
       # default `bundled` set rather than adding to it, so key-auth was not merely unused --
       # it was unavailable, and referencing it in kong.yml would have failed Kong's startup.
-      KONG_PLUGINS: request-transformer,cors,key-auth
+      #
+      # `prometheus` is here for the same reason and MUST STAY IN STEP WITH THE CHART'S OWN LIST:
+      # kong.yml is shared by both targets and declares the plugin globally, so a target missing it
+      # here does not merely lose metrics -- Kong refuses to boot with "plugin 'prometheus' not
+      # enabled". The metrics themselves are served on the STATUS listener, which Compose does not
+      # publish; loading the plugin without it costs a shared-dict counter per request and is what
+      # keeps the two targets' gateway configuration identical.
+      KONG_PLUGINS: request-transformer,cors,key-auth,prometheus
     volumes:
       - kong_config:/usr/local/kong/declarative:ro
     depends_on:
@@ -582,7 +622,7 @@ services:
   # ---------------------------------------------------------------------------
   mosquitto-init:
     container_name: factoryplus_mosquitto_init
-    image: eclipse-mosquitto:latest
+    image: eclipse-mosquitto:2.0.20
     user: "0"
     environment:
       MQTT_USER: ${MQTT_USER:-factoryplus}
@@ -598,7 +638,7 @@ services:
 
   mosquitto:
     container_name: factoryplus_mosquitto
-    image: eclipse-mosquitto:latest
+    image: eclipse-mosquitto:2.0.20
     restart: always
     ports:
       - "1883:1883"
@@ -626,6 +666,12 @@ services:
   # Application Runtimes & Ingestion
   # ---------------------------------------------------------------------------
   # React Web Dashboard (multi-stage build serving static assets via NGINX on port 3000)
+  #
+  # BAKED CONFIGURATION, deliberately: Compose builds the image against the stack it will serve, so
+  # inlining is simpler and there is nothing to mount. The Kubernetes path builds the same
+  # Dockerfile with VITE_RUNTIME_CONFIG=true and mounts a ConfigMap over /config.js instead --
+  # frontend/src/config.js prefers the runtime value and falls through to these. See
+  # docs/kubernetes-migration-plan.md §2.1.
   frontend:
     container_name: factoryplus_frontend
     build:
@@ -636,6 +682,7 @@ services:
         VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
         VITE_ENABLE_REALTIME: ${VITE_ENABLE_REALTIME:-true}
         VITE_GITHUB_REPO_URL: ${VITE_GITHUB_REPO_URL:-https://github.com/Harri-Llewelyn/ACS-Cymru}
+        VITE_ALLOW_SIGNUP: ${VITE_ALLOW_SIGNUP:-false}
     restart: always
     ports:
       - "3000:3000"
@@ -656,8 +703,23 @@ services:
       MQTT_PORT: ${MQTT_PORT:-1883}
       MQTT_USER: ${MQTT_USER:-factoryplus}
       MQTT_PASSWORD: ${MQTT_PASSWORD}
+      # MQTTS, opt-in and EMPTY BY DEFAULT -- this broker declares no TLS listener (see
+      # mosquitto-tls.conf for why it is a separate file). An empty MQTT_TLS_ENABLED is a no-op in
+      # ingestion.py, so the default path is unchanged. Passed through rather than omitted so that
+      # an operator who does mount certificates does not have to edit this file.
+      MQTT_TLS_ENABLED: ${MQTT_TLS_ENABLED:-}
+      MQTT_TLS_CA_FILE: ${MQTT_TLS_CA_FILE:-}
       SUPABASE_URL: http://supabase-kong:8000
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      # Device liveness watchdog. A device that stops publishing writes nothing and emits no
+      # DDEATH, so without this it stays ONLINE forever. 0 disables it; raise the window for a
+      # fleet of event-driven devices that legitimately stay quiet for long periods.
+      DEVICE_OFFLINE_TIMEOUT_SECONDS: ${DEVICE_OFFLINE_TIMEOUT_SECONDS:-300}
+      DEVICE_WATCHDOG_INTERVAL_SECONDS: ${DEVICE_WATCHDOG_INTERVAL_SECONDS:-30}
+      # Rebirth requests are what recover a Sparkplug alias table after a restart. Rate limited
+      # per edge node, because a gateway that reboots on rebirth would otherwise be held in a
+      # loop by the mechanism meant to recover it.
+      REBIRTH_REQUEST_INTERVAL_SECONDS: ${REBIRTH_REQUEST_INTERVAL_SECONDS:-300}
       PYTHONUNBUFFERED: "1"
     depends_on:
       timescaledb:
@@ -722,12 +784,16 @@ services:
 
   grafana:
     container_name: factoryplus_grafana
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.6.1
     restart: always
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
-      GF_SERVER_ROOT_URL: "http://localhost:3002/"
+      # Built from the SAME value supabase-db-init registers as the OAuth client's redirect_uris,
+      # so the two cannot drift -- a mismatch is `invalid redirect_uri` at /oauth/authorize, which
+      # reads as a Grafana fault rather than as a registration one. Overrides grafana.ini's
+      # [server] root_url, which keeps the localhost default for a standalone read of that file.
+      GF_SERVER_ROOT_URL: ${GRAFANA_PUBLIC_URL:-http://localhost:3002}/
       GF_INSTALL_PLUGINS: ""
       DB_PASSWORD: ${DB_PASSWORD}
       # Read by grafana.ini through $__env{GRAFANA_OAUTH_CLIENT_SECRET}, so the secret is not
@@ -742,7 +808,35 @@ services:
       - ./grafana/provisioning/alerting:/etc/grafana/provisioning/alerting:ro
       - ./grafana/provisioning/datasources:/tmp/datasources-template:ro
       - grafana_provisioning_datasources:/etc/grafana/provisioning/datasources
-    entrypoint: ["/bin/sh", "-c", "sed \"s/\\$${DB_PASSWORD}/$$DB_PASSWORD/g\" /tmp/datasources-template/datasources.template.yml > /etc/grafana/provisioning/datasources/datasources.yml && exec /run.sh"]
+    # Renders the datasource template, then hands over to Grafana's own /run.sh.
+    #
+    # The placeholder is __DB_PASSWORD__ rather than ${DB_PASSWORD}, so this expression no longer
+    # has to escape a shell variable past Compose's substitution as well as sed's. The guard is
+    # the same one supabase-kong-init uses: an unsubstituted marker reaching Grafana surfaces as
+    # "password authentication failed", which points at the database rather than at this line.
+    #
+    # THIS OVERRIDE HAS NO KUBERNETES COUNTERPART -- Helm renders the same template into a Secret
+    # and Grafana runs its stock entrypoint. See docs/kubernetes-migration-plan.md §2.4.
+    entrypoint:
+      - /bin/sh
+      - -e
+      - -c
+      - |
+        if [ -z "$$DB_PASSWORD" ]; then
+          echo 'DB_PASSWORD must be set -- Grafana would otherwise provision the TimescaleDB datasource with an empty password.' >&2
+          exit 1
+        fi
+        sed -e "s|__DB_PASSWORD__|$$DB_PASSWORD|g" \
+            /tmp/datasources-template/datasources.template.yml \
+            > /etc/grafana/provisioning/datasources/datasources.yml
+        # Comment lines excluded for the same reason as in supabase-kong-init: the template's own
+        # header documents the placeholder convention by name.
+        if grep -vE '^[[:space:]]*#' /etc/grafana/provisioning/datasources/datasources.yml \
+           | grep -qE '__[A-Z0-9_]+__'; then
+          echo 'Grafana datasource config still contains unsubstituted placeholders.' >&2
+          exit 1
+        fi
+        exec /run.sh
     depends_on:
       timescaledb:
         condition: service_healthy

@@ -1,0 +1,41 @@
+# Build-context exclusions for the images built from the REPOSITORY ROOT:
+#   Dockerfile                      -> ingestion daemon
+#   supabase/functions/Dockerfile   -> edge runtime (needs node_red_flow.json, which lives here)
+#   tests/Dockerfile                -> conformance test runner
+#
+# ONE .dockerignore SERVES ALL THREE, so an exclusion added for one image can break another. That
+# is not hypothetical: excluding `tests` for the ingestion build later broke the test-runner build,
+# which needs tests/schemas -- and it failed as "/tests/schemas: not found" during COPY, which reads
+# like a missing file rather than an ignored one.
+#
+# frontend/ has its own .dockerignore because it is built from its own context. It must keep
+# frontend/src/utils/ -- the test runner reads sparkplugDatatype.js and model3d.js from THIS context
+# for its drift checks against the edge worker's copies.
+
+.git
+.github
+node_modules
+**/node_modules
+frontend/dist
+frontend/coverage
+
+# Local secrets. .env.example is deliberately NOT excluded -- it is the documented template.
+.env
+.env.*
+!.env.example
+
+# Nothing in these is read at build time by any of the three images; excluding them keeps the context
+# small and, more importantly, stops an unrelated edit from busting the layer cache.
+#
+# `tests` is NOT excluded: tests/Dockerfile copies tests/schemas (the vendored IDTA metamodel schema)
+# and it is 60 KB. Its absence would make the AAS suite skip its schema-conformance assertions -- the
+# ones that caught three real metamodel violations -- while still reporting success.
+docs
+grafana
+simulators
+timescaledb
+deploy
+supabase/migrations/archive
+
+*.md
+!supabase/functions/**/*.md

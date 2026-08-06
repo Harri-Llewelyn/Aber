@@ -10,6 +10,7 @@ import { downloadJSON } from '../../utils/downloadJSON'
 import { datatypeLabel, SPARKPLUG_DATATYPES } from '../../utils/sparkplugDatatype'
 import {
   groupCatalog, knownGroupNames, groupOptionsForStandard, canonicaliseGroup, isValidMetricName,
+  metricNameError,
   composeMetricName
 } from '../../utils/metricGroup'
 import { modelledMetrics } from '../../utils/deviceTags'
@@ -544,6 +545,10 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
     ? newMetric.semanticIdType
     : (semanticIdValue ? DEFAULT_SEMANTIC_ID_TYPE : '')
 
+  // Shown only once there is a type to compose a name from: before that the name is legitimately
+  // half-built, and complaining about it would be scolding the operator mid-keystroke.
+  const nameError = effectiveType !== '' ? metricNameError(composedName) : null
+
   const canAddMetric =
     effectiveType !== '' &&
     isValidMetricName(composedName) &&
@@ -892,6 +897,16 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
                   {semanticIdTypeValue ? ` (${semanticIdTypeValue})` : ''} — editable later, unlike the name.</>
               )}
             </div>
+
+            {/* The database says the same thing (metric_catalog_name_format, migration 0007), but
+                a 400 after pressing Add is a poor way to learn it -- and the name is immutable, so
+                there is no correcting it afterwards either. */}
+            {nameError && (
+              <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--danger-text)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <IconAlertTriangle size={12} />
+                <span>{nameError}</span>
+              </div>
+            )}
 
             {semanticIdValue === '' && semanticIdTypeValue !== '' && (
               <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '5px' }}>

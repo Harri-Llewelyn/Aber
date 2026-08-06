@@ -1,0 +1,13 @@
+# Build-context exclusions for frontend/Dockerfile.
+#
+# node_modules is the one that matters: the image runs `npm ci` from package-lock.json, so sending
+# the host's tree is both slow and wrong -- a Windows/macOS tree can carry platform-specific
+# binaries the alpine builder cannot execute.
+node_modules
+dist
+coverage
+.vite
+
+# public/ is NOT excluded: it carries config.js, the runtime-configuration placeholder a
+# Kubernetes deployment mounts a ConfigMap over. Excluding it yields an image whose /config.js
+# 404s, which fails only at deploy time.

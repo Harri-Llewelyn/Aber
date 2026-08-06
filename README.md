@@ -5,7 +5,7 @@
 An industrial, asset-centric manufacturing management platform built in alignment with the
 **AMRC Connectivity Stack (ACS / Factory+)** framework.
 
-Real-time telemetry streaming, shopfloor spatial mapping, zero-touch edge device onboarding,
+Real-time telemetry streaming, shopfloor cell mapping, zero-touch edge device onboarding,
 fine-grained row-level security, continuous Digital Thread audit logging, AAS V3 export, and edge
 flow management.
 
@@ -18,7 +18,7 @@ flow management.
 
 Where the upstream ACS ships bespoke microservices, this fork uses **Supabase** (Postgres, GoTrue,
 PostgREST, Realtime, Storage, Edge Functions), **TimescaleDB**, **Grafana** and **Node-RED**. The
-custom surface is deliberately small: one Python ingestion daemon, four edge functions, and a React
+custom surface is deliberately small: one Python ingestion daemon, five edge functions, and a React
 dashboard.
 
 The same instinct shows up throughout the design: derived state is computed at read time rather
@@ -33,7 +33,7 @@ on the way out rather than an adopted metamodel.
 audit triggers and edge functions. **Standalone TimescaleDB** stores the `telemetry` hypertable and
 is reached from Supabase through a `postgres_fdw` view. A **Python daemon** consumes Sparkplug B
 MQTT, gates unregistered devices into quarantine, and routes metadata and telemetry to their
-respective stores. A **React 18 SPA** queries PostgREST directly and subscribes to a Realtime
+respective stores. A **React 18 Single Page Application** queries PostgREST directly and subscribes to a Realtime
 change feed.
 
 ### Topology
@@ -51,7 +51,7 @@ flowchart TB
 
     subgraph Processing ["Ingestion & Serverless"]
         ING["Python Ingestion Engine<br/>identity - quarantine - binding"]
-        EF["Edge Functions<br/>approve-quarantine - deploy-nodered<br/>aas-export - grafana-userinfo"]
+        EF["Edge Functions<br/>approve-quarantine - deploy-nodered - aas-export<br/>grafana-userinfo - nodered-userinfo"]
     end
 
     subgraph Supabase ["Supabase BaaS"]
@@ -98,16 +98,41 @@ flowchart TB
 
 ---
 
-## Quick Start
+## Deployment targets
+
+**Kubernetes (k3s) is the primary target. Docker Compose stays the local development and debugging
+path.** Both are maintained, both are exercised in CI, and neither is deprecated.
+
+| | Docker Compose | Kubernetes (Helm) |
+| :--- | :--- | :--- |
+| Purpose | Local development, debugging, one-command stack | Deployment |
+| Entry point | `docker compose up -d` | `helm install` — see [`deploy/k8s/README.md`](deploy/k8s/README.md) |
+| Reachability | Published ports on `localhost` | `*.<publicBaseDomain>` via one Ingress |
+| TLS | none | cert-manager, internal CA by default ([`deploy/k8s/internal-ca.yaml`](deploy/k8s/internal-ca.yaml)) |
+| MQTT | 1883 plaintext + 9001 WebSockets | the same, plus optional MQTTS on 8883 |
+| Conformance check | `ingestion/validate.py` from the host | the same suite, as an in-cluster Job |
+
+The container images, the SQL migrations and the init scripts are **shared substrate** — only the
+*wiring* is expressed twice, and the intentional differences are enumerated in a divergence table in
+the Kubernetes runbook. Anything not in that table is drift, and CI checks the parts that can be
+checked (image tag parity, mirrored config files, and the conformance suite against both).
+
+The design and its reasoning — including why several things are done differently on Kubernetes than
+the obvious way — are in [`docs/kubernetes-migration-plan.md`](docs/kubernetes-migration-plan.md).
+
+---
+
+## Quick Start (Docker Compose)
 
 ```bash
 npm run setup                   # creates .env from .env.example (cross-platform, no POSIX shell)
 docker compose up --build -d    # launches the whole stack
 ```
 
-The schema baseline (`0001`), seed data (`0002`), audit hardening (`0003`) and demo accounts
-(`supabase/seed.sql`) are applied by `supabase-db-init` on startup, and re-applied harmlessly on
-every later start.
+Every file in `supabase/migrations/` — the schema baseline (`0001`), seed data (`0002`), and the
+later additive migrations (`0003` audit immutability, `0004`, `0005`, `0006` Node-RED SSO, `0007`) —
+plus demo accounts (`supabase/seed.sql`) are applied by `supabase-db-init` on startup, and
+re-applied harmlessly on every later start.
 
 | Interface | URL |
 | :--- | :--- |
@@ -148,6 +173,44 @@ docker compose down -v          # also drops volumes, invalidating every logged-
 
 ---
 
+## Quick Start (Kubernetes)
+
+Full runbook, including the hardening features and every failure mode worth knowing about, in
+[`deploy/k8s/README.md`](deploy/k8s/README.md). The short version:
+
+```bash
+# Five images are built from this repository and are on no registry.
+docker build -f supabase/functions/Dockerfile -t factoryplus/edge-runtime:0.1.0 .   # context: repo root
+docker build -f Dockerfile                    -t factoryplus/ingestion:0.1.0 .      # context: repo root
+docker build -f node-red/Dockerfile           -t factoryplus/node-red:0.1.0 node-red
+docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
+                                              -t factoryplus/frontend:0.1.0 frontend
+docker build -f tests/Dockerfile              -t factoryplus/test-runner:0.1.0 .    # conformance suites
+
+node scripts/sync-helm-chart-files.mjs        # mirror repo config into the chart (Helm cannot read outside it)
+
+kubectl create namespace factoryplus
+helm install factoryplus deploy/helm/factoryplus -n factoryplus \
+  -f deploy/helm/factoryplus/values-dev.yaml --wait --timeout 15m
+
+helm test factoryplus -n factoryplus          # the postgres_fdw gate — seconds, mutates nothing
+```
+
+Then seven subdomains on one Ingress: `app.`, `api.`, `nodered.`, `grafana.`, `studio.`, `docs.`,
+`mqtt.` — plus a LoadBalancer for **raw MQTT on 1883**, which is TCP and cannot ride an HTTP Ingress.
+
+Two things worth knowing before the first install:
+
+- **`values-dev.yaml` carries the published demo credentials from `.env.example`.** They are in git.
+  For anything another person can reach, start from `values-prod.yaml.example` and point
+  `secrets.existingSecret` at a Secret managed outside the chart.
+- **The chart validates its own values and fails the render, not the pod.** A partial Supabase
+  credential set, a Realtime key of the wrong length, a renamed Realtime Service, TLS with
+  `scheme: http`, an HPA on a single-writer workload — each of those otherwise produces a stack that
+  reports healthy and refuses every request, or a crash loop naming something other than the cause.
+
+---
+
 ## Documentation Map
 
 | Directory | Covers |
@@ -160,7 +223,11 @@ docker compose down -v          # also drops volumes, invalidating every logged-
 | [`docs/openapi.yaml`](docs/openapi.yaml) | REST API specification rendered by Swagger UI |
 | [`grafana/`](grafana) | Datasource, dashboard and alerting provisioning |
 | [`timescaledb/init/`](timescaledb/init) | Hypertable schema and retention policy |
-| [`scripts/`](scripts) | Setup, Node-RED seeding, storage bucket, MQTT credentials, vocabulary generation |
+| [`scripts/`](scripts) | Setup, Node-RED seeding, storage bucket, MQTT credentials, vocabulary generation, chart-file sync, image tag parity |
+| **[`deploy/k8s/README.md`](deploy/k8s/README.md)** | Kubernetes runbook: install, upgrade, teardown, hardening, the divergence table, and what will bite you |
+| [`deploy/helm/factoryplus/`](deploy/helm/factoryplus) | The Helm chart. `values.yaml` documents every setting and why it is not simply a default |
+| [`docs/kubernetes-migration-plan.md`](docs/kubernetes-migration-plan.md) | How the Kubernetes target was designed and why, phase by phase, including what was found by building it |
+| [`tests/`](tests) | Vendored IDTA AAS schema, and the conformance test-runner image |
 | [`CLAUDE.md`](CLAUDE.md) | Detailed design rationale and invariants for contributors |
 
 ---
@@ -181,15 +248,15 @@ docker compose down -v          # also drops volumes, invalidating every logged-
 | `supabase-storage` | `factoryplus_supabase_storage` | `supabase/storage-api:v1.11.13` | — |
 | `supabase-storage-init` | `factoryplus_supabase_storage_init` | `node:20-alpine` | — |
 | `supabase-meta` | `factoryplus_supabase_meta` | `supabase/postgres-meta:v0.96.6` | — |
-| `supabase-studio` | `factoryplus_supabase_studio` | `supabase/studio` | `54323:3000` |
+| `supabase-studio` | `factoryplus_supabase_studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `54323:3000` |
 | `timescaledb` | `factoryplus_timescaledb` | `timescale/timescaledb:latest-pg15` | `5433:5432` |
-| `mosquitto-init` | `factoryplus_mosquitto_init` | `eclipse-mosquitto:latest` | — |
-| `mosquitto` | `factoryplus_mosquitto` | `eclipse-mosquitto:latest` | `1883`, `9001` |
+| `mosquitto-init` | `factoryplus_mosquitto_init` | `eclipse-mosquitto:2.0.20` | — |
+| `mosquitto` | `factoryplus_mosquitto` | `eclipse-mosquitto:2.0.20` | `1883`, `9001` |
 | `frontend` | `factoryplus_frontend` | `./frontend/Dockerfile` | `3000:3000` |
 | `ingestion` | `factoryplus_ingestion` | `./Dockerfile` | — |
 | `node-red-init` | `factoryplus_node_red_init` | `./node-red/Dockerfile` | — |
 | `node-red` | `factoryplus_node_red` | `./node-red/Dockerfile` | `1880:1880` |
-| `grafana` | `factoryplus_grafana` | `grafana/grafana:latest` | `3002:3000` |
+| `grafana` | `factoryplus_grafana` | `grafana/grafana:11.6.1` | `3002:3000` |
 | `swagger-ui` | `factoryplus_swagger_ui` | `swaggerapi/swagger-ui:v5.17.14` | `8088:8080` |
 
 ---
@@ -276,15 +343,18 @@ is why the schema builder offers a choice rather than a migration path.
 ## Testing
 
 ```bash
-# Frontend — 607 tests
+# Frontend — 684 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required
 python ingestion/test_gateway_binding.py
 python ingestion/test_declared_metrics.py
 python ingestion/test_device_location.py
+python ingestion/test_health_heartbeat.py
+python ingestion/test_mqtt_tls.py
 python supabase/functions/approve-quarantine/test_approve_quarantine.py
 python supabase/functions/deploy-nodered/test_deploy_nodered.py
+python supabase/functions/nodered-userinfo/test_nodered_userinfo.py
 python supabase/functions/aas-export/test_aas_export.py
 
 # Database suites — need Postgres
@@ -296,12 +366,24 @@ set -a && . ./.env && set +a && unset MQTT_HOST DB_HOST DB_PORT
 python ingestion/validate.py
 ```
 
-CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs three jobs: **frontend-build**
-(tests, drift guards, production bundle), **edge-function-auth-test** (auth ladders and RLS against
-a real Postgres), and **e2e-validation** (full Docker stack, `validate.py`, live AAS export).
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs five jobs:
+
+| Job | Covers |
+| :--- | :--- |
+| **frontend-build** | Vitest, the mirrored-logic drift guards, production bundle |
+| **helm-chart** | `helm lint`, render, API-schema validation, and the chart's guard rails |
+| **edge-function-auth-test** | Auth ladders and RLS against a real Postgres |
+| **e2e-validation** | Full Docker Compose stack, `validate.py`, live AAS export |
+| **k8s-validation** | k3d cluster, `helm test`, the same suites in-cluster, ingress assertions |
+
+**The last two are the real drift control between the two deployment targets.** `validate.py` is
+topology-agnostic and runs against both; if both pass, the wiring agrees where it matters. There is
+no way to automate "these two topologies describe the same system", and a check claiming to would
+pass while they diverged.
 
 See [`ingestion/README.md`](ingestion/README.md#testing) for why `validate.py` needs
-`SUPABASE_SERVICE_ROLE_KEY` but must **not** inherit the rest of `.env`.
+`SUPABASE_SERVICE_ROLE_KEY` but must **not** inherit the rest of `.env` — and why running it
+**in-cluster needs no overrides at all**.
 
 ---
 
@@ -327,8 +409,9 @@ Two rules worth stating up front:
 
 - **`metric_catalog.name` is immutable.** Changing a metric is deprecate-and-supersede, never a
   rename — a device is configured against that exact string.
-- **Add schema changes as a new numbered migration.** `0001`–`0003` are replayed on every boot and
-  are guarded to be no-ops once applied; editing them reaches a fresh database only.
+- **Add schema changes as a new numbered migration.** EVERY migration is replayed on every boot —
+  there is no applied-migrations ledger — so a new one must be idempotent. The baseline pair is
+  additionally guarded to be a no-op once applied; editing it reaches a fresh database only.
 
 Before packaging a hand-off, tear down volumes and confirm a clean workspace:
 
