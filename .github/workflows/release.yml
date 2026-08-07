@@ -143,27 +143,26 @@ jobs:
         run: node scripts/check-docs-drift.mjs
 
   # -----------------------------------------------------------------------------------------------
-  # The four independent images, in parallel. test-runner is not here: it is built FROM ingestion.
+  # The three INDEPENDENT images, in parallel.
+  #
+  # ingestion is deliberately not here even though it has no dependencies of its own: test-runner is
+  # built FROM it, and the two have to share a runner. See build-ingestion-chain below.
   # -----------------------------------------------------------------------------------------------
   build-images:
     name: Image — ${{ matrix.name }}
     needs: prepare-release
     runs-on: ubuntu-latest
     strategy:
-      # One image failing should not leave the other three pushed and this job green-ish. The chart
+      # One image failing should not leave the other two pushed and this job green-ish. The chart
       # job `needs` this one, so a failure anywhere stops the chart regardless -- but finishing the
       # siblings makes the log show whether the failure was specific or systemic.
       fail-fast: false
       matrix:
         include:
-          # Context is the REPOSITORY ROOT for these two: node_red_flow.json and sparkplug_b.proto
-          # both live there, and neither is reachable from a narrower context.
+          # Context is the REPOSITORY ROOT: node_red_flow.json lives there and is not reachable
+          # from a narrower context.
           - name: edge-runtime
             dockerfile: supabase/functions/Dockerfile
-            context: .
-            build_args: ''
-          - name: ingestion
-            dockerfile: Dockerfile
             context: .
             build_args: ''
           - name: node-red
@@ -214,23 +213,46 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
   # -----------------------------------------------------------------------------------------------
-  # test-runner EXTENDS ingestion (`ARG INGESTION_IMAGE`), so it cannot join the matrix above.
+  # ingestion, then test-runner FROM it -- ONE JOB, ONE RUNNER, ONE LOCAL IMAGE STORE.
   #
-  # It is published rather than left as a local build for the same reason it exists at all: the
-  # conformance suites are the only thing that can say whether a deployed stack is correct, and a
+  # test-runner is `FROM ${INGESTION_IMAGE}`, so its base has to be resolvable at build time. Split
+  # across two jobs it is not, and the failure is a `403 Forbidden` pulling
+  # ghcr.io/.../ingestion:<version> -- which reads as a permissions problem and is not one:
+  #
+  #   - on a DRY RUN nothing was pushed, so the base does not exist in the registry at all;
+  #   - on a FIRST release the package exists but is PRIVATE (GHCR creates every new package
+  #     private), so an unauthenticated pull is refused;
+  #   - and on any release, a separate job means a separate runner, so a locally-built base is
+  #     simply not there.
+  #
+  # NOTE THE TRAP THAT MADE THE FIRST ATTEMPT AT THIS WRONG. Building the base locally in the same
+  # job is NOT sufficient on its own: `docker/setup-buildx-action` creates a `docker-container`
+  # builder AND SELECTS IT, and that driver has its own image store. A plain `docker build -t ref .`
+  # then writes to the daemon while the build that consumes it reads from the container -- so the
+  # base is invisible and BuildKit falls back to a registry pull, producing the same 403 as if the
+  # step had never run. That is why this job does not set up Buildx at all: with the default `docker`
+  # driver both builds share the daemon's image store, which is the whole point.
+  #
+  # The cost is the GHA layer cache, which the container driver is what enables. Worth it here: this
+  # runs on a tag, not on every push, and correctness is not negotiable against a few minutes.
+  #
+  # test-runner is published rather than left as a local build for the same reason it exists at all:
+  # the conformance suites are the only thing that can say whether a deployed stack is correct, and a
   # suite that only runs where the repository is checked out cannot be pointed at the cluster it is
-  # meant to judge. `e2e.enabled` is still false by default -- these Jobs seed and delete fixtures.
+  # meant to judge. `e2e.enabled` is still false by default -- those Jobs seed and delete fixtures.
   # -----------------------------------------------------------------------------------------------
-  build-test-runner:
-    name: Image — test-runner
-    needs: [prepare-release, build-images]
+  build-ingestion-chain:
+    name: Images — ingestion, test-runner
+    needs: prepare-release
     runs-on: ubuntu-latest
+    env:
+      V: ${{ needs.prepare-release.outputs.version }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
 
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+      # Deliberately NO docker/setup-buildx-action -- see the header. Both builds must run on the
+      # default `docker` driver so the second can see what the first produced.
 
       - name: Log In To GHCR
         if: needs.prepare-release.outputs.push == 'true'
@@ -240,38 +262,66 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # On a dry run the ingestion image above was built and NOT pushed, so it is not in this
-      # runner's daemon and not in the registry either. Rebuilding it locally under the same
-      # reference is what keeps the dry run a real rehearsal rather than a step that quietly skips.
-      - name: Rebuild The Ingestion Base Locally (dry run only)
-        if: needs.prepare-release.outputs.push != 'true'
+      # Context is the REPOSITORY ROOT: the Dockerfile compiles sparkplug_b.proto with protoc and
+      # the .proto lives there.
+      - name: Build ingestion
         run: |
-          docker build -f Dockerfile \
-            -t "$IMAGE_NAMESPACE/ingestion:${{ needs.prepare-release.outputs.version }}" .
+          set -eu
+          docker build -f Dockerfile -t "$IMAGE_NAMESPACE/ingestion:$V" \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.version=$V" \
+            --label "org.opencontainers.image.licenses=MIT" \
+            .
 
-      - name: Build & Push
-        uses: docker/build-push-action@v6
-        with:
-          # REPOSITORY ROOT: test_aas_export.py resolves five files relative to parents[3], so the
-          # suite needs the repo-shaped layout tests/Dockerfile builds. See its header.
-          context: .
-          file: tests/Dockerfile
-          build-args: |
-            INGESTION_IMAGE=${{ env.IMAGE_NAMESPACE }}/ingestion:${{ needs.prepare-release.outputs.version }}
-          push: ${{ needs.prepare-release.outputs.push == 'true' }}
-          tags: ${{ env.IMAGE_NAMESPACE }}/test-runner:${{ needs.prepare-release.outputs.version }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ needs.prepare-release.outputs.version }}
-            org.opencontainers.image.licenses=MIT
+      # The guard that turns a silent registry fallback into a legible failure. `docker build` pulls
+      # a missing base by default, so without this a broken local store degrades into exactly the
+      # 403 this job exists to avoid -- an error naming the registry rather than the build order.
+      - name: Assert The Base Is Local Before Building On It
+        run: |
+          set -eu
+          REF="$IMAGE_NAMESPACE/ingestion:$V"
+          if ! docker image inspect "$REF" >/dev/null 2>&1; then
+            echo "::error::$REF is not in this runner's local image store."
+            echo "::error::test-runner would fall back to pulling it from GHCR and fail with 403."
+            echo "::error::Most likely cause: a Buildx builder was selected, so the build above"
+            echo "::error::wrote to a container image store instead of the docker daemon."
+            exit 1
+          fi
+          echo "  ok  $REF is local -- test-runner will build against it without a pull"
+
+      # REPOSITORY ROOT again: test_aas_export.py resolves five files relative to parents[3], so the
+      # suite needs the repo-shaped layout tests/Dockerfile builds. See its header.
+      #
+      # INGESTION_IMAGE is passed explicitly rather than relying on the Dockerfile's ARG default:
+      # the base is the image built seconds ago at the version being released, which no committed
+      # default can name.
+      - name: Build test-runner From The Local ingestion
+        run: |
+          set -eu
+          docker build -f tests/Dockerfile -t "$IMAGE_NAMESPACE/test-runner:$V" \
+            --build-arg "INGESTION_IMAGE=$IMAGE_NAMESPACE/ingestion:$V" \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.version=$V" \
+            --label "org.opencontainers.image.licenses=MIT" \
+            .
+
+      # Pushed only after BOTH have built. A pushed ingestion beside a test-runner that failed to
+      # build would be a half-published release whose missing half is the thing that reports on it.
+      - name: Push Both
+        if: needs.prepare-release.outputs.push == 'true'
+        run: |
+          set -eu
+          docker push "$IMAGE_NAMESPACE/ingestion:$V"
+          docker push "$IMAGE_NAMESPACE/test-runner:$V"
 
   # -----------------------------------------------------------------------------------------------
   # The chart, last, and only once every image it can name exists.
   # -----------------------------------------------------------------------------------------------
   publish-chart:
     name: Helm Chart
-    needs: [prepare-release, build-images, build-test-runner]
+    needs: [prepare-release, build-images, build-ingestion-chain]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code

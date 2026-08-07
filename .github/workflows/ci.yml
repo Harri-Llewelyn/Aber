@@ -177,6 +177,52 @@ jobs:
       - name: Verify Chart Files Are In Sync With Their Sources
         run: node scripts/sync-helm-chart-files.mjs --check
 
+      # THESE THREE RUN BEFORE THE SATELLITE CHECKS BELOW, and the ordering is deliberate
+      # rather than tidy. A GitHub Actions job stops at its FIRST failing step, so whichever
+      # check runs first is the only one that reports -- and this job is named for the chart.
+      # It used to lint and render last, behind a broker check that starts a real Mosquitto in
+      # Docker; the result was a run where an invalid probe in the chart went unreported
+      # because an unrelated certificate permission failed thirty seconds earlier, and the k3d
+      # job downstream then failed on the very defect this job exists to catch first.
+      # Chart correctness first, then the couplings it has with everything else.
+      - name: Lint Chart
+        run: helm lint deploy/helm/factoryplus -f deploy/helm/factoryplus/values-dev.yaml
+
+      - name: Render Chart
+        run: |
+          helm template factoryplus deploy/helm/factoryplus \
+            -f deploy/helm/factoryplus/values-dev.yaml > /tmp/rendered.yaml
+          echo "Rendered $(grep -c '^kind:' /tmp/rendered.yaml) objects."
+
+      # Renders cleanly is not the same as "the API server would accept it". A misindented probe
+      # or a bad field name is valid YAML and invalid Kubernetes.
+      #
+      # kubeconform, NOT `kubectl apply --dry-run=client`. That was what stood here, and it cannot
+      # work in this job: `kubectl apply` performs API discovery before it validates anything, so
+      # with no cluster it fails on `dial tcp [::1]:8080: connect: connection refused` -- and
+      # `--validate=false` does not help, because it is the discovery call that fails, not the
+      # validation. The step could only ever have passed against a live cluster, which this job does
+      # not have and should not need. kubeconform validates offline against the published Kubernetes
+      # JSON schemas.
+      #
+      # This is the step that catches a list item YAML read as a MAPPING. `Authorization: Bearer` in
+      # an exec probe is the real example -- the colon-space silently turns one command argument
+      # into a key/value pair, `helm lint` passes, and it aborts the WHOLE `helm install` at the API
+      # server with `cannot unmarshal object into Go struct field ExecAction...command of type
+      # string`: a Go type, no filename, nothing created. kubeconform names the JSON pointer:
+      #   at '/spec/template/spec/containers/0/readinessProbe/exec/command/2': got object, want string
+      #
+      # -ignore-missing-schemas lets a CRD through (ServiceMonitor, if telemetry is ever enabled in
+      # values-dev). It is not silent: READ THE `Skipped:` COUNT in the summary -- anything above 0
+      # is a resource nothing validated.
+      - name: Validate Rendered Manifests Against The Kubernetes Schema
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w ghcr.io/yannh/kubeconform:v0.6.7             -strict -summary -ignore-missing-schemas             -kubernetes-version "${KUBECONFORM_K8S_VERSION}" /tmp/rendered.yaml
+        env:
+          # Matches the chart's kubeVersion floor closely enough to catch field-level mistakes; the
+          # schemas are per-release, so this pins WHICH API surface the manifests are judged against.
+          KUBECONFORM_K8S_VERSION: 1.31.0
+
       # mosquitto's ACCEPTED SYNTAX CHANGES BETWEEN MINOR VERSIONS, and nothing else in this pipeline
       # reads the broker config at all: `docker compose config` validates compose YAML, helm renders
       # the ConfigMap without parsing its contents, and the unit suites never touch it.
@@ -280,20 +326,6 @@ jobs:
               print(f"::error::{e}")
           sys.exit(1 if errors else 0)
           PY
-
-      - name: Lint Chart
-        run: helm lint deploy/helm/factoryplus -f deploy/helm/factoryplus/values-dev.yaml
-
-      - name: Render Chart
-        run: |
-          helm template factoryplus deploy/helm/factoryplus \
-            -f deploy/helm/factoryplus/values-dev.yaml > /tmp/rendered.yaml
-          echo "Rendered $(grep -c '^kind:' /tmp/rendered.yaml) objects."
-
-      # Renders cleanly is not the same as "the API server would accept it". A misindented probe
-      # or a bad field name is valid YAML and invalid Kubernetes.
-      - name: Validate Rendered Manifests Against The Kubernetes Schema
-        run: kubectl apply --dry-run=client -f /tmp/rendered.yaml
 
       # The chart's guard rails exist because each of these misconfigurations otherwise produces a
       # stack that reports healthy and refuses every request, or a CrashLoopBackOff whose logs name

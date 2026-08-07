@@ -40,7 +40,9 @@
  *   node scripts/check-broker-config.mjs --verbose
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import {
+  readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, existsSync, chmodSync,
+} from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -224,6 +226,34 @@ try {
     // Self-signed, so it is its own CA -- which is all `cafile` needs to load.
     if (gen.status === 0 && existsSync(join(certs, 'tls.crt'))) {
       writeFileSync(join(certs, 'ca.crt'), readFileSync(join(certs, 'tls.crt')));
+
+      // THE KEY MUST BE READABLE BY UID 1883, AND OPENSSL 3 DOES NOT MAKE IT SO.
+      //
+      // `openssl req -keyout` writes the private key 0600 owned by whoever ran it (OpenSSL 1.x used
+      // 0644; 3.x tightened it). These files are bind-mounted into the broker container, mosquitto
+      // drops to uid 1883, and a bind mount carries the HOST's ownership -- so the broker cannot
+      // read its own key and exits 1 with three lines of raw OpenSSL text naming neither the file
+      // nor the cause:
+      //
+      //     Error: Unable to load server key file "/mosquitto/certs/tls.key". Check keyfile.
+      //     OpenSSL Error[0]: error:8000000D:system library::Permission denied
+      //
+      // which reads as a malformed key, not as a permission on the host side.
+      //
+      // THIS CANNOT BE CAUGHT ON DOCKER DESKTOP. Windows and macOS bind mounts go through a
+      // virtualised filesystem that presents every file as world-readable and ignores host uid
+      // entirely, so this check passes locally on any machine and fails on every Linux CI runner --
+      // the most expensive shape of environment difference, because the local result is not merely
+      // unrepresentative, it is the opposite.
+      //
+      // Widening to 0644 is safe HERE and nowhere else: this is a throwaway self-signed key, valid
+      // one day, minted in a temp directory that is deleted in `finally`, for a broker that is
+      // killed at the end of this function. The chart does not do this -- there the key arrives as a
+      // projected Secret whose mode Kubernetes sets, which is why nothing in the deployment path has
+      // the same problem.
+      chmodSync(join(certs, 'tls.key'), 0o644);
+      chmodSync(join(certs, 'tls.crt'), 0o644);
+      chmodSync(join(certs, 'ca.crt'), 0o644);
       const r = startBroker({ withTls: true, certsDir: certs, ports: ['28883:8883'] });
       started.push(r.name);
       if (!r.running) {

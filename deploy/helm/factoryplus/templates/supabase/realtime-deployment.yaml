@@ -142,12 +142,26 @@ spec:
           # container's environment -- an httpGet header would mean templating the anon key into
           # the pod spec. Using the anon key here also proves API_JWT_SECRET matches what the
           # browser will present on the socket.
+          # THE SINGLE QUOTES ARE LOAD-BEARING. `Authorization: Bearer …` contains a colon followed
+          # by a space, which YAML reads as a key/value separator -- so an unquoted list item parses
+          # as a MAPPING, not a string, and the probe silently becomes
+          #   {"curl -sf -H \"Authorization": "Bearer $SUPABASE_ANON_KEY\" http://…"}
+          #
+          # Nothing in the chart's own tooling catches it. `helm template` emits it happily, `helm
+          # lint` passes, and the YAML is perfectly valid -- it just describes something else. It
+          # fails at the API server, as:
+          #   cannot unmarshal object into Go struct field ExecAction...command of type string
+          # which names a Go type and no file, and aborts the WHOLE `helm install` before any
+          # resource is created, so the stack looks entirely broken over one missing pair of quotes.
+          #
+          # Single quotes rather than double: the command already contains double quotes around the
+          # header value, and those have to reach curl.
           startupProbe:
             exec:
               command:
                 - /bin/sh
                 - -c
-                - curl -sf -H "Authorization: Bearer $SUPABASE_ANON_KEY" http://localhost:{{ .Values.realtime.port }}/api/tenants/{{ .Values.realtime.serviceName }}/health
+                - 'curl -sf -H "Authorization: Bearer $SUPABASE_ANON_KEY" http://localhost:{{ .Values.realtime.port }}/api/tenants/{{ .Values.realtime.serviceName }}/health'
             periodSeconds: 10
             timeoutSeconds: 5
             # Realtime applies its own _realtime migrations and seeds the tenant before answering.
@@ -157,7 +171,7 @@ spec:
               command:
                 - /bin/sh
                 - -c
-                - curl -sf -H "Authorization: Bearer $SUPABASE_ANON_KEY" http://localhost:{{ .Values.realtime.port }}/api/tenants/{{ .Values.realtime.serviceName }}/health
+                - 'curl -sf -H "Authorization: Bearer $SUPABASE_ANON_KEY" http://localhost:{{ .Values.realtime.port }}/api/tenants/{{ .Values.realtime.serviceName }}/health'
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3

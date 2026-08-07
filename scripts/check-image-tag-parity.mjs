@@ -66,7 +66,14 @@ const TARGET_SPECIFIC = new Map([
   ['node', 'Compose: supabase-storage-init / node-red-init. Kubernetes: node:20-alpine, pinned inline in the Job.'],
   ['busybox', 'Kubernetes only: the wait-for initContainers.'],
   ['curlimages/curl', 'Kubernetes only: readiness waits that need an HTTP client.'],
-  ['bitnami/kubectl', 'Kubernetes only: the AAS Job waits on the validate Job.'],
+  [
+    'bitnamilegacy/kubectl',
+    'Kubernetes only: the AAS Job waits on the validate Job. `bitnamilegacy` rather than ' +
+      '`bitnami` because Bitnami withdrew its tagged Docker Hub catalogue -- every semver tag on ' +
+      'bitnami/kubectl now 404s and only `latest` and digests remain, so the old pin stopped ' +
+      'resolving with nothing here having changed. See the initContainer for why this is a ' +
+      'stopgap.',
+  ],
   [
     'sapcc/mosquitto-exporter',
     'Kubernetes only: the broker metrics sidecar. Mosquitto publishes its statistics to $SYS MQTT ' +
@@ -174,7 +181,7 @@ for (const [repo, chartTag] of chart) {
   // TARGET_SPECIFIC applies in BOTH directions. It was originally consulted only in the
   // compose-side loop below, which was an asymmetry rather than a decision: every entry in it names
   // an image that legitimately exists on one target and not the other, and which target that is
-  // varies -- `alpine` is Compose-only, `bitnami/kubectl` and the mosquitto exporter are
+  // varies -- `alpine` is Compose-only, `bitnamilegacy/kubectl` and the mosquitto exporter are
   // Kubernetes-only. Checking it on one side meant a Kubernetes-only image could not be declared at
   // all, only worked around.
   if (TARGET_SPECIFIC.has(repo)) continue;
@@ -353,6 +360,34 @@ if (!nsMatch) {
     `release.yml pushes to ${nsMatch[1]} but the chart and this script expect ${IMAGE_NAMESPACE}.`
   );
 }
+// What release.yml actually BUILDS, as opposed to what its verification lists claim. Two shapes,
+// because the images are built two ways for a reason: the independent ones ride a matrix, while
+// ingestion and test-runner share a runner (test-runner is FROM ingestion, and a base built in a
+// different job -- or on a Buildx container driver -- is not resolvable, which fails as a registry
+// 403 rather than as a build-order problem).
+//
+// Checked separately from the `for img in` lists below because those lists are what the release
+// ASSERTS it published; this is what it did. An image dropped from the build but left in the list
+// fails the release loudly at the verification step, which is fine. An image dropped from the list
+// but left in the build publishes something nothing checks -- and the reverse, an image in neither,
+// leaves the chart naming a tag that does not exist. That is the ImagePullBackOff-with-no-failed-
+// release case, so it is worth its own assertion.
+const matrixBuilt = [...releaseSrc.matchAll(/^\s+- name:\s*([a-z0-9-]+)\s*\n\s+dockerfile:/gm)].map(
+  (m) => m[1]
+);
+const scriptBuilt = [...releaseSrc.matchAll(/-t\s+"\$IMAGE_NAMESPACE\/([a-z0-9-]+):\$V"/g)].map(
+  (m) => m[1]
+);
+const actuallyBuilt = [...new Set([...matrixBuilt, ...scriptBuilt])].sort();
+if (actuallyBuilt.join('|') !== expected.join('|')) {
+  releaseIssues.push(
+    'release.yml does not build the published set of images.\n' +
+      `    matrix        : ${fmt(matrixBuilt.sort())}\n` +
+      `    shared runner : ${fmt(scriptBuilt.sort())}\n` +
+      `    expected      : ${fmt(expected)}`
+  );
+}
+
 const forLists = [...releaseSrc.matchAll(/for img in ([a-z0-9 -]+);\s*do/g)].map((m) =>
   m[1].trim().split(/\s+/).sort()
 );

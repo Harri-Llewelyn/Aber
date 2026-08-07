@@ -52,7 +52,22 @@ spec:
       {{- end }}
       initContainers:
         - name: wait-for-validate
-          image: bitnami/kubectl:1.31.1
+          # `bitnami/kubectl:1.31.1` UNTIL BITNAMI WITHDREW ITS TAGGED DOCKER HUB CATALOGUE. That
+          # repository now publishes only `latest` and digest references; every semver tag 404s, so
+          # the pin stopped resolving without anything in this repository changing. `bitnamilegacy`
+          # is where Bitnami relocated the archived builds -- byte-for-byte the image that was here
+          # before, same shell, same uid 1001, same kubectl v1.31.1.
+          #
+          # A STOPGAP, and the namespace name says so: it is frozen and will not be rebuilt for
+          # CVEs. The right fix is to drop the dependency rather than re-pin it -- this
+          # initContainer only polls one Job's status, which `curlimages/curl` (already pinned in
+          # this chart, 10 MB, has a shell) can do against the API server with the ServiceAccount
+          # token this pod already carries.
+          #
+          # The alternatives were weighed: `rancher/kubectl` is distroless and has no /bin/sh, which
+          # the wait loop below needs; `alpine/k8s` has one but is 1.19 GB against 432 MB, pulled on
+          # every e2e run, to gain a toolchain nothing here uses.
+          image: bitnamilegacy/kubectl:1.31.1
           imagePullPolicy: IfNotPresent
           command:
             - /bin/sh

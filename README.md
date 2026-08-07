@@ -344,7 +344,7 @@ is why the schema builder offers a choice rather than a migration path.
 ## Testing
 
 ```bash
-# Frontend — 684 tests
+# Frontend — 690 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required
@@ -394,9 +394,15 @@ tag only** — never on a branch, so nothing about ordinary development reveals 
 | Job | Covers |
 | :--- | :--- |
 | **prepare-release** | Derives the version from the tag, refuses a non-SemVer one, re-runs the static checks a published artefact must not violate |
-| **build-images** | The four independent images, in parallel, pushed to GHCR |
-| **build-test-runner** | The conformance runner, which is built `FROM` the ingestion image and so cannot join the matrix |
+| **build-images** | The three independent images, in parallel, pushed to GHCR |
+| **build-ingestion-chain** | `ingestion`, then `test-runner` **on the same runner** — it is built `FROM` ingestion, so the base must be in the local image store |
 | **publish-chart** | Lint, render, package at the tag's version, push over OCI, pull it back |
+
+`build-ingestion-chain` sets up **no Buildx builder**, deliberately. `docker/setup-buildx-action`
+selects a `docker-container` builder with its own image store, so a locally-built base becomes
+invisible to the build that consumes it and BuildKit falls back to a registry pull — which fails
+`403 Forbidden` on a dry run (nothing was pushed) or on a first release (the package is still
+private). The error names the registry, not the build order.
 
 The tag is the only place the version is written: it stamps the five image tags, the chart `version`
 and the chart `appVersion` in one run. **Images publish before the chart**, because a chart that
