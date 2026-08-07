@@ -1,0 +1,13 @@
+# i3X service runtime dependencies.
+#
+# DELIBERATELY THREE. There is no web framework here: the HTTP surface is 20 routes of JSON in and
+# JSON out plus one SSE stream, which `http.server.ThreadingHTTPServer` serves without adding an
+# async runtime, an ASGI server and a dependency-injection framework to an edge container. The
+# conformance suite itself is written to the same standard -- "zero runtime dependencies".
+#
+# paho-mqtt is pinned to the v1 line for the same reason ingestion.py is: the v2 callback signatures
+# are a breaking change, and running the two consumers on different API versions would mean the
+# alias-handling code mirrored between them was no longer literally comparable.
+paho-mqtt==1.6.1
+protobuf==4.25.3
+requests==2.32.3

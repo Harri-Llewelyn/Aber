@@ -353,6 +353,10 @@ python ingestion/test_declared_metrics.py
 python ingestion/test_device_location.py
 python ingestion/test_health_heartbeat.py
 python ingestion/test_mqtt_tls.py
+# i3X subscription engine and address-space projection. Covers the sync-acknowledgement and
+# queue-overflow MUSTs that the CESMII conformance suite SKIPS when a live run happens to observe
+# no value changes -- see i3x/README.md.
+python i3x/test_i3x_service.py
 python supabase/functions/approve-quarantine/test_approve_quarantine.py
 python supabase/functions/deploy-nodered/test_deploy_nodered.py
 python supabase/functions/nodered-userinfo/test_nodered_userinfo.py

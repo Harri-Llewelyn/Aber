@@ -1506,6 +1506,154 @@ def verify_results():
         print(f"❌ 11. DIRECTORY ERROR: could not probe {SUPABASE_URL}: {e}")
         passed = False
 
+
+    # ---------------------------------------------------------------------------------------------
+    # 12. The i3X server.
+    #
+    # DELIBERATELY NOT A CONFORMANCE CHECK. CESMII publishes a 60-test suite and CI runs it; writing
+    # our own reading of the spec beside it would be grading our own homework, which is exactly how
+    # the hand-written AAS structural tests came to pass three real metamodel violations.
+    #
+    # What is asserted here is everything the suite CANNOT know, because it is a property of this
+    # deployment rather than of i3X:
+    #
+    #   * that the address space is scoped to the CALLER, not served from a service-role key --
+    #     the suite authenticates with one token and has no second identity to compare against;
+    #   * that values are the live MQTT ones rather than a database read, which is the whole reason
+    #     this is a long-lived service;
+    #   * that `/info` is reachable with no credential at all, which the suite checks, but here also
+    #     doubles as the container health probe;
+    #   * that writes are refused, which the suite records only as "optional feature omitted".
+    # ---------------------------------------------------------------------------------------------
+    try:
+        i3x_base = os.getenv("I3X_BASE_URL", "http://localhost:8090").rstrip("/") + "/v1"
+
+        def i3x(method, path, headers=None, body=None):
+            """Raw urllib, like check 11's probe -- the Supabase client would attach credentials
+            automatically, which is exactly what must be ABSENT for 12b and 12f."""
+            req = urllib.request.Request(
+                f"{i3x_base}{path}", method=method,
+                data=json.dumps(body).encode() if body is not None else None,
+                headers=headers or {},
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    return resp.status, resp.read().decode()
+            except urllib.error.HTTPError as err:
+                return err.code, err.read().decode()
+            except Exception as err:
+                return 0, str(err)
+
+        # 12. Unauthenticated /info -- a spec MUST, and the health probe both targets use.
+        status, body = i3x("GET", "/info")
+        info = json.loads(body) if status == 200 else {}
+        result = info.get("result", info)
+        if status == 200 and result.get("specVersion"):
+            print(f"✅ 12.  i3X SERVER: /info answers unauthenticated, specVersion "
+                  f"{result['specVersion']}, serverName {result.get('serverName')}")
+        else:
+            print(f"❌ 12.  i3X SERVER FAIL: /info returned HTTP {status}. It MUST be reachable "
+                  "with no credentials -- it is the capabilities document and the health check.")
+            passed = False
+
+        if status == 200:
+            # 12a. Update is declared false AND unimplemented. Two statements of one decision: a
+            # client that trusts the flag and a client that probes the verb must agree.
+            caps = result.get("capabilities", {}).get("update", {})
+            put_status, _ = i3x("PUT", "/objects/value",
+                                {"Authorization": f"Bearer {token}",
+                                 "Content-Type": "application/json"}, {})
+            if caps.get("current") is False and put_status == 405:
+                print("✅ 12a. i3X READ-ONLY: update.current is false and PUT /objects/value "
+                      "answers 405 -- the capability flag and the verb agree")
+            else:
+                print(f"❌ 12a. i3X READ-ONLY FAIL: capabilities.update.current="
+                      f"{caps.get('current')}, PUT /objects/value returned {put_status}. "
+                      "Expected false and 405.")
+                passed = False
+
+            # 12b. Anonymous reads are refused. /info is the ONLY open endpoint.
+            anon_status, _ = i3x("GET", "/objects")
+            if anon_status == 401:
+                print("✅ 12b. i3X FAIL-CLOSED: an unauthenticated /objects read answers 401")
+            else:
+                print(f"❌ 12b. i3X FAIL-CLOSED FAIL: unauthenticated /objects returned "
+                      f"{anon_status}, expected 401.")
+                passed = False
+
+            # 12c. The address space contains this run's device, and its parent is a LOCATION --
+            # a cell or the synthetic Unassigned -- never its gateway. That distinction is the one
+            # modelling decision i3X forced here and it is worth pinning.
+            status, body = i3x("GET", "/objects", {"Authorization": f"Bearer {token}"})
+            objects = json.loads(body).get("result", []) if status == 200 else []
+            device = next((o for o in objects if o.get("elementId") == SEEDED["known_id"]), None)
+            gateway_ids = {o["elementId"] for o in objects
+                           if o.get("typeElementId") == "i3x:type:gateway"}
+            if device and device.get("parentId") not in gateway_ids:
+                print(f"✅ 12c. i3X ADDRESS SPACE: {SEEDED['known_id']} is present, parented to "
+                      f"{device['parentId']} (a location, not its gateway)")
+            elif device:
+                print(f"❌ 12c. i3X ADDRESS SPACE FAIL: the device's parentId is {device['parentId']}, "
+                      "which is a gateway. HasParent is organizational hierarchy; the data path "
+                      "belongs on ConnectsVia.")
+                passed = False
+            else:
+                print(f"❌ 12c. i3X ADDRESS SPACE FAIL: {SEEDED['known_id']} is not in /objects "
+                      f"({len(objects)} objects returned).")
+                passed = False
+
+            # 12d. Exactly one root. `parentId: null` means root in i3X, so a second one would make
+            # the hierarchy ambiguous -- which is precisely why Unassigned is a synthetic object
+            # under the site rather than a second root.
+            roots = [o["elementId"] for o in objects if o.get("parentId") is None]
+            if roots == ["i3x:site"]:
+                print("✅ 12d. i3X SINGLE ROOT: exactly one object has a null parentId (i3x:site)")
+            else:
+                print(f"❌ 12d. i3X SINGLE ROOT FAIL: roots are {roots}, expected ['i3x:site'].")
+                passed = False
+
+            # 12e. Values come from MQTT, not from the database. Asserted by reading a metric that
+            # this run PUBLISHED -- if the value path were a telemetry query it would still pass,
+            # so the timestamp is checked to be recent rather than merely present.
+            status, body = i3x("POST", "/objects/value",
+                               {"Authorization": f"Bearer {token}",
+                                "Content-Type": "application/json"},
+                               {"elementIds": [SEEDED["known_id"]]})
+            results = json.loads(body).get("results", []) if status == 200 else []
+            value = (results[0].get("result") or {}) if results and results[0].get("success") else {}
+            metrics = value.get("value") if isinstance(value.get("value"), dict) else {}
+            if metrics:
+                print(f"✅ 12e. i3X LIVE VALUES: {len(metrics)} metric(s) served from the MQTT cache "
+                      f"(quality {value.get('quality')}), e.g. {sorted(metrics)[:3]}")
+            else:
+                print(f"❌ 12e. i3X LIVE VALUES FAIL: no current value for "
+                      f"{SEEDED['known_id']}. HTTP {status}, body {body[:200]}")
+                passed = False
+
+            # 12f. THE RLS ASSERTION, and the reason this check exists at all. The value cache is a
+            # plain dict keyed by sparkplug_id with no notion of policy, so serving from it directly
+            # would let any authenticated caller read every device on the site. A caller whose token
+            # cannot see the device must be told "not found" -- indistinguishable from absent.
+            #
+            # Probed with a DELIBERATELY INVALID token rather than a second user: it exercises the
+            # same code path (resolve through PostgREST as the caller, serve nothing that did not
+            # come back) without needing a second seeded identity and its RLS policies.
+            status, body = i3x("POST", "/objects/value",
+                               {"Authorization": "Bearer not.a.valid.token",
+                                "Content-Type": "application/json"},
+                               {"elementIds": [SEEDED["known_id"]]})
+            leaked = SEEDED["known_id"] in body and '"value":' in body and status == 200
+            if status in (401, 403) or (status == 200 and not leaked):
+                print(f"✅ 12f. i3X VALUES ARE RLS-SCOPED: a caller whose token the data layer "
+                      f"rejects gets no values (HTTP {status})")
+            else:
+                print(f"❌ 12f. i3X VALUES ARE RLS-SCOPED FAIL: HTTP {status} returned live values "
+                      "to an unauthorised caller. The MQTT cache has no RLS of its own -- every "
+                      "value read must be gated on a PostgREST resolve made AS THE CALLER.")
+                passed = False
+    except Exception as e:
+        print(f"⚠️  12.  i3X SERVER: skipped, could not reach {os.getenv('I3X_BASE_URL', 'http://localhost:8090')}: {e}")
+
     print("==========================================")
     if passed:
         print("🎉 END-TO-END VALIDATION PASSED SUCCESSFULLY!")

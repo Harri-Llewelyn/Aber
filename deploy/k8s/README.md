@@ -414,7 +414,7 @@ kubectl -n factoryplus get pvc          # delete deliberately, never as cleanup 
 
 ### Images you must build
 
-Five images are built from this repository rather than pulled from a vendor. **They are published**
+Six images are built from this repository rather than pulled from a vendor. **They are published**
 to `ghcr.io/harri-llewelyn/acs-cymru/`, so an ordinary install needs none of this — the chart pulls
 them at its own `appVersion`.
 
@@ -447,6 +447,12 @@ docker build -f node-red/Dockerfile             -t $NS/node-red:$V node-red
 docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
                                                 -t $NS/frontend:$V frontend
 
+# i3X 1.0 server -- repository root again, because it compiles sparkplug_b.proto. Built
+# independently of the ingestion image despite sharing that need: a chained base has to be
+# resolvable at build time, which is the ordering problem release.yml's build-ingestion-chain
+# exists to work around, and one more independent image is cheaper than one more constraint.
+docker build -f i3x/Dockerfile                  -t $NS/i3x-service:$V .
+
 # Conformance test runner (only needed for e2e.enabled=true). EXTENDS the ingestion image, so build
 # that first: it adds jsonschema and the AAS suite in a repo-shaped layout. jsonschema is deliberately
 # NOT in the production ingestion image, and without it the schema-conformance tests skip themselves
@@ -454,7 +460,7 @@ docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
 docker build -f tests/Dockerfile --build-arg INGESTION_IMAGE=$NS/ingestion:$V \
                                                 -t $NS/test-runner:$V .
 
-for i in edge-runtime ingestion node-red frontend test-runner; do
+for i in edge-runtime ingestion node-red frontend test-runner i3x-service; do
   k3d image import $NS/$i:$V -c <cluster>   # or push to your registry
 done
 ```

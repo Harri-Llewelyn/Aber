@@ -165,7 +165,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
         with:
           version: v3.16.3
 
@@ -217,7 +217,17 @@ jobs:
       # is a resource nothing validated.
       - name: Validate Rendered Manifests Against The Kubernetes Schema
         run: |
-          docker run --rm -v "$PWD:/w" -w /w ghcr.io/yannh/kubeconform:v0.6.7             -strict -summary -ignore-missing-schemas             -kubernetes-version "${KUBECONFORM_K8S_VERSION}" /tmp/rendered.yaml
+          # `-v /tmp:/tmp`, NOT the workspace. The rendered manifest is written to the RUNNER's
+          # /tmp by the step above, which is not inside the repository -- so mounting $PWD gave the
+          # container its own empty /tmp and kubeconform answered
+          #   /tmp/rendered.yaml - failed validation: lstat /tmp/rendered.yaml: no such file
+          # counted as `Errors: 1`. That is a genuine non-zero exit, but it names a missing file
+          # rather than an invalid manifest, so it reads as a broken chart. Mount what the file is
+          # actually on.
+          docker run --rm -v /tmp:/tmp ghcr.io/yannh/kubeconform:v0.6.7 \
+            -strict -summary -ignore-missing-schemas \
+            -kubernetes-version "${KUBECONFORM_K8S_VERSION}" \
+            /tmp/rendered.yaml
         env:
           # Matches the chart's kubeVersion floor closely enough to catch field-level mistakes; the
           # schemas are per-release, so this pins WHICH API surface the manifests are judged against.
@@ -935,9 +945,44 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
         with:
           version: v3.16.3
+
+      # THIS JOB IS DISK-BOUND, and the failure does not look like a disk problem.
+      #
+      # A GitHub-hosted ubuntu runner starts with roughly 14 GB free on `/`, and this job needs the
+      # host Docker daemon to hold five freshly built images, the k3d node's containerd to hold a
+      # SECOND COPY of all five (`k3d image import` copies, it does not share a store), and then the
+      # dozen third-party images the pods pull -- supabase/postgres, timescaledb, studio, realtime,
+      # kong, grafana and the rest. That total does not fit.
+      #
+      # What happens when it does not fit is the expensive part. k3s's kubelet evicts on
+      # ephemeral-storage below ~3.8 GB, so pods are evicted, rescheduled onto the same single node,
+      # and evicted again -- a cascade that leaves `Evicted`, `ContainerStatusUnknown` and
+      # `Completed` scattered across every workload, replicas of things that have `replicas: 1`, and
+      # a `helm install --wait` that eventually reports `context deadline exceeded`. Nothing in that
+      # picture says "disk": it reads as a broken chart, and it took a full 18-minute run to
+      # diagnose.
+      #
+      # The runner ships ~25 GB of toolchains this repository does not use. Removing them costs
+      # seconds and is the difference between the cascade above and a clean install. `|| true` on
+      # each: the exact contents of the runner image change between releases, and a missing
+      # directory must not fail the job.
+      - name: Reclaim Runner Disk Before Creating The Cluster
+        run: |
+          echo "--- before"
+          df -h / | tail -1
+          sudo rm -rf /usr/local/lib/android      || true   # ~9 GB
+          sudo rm -rf /usr/share/dotnet           || true   # ~2 GB
+          sudo rm -rf /opt/ghc                    || true   # ~1 GB
+          sudo rm -rf /usr/local/.ghcup           || true   # ~2 GB
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true   # ~6 GB
+          sudo rm -rf /usr/local/share/powershell || true   # ~1 GB
+          sudo rm -rf /usr/share/swift            || true   # ~1 GB
+          docker image prune -af                  || true
+          echo "--- after"
+          df -h / | tail -1
 
       - name: Set up k3d
         run: |
@@ -959,7 +1004,7 @@ jobs:
           kubectl cluster-info
           kubectl get nodes -o wide
 
-      # The five images this repository builds. Built here and imported directly into the cluster's
+      # The six images this repository builds. Built here and imported directly into the cluster's
       # containerd, so nothing is pushed anywhere and no GHCR credential is needed -- release.yml
       # owns publishing. `pullPolicy: IfNotPresent` is what makes the imported copy win.
       #
@@ -994,6 +1039,8 @@ jobs:
           docker build -f supabase/functions/Dockerfile -t "$IMG_NS/edge-runtime:$V" .
           docker build -f Dockerfile                    -t "$IMG_NS/ingestion:$V" .
           docker build -f node-red/Dockerfile           -t "$IMG_NS/node-red:$V" node-red
+          # i3X server -- repository root again, for sparkplug_b.proto.
+          docker build -f i3x/Dockerfile                -t "$IMG_NS/i3x-service:$V" .
           # VITE_RUNTIME_CONFIG=true bakes NOTHING -- the whole point of Phase 0. A default build
           # would carry a baked URL that masks a missing ConfigMap instead of surfacing it.
           docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
@@ -1016,6 +1063,23 @@ jobs:
             "$IMG_NS/node-red:$V" \
             "$IMG_NS/frontend:$V" \
             "$IMG_NS/test-runner:$V"
+
+          # `k3d image import` COPIES into the node's containerd; it does not share the host
+          # daemon's store. So after this line every one of those images exists twice on the same
+          # filesystem, and the host's copy is never read again -- the cluster is the only consumer
+          # from here on. Dropping it back is the largest single reclaim available, and it has to
+          # happen AFTER the import rather than instead of it.
+          #
+          # The builder cache goes too: it holds every intermediate layer of five multi-stage
+          # builds, which is comparable in size to the images themselves and is of no use once the
+          # job stops building.
+          docker image rm -f \
+            "$IMG_NS/edge-runtime:$V" "$IMG_NS/ingestion:$V" "$IMG_NS/node-red:$V" \
+            "$IMG_NS/frontend:$V" "$IMG_NS/test-runner:$V" || true
+          docker builder prune -af || true
+          docker image prune -af || true
+          echo "--- disk after import and reclaim"
+          df -h / | tail -1
 
       - name: Mirror Repository Config Into The Chart
         run: node scripts/sync-helm-chart-files.mjs --check
@@ -1165,6 +1229,15 @@ jobs:
       - name: Diagnostics On Failure
         if: failure()
         run: |
+          # DISK FIRST, because it is the failure that disguises itself as every other failure.
+          # Ephemeral-storage eviction leaves `Evicted`, `ContainerStatusUnknown` and `Completed`
+          # across unrelated workloads and ends as `context deadline exceeded`, which reads as a
+          # broken chart. `NodeHasDiskPressure` in the node conditions settles it in one line.
+          echo "=== disk and node pressure"
+          df -h / | tail -1 || true
+          kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .status.conditions[*]}  {.type}={.status} {.message}{"\n"}{end}{end}' || true
+          kubectl -n $NS get events --field-selector reason=Evicted 2>/dev/null | head -5 || true
+          echo
           kubectl -n $NS get pods -o wide || true
           kubectl -n $NS get svc,ingress,pvc || true
           kubectl -n $NS get events --sort-by=.lastTimestamp | tail -40 || true
@@ -1182,6 +1255,16 @@ jobs:
   e2e-validation:
     name: End-to-End Unified Stack Ingestion Validation
     runs-on: ubuntu-latest
+    env:
+      # A COMMIT SHA, and it has to be. The obvious pin -- the `1.0.0` tag -- does not work: that
+      # tag predates the conformance suite, so its tree has no `conformance-tests/` at all and the
+      # checkout succeeds while the runner then reports a missing file. The suite lives only on
+      # `main`, so the choice is an unpinned branch or a SHA, and an unpinned branch would let
+      # someone else's commit decide whether this pipeline is green.
+      #
+      # Bumping this is a deliberate act: read the suite's CHANGELOG first, because a new MUST test
+      # is a real finding about this server, not a CI problem to work around.
+      I3X_SUITE_REF: "5010274f4952acb1c23dc77b32bd44eed16f0c2b"
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
@@ -1322,6 +1405,58 @@ jobs:
           export MQTT_PORT=1883        # mosquitto    1883:1883
           export SUPABASE_URL=http://127.0.0.1:54321  # supabase-kong 54321:8000
           python ingestion/validate.py
+
+      # ---------------------------------------------------------------------------------------
+      # i3X 1.0 conformance, run by CESMII'S OWN TEST SUITE rather than by assertions of ours.
+      #
+      # THIS IS THE SAME DISCIPLINE AS VALIDATING AAS AGAINST THE REAL IDTA SCHEMA. Hand-written
+      # structural tests passed three genuine AAS metamodel violations, all of the same shape, and
+      # the only thing that caught them was the published schema. A conformance claim checked
+      # against our own reading of the spec is worth very little; checked against the authors'
+      # executable definition of it, it is worth a great deal. The suite found ELEVEN real MUST
+      # failures on this server's first run -- including a request-body handling bug that corrupted
+      # the NEXT request on a keep-alive connection, which no test written from the same
+      # misunderstanding would ever have looked for.
+      #
+      # Pinned to a commit, not to `main`: an upstream change to the suite must be a deliberate
+      # update here, or a green pipeline could turn red for reasons that have nothing to do with
+      # this repository.
+      #
+      # The expected verdict is **1.0 Compatible**, not Full Compliance, and that is the design:
+      # Update is a MAY, `GET /info` declares `update.current: false`, and `PUT /objects/value`
+      # answers 405. "Optional features were omitted" is the suite agreeing with us.
+      # ---------------------------------------------------------------------------------------
+      - name: i3X Conformance — CESMII Official Suite
+        run: |
+          set -eu
+          git clone --quiet https://github.com/cesmii/i3X.git /tmp/i3x-spec
+          git -C /tmp/i3x-spec checkout --quiet "$I3X_SUITE_REF"
+
+          set -a && . ./.env && set +a
+          TOKEN=$(curl -s -X POST "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
+            -H "apikey: $SUPABASE_ANON_KEY" -H "Content-Type: application/json" \
+            -d '{"email":"admin@factoryplus.local","password":"factoryplus123"}' \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+          test -n "$TOKEN"
+
+          cd /tmp/i3x-spec/conformance-tests
+          node bin/i3x-test.js run "http://127.0.0.1:${I3X_PORT:-8090}/v1" --token "$TOKEN" \
+            | tee /tmp/i3x-conformance.txt
+
+          # ASSERT ON THE VERDICT, not on the exit code. The suite exits non-zero for a failed MUST,
+          # but "Not Compliant" and "could not reach the server" are different problems and only one
+          # of them is ours -- so the verdict line is read explicitly and an absent one is a failure
+          # in its own right.
+          if grep -q "Result: Full 1.0 Compliance" /tmp/i3x-conformance.txt; then
+            echo "i3X: Full 1.0 Compliance"
+          elif grep -q "Result: 1.0 Compatible" /tmp/i3x-conformance.txt; then
+            echo "i3X: 1.0 Compatible (update methods deliberately omitted)"
+          else
+            echo "::error::i3X conformance did not reach a passing verdict."
+            grep -E "Result:|✗" /tmp/i3x-conformance.txt | head -30 || true
+            exit 1
+          fi
+
 
       # The live half of the AAS export suite: composes a shell for the demo device against the
       # running stack and validates the emitted document. The same file runs in

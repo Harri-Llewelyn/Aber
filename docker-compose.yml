@@ -729,6 +729,54 @@ services:
       supabase-db-init:
         condition: service_completed_successfully
 
+  # i3X 1.0 server (CESMII Industrial Information Interoperability eXchange).
+  #
+  # A READ-SIDE ADAPTER, alongside ingestion rather than inside it. It holds its own `spBv1.0/#`
+  # subscription because i3X subscriptions must accumulate value changes between client polls, and
+  # those values cannot come from Supabase Realtime -- `telemetry` is a postgres_fdw foreign table
+  # whose rows never enter Supabase's WAL, so publishing it emits nothing at all, silently.
+  #
+  # `replicas: 1` is a correctness constraint here as it is for ingestion, and for a second reason
+  # on top of the duplicate-consumption one: subscription state (queues, sequence numbers, open SSE
+  # streams) is in memory, so a second replica would answer `/subscriptions/sync` for a
+  # subscription it has never heard of and return 404 for a live client.
+  i3x-service:
+    container_name: factoryplus_i3x
+    build:
+      # REPOSITORY ROOT: sparkplug_b.proto lives there and the image compiles it.
+      context: .
+      dockerfile: i3x/Dockerfile
+    restart: always
+    ports:
+      - "${I3X_PORT:-8090}:8090"
+    environment:
+      SUPABASE_URL: http://supabase-kong:8000
+      # THE ANON KEY, AND DELIBERATELY NOT THE SERVICE-ROLE KEY. This service authenticates the
+      # caller and then queries PostgREST as that caller, so RLS decides what the i3X address space
+      # contains. `main()` REFUSES TO START if SUPABASE_SERVICE_ROLE_KEY is present, which turns a
+      # copy-paste of the ingestion environment block into a container that will not boot rather
+      # than into a silent, total RLS bypass over every asset on the site.
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      MQTT_HOST: ${MQTT_HOST:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_USER: ${MQTT_USER:-factoryplus}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_TLS_ENABLED: ${MQTT_TLS_ENABLED:-}
+      MQTT_TLS_CA_FILE: ${MQTT_TLS_CA_FILE:-}
+      # Subscription limits. The TTL is a spec MUST -- an abandoned subscription must be deleted, or
+      # a client that walks away holds a queue open forever. The queue limit is what makes overflow
+      # a reported 206 rather than unbounded memory growth.
+      I3X_SUBSCRIPTION_TTL_SECONDS: ${I3X_SUBSCRIPTION_TTL_SECONDS:-300}
+      I3X_SUBSCRIPTION_QUEUE_LIMIT: ${I3X_SUBSCRIPTION_QUEUE_LIMIT:-10000}
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      supabase-kong:
+        condition: service_started
+      supabase-db-init:
+        condition: service_completed_successfully
+
   node-red-init:
     container_name: factoryplus_node_red_init
     # Built, not pulled, and from the SAME context as node-red below. settingsAreCorrect()

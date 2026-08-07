@@ -214,7 +214,11 @@ const allFiles = walk('.').map((f) => f.replace(/^\.\//, ''));
 // -------------------------------------------------------------------------------------------------
 {
   const src = read('ingestion/validate.py');
-  const ids = new Set([...src.matchAll(/["'](?:✅|❌|⚠️)?\s*(\d+[a-z]?)\.\s+[A-Z]/gu)].map((m) => m[1]));
+  // `[A-Za-z0-9]` after the number, not `[A-Z]`. The stricter form silently UNDER-COUNTED: the i3X
+  // checks are labelled "12. i3X SERVER", and a leading lowercase letter made seven outcomes
+  // invisible to this check while it still reported ok against a now-stale total. A counter that
+  // quietly stops counting is the exact failure this file exists to prevent.
+  const ids = new Set([...src.matchAll(/["'](?:✅|❌|⚠️)?\s*(\d+[a-z]?)\.\s+[A-Za-z0-9]/gu)].map((m) => m[1]));
   const doc = read('ingestion/README.md');
   const claimed = doc.match(/asserts (\d+) outcomes/);
   if (claimed && Number(claimed[1]) !== ids.size) {
@@ -245,7 +249,7 @@ const allFiles = walk('.').map((f) => f.replace(/^\.\//, ''));
     ...values.matchAll(/repository:\s*(\S+)[\s\S]{0,400}?^\s{4}tag:\s*""\s*$/gm),
   ].map((m) => m[1]);
   const unique = [...new Set(built)];
-  const EXPECTED = 5;
+  const EXPECTED = 6;
   if (unique.length !== EXPECTED) {
     fail(
       `expected ${EXPECTED} chart images with an empty tag (built here, resolved from appVersion); ` +
@@ -410,6 +414,69 @@ const allFiles = walk('.').map((f) => f.replace(/^\.\//, ''));
     pass(
       `openapi.yaml covers all ${published} published relations and all ${functions.length} edge functions`
     );
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 11. frontend/Dockerfile's build args are the set we have deliberately decided are not secrets.
+//
+// That Dockerfile carries `# check=skip=SecretsUsedInArgOrEnv`, which switches OFF BuildKit's
+// warning about sensitive data in ARG/ENV for the WHOLE FILE -- there is no per-line suppression.
+// The skip is justified for exactly one argument: VITE_SUPABASE_ANON_KEY is a public, RLS-gated
+// JWT whose purpose is to be served to browsers, and the rule matches on the name rather than on
+// anything about the value.
+//
+// The danger is not today's file, it is the next one. Someone adds `ARG SUPABASE_SERVICE_ROLE_KEY`
+// -- which IS a secret, bypasses RLS entirely, and would be inlined into a public bundle by Vite --
+// and the warning that exists to catch precisely that has already been silenced, by a line they did
+// not write and will not see. So the skip is paired with an allowlist: adding an ARG means adding it
+// here, which is the moment to ask whether the skip still holds.
+//
+// Vite only inlines `VITE_`-prefixed variables, so a non-VITE_ ARG appearing here is doubly worth a
+// second look: it is not something the bundle needs.
+// -------------------------------------------------------------------------------------------------
+{
+  const FRONTEND_BUILD_ARGS = new Set([
+    'VITE_RUNTIME_CONFIG',   // selects baked vs runtime config; not a credential
+    'VITE_SUPABASE_URL',     // an endpoint, public
+    'VITE_SUPABASE_ANON_KEY', // public anon JWT -- the reason for the skip; see the Dockerfile
+    'VITE_ENABLE_REALTIME',  // feature flag
+    'VITE_GITHUB_REPO_URL',  // issue tracker URL
+    'VITE_ALLOW_SIGNUP',     // feature flag
+  ]);
+
+  const df = read('frontend/Dockerfile');
+  const skipped = /^#\s*check=skip=([A-Za-z,]+)/m.exec(df);
+  const declared = new Set(
+    [...df.matchAll(/^ARG\s+([A-Za-z_][A-Za-z0-9_]*)/gm)].map((m) => m[1])
+  );
+
+  if (!skipped) {
+    // Not an error: if the skip is gone the allowlist is no longer load-bearing. Say so rather
+    // than silently keeping a check whose premise has been removed.
+    pass('frontend/Dockerfile has no check=skip directive (allowlist not required)');
+  } else if (skipped[1] !== 'SecretsUsedInArgOrEnv') {
+    fail(
+      `frontend/Dockerfile skips BuildKit rules "${skipped[1]}". Only SecretsUsedInArgOrEnv is\n` +
+        '      justified there; widening the skip hides checks nobody has reasoned about.'
+    );
+  } else {
+    const added = [...declared].filter((a) => !FRONTEND_BUILD_ARGS.has(a));
+    const removed = [...FRONTEND_BUILD_ARGS].filter((a) => !declared.has(a));
+    if (added.length) {
+      fail(
+        `frontend/Dockerfile declares ARG(s) not in the allowlist: ${added.join(', ')}.\n` +
+          '      SecretsUsedInArgOrEnv is skipped for that whole file, so a genuinely sensitive\n' +
+          '      value added there would raise NO warning. Confirm it is safe to inline into a\n' +
+          '      public browser bundle, then add it to FRONTEND_BUILD_ARGS in this script.'
+      );
+    } else if (removed.length) {
+      fail(
+        `FRONTEND_BUILD_ARGS lists ARG(s) frontend/Dockerfile no longer declares: ${removed.join(', ')}.`
+      );
+    } else {
+      pass(`all ${declared.size} frontend build args are on the reviewed non-secret allowlist`);
+    }
   }
 }
 

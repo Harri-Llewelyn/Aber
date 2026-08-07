@@ -1,9 +1,9 @@
 # =================================================================================================
-# Release: publish the five images this repository builds, then the Helm chart, to GHCR over OCI.
+# Release: publish the six images this repository builds, then the Helm chart, to GHCR over OCI.
 #
 # THE ORDER IS THE WHOLE DESIGN. The chart names those five images at `Chart.AppVersion`, so a chart
 # published before its images resolves to tags that do not exist yet -- and the failure is not a
-# failed install. `helm install` SUCCEEDS, `--wait` blocks for its full timeout, and five workloads
+# failed install. `helm install` SUCCEEDS, `--wait` blocks for its full timeout, and six workloads
 # sit in ImagePullBackOff while the databases, the broker and Kong all come up healthy. Someone
 # reading `kubectl get pods` sees a stack that is two thirds up and no error naming the release.
 # So: images first, chart last, and the chart job `needs` them.
@@ -122,7 +122,7 @@ jobs:
           echo "Releasing $VERSION (push=$PUSH)"
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
 
@@ -143,7 +143,7 @@ jobs:
         run: node scripts/check-docs-drift.mjs
 
   # -----------------------------------------------------------------------------------------------
-  # The three INDEPENDENT images, in parallel.
+  # The four INDEPENDENT images, in parallel.
   #
   # ingestion is deliberately not here even though it has no dependencies of its own: test-runner is
   # built FROM it, and the two have to share a runner. See build-ingestion-chain below.
@@ -153,7 +153,7 @@ jobs:
     needs: prepare-release
     runs-on: ubuntu-latest
     strategy:
-      # One image failing should not leave the other two pushed and this job green-ish. The chart
+      # One image failing should not leave the others pushed and this job green-ish. The chart
       # job `needs` this one, so a failure anywhere stops the chart regardless -- but finishing the
       # siblings makes the log show whether the failure was specific or systemic.
       fail-fast: false
@@ -169,6 +169,14 @@ jobs:
             dockerfile: node-red/Dockerfile
             context: node-red
             build_args: ''
+          # REPOSITORY ROOT: the i3X server compiles sparkplug_b.proto, which lives there. It is an
+          # independent build despite sharing that need with ingestion -- see i3x/Dockerfile for
+          # why a chained base would reintroduce the ordering problem build-ingestion-chain exists
+          # to avoid.
+          - name: i3x-service
+            dockerfile: i3x/Dockerfile
+            context: .
+            build_args: ''
           # VITE_RUNTIME_CONFIG=true bakes NOTHING, which is what lets one published image serve any
           # environment and read its configuration from the /config.js ConfigMap. A default build
           # would carry a baked Supabase URL that MASKS a missing ConfigMap instead of surfacing it
@@ -183,18 +191,18 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log In To GHCR
         if: needs.prepare-release.outputs.push == 'true'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build & Push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
@@ -256,7 +264,7 @@ jobs:
 
       - name: Log In To GHCR
         if: needs.prepare-release.outputs.push == 'true'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -330,7 +338,7 @@ jobs:
       - name: Set up Helm
         # Pinned to the version ci.yml lints and renders with, so the chart is packaged by the same
         # Helm that proved it renders. OCI support has been GA since 3.8.
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
         with:
           version: v3.16.3
 
@@ -377,7 +385,7 @@ jobs:
             --set e2e.enabled=true > /tmp/from-package.yaml
 
           MISSING=0
-          for img in edge-runtime ingestion node-red frontend test-runner; do
+          for img in edge-runtime ingestion node-red frontend test-runner i3x-service; do
             REF="$IMAGE_NAMESPACE/$img:$V"
             if grep -qF "$REF" /tmp/from-package.yaml; then
               echo "  ok  $REF"
@@ -433,7 +441,7 @@ jobs:
             echo '```'
             echo
             echo "Images published at \`$V\`:"
-            for img in edge-runtime ingestion node-red frontend test-runner; do
+            for img in edge-runtime ingestion node-red frontend test-runner i3x-service; do
               echo "- \`$IMAGE_NAMESPACE/$img:$V\`"
             done
           } >> "$GITHUB_STEP_SUMMARY"

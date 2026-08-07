@@ -9,7 +9,7 @@ allowed to be heard at all.
 | File | Purpose |
 | :--- | :--- |
 | [`ingestion.py`](ingestion.py) | The daemon. Identity resolution, quarantine gating, telemetry mapping |
-| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 34 outcomes |
+| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 41 outcomes |
 | [`logging_config.py`](logging_config.py) | Structured logger used by both |
 | [`test_gateway_binding.py`](test_gateway_binding.py) | Gateway↔device binding, telemetry sanity window, append-only historian |
 | [`test_declared_metrics.py`](test_declared_metrics.py) | Birth-metric observation, change-only writes, alias resolution, rebirth rate limit, device watchdog |

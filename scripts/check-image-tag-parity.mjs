@@ -37,7 +37,7 @@ const VALUES = join(REPO_ROOT, 'deploy', 'helm', 'factoryplus', 'values.yaml');
 const verbose = process.argv.includes('--verbose');
 
 /**
- * The registry namespace the five built images are published under, by .github/workflows/release.yml.
+ * The registry namespace the six built images are published under, by .github/workflows/release.yml.
  *
  * Lowercase because OCI reference names are case-sensitive and must be lowercase -- the GitHub
  * account is `Harri-Llewelyn`, and a reference carrying those capitals pushes without complaint and
@@ -54,7 +54,7 @@ const IMAGE_NAMESPACE = 'ghcr.io/harri-llewelyn/acs-cymru';
  * values.yaml their tag is deliberately EMPTY, resolved to Chart.AppVersion by the
  * `factoryplus.image` helper.
  */
-const BUILT_IMAGES = ['edge-runtime', 'ingestion', 'node-red', 'frontend', 'test-runner'];
+const BUILT_IMAGES = ['edge-runtime', 'ingestion', 'node-red', 'frontend', 'test-runner', 'i3x-service'];
 const LOCALLY_BUILT = new Set(BUILT_IMAGES.map((n) => `${IMAGE_NAMESPACE}/${n}`));
 
 /**

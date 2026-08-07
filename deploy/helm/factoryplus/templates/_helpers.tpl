@@ -97,10 +97,10 @@ storageClassName: {{ $sc | quote }}
 {{/*
 Render a `repository:tag` image reference, defaulting an EMPTY tag to the chart's appVersion.
 
-Used only by the five images this repository BUILDS -- edge-runtime, ingestion, node-red, frontend
-and test-runner. Their tag is empty in values.yaml on purpose, so the chart and the images it names
-ship from one release tag and cannot drift: .github/workflows/release.yml stamps appVersion from the
-`v*` tag and pushes those five images at the same string, in the same job.
+Used only by the images this repository BUILDS -- edge-runtime, ingestion, node-red, frontend,
+test-runner and i3x-service. Their tag is empty in values.yaml on purpose, so the chart and the
+images it names ship from one release tag and cannot drift: .github/workflows/release.yml stamps
+appVersion from the `v*` tag and pushes all of them at the same string, in the same run.
 
 It is deliberately NOT used for third-party images. Those pins are decisions, several of them
 load-bearing -- supabase/realtime and supabase/storage-api migrate shared schemas on boot,
@@ -262,6 +262,10 @@ must never be scaled" has one answer rather than three that can drift.
 {{- define "factoryplus.singleWriterWorkloads" -}}
 ingestion: a plain paho subscribe with no shared-subscription group -- every replica consumes every
   message, so a second one duplicates telemetry, quarantine decisions and append-only audit rows
+i3x-service: the same unshared spBv1.0/# subscription, AND its subscription state (queues, sequence
+  numbers, open SSE streams) is in memory -- a second replica answers /subscriptions/sync for a
+  subscriptionId it has never seen, so a live client gets an intermittent 404 depending on which pod
+  the Service picked
 node-red: single-writer /data (the live flow, the encrypted credentials, editor sessions and the
   persisted editor-user map)
 mosquitto: does not cluster -- two brokers behind one Service split the fleet, and Sparkplug state
@@ -464,6 +468,15 @@ using one for both fails in a way that names neither. In-cluster URLs are not co
 {{- define "factoryplus.studioUrl" -}}{{ include "factoryplus.publicUrl" (dict "ctx" . "key" "studio" "sub" "studio") }}{{- end -}}
 {{- define "factoryplus.docsUrl" -}}{{ include "factoryplus.publicUrl" (dict "ctx" . "key" "docs" "sub" "docs") }}{{- end -}}
 {{- define "factoryplus.mqttUrl" -}}{{ include "factoryplus.publicUrl" (dict "ctx" . "key" "mqtt" "sub" "mqtt") }}{{- end -}}
+{{/*
+The i3X server's browser-facing URL.
+
+Derived here like every other public URL rather than written as a literal, because it has more than
+one consumer: the Ingress rule, NOTES.txt, and -- for anyone pointing the CESMII conformance suite
+or the MCP server at this deployment -- the value of `I3X_BASE_URL`. One definition means an ingress
+hostname cannot disagree with what is documented as the endpoint.
+*/}}
+{{- define "factoryplus.i3xUrl" -}}{{ include "factoryplus.publicUrl" (dict "ctx" . "key" "i3x" "sub" "i3x") }}{{- end -}}
 
 {{/*
 Host only, for an Ingress rule -- the scheme and any path stripped off.
@@ -505,6 +518,14 @@ the public surface (NOTES.txt, and Phase 7's NetworkPolicies) read one definitio
 {{- end -}}
 {{- if .Values.swaggerUi.enabled -}}
 {{- $routes = append $routes (dict "name" "docs" "host" (include "factoryplus.hostOf" (dict "ctx" . "name" "docs")) "service" "swagger-ui" "port" 8080) -}}
+{{- end -}}
+{{- if .Values.i3xService.enabled -}}
+{{/* The i3X server is browser- and client-facing: the MCP server, the i3X Explorer and any
+     conformance run all reach it over HTTP from outside the cluster, so it needs a route of its
+     own. `GET /info` is unauthenticated by spec, so this hostname exposes a capabilities document
+     to anyone who can reach the ingress -- which is intended (it is the health check) and is why
+     nothing about the address space is in it. */}}
+{{- $routes = append $routes (dict "name" "i3x" "host" (include "factoryplus.hostOf" (dict "ctx" . "name" "i3x")) "service" "i3x-service" "port" 8090) -}}
 {{- end -}}
 {{- if .Values.mosquitto.enabled -}}
 {{/* MQTT over WEBSOCKETS only -- port 9001. Raw MQTT on 1883 is TCP and cannot ride an HTTP

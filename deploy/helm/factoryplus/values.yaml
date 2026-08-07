@@ -611,6 +611,47 @@ ingestion:
     limits: { memory: 512Mi }
 
 # ---------------------------------------------------------------------------------------------
+# i3X 1.0 server (CESMII Industrial Information Interoperability eXchange)
+#
+# A READ-SIDE ADAPTER over the model this stack already holds: `schemas.schema_definition` IS an
+# i3X ObjectType (both are JSON Schema, so there is no translation), `sparkplug_id` IS an elementId,
+# and Unmodelled IS `isExtended`. What it adds is a live query surface and subscriptions.
+#
+# Conformance is measured, not asserted: CESMII publishes a 60-test suite and CI runs it against
+# this service. The current verdict is **1.0 Compatible** -- every MUST passes; the optional Update
+# methods are deliberately not implemented (see `PUT /objects/value` -> 405 below).
+# ---------------------------------------------------------------------------------------------
+i3xService:
+  enabled: true
+  image:
+    # BUILT FROM i3x/Dockerfile with the REPOSITORY ROOT as context, because it compiles
+    # sparkplug_b.proto:
+    #   docker build -f i3x/Dockerfile -t <repo>:<tag> .
+    #
+    # PUBLISHED -- see supabaseFunctions.image for what the empty tag means.
+    repository: ghcr.io/harri-llewelyn/acs-cymru/i3x-service
+    tag: ""
+    pullPolicy: IfNotPresent
+  # Reported by GET /info as `serverName`. Worth setting per environment: an i3X client browsing
+  # several sites has no other way to tell two servers apart.
+  serverName: factoryplus-i3x
+  # A spec MUST: a subscription with neither an open stream nor a /sync call inside this window is
+  # DELETED, along with its queued values. Without it, a client that walks away holds a queue open
+  # for the lifetime of the process. An open SSE stream counts as activity, so a quiet-but-connected
+  # machine is not reaped out from under a healthy connection.
+  subscriptionTtlSeconds: 300
+  # How many update batches one subscription may queue before the OLDEST are dropped. Dropping is
+  # not silent -- the next /sync answers HTTP 206 and the client computes the exact gap from the
+  # sequence numbers, then backfills from /objects/history. Raise it for slow pollers; the cost is
+  # memory per subscription.
+  subscriptionQueueLimit: 10000
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    # The value cache is one entry per device-metric and the queues are bounded by the limit above,
+    # so this is sized for connection handling rather than for data.
+    limits: { memory: 512Mi }
+
+# ---------------------------------------------------------------------------------------------
 # Edge and frontend (Phase 4)
 # ---------------------------------------------------------------------------------------------
 nodeRed:
