@@ -38,6 +38,47 @@ want for a throwaway cluster and never what you want on k3s.
 
 ## Install
 
+Two paths, and they are for genuinely different situations. **From the registry** if you want to
+run this stack; **from a checkout** if you are changing it.
+
+### A. From the published chart (no checkout, no image builds)
+
+The chart and the five images this repository builds are published to GHCR as OCI artefacts. Helm
+speaks OCI natively — there is no `helm repo add`, and no index to go stale.
+
+```bash
+# What versions exist?
+helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/factoryplus --version 0.1.0
+
+helm install factoryplus oci://ghcr.io/harri-llewelyn/acs-cymru/factoryplus \
+  --version 0.1.0 \
+  --namespace factoryplus --create-namespace \
+  --values my-values.yaml \
+  --wait --timeout 15m
+```
+
+**`--version` is not optional in practice.** Without it Helm resolves the newest release, which
+makes the command mean something different next month and gives you no way to reproduce today's
+install. Pin it, in the command and in whatever runs the command.
+
+**There is no `-f values-dev.yaml` on this path** — that file is in the repository, not in your
+hands. But the chart *refuses to render* without credentials rather than generating them (see
+`factoryplus.validateSecrets`), so an install with no values fails with a message naming the four
+it needs. Either write a `my-values.yaml` from
+[`values-prod.yaml.example`](../helm/factoryplus/values-prod.yaml.example) — which travels **inside
+the package**, so `helm pull --untar` gives you a copy — or, for a throwaway cluster, pull the
+demo credentials out of `.env.example`.
+
+The five built images resolve automatically to the chart's `appVersion`, which the release stamps
+equal to the chart version. Chart 0.1.0 can only pull images 0.1.0; there is nothing to line up by
+hand and no `latest` tag to drift onto.
+
+> **linux/amd64 only.** These images are not built for arm64, so a Pi, Jetson or Graviton node
+> cannot run them — the pods land and fail with `exec format error`. On arm64, build locally
+> (*Images you must build* below); the Dockerfiles need no changes on a native arm64 host.
+
+### B. From a checkout (development)
+
 ```bash
 # Mirror repository-owned config files into the chart (see "Chart files" below).
 node scripts/sync-helm-chart-files.mjs
@@ -50,9 +91,31 @@ helm install factoryplus deploy/helm/factoryplus \
   --wait --timeout 10m
 ```
 
+This still **pulls** the five built images from GHCR at the `appVersion` in `Chart.yaml` — a
+checkout does not imply a local build. To run your own, build them under the reference the chart
+asks for and make them available to the cluster (`k3d image import`, or a push to your own
+registry). `pullPolicy` is `IfNotPresent`, so a locally-present image of that exact name and tag
+wins over the published one. The commands are under *Images you must build*.
+
 `values-dev.yaml` carries the published demo credentials from `.env.example`. **They are in git.**
 For anything another person can reach, start from `values-prod.yaml.example` and set
 `secrets.existingSecret` to a Secret managed outside the chart.
+
+### Overriding an image
+
+Any single component can be pointed elsewhere without forking the chart — an explicit `tag` beats
+the `appVersion` default:
+
+```yaml
+ingestion:
+  image:
+    repository: registry.internal/factoryplus/ingestion
+    tag: "0.1.0-hotfix.2"
+```
+
+Do this for a hotfix, a bisect or an air-gapped mirror. Do not do it as a way to run one component
+a release ahead of the rest: the five are built and tested together, and the failures from mixing
+them are the asymmetric kind that surface days later on whichever component was *not* changed.
 
 ## Verify
 
@@ -351,35 +414,115 @@ kubectl -n factoryplus get pvc          # delete deliberately, never as cleanup 
 
 ### Images you must build
 
-Five images are not on any public registry. Build them and load them into the cluster:
+Five images are built from this repository rather than pulled from a vendor. **They are published**
+to `ghcr.io/harri-llewelyn/acs-cymru/`, so an ordinary install needs none of this — the chart pulls
+them at its own `appVersion`.
+
+Build them yourself when you are **changing** one, when you are on **arm64** (the published images
+are amd64 only), or when the cluster **cannot reach GHCR**.
+
+**Tag them exactly as the chart names them**, or the build is ignored: the pods ask for
+`ghcr.io/harri-llewelyn/acs-cymru/<name>:<appVersion>`, and anything else means Kubernetes falls
+through to pulling the published image and your change silently does not run. `NS` and `V` below
+exist to make that hard to get wrong.
 
 ```bash
+NS=ghcr.io/harri-llewelyn/acs-cymru
+V=$(grep -E '^appVersion:' deploy/helm/factoryplus/Chart.yaml | head -1 \
+    | sed -E 's/^appVersion:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
+
 # Edge functions — context is the REPOSITORY ROOT, because node_red_flow.json lives there
-docker build -f supabase/functions/Dockerfile   -t factoryplus/edge-runtime:0.1.0 .
+docker build -f supabase/functions/Dockerfile   -t $NS/edge-runtime:$V .
 
 # Ingestion daemon — also repository root; the Dockerfile compiles sparkplug_b.proto with protoc
-docker build -f Dockerfile                      -t factoryplus/ingestion:0.1.0 .
+docker build -f Dockerfile                      -t $NS/ingestion:$V .
 
 # Node-RED — a CUSTOM image is required, not a convenience: settings.js lives on the data volume
 # and Node resolves require() from the requiring file's location, so passport-oauth2 has to be
 # reachable by absolute path in the image
-docker build -f node-red/Dockerfile             -t factoryplus/node-red:0.1.0 node-red
+docker build -f node-red/Dockerfile             -t $NS/node-red:$V node-red
 
 # Frontend — VITE_RUNTIME_CONFIG=true bakes NOTHING, which is what lets one image serve any
 # environment. A default build also runs, but its baked URL masks a missing ConfigMap.
 docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
-                                                -t factoryplus/frontend:0.1.0 frontend
+                                                -t $NS/frontend:$V frontend
 
 # Conformance test runner (only needed for e2e.enabled=true). EXTENDS the ingestion image, so build
 # that first: it adds jsonschema and the AAS suite in a repo-shaped layout. jsonschema is deliberately
 # NOT in the production ingestion image, and without it the schema-conformance tests skip themselves
 # while the suite still reports success.
-docker build -f tests/Dockerfile                -t factoryplus/test-runner:0.1.0 .
+docker build -f tests/Dockerfile --build-arg INGESTION_IMAGE=$NS/ingestion:$V \
+                                                -t $NS/test-runner:$V .
 
 for i in edge-runtime ingestion node-red frontend test-runner; do
-  k3d image import factoryplus/$i:0.1.0 -c <cluster>   # or push to your registry
+  k3d image import $NS/$i:$V -c <cluster>   # or push to your registry
 done
 ```
+
+---
+
+## Publishing a release
+
+[`.github/workflows/release.yml`](../../.github/workflows/release.yml) publishes the five images and
+then the chart, to GHCR over OCI, on a `v*` tag.
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+That tag is the only place the version is written. It stamps the five image tags, the chart
+`version` and the chart `appVersion` in one run — **nothing is bumped in a commit first**, which is
+the usual way a chart ends up published under a version naming a different build. `Chart.yaml`'s
+committed values are for the untagged path only (a checkout, `helm lint`, `helm template`).
+
+**Rehearse it first.** Actions → Release → *Run workflow*, with `dry_run` left ticked: everything
+builds, the chart packages, every check runs, and nothing is pushed.
+
+**Images publish before the chart, and the chart job `needs` them.** A chart published ahead of its
+images does not fail — `helm install` succeeds, the databases and broker come up healthy, and five
+workloads sit in `ImagePullBackOff` with no failed release to point at.
+
+### One-time: make the packages public
+
+**GHCR creates every new package private, whatever the repository's visibility**, and
+`GITHUB_TOKEN` cannot change it — package visibility is an account-level setting, not a repository
+one. So the first release publishes six packages that nobody else can pull, and the symptom on a
+consumer's machine is an authentication error on a repository that is public.
+
+After the first successful release, once per package:
+
+```bash
+for p in factoryplus edge-runtime ingestion node-red frontend test-runner; do
+  gh api --method PATCH -H "Accept: application/vnd.github+json" \
+    "/user/packages/container/acs-cymru%2F$p" -f visibility=public
+done
+```
+
+The `%2F` is required — the package name is `acs-cymru/edge-runtime` and the slash must be encoded
+or the path resolves to a different endpoint. This needs a `gh auth login` with the `write:packages`
+scope; `gh auth refresh -s write:packages` adds it to an existing login. The same thing is four
+clicks per package under *Profile → Packages → <package> → Package settings → Change visibility*.
+
+Verify from somewhere with no credentials at all:
+
+```bash
+helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/factoryplus --version 0.2.0
+```
+
+### What the release does not do
+
+- **No `latest` tag**, for any image or the chart. The chart resolves every built image from its own
+  `appVersion` precisely so a chart release can only run the images built beside it; a floating tag
+  invites exactly the mixed-version stack that design prevents.
+- **No arm64.** See the note under *Install*.
+- **No signing or provenance attestation.** Consumers cannot verify these artefacts came from this
+  pipeline. Adding cosign keyless signing is a contained change and worth doing before anyone
+  outside depends on the chart.
+- **It does not re-run the E2E or in-cluster suites.** Those ran on the commit the tag points at.
+  What it does repeat are the checks whose failure would be *baked into the artefact* rather than
+  caught on the next commit — above all `sync-helm-chart-files.mjs --check`, because Helm cannot
+  read outside its own chart and a stale mirror ships a chart that provisions a different database
+  than this repository describes.
 
 ### Provisioning a gateway's MQTT credential
 

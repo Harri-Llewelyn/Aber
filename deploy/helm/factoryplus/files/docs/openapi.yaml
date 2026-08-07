@@ -124,6 +124,11 @@ tags:
     description: WebSocket change feed.
   - name: Edge Functions
     description: Privileged server-side operations.
+  - name: Directory
+    description: >-
+      Factory+ Directory adapter. Served at the UNPREFIXED paths an upstream Factory+ client
+      expects, because such a client has no Supabase apikey.
+
 
 paths:
 
@@ -1155,6 +1160,203 @@ paths:
         '403': { description: 'Forbidden: insufficient privileges.' }
         '502': { description: Node-RED rejected the deployment (including a 401 from its admin auth). }
 
+  /functions/v1/fplus-directory:
+    get:
+      tags: [Directory]
+      summary: Factory+ Directory adapter (also served at /ping and /v1/*)
+      description: |
+        Serves the read half of the **Factory+ Directory** component's REST contract by projecting
+        tables this platform already has. It is an *adapter*: nothing upstream of it knows the
+        Directory exists.
+
+        Kong routes it at the **unprefixed** paths a Factory+ client expects — `/ping` and
+        `/v1/…` — because such a client has no Supabase `apikey` and no way to acquire one. Those
+        routes are exempt from `key-auth`, so **the function itself is the only thing in front of
+        the data**: every `/v1/` path refuses a request with no bearer token, before it routes,
+        and then queries **as the caller** so RLS still applies. It holds no service-role key.
+
+        Identity mapping:
+
+        | Factory+ | Here |
+        | :--- | :--- |
+        | `Instance_UUID` | `devices.id` / `gateways.id` — already RFC4122 |
+        | Sparkplug address | `(gateways.sparkplug_group, gateways.sparkplug_id)` |
+        | `Schema_UUID` | `schemas.id` — **locally minted**, not registered with AMRC |
+        | `Service_UUID` | `directory_services.id` — likewise local |
+
+        See `/ping`, `/v1/device`, `/v1/address/{group_id}/{node_id}`, `/v1/schema` and
+        `/v1/service` below for the individual endpoints.
+      responses:
+        '404':
+          description: |
+            No route. Invoked under `/functions/v1/` the handler still works, but the documented
+            entry points are the unprefixed ones.
+
+  /ping:
+    get:
+      tags: [Directory]
+      summary: Directory liveness — unauthenticated by specification
+      description: |
+        **Requires no `apikey` and no bearer token.** Factory+ requires every component to serve
+        this so a client can discover what it is talking to before holding a credential for it.
+
+        It reports the service's identity and version and **nothing about the fleet** — no counts,
+        no names — which is what makes being open cost nothing.
+      security: []
+      responses:
+        '200':
+          description: The adapter is live.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service: { type: string, example: fplus-directory }
+                  status: { type: string, example: ok }
+                  version: { type: string, example: '1.0.0' }
+                  factoryplus_payload_uuid:
+                    type: string
+                    example: 11ad7b32-1d32-4c4a-b0c9-fa049208939a
+                    description: The Factory+ Sparkplug payload marker this deployment's births carry.
+
+  /v1/device:
+    get:
+      tags: [Directory]
+      summary: Every known device Instance_UUID
+      description: |
+        Returns a JSON **array of UUID strings**, matching the Factory+ Directory's own shape — a
+        client enumerates, then fetches the ones it cares about.
+
+        Archived devices are excluded. Quarantined devices are **included**, deliberately: they
+        exist on the wire, so a client meeting their traffic needs to be able to look them up. The
+        per-device response carries a `quarantined` flag saying why telemetry is not being stored.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Instance_UUIDs.
+          content:
+            application/json:
+              schema: { type: array, items: { type: string, format: uuid } }
+        '401': { description: 'No bearer token. Enforced by the function, not by the gateway.' }
+
+  /v1/device/{instance_uuid}:
+    get:
+      tags: [Directory]
+      summary: One device's address, status and schemas
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: instance_uuid
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: '`devices.id`. A `sparkplug_id` here returns `400` with a pointer to `/v1/address/…`.'
+      responses:
+        '200':
+          description: The device.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DirectoryDevice' }
+        '400': { description: Not an RFC4122 UUID. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: No such device. }
+
+  /v1/address/{group_id}/{node_id}:
+    get:
+      tags: [Directory]
+      summary: Resolve a Sparkplug address to its edge node and devices
+      description: |
+        The endpoint migration `0008` exists for. Before `gateways.sparkplug_group`, a node id
+        alone was the whole address and two groups collided into one row — silently.
+
+        The edge node reports `schemas: []`: claiming Factory+'s component schema
+        (`05688a03-…`) would assert that it serves a `Service_UUID` at a `Service_URL`, which it
+        does not.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: group_id, in: path, required: true, schema: { type: string }, description: 'e.g. `FactoryPlus`' }
+        - { name: node_id, in: path, required: true, schema: { type: string }, description: 'The gateway `sparkplug_id`.' }
+      responses:
+        '200':
+          description: The edge node and the devices behind it.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  uuid: { type: string, format: uuid }
+                  name: { type: string }
+                  address: { $ref: '#/components/schemas/SparkplugAddress' }
+                  online: { type: boolean }
+                  last_change: { type: string, format: date-time, nullable: true }
+                  schemas: { type: array, items: { type: string } }
+                  devices: { type: array, items: { $ref: '#/components/schemas/DirectoryDevice' } }
+        '400': { description: Malformed address. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: No edge node at that address. }
+
+  /v1/schema:
+    get:
+      tags: [Directory]
+      summary: Schema identifiers in use
+      description: |
+        **Locally minted, and the response says so.** Factory+ `Schema_UUID`s are registered
+        against the AMRC schema repository; these are this deployment's own `schemas.id` values.
+        Returning them unqualified would assert an interoperability that does not exist — the same
+        rule the semantic-id namespace follows.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Active schema versions.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  namespace: { type: string, example: local }
+                  note: { type: string }
+                  schemas:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        uuid: { type: string, format: uuid }
+                        name: { type: string }
+                        version: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/service:
+    get:
+      tags: [Directory]
+      summary: Advertised stack services
+      description: 'Stack service endpoints, not registered Factory+ `Service_UUID`s.'
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Services.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  namespace: { type: string, example: local }
+                  note: { type: string }
+                  services:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        uuid: { type: string, format: uuid }
+                        name: { type: string }
+                        type: { type: string }
+                        url: { type: string }
+                        online: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /functions/v1/grafana-userinfo:
     get:
       tags: [Edge Functions]
@@ -1340,6 +1542,13 @@ components:
             characters, 24 total). This is the edge node segment of the MQTT topic, and the MQTT
             username a provisioned gateway authenticates with.
         cell_id: { type: string, format: uuid, nullable: true }
+        sparkplug_group:
+          type: string
+          default: FactoryPlus
+          description: >-
+            Sparkplug B Group ID -- the second topic segment. With `sparkplug_id` it forms the edge
+            node address Factory+ resolves as (group, node), which is what `/v1/address/…` reads.
+            Editable, unlike `sparkplug_id`: it is a configuration choice, not an issued identity.
         location_scope: { $ref: '#/components/schemas/LocationScope' }
         access_url: { type: string, nullable: true, description: 'The gateway''s own UI. Omitted rather than disabled in the dashboard when absent.' }
         status: { type: string, enum: [ONLINE, OFFLINE], default: OFFLINE }
@@ -1415,8 +1624,11 @@ components:
           type: string
           nullable: true
           readOnly: true
-          enum: [sparkplug_id, reported_identity, legacy_name]
-          description: How ingestion last resolved this device. `legacy_name` marks a gateway still to be reconfigured.
+          enum: [sparkplug_id, reported_identity, instance_uuid, legacy_name]
+          description: >-
+            How ingestion last resolved this device. `instance_uuid` means it was addressed by its
+            Factory+ Instance_UUID (which is `devices.id`); `legacy_name` marks a gateway still to
+            be reconfigured.
         gateway_id: { type: string, format: uuid, nullable: true, description: 'Serving gateway — the DATA PATH, not the location.' }
         cell_id:
           type: string
@@ -1687,6 +1899,29 @@ components:
         datatype: { type: string, nullable: true }
         unit: { type: string, nullable: true }
         semantic_id: { type: string, nullable: true, description: 'The companion spec''s own namespace URI plus browse name — derived from something the OPC Foundation publishes, but still not a concept URI it registers.' }
+
+    SparkplugAddress:
+      type: object
+      description: A Sparkplug B address. `(group_id, node_id)` names the edge node; `device_id` is its device.
+      properties:
+        group_id: { type: string, example: FactoryPlus, description: 'Empty when the device is bound to no gateway.' }
+        node_id: { type: string, example: gwy100000000000400080000 }
+        device_id: { type: string, example: dev200000000000400080000 }
+
+    DirectoryDevice:
+      type: object
+      readOnly: true
+      description: A device as the Factory+ Directory adapter renders it.
+      properties:
+        uuid: { type: string, format: uuid, description: 'The Factory+ Instance_UUID — `devices.id`.' }
+        name: { type: string }
+        address: { $ref: '#/components/schemas/SparkplugAddress' }
+        online: { type: boolean }
+        quarantined: { type: boolean, description: 'Present in the directory but its telemetry is being dropped.' }
+        schemas:
+          type: array
+          items: { type: string, format: uuid }
+          description: 'Resolved through the `device_schemas` view, so join rows and the legacy 1:1 column agree.'
 
     Document:
       type: object

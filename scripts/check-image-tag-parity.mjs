@@ -37,16 +37,25 @@ const VALUES = join(REPO_ROOT, 'deploy', 'helm', 'factoryplus', 'values.yaml');
 const verbose = process.argv.includes('--verbose');
 
 /**
- * Images built from this repository rather than pulled. They have no tag in docker-compose at all
- * (Compose uses `build:`), so there is nothing to compare and their absence is not drift.
+ * The registry namespace the five built images are published under, by .github/workflows/release.yml.
+ *
+ * Lowercase because OCI reference names are case-sensitive and must be lowercase -- the GitHub
+ * account is `Harri-Llewelyn`, and a reference carrying those capitals pushes without complaint and
+ * then cannot be pulled by anything.
  */
-const LOCALLY_BUILT = new Set([
-  'factoryplus/frontend',
-  'factoryplus/ingestion',
-  'factoryplus/node-red',
-  'factoryplus/edge-runtime',
-  'factoryplus/test-runner',
-]);
+const IMAGE_NAMESPACE = 'ghcr.io/harri-llewelyn/acs-cymru';
+
+/**
+ * Images built from this repository rather than pulled. They have no tag in docker-compose at all
+ * (Compose uses `build:`), so there is nothing to compare against it and their absence is not drift.
+ *
+ * They are PUBLISHED, so their tag is not compared against Compose but is nonetheless the thing
+ * most worth checking here -- see the release-surface section at the bottom of this file. In
+ * values.yaml their tag is deliberately EMPTY, resolved to Chart.AppVersion by the
+ * `factoryplus.image` helper.
+ */
+const BUILT_IMAGES = ['edge-runtime', 'ingestion', 'node-red', 'frontend', 'test-runner'];
+const LOCALLY_BUILT = new Set(BUILT_IMAGES.map((n) => `${IMAGE_NAMESPACE}/${n}`));
 
 /**
  * Images one target legitimately uses and the other does not. Each needs a REASON, so that adding a
@@ -103,9 +112,13 @@ function chartImages() {
     // The tag is within the next few lines; comments between them are normal in this file.
     for (let j = i + 1; j < Math.min(i + 12, lines.length); j += 1) {
       if (/^\s*repository:/.test(lines[j])) break;
-      const tagMatch = lines[j].match(/^\s*tag:\s*["']?([^"'\s#]+)["']?/);
+      // An EMPTY tag (`tag: ""`) must be captured as '' rather than skipped. It is how the five
+      // built images say "resolve me to Chart.AppVersion", and a pattern requiring at least one
+      // character silently drops those entries -- which would let a built image disappear from
+      // this comparison entirely, the one class of drift this file exists to catch.
+      const tagMatch = lines[j].match(/^\s*tag:\s*(?:"([^"]*)"|'([^']*)'|([^\s#]+))\s*(?:#.*)?$/);
       if (tagMatch) {
-        out.set(repoMatch[1], tagMatch[1]);
+        out.set(repoMatch[1], tagMatch[1] ?? tagMatch[2] ?? tagMatch[3] ?? '');
         break;
       }
     }
@@ -267,6 +280,164 @@ if (onlyChart.length) {
   );
 }
 
+/* =================================================================================================
+ * THE RELEASE SURFACE.
+ *
+ * Everything above compares the two DEPLOYMENT targets. This compares the four places that have to
+ * agree about the images this repository BUILDS AND PUBLISHES, which is a different coupling and a
+ * newer one:
+ *
+ *   values.yaml            what the chart tells a cluster to pull
+ *   release.yml            what actually gets pushed to GHCR
+ *   ci.yml                 what k8s-validation builds locally and imports into k3d
+ *   tests/Dockerfile       which ingestion image the conformance runner extends
+ *
+ * These fail QUIETLY and in different places, which is why they are worth a check rather than a
+ * convention:
+ *
+ *   - values.yaml naming an image release.yml does not push is the worst of them. `helm install`
+ *     SUCCEEDS, the databases and broker come up healthy, and the affected workloads sit in
+ *     ImagePullBackOff -- there is no failed release to look at, only a partly-running stack.
+ *   - ci.yml building a different reference than the chart asks for does not fail either: the pod
+ *     falls through to PULLING the published image, so the job silently stops testing the working
+ *     tree and starts testing whatever was last released.
+ *   - tests/Dockerfile's ARG default drifting means a bare `docker build` extends a different
+ *     ingestion image than the chart deploys, and the conformance suite reports on a stack it is
+ *     not running beside.
+ *
+ * The matrix in release.yml is templated (`${{ matrix.name }}`), so what is read here is that
+ * workflow's own literal `for img in ...` verification lists -- which is the right thing to read
+ * anyway: those lists are what the release asserts the packaged chart references.
+ * ============================================================================================= */
+const RELEASE_WF = join(REPO_ROOT, '.github', 'workflows', 'release.yml');
+const CI_WF = join(REPO_ROOT, '.github', 'workflows', 'ci.yml');
+const CHART_YAML = join(REPO_ROOT, 'deploy', 'helm', 'factoryplus', 'Chart.yaml');
+const TESTS_DOCKERFILE = join(REPO_ROOT, 'tests', 'Dockerfile');
+
+const releaseIssues = [];
+const expected = [...BUILT_IMAGES].sort();
+const fmt = (names) => (names.length ? names.join(', ') : '(none)');
+
+/** The chart's appVersion -- the tag every built image resolves to. */
+const chartYaml = readFileSync(CHART_YAML, 'utf8');
+const appVersionMatch = chartYaml.match(/^appVersion:\s*["']?([^"'\s#]+)["']?/m);
+const appVersion = appVersionMatch ? appVersionMatch[1] : null;
+if (!appVersion) {
+  releaseIssues.push('Chart.yaml has no readable appVersion -- every built image resolves to it.');
+}
+
+// 1. values.yaml: the built images are exactly those whose tag is empty.
+const emptyTagged = [...chart.entries()]
+  .filter(([, tag]) => tag === '')
+  .map(([repo]) => repo)
+  .sort();
+const expectedRefs = expected.map((n) => `${IMAGE_NAMESPACE}/${n}`).sort();
+if (emptyTagged.join('|') !== expectedRefs.join('|')) {
+  releaseIssues.push(
+    'values.yaml images with an empty tag do not match the published set.\n' +
+      `    values.yaml : ${fmt(emptyTagged)}\n` +
+      `    expected    : ${fmt(expectedRefs)}\n` +
+      '    An empty tag means "resolve to Chart.AppVersion", so it marks exactly the images this\n' +
+      '    repository builds. A third-party image must keep its explicit pin -- several of them\n' +
+      '    carry a schema migration or a version coupling and must not float onto our appVersion.'
+  );
+}
+
+// 2. release.yml: the literal verification lists, and the namespace it pushes to.
+const releaseSrc = readFileSync(RELEASE_WF, 'utf8');
+const nsMatch = releaseSrc.match(/^\s*IMAGE_NAMESPACE:\s*(\S+)/m);
+if (!nsMatch) {
+  releaseIssues.push('release.yml declares no IMAGE_NAMESPACE.');
+} else if (nsMatch[1] !== IMAGE_NAMESPACE) {
+  releaseIssues.push(
+    `release.yml pushes to ${nsMatch[1]} but the chart and this script expect ${IMAGE_NAMESPACE}.`
+  );
+}
+const forLists = [...releaseSrc.matchAll(/for img in ([a-z0-9 -]+);\s*do/g)].map((m) =>
+  m[1].trim().split(/\s+/).sort()
+);
+if (!forLists.length) {
+  releaseIssues.push(
+    'release.yml has no `for img in ...` list -- the verification and summary steps are what this\n' +
+      '    check reads to learn which images a release actually publishes.'
+  );
+}
+forLists.forEach((list, i) => {
+  if (list.join('|') !== expected.join('|')) {
+    releaseIssues.push(
+      `release.yml image list #${i + 1} does not match the published set.\n` +
+        `    release.yml : ${fmt(list)}\n` +
+        `    expected    : ${fmt(expected)}`
+    );
+  }
+});
+
+// 3. ci.yml: what k8s-validation builds and imports, under the same namespace and appVersion.
+const ciSrc = readFileSync(CI_WF, 'utf8');
+// IMG_NS, not NS: the k8s-validation job already uses NS for the Kubernetes namespace, and reading
+// that one instead compares the chart's registry namespace against the string "factoryplus".
+const ciNs = ciSrc.match(/^\s*IMG_NS:\s*(\S+)/m);
+if (!ciNs) {
+  releaseIssues.push('ci.yml no longer declares an IMG_NS for the local image builds.');
+} else if (ciNs[1] !== IMAGE_NAMESPACE) {
+  releaseIssues.push(
+    `ci.yml builds under ${ciNs[1]} but the chart resolves ${IMAGE_NAMESPACE}. The pods would not\n` +
+      '    find the imported images and would fall through to pulling the published ones, so the\n' +
+      '    job would stop testing this working tree without failing.'
+  );
+}
+const ciBuilt = [...ciSrc.matchAll(/-t\s+"\$IMG_NS\/([a-z0-9-]+):\$V"/g)].map((m) => m[1]).sort();
+if (ciBuilt.join('|') !== expected.join('|')) {
+  releaseIssues.push(
+    'ci.yml does not build the published set of images.\n' +
+      `    ci.yml   : ${fmt(ciBuilt)}\n` +
+      `    expected : ${fmt(expected)}`
+  );
+}
+
+// Every image reference in those steps must interpolate IMG_NS. Checked separately from the `-t`
+// list above because it is a different SHAPE and the first version of this file got it wrong: the
+// test-runner's `--build-arg INGESTION_IMAGE=...` was left reading $NS, which in that job expands
+// to the Kubernetes namespace -- so the build would have gone looking for `factoryplus/ingestion`,
+// found nothing, and failed with a pull error naming an image nobody had ever configured.
+for (const stray of ciSrc.matchAll(/(INGESTION_IMAGE=|[-]t\s+")\$NS\//g)) {
+  releaseIssues.push(
+    `ci.yml has an image reference using $NS rather than $IMG_NS: "${stray[0]}".\n` +
+      '    $NS is the Kubernetes namespace in that job, not the registry namespace.'
+  );
+}
+
+// 4. tests/Dockerfile: the ARG default names a published image at the chart's appVersion.
+const testsSrc = readFileSync(TESTS_DOCKERFILE, 'utf8');
+const argMatch = testsSrc.match(/^ARG\s+INGESTION_IMAGE=(\S+)/m);
+if (!argMatch) {
+  releaseIssues.push('tests/Dockerfile no longer declares ARG INGESTION_IMAGE.');
+} else {
+  const wanted = `${IMAGE_NAMESPACE}/ingestion:${appVersion}`;
+  if (argMatch[1] !== wanted) {
+    releaseIssues.push(
+      `tests/Dockerfile defaults INGESTION_IMAGE to ${argMatch[1]}, expected ${wanted}.\n` +
+        "    CI and release.yml both pass this explicitly, so the default only bites a bare\n" +
+        '    `docker build` -- which is exactly when nobody is watching for it.'
+    );
+  }
+}
+
+if (releaseIssues.length) {
+  failed = true;
+  console.error('\nRelease surface FAILED:\n');
+  for (const issue of releaseIssues) console.error(`  ${issue}\n`);
+  console.error(
+    'values.yaml, release.yml, ci.yml and tests/Dockerfile must agree on which images this\n' +
+      'repository publishes, under which namespace, at which version. None of these disagreements\n' +
+      'produces a failed install -- they produce a stack that comes up two thirds healthy.\n'
+  );
+}
+
 if (failed) process.exit(1);
 
 console.log(`\nImage tags agree across both targets (${shared.length} shared image(s)).`);
+console.log(
+  `Release surface agrees: ${expected.length} built image(s) under ${IMAGE_NAMESPACE}, ` +
+    `tagged ${appVersion} by the chart.`
+);

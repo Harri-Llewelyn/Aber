@@ -50,7 +50,7 @@ spec:
           #
           # The image also carries the entrypoint that reads the flow into NODERED_FLOW_JSON, so
           # this Deployment needs no command override at all.
-          image: "{{ .Values.supabaseFunctions.image.repository }}:{{ .Values.supabaseFunctions.image.tag }}"
+          image: {{ include "factoryplus.image" (dict "image" .Values.supabaseFunctions.image "ctx" $) | quote }}
           imagePullPolicy: {{ .Values.supabaseFunctions.image.pullPolicy }}
           ports:
             - name: http

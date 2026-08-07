@@ -95,7 +95,7 @@ spec:
         - name: ingestion
           # BUILT FROM the repository-root Dockerfile (it compiles sparkplug_b.proto with protoc at
           # build time), not pulled:  docker build -f Dockerfile -t <repo>:<tag> .
-          image: "{{ .Values.ingestion.image.repository }}:{{ .Values.ingestion.image.tag }}"
+          image: {{ include "factoryplus.image" (dict "image" .Values.ingestion.image "ctx" $) | quote }}
           imagePullPolicy: {{ .Values.ingestion.image.pullPolicy }}
           env:
             # TimescaleDB. M2: the in-cluster name and the STANDARD port -- 5433 is only

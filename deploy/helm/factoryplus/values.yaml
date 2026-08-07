@@ -287,8 +287,13 @@ supabaseFunctions:
     # node_red_flow.json are baked in, because there is no repository on a cluster node to mount
     # and a rollback must roll the functions back with the image.
     #   docker build -f supabase/functions/Dockerfile -t <repo>:<tag> .
-    repository: factoryplus/edge-runtime
-    tag: "0.1.0"
+    #
+    # PUBLISHED, so this installs from a registry with no local build. The build command above is
+    # still the supported path for a fork or an air-gapped cluster -- retag and override.
+    repository: ghcr.io/harri-llewelyn/acs-cymru/edge-runtime
+    # Empty on purpose: resolved to Chart.AppVersion by the `factoryplus.image` helper, so the
+    # chart and the image it names ship from one release tag. Set it to pull a specific build.
+    tag: ""
     pullPolicy: IfNotPresent
   replicas: 1
   # Each function checks its own role claim, which is why the runtime does not.
@@ -576,8 +581,10 @@ ingestion:
   image:
     # BUILT FROM the repository-root Dockerfile, not pulled:
     #   docker build -f Dockerfile -t <repo>:<tag> .
-    repository: factoryplus/ingestion
-    tag: "0.1.0"
+    #
+    # PUBLISHED -- see supabaseFunctions.image for what the empty tag means.
+    repository: ghcr.io/harri-llewelyn/acs-cymru/ingestion
+    tag: ""
     pullPolicy: IfNotPresent
   # Liveness. ingestion.py already writes this file every `healthIntervalSeconds` while its MQTT
   # connection is up, and stops when the connection drops -- so a wedged daemon goes stale and gets
@@ -616,8 +623,10 @@ nodeRed:
     # resolves require() from the requiring FILE's location, so it reaches /data/node_modules and
     # /node_modules -- never the image's. The base image is pinned because settings.js depends on
     # three contracts internal enough to move between releases.
-    repository: factoryplus/node-red
-    tag: "0.1.0"
+    #
+    # PUBLISHED -- see supabaseFunctions.image for what the empty tag means.
+    repository: ghcr.io/harri-llewelyn/acs-cymru/node-red
+    tag: ""
     pullPolicy: IfNotPresent
   replicas: 1
   oauthClientId: c0ffee00-0000-4000-8000-000000000002
@@ -647,8 +656,11 @@ frontend:
     #
     # That build arg is the whole point of Phase 0: it bakes nothing, so this ONE image serves any
     # environment and reads its configuration from the /config.js ConfigMap below.
-    repository: factoryplus/frontend
-    tag: "0.1.0"
+    #
+    # PUBLISHED -- see supabaseFunctions.image for what the empty tag means. It bakes nothing, so
+    # the published image is the same one every environment runs; the ConfigMap below differs.
+    repository: ghcr.io/harri-llewelyn/acs-cymru/frontend
+    tag: ""
     pullPolicy: IfNotPresent
   # The only component here that scales freely -- NGINX serving static files, no state, no upstream
   # connection pool. First HPA candidate in Phase 7 alongside Kong and PostgREST.
@@ -745,9 +757,13 @@ e2e:
     # jsonschema and the AAS suite -- jsonschema is deliberately NOT in the production ingestion
     # image, and without it the schema-conformance tests skip themselves while still reporting
     # success.
-    #   docker build -f tests/Dockerfile -t factoryplus/test-runner:0.1.0 .
-    repository: factoryplus/test-runner
-    tag: "0.1.0"
+    #   docker build -f tests/Dockerfile -t <repo>:<tag> .
+    #
+    # PUBLISHED -- see supabaseFunctions.image for what the empty tag means. It is published for
+    # the same reason it exists: a conformance suite that only runs where the repository is
+    # checked out cannot be run against the cluster it is meant to judge.
+    repository: ghcr.io/harri-llewelyn/acs-cymru/test-runner
+    tag: ""
     pullPolicy: IfNotPresent
   # How long the AAS Job waits for the validate Job to finish. validate.py drives MQTT round trips
   # and its own retries, so this is minutes, not seconds.

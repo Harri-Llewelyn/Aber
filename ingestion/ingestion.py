@@ -160,10 +160,30 @@ GATEWAY_ID_PATTERN = re.compile(r"^gwy[0-9a-f]{21}$")
 DEVICE_ID_PATTERN = re.compile(r"^dev[0-9a-f]{21}$")
 SPARKPLUG_ID_LENGTH = 24
 
+# An RFC4122 UUID as Factory+ publishes one in `Instance_UUID`. Matched case-insensitively
+# because the standard does not fix the case and PostgREST compares uuid values, not text.
+UUID_PATTERN = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
 # Payload metrics that carry identity rather than configuration or telemetry. Asset_ID is the
 # device's own claim about which asset it is (used only as a cross-check against the topic);
-# Asset_Name is a human-readable hint. Neither is stored as a parameter or a metric.
-IDENTITY_METRICS = ("Asset_ID", "Asset_Name")
+# Asset_Name is a human-readable hint. Instance_UUID and Schema_UUID are the Factory+ birth
+# profile -- which asset this is, and which model it conforms to.
+#
+# None is stored as a parameter, a telemetry sample, or a DECLARED METRIC. The last matters
+# most: a schema models what a device measures, and an identity assertion is not a measurement.
+# Counting them would flag every Factory+-conformant device as publishing two metrics its
+# schema does not model.
+IDENTITY_METRICS = ("Asset_ID", "Asset_Name", "Instance_UUID", "Schema_UUID")
+
+# The Factory+ Sparkplug payload marker, carried in the payload's top-level `uuid` field. Read
+# for logging only: the topic is still what identifies the asset.
+FACTORYPLUS_PAYLOAD_UUID = "11ad7b32-1d32-4c4a-b0c9-fa049208939a"
+
+# Default Sparkplug Group ID, matching gateways.sparkplug_group's column default (migration
+# 0008). Used only to describe the fallback in a log line; resolution never assumes it.
+DEFAULT_SPARKPLUG_GROUP = "FactoryPlus"
 
 # Recorded on devices.quarantine_reason as "<CODE>: <detail>".
 REASON_UNKNOWN_DEVICE = "UNKNOWN_DEVICE"
@@ -186,6 +206,7 @@ TELEMETRY_MAX_FUTURE_SECONDS = 5 * 60      # 5 minutes ahead of now
 # Recorded on devices.identity_source.
 SOURCE_SPARKPLUG_ID = "sparkplug_id"
 SOURCE_REPORTED_IDENTITY = "reported_identity"
+SOURCE_INSTANCE_UUID = "instance_uuid"
 SOURCE_LEGACY_NAME = "legacy_name"
 
 # Device resolution TTL cache, keyed by the id seen on the wire.
@@ -511,7 +532,12 @@ def resolve_device(wire_id: str, use_cache: bool = True):
       2. reported_identity -- a third-party device's own factory-preset id, recorded when it
                               was discovered. Such a device cannot be made to publish an
                               issued id, so its own is what must keep resolving.
-      3. name              -- legacy, pre-0014 devices. Warns; this arm goes away once every
+      3. id                -- the Factory+ `Instance_UUID`. `devices.id` IS that identifier:
+                              it is already an RFC4122 UUID, so a Factory+ gateway addressing
+                              a device by Instance_UUID resolves with no extra column and no
+                              second identifier namespace. Only tried when the wire id is
+                              UUID-shaped, so it costs nothing on the ordinary path.
+      4. name              -- legacy, pre-0014 devices. Warns; this arm goes away once every
                               gateway has been reconfigured.
 
     Returns the row (with `_identity_source` attached) or None if unregistered. Any failure
@@ -528,6 +554,11 @@ def resolve_device(wire_id: str, use_cache: bool = True):
 
     # A well-formed platform id is never also a legacy name, so skip that round-trip.
     lookups = [("sparkplug_id", SOURCE_SPARKPLUG_ID), ("reported_identity", SOURCE_REPORTED_IDENTITY)]
+    if UUID_PATTERN.match(wire_id):
+        # Factory+ Instance_UUID. Guarded on the shape because `devices.id` is a uuid column:
+        # PostgREST rejects a non-UUID comparison with a 400, so an unguarded arm would turn
+        # every ordinary sparkplug_id lookup into a wasted failing round-trip.
+        lookups.append(("id", SOURCE_INSTANCE_UUID))
     if not DEVICE_ID_PATTERN.match(wire_id):
         lookups.append(("name", SOURCE_LEGACY_NAME))
 
@@ -570,9 +601,22 @@ def resolve_device(wire_id: str, use_cache: bool = True):
         return None
 
 
-def resolve_gateway(wire_id: str):
+def resolve_gateway(wire_id: str, group_id: str = None):
     """
-    Resolve an edge node id to its `gateways` row by sparkplug_id, then by name (legacy).
+    Resolve an edge node to its `gateways` row.
+
+    THE ADDRESS IS (group, node), which is how Factory+ addresses an edge node and why its
+    Directory keys on /v1/address/{group_id}/{node_id}. Before `gateways.sparkplug_group`
+    existed the group was parsed and discarded, so two groups publishing the same edge node id
+    resolved to ONE row -- silently, with each group's telemetry attributed to the other's asset.
+
+    Resolution order, and the middle arm is the migration path:
+
+      1. (sparkplug_group, sparkplug_id) -- the current scheme.
+      2. sparkplug_id alone              -- group-agnostic. Warns, throttled, naming both the
+                                            group on the wire and the one on the row. Goes away
+                                            once every gateway is reconfigured.
+      3. name                            -- legacy, pre-0014. Warns the same way.
 
     Gateways are never auto-created -- an unregistered edge node is logged and dropped,
     mirroring the fail-closed treatment of unregistered devices.
@@ -580,35 +624,68 @@ def resolve_gateway(wire_id: str):
     if not supabase_client or not wire_id:
         return None
 
-    if wire_id in _gateway_cache:
-        row, cached_at = _gateway_cache[wire_id]
+    # Keyed by the PAIR. A cache keyed on the node alone would hand a hit from one group to a
+    # request from another, which is precisely the collision this change exists to close.
+    cache_key = (group_id or "", wire_id)
+    if cache_key in _gateway_cache:
+        row, cached_at = _gateway_cache[cache_key]
         if time.time() - cached_at < CACHE_TTL_SECONDS:
             return row
 
-    lookups = ["sparkplug_id"] if GATEWAY_ID_PATTERN.match(wire_id) else ["sparkplug_id", "name"]
-
+    columns = "id,name,sparkplug_id,sparkplug_group"
     try:
+        # 1. Group-qualified.
+        if group_id:
+            res = supabase_client.table("gateways").select(columns).eq(
+                "sparkplug_group", group_id
+            ).eq("sparkplug_id", wire_id).execute()
+            rows = res.data if res else []
+            if rows:
+                row = dict(rows[0])
+                row["_identity_source"] = SOURCE_SPARKPLUG_ID
+                _gateway_cache[cache_key] = (row, time.time())
+                return row
+
+        # 2/3. Group-agnostic fallback, then the legacy name arm.
+        lookups = ["sparkplug_id"] if GATEWAY_ID_PATTERN.match(wire_id) else ["sparkplug_id", "name"]
         for column in lookups:
-            res = supabase_client.table("gateways").select("id,name,sparkplug_id").eq(column, wire_id).execute()
+            res = supabase_client.table("gateways").select(columns).eq(column, wire_id).execute()
             rows = res.data if res else []
             if not rows:
                 continue
 
             row = dict(rows[0])
-            row["_identity_source"] = SOURCE_SPARKPLUG_ID if column == "sparkplug_id" else SOURCE_LEGACY_NAME
-            if column == "name" and _throttled(
-                _legacy_identity_warned, wire_id, LEGACY_IDENTITY_WARN_INTERVAL_SECONDS
-            ):
-                logger.warning(
-                    "DEPRECATED IDENTITY: edge node '%s' was matched by name. Reconfigure it to publish "
-                    "sparkplug_id '%s' instead; name-based matching will be removed.",
-                    wire_id, row.get("sparkplug_id")
-                )
+            row["_identity_source"] = (
+                SOURCE_SPARKPLUG_ID if column == "sparkplug_id" else SOURCE_LEGACY_NAME
+            )
 
-            _gateway_cache[wire_id] = (row, time.time())
+            if column == "name":
+                if _throttled(_legacy_identity_warned, wire_id, LEGACY_IDENTITY_WARN_INTERVAL_SECONDS):
+                    logger.warning(
+                        "DEPRECATED IDENTITY: edge node '%s' was matched by name. Reconfigure it to "
+                        "publish sparkplug_id '%s' instead; name-based matching will be removed.",
+                        wire_id, row.get("sparkplug_id")
+                    )
+            elif group_id and row.get("sparkplug_group") != group_id:
+                # Resolved, but under the wrong group. NOT a refusal: a fleet is reconfigured one
+                # gateway at a time, and refusing here would strand every device behind a node
+                # whose group had not been corrected yet.
+                if _throttled(
+                    _legacy_identity_warned, "group:%s" % wire_id, LEGACY_IDENTITY_WARN_INTERVAL_SECONDS
+                ):
+                    logger.warning(
+                        "DEPRECATED IDENTITY: edge node '%s' published under Sparkplug group '%s' but "
+                        "is registered under '%s'. Matched group-agnostically. Set gateways."
+                        "sparkplug_group to '%s', or reconfigure the gateway to publish under '%s'; "
+                        "group-agnostic matching will be removed.",
+                        wire_id, group_id, row.get("sparkplug_group"),
+                        group_id, row.get("sparkplug_group") or DEFAULT_SPARKPLUG_GROUP
+                    )
+
+            _gateway_cache[cache_key] = (row, time.time())
             return row
 
-        _gateway_cache[wire_id] = (None, time.time())
+        _gateway_cache[cache_key] = (None, time.time())
         return None
     except Exception as e:
         logger.error("Error resolving gateway identity '%s' in Supabase: %s", wire_id, e)
@@ -631,9 +708,12 @@ def _timestamp_is_sane(dt: datetime, now: datetime = None) -> bool:
     return -TELEMETRY_MAX_AGE_SECONDS <= delta <= TELEMETRY_MAX_FUTURE_SECONDS
 
 
-def verify_gateway_binding(device: dict, gateway_wire_id: str):
+def verify_gateway_binding(device: dict, gateway_wire_id: str, group_id: str = None):
     """
     Check that the edge node publishing this message is the one the device is bound to.
+
+    `group_id` scopes the edge node lookup -- the address is (group, node), so a node id alone
+    can name two different gateways once more than one group is in use.
 
     Returns None when the message may be trusted, or a quarantine reason string when it may
     not. Never raises: a lookup failure is reported as a mismatch, which is the fail-closed
@@ -669,7 +749,7 @@ def verify_gateway_binding(device: dict, gateway_wire_id: str):
     if device.get("_identity_source") == SOURCE_LEGACY_NAME:
         return None
 
-    gateway = resolve_gateway(gateway_wire_id)
+    gateway = resolve_gateway(gateway_wire_id, group_id)
 
     # An unregistered edge node speaking for a *registered, bound* device. resolve_gateway()'s
     # contract is that unregistered edge nodes are dropped; that was only ever enforced on the
@@ -825,7 +905,8 @@ def extract_name_hint(payload):
     return None
 
 
-def quarantine_new_device(wire_id: str, gateway_wire_id: str, reason: str, payload):
+def quarantine_new_device(wire_id: str, gateway_wire_id: str, reason: str, payload,
+                          group_id: str = None):
     """
     Insert a newly discovered device with is_quarantined = True, and return the created row.
 
@@ -833,7 +914,7 @@ def quarantine_new_device(wire_id: str, gateway_wire_id: str, reason: str, paylo
     always discarded it, which is why approving a quarantined device previously required the
     operator to re-pick its gateway by hand.
     """
-    gateway = resolve_gateway(gateway_wire_id)
+    gateway = resolve_gateway(gateway_wire_id, group_id)
     if gateway is None:
         logger.warning(
             "Quarantining device '%s' from unregistered edge node '%s': it will have no gateway "
@@ -910,7 +991,8 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
 
         if device is None:
             device = quarantine_new_device(
-                wire_id, gateway_wire_id, quarantine_reason or REASON_UNKNOWN_DEVICE, payload
+                wire_id, gateway_wire_id, quarantine_reason or REASON_UNKNOWN_DEVICE, payload,
+                group_id=group_id
             )
             if device is None:
                 logger.error("Failed to record quarantined device '%s'; dropping its birth certificate.", wire_id)
@@ -920,7 +1002,8 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
         else:
             # An identity fault already diagnosed by the caller takes precedence: it describes
             # the id itself, which is the more fundamental problem of the two.
-            hold_reason = quarantine_reason or verify_gateway_binding(device, gateway_wire_id)
+            hold_reason = quarantine_reason or verify_gateway_binding(
+                device, gateway_wire_id, group_id)
 
             if hold_reason:
                 # A registered device publishing a faulty identity, or announced by a gateway
@@ -1017,7 +1100,7 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     # clock, and edge node clocks drift (or, for a replayed payload, are plain wrong).
     heartbeat_dt = datetime.now(timezone.utc)
 
-    gateway = resolve_gateway(edge_node_id)
+    gateway = resolve_gateway(edge_node_id, group_id)
     if gateway is None:
         # Rate-limited: an unregistered node beats every 30s and would otherwise
         # fill the log with the same line forever.
@@ -1066,7 +1149,7 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     # letting an unbound publisher quarantine a healthy device would hand it the denial of
     # service this check exists to prevent. The device's own gateway keeps being believed and
     # its DBIRTH path is what raises the alarm.
-    binding_fault = verify_gateway_binding(device, gateway_wire_id)
+    binding_fault = verify_gateway_binding(device, gateway_wire_id, group_id)
     if binding_fault:
         logger.warning(
             "Dropping DDATA for device '%s' published via edge node '%s': %s",
@@ -1221,6 +1304,12 @@ def parse_sparkplug_payload(msg):
                 payload.timestamp = int(data['timestamp'])
             else:
                 payload.timestamp = int(time.time() * 1000)
+
+            # The Factory+ payload marker. Carried through so the fallback parser presents the
+            # same payload shape the protobuf path does; nothing branches on it, because the
+            # TOPIC is what identifies the asset and a self-declared marker is not evidence.
+            if data.get('uuid'):
+                payload.uuid = str(data['uuid'])
 
             for m in data.get('metrics', []):
                 metric = payload.metrics.add()

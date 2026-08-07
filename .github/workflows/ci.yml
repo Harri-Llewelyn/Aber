@@ -927,32 +927,63 @@ jobs:
           kubectl cluster-info
           kubectl get nodes -o wide
 
-      # Four images have no public registry; the fifth is the test runner. Built here and imported
-      # directly into the cluster's containerd, so nothing is pushed anywhere.
+      # The five images this repository builds. Built here and imported directly into the cluster's
+      # containerd, so nothing is pushed anywhere and no GHCR credential is needed -- release.yml
+      # owns publishing. `pullPolicy: IfNotPresent` is what makes the imported copy win.
+      #
+      # TAGGED UNDER THEIR PUBLISHED NAMES, AT THE CHART'S OWN appVersion. Both halves are load
+      # bearing. The chart resolves an empty `image.tag` to Chart.AppVersion, so a build tagged
+      # anything else is simply not the reference the pods ask for -- and the pods would then try
+      # to PULL the published image instead, which turns this job from "does the chart work" into
+      # "is GHCR reachable and is that tag public". A local build under the exact published
+      # reference is what keeps this job testing the chart and nothing else.
+      #
+      # Reading appVersion from Chart.yaml rather than repeating it means bumping the chart cannot
+      # leave this job building a tag nothing references.
+      - name: Resolve The Chart's appVersion
+        id: appversion
+        run: |
+          set -eu
+          V=$(grep -E '^appVersion:' deploy/helm/factoryplus/Chart.yaml \
+              | head -1 | sed -E 's/^appVersion:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
+          test -n "$V"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Chart appVersion: $V"
+
       - name: Build Local Images
+        env:
+          # IMG_NS, not NS: the enclosing job already uses NS for the Kubernetes namespace.
+          IMG_NS: ghcr.io/harri-llewelyn/acs-cymru
+          V: ${{ steps.appversion.outputs.version }}
         run: |
           set -eu
           # Context is the REPOSITORY ROOT for these two: node_red_flow.json and sparkplug_b.proto
           # both live there.
-          docker build -f supabase/functions/Dockerfile -t factoryplus/edge-runtime:0.1.0 .
-          docker build -f Dockerfile                    -t factoryplus/ingestion:0.1.0 .
-          docker build -f node-red/Dockerfile           -t factoryplus/node-red:0.1.0 node-red
+          docker build -f supabase/functions/Dockerfile -t "$IMG_NS/edge-runtime:$V" .
+          docker build -f Dockerfile                    -t "$IMG_NS/ingestion:$V" .
+          docker build -f node-red/Dockerfile           -t "$IMG_NS/node-red:$V" node-red
           # VITE_RUNTIME_CONFIG=true bakes NOTHING -- the whole point of Phase 0. A default build
           # would carry a baked URL that masks a missing ConfigMap instead of surfacing it.
           docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
-                                                        -t factoryplus/frontend:0.1.0 frontend
+                                                        -t "$IMG_NS/frontend:$V" frontend
           # The conformance runner: the ingestion image plus jsonschema and the AAS suite. Built
-          # after ingestion because it extends it.
-          docker build -f tests/Dockerfile              -t factoryplus/test-runner:0.1.0 .
+          # after ingestion because it extends it, and told WHICH ingestion -- the Dockerfile's ARG
+          # default is a convenience for a bare `docker build`, not something to rely on here.
+          docker build -f tests/Dockerfile \
+            --build-arg "INGESTION_IMAGE=$IMG_NS/ingestion:$V" -t "$IMG_NS/test-runner:$V" .
 
       - name: Import Images Into k3d
+        env:
+          # IMG_NS, not NS: the enclosing job already uses NS for the Kubernetes namespace.
+          IMG_NS: ghcr.io/harri-llewelyn/acs-cymru
+          V: ${{ steps.appversion.outputs.version }}
         run: |
           k3d image import -c factoryplus \
-            factoryplus/edge-runtime:0.1.0 \
-            factoryplus/ingestion:0.1.0 \
-            factoryplus/node-red:0.1.0 \
-            factoryplus/frontend:0.1.0 \
-            factoryplus/test-runner:0.1.0
+            "$IMG_NS/edge-runtime:$V" \
+            "$IMG_NS/ingestion:$V" \
+            "$IMG_NS/node-red:$V" \
+            "$IMG_NS/frontend:$V" \
+            "$IMG_NS/test-runner:$V"
 
       - name: Mirror Repository Config Into The Chart
         run: node scripts/sync-helm-chart-files.mjs --check

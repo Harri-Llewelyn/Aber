@@ -78,6 +78,12 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // authorisation decision, and one endpoint serving both would let a change made for one
   // product's role model silently move the other's.
   "nodered-userinfo": ["SUPABASE_SERVICE_ROLE_KEY"],
+
+  // Factory+ Directory adapter. NO SERVICE-ROLE KEY, and that is the point: it is a live read
+  // API over the whole address space, so it authenticates the caller and then queries AS them,
+  // letting RLS decide what they see. Granting the service key here would turn every
+  // authenticated user's directory lookup into a privileged one. The common env is all it needs.
+  "fplus-directory": [],
 };
 
 /**

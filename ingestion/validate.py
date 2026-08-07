@@ -123,7 +123,11 @@ MALFORMED_DEVICE_ID = "dev" + "f" * 20
 
 # The Sparkplug Group ID every message in this run is published under. Named rather than inlined
 # because the alias table and the rebirth topic are both scoped by it.
-VAL_GROUP = "Group1"
+# Must match gateways.sparkplug_group, whose column default is 'FactoryPlus' (migration 0008).
+# It was "Group1" while ingestion discarded the group entirely; now that resolution is
+# group-qualified, publishing under a group the seeded gateway is not registered under would
+# exercise the DEPRECATED fallback arm on every check rather than the current path.
+VAL_GROUP = "FactoryPlus"
 
 # Sparkplug metric aliases for check 8. 100 is declared by the gateway's NBIRTH and used by a
 # DEVICE's DDATA -- that pair is the whole point, since Sparkplug scopes alias uniqueness to the
@@ -694,7 +698,7 @@ def run_simulation():
     def publish(msg_type, device_id, metrics, asset_id=None, asset_name=None):
         """Publish under `device_id`. asset_id overrides the Asset_ID metric to force a mismatch."""
         payload = make_sparkplug_payload(asset_id or device_id, metrics, now_ms, asset_name)
-        client.publish(f"spBv1.0/Group1/{msg_type}/{gw}/{device_id}", payload)
+        client.publish(f"spBv1.0/{VAL_GROUP}/{msg_type}/{gw}/{device_id}", payload)
         time.sleep(2)
 
     # 1. DBIRTH for an unknown but well-formed device id -> quarantined, reason UNKNOWN_DEVICE
@@ -1392,6 +1396,115 @@ def verify_results():
         except Exception as e:
             print(f"❌ 10. DEVICE WATCHDOG ERROR: {e}")
             passed = False
+
+    # 11. FACTORY+ DIRECTORY ADAPTER
+    #
+    # The whole point of the adapter is to be reachable by a client that holds NO Supabase apikey,
+    # which means these routes are exempt from Kong's key-auth and the edge function is the only
+    # thing standing in front of the data. Check 11b is therefore the security assertion for the
+    # entire surface: if it ever passes when it should not, the fleet's address space is public.
+    #
+    # All three are probed with raw urllib rather than the Supabase client, deliberately -- the
+    # client would attach an apikey and a token automatically, which is exactly what must NOT be
+    # required for 11a and exactly what must be absent for 11b.
+    try:
+        def probe(path, headers=None):
+            req = urllib.request.Request(f"{SUPABASE_URL}{path}", headers=headers or {})
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    return resp.status, resp.read().decode()
+            except urllib.error.HTTPError as err:
+                return err.code, err.read().decode()
+
+        # 11a. /ping must answer WITHOUT an apikey. The Factory+ component specification requires
+        # it for discovery, and Kong's key-auth would otherwise refuse it at the gateway.
+        status, body = probe("/ping")
+        if status == 200 and '"service"' in body and "fplus-directory" in body:
+            print("✅ 11. DIRECTORY /ping: answers 200 with no apikey and no bearer token.")
+        else:
+            print(f"❌ 11. DIRECTORY /ping FAIL: HTTP {status}, body {body[:160]}. Expected 200. "
+                  "A 401 means the Kong route is still behind key-auth; a 404 means the function "
+                  "is not registered in supabase/functions/main/index.ts.")
+            passed = False
+
+        # 11b. THE ONE THAT MATTERS. Anonymous /v1/device must be refused BY THE FUNCTION, since
+        # the gateway is not gating it.
+        status, body = probe("/v1/device")
+        if status == 401:
+            print("✅ 11b. DIRECTORY FAIL-CLOSED: anonymous /v1/device answers 401.")
+        else:
+            print(f"❌ 11b. DIRECTORY FAIL-CLOSED FAIL: anonymous /v1/device answered {status}. "
+                  "These routes are exempt from Kong's key-auth, so the function's own token "
+                  "check is the ONLY thing in front of the whole address space.")
+            passed = False
+
+        # 11c. And it must actually work for an authenticated caller.
+        anon = os.getenv("SUPABASE_ANON_KEY", "")
+        token = None
+        try:
+            req = urllib.request.Request(
+                f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
+                data=json.dumps({"email": "admin@factoryplus.local",
+                                 "password": "factoryplus123"}).encode(),
+                headers={"apikey": anon, "Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                token = json.loads(resp.read())["access_token"]
+        except Exception as auth_err:
+            print(f"⚠️  11c. DIRECTORY AUTHENTICATED READ: skipped, could not sign in ({auth_err}).")
+
+        if token:
+            status, body = probe("/v1/device", {"Authorization": f"Bearer {token}"})
+            try:
+                parsed = json.loads(body)
+            except Exception:
+                parsed = None
+
+            # A UUID LIST, matching the Factory+ Directory's own shape. Asserting the SHAPE and
+            # not merely the status is the point: a 200 carrying an error object would pass a
+            # status-only check while telling a client nothing it can use.
+            if status == 200 and isinstance(parsed, list) and all(
+                isinstance(x, str) and len(x) == 36 for x in parsed
+            ):
+                print(f"✅ 11c. DIRECTORY AUTHENTICATED READ: /v1/device returned {len(parsed)} "
+                      "Instance_UUID(s).")
+
+                # 11d. And one of them resolves to a Sparkplug address, which is the mapping the
+                # adapter exists to publish and the reason migration 0008 added the group.
+                if SEEDED.get("known_uuid") and SEEDED["known_uuid"] in parsed:
+                    status, body = probe(f"/v1/device/{SEEDED['known_uuid']}",
+                                         {"Authorization": f"Bearer {token}"})
+                    entry = json.loads(body) if status == 200 else {}
+                    address = entry.get("address") or {}
+                    if address.get("group_id") == VAL_GROUP and address.get("node_id") == SEEDED.get("gateway_id"):
+                        print(f"✅ 11d. DIRECTORY ADDRESS MAPPING: the device resolves to "
+                              f"{address['group_id']}/{address['node_id']}/{address.get('device_id')}.")
+                    else:
+                        print(f"❌ 11d. DIRECTORY ADDRESS MAPPING FAIL: got {address}, expected group "
+                              f"'{VAL_GROUP}' and node '{SEEDED.get('gateway_id')}'.")
+                        passed = False
+                else:
+                    print("⚠️  11d. DIRECTORY ADDRESS MAPPING: skipped, this run's device is not in "
+                          "the listing.")
+
+                # 11e. The reverse lookup: an address resolves to the edge node and its devices.
+                status, body = probe(f"/v1/address/{VAL_GROUP}/{SEEDED.get('gateway_id')}",
+                                     {"Authorization": f"Bearer {token}"})
+                node = json.loads(body) if status == 200 else {}
+                if status == 200 and node.get("uuid") == SEEDED.get("gateway_uuid"):
+                    print(f"✅ 11e. DIRECTORY ADDRESS LOOKUP: /v1/address resolved the edge node and "
+                          f"{len(node.get('devices') or [])} device(s) behind it.")
+                else:
+                    print(f"❌ 11e. DIRECTORY ADDRESS LOOKUP FAIL: HTTP {status}, uuid "
+                          f"{node.get('uuid')}, expected {SEEDED.get('gateway_uuid')}.")
+                    passed = False
+            else:
+                print(f"❌ 11c. DIRECTORY AUTHENTICATED READ FAIL: HTTP {status}, body {body[:200]}. "
+                      "Expected 200 and a JSON array of Instance_UUIDs.")
+                passed = False
+    except Exception as e:
+        print(f"❌ 11. DIRECTORY ERROR: could not probe {SUPABASE_URL}: {e}")
+        passed = False
 
     print("==========================================")
     if passed:

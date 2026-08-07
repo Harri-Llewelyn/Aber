@@ -27,6 +27,7 @@ Squashed to a **two-file baseline** for the public beta, plus additive remediati
 | `0005_digital_thread_signal_and_attribution.sql` | Stops the audit trigger recording machine non-events |
 | `0006_nodered_oidc_auth.sql` | Node-RED's OAuth client and the webhook signing key |
 | `0007_metric_catalog_name_check.sql` | Constrains `metric_catalog.name` to the Factory+ format |
+| `0008_gateway_sparkplug_group.sql` | Adds `gateways.sparkplug_group`, making the edge node address `(group, node)` |
 
 Add schema changes as a **new numbered file** (`0008_…`). The baseline files describe the state a
 fresh database is built into; a live database has already run them.
@@ -188,6 +189,46 @@ keep-in-step obligation `deriveMetricGroup()` and `utils/sparkplugId.js` carry.
 
 All 15 seeded catalog names conform, so the constraint validates cleanly on a fresh database.
 
+### The Sparkplug group is part of the address (0008)
+
+Ingestion parsed `spBv1.0/<group>/<type>/<node>/<device>` and **never read the group**, so two
+groups publishing the same edge node id resolved to one row — silently, each group's telemetry
+attributed to the other's asset. `gateways.sparkplug_group` closes that, and is what makes
+`/v1/address/{group_id}/{node_id}` mean anything.
+
+Resolution order in `resolve_gateway()`, with the middle arm as the migration path:
+
+1. `(sparkplug_group, sparkplug_id)` — the current scheme.
+2. `sparkplug_id` alone — warns `DEPRECATED IDENTITY`, throttled, naming both the group on the
+   wire and the one on the row. **Not a refusal**: a fleet is reconfigured one gateway at a time,
+   and refusing here would strand every device behind a node not yet corrected.
+3. `name` — legacy, pre-`sparkplug_id`.
+
+The resolution cache is keyed by the **pair**. A cache keyed on the node alone would hand a hit
+from one group to a request from another — precisely the collision this closes.
+
+> **Adding a column to `gateways` requires `ensure_gateway_status_view()`.** `0008` calls it, and
+> `0001` no longer carries a second, explicit-column copy of the view — see below.
+
+### `0001` builds `gateway_status` by calling the function, not inline
+
+`pg_dump` expanded the view into an **explicit column list** when the baseline was squashed, while
+`ensure_gateway_status_view()` selects `g.*`. Those drift apart the moment a later migration adds
+a gateways column: `0008` widened the view, and `0001`'s replay on the next boot tried to recreate
+it from the older, narrower list:
+
+```
+ERROR:  cannot drop columns from view
+```
+
+`db-init` runs with `ON_ERROR_STOP=1`, so that is not a warning — **the stack never comes up
+again**, and it surfaces on the *second* boot rather than the first. `0004` hit the same wall from
+the opposite direction when a column was removed.
+
+`0001` now calls the function, leaving one definition of the view in the repository. The function
+drops and recreates rather than replacing, which is also what re-applies the `COMMENT` and the
+grants — `DROP VIEW` discards both, which is why they live inside it.
+
 ---
 
 ## Core Tables
@@ -305,7 +346,7 @@ able to override it.
 
 ## Edge Functions
 
-All four fail closed: missing or unrecognised role ⇒ `403`.
+All fail closed: missing or unrecognised role ⇒ `403`.
 
 | Function | Roles | Notes |
 | :--- | :--- | :--- |
@@ -313,6 +354,43 @@ All four fail closed: missing or unrecognised role ⇒ `403`.
 | [`deploy-nodered`](functions/deploy-nodered) | `Administrator`, `Shopfloor_Manager` | Deploys **only** the committed flow |
 | [`aas-export`](functions/aas-export) | + `Operator`, `Auditor` | Export is a read |
 | [`grafana-userinfo`](functions/grafana-userinfo) | any mapped role | OIDC userinfo for Grafana SSO |
+| [`nodered-userinfo`](functions/nodered-userinfo) | any mapped role | The same lookup in Node-RED's permission vocabulary |
+| [`fplus-directory`](functions/fplus-directory) | any authenticated user | Factory+ Directory adapter — see below |
+
+### The Factory+ Directory adapter
+
+`fplus-directory` serves the read half of the Factory+ Directory component's REST contract by
+**projecting** tables that already exist. Nothing upstream of it knows the Directory exists — no
+column, trigger or ingestion path changed to support it, exactly as `aas-export` is an adapter
+rather than an adopted format.
+
+| Endpoint | Returns |
+| :--- | :--- |
+| `GET /ping` | Service identity and version. **Unauthenticated by specification** |
+| `GET /v1/device` | A JSON array of `Instance_UUID`s |
+| `GET /v1/device/{uuid}` | One device's Sparkplug address, status and schemas |
+| `GET /v1/address/{group}/{node}` | The edge node at that address and the devices behind it |
+| `GET /v1/schema` · `GET /v1/service` | Locally minted schema / service identifiers |
+
+**It is served at the unprefixed paths**, not under `/functions/v1/`, because a Factory+ client has
+no Supabase `apikey` and no way to acquire one. Those Kong routes are therefore exempt from
+`key-auth` — which makes the function itself the **only** thing in front of the fleet's address
+space. Every `/v1/` path refuses a request with no bearer token *before it routes*, and
+`validate.py` check 11b asserts that 401 rather than trusting it.
+
+It **queries as the caller**, not as the service role: a Directory is a live read over the whole
+address space, so running it privileged would hand every authenticated user a view their RLS
+policies do not grant them. Its entry in `FUNCTION_REGISTRY` grants no `SUPABASE_SERVICE_ROLE_KEY`,
+which makes that structural rather than a discipline.
+
+**What it does not claim.** Schema and service identifiers are this deployment's own UUIDs, and the
+response says so (`"namespace": "local"`). Factory+ `Schema_UUID`s are registered against the AMRC
+schema repository; returning local ids unqualified would assert an interoperability that does not
+exist — the same rule the semantic-id namespace follows.
+
+Two identity mappings need no new columns, which is why this is an adapter and not a migration:
+`Instance_UUID` is `devices.id` (already RFC4122), and the Sparkplug address is
+`(gateways.sparkplug_group, gateways.sparkplug_id)`.
 
 ### The worker router
 

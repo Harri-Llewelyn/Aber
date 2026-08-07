@@ -1015,36 +1015,27 @@ CREATE TABLE IF NOT EXISTS public.documents (
 );
 
 -- Name: gateway_status; Type: VIEW; Schema: public; Owner: -
-CREATE OR REPLACE VIEW public.gateway_status WITH (security_invoker='true') AS
- SELECT g.id,
-    g.name,
-    g.cell_id,
-    g.access_url,
-    g.status,
-    g.created_at,
-    g.is_archived,
-    g.archived_at,
-    g.auto_delete_at,
-    g.last_heartbeat,
-    -- g.ip_address removed alongside the column above. pg_dump expanded this view into an
-    -- explicit column list rather than the `g.*` that ensure_gateway_status_view() uses, so the
-    -- two have to be kept in step by hand -- leaving it here would fail a FRESH install with
-    -- "column g.ip_address does not exist" while every existing database carried on working.
-    g.is_virtual,
-    g.sparkplug_id,
-    g.location_scope,
-        CASE
-            WHEN (g.status = 'OFFLINE'::text) THEN 'OFFLINE'::text
-            WHEN (g.last_heartbeat IS NULL) THEN g.status
-            WHEN ((now() - g.last_heartbeat) > '00:01:30'::interval) THEN 'STALE'::text
-            ELSE g.status
-        END AS live_status,
-    ((g.last_heartbeat IS NOT NULL) AND ((now() - g.last_heartbeat) > '00:01:30'::interval)) AS is_stale,
-    (EXTRACT(epoch FROM (now() - g.last_heartbeat)))::bigint AS heartbeat_age_seconds
-   FROM public.gateways g;
-
--- Name: VIEW gateway_status; Type: COMMENT; Schema: public; Owner: -
-COMMENT ON VIEW public.gateway_status IS 'public.gateways with heartbeat staleness derived at read time. Mirrors frontend/src/utils/gatewayStatus.js -- keep the 90s threshold in step. Deliberately a view, not a stored column or a pg_cron writer: writing status would append to the immutable digital_thread audit table on every sweep and would be stale between ticks. Rebuilt by public.ensure_gateway_status_view() -- call it after adding a gateways column.';
+--
+-- BUILT BY THE FUNCTION, NOT INLINE, and that is load bearing rather than tidy.
+--
+-- pg_dump expanded this view into an EXPLICIT COLUMN LIST when the baseline was squashed, while
+-- ensure_gateway_status_view() selects `g.*`. Those two drift apart the moment a later migration
+-- adds a column to public.gateways: 0008 adds `sparkplug_group` and rebuilds the view with `g.*`,
+-- so the view gains a column -- and then THIS statement replays on the next boot with the older,
+-- narrower list and PostgreSQL refuses:
+--
+--     ERROR:  cannot drop columns from view
+--
+-- db-init runs with ON_ERROR_STOP=1, so that is not a warning: the stack never comes up again,
+-- and it happens on the SECOND boot rather than the first, which is the worst time to find out.
+-- 0004 hit the same wall from the opposite direction when a column was REMOVED.
+--
+-- Calling the function leaves ONE definition of this view in the repository. The function drops
+-- and recreates rather than replacing -- which is also what re-applies the grants, since DROP VIEW
+-- discards them.
+SELECT public.ensure_gateway_status_view();
+-- No COMMENT ON VIEW here: the function sets it, along with the grants, because DROP VIEW
+-- discards both. A copy outside would be the same drift this change removes.
 
 -- Name: iso22400_vocabulary; Type: TABLE; Schema: public; Owner: -
 CREATE TABLE IF NOT EXISTS public.iso22400_vocabulary (

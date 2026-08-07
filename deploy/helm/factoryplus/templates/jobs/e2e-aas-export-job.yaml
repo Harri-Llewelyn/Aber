@@ -86,7 +86,7 @@ spec:
             limits: { memory: 128Mi }
       containers:
         - name: aas-export
-          image: "{{ .Values.e2e.image.repository }}:{{ .Values.e2e.image.tag }}"
+          image: {{ include "factoryplus.image" (dict "image" .Values.e2e.image "ctx" $) | quote }}
           imagePullPolicy: {{ .Values.e2e.image.pullPolicy }}
           # The repo-shaped path is required: the suite resolves the IDTA schema and the four
           # mapper files relative to parents[3] of its own location. See tests/Dockerfile.

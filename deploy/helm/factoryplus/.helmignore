@@ -1,0 +1,46 @@
+# Patterns excluded from `helm package`. Matched with Go filepath.Match against every path in the
+# chart directory, so a bare name matches at any depth and a leading `/` anchors it to the root.
+#
+# WHAT THIS FILE IS ACTUALLY FOR HERE. Almost every chart's .helmignore is boilerplate, because
+# almost every chart directory holds nothing but templates. This one holds files/ -- 13 directories
+# of repository-owned configuration mirrored in by scripts/sync-helm-chart-files.mjs, because Helm
+# cannot read outside its own chart. That mirror is a copy of things that live elsewhere in the
+# repository, so anything an editor, an OS or a tool drops next to the originals gets copied in
+# beside them and then packaged into a release artefact. Without this file, `helm package` says
+# nothing about any of it.
+
+# --- version control and editors -------------------------------------------------------------
+.git/
+.gitignore
+.gitattributes
+.vscode/
+.idea/
+*.swp
+*.swo
+*.bak
+*~
+
+# --- OS litter -------------------------------------------------------------------------------
+# .DS_Store and Thumbs.db are the two that reliably reach a repository from a shared checkout.
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- build output and dependencies -------------------------------------------------------------
+node_modules/
+__pycache__/
+*.pyc
+*.tgz
+
+# --- packaging artefacts -----------------------------------------------------------------------
+# A previously packaged chart sitting in the chart directory would otherwise be packaged INTO the
+# next one. Anchored, because a legitimately-named directory deeper in files/ should not be caught.
+/*.tgz
+/dist/
+
+# --- deliberately NOT ignored ------------------------------------------------------------------
+# values-dev.yaml and values-prod.yaml.example STAY IN THE PACKAGE, which is not the usual choice.
+# They are documentation that a published chart has no other way to carry: values-prod.yaml.example
+# is the only place the four optional hardening features are turned on together with the reasoning
+# for each, and `helm show values` renders values.yaml alone. Someone who pulled the chart from a
+# registry has no repository to read them from, which is precisely when they are worth the ~21 KB.

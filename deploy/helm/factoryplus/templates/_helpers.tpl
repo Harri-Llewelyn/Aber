@@ -94,6 +94,33 @@ storageClassName: {{ $sc | quote }}
 {{- end -}}
 {{- end -}}
 
+{{/*
+Render a `repository:tag` image reference, defaulting an EMPTY tag to the chart's appVersion.
+
+Used only by the five images this repository BUILDS -- edge-runtime, ingestion, node-red, frontend
+and test-runner. Their tag is empty in values.yaml on purpose, so the chart and the images it names
+ship from one release tag and cannot drift: .github/workflows/release.yml stamps appVersion from the
+`v*` tag and pushes those five images at the same string, in the same job.
+
+It is deliberately NOT used for third-party images. Those pins are decisions, several of them
+load-bearing -- supabase/realtime and supabase/storage-api migrate shared schemas on boot,
+supabase/studio is Zod-coupled to a postgres-meta version, nodered/node-red is what the generated
+settings.js depends on. Floating any of them onto our appVersion would mean bumping this chart
+silently changed which Postgres the databases run, which is the opposite of what a pin is for.
+
+An explicit `tag` still wins, so a deployment can pull one component at a different build (a hotfix,
+a bisect, a locally-built image) without forking the chart.
+
+  {{ include "factoryplus.image" (dict "image" .Values.ingestion.image "ctx" .) }}
+*/}}
+{{- define "factoryplus.image" -}}
+{{- $tag := .image.tag | default .ctx.Chart.AppVersion -}}
+{{- if not $tag -}}
+{{- fail "image tag resolved to empty: Chart.yaml has no appVersion and no explicit tag was set" -}}
+{{- end -}}
+{{- printf "%s:%s" .image.repository $tag -}}
+{{- end -}}
+
 {{/* ---------------------------------------------------------------------------------------- */}}
 {{/* 2. Validation                                                                              */}}
 {{/*                                                                                            */}}

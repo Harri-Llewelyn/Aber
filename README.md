@@ -18,7 +18,7 @@ flow management.
 
 Where the upstream ACS ships bespoke microservices, this fork uses **Supabase** (Postgres, GoTrue,
 PostgREST, Realtime, Storage, Edge Functions), **TimescaleDB**, **Grafana** and **Node-RED**. The
-custom surface is deliberately small: one Python ingestion daemon, five edge functions, and a React
+custom surface is deliberately small: one Python ingestion daemon, six edge functions, and a React
 dashboard.
 
 The same instinct shows up throughout the design: derived state is computed at read time rather
@@ -51,7 +51,7 @@ flowchart TB
 
     subgraph Processing ["Ingestion & Serverless"]
         ING["Python Ingestion Engine<br/>identity - quarantine - binding"]
-        EF["Edge Functions<br/>approve-quarantine - deploy-nodered - aas-export<br/>grafana-userinfo - nodered-userinfo"]
+        EF["Edge Functions<br/>approve-quarantine - deploy-nodered - aas-export<br/>grafana-userinfo - nodered-userinfo - fplus-directory"]
     end
 
     subgraph Supabase ["Supabase BaaS"]
@@ -130,7 +130,8 @@ docker compose up --build -d    # launches the whole stack
 ```
 
 Every file in `supabase/migrations/` — the schema baseline (`0001`), seed data (`0002`), and the
-later additive migrations (`0003` audit immutability, `0004`, `0005`, `0006` Node-RED SSO, `0007`) —
+later additive migrations (`0003` audit immutability, `0004`, `0005`, `0006` Node-RED SSO, `0007`
+metric-name format, `0008` Sparkplug group) —
 plus demo accounts (`supabase/seed.sql`) are applied by `supabase-db-init` on startup, and
 re-applied harmlessly on every later start.
 
@@ -384,6 +385,28 @@ pass while they diverged.
 See [`ingestion/README.md`](ingestion/README.md#testing) for why `validate.py` needs
 `SUPABASE_SERVICE_ROLE_KEY` but must **not** inherit the rest of `.env` — and why running it
 **in-cluster needs no overrides at all**.
+
+### Releases
+
+[`.github/workflows/release.yml`](.github/workflows/release.yml) is separate and runs on a **`v*`
+tag only** — never on a branch, so nothing about ordinary development reveals it exists.
+
+| Job | Covers |
+| :--- | :--- |
+| **prepare-release** | Derives the version from the tag, refuses a non-SemVer one, re-runs the static checks a published artefact must not violate |
+| **build-images** | The four independent images, in parallel, pushed to GHCR |
+| **build-test-runner** | The conformance runner, which is built `FROM` the ingestion image and so cannot join the matrix |
+| **publish-chart** | Lint, render, package at the tag's version, push over OCI, pull it back |
+
+The tag is the only place the version is written: it stamps the five image tags, the chart `version`
+and the chart `appVersion` in one run. **Images publish before the chart**, because a chart that
+names images which do not exist yet does not fail — `helm install` succeeds and five workloads sit
+in `ImagePullBackOff` while everything else comes up healthy.
+
+Run it from the Actions tab with `dry_run` ticked to rehearse the whole thing without publishing.
+Installation, the one-time GHCR visibility step, and what the release deliberately does *not* do
+(no `latest`, no arm64, no signing) are in
+[`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ---
 

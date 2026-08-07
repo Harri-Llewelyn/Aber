@@ -14,12 +14,16 @@
 # EVERY PLACEHOLDER IS `__UPPER_SNAKE__`, and both substituters assert that none survive. Adding
 # one means adding it to `supabase-kong-init` in docker-compose.yml AND to the chart.
 #
-# THREE ROUTES ARE DELIBERATELY EXEMPT from `key-auth`, and all three are load bearing:
+# FOUR ROUTES ARE DELIBERATELY EXEMPT from `key-auth`, and all four are load bearing:
 #
 #   * `/auth/v1/`                                    -- sign-in must work before a session exists
 #   * `/functions/v1/{grafana,nodered}-userinfo`     -- an OAuth client sends client credentials,
 #                                                       never a Supabase apikey
 #   * `/storage/v1/object/public/`                   -- an AAS File URL must resolve with no session
+#   * `/ping` and `/v1/`                             -- the Factory+ Directory adapter, whose
+#                                                       clients have no apikey. `/ping` is open by
+#                                                       specification; `/v1/` is authenticated by
+#                                                       the FUNCTION, not by the gateway
 #
 # Each carries a note at its own service definition. The full reasoning, and what the exemptions
 # do and do not expose:  supabase/README.md -> "API Gateway (kong.yml)"
@@ -186,6 +190,38 @@ services:
         strip_path: true
         paths:
           - /functions/v1/nodered-userinfo
+
+  # ---------------------------------------------------------------------------------------------
+  # Factory+ Directory adapter -- the FOURTH key-auth exemption.
+  #
+  # WHY IT IS EXEMPT. A Factory+ client has no Supabase apikey and no way to acquire one; gating
+  # this route would make the adapter unreachable by exactly the clients it exists for, which is
+  # the same argument as the two userinfo endpoints above. `/ping` must additionally be reachable
+  # with no credential at all -- the component specification requires it for discovery.
+  #
+  # WHAT STANDS IN FRONT OF THE DATA IS THE FUNCTION, NOT KONG. Every `/v1/` path in
+  # fplus-directory refuses a request with no bearer token, before it routes, and then queries as
+  # the CALLER so RLS still applies. That inversion is deliberate but it is also the whole
+  # security boundary for these routes, so `validate.py` asserts the 401 rather than trusting it.
+  #
+  # `strip_path: false`, UNLIKE the userinfo routes. Those match one exact path and want it
+  # removed; these must preserve `/v1/device/<uuid>` for the function to route on. With
+  # strip_path false Kong appends the request path to the service URL, so the runtime receives
+  # `/fplus-directory/v1/device/<uuid>` -- which is also how main/index.ts learns which worker to
+  # spawn, since it reads the first path segment. Setting strip_path true here would hand it an
+  # empty service name and it would answer 400, naming nothing.
+  # ---------------------------------------------------------------------------------------------
+  - name: fplus-directory
+    url: http://supabase-functions:9000/fplus-directory
+    routes:
+      - name: fplus-directory-ping
+        strip_path: false
+        paths:
+          - /ping
+      - name: fplus-directory-v1
+        strip_path: false
+        paths:
+          - /v1/
 
   - name: functions-v1
     url: http://supabase-functions:9000/

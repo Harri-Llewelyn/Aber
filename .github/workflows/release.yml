@@ -1,0 +1,389 @@
+# =================================================================================================
+# Release: publish the five images this repository builds, then the Helm chart, to GHCR over OCI.
+#
+# THE ORDER IS THE WHOLE DESIGN. The chart names those five images at `Chart.AppVersion`, so a chart
+# published before its images resolves to tags that do not exist yet -- and the failure is not a
+# failed install. `helm install` SUCCEEDS, `--wait` blocks for its full timeout, and five workloads
+# sit in ImagePullBackOff while the databases, the broker and Kong all come up healthy. Someone
+# reading `kubectl get pods` sees a stack that is two thirds up and no error naming the release.
+# So: images first, chart last, and the chart job `needs` them.
+#
+# WHAT VERSION MEANS HERE. The `v*` tag is the single source. It stamps the image tags, the chart
+# `version` and the chart `appVersion`, all in this one run -- Chart.yaml's committed values are
+# only for the untagged path (a checkout, `helm lint`, `helm template`) and are deliberately not
+# read when a tag is present. Nothing has to be bumped in a commit before tagging, which is the
+# usual way a chart ends up published under a version that names a different build.
+#
+# WHY NOT `latest`. No floating tag is pushed for any image. The chart resolves an empty
+# `image.tag` to appVersion precisely so a given chart release can only ever run the images built
+# beside it; a `latest` sitting alongside would be an invitation to override that, and the symptom
+# of doing so -- one component a release ahead of the schema its neighbours expect -- is the same
+# asymmetric drift scripts/check-image-tag-parity.mjs exists to prevent.
+#
+# ARCHITECTURE: linux/amd64 ONLY. Not an oversight and worth knowing before an edge rollout: k3s on
+# arm64 (a Pi, a Jetson, Graviton) cannot run these images. Cross-building them under QEMU is not a
+# small change either -- the frontend runs a full Vite build and the ingestion image compiles
+# sparkplug_b.proto with protoc, both of which are punishing emulated. An arm64 cluster should build
+# locally with the commands in deploy/k8s/README.md, which work unchanged on a native arm64 host.
+#
+# CREDENTIALS: the built-in GITHUB_TOKEN, with `packages: write` requested below. No PAT, no
+# repository secret. It can push to `ghcr.io/<this repo's owner>/...` and nowhere else, which is the
+# right blast radius for a workflow that runs on a tag.
+#
+# FIRST PUBLISH IS PRIVATE. GHCR creates every new package private regardless of the repository's
+# visibility, and GITHUB_TOKEN cannot change that -- it is an account-level setting. All six
+# packages need a one-time visibility flip; deploy/k8s/README.md carries the `gh` commands.
+# =================================================================================================
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # The rehearsal path. `dry_run: true` (the default) builds everything and pushes nothing, so the
+  # whole pipeline -- including the checks below and the chart package -- can be exercised without
+  # burning a version number or putting an artefact in front of anyone.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish, without the leading v (e.g. 0.2.0)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Build and verify but publish nothing'
+        required: false
+        default: true
+        type: boolean
+
+# Two releases in flight would race on the same package tags, and the loser wins -- OCI push does
+# not refuse an overwrite. `cancel-in-progress: false` because a half-finished release that pushed
+# images and not the chart is worse than a queued one.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  # Lowercased explicitly rather than interpolating github.repository_owner: this owner is
+  # `Harri-Llewelyn` and OCI reference names are case-sensitive and must be lowercase, so the
+  # interpolated form pushes fine and then produces a reference nothing can pull.
+  IMAGE_NAMESPACE: ghcr.io/harri-llewelyn/acs-cymru
+  CHART_REPO: oci://ghcr.io/harri-llewelyn/acs-cymru
+
+jobs:
+  # -----------------------------------------------------------------------------------------------
+  # Resolve and validate the version once, so the image jobs and the chart job cannot disagree, and
+  # run the static checks that a published artefact must not be able to violate.
+  #
+  # ci.yml triggers on BRANCHES, not tags, so nothing else in this pipeline runs for a `v*` push.
+  # The checks repeated here are the ones whose failure would be baked into the artefact rather than
+  # caught on the next commit -- above all the chart-files mirror: Helm cannot read outside its own
+  # chart, so a stale copy of kong.yml or a migration ships a chart that provisions a DIFFERENT
+  # database than this repository describes, and it surfaces at the first telemetry write. The full
+  # E2E and in-cluster suites are not repeated; they ran on the commit this tag points at.
+  # -----------------------------------------------------------------------------------------------
+  prepare-release:
+    name: Resolve Version & Pre-flight Checks
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      push: ${{ steps.resolve.outputs.push }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Resolve Version
+        id: resolve
+        run: |
+          set -eu
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION='${{ inputs.version }}'
+            PUSH='${{ inputs.dry_run == false }}'
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+            PUSH=true
+          fi
+
+          # SemVer, and strictly. Helm REQUIRES a SemVer chart version and rejects the package at
+          # `helm package` time, but the images would already have been pushed by then -- so this
+          # refuses before anything leaves the runner. The pattern allows a prerelease/build suffix
+          # (`1.0.0-rc.1`) because Helm does.
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)*$'; then
+            echo "::error::'$VERSION' is not a SemVer version. Tag as v<major>.<minor>.<patch>."
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "push=$PUSH"       >> "$GITHUB_OUTPUT"
+          echo "Releasing $VERSION (push=$PUSH)"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Helm cannot read files outside its chart directory, so repository-owned configuration is
+      # mirrored into deploy/helm/factoryplus/files/ and committed. Publishing a chart whose mirror
+      # is stale is the one failure here that survives the release and reaches a user's cluster.
+      - name: Verify Chart Files Are In Sync With Their Sources
+        run: node scripts/sync-helm-chart-files.mjs --check
+
+      # Both targets must pin the same tag for every shared image, and -- since this workflow --
+      # the five built images must agree across values.yaml, ci.yml and this file. A release is
+      # exactly when that last coupling matters: it is what decides whether the chart names images
+      # this workflow actually pushed.
+      - name: Verify Image Tag Parity Across Both Targets And The Release Surface
+        run: node scripts/check-image-tag-parity.mjs --verbose
+
+      - name: Verify Documentation Matches The Repository
+        run: node scripts/check-docs-drift.mjs
+
+  # -----------------------------------------------------------------------------------------------
+  # The four independent images, in parallel. test-runner is not here: it is built FROM ingestion.
+  # -----------------------------------------------------------------------------------------------
+  build-images:
+    name: Image — ${{ matrix.name }}
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    strategy:
+      # One image failing should not leave the other three pushed and this job green-ish. The chart
+      # job `needs` this one, so a failure anywhere stops the chart regardless -- but finishing the
+      # siblings makes the log show whether the failure was specific or systemic.
+      fail-fast: false
+      matrix:
+        include:
+          # Context is the REPOSITORY ROOT for these two: node_red_flow.json and sparkplug_b.proto
+          # both live there, and neither is reachable from a narrower context.
+          - name: edge-runtime
+            dockerfile: supabase/functions/Dockerfile
+            context: .
+            build_args: ''
+          - name: ingestion
+            dockerfile: Dockerfile
+            context: .
+            build_args: ''
+          - name: node-red
+            dockerfile: node-red/Dockerfile
+            context: node-red
+            build_args: ''
+          # VITE_RUNTIME_CONFIG=true bakes NOTHING, which is what lets one published image serve any
+          # environment and read its configuration from the /config.js ConfigMap. A default build
+          # would carry a baked Supabase URL that MASKS a missing ConfigMap instead of surfacing it
+          # -- so a published default build would silently point every install at whatever URL this
+          # runner happened to have.
+          - name: frontend
+            dockerfile: frontend/Dockerfile
+            context: frontend
+            build_args: VITE_RUNTIME_CONFIG=true
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log In To GHCR
+        if: needs.prepare-release.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          build-args: ${{ matrix.build_args }}
+          push: ${{ needs.prepare-release.outputs.push == 'true' }}
+          tags: ${{ env.IMAGE_NAMESPACE }}/${{ matrix.name }}:${{ needs.prepare-release.outputs.version }}
+          # `image.source` is what makes GHCR attach the package to this repository, which is both
+          # how the package page gets a README and how the repository's own settings can govern it.
+          # Without it the package is an orphan in the account's namespace with no link back.
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.prepare-release.outputs.version }}
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  # -----------------------------------------------------------------------------------------------
+  # test-runner EXTENDS ingestion (`ARG INGESTION_IMAGE`), so it cannot join the matrix above.
+  #
+  # It is published rather than left as a local build for the same reason it exists at all: the
+  # conformance suites are the only thing that can say whether a deployed stack is correct, and a
+  # suite that only runs where the repository is checked out cannot be pointed at the cluster it is
+  # meant to judge. `e2e.enabled` is still false by default -- these Jobs seed and delete fixtures.
+  # -----------------------------------------------------------------------------------------------
+  build-test-runner:
+    name: Image — test-runner
+    needs: [prepare-release, build-images]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log In To GHCR
+        if: needs.prepare-release.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # On a dry run the ingestion image above was built and NOT pushed, so it is not in this
+      # runner's daemon and not in the registry either. Rebuilding it locally under the same
+      # reference is what keeps the dry run a real rehearsal rather than a step that quietly skips.
+      - name: Rebuild The Ingestion Base Locally (dry run only)
+        if: needs.prepare-release.outputs.push != 'true'
+        run: |
+          docker build -f Dockerfile \
+            -t "$IMAGE_NAMESPACE/ingestion:${{ needs.prepare-release.outputs.version }}" .
+
+      - name: Build & Push
+        uses: docker/build-push-action@v6
+        with:
+          # REPOSITORY ROOT: test_aas_export.py resolves five files relative to parents[3], so the
+          # suite needs the repo-shaped layout tests/Dockerfile builds. See its header.
+          context: .
+          file: tests/Dockerfile
+          build-args: |
+            INGESTION_IMAGE=${{ env.IMAGE_NAMESPACE }}/ingestion:${{ needs.prepare-release.outputs.version }}
+          push: ${{ needs.prepare-release.outputs.push == 'true' }}
+          tags: ${{ env.IMAGE_NAMESPACE }}/test-runner:${{ needs.prepare-release.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.prepare-release.outputs.version }}
+            org.opencontainers.image.licenses=MIT
+
+  # -----------------------------------------------------------------------------------------------
+  # The chart, last, and only once every image it can name exists.
+  # -----------------------------------------------------------------------------------------------
+  publish-chart:
+    name: Helm Chart
+    needs: [prepare-release, build-images, build-test-runner]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Set up Helm
+        # Pinned to the version ci.yml lints and renders with, so the chart is packaged by the same
+        # Helm that proved it renders. OCI support has been GA since 3.8.
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      # A chart that does not render must not be packaged, let alone published. values-dev.yaml is
+      # used because values.yaml alone has no credentials and factoryplus.validateSecrets FAILS THE
+      # RENDER without them -- deliberately, so the refusal is legible rather than a stack that
+      # comes up and rejects every request.
+      - name: Lint
+        run: helm lint deploy/helm/factoryplus -f deploy/helm/factoryplus/values-dev.yaml
+
+      - name: Render
+        run: |
+          helm template factoryplus deploy/helm/factoryplus \
+            -f deploy/helm/factoryplus/values-dev.yaml > /tmp/rendered.yaml
+          wc -l /tmp/rendered.yaml
+
+      # --version and --app-version stamp the package WITHOUT editing Chart.yaml, so the released
+      # artefact carries the tag's version while the working tree stays as committed. Both are set
+      # to the same string on purpose: appVersion is what the chart resolves every built image's tag
+      # from, so chart 1.2.3 can only ever pull images 1.2.3.
+      - name: Package
+        id: package
+        run: |
+          set -eu
+          V='${{ needs.prepare-release.outputs.version }}'
+          helm package deploy/helm/factoryplus \
+            --version "$V" --app-version "$V" --destination /tmp/chart
+          PKG="/tmp/chart/factoryplus-$V.tgz"
+          test -f "$PKG"
+          echo "package=$PKG" >> "$GITHUB_OUTPUT"
+          ls -la /tmp/chart
+
+      # The assertion that makes the whole coupling real rather than intended: render the PACKAGED
+      # chart with no values at all and confirm every built image resolved to this version. An empty
+      # `image.tag` that failed to pick up appVersion would otherwise render `repo:` -- a reference
+      # Kubernetes reads as `repo:latest`, which for these five repositories does not exist and
+      # would ship as five ImagePullBackOffs in an artefact that packaged cleanly.
+      - name: Verify The Package Names This Version's Images
+        run: |
+          set -eu
+          V='${{ needs.prepare-release.outputs.version }}'
+          helm template factoryplus '${{ steps.package.outputs.package }}' \
+            -f deploy/helm/factoryplus/values-dev.yaml \
+            --set e2e.enabled=true > /tmp/from-package.yaml
+
+          MISSING=0
+          for img in edge-runtime ingestion node-red frontend test-runner; do
+            REF="$IMAGE_NAMESPACE/$img:$V"
+            if grep -qF "$REF" /tmp/from-package.yaml; then
+              echo "  ok  $REF"
+            else
+              echo "::error::packaged chart does not reference $REF"
+              grep -oE "$IMAGE_NAMESPACE/$img:[^\"]*" /tmp/from-package.yaml | sort -u || true
+              MISSING=1
+            fi
+          done
+          exit $MISSING
+
+      - name: Log In To GHCR
+        if: needs.prepare-release.outputs.push == 'true'
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' \
+            | helm registry login "$REGISTRY" -u '${{ github.actor }}' --password-stdin
+
+      - name: Push
+        if: needs.prepare-release.outputs.push == 'true'
+        run: helm push '${{ steps.package.outputs.package }}' "$CHART_REPO"
+
+      # Pull it back. `helm push` reporting success proves the layers were accepted, not that the
+      # chart is resolvable by version -- and "the tag is not where you expect" is the failure mode
+      # of an OCI chart repository, because the chart NAME becomes the last path segment and it is
+      # easy to push to a URL that already ends in it. Better to find that here than in the first
+      # issue someone files.
+      - name: Verify It Pulls Back
+        if: needs.prepare-release.outputs.push == 'true'
+        run: |
+          set -eu
+          V='${{ needs.prepare-release.outputs.version }}'
+          # `helm pull` does NOT create its --destination, though `helm package` does. It pulls
+          # successfully, prints the digest, and then fails writing the file -- so the error names
+          # a temporary path and looks like a pull failure rather than a missing directory.
+          mkdir -p /tmp/pulled
+          helm pull "$CHART_REPO/factoryplus" --version "$V" --destination /tmp/pulled
+          helm show chart "/tmp/pulled/factoryplus-$V.tgz"
+
+      - name: Summary
+        run: |
+          V='${{ needs.prepare-release.outputs.version }}'
+          {
+            if [ '${{ needs.prepare-release.outputs.push }}' != 'true' ]; then
+              echo "### Dry run — nothing was published"
+              echo
+            fi
+            echo "### factoryplus $V"
+            echo
+            echo '```bash'
+            echo "helm install factoryplus $CHART_REPO/factoryplus --version $V \\"
+            echo "  --namespace factoryplus --create-namespace \\"
+            echo "  --values my-values.yaml"
+            echo '```'
+            echo
+            echo "Images published at \`$V\`:"
+            for img in edge-runtime ingestion node-red frontend test-runner; do
+              echo "- \`$IMAGE_NAMESPACE/$img:$V\`"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"

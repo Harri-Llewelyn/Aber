@@ -118,7 +118,7 @@ spec:
           # A default-built (baked) image also works here -- src/config.js prefers the runtime value
           # and falls through to the baked one -- but it carries whatever URL it was built with as a
           # fallback, which MASKS a missing ConfigMap instead of surfacing it.
-          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
+          image: {{ include "factoryplus.image" (dict "image" .Values.frontend.image "ctx" $) | quote }}
           imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
           ports:
             - name: http

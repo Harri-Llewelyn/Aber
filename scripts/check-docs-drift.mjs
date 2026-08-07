@@ -110,28 +110,46 @@ const allFiles = walk('.').map((f) => f.replace(/^\.\//, ''));
 }
 
 // -------------------------------------------------------------------------------------------------
-// 3. README names every CI job, and no job it does not have.
+// 3. README names every job in every workflow, and no job it does not have.
 //
 // Found stale: "runs three jobs" when there were five. Someone reading it would not know the chart
 // or the k3d run existed.
+//
+// EVERY workflow, not just ci.yml. release.yml is the one a reader is most likely not to know
+// exists -- it never runs on a branch, so nothing about ordinary development reveals it, and what
+// it does (publishing images and a chart under a version derived from a tag) is exactly the kind of
+// thing someone needs to know about BEFORE they push a tag.
 // -------------------------------------------------------------------------------------------------
 {
-  const ci = read('.github/workflows/ci.yml');
-  // SCOPED TO THE `jobs:` BLOCK. A bare two-space-indent scan also matches `push:` under `on:`,
-  // which reported a nonexistent sixth job -- a checker's own false positive is the fastest way to
-  // teach everyone to ignore it.
-  const jobsBlock = ci.slice(ci.search(/^jobs:$/m));
-  const jobs = [...jobsBlock.matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)].map((m) => m[1]);
   const readme = read('README.md');
-  const missing = jobs.filter((j) => !readme.includes(j));
-  if (missing.length) fail(`README.md does not mention CI job(s): ${missing.join(', ')}`);
-  const claimed = readme.match(/runs (\w+) jobs/);
   const WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8 };
+  let allJobs = 0;
+  let anyMissing = false;
+
+  for (const wf of readdirSync(join(REPO, '.github/workflows')).filter((f) => f.endsWith('.yml'))) {
+    const src = read(`.github/workflows/${wf}`);
+    // SCOPED TO THE `jobs:` BLOCK. A bare two-space-indent scan also matches `push:` under `on:`,
+    // which reported a nonexistent sixth job -- a checker's own false positive is the fastest way to
+    // teach everyone to ignore it.
+    const jobsBlock = src.slice(src.search(/^jobs:$/m));
+    const jobs = [...jobsBlock.matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)].map((m) => m[1]);
+    const missing = jobs.filter((j) => !readme.includes(j));
+    if (missing.length) {
+      fail(`README.md does not mention ${wf} job(s): ${missing.join(', ')}`);
+      anyMissing = true;
+    }
+    allJobs += jobs.length;
+  }
+
+  // The count claim is about ci.yml specifically, which is what the sentence carrying it describes.
+  const ci = read('.github/workflows/ci.yml');
+  const ciJobs = [...ci.slice(ci.search(/^jobs:$/m)).matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)].length;
+  const claimed = readme.match(/runs (\w+) jobs/);
   if (claimed) {
     const n = WORDS[claimed[1].toLowerCase()] ?? Number(claimed[1]);
-    if (n !== jobs.length) fail(`README.md claims "${claimed[1]} jobs"; ci.yml defines ${jobs.length}`);
+    if (n !== ciJobs) fail(`README.md claims "${claimed[1]} jobs"; ci.yml defines ${ciJobs}`);
   }
-  if (!missing.length) pass(`README names all ${jobs.length} CI jobs`);
+  if (!anyMissing) pass(`README names all ${allJobs} workflow jobs`);
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -207,21 +225,47 @@ const allFiles = walk('.').map((f) => f.replace(/^\.\//, ''));
 }
 
 // -------------------------------------------------------------------------------------------------
-// 8. Every locally-built image the chart references has a documented build command.
+// 8. Every image this repository BUILDS has a documented build command.
 //
-// These are on no registry, so an undocumented one is an install that fails on ImagePullBackOff with
-// nothing saying where the image comes from.
+// They are published now, so an undocumented one is no longer an unavoidable ImagePullBackOff -- but
+// the build commands matter for more reasons than before: arm64 clusters cannot use the published
+// amd64 images, air-gapped ones cannot reach GHCR, and anyone CHANGING a component has to know the
+// reference to tag it as or their build is silently ignored in favour of the published image.
+//
+// The image set is identified by an EMPTY tag rather than by a name prefix. That is what marks the
+// images the chart resolves from Chart.AppVersion, and it is prefix-independent -- the previous
+// version of this check matched `factoryplus/...` literally, and when the images were repointed at
+// GHCR it did not fail, it matched nothing and reported "all 0 images documented". A check that
+// silently stops checking is worse than one that was never written, so this asserts the set is
+// non-empty and agrees with scripts/check-image-tag-parity.mjs.
 // -------------------------------------------------------------------------------------------------
 {
   const values = read('deploy/helm/factoryplus/values.yaml');
-  const local = [...values.matchAll(/repository:\s*(factoryplus\/[a-z-]+)/g)].map((m) => m[1]);
-  const runbook = read('deploy/k8s/README.md');
-  const undocumented = [...new Set(local)].filter((img) => {
-    const name = img.split('/')[1];
-    return !new RegExp(`docker build[^\\n]*${name}`).test(runbook) && !runbook.includes(`-t ${img}`);
-  });
-  if (undocumented.length) fail(`deploy/k8s/README.md has no build command for: ${undocumented.join(', ')}`);
-  else pass(`all ${new Set(local).size} locally-built images have documented build commands`);
+  const built = [
+    ...values.matchAll(/repository:\s*(\S+)[\s\S]{0,400}?^\s{4}tag:\s*""\s*$/gm),
+  ].map((m) => m[1]);
+  const unique = [...new Set(built)];
+  const EXPECTED = 5;
+  if (unique.length !== EXPECTED) {
+    fail(
+      `expected ${EXPECTED} chart images with an empty tag (built here, resolved from appVersion); ` +
+        `found ${unique.length}: ${unique.join(', ') || '(none)'}`
+    );
+  } else {
+    const runbook = read('deploy/k8s/README.md');
+    const undocumented = unique.filter((img) => {
+      const name = img.split('/').pop();
+      return (
+        !new RegExp(`docker build[^\\n]*${name}`).test(runbook) &&
+        !new RegExp(`-t\\s+\\$NS/${name}:`).test(runbook)
+      );
+    });
+    if (undocumented.length) {
+      fail(`deploy/k8s/README.md has no build command for: ${undocumented.join(', ')}`);
+    } else {
+      pass(`all ${unique.length} images built here have documented build commands`);
+    }
+  }
 }
 
 // -------------------------------------------------------------------------------------------------
