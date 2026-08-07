@@ -92,8 +92,38 @@ spec:
             {{- include "factoryplus.secretEnv" (dict "name" "JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
             {{- include "factoryplus.secretEnv" (dict "name" "ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
             {{- include "factoryplus.secretEnv" (dict "name" "SERVICE_ROLE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
-            - name: PGDATA
-              value: /var/lib/postgresql/data/pgdata
+            {{/*
+            NO `PGDATA` OVERRIDE, and setting one takes the database down on a fresh volume.
+
+            The habit of pointing PGDATA at a SUBDIRECTORY of the mount comes from stock `postgres`,
+            where it avoids initdb tripping over a `lost+found`. It cannot work here, because
+            `supabase/postgres` ships `/etc/postgresql/postgresql.conf` with
+
+                data_directory = '/var/lib/postgresql/data'
+
+            hardcoded, and launches the server with that config file. So PGDATA steers only the
+            entrypoint: initdb populates `.../data/pgdata` and chowns THAT, then the server starts,
+            reads the config, and opens `.../data` -- the mount root, still owned by root because
+            fsGroup sets the GROUP and never the owner. The result is
+
+                FATAL:  data directory "/var/lib/postgresql/data" has wrong ownership
+
+            on a volume the entrypoint has just reported initialising successfully, with every
+            Supabase service behind it stuck on an init container and nothing naming the cause.
+            docker-compose sets no PGDATA, which is why this only ever broke Kubernetes -- exactly
+            the class of divergence CI runs validate.py against both targets to catch.
+
+            Left unset, the image's own default IS the mount root, the root entrypoint chowns it to
+            postgres before dropping privileges, and both targets agree.
+
+            TIMESCALEDB KEEPS ITS PGDATA OVERRIDE, and that is not an inconsistency to tidy away.
+            `timescale/timescaledb` ships no `/etc/postgresql` at all -- the stock entrypoint runs
+            the server with `-D "$PGDATA"`, so there the override is honoured end to end and buys
+            the usual protection against initdb meeting a `lost+found` on a fresh volume. The two
+            images differ in how they locate the data directory, so the two templates differ too.
+            That difference is precisely why timescaledb came up healthy in the same cluster where
+            supabase-db crash-looped, which made the fault look like a Supabase problem.
+            */}}
           # The Compose healthcheck runs pg_isready AND `psql -c 'SELECT 1'`, because this image
           # answers pg_isready during its own bootstrap while still refusing connections. Both are
           # kept: readiness gates the Phase 2 init Jobs, and a database that accepts a connection

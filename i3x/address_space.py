@@ -37,6 +37,7 @@ cache (which has no RLS of its own).
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional
 
@@ -349,6 +350,31 @@ def is_extended(declared_metrics, modelled_metrics) -> bool:
     return bool(set(declared_metrics or []) - set(modelled_metrics))
 
 
+_ISO_FRACTION_RE = re.compile(r"(?<=:\d\d)\.(\d+)")
+
+
+def _normalise_fractional_seconds(text: str) -> str:
+    """
+    Pad or trim the fractional-seconds field to exactly 6 digits, and `Z` to `+00:00`.
+
+    THIS EXISTS FOR PYTHON 3.10, WHICH THE CONTAINER RUNS. `datetime.fromisoformat` only became a
+    general ISO 8601 parser in 3.11; before that it accepted a fractional part of EXACTLY 3 or 6
+    digits and raised `ValueError` on anything else. PostgREST emits `timestamptz` with trailing
+    zeros stripped, so `...:11.11239+00:00` -- five digits, because the microsecond happened to end
+    in a zero -- is a perfectly ordinary response that 3.10 cannot parse and 3.12 can.
+
+    That asymmetry is the whole danger. `to_rfc3339_utc` returns an unparseable value UNCHANGED, by
+    design, so the failure was not an exception: roughly one timestamp in ten kept its `+00:00`
+    offset and shipped as a conformance violation, on the container only, intermittently. The
+    official suite caught it in CI on a value the local run happened not to produce. Same shape as
+    the f-string defect: 3.12 is more permissive than 3.10, and testing on the newer one hides it.
+    """
+    text = text.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    return _ISO_FRACTION_RE.sub(lambda m: "." + m.group(1)[:6].ljust(6, "0"), text, count=1)
+
+
 def to_rfc3339_utc(value) -> Optional[str]:
     """
     Normalise any timestamp to RFC 3339 UTC with a literal `Z`.
@@ -369,7 +395,7 @@ def to_rfc3339_utc(value) -> Optional[str]:
         if not text:
             return None
         try:
-            dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            dt = datetime.fromisoformat(_normalise_fractional_seconds(text))
         except ValueError:
             # Unparseable is returned unchanged rather than dropped: a malformed timestamp from a
             # device is a fact about that device, and silently blanking it would hide it.

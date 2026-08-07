@@ -49,6 +49,7 @@ import json
 import logging
 import os
 import re
+import select
 import sys
 import threading
 import time
@@ -439,7 +440,9 @@ def _push_to_stream(sub) -> None:
         return
     for batch in _drain_for_stream(sub):
         if not channel.send(batch["updates"]):
-            _detach_stream(sub)
+            # Same identity guard as the handler's own unwind: this push may be racing a client
+            # that has just opened a replacement stream.
+            _detach_stream(sub, channel)
             return
 
 
@@ -448,8 +451,22 @@ def _drain_for_stream(sub):
     return registry.drain(sub)
 
 
-def _detach_stream(sub) -> None:
+def _detach_stream(sub, only_if=None) -> None:
+    """
+    Close this subscription's stream and mark it closed in the registry.
+
+    `only_if` GUARDS AGAINST A DISPLACED STREAM CLOSING ITS OWN REPLACEMENT. When a second stream
+    opens, the first is closed here and its handler thread is still parked in the wait loop; when
+    that thread finally unwinds it runs this in a `finally`. Without the identity check it would pop
+    whatever is registered under the subscription id -- by then the SECOND channel -- and close a
+    perfectly healthy stream that had just displaced it. The client would see a stream that opened,
+    worked, and died a keepalive interval later for no reason it could observe.
+    """
     with _streams_lock:
+        current = _streams.get(sub.subscription_id)
+        if only_if is not None and current is not only_if:
+            # Already displaced. The replacement owns the subscription now; leave it alone.
+            return
         channel = _streams.pop(sub.subscription_id, None)
     if channel:
         channel.close()
@@ -1175,19 +1192,42 @@ def h_sub_stream(req: Handler) -> None:
 
     for batch in backlog:
         if not channel.send(batch["updates"]):
-            _detach_stream(sub)
+            _detach_stream(sub, channel)
             return
 
     # Hold the connection open. The reaper treats an open stream as activity, so a quiet machine does
     # not have its subscription deleted underneath a healthy connection.
+    #
+    # WAIT ON THE SOCKET, NOT ON THE CLOCK. This loop used to `time.sleep(SSE_KEEPALIVE_SECONDS)` and
+    # discover the client had gone only when the next keepalive write failed -- so an abandoned
+    # stream pinned its thread and its TCP connection for up to a full keepalive interval.
+    #
+    # That is not a tidiness point, because HTTP/1.1 keep-alive SERIALISES a connection: a client
+    # that abandons a stream and immediately issues another request can have that request queued
+    # behind the corpse of the first on the same pooled connection. The official suite's SUB-10
+    # ("delete deletes the subscription") failed exactly this way -- the delete never reached a
+    # handler at all, and reported as a 15s client timeout, which reads as a hung server rather
+    # than as a stream that had not noticed it was over. It was reproducible only against a client
+    # that pools connections; a probe opening a fresh socket per request never sees it.
+    #
+    # A readable stream socket means EOF here: the request body was fully consumed at dispatch and
+    # no client sends more on an SSE connection. Either way -- orderly close, reset, or a client
+    # that has started talking nonsense -- ending the stream is the right response.
     try:
         while not channel.closed.is_set():
-            time.sleep(SSE_KEEPALIVE_SECONDS)
+            try:
+                ready, _, _ = select.select([req.connection], [], [], SSE_KEEPALIVE_SECONDS)
+            except (OSError, ValueError):
+                break
+            if ready:
+                break
             registry.touch(sub)
+            # Still sent on the idle path: intermediaries time out a silent connection, and the
+            # comment frame is what keeps a proxy from closing a healthy stream.
             if not channel.keepalive():
                 break
     finally:
-        _detach_stream(sub)
+        _detach_stream(sub, channel)
 
 
 ROUTES = {

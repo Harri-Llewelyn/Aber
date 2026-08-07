@@ -122,6 +122,14 @@ Three rules are easy to get wrong and each fails quietly:
 3. **One stream per subscription.** There is no fan-out in i3X — a second consumer creates its own
    subscription. Opening a second stream closes the first *cleanly* (a terminating zero-length
    chunk), because the spec says the displaced client sees a close **with no error**.
+4. **An abandoned stream must be noticed at once, not at the next keepalive.** The wait loop
+   `select`s on the connection rather than sleeping, so a client that hangs up frees the thread and
+   the socket immediately. Sleeping blind looks harmless and is not: HTTP/1.1 keep-alive
+   *serialises* a connection, so a pooling client that abandons a stream and immediately issues
+   another request has that request queued behind the corpse of the first. That is how SUB-10
+   ("delete deletes the subscription") failed — reported as a 15-second timeout on an endpoint that
+   was never reached, which reads as a hung server rather than as a stream that had not noticed it
+   was over. It reproduces only against a client that pools connections.
 
 ### Writes are refused
 

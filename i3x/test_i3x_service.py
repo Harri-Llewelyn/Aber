@@ -180,6 +180,16 @@ class TestOverflow(unittest.TestCase):
         self.assertEqual(second, 200, "a latched overflow flag would report 206 forever")
 
 
+class _FakeChannel:
+    """Stands in for an SseChannel: `_detach_stream` only ever calls `close()` on it."""
+
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
 class TestStreamExclusivity(unittest.TestCase):
     def test_sync_is_refused_while_a_stream_is_open(self):
         registry, _ = make_registry()
@@ -209,6 +219,40 @@ class TestStreamExclusivity(unittest.TestCase):
         registry.open_stream(sub)
         registry.open_stream(sub)
         self.assertEqual(len(closed), 1, "opening a second stream MUST close the first")
+
+    def test_a_displaced_stream_does_not_close_its_replacement(self):
+        """
+        The displaced handler thread unwinds LATER, and must not take the live stream with it.
+
+        When a second stream opens, the first is closed while its handler thread is still parked in
+        the wait loop. That thread then runs its `finally`, which detaches "the stream for this
+        subscription" -- by then the SECOND channel. The client would see a stream that opened,
+        worked, and then died for no reason it could observe, one keepalive interval later.
+
+        Asserted against the real `_detach_stream`, because the guard IS the fix: a test of the
+        registry alone would pass either way, since the registry never knew which channel was whose.
+        """
+        import i3x_service as svc
+
+        sub = svc.registry.create("alice")
+        first, second = _FakeChannel(), _FakeChannel()
+
+        with svc._streams_lock:
+            svc._streams[sub.subscription_id] = first
+        with svc._streams_lock:
+            svc._streams[sub.subscription_id] = second
+
+        # The displaced thread finally unwinds and detaches -- naming the channel it owned.
+        svc._detach_stream(sub, first)
+        self.assertIs(
+            svc._streams.get(sub.subscription_id),
+            second,
+            "a displaced stream's unwind closed the replacement that had taken over from it",
+        )
+
+        # The replacement's own unwind still works.
+        svc._detach_stream(sub, second)
+        self.assertIsNone(svc._streams.get(sub.subscription_id))
 
 
 class TestTtl(unittest.TestCase):
@@ -240,6 +284,62 @@ class TestTtl(unittest.TestCase):
         registry.open_stream(sub)
         clock.advance(10_000)
         self.assertEqual(registry.reap(), [])
+
+
+class TestRfc3339(unittest.TestCase):
+    """
+    i3X pins timestamps to RFC 3339 UTC with a literal `Z`. `to_rfc3339_utc` is the only place that
+    is enforced, and it is the only place a timestamp can silently escape unnormalised -- it returns
+    an unparseable value UNCHANGED, deliberately, so that a device's malformed timestamp is reported
+    rather than blanked. That design is what turned a parser gap into a conformance failure.
+    """
+
+    def test_offset_form_becomes_z(self):
+        self.assertEqual(A.to_rfc3339_utc("2026-01-08T10:30:00+00:00"), "2026-01-08T10:30:00Z")
+
+    def test_postgrest_trailing_zero_microseconds(self):
+        """
+        THE ACTUAL CI FAILURE. PostgREST strips trailing zeros from `timestamptz`, so a microsecond
+        value ending in 0 arrives with FIVE fractional digits. Python 3.10's `fromisoformat` accepts
+        exactly 3 or 6 and raises on anything else; 3.11 relaxed it. On the container this fell into
+        the unparseable branch and shipped `+00:00` -- the conformance suite's QRY-01 failure --
+        while every local run on 3.12 parsed it and passed.
+
+        Swept across every length, because "5 digits" was only the width that happened to occur.
+        """
+        for digits in range(1, 10):
+            fraction = "1" * digits
+            got = A.to_rfc3339_utc(f"2026-08-07T19:14:11.{fraction}+00:00")
+            self.assertTrue(
+                got.endswith("Z"),
+                f"{digits} fractional digit(s) escaped normalisation as {got!r}",
+            )
+            self.assertNotIn("+00:00", got)
+
+    def test_non_utc_offsets_are_converted_not_relabelled(self):
+        self.assertEqual(A.to_rfc3339_utc("2026-01-08T11:30:00+01:00"), "2026-01-08T10:30:00Z")
+
+    def test_naive_is_treated_as_utc(self):
+        self.assertEqual(A.to_rfc3339_utc("2026-01-08T10:30:00"), "2026-01-08T10:30:00Z")
+
+    def test_z_input_is_idempotent(self):
+        self.assertEqual(A.to_rfc3339_utc("2026-01-08T10:30:00Z"), "2026-01-08T10:30:00Z")
+
+    def test_unparseable_is_passed_through_not_blanked(self):
+        self.assertEqual(A.to_rfc3339_utc("not-a-timestamp"), "not-a-timestamp")
+        self.assertIsNone(A.to_rfc3339_utc(None))
+        self.assertIsNone(A.to_rfc3339_utc("   "))
+
+    def test_every_value_envelope_timestamp_is_normalised(self):
+        """The envelope is the choke point -- a raw heartbeat must not reach a client through it."""
+        env = A.gateway_value(
+            {
+                "sparkplug_id": "gwy1",
+                "status": "ONLINE",
+                "last_heartbeat": "2026-08-07T19:14:11.11239+00:00",
+            }
+        )
+        self.assertTrue(env["timestamp"].endswith("Z"), env["timestamp"])
 
 
 class TestAddressSpace(unittest.TestCase):

@@ -120,11 +120,16 @@ timescaledb:
     # Inherits global.storageClass when empty.
     storageClass: ""
     accessMode: ReadWriteOnce
-  # M5. The `postgres` user in this image is uid/gid 999; without fsGroup the local-path
-  # provisioner hands the pod a root-owned directory and initdb fails on permissions.
-  # CONFIRM AGAINST THE PINNED TAG before changing — it is an image property.
+  # M5. VERIFIED against the pinned tag, as the note here always asked: `timescale/timescaledb` is
+  # Alpine and its `postgres` user is uid/gid **70**, not 999. It said 999 — the Debian number —
+  # from the day it was written, and nothing caught it because it does not have to be right: this
+  # image's entrypoint runs as root and chowns the data directory to `postgres` itself before
+  # dropping privileges, so fsGroup only decides the group ownership of the mount root for the few
+  # milliseconds before that. It is corrected so the value states a fact, and so anyone who later
+  # sets `runAsUser` — at which point the entrypoint can no longer chown and fsGroup becomes
+  # load-bearing — starts from a true number instead of a plausible one.
   podSecurityContext:
-    fsGroup: 999
+    fsGroup: 70
     fsGroupChangePolicy: OnRootMismatch
   resources:
     requests:
@@ -147,9 +152,12 @@ supabaseDb:
     size: 20Gi
     storageClass: ""
     accessMode: ReadWriteOnce
-  # Same image lineage as TimescaleDB — Debian postgres, uid/gid 999.
+  # VERIFIED against the pinned tag: `supabase/postgres` is Debian and its `postgres` user is
+  # uid 105 / gid **106**. It is not "the same lineage as TimescaleDB" — that one is Alpine at 70 —
+  # and it was never 999. Same caveat as above: the entrypoint runs as root and chowns, so this is
+  # a statement of fact rather than a working part. See the statefulset for what DID break here.
   podSecurityContext:
-    fsGroup: 999
+    fsGroup: 106
     fsGroupChangePolicy: OnRootMismatch
   resources:
     requests:
