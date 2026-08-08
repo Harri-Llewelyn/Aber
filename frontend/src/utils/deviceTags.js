@@ -22,12 +22,23 @@ import { deriveMetricGroup } from './metricGroup'
  * Returns null -- not an empty set -- when neither key is present. That is "this schema cannot
  * be evaluated", which is a different answer from "this schema models nothing", and the
  * difference decides whether a device gets flagged. See unmodelledMetrics().
+ *
+ * MIRRORED BY `modelled_metrics()` IN `ingestion/validate.py`, and the two are held together by
+ * `tests/fixtures/modelled-metrics.json` -- see `__tests__/modelledMetricsContract.test.js`.
  */
 export function modelledMetrics(schema) {
   const def = schema?.schema_definition
   if (!def) return null
 
-  const properties = def.properties && typeof def.properties === 'object' ? Object.keys(def.properties) : []
+  // `!Array.isArray` IS LOAD-BEARING, and its absence was a live divergence from the Python
+  // mirror rather than a hypothetical one. `typeof [] === 'object'`, so an array reached
+  // `Object.keys`, which yields its INDICES -- a schema with `properties: ['Temp','Pressure']`
+  // was read here as modelling two metrics named '0' and '1', so nearly everything the device
+  // published came back Unmodelled, while validate.py read the same schema as having no model at
+  // all. An array is not a valid JSON Schema `properties` object; it contributes nothing.
+  const hasProperties =
+    def.properties && typeof def.properties === 'object' && !Array.isArray(def.properties)
+  const properties = hasProperties ? Object.keys(def.properties) : []
   const required = Array.isArray(def.required) ? def.required : []
   if (properties.length === 0 && required.length === 0) return null
 

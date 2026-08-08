@@ -19,10 +19,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
  * login instead of whenever their JWT happens to be reissued.
  */
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { resolveUserRole } from "../_shared/roles.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
 /**
  * Supabase RBAC role -> Grafana org role.
@@ -84,20 +82,10 @@ export default async function handler(req: Request): Promise<Response> {
     // caller would couple this endpoint to the exact shape of that policy. The user id is
     // already authenticated above, so this is a lookup, not an authorisation decision.
     const supabaseAdmin = createClient(supabaseUrl, serviceKey);
-    const { data: roleRow, error: roleError } = await supabaseAdmin
-      .from("user_roles")
-      .select("roles(name)")
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    // A failed lookup is not evidence of a role. Returning no role lets Grafana's
-    // role_attribute_strict refuse the login, which is the correct answer to "we could not
-    // determine this user's privileges".
-    if (roleError) {
-      console.error(`role lookup failed for user ${user.id}: ${roleError.message}`);
-    }
-
-    const dbRole = (roleRow as { roles?: { name?: string } } | null)?.roles?.name;
+    // A failed lookup is not evidence of a role: resolveUserRole logs and returns null, and
+    // returning no role lets Grafana's role_attribute_strict refuse the login — the correct
+    // answer to "we could not determine this user's privileges".
+    const dbRole = await resolveUserRole(supabaseAdmin, user.id);
     // public.user_roles is the ONLY source. This used to fall back to the JWT's
     // app_metadata.role when no row was found, on the reasoning that handle_new_user() writes
     // both -- but deleting the row is exactly how a role is revoked, so the fallback re-granted

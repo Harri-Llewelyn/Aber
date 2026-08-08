@@ -166,16 +166,42 @@ const allFiles = walk('.').map((f) => f.replace(/^\.\//, ''));
   else pass(`README lists all ${suites.length} Python test suites`);
 }
 
+/**
+ * The edge functions, read from `main/index.ts`'s FUNCTION_REGISTRY.
+ *
+ * A DIRECTORY IS NOT AN ENDPOINT, and this used to assume it was. `main/index.ts` resolves a
+ * request path against that registry and answers 404 for anything not named there, so the registry
+ * -- not the filesystem -- is what decides whether a directory is reachable. Its own header says
+ * as much: "Adding a function means adding it here. That is the intended friction: it is the one
+ * place where 'what may this code reach' is stated."
+ *
+ * Listing directories was fine while every directory happened to be a function. Adding
+ * `_shared/` -- a module imported by the functions, deliberately NOT routable -- made it report
+ * a seventh edge function and demand that README.md and openapi.yaml document an endpoint that
+ * does not exist. Which is the checker's own failure mode: a check that restates a definition
+ * instead of deriving it eventually disagrees with the thing it is checking.
+ *
+ * `main` is excluded because it is the router itself, not one of the functions it routes to.
+ */
+function edgeFunctionNames() {
+  const src = read('supabase/functions/main/index.ts');
+  const block = src.match(/const FUNCTION_REGISTRY[^{]*\{([\s\S]*?)\n\};/);
+  if (!block) {
+    fail('check-docs-drift: could not find FUNCTION_REGISTRY in supabase/functions/main/index.ts');
+    return [];
+  }
+  const names = [...block[1].matchAll(/^\s*"([a-z0-9-]+)"\s*:/gim)].map((m) => m[1]);
+  if (!names.length) fail('check-docs-drift: FUNCTION_REGISTRY parsed as empty; the shape must have changed');
+  return names.sort();
+}
+
 // -------------------------------------------------------------------------------------------------
 // 5. The edge-function count, and every function named in the topology diagram.
 //
 // Found stale: "four edge functions" with five on disk, and the diagram listed four.
 // -------------------------------------------------------------------------------------------------
 {
-  const fns = readdirSync(join(REPO, 'supabase/functions'), { withFileTypes: true })
-    .filter((e) => e.isDirectory() && e.name !== 'main')
-    .map((e) => e.name)
-    .sort();
+  const fns = edgeFunctionNames();
   const readme = read('README.md');
   const WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7 };
   const claimed = readme.match(/daemon, (\w+) edge functions/);
@@ -391,10 +417,9 @@ const allFiles = walk('.').map((f) => f.replace(/^\.\//, ''));
     .filter((r) => !relations.has(r))
     .sort();
 
-  const functions = readdirSync(join(REPO, 'supabase/functions'), { withFileTypes: true })
-    .filter((e) => e.isDirectory() && e.name !== 'main')
-    .map((e) => e.name)
-    .sort();
+  // Same source as check 5: what is ROUTABLE, not what is on disk. An unrouted directory has no
+  // URL, so requiring an OpenAPI path for it would demand documenting an endpoint that 404s.
+  const functions = edgeFunctionNames();
   const undocumentedFns = functions.filter((f) => !specPaths.has(`/functions/v1/${f}`));
 
   if (undocumented.length) {

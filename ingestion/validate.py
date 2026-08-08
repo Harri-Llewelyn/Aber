@@ -390,6 +390,68 @@ def get_supabase_admin_connection():
         password=SUPABASE_DB_PASS,
     )
 
+
+def preflight_supabase_admin():
+    """
+    Prove the owner connection works BEFORE the suite runs. Returns True if it is usable.
+
+    WHY THIS EXISTS. The owner connection is a second database connection with different
+    credentials, configured by a different set of environment variables (SUPABASE_DB_*), and it was
+    used in exactly one place: clearing this run's audit rows, at the very end. Nothing exercised
+    it until then, and `cleanup_validation_data()` swallows its failures into a generic
+    `Supabase cleanup warning:` — so a wrong host, port or password produced a full green run that
+    silently left fixture audit rows behind, and the next run inherited them.
+
+    Failing at the start instead costs one connection and turns "why does the digital thread have
+    VALIDATE_ rows in it" into a line at the top of the log naming the variable to fix.
+
+    IT TESTS AUTHORITY, NOT REACHABILITY, and the distinction is the whole point. Connecting proves
+    nothing here: `service_role` connects perfectly well and is refused by 0003's append-only
+    trigger, which is exactly the situation this connection exists to escape. So the check performs
+    the real DELETE inside a transaction and rolls it back — the one operation cleanup depends on,
+    against a real row, with no side effect. A permissions probe that asked `SELECT current_user`
+    and compared it to a hardcoded 'postgres' would pass for any owner-named role and fail for a
+    correctly-privileged one with another name.
+    """
+    label = f"{SUPABASE_DB_USER}@{SUPABASE_DB_HOST}:{SUPABASE_DB_PORT}/{SUPABASE_DB_NAME}"
+    try:
+        conn = get_supabase_admin_connection()
+    except Exception as exc:
+        print(f"❌ PREFLIGHT: cannot reach the Supabase database as the owner ({label}).")
+        print(f"   {exc}")
+        print("   Set SUPABASE_DB_HOST / SUPABASE_DB_PORT / SUPABASE_DB_NAME / SUPABASE_DB_USER /")
+        print("   POSTGRES_PASSWORD. From the HOST the port is 54322 (docker-compose publishes it");
+        print("   there to avoid colliding with a local PostgreSQL); IN-CLUSTER it is 5432 and the")
+        print("   host is `supabase-db`. Without this, audit-row cleanup cannot run.")
+        return False
+
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM public.digital_thread LIMIT 1")
+                row = cur.fetchone()
+                if row is None:
+                    # Nothing to test against. Connectivity is proven; authority is not, and saying
+                    # so is better than implying a check that did not happen.
+                    print(f"⚠️  PREFLIGHT: connected as {label}, but digital_thread is empty, so")
+                    print("   DELETE authority could not be exercised.")
+                    return True
+                cur.execute("DELETE FROM public.digital_thread WHERE id = %s", (row[0],))
+                # Never committed. The row is untouched; only the trigger's verdict was wanted.
+                conn.rollback()
+    except Exception as exc:
+        print(f"❌ PREFLIGHT: connected as {label}, but it cannot DELETE from digital_thread.")
+        print(f"   {exc}")
+        print("   0003's append-only trigger refuses every application role including service_role,")
+        print("   and exempts the table owner. SUPABASE_DB_USER must be that owner (`postgres`),")
+        print("   not a Supabase API role.")
+        return False
+    finally:
+        conn.close()
+
+    print(f"✅ PREFLIGHT: owner connection usable ({label}); audit cleanup will succeed.")
+    return True
+
 def cleanup_validation_data():
     print("Cleaning up validation data...")
     if supabase_client:
@@ -426,17 +488,28 @@ def cleanup_validation_data():
             #
             # Routed through an owner connection rather than PostgREST because 0003's append-only
             # trigger refuses DELETE for service_role -- see get_supabase_admin_connection().
+            # NOT inside the surrounding try's generic handler, deliberately. Folded in with the
+            # PostgREST deletes, a failure here printed `Supabase cleanup warning: ...` among
+            # routine noise and the run still reported success -- while the audit rows it was
+            # supposed to remove stayed in an append-only table for every later run to inherit.
+            # The preflight above should mean this never fires; if it does, it says what happened.
             if stale_ids:
-                audit_conn = get_supabase_admin_connection()
                 try:
-                    audit_conn.autocommit = True
-                    with audit_conn.cursor() as cur:
-                        cur.execute(
-                            "DELETE FROM public.digital_thread WHERE entity_id = ANY(%s::uuid[])",
-                            (stale_ids,),
-                        )
-                finally:
-                    audit_conn.close()
+                    audit_conn = get_supabase_admin_connection()
+                    try:
+                        audit_conn.autocommit = True
+                        with audit_conn.cursor() as cur:
+                            cur.execute(
+                                "DELETE FROM public.digital_thread WHERE entity_id = ANY(%s::uuid[])",
+                                (stale_ids,),
+                            )
+                    finally:
+                        audit_conn.close()
+                except Exception as audit_err:
+                    print(f"❌ AUDIT CLEANUP FAILED: {len(stale_ids)} entity id(s) left behind in "
+                          f"public.digital_thread -- {audit_err}")
+                    print("   These rows are append-only and cannot be removed through PostgREST. "
+                          "Clear them with an owner connection, or the next run starts dirty.")
         except Exception as e:
             print(f"Supabase cleanup warning: {e}")
 
@@ -1654,6 +1727,94 @@ def verify_results():
     except Exception as e:
         print(f"⚠️  12.  i3X SERVER: skipped, could not reach {os.getenv('I3X_BASE_URL', 'http://localhost:8090')}: {e}")
 
+    # ---------------------------------------------------------------------------------------------
+    # 13. The `anon` privilege baseline.
+    #
+    # WHY THIS IS AN END-TO-END CHECK AND NOT A CODE REVIEW. `public.ensure_cron_job` is SECURITY
+    # DEFINER with no authorisation check, and migration 0001 -- a pg_dump baseline, which records
+    # only POSITIVE grants -- granted EXECUTE on it to `anon`. The result was reachable from the
+    # network with nothing but the published anon key:
+    #
+    #     POST /rest/v1/rpc/ensure_cron_job  ->  HTTP 204, and the job appeared in cron.job
+    #
+    # scheduling arbitrary SQL as `postgres`, which carries rolbypassrls and rolcreaterole. Reading
+    # 0001 does not reveal this: it contains `REVOKE ALL ... FROM PUBLIC` two lines above the GRANT
+    # that undoes it, so the file looks correct in the region where it is wrong. Only asking the
+    # running database, as an unauthenticated caller, gives a truthful answer.
+    #
+    # Migration 0009 withdraws it and self-checks at boot. This is the second gate, and it is the
+    # one that survives someone re-running pg_dump: a regenerated baseline would reintroduce the
+    # grant silently, and db-init's own check runs BEFORE any of this stack is up.
+    # ---------------------------------------------------------------------------------------------
+    try:
+        def anon_rpc(fn, args):
+            """
+            Call a PostgREST RPC as the ANON role and nothing else.
+
+            Raw urllib rather than the Supabase client, and the anon key in BOTH headers: the point
+            is to be exactly the caller an attacker is -- someone holding the published key from
+            .env.example and no session at all. A client that silently attached a service token
+            would answer a different question.
+            """
+            anon_key = os.getenv("SUPABASE_ANON_KEY", "")
+            req = urllib.request.Request(
+                f"{SUPABASE_URL}/rest/v1/rpc/{fn}",
+                method="POST",
+                data=json.dumps(args).encode(),
+                headers={"apikey": anon_key,
+                         "Authorization": f"Bearer {anon_key}",
+                         "Content-Type": "application/json"},
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    return resp.status, resp.read().decode()
+            except urllib.error.HTTPError as err:
+                return err.code, err.read().decode()
+
+        status, body = anon_rpc(
+            "ensure_cron_job",
+            {"p_name": "validate_probe_never_runs",
+             # 31 February. If the guard has regressed and this DOES schedule, it can never fire.
+             "p_schedule": "0 0 31 2 *",
+             "p_command": "SELECT 1"},
+        )
+        if status in (401, 403):
+            print(f"✅ 13.  ANON CANNOT SCHEDULE CRON: rpc/ensure_cron_job refused with HTTP {status}.")
+        elif status == 404:
+            print("✅ 13.  ANON CANNOT SCHEDULE CRON: rpc/ensure_cron_job is not exposed at all.")
+        else:
+            print(f"❌ 13.  ANON CAN SCHEDULE CRON -- PRIVILEGE ESCALATION: HTTP {status}. "
+                  "public.ensure_cron_job is SECURITY DEFINER with no authorisation check and "
+                  "schedules SQL as the database owner (rolbypassrls, rolcreaterole). Migration "
+                  f"0009 should have revoked it. Response: {body[:200]}")
+            passed = False
+
+        # The general form. A single named function is one regression; a grant to `anon` on
+        # anything in `public` is the class. The allow-list is empty by design -- see 0009.
+        try:
+            audit_conn = get_supabase_admin_connection()
+            with audit_conn.cursor() as cur:
+                cur.execute("""
+                    SELECT string_agg(p.proname, ', ' ORDER BY p.proname)
+                    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                    WHERE n.nspname = 'public'
+                      AND has_function_privilege('anon', p.oid, 'EXECUTE')
+                """)
+                leaked = cur.fetchone()[0]
+            audit_conn.close()
+            if leaked:
+                print(f"❌ 13a. ANON PRIVILEGE BASELINE FAIL: anon can EXECUTE in public: {leaked}. "
+                      "An anon privilege review must return an EMPTY set -- that is what makes a "
+                      "real finding visible instead of hiding it among harmless trigger functions.")
+                passed = False
+            else:
+                print("✅ 13a. ANON PRIVILEGE BASELINE: anon holds no EXECUTE on any function in "
+                      "public -- the review returns an empty set.")
+        except Exception as db_err:
+            print(f"⚠️  13a. ANON PRIVILEGE BASELINE: skipped, no owner DB connection ({db_err}).")
+    except Exception as e:
+        print(f"⚠️  13.  ANON PRIVILEGE BASELINE: skipped, could not reach PostgREST: {e}")
+
     print("==========================================")
     if passed:
         print("🎉 END-TO-END VALIDATION PASSED SUCCESSFULLY!")
@@ -1690,9 +1851,15 @@ if __name__ == "__main__":
     print(f"  Service role key: {'set' if SUPABASE_SERVICE_ROLE_KEY else 'MISSING'}")
     print()
 
+    # Checked here rather than discovered at cleanup. The suite still runs when this fails -- its
+    # assertions are worth reporting either way -- but the exit status carries the failure, because
+    # a run that cannot clear its own audit rows leaves the next one seeded with this one's.
+    admin_ok = preflight_supabase_admin()
+    print()
+
     if args.cleanup:
         cleanup_validation_data()
-        sys.exit(0)
+        sys.exit(0 if admin_ok else 1)
 
     success = False
     try:
@@ -1704,4 +1871,4 @@ if __name__ == "__main__":
         if not args.keep_data:
             cleanup_validation_data()
 
-    sys.exit(0 if success else 1)
+    sys.exit(0 if (success and admin_ok) else 1)

@@ -125,13 +125,14 @@ the obvious way — are in [`docs/kubernetes-migration-plan.md`](docs/kubernetes
 ## Quick Start (Docker Compose)
 
 ```bash
-npm run setup                   # creates .env from .env.example (cross-platform, no POSIX shell)
+npm run setup                   # writes .env with 14 FRESHLY GENERATED credentials
+                                # (cross-platform, no POSIX shell, no openssl needed)
 docker compose up --build -d    # launches the whole stack
 ```
 
 Every file in `supabase/migrations/` — the schema baseline (`0001`), seed data (`0002`), and the
 later additive migrations (`0003` audit immutability, `0004`, `0005`, `0006` Node-RED SSO, `0007`
-metric-name format, `0008` Sparkplug group) —
+metric-name format, `0008` Sparkplug group, `0009` withdraws the residual `anon` function grants) —
 plus demo accounts (`supabase/seed.sql`) are applied by `supabase-db-init` on startup, and
 re-applied harmlessly on every later start.
 
@@ -351,12 +352,17 @@ is why the schema builder offers a choice rather than a migration path.
 ## Testing
 
 ```bash
-# Frontend — 690 tests
+# Frontend — 702 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required
 python ingestion/test_gateway_binding.py
 python ingestion/test_declared_metrics.py
+# The Python half of the modelled-metrics mirror contract. Its JavaScript half runs in the
+# frontend suite above; both assert tests/fixtures/modelled-metrics.json, which is how two
+# implementations of one rule in two languages are held together — see scripts/check-mirror-drift.mjs
+# for the mirrors that can be compared as values instead.
+python ingestion/test_modelled_metrics_contract.py
 python ingestion/test_device_location.py
 python ingestion/test_health_heartbeat.py
 python ingestion/test_mqtt_tls.py

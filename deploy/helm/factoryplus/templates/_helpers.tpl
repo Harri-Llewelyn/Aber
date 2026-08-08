@@ -150,6 +150,31 @@ Skipped entirely when `existingSecret` is set, because the values are then not t
 {{- if $missing -}}
 {{- fail (printf "\n\nfactoryplus: required credentials are not set:\n  - %s\n\nThese are a SET, not independent values: anonKey and serviceRoleKey are JWTs signed by\njwtSecret, so supplying some and not others yields a stack that reports healthy and rejects\nevery request at the gateway. The chart deliberately does not generate them.\n\nFor a local k3s stack:   helm install ... -f values-dev.yaml\nFor anything else:       copy values-prod.yaml.example and supply a matching set.\n" (join "\n  - " $missing)) -}}
 {{- end -}}
+{{/*
+THE DEMO SECRET IS REFUSED ON ANYTHING THAT IS NOT PLAINLY LOCAL.
+
+`values-dev.yaml` legitimately carries the published Supabase demo credentials, and CI installs
+with it every run — so this cannot simply ban the value. What it bans is the combination that has
+no innocent reading: the demo JWT secret together with a public hostname somebody chose.
+
+Since Kong began running `key-auth`, anonKey and serviceRoleKey are GATEWAY API KEYS as well as
+JWTs. A deployment on the demo set is one where the published keys in this repository authenticate
+at the edge, and the giveaway is precisely that nothing looks wrong: every pod is healthy, every
+request succeeds, and the credentials are in a file thousands of people already have.
+
+The local forms below are the ones the chart's own docs and CI use; anything else is taken to be
+a deployment other people can reach. Overriding this by editing the list is not a workaround —
+`node scripts/setup.mjs` mints a matching set in one command, and `values-prod.yaml.example`
+documents where to put it.
+*/}}
+{{- $demoJwtSecret := "super-secret-jwt-token-with-at-least-32-characters" -}}
+{{- if eq (.Values.secrets.jwtSecret | default "") $demoJwtSecret -}}
+{{- $domain := .Values.global.publicBaseDomain | default "" -}}
+{{- $isLocal := or (empty $domain) (contains "127.0.0.1" $domain) (contains "localhost" $domain) (contains "192.168." $domain) (hasSuffix ".local" $domain) (hasSuffix ".localhost" $domain) (hasSuffix ".internal" $domain) -}}
+{{- if not $isLocal -}}
+{{- fail (printf "\n\nfactoryplus: refusing to install on the PUBLISHED demo credentials with a public hostname.\n\n  global.publicBaseDomain = %s\n  secrets.jwtSecret       = the Supabase demo value, committed in this repository\n\nanonKey and serviceRoleKey are signed by that secret AND are registered as Kong API keys, so this\ndeployment would authenticate anyone holding a file that ships with the source.\n\nGenerate a matching set:\n\n  node scripts/setup.mjs        # writes .env with fresh, internally consistent credentials\n\nthen carry those four values into your own values file (see values-prod.yaml.example), or set\nsecrets.existingSecret to a Secret managed outside the chart.\n\nIf this really is a private lab, name it as one -- a publicBaseDomain under 127.0.0.1.nip.io,\nlocalhost, 192.168.*, .local, .localhost or .internal is accepted as-is.\n" $domain) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 
@@ -546,9 +571,19 @@ explicit and make the pod sit in Init: with a legible reason.
 
 The loop is bounded. An unbounded wait produces a pod that is Init: forever with no failure to
 alert on -- worse than a clean failure, because nothing surfaces it.
+
+`command` AND `describe` ARE REQUIRED, and the render fails without them rather than emitting a
+container that cannot work. A caller that omitted them -- i3x-service passed `port`, which this
+helper does not take -- produced `until ; do`, which is valid YAML holding a shell syntax error.
+So `helm lint`, `helm template` and kubeconform all passed, the manifest installed cleanly, and the
+only symptom was one Deployment in Init:CrashLoopBackOff with `/bin/sh: syntax error: unexpected
+";"` buried in an initContainer's log. That is the chart's stated rule -- validate values and fail
+the render, never the pod -- applied to its own helpers.
 */}}
 {{- define "factoryplus.waitFor" -}}
-- name: {{ .name }}
+{{- if not .command }}{{- fail (printf "factoryplus.waitFor(%s): `command` is required. It is the shell test the until-loop runs; without it the container renders as `until ; do` and dies with a shell syntax error at runtime instead of failing here." (.name | default "<unnamed>")) }}{{- end }}
+{{- if not .describe }}{{- fail (printf "factoryplus.waitFor(%s): `describe` is required. It is what the pod prints while waiting and on timeout, and it is the only thing that makes an Init: pod legible." (.name | default "<unnamed>")) }}{{- end }}
+- name: {{ .name | required "factoryplus.waitFor: `name` is required (it names the initContainer in kubectl output)." }}
   image: {{ .image | default "busybox:1.36" }}
   imagePullPolicy: IfNotPresent
   command:

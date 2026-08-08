@@ -21,6 +21,7 @@ Factory+ Asset Tracking Platform is an industrial manufacturing management syste
 | **Storage** | Supabase storage-api | - | 3D asset models via `/storage/v1/`; one public bucket |
 | **Edge** | Node-RED | 1880 | Edge flow automation |
 | **Monitoring** | Grafana | 3002 | Time-series dashboards (SSO via Supabase Auth) |
+| **i3X** | Python HTTP server | 8090 | CESMII i3X 1.0 read API; own `spBv1.0/#` subscription |
 
 ### Data Flow
 
@@ -81,9 +82,11 @@ Catalog metrics are categorised by the **first path segment of their name** (`Ax
 `mtconnect_vocabulary` (`20260101000018_mtconnect_vocabulary.sql`) holds MTConnect's controlled
 vocabularies: 249 data item types with their category, 123 subtypes, 100 units, 126 component types.
 
-- **The migration is GENERATED.** Never hand-edit it — change
+- **The rows are GENERATED.** Never hand-edit them — change
   `scripts/generate-mtconnect-vocabulary.mjs` and re-run. Bump `SCHEMA_VERSION` to adopt a newer
-  MTConnect release.
+  MTConnect release. They live in `0002`'s marked block; CI fails on an edited block via the
+  SHA-256 in the BEGIN marker. See **Database Migrations** for why the generator writes there
+  rather than into `archive/`.
 - **It is a vocabulary, not a catalog.** `ANGLE` is a type; `Axes/C/ANGLE` is the metric. The
   standard cannot enumerate metrics because component instances are per-device. Do not seed data
   item types into `metric_catalog`.
@@ -117,7 +120,7 @@ policy, `anon` revoked, maintained by editing the migration.
 - **The OPC UA group is derived from the browse path**, not a hardcoded spec→group map — a browse
   path is already `/`-delimited, which is part of why `/` is the metric group separator.
 - **The vocabulary uses ISO's terminology.** ISO 22400-2 calls the second OEE factor
-  *Effectiveness*, not Performance. `0032` supersedes the catalog's `OEE/PERFORMANCE` with
+  *Effectiveness*, not Performance. `archive/20260101000032_effectiveness_and_mtconnect_semantics.sql` supersedes the catalog's `OEE/PERFORMANCE` with
   `OEE/EFFECTIVENESS` — **deprecate-and-supersede, not a rename**, since `name` is immutable. Both
   rows carry the *same* `semantic_id`: they are two names for one concept, which is why the index
   on `semantic_id` is deliberately not unique. `ISO-22400-OEE-Schema` lists **both** names in
@@ -145,7 +148,7 @@ Administration Shell (IEC 63278) **without** adopting its metamodel.
   interoperability; the metamodel buys the cost. If an AAS export layer is built, it reads these.
 - **`semantic_id` is deliberately mutable**, unlike `name`/`datatype`. It is an assertion *about*
   the metric and crosswalks get corrected; freezing it would mean deprecating a metric — and
-  reconfiguring a device — to fix a typo. Migration 0029 ends with a probe that inserts a row and
+  reconfiguring a device — to fix a typo. The archived `20260101000029_semantic_identifiers.sql` ends with a probe that inserts a row and
   asserts the UPDATE succeeds, so widening `enforce_metric_catalog_immutability()` later fails the
   migration rather than silently making semantic ids unfixable.
 - **`semantic_id_type` is CHECK-constrained** to `IRI`/`IRDI`/`ModelReference`, mirrored by
@@ -160,7 +163,7 @@ Administration Shell (IEC 63278) **without** adopting its metamodel.
   not do is make two organisations agree. OPC UA ids are the exception: they are the companion
   spec's own namespace URI plus browse name, derived from something the OPC Foundation does
   publish — but still not a concept URI it registers.
-- **MTConnect ids exist at two levels** (`0032`). `mtconnect_vocabulary.semantic_id` is the
+- **MTConnect ids exist at two levels** (`archive/…0032`). `mtconnect_vocabulary.semantic_id` is the
   *concept*, scoped by kind (`…/v2.0/DataItemType/ANGLE`) because a component and a data item type
   could share a name and `(kind, name)` is the table's key. `metric_catalog.semantic_id` is the
   *observation*, built from the whole metric name (`…/v2.0/Axes/C/ANGLE`) because a catalog entry
@@ -232,7 +235,7 @@ byte-identical to the JSON export, and a test asserts it.
 ### 3D Asset Models (Supabase Storage)
 
 `supabase-storage` runs, serving exactly one bucket: `asset-3d-models`. A device's model becomes an
-AAS `File` in a `VisualRepresentation` submodel (`devices.model_3d_path`, migration 0035).
+AAS `File` in a `VisualRepresentation` submodel (`devices.model_3d_path`, `archive/20260101000035_asset_3d_models.sql`).
 
 - **The column stores an object KEY, never a URL.** A stored URL bakes in the origin of whichever
   stack uploaded it and is wrong the moment the deployment moves. The public URL is composed at
@@ -275,11 +278,57 @@ AAS `File` in a `VisualRepresentation` submodel (`devices.model_3d_path`, migrat
   unreferenced object is merely litter) and rolls the object back if the row write fails. Removal
   is the reverse order, for the same reason read backwards.
 
+### i3X Server (CESMII Industrial Information Interoperability eXchange)
+
+`i3x/` is a **conformant i3X 1.0 server over the existing model** — `1.0 Compatible` against
+CESMII's official 60-test suite, which CI runs against the live Compose stack. Full detail in
+[`i3x/README.md`](i3x/README.md); what belongs here is what constrains work elsewhere.
+
+- **It is a read-side adapter and introduces no new type system.** `schemas.schema_definition` *is*
+  an ObjectType (both JSON Schema), `sparkplug_id` *is* an elementId, Unmodelled *is* `isExtended`.
+  That is why i3X cost an adapter where AAS cost an exporter plus a metamodel — and why AAS and
+  i3X sit side by side rather than competing: **an AAS shell is a document handed over, i3X is a
+  live endpoint queried.**
+- **It holds its own `spBv1.0/#` subscription, and that is forced, not a preference.** Subscription
+  values cannot come from Supabase Realtime for the reason the Realtime section already gives:
+  `telemetry`'s rows never reach Supabase's WAL. Everything else in this service is projection;
+  this is the part that is real engineering, and it is why the workload exists at all.
+- **No service-role key, and `main()` refuses to start if one is in its environment.** Every
+  metadata read is a PostgREST request carrying the *caller's* bearer token, so the address space
+  is exactly what that caller sees in the dashboard. `ingestion.py` is deliberately **not
+  imported** — it builds a service-role client at import time.
+- **The MQTT value cache has no RLS**, which is the trap this design must close. Metadata is safe
+  because PostgREST enforces policy; the cache is a plain dict keyed by `sparkplug_id`. So a value
+  request resolves the requested elementIds through PostgREST *as the caller* first and serves only
+  what came back. `validate.py` check 12f pins this.
+- **`parentId` is the cell, not the gateway.** i3X gives an Object one parent; a device here has
+  two (a cell — where it is; a gateway — how its data arrives). `HasParent` is organizational
+  hierarchy, so the cell wins and the data path becomes a `ConnectsVia`/`ProvidesConnectivityFor`
+  pair. Collapsing them would make a virtual gateway unrepresentable.
+- **Writes are refused**: `PUT /objects/value` answers **405** and `/info` declares
+  `update.current: false`. Update is a MAY, so this is fully conformant — *1.0 Compatible* is the
+  suite agreeing, not a shortfall. It is also the durable control: the MCP server has an
+  `--enable-writes` flag, but that is client-side, and a server that does not implement the verb
+  cannot be talked into it. Writes belong on the Sparkplug/NCMD path, where they are audited.
+- **One SSE stream per subscription — there is no fan-out in i3X**, and the wait loop `select`s on
+  the connection rather than sleeping. HTTP/1.1 keep-alive *serialises* a connection, so a pooling
+  client that abandons a stream and immediately issues another request has that request queued
+  behind the corpse of the first; that is how the suite's SUB-10 failed, reported as a client
+  timeout on an endpoint that was never reached.
+- **Two Python 3.10 constraints the container enforces and a 3.12 dev machine hides**, both of
+  which have already caused defects here: nested same-type quotes in f-strings are PEP 701 (3.12+),
+  and `datetime.fromisoformat` accepts only 3 or 6 fractional digits before 3.11 — PostgREST emits
+  trailing-zero-stripped timestamps, so `…11.11239+00:00` parsed locally and failed in CI, silently
+  shipping a non-conformant `+00:00` offset. Parse-check Python under `python:3.10-slim`.
+- `replicas: 1` with `Recreate`, and it is in `factoryplus.singleWriterWorkloads` for **two**
+  reasons: a second MQTT consumer duplicates work, and subscription state is in memory, so a second
+  pod 404s a live client depending on which one the Service picks.
+
 ### Multi-Submodel Attachment (Phase 5)
 
 `device_submodels` (`20260101000034`) attaches many schemas to one device, one AAS Submodel each.
 
-- **`devices.schema_id` is retained as a fallback, not dropped.** Migrations 0021 and 0033 write it,
+- **`devices.schema_id` is retained as a fallback, not dropped.** The archived `20260101000021_*` and `20260101000033_*` write it,
   and every reader resolves the union via the `device_schemas` view — join rows, falling back to the
   1:1 column for a device with none. New code reads the join; `schema_id` is the compatibility arm.
 - **The modelled set is the union across attachments.** `modelledMetricsAcross()` in `deviceTags.js`,
@@ -315,7 +364,7 @@ forking the next version, editing the draft, and publishing it.
 - **The freeze is deny-by-default**: the guard diffs `to_jsonb(NEW)` against `to_jsonb(OLD)` with
   `status` removed, so a column added later is frozen when it exists, not when someone remembers.
 - **It binds app-facing roles only** (`authenticated`/`anon`/`service_role`), and that is
-  load-bearing. Migrations 0019/0033 rewrite seeded schemas by name on every boot, so a guard that
+  load-bearing. The archived `20260101000019_*`/`20260101000033_*` rewrite seeded schemas by name on every boot, so a guard that
   bound `postgres` would stop db-init the first time anyone published a v2 — the stack would break
   because a user used the feature. The RPCs are `SECURITY DEFINER`, so mutation is *routed*, not
   forbidden. The **status-transition check sits above that bypass** and binds everyone: history
@@ -376,7 +425,7 @@ forking the next version, editing the draft, and publishing it.
 - Live metric names: `Systems/TEMPERATURE`, `Axes/DISPLACEMENT`, `Controller/EXECUTION`,
   `Controller/EMERGENCY_STOP`, `Controller/FIRMWARE`, `SERIAL_NUMBER`, `OEE/{AVAILABILITY,
   EFFECTIVENESS,QUALITY}`, plus the local extensions `safety_interlock` and `max_temp_threshold`.
-  `OEE/PERFORMANCE` is deprecated, superseded by `OEE/EFFECTIVENESS` (migration 0032).
+  `OEE/PERFORMANCE` is deprecated, superseded by `OEE/EFFECTIVENESS` (`archive/20260101000032_effectiveness_and_mtconnect_semantics.sql`).
 
 `metric_groups` (`20260101000017_metric_group_vocabulary.sql`) is a registry of approved group
 **spellings**, not of group membership — membership is always derived from the name. Since 0018 it
@@ -387,7 +436,7 @@ is seeded from MTConnect's component types, with `standard` recording provenance
 - `enforce_metric_group_spelling()` rejects a group differing only in case from a known one,
   checking the registry **and** groups already in use. It derives the group from `NEW.name`, not
   `NEW.metric_group` — generated columns are computed *after* `BEFORE` triggers, so the latter is
-  still `NULL` there. Keep that expression in step with migration 0016 too.
+  still `NULL` there. Keep that expression in step with `archive/20260101000016_metric_group.sql` too.
 - The picker's vocabulary is `knownGroupNames(registry, catalog)` — the union of both sources.
   Registry casing wins, because that is what the trigger treats as canonical.
 
@@ -484,13 +533,20 @@ is **derived at read time** in `frontend/src/utils/deviceTags.js`.
 
 ### Realtime Change Feed
 
-`supabase-realtime` publishes `cells`, `gateways`, `devices`, `digital_thread` (migration 0023).
+`supabase-realtime` publishes `cells`, `gateways`, `devices`, `digital_thread` (`archive/20260101000023_realtime_publication.sql`).
 Tabs subscribe through `hooks/useRealtimeTable.js`; `usePolling` stays at 60s as reconciliation.
 
-- **`telemetry` is unpublishable, not merely unpublished.** It is a `postgres_fdw` foreign table
-  (migration 0010) whose rows enter TimescaleDB's WAL, never Supabase's. Adding it to the
-  publication does not error — it silently emits nothing, which is the worse failure. Do not
-  "fix" the Telemetry tab by subscribing it.
+- **`telemetry` is unpublishable, not merely unpublished.** `public.telemetry` is a **VIEW** over
+  `timescale.telemetry`, which is the `postgres_fdw` foreign table
+  (`archive/20260101000010_telemetry_foreign_table.sql`). Either way the rows enter TimescaleDB's
+  WAL and never Supabase's. Adding it to the publication does not error — it silently emits
+  nothing, which is the worse failure. Do not "fix" the telemetry views by subscribing them.
+  - **The foreign table's isolation rests on `PGRST_DB_SCHEMAS`, not on grants**, and this is worth
+    knowing before anyone "tidies" it. `authenticated` holds `SELECT` on `timescale.telemetry`
+    *and* `USAGE` on the schema, so privileges alone would leave it reachable; what stops it is
+    that PostgREST is configured `public,storage,graphql_public`. Verified: `Accept-Profile:
+    timescale` is refused with `PGRST106 The schema must be one of the following: …` — an explicit
+    refusal by name, not an accident of omission. `anon` reaches neither object.
 - **Never delete `usePolling`.** Realtime has no replay: a dropped socket loses every change in
   the gap and the client is not told. The poll is also the only path carrying the 401 stop and
   exponential backoff.
@@ -511,17 +567,17 @@ Tabs subscribe through `hooks/useRealtimeTable.js`; `usePolling` stays at 60s as
 
 Four non-obvious container requirements, each of which crash-loops or 403s the service:
 `RLIMIT_NOFILE` must be set (its `run.sh` uses it under `set -u`); the `_realtime` schema must
-pre-exist (migration 0022); the tenant is `realtime-dev` and `TENANT_NAME` is ignored by
+pre-exist (`archive/20260101000022_realtime_schema_bootstrap.sql`); the tenant is `realtime-dev` and `TENANT_NAME` is ignored by
 `SEED_SELF_HOST`; and Kong must address it as `realtime-dev.supabase-realtime` because Realtime
 resolves the tenant from the leading hostname label. The compose alias and the kong.yml upstream
 URL must change together.
 
 ### Scheduled Work & Event Dispatch
 
-`pg_cron` (migration 0025) is **janitorial only** — pruning `net._http_response` and
+`pg_cron` (`archive/20260101000025_pg_cron_maintenance.sql`) is **janitorial only** — pruning `net._http_response` and
 `cron.job_run_details`, and honouring `auto_delete_at`. No job derives application state.
 
-- **Gateway staleness is a VIEW (`public.gateway_status`, migration 0024), never a cron writer.**
+- **Gateway staleness is a VIEW (`public.gateway_status`, `archive/20260101000024_gateway_status_view.sql`), never a cron writer.**
   `log_digital_thread_event()` fires on every UPDATE to `gateways`, so a sweep writing `STALE`
   would append to an append-only audit table forever, and would be correct only between ticks.
   Keep the 90s threshold in step with `utils/gatewayStatus.js`, same obligation as
@@ -531,7 +587,7 @@ URL must change together.
 - `ensure_cron_job()` exists because `cron.schedule()` appends rather than replaces, and
   supabase-db-init replays every migration on every boot.
 
-`pg_net` (migration 0027) fires the quarantine webhook. **It is a transition trigger, split
+`pg_net` (`archive/20260101000027_quarantine_webhook.sql`) fires the quarantine webhook. **It is a transition trigger, split
 across INSERT and UPDATE — not a hook on `digital_thread` INSERT.** Ingestion stamps
 `gateways.last_heartbeat` on every heartbeat, so a blanket hook would emit ~2 HTTP calls/min/
 gateway of noise. `TG_OP` cannot appear in a `WHEN` clause (it is PL/pgSQL-only) and `OLD` is
@@ -543,7 +599,8 @@ unbound on INSERT, which is why it is two triggers sharing one function.
   SSRF primitive. `anon` is revoked at the grant level too.
 
 **Vault** holds only secrets read *from SQL* — in practice `nodered_webhook_jwt_secret`, which
-`dispatch_device_quarantine_webhook()` **signs** its outbound pg_net request with (migration 0003),
+`dispatch_device_quarantine_webhook()` **signs** its outbound pg_net request with (seeded by the
+applied `0006_nodered_oidc_auth.sql`),
 and `nodered_admin_token`, now break-glass only. `MQTT_PASSWORD` / `DB_PASSWORD` /
 `POSTGRES_PASSWORD` stay in `.env`: mosquitto-init and supabase-db need them before the database
 accepts connections, and duplicating them would create two sources of truth. The `deploy-nodered`
@@ -953,6 +1010,25 @@ provisioning script writes.
   loop plus readiness probes for everything else. The hooks are `post-install,post-upgrade`, never
   `pre-` — `pre-upgrade` would run the migrations before the new GoTrue exists, and GoTrue owns the
   `auth` schema they build on.
+- **NEVER `helm install --wait` ON A FIRST INSTALL — it deadlocks this chart.** Helm's order is
+  *create resources → (with `--wait`) block until every workload is Ready → run post-install
+  hooks*. The bootstrap **is** those hooks: `db-roles-init` issues the passwords for
+  `authenticator`, `supabase_auth_admin` and `supabase_storage_admin`, and PostgREST, GoTrue,
+  Realtime and storage-api each wait for their own role before starting. So `--wait` waits for
+  pods that are waiting for the hooks that `--wait` will not run until the pods are ready. It fails
+  as `INSTALLATION FAILED: context deadline exceeded` after the full timeout, with `supabase-db`
+  perfectly healthy, **no init-hook pod ever created**, and the only real evidence
+  `password authentication failed` in the database log — nothing in that points at Helm. Install
+  without it and assert readiness afterwards with `kubectl rollout status`; `--wait` on a later
+  `helm upgrade` is fine, because the roles already have their passwords.
+- **Do NOT set `PGDATA` on `supabase-db`.** That image ships `/etc/postgresql/postgresql.conf` with
+  `data_directory = '/var/lib/postgresql/data'` hardcoded and launches the server with it, so
+  `PGDATA` steers only the entrypoint: initdb populates and chowns a subdirectory, then the server
+  opens the mount root — still root-owned, because fsGroup sets the *group*, never the owner —
+  and dies with `data directory … has wrong ownership`. Compose sets no `PGDATA`, so this broke
+  Kubernetes only. **TimescaleDB keeps its override**: that image ships no `/etc/postgresql` and
+  runs `-D "$PGDATA"`, so there it is honoured end to end. The two templates differ because the
+  images do, which is why TimescaleDB came up healthy in the same cluster.
 - **Probe the image; do not assume a health path.** `supabase/edge-runtime` has none —
   `/_internal/health` and `/health` both 404 as unregistered function names, `/` answers 400 and a
   real function 401s, and `httpGet` scores all four as failures. It uses `tcpSocket`.
@@ -970,7 +1046,8 @@ provisioning script writes.
   scans for surviving markers and fails loudly, and each skips comment lines, because the templates
   document the convention by name.
 - **A deployment's public URLs are psql variables, never literals in the seed.** `NODERED_PUBLIC_URL`
-  (migration 0003) and `GRAFANA_PUBLIC_URL` (0002) are registered as those clients' `redirect_uris`,
+  (applied `0006_nodered_oidc_auth.sql`) and `GRAFANA_PUBLIC_URL` (applied `0002_seed_data.sql`)
+  are registered as those clients' `redirect_uris`,
   and the upserts are `DO UPDATE` so a rotated secret reaches an existing database. A hardcoded URL
   there is therefore **rewritten on every boot** — which is how Grafana's sat at `localhost:3002`,
   un-fixable in place, until it was parameterised. Both trim a trailing slash: a value pasted from
@@ -992,10 +1069,25 @@ provisioning script writes.
 
 ### Initial Setup
 ```bash
-npm run setup          # Creates .env from .env.example (cross-platform)
+npm run setup          # Writes .env with 14 FRESHLY GENERATED credentials
 docker compose up --build -d   # Launch full stack (all services)
 docker compose down -v         # Clean shutdown + volumes
 ```
+
+- **`setup.mjs` generates; it no longer copies `.env.example`.** Those are the published Supabase
+  demo values, and since Kong runs `key-auth` the anon and service-role JWTs are *gateway API
+  keys* — a default install accepted credentials committed to this repository. `--demo` copies
+  verbatim and is for CI, which needs identical credentials every run (as does `values-dev.yaml`).
+- **The three Supabase values are a SET.** The anon and service-role keys are HS256 JWTs *signed
+  by* `SUPABASE_JWT_SECRET`; rotating the secret without re-minting both yields a stack that comes
+  up entirely healthy and rejects every request at the gateway. That is why they are minted
+  together in one script rather than left to three `openssl` commands.
+- **The demo LOGINS are separate and unchanged** — `admin@factoryplus.local` / `factoryplus123`
+  come from `supabase/seed.sql`, which `validate.py` authenticates as. Generating those is a
+  distinct change with a test-suite dependency.
+- The chart **refuses to install the demo JWT secret alongside a public `publicBaseDomain`**;
+  local forms (`127.0.0.1`, `localhost`, `192.168.*`, `.local`, `.localhost`, `.internal`) are
+  accepted, so CI and a genuine lab are unaffected.
 
 ### Frontend Development
 ```bash
@@ -1025,7 +1117,7 @@ python ingestion/validate.py
 ```
 
 **`validate.py` needs `SUPABASE_SERVICE_ROLE_KEY` in its environment but must NOT inherit the
-rest of `.env`.** Without the key it seeds nothing and fails ~12 of 20 checks in a way that
+rest of `.env`.** Without the key it seeds nothing and fails a large fraction of its 43 checks in a way that
 reads like a schema fault ("no quarantined device reported", "no telemetry records"), with the
 real cause one line up: `Service role key: MISSING`. But sourcing `.env` wholesale breaks it a
 second way — `MQTT_HOST=mosquitto` and `DB_HOST=timescaledb` are compose-internal names that do
@@ -1042,14 +1134,62 @@ python ingestion/validate.py
 
 **Squashed to a two-file baseline for the public beta.** `supabase/migrations/` now holds
 `0001_baseline_schema.sql` (pure DDL) and `0002_seed_data.sql` (pure DML), auto-applied by
-`supabase-db-init` on startup. Add schema changes as a **new** numbered file (`0003_…`) — the two
-baseline files are guarded to be no-ops once applied, so editing them reaches a fresh database only.
+`supabase-db-init` on startup. Add schema changes as a **new** numbered file (`0003_…`).
+
+**BOTH BASELINE FILES REPLAY ON EVERY BOOT — they are idempotent, not skipped**, and the difference
+decides whether an edit ever reaches a running deployment. This section previously said they were
+"guarded to be no-ops once applied, so editing them reaches a fresh database only", which
+`0002`'s own header contradicts in as many words: *"IT IS IDEMPOTENT, because supabase-db-init
+replays every /migrations/*.sql on every boot"*, and the reference vocabularies use
+`ON CONFLICT … DO UPDATE` precisely so that *"an edit has to reach a database that already
+exists"*. Editing `0002` to adopt a newer MTConnect release does reach live databases; believing
+otherwise is what made the MTConnect generator's dead output path look acceptable for months.
+
+The reason to add a new file is still sound — a squashed baseline is a snapshot, and threading a
+change into 2,000 lines of generated DDL loses the *why* — but it is a reviewability argument, not
+a mechanical one.
 
 - **The 38 original migrations are archived, not deleted**, under `supabase/migrations/archive/`
   (the glob `*.sql` does not recurse, so nothing there runs). They are the *reasoning* — why
   `metric_catalog.name` is immutable, why gateway staleness is a view, why the Realtime tenant must
-  be addressed as `realtime-dev.supabase-realtime`. **Every `migration NNNN` reference in this
-  document points into that directory.**
+  be addressed as `realtime-dev.supabase-realtime`.
+  - **EVERY CITATION IN THIS DOCUMENT NAMES ITS FILE.** It used to say "every `migration NNNN`
+    reference points into that directory", which stopped being true the moment applied migrations
+    `0003`…`0009` existed: one notation then meant two directories, and two citations were simply
+    wrong — the Vault webhook secret and `NODERED_PUBLIC_URL` were both attributed to a
+    "migration 0003" that contains neither (they are in the applied
+    `0006_nodered_oidc_auth.sql`). A convention that has to be remembered is one that decays, so
+    archived files are now written `archive/<full-name>` and applied ones by their real filename.
+
+**The applied migrations, in execution order.** These run; everything under `archive/` does not:
+
+| File | What it adds |
+| :--- | :--- |
+| `0001_baseline_schema.sql` | All DDL, squashed. Pure structure |
+| `0002_seed_data.sql` | All seed rows, incl. the generated MTConnect block |
+| `0003_audit_immutability_and_quarantine_rpc.sql` | `digital_thread` append-only trigger; the atomic `approve_quarantined_device()` RPC |
+| `0004_drop_gateway_ip_address.sql` | Removes a superseded column |
+| `0005_digital_thread_signal_and_attribution.sql` | Audit rows record a real change and a real actor |
+| `0006_nodered_oidc_auth.sql` | Node-RED OAuth client, `nodered_webhook_jwt_secret` in Vault |
+| `0007_metric_catalog_name_check.sql` | Rejects non-conforming metric names on INSERT |
+| `0008_gateway_sparkplug_group.sql` | `gateways.sparkplug_group`, exposed through `gateway_status` |
+| `0009_revoke_noop_anon_grants.sql` | Withdraws `anon`'s function grants — see below |
+
+- **`0009` closed a privilege escalation, not just noise.** `public.ensure_cron_job` is
+  `SECURITY DEFINER` with no authorisation check, and `0001` granted EXECUTE on it to `anon` — so
+  `POST /rest/v1/rpc/ensure_cron_job` answered **204** with nothing but the published anon key,
+  scheduling arbitrary SQL as `postgres` (`rolbypassrls`, `rolcreaterole`). `0001`'s ACL block
+  contains `REVOKE … FROM PUBLIC` two lines above the `GRANT … TO anon` that undoes it, which is
+  why reading the file does not reveal it — **pg_dump records only positive grants**, and the
+  privilege reset `0001` added for that reason covers tables and sequences but not functions.
+- **`0009` derives its set rather than listing it**, and it must stay that way. A hand-written list
+  was wrong within one migration: `enforce_digital_thread_append_only()` is created by `0003`,
+  after the list was derived from `0001`. It snapshots what `authenticated`/`service_role` can
+  execute, revokes PUBLIC and `anon` across `public`, then restores those two — so a logged-in
+  user's effective privilege does not change and only `anon` loses. Its self-check **raises**, so a
+  database where `anon` can reach a SECURITY DEFINER function does not come up reporting success.
+  `validate.py` checks 13/13a are the second gate, because a regenerated `pg_dump` baseline would
+  reintroduce the grant silently.
 - **Both files are idempotent, and that is not optional** — db-init replays every `*.sql` on every
   boot and there is no applied-migrations ledger. A raw `pg_dump` baseline installs on the first
   boot and takes the stack down on the second.
@@ -1066,11 +1206,26 @@ baseline files are guarded to be no-ops once applied, so editing them reaches a 
   onto the active one. It works *because 0001 runs first and nothing after it re-pins*. A later
   migration that re-pins a schema binding must resolve the active version itself or re-run that
   reconciliation.
-- The MTConnect vocabulary is still generated, but now lives inside `0002`. The generator writes to
-  its historical path in `archive/` and `scripts/check-mtconnect-seed-sync.mjs` compares the
-  `(kind, name, category)` triples against the seed. **The generator cannot simply write the seed
-  section** — it emits no `semantic_id`, which the old migration 0032 backfilled separately, so
-  splicing its output in would silently drop every semantic id on a fresh database.
+- The MTConnect vocabulary is still generated, and now **the generator writes the live seed** —
+  `0002`'s block between `-- >>> BEGIN GENERATED mtconnect_vocabulary` and its `END` marker.
+  Bumping `SCHEMA_VERSION` and re-running therefore reaches a real database, which it did not
+  before: the generator used to write its historical path under `archive/`, which `db-init` never
+  executes because the glob `*.sql` does not recurse. The documented upgrade procedure was a no-op
+  and nothing said so.
+  - **The blocker was `semantic_id`,** which the generator did not emit and the old `archive/20260101000032_effectiveness_and_mtconnect_semantics.sql`
+    backfilled in a separate pass — splicing its output in would have dropped every semantic id on
+    a fresh database. The generator now derives it (`…/v2.0/<Kind>/<name>`, pinned to the **major**
+    line, never `SCHEMA_VERSION`), which is what made the seed generable at all.
+  - **Regenerating reproduced the committed 598 rows byte-for-byte**, which is what confirms the
+    derivation matches 0032's SQL rather than merely resembling it.
+  - `scripts/check-mtconnect-seed-sync.mjs` no longer diffs two files. It verifies a **SHA-256
+    stamped into the BEGIN marker**, plus the semantic-id form, the category rules and
+    `(kind, name)` uniqueness. Comparing two committed artefacts is exactly what let the old check
+    pass while neither of them was the one that ran; and re-running the generator in CI would make
+    the pipeline depend on raw.githubusercontent.com being reachable.
+  - `ON CONFLICT … DO UPDATE SET category` only, still: `category` is upstream fact and should
+    reach an existing database, whereas `semantic_id` is an assertion corrected by hand, and
+    re-stamping it every boot would make a crosswalk permanently unfixable.
 
 ## Authentication & RBAC
 
@@ -1083,7 +1238,16 @@ baseline files are guarded to be no-ops once applied, so editing them reaches a 
 | `auditor@factoryplus.local` | `Auditor` | Digital thread read-only |
 
 ### Edge Functions
-- `supabase/functions/approve-quarantine/` — Validates role claims (`Administrator`/`Shopfloor_Manager`) before approving quarantined devices
+- `supabase/functions/approve-quarantine/` — Validates role claims
+  (`Administrator`/`Shopfloor_Manager`), then calls the **atomic `public.approve_quarantined_device()`
+  RPC** (applied `0003`) rather than orchestrating writes itself. It previously made four
+  sequential PostgREST requests with no transaction, so a failure part-way left `asset_config`
+  pointing at a device that was never merged, or two un-quarantined rows claiming one asset. The
+  RPC also takes the caller's `user.id` explicitly: `log_digital_thread_event()` records
+  `auth.uid()`, and the service-role JWT carries no `sub`, so **every approval and merge used to be
+  logged with `changed_by = NULL`** — the audit trail could not say who admitted a device to the
+  network. It re-checks the caller's role against `public.user_roles`, so authorisation does not
+  rest on the edge function alone
 - `supabase/functions/deploy-nodered/` — Validates role claims before proxying Node-RED flow
   deployments, then **forwards the caller's own access token** to Node-RED's admin API. The
   header is unconditional: attaching it only when `NODERED_ADMIN_TOKEN` was set is what made a
@@ -1099,7 +1263,34 @@ baseline files are guarded to be no-ops once applied, so editing them reaches a 
   serving both would let a change made for one product's role model silently move the other's
 
 Every function must be registered in `supabase/functions/main/index.ts` — the allow-list that
-states what each one may reach. An unregistered name 404s before a worker spawns.
+states what each one may reach. An unregistered name 404s before a worker spawns, and that
+allow-list is also **the definition of what an edge function IS**: `check-docs-drift.mjs` derives
+the list from it rather than from a directory listing, because a directory is not an endpoint.
+
+- **`_shared/` holds code imported by several functions**, currently `roles.ts` (the RBAC lookup)
+  and `cors.ts`. **A worker CAN import outside its `servicePath`** — that scopes what is *booted*,
+  not what the module graph may import. This document previously said the opposite, and that claim
+  was the stated basis for copying `resolveUserRole` into five functions; it was tested against
+  `supabase/edge-runtime:v1.74.2` and is false. Both delivery paths already ship the whole tree
+  (Compose bind-mounts `./supabase/functions`, the Dockerfile does `COPY supabase/functions`).
+  - It **is** still true for reading FILES at runtime — a different mechanism and a different
+    permission — which is why `deploy-nodered` takes the canonical flow through
+    `NODERED_FLOW_JSON` rather than off disk.
+  - `resolveUserRole` **takes a client rather than building one**, deliberately: three functions
+    pass a caller-scoped client so RLS applies, and the two userinfo endpoints pass a service-role
+    client because the caller is an OAuth client whose user id is already authenticated. Which
+    identity performs the read is a per-function security decision and must stay visible at the
+    call site.
+  - `sparkplugToXsd` and `model3dContentType` stay duplicated **with the frontend** and keep their
+    `test_aas_export.py` drift checks — that boundary is a browser bundle, which `_shared` cannot
+    bridge.
+- **The functions send no `Access-Control-Allow-Origin`.** The origin policy is Kong's `cors`
+  plugin and only Kong's: its `header_filter` *replaces* whatever the upstream sent and it answers
+  preflight itself, so the wildcard the functions used to declare never reached a browser. Measured,
+  not assumed. Deriving an allow-list here too would create a second statement of one policy — the
+  arrangement drift guards exist to survive. Revisit only if the edge runtime is ever exposed
+  directly, which it is not on either target (no published port under Compose; ClusterIP behind
+  Kong on Kubernetes).
 
 ## Frontend Architecture
 
@@ -1296,6 +1487,27 @@ GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)):
 
 - **Fail-closed security**: Edge functions and RLS policies deny access by default; missing role claims result in `403 Forbidden`
 - **Quarantine gating**: Unregistered devices auto-insert into Supabase with `is_quarantined=true`; telemetry for quarantined devices is dropped. The arriving edge node is recorded on the row, so approval does not require re-picking the gateway
+- **Kong runs `key-auth`**, so every request through the gateway needs a registered API key — the
+  anon or service-role JWT, treated as an **opaque string**, not parsed. Two routes are exempt by
+  exact path and one service each: `grafana-userinfo` and `nodered-userinfo`, because an OAuth
+  client presents client credentials and has no setting that would add a Supabase `apikey` header.
+  A consequence worth knowing when testing: **a validly-signed JWT that is not a registered key is
+  refused at the gateway**, so a freshly minted token cannot be exercised against a running stack
+  without registering it — which is also exactly why shipping the published demo keys mattered.
+- **`mosquitto.acl` confines each MQTT client to its own edge-node subtree** via
+  `pattern readwrite spBv1.0/+/+/%u/#`, where `%u` is the connecting username — which constrains a
+  client only when its username IS its `sparkplug_id`, hence
+  `scripts/mosquitto-provision-gateway.mjs`. The shared `factoryplus` principal is still exempt
+  (`topic readwrite spBv1.0/#`) because the Node-RED simulator and `validate.py` publish as
+  gateways under it, and the validator creates its gateways at runtime so it cannot use a
+  pre-provisioned credential. The application tier closes the other half:
+  `verify_gateway_binding()` in `ingestion.py` rejects a message whose topic does not match the
+  device's registered gateway
+- **`ingestion/validate.py` asserts 43 numbered outcomes** and begins with a preflight that proves
+  the owner database connection can actually `DELETE` from `digital_thread` — by doing it inside a
+  transaction and rolling back. Connecting proves nothing there: `service_role` connects perfectly
+  and is then refused by 0003's append-only trigger, which is the situation that connection exists
+  to escape
 - **Renaming is safe**: `name` carries no identity (see Asset Identity above). Do not reintroduce name-based lookups — the `isUuid()` format-sniffing that used to guard them has been removed
 - **Digital Thread**: PostgreSQL `log_digital_thread_event()` trigger automatically logs INSERT/UPDATE/DELETE on cells, gateways, and devices
 - **Cross-platform setup**: `scripts/setup.mjs` uses Node.js fs module (no POSIX shell required)

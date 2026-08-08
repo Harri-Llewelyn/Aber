@@ -118,11 +118,27 @@ jobs:
           [ "$fail" -eq 0 ] && echo "Schema version name derivation matches across SQL and frontend."
           exit $fail
 
+      # The four SQL-to-JavaScript mirrors that had no guard: the sparkplug_id derivation, the
+      # gateway staleness threshold, effective-cell resolution, and the location_source labels.
+      #
+      # IT COMPARES VALUES, not the presence of a literal. The three steps above assert that a
+      # characteristic string appears on both sides, which catches a rewrite and misses a
+      # re-tuning -- change `INTERVAL '90 seconds'` to 120 and every "does this file mention a
+      # threshold" check still passes. Verified by retuning each side in turn and confirming the
+      # step fails in both directions.
+      #
+      # `sparkplugId.js` is the one that matters most: it derives an IMMUTABLE WIRE IDENTITY, so a
+      # divergence yields ids that resolve in the UI and not on the wire -- and since `sparkplug_id`
+      # is GENERATED ALWAYS ... STORED off the row's UUID, the values already issued cannot be
+      # corrected. Every device would have to be re-provisioned.
+      - name: Verify SQL-to-JavaScript Mirrors Agree
+        run: node scripts/check-mirror-drift.mjs
+
       # The MTConnect vocabulary is generated, and now lives inside 0002_seed_data.sql rather than
-      # in a migration of its own. A plain file diff no longer has anything to compare, so the check
-      # compares the (kind, name, category) triples instead -- see the script's header for why the
-      # generator cannot simply write the seed section (it emits no semantic_id, which the seed
-      # carries).
+      # in a migration of its own. The generator writes that block directly and stamps a SHA-256
+      # into its BEGIN marker; this recomputes it, plus the semantic-id form, the category rules and
+      # (kind, name) uniqueness. It no longer diffs two committed files -- which is how the previous
+      # version passed for months while the generator wrote to an archived path that never ran.
       - name: Verify MTConnect Vocabulary Seed Is In Sync
         run: |
           node scripts/generate-mtconnect-vocabulary.mjs
@@ -899,6 +915,16 @@ jobs:
         run: |
           python ingestion/test_declared_metrics.py
 
+      # The Python half of the modelled-metrics contract; the JavaScript half runs in
+      # frontend-build. Both assert tests/fixtures/modelled-metrics.json, because the rule is
+      # BEHAVIOUR and neither language can import the other -- grepping both files for `required`
+      # would prove they spell it, not that they agree about a schema whose `required` is a string.
+      # Writing the pair found a live divergence: for `properties: ['A','B']` the JS returned the
+      # array INDICES as metric names while the Python returned None.
+      - name: Run Modelled-Metrics Mirror Contract
+        run: |
+          python ingestion/test_modelled_metrics_contract.py
+
       # Pins the invariant that the daemon never writes an asset's location. devices.cell_id is
       # NULL-means-inherit with no column default (migration 0036), which only holds while
       # nothing writes a value on an operator's behalf -- and a regression here would be silent:
@@ -1335,9 +1361,14 @@ jobs:
           protoc --python_out=. sparkplug_b.proto
           cp sparkplug_b_pb2.py ingestion/
 
+      # `--demo` rather than `cp`, and CI is the one caller entitled to it. A pipeline needs the
+      # same credentials on every run — `values-dev.yaml` carries the same set for the same reason
+      # — but going through the script means "use the published demo keys" is a named request that
+      # prints its own warning, instead of a shell command that quietly bypasses generation.
+      # Developers get freshly minted credentials from a bare `npm run setup`.
       - name: Prepare Environment File
         run: |
-          cp .env.example .env
+          node scripts/setup.mjs --demo
 
       - name: Launch Unified Docker Compose Stack
         run: |

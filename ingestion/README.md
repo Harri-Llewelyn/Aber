@@ -9,7 +9,7 @@ allowed to be heard at all.
 | File | Purpose |
 | :--- | :--- |
 | [`ingestion.py`](ingestion.py) | The daemon. Identity resolution, quarantine gating, telemetry mapping |
-| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 41 outcomes |
+| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 43 outcomes |
 | [`logging_config.py`](logging_config.py) | Structured logger used by both |
 | [`test_gateway_binding.py`](test_gateway_binding.py) | Gateway↔device binding, telemetry sanity window, append-only historian |
 | [`test_declared_metrics.py`](test_declared_metrics.py) | Birth-metric observation, change-only writes, alias resolution, rebirth rate limit, device watchdog |
@@ -345,6 +345,17 @@ Its cleanup uses a **direct owner connection** to Supabase Postgres for audit ro
 `public.digital_thread` is genuinely append-only — the trigger added in
 [`0003`](../supabase/migrations/0003_audit_immutability_and_quarantine_rpc.sql) refuses `DELETE`
 for `service_role` too. Clearing audit rows is meant to require owner authority.
+
+**That connection is proved at startup, not discovered at cleanup.** It is a second connection with
+its own credentials (`SUPABASE_DB_*`), and it was previously exercised only by the final cleanup —
+whose failures were swallowed into a generic warning. A wrong host, port or user therefore produced
+a fully green run that quietly left fixture audit rows behind for the next one to inherit.
+
+The preflight **tests authority, not reachability**: it performs the real `DELETE` inside a
+transaction and rolls it back. Connecting proves nothing, because `service_role` connects perfectly
+and is then refused by the trigger — which is the exact situation this connection exists to escape.
+A failed preflight is reported at the top of the log and carried into the exit status; the suite
+still runs, because its assertions are worth reporting either way.
 
 ---
 
