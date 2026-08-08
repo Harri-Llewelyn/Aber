@@ -192,7 +192,14 @@ node scripts/sync-helm-chart-files.mjs        # mirror repo config into the char
 
 kubectl create namespace factoryplus
 helm install factoryplus deploy/helm/factoryplus -n factoryplus \
-  -f deploy/helm/factoryplus/values-dev.yaml --wait --timeout 15m
+  -f deploy/helm/factoryplus/values-dev.yaml --timeout 15m
+
+# NOT `--wait`, which deadlocks the first install: Helm blocks on workload readiness BEFORE
+# running post-install hooks, and those hooks are what give PostgREST, GoTrue, Realtime and
+# storage-api their database passwords. See deploy/k8s/README.md.
+for w in $(kubectl -n factoryplus get statefulset,deploy -o name); do
+  kubectl -n factoryplus rollout status "$w" --timeout=10m
+done
 
 helm test factoryplus -n factoryplus          # the postgres_fdw gate — seconds, mutates nothing
 ```
@@ -410,7 +417,7 @@ private). The error names the registry, not the build order.
 
 The tag is the only place the version is written: it stamps the five image tags, the chart `version`
 and the chart `appVersion` in one run. **Images publish before the chart**, because a chart that
-names images which do not exist yet does not fail — `helm install` succeeds and five workloads sit
+names images which do not exist yet does not fail — `helm install` succeeds and six workloads sit
 in `ImagePullBackOff` while everything else comes up healthy.
 
 Run it from the Actions tab with `dry_run` ticked to rehearse the whole thing without publishing.

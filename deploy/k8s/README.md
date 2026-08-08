@@ -43,7 +43,7 @@ run this stack; **from a checkout** if you are changing it.
 
 ### A. From the published chart (no checkout, no image builds)
 
-The chart and the five images this repository builds are published to GHCR as OCI artefacts. Helm
+The chart and the six images this repository builds are published to GHCR as OCI artefacts. Helm
 speaks OCI natively — there is no `helm repo add`, and no index to go stale.
 
 ```bash
@@ -54,8 +54,28 @@ helm install factoryplus oci://ghcr.io/harri-llewelyn/acs-cymru/factoryplus \
   --version 0.1.0 \
   --namespace factoryplus --create-namespace \
   --values my-values.yaml \
-  --wait --timeout 15m
+  --timeout 15m
+
+# `helm install` returns once the init hooks have finished. Readiness is a separate question:
+for w in $(kubectl -n factoryplus get statefulset,deploy -o name); do
+  kubectl -n factoryplus rollout status "$w" --timeout=10m
+done
 ```
+
+> **Do not add `--wait` to the first install — it deadlocks.** Helm's order is *create resources →
+> (with `--wait`) block until every workload is Ready → run post-install hooks*. This chart's
+> bootstrap **is** those hooks: `db-roles-init` sets the passwords for `authenticator`,
+> `supabase_auth_admin` and `supabase_storage_admin`, and PostgREST, GoTrue, Realtime and
+> storage-api each wait for their own role before starting. So `--wait` waits for pods that are
+> waiting for the hooks that `--wait` will not run until the pods are ready.
+>
+> It fails as `INSTALLATION FAILED: context deadline exceeded` after the full timeout, with
+> supabase-db perfectly healthy, **no init-hook pods ever created**, and the only real evidence
+> `password authentication failed` in the database log. Nothing in that points at Helm, which is
+> why it is called out here rather than left to be rediscovered.
+>
+> `--wait` on a subsequent `helm upgrade` is fine: the roles already have their passwords, so the
+> workloads can reach Ready without the hooks having run first.
 
 **`--version` is not optional in practice.** Without it Helm resolves the newest release, which
 makes the command mean something different next month and gives you no way to reproduce today's
@@ -69,7 +89,7 @@ it needs. Either write a `my-values.yaml` from
 the package**, so `helm pull --untar` gives you a copy — or, for a throwaway cluster, pull the
 demo credentials out of `.env.example`.
 
-The five built images resolve automatically to the chart's `appVersion`, which the release stamps
+The six built images resolve automatically to the chart's `appVersion`, which the release stamps
 equal to the chart version. Chart 0.1.0 can only pull images 0.1.0; there is nothing to line up by
 hand and no `latest` tag to drift onto.
 
@@ -88,10 +108,16 @@ kubectl create namespace factoryplus
 helm install factoryplus deploy/helm/factoryplus \
   --namespace factoryplus \
   --values deploy/helm/factoryplus/values-dev.yaml \
-  --wait --timeout 10m
+  --timeout 10m
+
+for w in $(kubectl -n factoryplus get statefulset,deploy -o name); do
+  kubectl -n factoryplus rollout status "$w" --timeout=10m
+done
 ```
 
-This still **pulls** the five built images from GHCR at the `appVersion` in `Chart.yaml` — a
+No `--wait` here either, for the reason given above — it is exactly what CI does.
+
+This still **pulls** the six built images from GHCR at the `appVersion` in `Chart.yaml` — a
 checkout does not imply a local build. To run your own, build them under the reference the chart
 asks for and make them available to the cluster (`k3d image import`, or a push to your own
 registry). `pullPolicy` is `IfNotPresent`, so a locally-present image of that exact name and tag
@@ -114,7 +140,7 @@ ingestion:
 ```
 
 Do this for a hotfix, a bisect or an air-gapped mirror. Do not do it as a way to run one component
-a release ahead of the rest: the five are built and tested together, and the failures from mixing
+a release ahead of the rest: the six are built and tested together, and the failures from mixing
 them are the asymmetric kind that surface days later on whichever component was *not* changed.
 
 ## Verify
@@ -469,7 +495,7 @@ done
 
 ## Publishing a release
 
-[`.github/workflows/release.yml`](../../.github/workflows/release.yml) publishes the five images and
+[`.github/workflows/release.yml`](../../.github/workflows/release.yml) publishes the six images and
 then the chart, to GHCR over OCI, on a `v*` tag.
 
 ```bash
@@ -485,7 +511,7 @@ committed values are for the untagged path only (a checkout, `helm lint`, `helm 
 builds, the chart packages, every check runs, and nothing is pushed.
 
 **Images publish before the chart, and the chart job `needs` them.** A chart published ahead of its
-images does not fail — `helm install` succeeds, the databases and broker come up healthy, and five
+images does not fail — `helm install` succeeds, the databases and broker come up healthy, and six
 workloads sit in `ImagePullBackOff` with no failed release to point at.
 
 ### One-time: make the packages public

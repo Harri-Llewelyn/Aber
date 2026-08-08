@@ -881,7 +881,11 @@ Compose job. Both targets must stay green.
    `local-path` all behave as they will on the real cluster). kind would test a different ingress
    controller and a different provisioner than production uses. Build the images locally and
    `k3d image import` them.
-3. `helm install --wait --timeout 10m`.
+3. `helm install --timeout 10m`, then `kubectl rollout status` over every StatefulSet and
+   Deployment. **Not `--wait`** — Helm blocks on workload readiness *before* running post-install
+   hooks, and the hooks are this chart's bootstrap (`db-roles-init` issues the passwords that
+   PostgREST, GoTrue, Realtime and storage-api wait for), so `--wait` deadlocks the first install
+   and reports it as `context deadline exceeded` with no hook pod ever created.
 4. **`helm test` first (M6)** — the `postgres_fdw` cross-database check. It is seconds long and
    turns a whole class of deep, misattributed `validate.py` failures into one legible one.
 5. Run `ingestion/validate.py` **as a Job in the namespace** (§2.5), then

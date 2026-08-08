@@ -67,6 +67,19 @@ subtree, which only constrains anything if the username IS that id:
 
   node scripts/mosquitto-provision-gateway.mjs --target=k8s <gwy...>
 
+DO NOT INSTALL WITH `--wait`. Helm blocks on workload readiness BEFORE it runs post-install hooks,
+and those hooks are this chart's bootstrap: db-roles-init issues the passwords for `authenticator`,
+`supabase_auth_admin` and `supabase_storage_admin`, which PostgREST, GoTrue, Realtime and
+storage-api each wait for before starting. So `--wait` waits for pods that are waiting for the
+hooks that `--wait` will not run until the pods are ready — reported, fifteen minutes later, as
+`context deadline exceeded` with supabase-db perfectly healthy. Wait explicitly instead:
+
+  for w in $(kubectl -n {{ .Release.Namespace }} get statefulset,deploy -o name); do
+    kubectl -n {{ .Release.Namespace }} rollout status "$w" --timeout=10m
+  done
+
+(`--wait` on a later `helm upgrade` is fine — the roles already have their passwords.)
+
 Check the migrations actually applied — the init hooks run AFTER the workloads are created, so a
 `helm install` can return before they finish:
 

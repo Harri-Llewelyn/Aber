@@ -121,10 +121,12 @@ spec:
                       {{- include "factoryplus.selectorLabels" (dict "ctx" . "component" "supabase-storage") | nindent 22 }}
           {{- end }}
           {{- if eq .Values.backup.destination "pvc" }}
-          # Same uid as the databases, so the dumps are written by a non-root user and are readable
-          # by a restore Job running as the same.
+          # Same gid as supabase-db, whose image this Job reuses for its pg_dump -- so a restore Job
+          # running from that same image can read what this one wrote. 106 is that image's `postgres`
+          # group, verified against the pinned tag; it read 999 here for the same reason it did in
+          # values.yaml and in the CI checker, which is that nobody had looked.
           securityContext:
-            fsGroup: 999
+            fsGroup: 106
             fsGroupChangePolicy: OnRootMismatch
           {{- end }}
           containers:

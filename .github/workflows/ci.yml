@@ -694,13 +694,28 @@ jobs:
       # M5. local-path provisions a root-owned host directory and several of these images run as a
       # non-root user, so a missing fsGroup is a crash loop on a permission error naming a path the
       # operator never chose. The uids are IMAGE PROPERTIES -- confirm against the pinned tag if a
-      # value here ever needs changing.
+      # value here ever needs changing:
+      #
+      #   docker run --rm --entrypoint sh <image>:<pinned-tag> -c 'getent passwd <user>'
+      #
+      # WHICH IS EXACTLY WHAT NOBODY DID FOR THE TWO DATABASES. Both said 999 -- here AND in
+      # values.yaml -- from the day they were written, and the note above telling the next person to
+      # confirm was the only thing standing behind either number. `timescale/timescaledb` is Alpine
+      # (uid/gid 70) and `supabase/postgres` is Debian (105:106); neither is 999, which is stock
+      # Debian `postgres` and belongs to a third image that is not in this chart.
+      #
+      # It never surfaced because both images run their entrypoint as ROOT and chown the data
+      # directory to their own postgres user before dropping privileges, so fsGroup is decorative
+      # for them today. It stops being decorative the moment anyone sets `runAsUser` -- at which
+      # point the entrypoint can no longer chown and this number is the whole permission story.
+      # A restated constant in a checker is not a check: it agreed with values.yaml perfectly while
+      # both were wrong.
       - name: Verify fsGroup Is Set On Every Workload With A Volume
         run: |
           python3 - <<'PY'
           import re, sys
           EXPECTED = {
-              'timescaledb': '999', 'supabase-db': '999',
+              'timescaledb': '70', 'supabase-db': '106',
               'supabase-storage': '1000', 'node-red': '1000', 'mosquitto': '1883',
           }
           docs = open('/tmp/rendered.yaml', encoding='utf-8').read().split('\n---\n')
@@ -1084,9 +1099,25 @@ jobs:
       - name: Mirror Repository Config Into The Chart
         run: node scripts/sync-helm-chart-files.mjs --check
 
-      # `--wait` blocks on the workloads; the post-install hooks (db-roles-init -> db-init ->
-      # storage-init) run after them and are waited on separately below, because `helm install`
-      # returning is NOT the same as the migrations having been applied.
+      # DELIBERATELY NO `--wait` ON THE FIRST INSTALL. It deadlocks this chart, and the deadlock is
+      # structural rather than a timing fluke.
+      #
+      # Helm's install order is: create resources -> (if --wait) BLOCK until every workload is
+      # Ready -> run post-install hooks. The bootstrap here is post-install hooks: db-roles-init
+      # sets the passwords for `authenticator`, `supabase_auth_admin` and `supabase_storage_admin`,
+      # which do not exist until it runs. PostgREST, GoTrue, Realtime and storage-api each have an
+      # initContainer that waits for its own role to authenticate -- correctly, since PostgREST
+      # starting early caches an EMPTY schema and then 404s every table from a healthy-looking
+      # process.
+      #
+      # So --wait waits for pods that are waiting for the hooks that --wait will not run until the
+      # pods are ready. It ends as `INSTALLATION FAILED: context deadline exceeded` fifteen minutes
+      # later, with supabase-db healthy, no init-hook pods ever created, and the only real evidence
+      # being `password authentication failed` in the database log. Nothing in that names Helm.
+      #
+      # Hooks are still waited on: `helm install` blocks on hook completion regardless of --wait.
+      # Readiness is then asserted explicitly below, which is what --wait was there for -- and it
+      # is a better assertion anyway, because it runs AFTER the database is actually usable.
       - name: Install The Chart
         run: |
           kubectl create namespace $NS
@@ -1094,7 +1125,7 @@ jobs:
             --namespace $NS \
             --values deploy/helm/factoryplus/values-dev.yaml \
             --set e2e.enabled=true \
-            --wait --timeout 15m
+            --timeout 15m
 
       - name: Wait For The Init Hooks
         run: |
@@ -1104,6 +1135,19 @@ jobs:
             kubectl -n $NS wait --for=condition=complete \
               "job/factoryplus-$job" --timeout=10m
             kubectl -n $NS logs "job/factoryplus-$job" | tail -20
+          done
+
+      # What `--wait` used to cover, moved to where it can actually succeed. Every workload is
+      # checked, so a component left behind by the hooks fails HERE -- naming itself -- rather than
+      # surfacing later as an unexplained validate.py failure.
+      - name: Wait For Every Workload To Become Ready
+        run: |
+          set -eu
+          # Named one at a time: `kubectl rollout status <type>` with no name is an error, not a
+          # sweep, and would fail this step for a reason unrelated to any workload's health.
+          for w in $(kubectl -n $NS get statefulset,deploy -o name); do
+            echo "--- $w"
+            kubectl -n $NS rollout status "$w" --timeout=10m
           done
 
       # M6. The cheap gate, FIRST. `public.telemetry` is a postgres_fdw projection, and a mistake in
