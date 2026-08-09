@@ -193,8 +193,31 @@ spec:
             # the webhook receiver -- and it has to be an end-to-end check: the fix is a runtime
             # property of the assembled stack, and a settings.js securing only /flows would leave the
             # webhook receiver open.
+            {{- /*
+              THE PUBLIC ORIGIN, NOT THE IN-CLUSTER ONE, AND THE COOKIE IS THE REASON.
+
+              This was `http://node-red:1880`, which is correct for check 7 and silently wrong for
+              7b. 7b drives the real browser handshake, and validate.py says why in its own comment:
+              "the state and PKCE verifier live in Node-RED's express session, so the callback has
+              to arrive carrying the cookie the /auth/strategy request set".
+
+              A cookie jar is HOST-SCOPED. Starting the flow at `node-red:1880` and receiving the
+              callback at `nodered.<publicBaseDomain>` -- which is what the OAuth client's
+              registered redirect_uri necessarily is -- means the session cookie is never sent
+              back. Node-RED then has no PKCE verifier for the code, and Passport fails the callback
+              with 403, surfacing as `AuthenticationError: Forbidden`. Nothing is broken; the
+              handshake was split across two origins.
+
+              Compose never hit this because both ends default to `http://localhost:1880`, so the
+              flow is single-origin there by accident of the topology rather than by design. Using
+              the public origin here makes Kubernetes single-origin too, and has the side benefit
+              that check 7 now exercises the ingress path a real operator uses.
+
+              Falls back to the in-cluster Service when no public domain is configured, so a stack
+              installed without one still runs the suite instead of rendering an unusable hostname.
+            */}}
             - name: NODERED_BASE_URL
-              value: http://node-red:1880
+              value: {{ (.Values.publicUrls.nodered | default (ternary (printf "%s://nodered.%s" .Values.global.scheme .Values.global.publicBaseDomain) "" (ne (.Values.global.publicBaseDomain | toString) ""))) | default "http://node-red:1880" | quote }}
             {{- include "factoryplus.secretEnv" (dict "name" "NODERED_OAUTH_CLIENT_SECRET" "secretName" $secretName "key" "NODERED_OAUTH_CLIENT_SECRET") | nindent 12 }}
             {{- /*
               I3X_BASE_URL WAS NEVER SET HERE, so checks 12-12f have never actually run on this
