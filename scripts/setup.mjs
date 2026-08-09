@@ -4,9 +4,9 @@
  * WHY THIS CHANGED. `.env.example` ships working Supabase demo values, and the documented
  * quickstart was `npm run setup`, which copied them verbatim. Two later changes made that
  * expensive: Kong now runs `key-auth` with the anon and service-role JWTs registered as gateway
- * API KEYS, so a default install accepts published credentials at its edge; and the `factoryplus`
- * MQTT principal's password is `MQTT_PASSWORD`. The keys are in git, in this repository, and in
- * every other Supabase self-host guide on the internet.
+ * API KEYS, so a default install accepts published credentials at its edge; and the four MQTT
+ * principals' passwords are committed alongside them. The keys are in git, in this repository, and
+ * in every other Supabase self-host guide on the internet.
  *
  * THE JWTS ARE A SET AND MUST BE GENERATED TOGETHER. `SUPABASE_ANON_KEY` and
  * `SUPABASE_SERVICE_ROLE_KEY` are HS256 JWTs *signed by* `SUPABASE_JWT_SECRET`. Rotating the
@@ -113,7 +113,15 @@ const generated = {
   PG_META_CRYPTO_KEY: hex(32),
   REALTIME_DB_ENC_KEY: hex(8),          // EXACTLY 16 chars
   REALTIME_SECRET_KEY_BASE: hex(32),    // AT LEAST 64 chars
-  MQTT_PASSWORD: hex(24),
+  // FOUR MQTT PASSWORDS, ONE PER PRINCIPAL, and independently generated on purpose. mosquitto.acl
+  // confines each account to a different subtree, which is worth nothing if one leaked password
+  // opens all four. The USERNAMES are not generated: two of them are `sparkplug_id`s derived from
+  // pinned UUIDs, and the ACL matches the topic's edge-node segment against the username exactly.
+  MQTT_INGESTION_PASSWORD: hex(24),
+  MQTT_I3X_PASSWORD: hex(24),
+  MQTT_SIMULATOR_PASSWORD: hex(24),
+  MQTT_VALIDATOR_PASSWORD: hex(24),
+  MQTT_MONITOR_PASSWORD: hex(24),
   GRAFANA_ADMIN_PASSWORD: hex(12),
   GRAFANA_OAUTH_CLIENT_SECRET: hex(32),
   NODERED_CREDENTIAL_SECRET: hex(32),

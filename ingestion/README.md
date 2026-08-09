@@ -200,8 +200,12 @@ On an unresolvable alias the daemon publishes `Node Control/Rebirth` to
   next one too, and retrying per message is exactly the flood the limit exists to prevent.
 - The daemon ignores `NCMD`/`DCMD` on its own wildcard subscription, so its own request coming
   straight back is not read as edge-node traffic.
-- `mosquitto.acl` already permits this: the `factoryplus` principal holds `readwrite spBv1.0/#`,
-  and each gateway's `spBv1.0/+/+/%u/#` covers its own NCMD topic.
+- `mosquitto.acl` permits **exactly this and nothing more**: the `factoryplus_ingestion` principal
+  holds `read spBv1.0/#` plus `write spBv1.0/+/NCMD/+`, so the daemon can ask for a rebirth and
+  cannot publish DBIRTH or DDATA at all. Each gateway's own `spBv1.0/+/+/%u/#` covers receiving it.
+  That split is the point: this credential cannot forge telemetry for a device that is correctly
+  bound to its gateway — the one forgery `verify_gateway_binding()` cannot detect, because such a
+  message satisfies it by construction.
 - **The demo Node-RED simulator does not answer a rebirth** — it publishes on a timer and
   subscribes to no command topic. That is a simulator limitation, not a daemon one.
 
@@ -248,7 +252,7 @@ published default is a silent security downgrade, and the failure mode is silenc
 | Variable | Default | Notes |
 | :--- | :--- | :--- |
 | `MQTT_HOST` / `MQTT_PORT` | `mosquitto` / `1883` | Compose-internal name |
-| `MQTT_USER` / `MQTT_PASSWORD` | `factoryplus` / **required** | |
+| `MQTT_USER` / `MQTT_PASSWORD` | `factoryplus_ingestion` / **required** | Its own principal. There is no shared broker account any more — see `mosquitto.acl` |
 | `DB_HOST` / `DB_PORT` | `timescaledb` / `5432` | Port defaults to `5433` when `DB_HOST` is unset, i.e. running from the host |
 | `DB_PASSWORD` | **required** | Unless `TIMESCALEDB_URL` is set |
 | `SUPABASE_URL` | `http://127.0.0.1:54321` | |
@@ -288,6 +292,7 @@ would expect.
 ```bash
 docker compose up -d
 set -a && . ./.env && set +a && unset MQTT_HOST DB_HOST DB_PORT
+export MQTT_USER="$MQTT_VALIDATOR_USER" MQTT_PASSWORD="$MQTT_VALIDATOR_PASSWORD"
 python ingestion/validate.py
 ```
 

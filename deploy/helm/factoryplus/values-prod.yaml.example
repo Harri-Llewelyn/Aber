@@ -111,8 +111,23 @@ secrets:
 
   pgMetaCryptoKey: ""
 
-  mqttUser: factoryplus
-  mqttPassword: ""
+  # Five MQTT principals, each confined by mosquitto.acl. GENERATE FIVE DIFFERENT PASSWORDS --
+  # the confinement is what limits the blast radius of one leaked credential, and reusing a
+  # single value throws that away. The usernames are fixed: the two gateway ones must equal the
+  # sparkplug_id generated from their pinned UUIDs, and the render fails if they do not.
+  #
+  # mqttValidatorPassword is only needed with e2e.enabled -- leave it empty in production and no
+  # account is created for it.
+  mqttIngestionUser: factoryplus_ingestion
+  mqttIngestionPassword: ""
+  mqttI3xUser: factoryplus_i3x
+  mqttI3xPassword: ""
+  mqttSimulatorUser: gwy100000000000400080000
+  mqttSimulatorPassword: ""
+  mqttValidatorUser: gwy110000000000400080000
+  mqttValidatorPassword: ""
+  mqttMonitorUser: factoryplus_monitor
+  mqttMonitorPassword: ""
 
   grafanaAdminUser: admin
   grafanaAdminPassword: ""
@@ -140,9 +155,18 @@ publicUrls:
 timescaledb:
   persistence:
     size: 200Gi
-    # The historian grows with fleet size and retention, not with usage. Size it against the
-    # retention policy in timescaledb/init/002_retention.sql, not against today's row count.
+    # The historian grows with fleet size and retention, not with usage. Size it against
+    # `retention.retainFor` below, not against today's row count -- and note that `never` makes
+    # this a running cost rather than a ceiling.
     storageClass: ""
+  # SET THIS DELIBERATELY BEFORE CARRYING PRODUCTION TELEMETRY. `retainFor` is a hard delete with
+  # no undo: TimescaleDB drops whole chunks and nothing in this chart copies them anywhere first,
+  # so the backup CronJob does not protect data the retention policy has already removed.
+  # Traceability obligations in manufacturing commonly run to years; the 90-day default is a
+  # starting point that no one has yet applied a requirement to.
+  retention:
+    compressAfter: "7 days"
+    retainFor: "90 days"
   resources:
     requests:
       cpu: 500m

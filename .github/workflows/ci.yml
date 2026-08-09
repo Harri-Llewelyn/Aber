@@ -1380,7 +1380,7 @@ jobs:
           timeout 90s bash -c '
             until docker compose exec -T timescaledb pg_isready -U postgres >/dev/null 2>&1 && \
                   docker compose exec -T supabase-db pg_isready -U postgres >/dev/null 2>&1 && \
-                  docker compose exec -T mosquitto mosquitto_sub -u factoryplus -P factoryplus123 -t "\$SYS/broker/version" -C 1 >/dev/null 2>&1; do
+                  docker compose exec -T mosquitto mosquitto_sub -u factoryplus_monitor -P factoryplus123 -t "\$SYS/broker/version" -C 1 >/dev/null 2>&1; do
               echo "Waiting for TimescaleDB, Supabase DB, and Mosquitto to become ready..."
               sleep 2
             done

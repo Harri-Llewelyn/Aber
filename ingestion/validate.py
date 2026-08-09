@@ -129,6 +129,30 @@ MALFORMED_DEVICE_ID = "dev" + "f" * 20
 # exercise the DEPRECATED fallback arm on every check rather than the current path.
 VAL_GROUP = "FactoryPlus"
 
+# ---------------------------------------------------------------------------------------------
+# The validator's gateway UUID is PINNED, and that is what lets it hold an ordinary per-gateway
+# MQTT credential instead of a wildcard one.
+#
+# mosquitto.acl confines every client to `spBv1.0/+/+/%u/#`, so an account's username must equal
+# the edge-node segment of the topics it publishes -- and that segment must be the gateway row's
+# `sparkplug_id` or verify_gateway_binding() rejects the message. `sparkplug_id` is GENERATED
+# ('gwy' + the first 21 hex characters of the UUID), so it is a pure function of this constant:
+#
+#     11000000-0000-4000-8000-000000000001  ->  gwy110000000000400080000
+#
+# Letting the database allocate the UUID, as this did, made the id different on every run and so
+# unprovisionable in advance -- which is the whole reason a shared `readwrite spBv1.0/#` account
+# survived here after every other consumer had been moved off one.
+#
+# ONLY THE GATEWAY IS PINNED. The devices are still created at runtime with database-allocated
+# UUIDs, because they sit in the FIFTH topic segment, which the ACL's trailing `#` covers. So the
+# onboarding and quarantine checks still exercise genuinely unknown device ids.
+#
+# The first 21 hex characters are what matter: 11000000-…-0002 would collide with -0001, since
+# they differ only past that cut. Do not derive a second fixture id by incrementing the last group.
+VAL_GW_UUID = "11000000-0000-4000-8000-000000000001"
+VAL_GW_SPARKPLUG_ID = "gwy110000000000400080000"
+
 # Sparkplug metric aliases for check 8. 100 is declared by the gateway's NBIRTH and used by a
 # DEVICE's DDATA -- that pair is the whole point, since Sparkplug scopes alias uniqueness to the
 # edge node including its devices, and a per-device table would silently fail to resolve it.
@@ -641,11 +665,31 @@ def seed_supabase():
     # by entity_id, and the cell's id is otherwise not recoverable once the row is deleted.
     SEEDED["cell_uuid"] = cell_id
 
-    # Seed gateway
-    g_res = supabase_client.table("gateways").insert({"name": VAL_GW_NAME, "cell_id": cell_id, "status": "ONLINE"}).execute()
+    # Seed gateway AT ITS PINNED UUID -- see VAL_GW_UUID for why the id cannot be left to the
+    # database. UPSERT rather than INSERT: the id is now fixed, so a previous run that died before
+    # cleanup leaves the row behind and a plain insert would fail on the primary key from then on,
+    # permanently, until someone deleted it by hand.
+    g_res = (
+        supabase_client.table("gateways")
+        .upsert(
+            {"id": VAL_GW_UUID, "name": VAL_GW_NAME, "cell_id": cell_id, "status": "ONLINE"},
+            on_conflict="id",
+        )
+        .execute()
+    )
     gateway = g_res.data[0] if g_res.data else {}
     SEEDED["gateway_uuid"] = gateway.get("id")
     SEEDED["gateway_id"] = gateway.get("sparkplug_id")
+
+    # The generated id is what the MQTT credential is named after, so a mismatch means every
+    # publish below is dropped by the broker with nothing logged at either end -- and the run
+    # would fail as "no telemetry ingested", naming the wrong subsystem entirely.
+    if SEEDED["gateway_id"] != VAL_GW_SPARKPLUG_ID:
+        raise SystemExit(
+            f"Seeded gateway sparkplug_id is {SEEDED['gateway_id']!r} but the MQTT credential is "
+            f"provisioned for {VAL_GW_SPARKPLUG_ID!r}. The generated-column expression and "
+            f"VAL_GW_SPARKPLUG_ID have diverged."
+        )
 
     # Seed the registered devices. sparkplug_id is a generated column, so it comes back on the
     # insert -- these are the ids the simulated gateways will publish under.
@@ -738,7 +782,14 @@ def run_simulation():
     # If upgrading to paho-mqtt 2.x+, callbacks must be migrated to CallbackAPIVersion.VERSION2
     # signatures (e.g. on_connect(client, userdata, flags, reason_code, properties)).
     client = mqtt.Client()
-    client.username_pw_set(os.getenv("MQTT_USER", "factoryplus"), os.getenv("MQTT_PASSWORD", "factoryplus123"))
+    # Connects as ITS OWN GATEWAY, exactly as a physical edge node does -- username ==
+    # VAL_GW_SPARKPLUG_ID, confined by mosquitto.acl to its own edge-node subtree. There is no
+    # wildcard account to fall back on any more, so a mismatch between this credential and
+    # VAL_GW_UUID shows up as every publish being silently dropped by the broker.
+    client.username_pw_set(
+        os.getenv("MQTT_USER", VAL_GW_SPARKPLUG_ID),
+        os.getenv("MQTT_PASSWORD", "factoryplus123"),
+    )
 
     # Capture the daemon's own NCMD rebirth requests. Check 9 asserts one is issued for an
     # unknown alias and that the second is suppressed, so both the presence and the ABSENCE of a

@@ -2338,6 +2338,26 @@ GRANT EXECUTE ON FUNCTION public.active_schema_version(UUID)            TO PUBLI
 --
 -- REPLICA IDENTITY FULL is required rather than cosmetic: Realtime evaluates RLS against the old
 -- row too, and with the default identity it only has the primary key.
+--
+-- `digital_thread` IS ALSO ABSENT, AND FOR A DIFFERENT REASON -- it was published until this was
+-- narrowed. An UNAUTHENTICATED subscriber still receives the change ENVELOPE: Realtime redacts
+-- the payload to `{}` and attaches a 401, but the message itself arrives, so the mere FACT and
+-- TIMING of a change leaks to anyone who can reach the socket. Kong's `key-auth` does not close
+-- that: the anon key is a registered key that is necessarily shipped to every browser.
+--
+-- The envelope is upstream Realtime behaviour and cannot be fixed here, so what is available is
+-- to publish less. `digital_thread` is the audit log -- it times quarantine decisions, approvals
+-- and reconfiguration, which is the most operationally sensitive stream in the publication -- and
+-- NOTHING SUBSCRIBES TO IT. All four consumers (Overview, Cells, Devices, Gateways) subscribe to
+-- ['cells','gateways','devices'] only, so removing it costs no behaviour at all.
+--
+-- THIS IS NOT AN ACCESS CHANGE. A publication governs logical replication and nothing else: the
+-- grants and the RLS policies on `digital_thread` are untouched, so authenticated users and API
+-- clients read the audit log through PostgREST exactly as before. The Digital Thread tab already
+-- refreshes by polling.
+--
+-- The residual, accepted knowingly: asset-edit timing still leaks through the three tables that
+-- ARE published, because the dashboard genuinely needs them live.
 
 DO $$
 BEGIN
@@ -2346,16 +2366,24 @@ BEGIN
   END IF;
 END $$;
 
+-- SET TABLE is ABSOLUTE, not additive -- it replaces the publication's whole membership. That is
+-- what lets this narrowing reach a database that already exists without a follow-up migration:
+-- every boot replays this file, and the next replay drops `digital_thread` from the set. A
+-- separate 0010 doing the removal would instead fight this statement forever, re-adding and
+-- re-dropping the table on each boot (the 0030/0032 lesson).
 ALTER PUBLICATION supabase_realtime SET TABLE
   public.cells,
   public.gateways,
-  public.devices,
-  public.digital_thread;
+  public.devices;
 
 ALTER TABLE public.cells          REPLICA IDENTITY FULL;
 ALTER TABLE public.gateways       REPLICA IDENTITY FULL;
 ALTER TABLE public.devices        REPLICA IDENTITY FULL;
-ALTER TABLE public.digital_thread REPLICA IDENTITY FULL;
+
+-- Returned to the default now that the table is unpublished. FULL only ever affected UPDATE and
+-- DELETE, which 0003's append-only trigger refuses anyway, so this changes no behaviour -- it
+-- stops the file asserting a replication requirement for a table that is not replicated.
+ALTER TABLE public.digital_thread REPLICA IDENTITY DEFAULT;
 
 
 -- ---------------------------------------------------------------------------------------------
@@ -2433,10 +2461,20 @@ BEGIN
 
   -- Realtime evaluates RLS against the old row; with the default replica identity it only has
   -- the primary key, and change events are silently withheld rather than erroring.
+  --
+  -- THE SET IS DERIVED FROM THE PUBLICATION, NOT LISTED HERE. It was listed, and the list is what
+  -- broke: narrowing the publication to drop `digital_thread` left this check still demanding FULL
+  -- on a table that is no longer replicated, so section 5 and this assertion contradicted each
+  -- other and db-init failed with a message about replica identity -- naming neither the
+  -- publication nor the change that had actually been made. A check that restates a constant
+  -- rather than reading it is a second source of truth, and it fails on the day the first one
+  -- changes.
   IF EXISTS (
-    SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE n.nspname = 'public'
-       AND c.relname IN ('cells', 'gateways', 'devices', 'digital_thread')
+    SELECT 1
+      FROM pg_publication_tables pt
+      JOIN pg_class c      ON c.relname = pt.tablename
+      JOIN pg_namespace n  ON n.oid = c.relnamespace AND n.nspname = pt.schemaname
+     WHERE pt.pubname = 'supabase_realtime'
        AND c.relreplident <> 'f'
   ) THEN
     RAISE EXCEPTION 'baseline incomplete: a published table is not REPLICA IDENTITY FULL';

@@ -129,9 +129,9 @@ existing Secret is left exactly as it is -- otherwise every `helm upgrade` would
 credential provisioned since the last one, and the fleet would fall off the broker in one go with
 `helm upgrade` as the only clue.
 
-The platform account is NOT in here. It comes from `secrets.mqttPassword` and is re-applied by the
-initContainer on every start, so rotating it in values reaches the broker on restart. This Secret
-holds only what the provisioning script adds.
+The five PLATFORM principals are NOT in here. They come from `secrets.mqtt*` and are re-applied by
+the initContainer (and the reload sidecar) on every start, so rotating one in values reaches the
+broker on restart. This Secret holds only what the provisioning script adds.
 
 Option C (mosquitto-go-auth against the `gateways` table, where the username is already the
 sparkplug_id the ACL's %u matches) remains the recorded future direction -- see plan §5.1.
@@ -318,18 +318,12 @@ spec:
             # Root, to chown. The broker container itself does not run as root.
             runAsUser: 0
           env:
-            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_USER") | nindent 12 }}
-            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_PASSWORD") | nindent 12 }}
+            {{- include "factoryplus.mqttPrincipalEnv" . | nindent 12 }}
           command:
             - /bin/sh
             - -e
             - -c
             - |
-              if [ -z "$MQTT_PASSWORD" ]; then
-                echo 'MQTT_PASSWORD must be set -- the broker runs allow_anonymous false, so an empty platform credential locks out the ingestion daemon and Node-RED with CONNACK 5.' >&2
-                exit 1
-              fi
-
               cp /policy/mosquitto.conf /mosquitto/config/mosquitto.conf
               cp /policy/mosquitto.acl  /mosquitto/config/mosquitto.acl
               {{- if $tls.enabled }}
@@ -362,13 +356,10 @@ spec:
                 : > /mosquitto/config/password_file
               fi
 
-              # The PLATFORM account, re-applied on every start from values rather than stored in
-              # the Secret. `mosquitto_passwd -b` upserts, so this is idempotent AND means rotating
-              # secrets.mqttPassword reaches the broker on the next restart.
-              #
-              # NOT -c: that would CREATE a new file, discarding every gateway credential copied in
-              # above. The single most destructive character available in this script.
-              mosquitto_passwd -b /mosquitto/config/password_file "$MQTT_USER" "$MQTT_PASSWORD"
+              # The FIVE PLATFORM PRINCIPALS, re-applied on every start from values rather than
+              # stored in the Secret, so rotating one in values reaches the broker on the next
+              # restart. Shared with the reload sidecar so the two cannot disagree about the set.
+              {{- include "factoryplus.mqttPrincipalUpserts" . | nindent 14 }}
 
               chown 1883:1883 /mosquitto/config/password_file
               chmod 0600 /mosquitto/config/password_file
@@ -408,8 +399,15 @@ spec:
               protocol: TCP
             {{- end }}
           env:
-            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_USER") | nindent 12 }}
-            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_PASSWORD") | nindent 12 }}
+            {{- /*
+              THE MONITORING PRINCIPAL, which can read $SYS and publish nothing anywhere. The
+              probes below are the only reason the broker container needs a credential at all, and
+              giving them the ingestion or simulator account would leave a credential able to write
+              Sparkplug topics sitting in the broker's own environment for the sake of a health
+              check. Read-only is exactly the authority a probe needs.
+            */}}
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_MONITOR_USER") | nindent 12 }}
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_MONITOR_PASSWORD") | nindent 12 }}
           # A REAL SUBSCRIBE, not a TCP check. The broker runs `allow_anonymous false`, so a
           # tcpSocket probe passes while every client is being refused with CONNACK 5 -- which is
           # precisely the failure mode this stack has hit before (a stale credential file, or a
@@ -493,8 +491,7 @@ spec:
             # Root, so it can write the broker-owned file and signal the broker process.
             runAsUser: 0
           env:
-            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_USER") | nindent 12 }}
-            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_PASSWORD") | nindent 12 }}
+            {{- include "factoryplus.mqttPrincipalEnv" . | nindent 12 }}
           command:
             - /bin/sh
             - -c
@@ -556,9 +553,12 @@ spec:
                 else
                   : > /mosquitto/config/password_file
                 fi
-                # Re-add the platform account: the Secret holds gateways only, and dropping this
-                # would disconnect the ingestion daemon and Node-RED on the next reload.
-                mosquitto_passwd -b /mosquitto/config/password_file "$MQTT_USER" "$MQTT_PASSWORD"
+                # Re-add the platform principals: the Secret holds per-gateway credentials only, so
+                # dropping these would disconnect the ingestion daemon, the i3X server and Node-RED
+                # on the next reload -- and take the broker's own probes with them, which turns a
+                # credential rotation into a NotReady pod. Shared with assemble-config so the two
+                # cannot disagree about the set.
+                {{- include "factoryplus.mqttPrincipalUpserts" . | nindent 16 }}
                 chown 1883:1883 /mosquitto/config/password_file
                 chmod 0600 /mosquitto/config/password_file
 
@@ -613,12 +613,15 @@ spec:
           env:
             - name: BROKER_ENDPOINT
               value: tcp://127.0.0.1:1883
-            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_USER") | nindent 12 }}
+            {{- /* THE MONITORING PRINCIPAL. `$SYS/#` is precisely what this exporter reads and the
+                   only thing that account can reach -- it cannot publish anywhere, which is the
+                   right authority for something whose whole job is to observe. */}}
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_MONITOR_USER") | nindent 12 }}
             {{- /* MQTT_PASS, not MQTT_PASSWORD: this exporter's own variable name. Reusing the
                    block the other containers share would leave it unauthenticated against a broker
                    running allow_anonymous false, and it would report that as a connection failure
                    rather than as a credential one. */}}
-            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_PASS" "secretName" $secretName "key" "MQTT_PASSWORD") | nindent 12 }}
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_PASS" "secretName" $secretName "key" "MQTT_MONITOR_PASSWORD") | nindent 12 }}
           ports:
             - name: metrics
               containerPort: {{ .Values.mosquitto.metrics.port }}

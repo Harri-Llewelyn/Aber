@@ -363,8 +363,40 @@ Single entry point, included once from NOTES.txt so every render runs every chec
 ORDER IS DELIBERATE, most fundamental first: a stack with no credentials should be told that, not
 told about the hostnames it also lacks.
 */}}
+{{/*
+The two GATEWAY MQTT usernames must be well-formed sparkplug_ids, and the monitoring account must
+have a password.
+
+WHY THE RENDER AND NOT THE POD. `mosquitto.acl` pins the topic's edge-node segment to the
+connecting username (`pattern readwrite spBv1.0/+/+/%u/#`), and `verify_gateway_binding()` requires
+that same segment to be the gateway row's GENERATED `sparkplug_id`. So a friendly username here
+does not fail: the client authenticates perfectly, and then the broker silently drops every
+message it publishes. Nothing logs a reason at either end -- the symptom is an edge node that
+connects and produces no telemetry, which reads as a broken simulator or a broken ingestion daemon.
+
+The monitoring password is checked because the broker's own probes authenticate as that account:
+an empty one leaves the pod permanently NotReady and takes down every workload that waits on it,
+reporting nothing about MQTT.
+
+Skipped when `existingSecret` is set -- the values are then not the chart's to see.
+*/}}
+{{- define "factoryplus.validateMqttPrincipals" -}}
+{{- if not .Values.secrets.existingSecret -}}
+{{- range $field := list "mqttSimulatorUser" "mqttValidatorUser" -}}
+{{- $v := get $.Values.secrets $field -}}
+{{- if not (regexMatch "^gwy[0-9a-f]{21}$" $v) -}}
+{{- fail (printf "\n\nfactoryplus: secrets.%s is %q, which is not a gateway sparkplug_id.\n\nIt must be 'gwy' followed by exactly 21 lowercase hex characters. mosquitto.acl confines each\nclient to `spBv1.0/+/+/%%u/#`, and ingestion's verify_gateway_binding() requires that same topic\nsegment to be the gateway row's GENERATED sparkplug_id -- so any other value AUTHENTICATES FINE\nand then has every published message silently dropped by the broker, with nothing logged at\neither end.\n\nThe id is derived from the row's pinned UUID: 'gwy' + the first 21 hex characters of it.\n  10000000-0000-4000-8000-000000000001 -> gwy100000000000400080000  (Virtual_Gateway_NodeRED)\n  11000000-0000-4000-8000-000000000001 -> gwy110000000000400080000  (validate.py's gateway)\n" $field $v) -}}
+{{- end -}}
+{{- end -}}
+{{- if not .Values.secrets.mqttMonitorPassword -}}
+{{- fail "\n\nfactoryplus: secrets.mqttMonitorPassword is empty.\n\nThe broker's startup, readiness and liveness probes authenticate as this account (it can read\n$SYS and publish nothing). Without it mosquitto never becomes Ready, and every workload that\nwaits on it fails to start -- an outage whose events mention neither MQTT nor this setting.\n" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "factoryplus.validate" -}}
 {{- include "factoryplus.validateSecrets" . -}}
+{{- include "factoryplus.validateMqttPrincipals" . -}}
 {{- include "factoryplus.validateRealtime" . -}}
 {{- include "factoryplus.validateRealtimeServiceName" . -}}
 {{- include "factoryplus.validatePublicUrls" . -}}
@@ -586,6 +618,13 @@ the render, never the pod -- applied to its own helpers.
 - name: {{ .name | required "factoryplus.waitFor: `name` is required (it names the initContainer in kubectl output)." }}
   image: {{ .image | default "busybox:1.36" }}
   imagePullPolicy: IfNotPresent
+  {{- /* Optional `env`, for a probe that needs a credential -- a Kong route under key-auth, say.
+         Passed as rendered YAML so the caller composes it with factoryplus.secretEnv and no secret
+         value ever reaches a command line, where `kubectl describe` would show it. */ -}}
+  {{- with .env }}
+  env:
+    {{- . | nindent 4 }}
+  {{- end }}
   command:
     - /bin/sh
     - -c
@@ -608,6 +647,13 @@ Wait for a Postgres to accept a QUERY, not merely a connection.
 `pg_isready` is not enough against supabase/postgres: it answers during the image's own bootstrap
 while the server still refuses queries, so a migration Job gated on it starts too early and fails
 part-way through -- leaving a half-applied schema, which is the worst outcome available here.
+
+OPTIONAL `query` LETS A CALLER WAIT FOR A SCHEMA RATHER THAN A SERVER, which is a different and
+usually stronger precondition. `psql -c` exits non-zero on a missing relation exactly as it does on
+a refused connection, so one probe covers "the database is down" and "the migrations have not run
+yet" without distinguishing them -- and the caller does not need to, because the answer to both is
+"keep waiting". Optional `describe` names what is being waited FOR in the log and the timeout
+message; without it the message names only the host, which is the least useful half.
 */}}
 {{- define "factoryplus.waitForPostgres" -}}
 - name: {{ .name }}
@@ -624,15 +670,15 @@ part-way through -- leaving a half-applied schema, which is the worst outcome av
     - -c
     - |
       deadline=$(( $(date +%s) + {{ .ctx.Values.initJobs.waitTimeout }} ))
-      until psql -h {{ .host }} -p {{ .port }} -U {{ .user }} -d {{ .db }} -c 'SELECT 1;' >/dev/null 2>&1; do
+      until psql -h {{ .host }} -p {{ .port }} -U {{ .user }} -d {{ .db }} -c {{ .query | default "SELECT 1;" | quote }} >/dev/null 2>&1; do
         if [ "$(date +%s)" -ge "$deadline" ]; then
-          echo "timed out after {{ .ctx.Values.initJobs.waitTimeout }}s waiting for {{ .host }}" >&2
+          echo "timed out after {{ .ctx.Values.initJobs.waitTimeout }}s waiting for {{ .describe | default .host }}" >&2
           exit 1
         fi
-        echo "waiting for {{ .host }} to accept queries ..."
+        echo "waiting for {{ .describe | default (printf "%s to accept queries" .host) }} ..."
         sleep 3
       done
-      echo "{{ .host }} is accepting queries"
+      echo "{{ .describe | default (printf "%s is accepting queries" .host) }} — ready"
 {{- end -}}
 
 {{/* Pull one key from the chart's Secret as an env var. */}}
@@ -642,6 +688,59 @@ part-way through -- leaving a half-applied schema, which is the worst outcome av
     secretKeyRef:
       name: {{ .secretName }}
       key: {{ .key }}
+{{- end -}}
+
+{{/*
+The five MQTT platform principals, as env, for the two containers that PROVISION them: the
+broker's assemble-config initContainer and the credential-reload sidecar.
+
+ONE DEFINITION, because the two must agree exactly. They write the same password file, and a
+principal present in one and absent from the other produces a broker that authenticates a client
+until the next reload and then stops -- an intermittent CONNACK 5 that looks like a flapping
+network rather than a template that disagrees with itself.
+
+Consumers (ingestion, i3x, node-red, the validator Job) each take only THEIR OWN pair, so this is
+deliberately not used there: the point of the split is that no workload holds another's credential.
+*/}}
+{{- define "factoryplus.mqttPrincipalEnv" -}}
+{{- $secretName := include "factoryplus.secretName" . -}}
+{{- range $p := list "INGESTION" "I3X" "SIMULATOR" "VALIDATOR" "MONITOR" }}
+{{ include "factoryplus.secretEnv" (dict "name" (printf "MQTT_%s_USER" $p) "secretName" $secretName "key" (printf "MQTT_%s_USER" $p)) }}
+{{ include "factoryplus.secretEnv" (dict "name" (printf "MQTT_%s_PASSWORD" $p) "secretName" $secretName "key" (printf "MQTT_%s_PASSWORD" $p)) }}
+{{- end }}
+{{- end -}}
+
+{{/*
+The shell fragment that upserts those five accounts into an ALREADY-ASSEMBLED password file.
+
+`mosquitto_passwd -b` upserts, so this is idempotent and re-applying it on every start is what
+makes a rotated password in values reach the broker on the next restart.
+
+NEVER `-c` HERE. That flag CREATES the file, discarding every per-gateway credential provisioned
+since the last upgrade -- the whole fleet drops off the broker at once with `helm upgrade` as the
+only clue. It is the single most destructive character available in this script.
+
+An EMPTY password skips that account rather than writing an empty one. `mqttValidatorPassword` is
+the case that matters: the validator is a fixture, so a production install leaves it unset and
+should simply not have the account, not fail to boot over a credential it never wanted.
+*/}}
+{{- define "factoryplus.mqttPrincipalUpserts" -}}
+for p in INGESTION I3X SIMULATOR VALIDATOR MONITOR; do
+  eval user="\$MQTT_${p}_USER"
+  eval pass="\$MQTT_${p}_PASSWORD"
+  if [ -n "$pass" ]; then
+    mosquitto_passwd -b /mosquitto/config/password_file "$user" "$pass"
+  else
+    echo "MQTT_${p}_PASSWORD is empty -- not creating an account for '${user}'."
+  fi
+done
+# The monitoring account is the one that cannot be skipped: the broker's own probes subscribe to
+# $SYS as it, so without it the pod never becomes ready and every workload that waits on mosquitto
+# fails to start -- an outage whose message names neither MQTT nor this file.
+if [ -z "$MQTT_MONITOR_PASSWORD" ]; then
+  echo 'MQTT_MONITOR_PASSWORD must be set: the readiness, liveness and startup probes authenticate as this account, so an empty one leaves the broker permanently NotReady.' >&2
+  exit 1
+fi
 {{- end -}}
 
 {{/*

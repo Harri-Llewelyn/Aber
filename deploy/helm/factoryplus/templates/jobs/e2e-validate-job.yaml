@@ -49,11 +49,45 @@ spec:
       {{- end }}
       initContainers:
         {{/*
-          Waits for the gateway, not just the databases. validate.py reaches Supabase through Kong
-          with the service-role key; started too early it fails on connection refused and reports
-          "no quarantined device" -- a symptom three layers from the cause.
+          WAITS FOR THE MIGRATIONS, NOT FOR THE GATEWAY. This is a plain Job, so Kubernetes creates
+          it at `helm install` time -- alongside every Deployment and MINUTES BEFORE the
+          post-install hooks that bootstrap the database. It previously waited only on Kong, and
+          that failed in CI in the most misleading way available:
+
+            * Kong answers as soon as it is up, long before PostgREST has a schema behind it;
+            * the probe was `curl -s -o /dev/null`, with NO `-f`, so the 502 Kong returns while its
+              upstream is broken counted as SUCCESS.
+
+          So the Job started ~3 minutes early, found `supabase-db` still refusing connections, and
+          died reporting `relation "public.devices" does not exist` and a pydantic parse error
+          inside the PostgREST client. The pod ages are what gave it away: `e2e-validate` was
+          3m27s old while `db-init` was 43s old. Nothing in the failure named ordering.
+
+          Waiting on a QUERY against `public.devices` covers both halves at once -- `psql` exits
+          non-zero whether the server is down or the table does not exist yet -- and the answer to
+          both is the same: keep waiting. It is the same discipline `ingestion` uses against the
+          telemetry hypertable: probe the OBJECT the workload needs, not the process that serves it.
         */}}
-        {{- include "factoryplus.waitFor" (dict "ctx" . "name" "wait-for-kong" "image" "curlimages/curl:8.10.1" "command" (printf "curl -s -o /dev/null %s/rest/v1/" (include "factoryplus.supabase.internalUrl" .)) "describe" "supabase-kong") | nindent 8 }}
+        {{- include "factoryplus.waitForPostgres" (dict
+             "ctx" .
+             "name" "wait-for-migrations"
+             "host" (include "factoryplus.supabaseDb.host" .)
+             "port" (include "factoryplus.supabaseDb.port" .)
+             "user" "postgres"
+             "db" "postgres"
+             "passwordKey" "POSTGRES_PASSWORD"
+             "query" "SELECT 1 FROM public.devices LIMIT 1;"
+             "describe" "the Supabase migrations (public.devices) — db-init is a post-install hook and runs AFTER this Job is created")
+           | nindent 8 }}
+        {{/*
+          Kong second, and with `-f` this time. validate.py reaches Supabase THROUGH the gateway, so
+          the database being ready is necessary but not sufficient. `-f` matters: without it any
+          response at all -- including the 502 above -- satisfies the probe, which is exactly how
+          this check came to pass while proving nothing. A 401 would also fail `-f`, and that is
+          correct here: `/rest/v1/` is not on Kong's key-auth exemption list, so an unauthenticated
+          200 would itself be a finding.
+        */}}
+        {{- include "factoryplus.waitFor" (dict "ctx" . "name" "wait-for-kong" "image" "curlimages/curl:8.10.1" "command" (printf "curl -sf -o /dev/null -H \"apikey: $SERVICE_ROLE_KEY\" '%s/rest/v1/devices?limit=1'" (include "factoryplus.supabase.internalUrl" .)) "describe" "supabase-kong routing to PostgREST with a live schema" "env" (include "factoryplus.secretEnv" (dict "name" "SERVICE_ROLE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY"))) | nindent 8 }}
       containers:
         - name: validate
           # The test-runner image: the ingestion image plus jsonschema and the AAS suite. Built from
@@ -86,8 +120,15 @@ spec:
               value: mosquitto
             - name: MQTT_PORT
               value: "1883"
-            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_USER") | nindent 12 }}
-            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_PASSWORD") | nindent 12 }}
+            {{- /*
+              The validator connects AS AN ORDINARY GATEWAY, confined by mosquitto.acl to its own
+              edge-node subtree exactly as a physical one is. The username is the `sparkplug_id`
+              generated from VAL_GW_UUID in validate.py -- pinned there precisely so this
+              credential can be issued before the row exists. A mismatch between the two shows up
+              as every publish being silently dropped, and the run failing as "no telemetry".
+            */}}
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_VALIDATOR_USER") | nindent 12 }}
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_VALIDATOR_PASSWORD") | nindent 12 }}
             - name: SUPABASE_URL
               value: {{ include "factoryplus.supabase.internalUrl" . | quote }}
             # WITHOUT THIS the script seeds nothing and fails about 12 of 20 checks in a way that

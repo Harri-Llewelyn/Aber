@@ -34,8 +34,18 @@ secrets:
 
   pgMetaCryptoKey: factoryplus-pg-meta-crypto-key
 
-  mqttUser: factoryplus
-  mqttPassword: factoryplus123
+  # Five principals; see values.yaml for why the two gateway usernames are sparkplug_ids and not
+  # free text. One shared password here only because this file is the CI fixture.
+  mqttIngestionUser: factoryplus_ingestion
+  mqttIngestionPassword: factoryplus123
+  mqttI3xUser: factoryplus_i3x
+  mqttI3xPassword: factoryplus123
+  mqttSimulatorUser: gwy100000000000400080000
+  mqttSimulatorPassword: factoryplus123
+  mqttValidatorUser: gwy110000000000400080000
+  mqttValidatorPassword: factoryplus123
+  mqttMonitorUser: factoryplus_monitor
+  mqttMonitorPassword: factoryplus123
 
   grafanaAdminUser: admin
   grafanaAdminPassword: admin

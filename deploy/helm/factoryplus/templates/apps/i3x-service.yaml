@@ -73,6 +73,21 @@ spec:
             # key here "for convenience".
             {{- include "factoryplus.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" (include "factoryplus.secretName" .) "key" "SUPABASE_ANON_KEY") | nindent 12 }}
             {{- include "factoryplus.brokerClientEnv" . | nindent 12 }}
+            {{- /*
+              THE BROKER CREDENTIAL WAS MISSING HERE ENTIRELY, and this is a fix rather than a
+              rename. brokerClientEnv carries host, port and TLS only, so on Kubernetes this pod
+              connected anonymously to a broker running `allow_anonymous false` -- refused with
+              CONNACK 5, after which i3x_service falls back to its Python default and Compose
+              happened to supply the shared account that no longer exists. The service came up,
+              answered /info, and served an address space whose values never updated.
+
+              READ-ONLY, and separate from the ingestion account on purpose: this server refuses
+              writes in code (405 on PUT /objects/value, `update.current: false`), and that stance
+              is worth more when the broker enforces it too -- a credential that cannot publish
+              cannot be talked into publishing.
+            */}}
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_USER" "secretName" (include "factoryplus.secretName" .) "key" "MQTT_I3X_USER") | nindent 12 }}
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" (include "factoryplus.secretName" .) "key" "MQTT_I3X_PASSWORD") | nindent 12 }}
             - name: I3X_SUBSCRIPTION_TTL_SECONDS
               value: {{ .Values.i3xService.subscriptionTtlSeconds | quote }}
             - name: I3X_SUBSCRIPTION_QUEUE_LIMIT

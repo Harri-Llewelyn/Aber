@@ -44,6 +44,17 @@ const MIRRORS = [
     why: 'TimescaleDB bootstrap; Compose bind-mounts the same directory at /docker-entrypoint-initdb.d',
   },
   {
+    source: 'timescaledb',
+    dest: 'timescaledb-retention',
+    // NOT part of the initdb mirror above, and the separation is the point. Everything in
+    // timescaledb/init runs ONLY on an empty data directory; this one runs on EVERY boot, which
+    // is what makes the compression and retention intervals a setting rather than a constant
+    // fixed before the first row was written. Mounting it into the initdb ConfigMap would silently
+    // restore the old behaviour.
+    match: (name) => name === 'retention.sql',
+    why: 'Compression/retention reconciliation; run on every boot by a hook Job with the configured intervals',
+  },
+  {
     source: join('supabase', 'migrations'),
     dest: 'migrations',
     // Top level only -- readdirSync does not recurse, which is what keeps

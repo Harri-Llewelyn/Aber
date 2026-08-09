@@ -5,7 +5,9 @@
  * WHY A GATEWAY NEEDS ITS OWN CREDENTIAL. `mosquitto.acl` confines each client to
  * `spBv1.0/+/+/%u/#`, where `%u` is the connecting username. That rule only constrains anything
  * if a gateway's username IS its `sparkplug_id` -- a gateway sharing the platform-wide
- * `factoryplus` account is a trusted principal and is confined by nothing at the broker tier.
+ * `factoryplus` account WAS a trusted principal confined by nothing at the broker tier -- which is
+ * why that account no longer exists. Every principal in `mosquitto.acl` is now confined, and the
+ * only accounts that may publish asset data are per-gateway ones issued by this script.
  *
  * So: one account per gateway, named after the id it is allowed to publish under.
  *

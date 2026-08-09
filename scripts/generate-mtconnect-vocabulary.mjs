@@ -180,7 +180,10 @@ const header =
   `-- GENERATED. Do not edit these rows by hand: bump SCHEMA_VERSION in\n` +
   `-- scripts/generate-mtconnect-vocabulary.mjs and re-run it. CI verifies the digest above.`;
 
-const seed = readFileSync(SEED, 'utf8');
+// Normalised, matching scripts/check-mtconnect-seed-sync.mjs. Git checks this file out as CRLF on
+// Windows; splicing an LF block into a CRLF file would produce a mixed-ending seed whose digest is
+// over neither, so regenerating on Windows would emit a stamp CI then rejected.
+const seed = readFileSync(SEED, 'utf8').replace(/\r\n/g, '\n');
 const beginAt = seed.indexOf(BEGIN_MARKER);
 const endAt = seed.indexOf(END_MARKER);
 if (beginAt < 0 || endAt < 0 || endAt < beginAt) {

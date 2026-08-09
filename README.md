@@ -231,7 +231,7 @@ Two things worth knowing before the first install:
 | [`supabase/migrations/archive/`](supabase/migrations/archive) | The 38 pre-beta migrations, preserved for their reasoning. Never executed |
 | [`docs/openapi.yaml`](docs/openapi.yaml) | REST API specification rendered by Swagger UI |
 | [`grafana/`](grafana) | Datasource, dashboard and alerting provisioning |
-| [`timescaledb/init/`](timescaledb/init) | Hypertable schema and retention policy |
+| [`timescaledb/`](timescaledb) | Hypertable schema (`init/`, first boot only) and the compression/retention reconciliation applied on every boot |
 | [`scripts/`](scripts) | Setup, Node-RED seeding, storage bucket, MQTT credentials, vocabulary generation, chart-file sync, image tag parity |
 | **[`deploy/k8s/README.md`](deploy/k8s/README.md)** | Kubernetes runbook: install, upgrade, teardown, hardening, the divergence table, and what will bite you |
 | [`deploy/helm/factoryplus/`](deploy/helm/factoryplus) | The Helm chart. `values.yaml` documents every setting and why it is not simply a default |
@@ -381,6 +381,7 @@ python supabase/migrations/test_schema_versioning.py
 
 # End-to-end — needs the running stack
 set -a && . ./.env && set +a && unset MQTT_HOST DB_HOST DB_PORT
+export MQTT_USER="$MQTT_VALIDATOR_USER" MQTT_PASSWORD="$MQTT_VALIDATOR_PASSWORD"
 python ingestion/validate.py
 ```
 

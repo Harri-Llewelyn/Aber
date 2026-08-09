@@ -34,7 +34,12 @@ const RUNTIME_DIR =
   process.env.NODE_RED_RUNTIME_DIR || '/usr/src/node-red/node_modules';
 
 const credentialSecret = process.env.NODERED_CREDENTIAL_SECRET;
-const mqttUser = process.env.MQTT_USER || 'factoryplus';
+// The SIMULATOR'S OWN GATEWAY CREDENTIAL, not a shared platform account. mosquitto.acl confines
+// each client to `spBv1.0/+/+/%u/#`, so this username must be the `sparkplug_id` of the gateway
+// the flow publishes under -- Virtual_Gateway_NodeRED, whose UUID is pinned in 0002_seed_data.sql
+// precisely so that id is knowable in advance. A friendly name here would authenticate fine and
+// then have every publish silently dropped by the broker.
+const mqttUser = process.env.MQTT_USER || 'gwy100000000000400080000';
 const mqttPassword = process.env.MQTT_PASSWORD;
 const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
 
@@ -684,7 +689,60 @@ function credentialsWorthKeeping() {
   }
 }
 
-const writeCredentials = seededFlow || !credentialsWorthKeeping();
+/**
+ * The broker username currently stored in flows_cred.json, or null if it cannot be read.
+ *
+ * Decrypted with the same scheme the round-trip check below uses. A file we cannot decrypt is not
+ * ours to judge, so it reads as null and the keep-them-untouched path applies unchanged.
+ */
+function storedBrokerCredential() {
+  if (!fs.existsSync(credentialsPath)) return null;
+  try {
+    const existing = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
+    if (typeof existing?.$ !== 'string' || existing.$.length === 0) return null;
+    const key = crypto.createHash('sha256').update(credentialSecret).digest();
+    const iv = Buffer.from(existing.$.substring(0, 32), 'hex');
+    const decipher = crypto.createDecipheriv('aes-256-ctr', key, iv);
+    const plain =
+      decipher.update(existing.$.substring(32), 'base64', 'utf8') + decipher.final('utf8');
+    return JSON.parse(plain)['mqtt-broker-config'] || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A CHANGED BROKER IDENTITY FORCES A REWRITE, and this is not a refinement -- without it, changing
+ * MQTT_USER breaks every existing deployment silently.
+ *
+ * The credentials were seed-once: an existing flows_cred.json was left alone on the reasoning that
+ * it might hold something an operator typed into the editor. But the broker USERNAME is not user
+ * content -- since the accounts were split per principal it is the simulator gateway's
+ * `sparkplug_id`, which mosquitto.acl matches the topic's edge-node segment against. Renaming the
+ * account therefore left Node-RED authenticating as a user that no longer exists, and Node-RED
+ * reports exactly one thing when that happens:
+ *
+ *     Connection failed to broker: <clientId>@mqtt://mosquitto:1883
+ *
+ * -- the CLIENT ID, not the username, and no CONNACK code. The same line a wrong host produces.
+ * Observed on a real upgrade of this stack, which is why it is handled here rather than documented.
+ *
+ * Only a differing USER triggers this. A password an operator changed in the editor is left alone,
+ * because that is a credential for the same account; a different account is a different credential
+ * and the environment is authoritative about which one this deployment uses.
+ */
+const storedBroker = storedBrokerCredential();
+const brokerIdentityChanged = Boolean(storedBroker) && storedBroker.user !== mqttUser;
+
+const writeCredentials = seededFlow || !credentialsWorthKeeping() || brokerIdentityChanged;
+
+if (brokerIdentityChanged) {
+  console.log(
+    `[node-red-init] broker username changed ('${storedBroker.user}' -> '${mqttUser}'); ` +
+      'rewriting flows_cred.json. The old account no longer exists, and Node-RED would report ' +
+      'only "Connection failed to broker" if it kept using it.'
+  );
+}
 
 // 3b. Drop any credential key Node-RED generated for itself on an earlier boot.
 //

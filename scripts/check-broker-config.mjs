@@ -112,6 +112,24 @@ function assemble({ withTls }) {
  * drops to uid 1883) cannot read it and fails with "Unable to open pwfile", which looks like a
  * config error and is not one.
  */
+/**
+ * The principals mosquitto.acl actually names, provisioned into every test broker.
+ *
+ * `gwy999…` is not a real gateway and does not need to be: it exists so "a gateway cannot publish
+ * under ANOTHER edge node" is testable. Without a second edge node that assertion cannot be made
+ * at all, and it is the one that matters most -- it is the forgery `verify_gateway_binding()`
+ * cannot detect, because a message published under a correctly bound device satisfies it.
+ */
+const GATEWAY_A = 'gwy100000000000400080000';
+const GATEWAY_B = 'gwy999999999999999999999';
+const ACCOUNTS = {
+  factoryplus_ingestion: 'ing-secret',
+  factoryplus_i3x: 'i3x-secret',
+  factoryplus_monitor: 'mon-secret',
+  [GATEWAY_A]: 'gw-a-secret',
+  [GATEWAY_B]: 'gw-b-secret',
+};
+
 function startBroker({ withTls, certsDir, ports = [] }) {
   assemble({ withTls });
   const name = `fp-broker-check-${Date.now()}`;
@@ -125,6 +143,12 @@ function startBroker({ withTls, certsDir, ports = [] }) {
     '-c',
     'cp /cfgsrc/* /mosquitto/config/ && ' +
       'mosquitto_passwd -b -c /mosquitto/config/password_file probe probe-secret && ' +
+      // The real principals mosquitto.acl names, so section 4 can assert the confinement each one
+      // is supposed to have. TWO gateways, because "cannot address another edge node" needs
+      // another edge node to exist before it can be tested at all.
+      Object.entries(ACCOUNTS)
+        .map(([u, p]) => `mosquitto_passwd -b /mosquitto/config/password_file ${u} ${p} && `)
+        .join('') +
       'chown 1883:1883 /mosquitto/config/password_file && ' +
       'chmod 0600 /mosquitto/config/password_file && ' +
       'exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf'
@@ -191,10 +215,15 @@ try {
         );
       }
 
+      // A topic `probe` is ALLOWED to publish under mosquitto.acl's per-gateway pattern. This
+      // assertion is about authentication, not authorisation -- but at QoS 0 a denied publish
+      // still exits 0 (the broker drops it silently and tells the client nothing), so a topic the
+      // ACL refuses would have made this check pass while proving nothing. Authorisation is
+      // asserted properly in section 4, by whether a message is DELIVERED.
       const authed = docker([
         'run', '--rm', '--network', `container:${r.name}`, IMAGE,
         'mosquitto_pub', '-h', '127.0.0.1', '-p', '1883', '-u', 'probe', '-P', 'probe-secret',
-        '-t', 'probe/authed', '-m', 'x'
+        '-t', 'spBv1.0/FactoryPlus/DDATA/probe/dev1', '-m', 'x'
       ]);
       if (authed.status === 0) {
         ok.push('1883 accepts a client with valid credentials');
@@ -202,6 +231,116 @@ try {
         problems.push(
           `a client WITH valid credentials was refused on 1883: ${(authed.stderr || '').trim()}`
         );
+      }
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // 4. mosquitto.acl CONFINES EACH PRINCIPAL. Asserted by DELIVERY, not by exit status.
+    //
+    // A denied publish at QoS 0 exits 0: the broker drops the message and says nothing, by design.
+    // So every assertion here works the only way that is meaningful -- publish as one principal,
+    // subscribe as one permitted to read the whole tree, and ask whether the message ARRIVED.
+    //
+    // This is the check that would notice the shared `readwrite spBv1.0/#` account coming back,
+    // in any form: a new principal, a widened rule, or an ACL file that failed to load at all
+    // (mosquitto WARNS and continues on a missing acl_file rather than refusing to start, which is
+    // exactly the failure a config-parse check cannot see).
+    // -------------------------------------------------------------------------------------------
+    if (r.running) {
+      /**
+       * Publish as one client, read as another, and report whether the payload ARRIVED.
+       *
+       * MATCHES THE PAYLOAD, not "did the subscriber print anything". `mosquitto_sub -W` writes
+       * `Timed out` to stderr when the window closes empty, and the capture is 2>&1 -- so a
+       * truthiness test on the file treats a DROPPED message as a delivered one and every negative
+       * assertion here passes vacuously. That is exactly what this function got wrong first time,
+       * and it would have made the whole section report success while asserting nothing.
+       */
+      const MARKER = 'FP-ACL-PROBE';
+      const delivers = (pubUser, topic, subUser = 'factoryplus_ingestion', subTopic = 'spBv1.0/#') => {
+        const out = `/tmp/acl-${Date.now()}.txt`;
+        docker(['exec', '-d', r.name, 'sh', '-c',
+          `mosquitto_sub -u ${subUser} -P ${ACCOUNTS[subUser]} -t '${subTopic}' -C 1 -W 5 > ${out} 2>&1`]);
+        docker(['exec', r.name, 'sleep', '2']);
+        docker(['exec', r.name, 'mosquitto_pub', '-u', pubUser, '-P', ACCOUNTS[pubUser],
+          '-t', topic, '-m', MARKER]);
+        docker(['exec', r.name, 'sleep', '4']);
+        return (docker(['exec', r.name, 'cat', out]).stdout || '').includes(MARKER);
+      };
+
+      const expect = (label, got, wanted) => {
+        if (got === wanted) ok.push(label);
+        else problems.push(
+          `${label} -- expected the message to be ${wanted ? 'DELIVERED' : 'DROPPED'}, but it was ${got ? 'delivered' : 'dropped'}`
+        );
+      };
+
+      expect(
+        'a gateway may publish under its OWN edge node',
+        (delivers(GATEWAY_A, `spBv1.0/FactoryPlus/DDATA/${GATEWAY_A}/dev1`)),
+        true
+      );
+      expect(
+        'a gateway may NOT publish under another edge node (the forgery gateway binding cannot catch)',
+        (delivers(GATEWAY_A, `spBv1.0/FactoryPlus/DDATA/${GATEWAY_B}/dev1`)),
+        false
+      );
+      expect(
+        'the ingestion principal may NOT publish DDATA',
+        (delivers('factoryplus_ingestion', `spBv1.0/FactoryPlus/DDATA/${GATEWAY_A}/dev1`)),
+        false
+      );
+      expect(
+        'the ingestion principal may NOT publish DBIRTH',
+        (delivers('factoryplus_ingestion', `spBv1.0/FactoryPlus/DBIRTH/${GATEWAY_A}/dev1`)),
+        false
+      );
+      expect(
+        'the ingestion principal MAY publish a rebirth NCMD (alias recovery depends on it)',
+        (delivers('factoryplus_ingestion', `spBv1.0/FactoryPlus/NCMD/${GATEWAY_A}`)),
+        true
+      );
+      expect(
+        'the i3X principal may publish NOTHING (it refuses writes in code; the broker agrees)',
+        (delivers('factoryplus_i3x', `spBv1.0/FactoryPlus/NCMD/${GATEWAY_A}`)),
+        false
+      );
+      expect(
+        'the monitoring principal may publish NOTHING',
+        (delivers('factoryplus_monitor', `spBv1.0/FactoryPlus/DDATA/${GATEWAY_A}/dev1`)),
+        false
+      );
+      // A gateway's own NCMD must reach it through the WILDCARD subscription both the simulator
+      // flow and validate.py use. 2.0.20 grants `spBv1.0/+/NCMD/+` (QoS 0, not 128) even for a
+      // client confined by `pattern` and filters per message at delivery instead -- so those
+      // subscriptions did NOT need narrowing. If a future version starts refusing the SUBACK
+      // instead, rebirth recovery breaks silently and this is what says so.
+      expect(
+        'a gateway receives its own NCMD through a wildcard subscription',
+        (delivers('factoryplus_ingestion', `spBv1.0/FactoryPlus/NCMD/${GATEWAY_A}`,
+          GATEWAY_A, 'spBv1.0/+/NCMD/+')),
+        true
+      );
+      expect(
+        'a gateway does NOT receive another edge node\'s NCMD through that same subscription',
+        (delivers('factoryplus_ingestion', `spBv1.0/FactoryPlus/NCMD/${GATEWAY_B}`,
+          GATEWAY_A, 'spBv1.0/+/NCMD/+')),
+        false
+      );
+
+      // $SYS is reachable only by the monitoring account, and it is load-bearing: the broker's own
+      // probes authenticate as it, so losing this rule leaves the pod permanently NotReady.
+      const sysRead = (user) => docker(['exec', r.name, 'mosquitto_sub', '-u', user,
+        '-P', ACCOUNTS[user], '-t', '$SYS/broker/version', '-C', '1', '-W', '4']);
+      if ((sysRead('factoryplus_monitor').stdout || '').includes('mosquitto version')) {
+        ok.push('the monitoring principal can read $SYS (the health probes depend on it)');
+      } else {
+        problems.push('the monitoring principal CANNOT read $SYS -- every readiness probe will fail and no workload waiting on the broker will start');
+      }
+      if ((sysRead(GATEWAY_A).stdout || '').includes('mosquitto version')) {
+        problems.push('a gateway credential can read $SYS; `topic read $SYS/#` must be scoped to the monitoring user');
+      } else {
+        ok.push('a gateway credential cannot read $SYS');
       }
     }
   }

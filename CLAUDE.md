@@ -533,9 +533,32 @@ is **derived at read time** in `frontend/src/utils/deviceTags.js`.
 
 ### Realtime Change Feed
 
-`supabase-realtime` publishes `cells`, `gateways`, `devices`, `digital_thread` (`archive/20260101000023_realtime_publication.sql`).
+`supabase-realtime` publishes `cells`, `gateways`, `devices` (`0001_baseline_schema.sql` §5).
 Tabs subscribe through `hooks/useRealtimeTable.js`; `usePolling` stays at 60s as reconciliation.
 
+- **`digital_thread` was published and is not any more, and the reason is the envelope.** An
+  unauthenticated subscriber still receives the change *envelope* — Realtime redacts the payload
+  to `{}` and attaches a 401, but the message arrives — so the mere **fact and timing** of a change
+  leaks to anyone who can reach the socket. Kong's `key-auth` does not close that: the anon key is
+  a registered key necessarily shipped to every browser. The envelope is upstream Realtime
+  behaviour and cannot be fixed here, so the available lever is to **publish less**, and the audit
+  log was the most sensitive stream in the set (it times quarantine decisions, approvals and
+  reconfiguration) while **nothing subscribed to it** — all four consumers subscribe to
+  `['cells','gateways','devices']`. Free to remove; the residual asset-edit timing leak is
+  accepted, because the dashboard genuinely needs those three live.
+  - **This is not an access change.** A publication governs logical replication and nothing else:
+    grants and RLS on `digital_thread` are untouched, so `authenticated` and API clients read the
+    audit log through PostgREST exactly as before. Verified on a running stack.
+  - **The narrowing lives in 0001, not a new migration**, because `ALTER PUBLICATION … SET TABLE`
+    is *absolute*: every boot replays 0001 and the next replay drops the table from an existing
+    database. A 0010 doing the removal would fight 0001 forever — the 0030/0032 lesson.
+  - **0001's own self-check listed the four tables and had to be derived instead.** It asserted
+    `relreplident = 'f'` on a hardcoded set including `digital_thread`, so narrowing the
+    publication made section 5 and the assertion contradict each other and db-init failed with a
+    message about replica identity — naming neither the publication nor the change made. It now
+    reads `pg_publication_tables`. Same failure class as the fsGroup constant restated in CI: **a
+    check that restates a value rather than reading it is a second source of truth, and it fails
+    the day the first one changes.**
 - **`telemetry` is unpublishable, not merely unpublished.** `public.telemetry` is a **VIEW** over
   `timescale.telemetry`, which is the `postgres_fdw` foreign table
   (`archive/20260101000010_telemetry_foreign_table.sql`). Either way the rows enter TimescaleDB's
@@ -610,6 +633,43 @@ for the SQL-side consumer.
 - **The webhook secret is a signing key, not a bearer credential**, and the two must not be
   merged back. See **Node-RED Authentication** below for why sharing the admin token with the
   webhook hands every flow the admin API.
+
+### Telemetry Retention and Compression
+
+`timescaledb/retention.sql` reconciles the hypertable's compression and retention policies on
+**every boot**, driven by `TIMESCALE_COMPRESS_AFTER` / `TIMESCALE_RETAIN_FOR` (Compose:
+`timescaledb-retention` service; Kubernetes: a `post-install,post-upgrade` hook Job).
+
+- **It moved OUT of `timescaledb/init/` because that directory made the values unchangeable.** The
+  postgres entrypoint runs `/docker-entrypoint-initdb.d` **only on an empty data directory**, so an
+  operator editing the interval saw no effect on a running stack and had no route to one short of
+  destroying the volume — on Kubernetes, deleting the PVC, since a StatefulSet reattaches the same
+  claim. A retention interval that can only be chosen before the first row exists is not a setting.
+- **It is the operator's decision, and the default is not a recommendation.** `drop_chunks` is a
+  hard delete with no undo and nothing copies the chunks first — the backup CronJob does not
+  protect what retention already removed. Manufacturing traceability obligations run from weeks to
+  decades; 90 days is a starting point no requirement has been applied to. `never` (also `off`,
+  `none`, `disabled`) removes either policy.
+- **Policies are REMOVED and re-added, never `if_not_exists`.** With a policy already present at a
+  different interval, `add_*_policy` emits a notice and does nothing — so a changed setting would
+  appear to apply and would not. Removing first is what makes the environment authoritative.
+- **The compression `ALTER TABLE` is guarded on current state.** Re-issuing
+  `SET (timescaledb.compress…)` with different `segmentby` raises once compressed chunks exist, so
+  an unconditional statement would fail the *second* boot of a compressed database.
+- **Disabling compression leaves existing compressed chunks compressed.** Decompressing a history
+  that may be hundreds of gigabytes, unprompted, during a boot, is not something a config change
+  should do; off means "stop compressing new chunks".
+- **The values are QUOTED in `.env`, and that is required.** Compose parses `.env` itself and would
+  accept a bare `7 days`, but the documented way to run the validator **sources** it
+  (`set -a && . ./.env`), where an unquoted value with a space is executed as a command — printing
+  `days: command not found` *and* leaving `. ./.env` non-zero, so the rest of the `&&` chain never
+  runs. The visible symptom was the validator failing to resolve `timescaledb`, which reads as a
+  Docker networking fault. Found by running it, not by review.
+- Retention shorter than compression is legal and warns rather than failing: chunks would be
+  dropped before ever being compressed, which is almost certainly a mistake but is the operator's
+  data doing exactly what the configuration says.
+- Still not pg_cron, for the reason the section above gives: telemetry lives in the standalone
+  TimescaleDB, and pg_cron reaches it only across the `postgres_fdw` link.
 
 ### Node-RED Seeding & Credentials
 
@@ -1127,6 +1187,7 @@ are the correct ones there. Export the key alone, or source `.env` and unset `MQ
 
 ```bash
 set -a && . ./.env && set +a && unset MQTT_HOST DB_HOST DB_PORT
+export MQTT_USER="$MQTT_VALIDATOR_USER" MQTT_PASSWORD="$MQTT_VALIDATOR_PASSWORD"
 python ingestion/validate.py
 ```
 
@@ -1328,6 +1389,17 @@ replaces (on Kubernetes, a ConfigMap mounted over `/usr/share/nginx/html/config.
 - **Permission-based UI gating** via `hasPermission(uuid)` from `usePermissions`
 - **Direct Supabase client** at `src/lib/supabaseClient.js`
 - **Vitest** configured with globals enabled and jsdom environment
+- **Every telemetry query leaves `api.js` with a lower time bound**, supplied by
+  `telemetryLowerBound()` when the caller gave none (`TELEMETRY_DEFAULT_WINDOW_MINUTES`, 60).
+  `public.telemetry` is a `postgres_fdw` projection and **the wrapper pushes WHERE down but not
+  LIMIT**, so `.range()` bounds what Supabase *returns*, never what TimescaleDB *scans and ships* —
+  and `ORDER BY time DESC` makes it unavoidable, since the sort cannot begin until every row has
+  arrived. No live caller omits a window today; the floor exists so the next one cannot
+  reintroduce a fleet-wide scan by leaving out an argument, a mistake that costs nothing to make
+  and whose symptom (the database is slow) names nothing about its cause. An explicit `from` is
+  honoured verbatim — the floor catches an *absent* bound, never overrules a stated one — and with
+  only `to` the window is measured back from `to`, so a historical query does not return empty.
+  `telemetryWindow.test.js` pins the property "never unbounded", not the number.
 - **Derived state is computed client-side, not stored** — device tags, unmodelled metrics, metric
   grouping, gateway staleness and provisioning overdue all follow the same pattern: a pure function
   in `src/utils/`, unit-tested, with no backend cron and nothing persisted that could go stale.
@@ -1497,12 +1569,76 @@ GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)):
 - **`mosquitto.acl` confines each MQTT client to its own edge-node subtree** via
   `pattern readwrite spBv1.0/+/+/%u/#`, where `%u` is the connecting username — which constrains a
   client only when its username IS its `sparkplug_id`, hence
-  `scripts/mosquitto-provision-gateway.mjs`. The shared `factoryplus` principal is still exempt
-  (`topic readwrite spBv1.0/#`) because the Node-RED simulator and `validate.py` publish as
-  gateways under it, and the validator creates its gateways at runtime so it cannot use a
-  pre-provisioned credential. The application tier closes the other half:
+  `scripts/mosquitto-provision-gateway.mjs`. The application tier closes the other half:
   `verify_gateway_binding()` in `ingestion.py` rejects a message whose topic does not match the
   device's registered gateway
+
+### MQTT Principals
+
+**There is no shared broker account, and removing it was a security fix rather than tidying.** A
+single `factoryplus` principal held `readwrite spBv1.0/#` and was connected as by the ingestion
+daemon, the i3X server, the Node-RED simulator and `validate.py` alike — so the credential running
+the demo flow could publish `DBIRTH`/`DDATA` for **every machine on the site**. `verify_gateway_
+binding()` cannot catch that: a forged message published under a **correctly bound** device
+satisfies the binding check by construction. That is the whole reason the broker tier has to exist
+separately from the application tier.
+
+Five principals, each with a reason to reach exactly what it reaches:
+
+| Principal | Grant |
+| :--- | :--- |
+| `factoryplus_ingestion` | `read spBv1.0/#`, `write spBv1.0/+/NCMD/+` |
+| `factoryplus_i3x` | `read spBv1.0/#` |
+| `gwy100000000000400080000` | the Node-RED simulator, via the `%u` pattern |
+| `gwy110000000000400080000` | `validate.py`, via the same pattern |
+| `factoryplus_monitor` | `read $SYS/#` |
+
+- **Ingestion's split is exact, not approximate.** Its only `publish()` is the rebirth NCMD
+  (`ingestion.py`, `request_rebirth`), so `write spBv1.0/+/NCMD/+` is the whole of what it does —
+  and it therefore cannot forge telemetry at all. `+` rather than `#` because an NCMD topic has
+  exactly four segments.
+- **i3X gets its own read-only account rather than sharing ingestion's.** It refuses writes in code
+  (405 on `PUT /objects/value`, `update.current: false`); the durable control is a server that
+  cannot be talked into writing, and the broker should be able to make that statement too.
+  **On Kubernetes it previously had NO credential at all** — `brokerClientEnv` carries host, port
+  and TLS only — so it connected anonymously to a broker running `allow_anonymous false`, came up,
+  answered `/info`, and served an address space whose values never updated. Fixed with this split.
+- **A pinned UUID is what makes a per-gateway credential issuable in advance**, and it is the whole
+  reason `validate.py` could move off the wildcard account. `sparkplug_id` is
+  `'gwy' || substr(hex(uuid), 1, 21)` — a pure function of the primary key — so pinning the UUID
+  fixes the wire identity before the row exists. `VAL_GW_UUID` = `11000000-…-0001`. **Only the
+  GATEWAY is pinned**; devices are still allocated dynamically, because they sit in the fifth topic
+  segment which the trailing `#` covers, so the onboarding and quarantine checks still exercise
+  genuinely unknown ids. Note the first 21 hex characters are what matter: `…-0002` collides with
+  `…-0001`, so never derive a second fixture id by incrementing the last group.
+- **The username can never be a friendly name.** The ACL pins the topic's edge-node segment to
+  `%u` and `verify_gateway_binding()` requires that segment to be the row's generated
+  `sparkplug_id`, so `val_gateway_01` **authenticates perfectly and then has every publish silently
+  dropped by the broker**. `factoryplus.validateMqttPrincipals` fails the Helm render on one, and
+  `mosquitto-provision-gateway.mjs` rejects it.
+- **`factoryplus_monitor` is load-bearing, not hygiene.** The broker's own startup/readiness/
+  liveness probes and the Compose healthcheck authenticate as it, so an empty
+  `mqttMonitorPassword` leaves the pod permanently NotReady and every workload waiting on the
+  broker fails to start — an outage naming neither MQTT nor the setting. The chart refuses to
+  render without it.
+- **Wildcard SUBSCRIPTIONS are NOT refused, and that is measured.** 2.0.20 grants
+  `spBv1.0/+/NCMD/+` with QoS 0 (not 128) even to a client confined by `pattern`, and enforces the
+  ACL per message at *delivery*. So the simulator flow and `validate.py` keep their existing
+  wildcard NCMD subscriptions: each still receives its own rebirth request and not another node's.
+  Narrowing them was considered and rejected — the topic lives in the seeded flow, which is user
+  content.
+- **`scripts/check-broker-config.mjs` asserts all of this by DELIVERY, not by exit status.** A
+  denied publish at QoS 0 exits 0 and tells the client nothing, so a status-based check passes
+  vacuously. The first version of that helper made exactly this mistake in a second form: it tested
+  whether the subscriber printed anything, and `mosquitto_sub -W` writes `Timed out` to stderr —
+  so every negative assertion passed while asserting nothing. It matches the payload now.
+- **Changing `MQTT_USER` breaks an existing deployment silently unless the credential is
+  reconciled.** `node-red-init.mjs` seeded `flows_cred.json` once and then left it alone, so
+  Node-RED went on authenticating as an account that no longer existed and reported only
+  `Connection failed to broker: <clientId>@…` — the **client id, not the username**, and no CONNACK
+  code, which is the same line a wrong host produces. It now decrypts the stored credential and
+  rewrites when the **username** differs; a password changed in the editor is left alone, because
+  that is a credential for the same account.
 - **`ingestion/validate.py` asserts 43 numbered outcomes** and begins with a preflight that proves
   the owner database connection can actually `DELETE` from `digital_thread` — by doing it inside a
   transaction and rolling back. Connecting proves nothing there: `service_role` connects perfectly
