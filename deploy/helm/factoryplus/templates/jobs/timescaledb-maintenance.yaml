@@ -1,35 +1,37 @@
 {{- /*
-Compression and retention reconciliation for the telemetry hypertable.
+Telemetry lifecycle reconciliation: compression and retention on the raw hypertable, plus the
+1m/5m/1h rollups, their policies, and the telemetry_latest view.
 
 WHY A HOOK JOB AND NOT AN initdb SCRIPT. The postgres entrypoint runs /docker-entrypoint-initdb.d
 ONLY on an empty data directory, and on Kubernetes "recreate the volume" means deleting the PVC --
 `helm upgrade` will not do it and neither will deleting the pod, because the StatefulSet reattaches
 the same claim. A retention interval that could only be chosen before the first telemetry row was
 written was not a setting; it was a constant with a misleading name. This runs on every install and
-every upgrade, so `timescaledb.retention.*` is authoritative in both directions.
+every upgrade, so `timescaledb.retention.*` and `timescaledb.rollups.*` are authoritative in both
+directions. Rollups defined in init/ would exist on fresh installs and silently nowhere else.
 
 WHY post-upgrade AND post-install. Changing an interval is an upgrade, and that is the case this
 exists to serve. `before-hook-creation` deletes the previous Job so a repeat upgrade is not refused
 by the immutability of a completed Job's pod template.
 */ -}}
 {{- if and .Values.initJobs.enabled .Values.timescaledb.enabled .Values.timescaledb.retention.enabled }}
-{{- $component := "timescaledb-retention" -}}
+{{- $component := "timescaledb-maintenance" -}}
 {{- $fullname := include "factoryplus.fullname" . -}}
 {{- $secretName := include "factoryplus.secretName" . -}}
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ printf "%s-timescaledb-retention" $fullname }}
+  name: {{ printf "%s-timescaledb-maintenance" $fullname }}
   labels:
     {{- include "factoryplus.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
   annotations:
     "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "25"
+    "helm.sh/hook-weight": "5"
     "helm.sh/hook-delete-policy": before-hook-creation
 data:
 {{- $found := 0 }}
-{{- range $path, $bytes := .Files.Glob "files/timescaledb-retention/retention.sql" }}
+{{- range $path, $bytes := .Files.Glob "files/timescaledb-maintenance/*.sql" }}
 {{- $found = add1 $found }}
   {{ base $path }}: |
 {{ $.Files.Get $path | indent 4 }}
@@ -41,15 +43,16 @@ data:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ printf "%s-timescaledb-retention" $fullname }}
+  name: {{ printf "%s-timescaledb-maintenance" $fullname }}
   labels:
     {{- include "factoryplus.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
   annotations:
     "helm.sh/hook": post-install,post-upgrade
-    # WEIGHT 25 -- after db-roles-init (0), db-init (10) and storage-init (20). It touches only
-    # TimescaleDB and so depends on none of them, but running last keeps the hook sequence a single
-    # readable order rather than two interleaved ones.
-    "helm.sh/hook-weight": "25"
+    # WEIGHT 5 -- after db-roles-init (0) and BEFORE db-init (10), and the order is load-bearing.
+    # Migration 0010 maps the rollups and telemetry_latest as foreign tables and then READS each
+    # one to prove the mapping resolves; postgres_fdw is lazy, so mapping objects that do not exist
+    # yet succeeds and fails later in the dashboard instead. This Job is what creates them.
+    "helm.sh/hook-weight": "5"
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   backoffLimit: {{ .Values.initJobs.backoffLimit }}
@@ -97,34 +100,33 @@ spec:
             requests: { cpu: 10m, memory: 32Mi }
             limits: { memory: 128Mi }
       containers:
-        - name: retention
+        - name: maintenance
           image: "{{ .Values.timescaledb.image.repository }}:{{ .Values.timescaledb.image.tag }}"
           imagePullPolicy: {{ .Values.timescaledb.image.pullPolicy }}
           env:
             {{- include "factoryplus.secretEnv" (dict "name" "PGPASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
+          {{- /*
+            Values are passed as psql VARIABLES rather than substituted into the SQL at render
+            time, so the chart's copies stay byte-identical to the repository's -- the same files
+            Compose runs, with the same drift check behind them.
+          */}}
           command:
-            - psql
-            - -v
-            - ON_ERROR_STOP=1
-            - -h
-            - {{ include "factoryplus.timescale.host" . | quote }}
-            - -p
-            - {{ include "factoryplus.timescale.port" . | quote }}
-            - -U
-            - {{ .Values.timescaledb.username | quote }}
-            - -d
-            - {{ .Values.timescaledb.database | quote }}
-            {{- /*
-              Passed as psql variables rather than substituted into the SQL at render time, so the
-              chart's copy of retention.sql stays byte-identical to the repository's -- the same
-              file Compose runs, with the same drift check behind it.
-            */}}
-            - -v
-            - {{ printf "compress_after=%s" .Values.timescaledb.retention.compressAfter | quote }}
-            - -v
-            - {{ printf "retain_after=%s" .Values.timescaledb.retention.retainFor | quote }}
-            - -f
-            - /sql/retention.sql
+            - /bin/sh
+            - -e
+            - -c
+            - |
+              PSQL="psql -v ON_ERROR_STOP=1 -h {{ include "factoryplus.timescale.host" . }} -p {{ include "factoryplus.timescale.port" . }} -U {{ .Values.timescaledb.username }} -d {{ .Values.timescaledb.database }}"
+
+              echo 'Reconciling compression and retention policies...'
+              $PSQL -v compress_after={{ .Values.timescaledb.retention.compressAfter | quote }} -v retain_after={{ .Values.timescaledb.retention.retainFor | quote }} -f /sql/retention.sql
+              {{- if .Values.timescaledb.rollups.enabled }}
+
+              echo 'Reconciling telemetry rollups...'
+              $PSQL -v rollup_1m_retain={{ .Values.timescaledb.rollups.oneMinuteRetainFor | quote }} -v rollup_5m_retain={{ .Values.timescaledb.rollups.fiveMinuteRetainFor | quote }} -v rollup_1h_retain={{ .Values.timescaledb.rollups.oneHourRetainFor | quote }} -f /sql/aggregates.sql
+              {{- else }}
+
+              echo 'Rollups disabled (timescaledb.rollups.enabled=false); skipping aggregates.sql.'
+              {{- end }}
           volumeMounts:
             - name: sql
               mountPath: /sql
@@ -135,5 +137,5 @@ spec:
       volumes:
         - name: sql
           configMap:
-            name: {{ printf "%s-timescaledb-retention" $fullname }}
+            name: {{ printf "%s-timescaledb-maintenance" $fullname }}
 {{- end }}

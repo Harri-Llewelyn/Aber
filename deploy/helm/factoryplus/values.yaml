@@ -183,6 +183,23 @@ timescaledb:
     # traceability obligations run from weeks to decades and only the operator knows which applies.
     # `never` keeps everything, which is a valid choice and not an unconfigured one.
     retainFor: "90 days"
+  # --- Rollups (continuous aggregates) ---------------------------------------------------------
+  # 1-minute, 5-minute and 1-hour buckets, built 1m -> 5m -> 1h. Grafana's trend panels and any
+  # long-window query read these instead of scanning the raw hypertable; the dashboard's
+  # latest-value routes use the `telemetry_latest` view, which is created by the same script.
+  #
+  # THEY OUTLIVE THE RAW DATA ON PURPOSE. Each rollup is independent of the hypertable, so it
+  # survives `retention.retainFor`: raw at 90 days but hourly buckets at 5 years keeps shape,
+  # excursions and state transitions long after the rows are gone, at a fraction of the size.
+  #
+  # Disabling this leaves any rollups that already exist in place and simply stops reconciling
+  # them -- it does not drop years of history because a flag was flipped. Drop them by hand if
+  # that is what you mean.
+  rollups:
+    enabled: true
+    oneMinuteRetainFor: "180 days"
+    fiveMinuteRetainFor: "1 year"
+    oneHourRetainFor: "5 years"
   resources:
     requests:
       cpu: 100m
