@@ -610,6 +610,11 @@ class TestVisualRepresentation(unittest.TestCase):
         )
         if status not in (200, 201):
             # x-upsert lets a leftover from an interrupted run be replaced rather than blocking it.
+            #
+            # THE HEADER WAS MISSING, so this fallback could never do what its comment claimed: a
+            # bare PUT to a path with no object answers 400 "Object not found", and the real reason
+            # the POST failed was reported as that instead. It masked a five-byte bucket limit on
+            # Kubernetes for as long as this suite was unreachable.
             req = urllib.request.Request(
                 f"{SUPABASE_URL}/storage/v1/object/{MODEL_BUCKET}/{cls.path}",
                 data=cls.MODEL_BYTES, method="PUT",
@@ -617,6 +622,7 @@ class TestVisualRepresentation(unittest.TestCase):
             req.add_header("apikey", ANON_KEY)
             req.add_header("Authorization", f"Bearer {TOKEN}")
             req.add_header("Content-Type", "model/gltf-binary")
+            req.add_header("x-upsert", "true")
             with urllib.request.urlopen(req, timeout=30) as res:
                 status = res.status
         cls.upload_status = status

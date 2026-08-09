@@ -780,6 +780,36 @@ jobs:
       # perfectly and puts it into `helm get manifest`, every CI log that renders the chart, and any
       # GitOps repository the manifests are committed to.
       #
+      # NO ENV VALUE MAY RENDER IN SCIENTIFIC NOTATION.
+      #
+      # Helm parses a bare large integer in values.yaml as a FLOAT, so `{{ .Values.x | quote }}`
+      # emits "5.24288e+07" for 52428800. Every consumer here reads its environment with parseInt
+      # or Number.parseInt, both of which stop at the '.', so that value arrives as **5**.
+      #
+      # It cost three real defects on this target, all silent: storage-api rejected every upload
+      # over five bytes as "The object exceeded the maximum allowed size", storage-init created the
+      # model bucket with a five-byte limit, and the AAS exporter treated its 32 MiB bundling cap as
+      # three bytes and fell back to a URL reference for every model -- producing an .aasx that
+      # still validated. Compose was never affected: it reads these from .env as strings.
+      #
+      # The fix is `| int64 | quote`. This asserts the OUTCOME so the next value added cannot
+      # reintroduce it, which no amount of remembering would achieve.
+      - name: Verify No Rendered Value Uses Scientific Notation
+        run: |
+          python3 - <<'PY'
+          import re, sys
+          text = open('/tmp/rendered.yaml', encoding='utf-8').read()
+          bad = []
+          for m in re.finditer(r'^\s*(?:-\s*)?(?:name:\s*(\S+)\s*\n\s*)?value:\s*"?(-?\d+\.\d+e[+-]\d+)"?\s*$',
+                               text, re.M):
+              bad.append(f"{m.group(1) or '<unnamed>'} = {m.group(2)}")
+          if bad:
+              print("::error::rendered in scientific notation, so parseInt reads it as a single "
+                    f"digit: {', '.join(sorted(set(bad)))}. Use `| int64 | quote` in the template.")
+              sys.exit(1)
+          print("No rendered value uses scientific notation.")
+          PY
+
       # THE CHECK IS ON THE `service_role` KEY SPECIFICALLY, decided by decoding the JWT's role
       # claim rather than by pattern-matching the string. The distinction is real and the chart
       # depends on it: `anon` is public by construction -- it ships inside the frontend bundle and
