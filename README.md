@@ -351,7 +351,7 @@ is why the schema builder offers a choice rather than a migration path.
 ## Testing
 
 ```bash
-# Frontend — 702 tests
+# Frontend — 713 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required
