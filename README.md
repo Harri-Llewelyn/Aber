@@ -352,7 +352,7 @@ is why the schema builder offers a choice rather than a migration path.
 ## Testing
 
 ```bash
-# Frontend — 715 tests
+# Frontend — 735 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required
@@ -365,6 +365,11 @@ python ingestion/test_declared_metrics.py
 python ingestion/test_modelled_metrics_contract.py
 python ingestion/test_device_location.py
 python ingestion/test_health_heartbeat.py
+# Report-by-exception: sparse DDATA must write only the metrics that arrived, and a gap in the
+# Sparkplug sequence number must request a rebirth. Both matter far more under RBE than under a
+# timer -- a dropped message IS the lost change, and nothing ever restates it. The edge half runs
+# in the frontend suite (nodeRedRbe.test.js), which executes the flow's function nodes directly.
+python ingestion/test_rbe_telemetry.py
 python ingestion/test_mqtt_tls.py
 # i3X subscription engine and address-space projection. Covers the sync-acknowledgement and
 # queue-overflow MUSTs that the CESMII conformance suite SKIPS when a live run happens to observe

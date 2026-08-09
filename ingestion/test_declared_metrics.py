@@ -93,6 +93,7 @@ def reset_module_state():
     ingestion._alias_map.clear()
     ingestion._rebirth_requested.clear()
     ingestion._device_seen.clear()
+    ingestion._last_seq.clear()
 
 
 class TestExtractDeclaredMetrics(unittest.TestCase):

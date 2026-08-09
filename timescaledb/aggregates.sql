@@ -230,3 +230,186 @@ BEGIN
   -- from telemetry_1h is a question that would otherwise have no answer at all.
   RAISE NOTICE 'telemetry rollups reconciled (1m -> 5m -> 1h, real-time aggregation on).';
 END $$;
+
+
+-- ---------------------------------------------------------------------------------------------
+-- 4. telemetry_gapfill() -- carry the last observation forward across buckets nobody reported in.
+-- ---------------------------------------------------------------------------------------------
+-- WHY A ROLLUP ALONE IS THE WRONG SHAPE FOR REPORT-BY-EXCEPTION DATA. The aggregates above emit a
+-- row only for a bucket that CONTAINED a sample. Correct as an aggregate, wrong as a signal: under
+-- RBE a metric that has not changed publishes nothing, so a machine running steadily at 42 degC
+-- for an hour produces one bucket in sixty. Charted directly the other fifty-nine read as NULL --
+-- and a gap in a temperature trace does not mean "unknown", it means "unchanged", which is very
+-- nearly the opposite. Grafana draws a broken line through it and a `no data` alert rule reads it
+-- as the machine having stopped.
+--
+-- LOCF CANNOT LIVE IN THE CONTINUOUS AGGREGATE ITSELF. TimescaleDB rejects time_bucket_gapfill()
+-- inside a `WITH (timescaledb.continuous)` definition, and rightly: gapfill is defined relative to
+-- a query window, and a materialised view has no window to be relative to. Filling belongs at READ
+-- time. That is why the absence of locf() in section 2 is not the defect it looks like.
+--
+-- AND WHY THIS DOES NOT USE time_bucket_gapfill() EITHER, which is the part that is easy to get
+-- wrong. That function expands the groups a query already produced; it cannot invent a series that
+-- returned NO ROWS AT ALL. A device silent for the whole window has no rows in the window, so it
+-- yields no group, so there is nothing to expand and the result comes back EMPTY -- precisely the
+-- case gap-filling exists for, and precisely the case a silent RBE device is in. Measured on this
+-- database before this function existed: a 3-minute window opening 25 minutes after a device's
+-- last change returned zero rows. The grid below is built from the SERIES LIST FIRST and
+-- observations are joined onto it, so a series that reported nothing still gets one row per
+-- bucket carrying its last known value.
+--
+-- The LOCF itself is the standard gaps-and-islands form: a running count of non-null values labels
+-- each island, and the one real value in an island is broadcast across it. Deliberately plain SQL
+-- rather than locf() -- it costs nothing here and keeps the function readable by anyone who does
+-- not know the TimescaleDB toolkit.
+--
+-- SOURCE RESOLUTION FOLLOWS THE BUCKET: the widest rollup no coarser than the bucket asked for,
+-- and raw only below one minute. Asking for hourly buckets must not scan raw rows.
+--
+-- THE SEED IS WHAT MAKES A LONG SILENCE WORK. Under RBE the last change is usually BEFORE the
+-- window opens, so without a prior value the leading buckets would still be NULL. Each series gets
+-- one `ORDER BY time DESC LIMIT 1` lookup strictly earlier than the window, served directly by
+-- idx_telemetry_asset_metric_time, and that value fills everything up to the first real sample.
+--
+-- `is_carried` DISTINGUISHES A CARRIED VALUE FROM AN OBSERVED ONE, so a caller can render the two
+-- differently and an alert rule can refuse to fire on a reading nobody actually took. Filling a
+-- gap silently would be its own kind of lie.
+CREATE OR REPLACE FUNCTION telemetry_gapfill(
+    from_ts      TIMESTAMPTZ,
+    to_ts        TIMESTAMPTZ,
+    bucket       INTERVAL,
+    asset_ids    TEXT[] DEFAULT NULL,
+    metric_names TEXT[] DEFAULT NULL
+)
+RETURNS TABLE (
+    bucket_ts   TIMESTAMPTZ,
+    asset_id    TEXT,
+    metric_name TEXT,
+    val_double  DOUBLE PRECISION,
+    val_string  TEXT,
+    val_bool    BOOLEAN,
+    is_carried  BOOLEAN
+)
+LANGUAGE plpgsql
+STABLE
+AS $fn$
+DECLARE
+  source  text;
+  tcol    text;
+  dcol    text;
+  scol    text;
+  bcol    text;
+  secs    double precision;
+  aligned timestamptz;
+BEGIN
+  secs := extract(epoch FROM bucket);
+
+  IF to_ts <= from_ts THEN
+    RAISE EXCEPTION 'telemetry_gapfill: to_ts (%) must be after from_ts (%)', to_ts, from_ts;
+  END IF;
+  IF secs IS NULL OR secs <= 0 THEN
+    RAISE EXCEPTION 'telemetry_gapfill: bucket must be a positive interval, got %', bucket;
+  END IF;
+
+  IF    bucket >= INTERVAL '1 hour'    THEN source := 'telemetry_1h';
+  ELSIF bucket >= INTERVAL '5 minutes' THEN source := 'telemetry_5m';
+  ELSIF bucket >= INTERVAL '1 minute'  THEN source := 'telemetry_1m';
+  ELSE                                      source := 'telemetry';
+  END IF;
+
+  IF source = 'telemetry' THEN
+    tcol := 'time';   dcol := 'val_double';  scol := 'val_string';  bcol := 'val_bool';
+  ELSE
+    tcol := 'bucket'; dcol := 'last_double'; scol := 'last_string'; bcol := 'last_bool';
+  END IF;
+
+  -- Buckets are aligned to the epoch, the same grid time_bucket() uses, so a window that opens
+  -- mid-bucket still lines up with the rollup it is reading from.
+  aligned := to_timestamp(floor(extract(epoch FROM from_ts) / secs) * secs);
+
+  RETURN QUERY EXECUTE format($q$
+    WITH obs AS (
+      SELECT to_timestamp(floor(extract(epoch FROM o.%1$I) / $6) * $6) AS b,
+             o.asset_id    AS aid,
+             o.metric_name AS mname,
+             (array_agg(o.%2$I ORDER BY o.%1$I DESC) FILTER (WHERE o.%2$I IS NOT NULL))[1] AS d,
+             (array_agg(o.%3$I ORDER BY o.%1$I DESC) FILTER (WHERE o.%3$I IS NOT NULL))[1] AS s,
+             (array_agg(o.%4$I ORDER BY o.%1$I DESC) FILTER (WHERE o.%4$I IS NOT NULL))[1] AS bo
+        FROM %5$I o
+       WHERE o.%1$I >= $1 AND o.%1$I < $2
+         AND ($3::text[] IS NULL OR o.asset_id    = ANY ($3::text[]))
+         AND ($4::text[] IS NULL OR o.metric_name = ANY ($4::text[]))
+       GROUP BY 1, 2, 3
+    ),
+    -- The series list. `telemetry_latest` contributes the ones SILENT throughout the window --
+    -- the whole point of this function -- and `obs` contributes any whose raw history has since
+    -- been aged out by the retention policy but which still have rollup buckets in range.
+    series AS (
+      SELECT l.asset_id AS aid, l.metric_name AS mname
+        FROM telemetry_latest l
+       WHERE ($3::text[] IS NULL OR l.asset_id    = ANY ($3::text[]))
+         AND ($4::text[] IS NULL OR l.metric_name = ANY ($4::text[]))
+       UNION
+      SELECT obs.aid, obs.mname FROM obs
+    ),
+    grid AS (
+      SELECT series.aid, series.mname, g.b
+        FROM series
+        CROSS JOIN generate_series($5, $2, $7::interval) AS g(b)
+       WHERE g.b < $2
+    ),
+    seed AS (
+      SELECT series.aid, series.mname,
+             (SELECT t.val_double FROM telemetry t
+               WHERE t.asset_id = series.aid AND t.metric_name = series.mname
+                 AND t.time < $1 AND t.val_double IS NOT NULL
+               ORDER BY t.time DESC LIMIT 1) AS d,
+             (SELECT t.val_string FROM telemetry t
+               WHERE t.asset_id = series.aid AND t.metric_name = series.mname
+                 AND t.time < $1 AND t.val_string IS NOT NULL
+               ORDER BY t.time DESC LIMIT 1) AS s,
+             (SELECT t.val_bool FROM telemetry t
+               WHERE t.asset_id = series.aid AND t.metric_name = series.mname
+                 AND t.time < $1 AND t.val_bool IS NOT NULL
+               ORDER BY t.time DESC LIMIT 1) AS bo
+        FROM series
+    ),
+    joined AS (
+      SELECT grid.b, grid.aid, grid.mname, obs.d, obs.s, obs.bo, (obs.b IS NULL) AS empty_bucket
+        FROM grid
+        LEFT JOIN obs ON obs.aid = grid.aid AND obs.mname = grid.mname AND obs.b = grid.b
+    ),
+    islands AS (
+      SELECT j.*,
+             count(j.d)  OVER w AS grp_d,
+             count(j.s)  OVER w AS grp_s,
+             count(j.bo) OVER w AS grp_bo
+        FROM joined j
+      WINDOW w AS (PARTITION BY j.aid, j.mname ORDER BY j.b ROWS UNBOUNDED PRECEDING)
+    ),
+    filled AS (
+      SELECT i.b, i.aid, i.mname, i.empty_bucket,
+             max(i.d)      OVER (PARTITION BY i.aid, i.mname, i.grp_d)  AS d,
+             max(i.s)      OVER (PARTITION BY i.aid, i.mname, i.grp_s)  AS s,
+             bool_or(i.bo) OVER (PARTITION BY i.aid, i.mname, i.grp_bo) AS bo
+        FROM islands i
+    )
+    SELECT f.b, f.aid, f.mname,
+           coalesce(f.d,  sd.d),
+           coalesce(f.s,  sd.s),
+           coalesce(f.bo, sd.bo),
+           f.empty_bucket
+      FROM filled f
+      JOIN seed sd ON sd.aid = f.aid AND sd.mname = f.mname
+     ORDER BY f.aid, f.mname, f.b
+  $q$, tcol, dcol, scol, bcol, source)
+  USING from_ts, to_ts, asset_ids, metric_names, aligned, secs, bucket;
+END;
+$fn$;
+
+COMMENT ON FUNCTION telemetry_gapfill(TIMESTAMPTZ, TIMESTAMPTZ, INTERVAL, TEXT[], TEXT[]) IS
+  'Bucketed telemetry with every bucket present, empty ones carrying the last observation forward '
+  'and seeded from the newest sample before the window. is_carried marks a bucket nobody reported '
+  'in. Resolution selects the widest rollup no coarser than the bucket. This is what a report-by-'
+  'exception series must be read through: an unchanged metric publishes nothing, so a missing '
+  'bucket means unchanged, not unknown.';

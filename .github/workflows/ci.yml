@@ -981,6 +981,25 @@ jobs:
         run: |
           python ingestion/test_gateway_binding.py
 
+      # Report-by-exception. Both halves of this are invisible to an end-to-end run, which is why
+      # they are pinned here: a timer-driven flow and an RBE flow both look like "telemetry is
+      # arriving", and a sequence gap looks like nothing at all.
+      #
+      #   SPARSE DDATA IS COMPLETE. A payload carrying one metric is a device saying one thing
+      #   moved, not a payload that lost five. Synthesising rows for the metrics that stayed put
+      #   would fabricate observations indistinguishable from real readings.
+      #
+      #   A DROPPED MESSAGE IS THE LOST CHANGE. Under a timer the next tick restated everything
+      #   and a drop self-healed. Under RBE, lose the DDATA that said INTERRUPTED and every
+      #   consumer holds ACTIVE forever. `seq` is the only evidence, which is why a gap requests
+      #   a rebirth rather than merely logging.
+      #
+      # The edge half runs in frontend-build (nodeRedRbe.test.js): nothing else in this repository
+      # imports node_red_flow.json's function nodes, so nothing else can notice them regressing.
+      - name: Run Report-by-Exception Telemetry Tests
+        run: |
+          python ingestion/test_rbe_telemetry.py
+
   # =============================================================================================
   # The in-cluster half of the two-target guarantee.
   #

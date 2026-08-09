@@ -16,7 +16,7 @@ full Sparkplug B lifecycle so the platform can be exercised end to end with no p
 ## Overview
 
 The flow provides a **Gateway Simulator** tab in the Node-RED editor. It publishes `NBIRTH`,
-`DBIRTH`, periodic `DDATA` (5 s), `DDEATH`, and a periodic `NDATA` gateway heartbeat (30 s), plus
+`DBIRTH`, report-by-exception `DDATA`, `DDEATH`, and a periodic `NDATA` gateway heartbeat (30 s), plus
 interactive test controls (overheat alarm at 95 °C / reset to 42 °C) for exercising alerts and UI
 state transitions.
 
@@ -220,27 +220,57 @@ hardcode them.
 | :-- | :--- | :--- | :--- |
 | 1 | `NBIRTH` | `spBv1.0/FactoryPlus/NBIRTH/gwy1000…` | The edge node's own birth certificate, once at startup, before any device birth |
 | 2 | `DBIRTH` | `spBv1.0/FactoryPlus/DBIRTH/gwy1000…/dev2000…` | The metric names, types and config the device will report. Re-sent every 60 s |
-| 3 | `DDATA` | `spBv1.0/FactoryPlus/DDATA/gwy1000…/dev2000…` | Streaming telemetry, every 5 s |
+| 3 | `DDATA` | `spBv1.0/FactoryPlus/DDATA/gwy1000…/dev2000…` | Telemetry, **report by exception** — scanned every 5 s, published only when a metric moves |
 | 4 | `DDEATH` | `spBv1.0/FactoryPlus/DDEATH/gwy1000…/dev2000…` | Manually triggered — marks the device offline |
 | 5 | `NDATA` | `spBv1.0/FactoryPlus/NDATA/gwy1000…` | Gateway heartbeat, every 30 s |
 
+### Report by exception
+
+**`DDATA` means "these metrics changed".** The flow is *scanned* every 5 seconds; it *publishes*
+only what moved. A fixed-interval payload carrying every metric whether it moved or not is not
+DDATA — it is polling with extra steps, and it writes a row per metric per tick into the historian
+for readings nobody took.
+
+A metric qualifies as an exception when it is analogue and has moved by at least its **deadband**
+(0.5 °C on temperature, 0.05 mm on displacement), when it is discrete and changed at all, or when
+it has no cached value yet — the first scan after a birth. `DBIRTH` publishes the device's *live*
+readings and seeds that cache, so the birth certificate is the baseline rather than a set of
+nominal placeholders the first `DDATA` would then have to correct.
+
+**A deadband is only meaningful above the instrument's noise floor.** The simulated sensor noise
+is ±0.15 °C, deliberately below the 0.5 °C band — noise larger than the deadband trips the change
+test on its own and suppresses nothing.
+
+**`MAX_SILENCE_MS` (5 minutes) is the keepalive, and it is not a betrayal of RBE — it is what makes
+RBE safe to consume.** A value that is genuinely constant is indistinguishable, from the consumer's
+side, from a device that died silently, and every staleness check downstream reads absence as
+failure. Republishing an unchanged metric every five minutes bounds that ambiguity while still
+cutting wire and historian volume by roughly 9× against a full 5-second payload.
+
+Because an unchanged metric publishes nothing, **a missing bucket downstream means *unchanged*, not
+*unknown*.** Read these series through `telemetry_gapfill()` (see
+[`../timescaledb/aggregates.sql`](../timescaledb/aggregates.sql)), which carries the last
+observation forward; charting a rollup directly renders steady operation as a hole.
+
 ### Payload
 
-`Asset_ID` repeats the device's Sparkplug ID as a **cross-check** — the topic is what identifies
-the device, and if the two disagree the device is quarantined rather than one silently winning.
-`Asset_Name` is a display label; the platform never overwrites its own record's name from it.
+A `DDATA` payload carries **only the metrics that changed** — often just one. `seq` increments by
+one per message, wrapping 255 → 0, and is what lets `ingestion.py` detect that a message went
+missing; under RBE that is the only way it can find out, because a metric that stopped arriving
+looks exactly like a metric that stopped changing.
+
+`Asset_ID` and `Asset_Name` are **not** in `DDATA`. They are immutable, declared in `DBIRTH`, and
+discarded by the daemon's identity-metric filter before reaching the historian — the topic is what
+identifies the device. (`DBIRTH` still carries `Asset_ID` as a cross-check: if it disagrees with
+the topic the device is quarantined rather than one silently winning. An alias-encoded `DDATA` from
+a real gateway carries no `Asset_ID` either, which is why the topic has to be authoritative.)
 
 ```json
 {
   "timestamp": 1721399123456,
   "seq": 42,
   "metrics": [
-    { "name": "Asset_ID",    "datatype": 12, "string_value": "dev200000000000400080000" },
-    { "name": "Asset_Name",  "datatype": 12, "string_value": "Simulated_CNC_01" },
-    { "name": "Systems/TEMPERATURE",       "datatype": 10, "double_value": 42.5 },
-    { "name": "Axes/DISPLACEMENT",         "datatype": 10, "double_value": 1.35 },
-    { "name": "Controller/EXECUTION",      "datatype": 12, "string_value": "ACTIVE" },
-    { "name": "Controller/EMERGENCY_STOP", "datatype": 12, "string_value": "ARMED" }
+    { "name": "Systems/TEMPERATURE", "datatype": 10, "double_value": 47.5 }
   ]
 }
 ```

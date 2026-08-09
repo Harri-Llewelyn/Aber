@@ -246,6 +246,12 @@ _alias_lock = threading.Lock()
 _rebirth_requested = {}
 REBIRTH_METRIC_NAME = "Node Control/Rebirth"
 
+# Last Sparkplug `seq` seen per edge node, keyed exactly like the alias table above -- the
+# counter is per EDGE NODE and shared by its devices, so a device's DDATA advances the same run
+# its gateway's NDATA does. See check_message_sequence().
+_last_seq = {}
+_seq_lock = threading.Lock()
+
 # Devices heard from in THIS process -- {device_uuid: {"at": monotonic, "name": label}}.
 # Deliberately in-memory and deliberately not seeded from the database: see stale_device_ids().
 _device_seen = {}
@@ -421,6 +427,85 @@ def request_node_rebirth(client, group_id, edge_node_id):
         REBIRTH_METRIC_NAME, topic, REBIRTH_REQUEST_INTERVAL_SECONDS
     )
     return True
+
+
+# -----------------------------------------------------------------------------
+# Sparkplug Sequence Tracking
+# -----------------------------------------------------------------------------
+def check_message_sequence(group_id, edge_node_id, msg_type, payload, client=None):
+    """
+    Follow an edge node's Sparkplug `seq` counter and ask for a rebirth when it jumps.
+
+    Returns True if the message arrived in sequence (or could not be judged), False if a gap
+    was detected.
+
+    WHY THIS MATTERS FAR MORE UNDER REPORT-BY-EXCEPTION. When a device published every metric
+    on a timer, a dropped message cost one sample and the next tick five seconds later carried
+    the same information again -- the loss self-healed and nothing downstream could tell. Under
+    RBE a message IS the change: if the DDATA saying a machine went from ACTIVE to INTERRUPTED
+    is the one that gets dropped, nothing ever restates it. The historian, the dashboard and
+    every alert rule keep reporting ACTIVE indefinitely, and they are all confidently wrong.
+
+    The sequence number is the only evidence available that this happened. A metric that stopped
+    arriving is indistinguishable from a metric that stopped changing -- that ambiguity is
+    inherent to RBE -- but `seq` skipping from 41 to 43 is unambiguous, and the response is the
+    same one the alias cold start already uses: ask the node to re-birth, which re-declares every
+    metric at its current value and repairs the divergence.
+
+    NDEATH IS EXCLUDED. It is the broker's Last Will, registered at connect time and published
+    when the node is already gone, so it carries bdSeq rather than a live `seq` and is not part
+    of the counter's run.
+
+    RESYNCS ON A GAP rather than staying latched to the value it expected. Holding the old
+    expectation would make every subsequent message look out of sequence too, turning one drop
+    into a permanent alarm -- and the rebirth this triggers is itself a message that advances
+    the counter.
+    """
+    if msg_type == "NDEATH" or not payload.HasField("seq"):
+        return True
+
+    seq = payload.seq % 256
+    key = alias_key(group_id, edge_node_id)
+
+    with _seq_lock:
+        # Per the specification NBIRTH restarts the run at zero, so it is a resynchronisation
+        # point rather than something to check: whatever we believed before it is void.
+        if msg_type == "NBIRTH":
+            _last_seq[key] = seq
+            return True
+
+        previous = _last_seq.get(key)
+        _last_seq[key] = seq
+
+    # No baseline yet -- this daemon started mid-run. Adopting the observed value is right;
+    # calling it a gap would fire a rebirth at every node on every restart.
+    if previous is None:
+        return True
+
+    expected = (previous + 1) % 256
+    if seq == expected:
+        return True
+
+    # A redelivered QoS-1 message repeats a seq we have already seen. That is the broker doing
+    # its job, not a loss, and the historian's ON CONFLICT DO NOTHING already absorbs it.
+    if seq == previous:
+        logger.debug(
+            "Duplicate %s seq %d from edge node '%s' (redelivery); ignoring.",
+            msg_type, seq, edge_node_id
+        )
+        return True
+
+    missed = (seq - expected) % 256
+    requested = request_node_rebirth(client, group_id, edge_node_id)
+    logger.warning(
+        "SEQUENCE GAP: edge node '%s' sent %s with seq %d, expected %d -- %d message(s) lost or "
+        "reordered. Under report-by-exception an unseen change is never restated, so any metric "
+        "carried by those messages is now stale here.%s",
+        edge_node_id, msg_type, seq, expected, missed,
+        " A rebirth has been requested." if requested
+        else " A rebirth was not requested (throttled or no broker client)."
+    )
+    return False
 
 
 # -----------------------------------------------------------------------------
@@ -1314,6 +1399,15 @@ def parse_sparkplug_payload(msg):
             if data.get('uuid'):
                 payload.uuid = str(data['uuid'])
 
+            # The Sparkplug sequence number. Carried through so the fallback is not silently
+            # blind to message loss -- check_message_sequence() tests HasField('seq'), and
+            # dropping it here would make every JSON publisher exempt from gap detection.
+            # Assigned only when present and integral: `seq` is a uint64, so a missing or
+            # non-numeric one must leave the field unset rather than default it to 0, which
+            # would read as a legitimate wrap and mask a real gap.
+            if isinstance(data.get('seq'), (int, float)) and not isinstance(data.get('seq'), bool):
+                payload.seq = int(data['seq']) % 256
+
             for m in data.get('metrics', []):
                 metric = payload.metrics.add()
                 metric.name = m.get('name', '')
@@ -1419,6 +1513,11 @@ def on_message(client, userdata, msg):
     # command topics outright keeps a rebirth request from being read as edge-node traffic.
     if msg_type in ("NCMD", "DCMD"):
         return
+
+    # Follow the edge node's sequence counter before dispatching. Advisory: a gap is reported
+    # and a rebirth requested, but the message itself is still processed -- it is a real
+    # observation, and discarding it would compound the loss it is evidence of.
+    check_message_sequence(group_id, edge_node_id, msg_type, payload, client=client)
 
     # Node-level topics (spBv1.0/<group>/<NBIRTH|NDATA|NDEATH>/<edge_node>) carry no
     # device component and no Asset_ID metric -- they are edge gateway heartbeats.
