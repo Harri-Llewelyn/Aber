@@ -173,22 +173,45 @@ GRANT SELECT ON public.telemetry_latest, public.telemetry_1m,
 -- `LIMIT 1` keeps this to one round trip per relation on a database of any size. It fires when
 -- aggregates.sql has not run against this TimescaleDB -- most likely because the maintenance
 -- Job/service was reordered after db-init -- and says so.
+--
+-- "THE HISTORIAN IS UNREACHABLE" IS A DIFFERENT FACT FROM "THE MAPPING IS WRONG", and only the
+-- second is what this check is about. The distinction is not cosmetic: the RLS/edge-function CI
+-- job applies these migrations against a BARE POSTGRES with no TimescaleDB anywhere, because what
+-- it tests is authorisation and it has no use for a historian. Failing there would make the
+-- migration chain refuse to apply in a context where nothing is actually wrong -- and, worse,
+-- would couple every Supabase boot to TimescaleDB being up, so a historian taken down for
+-- maintenance would stop the whole stack applying migrations.
+--
+-- So a connection failure (SQLSTATE class 08 -- verified as 08001 from postgres_fdw) SKIPS, and
+-- anything else FAILS. A missing remote relation or a column-type disagreement arrives as 42P01
+-- or 42804 from the remote and still stops the boot, which is the case worth catching.
 -- ---------------------------------------------------------------------------------------------
 DO $$
 DECLARE
-  rel text;
+  rel         text;
+  unreachable boolean := false;
 BEGIN
   FOREACH rel IN ARRAY ARRAY['telemetry_latest', 'telemetry_1m', 'telemetry_5m', 'telemetry_1h'] LOOP
     BEGIN
       EXECUTE format('SELECT 1 FROM public.%I LIMIT 1', rel);
-    EXCEPTION WHEN others THEN
-      RAISE EXCEPTION
-        '0010 self-check FAILED: public.% is mapped but not readable (%). The remote objects are '
-        'created by timescaledb/aggregates.sql, which the timescaledb-maintenance service (Compose) '
-        'or hook Job (Helm) applies BEFORE db-init. Check that it ran and succeeded.',
-        rel, SQLERRM;
+    EXCEPTION
+      WHEN connection_exception THEN
+        unreachable := true;
+      WHEN others THEN
+        RAISE EXCEPTION
+          '0010 self-check FAILED: public.% is mapped but not readable (%). The remote objects are '
+          'created by timescaledb/aggregates.sql, which the timescaledb-maintenance service (Compose) '
+          'or hook Job (Helm) applies BEFORE db-init. Check that it ran and succeeded.',
+          rel, SQLERRM;
     END;
   END LOOP;
 
-  RAISE NOTICE '0010 self-check passed: the rollup and latest-value mappings resolve over the FDW.';
+  IF unreachable THEN
+    RAISE NOTICE
+      '0010: TimescaleDB is not reachable from here, so the rollup mappings could not be verified. '
+      'The foreign tables and views are created; they will resolve once the historian is up. This '
+      'is expected where Supabase is applied without one.';
+  ELSE
+    RAISE NOTICE '0010 self-check passed: the rollup and latest-value mappings resolve over the FDW.';
+  END IF;
 END $$;
