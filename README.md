@@ -237,7 +237,6 @@ Two things worth knowing before the first install:
 | [`deploy/helm/factoryplus/`](deploy/helm/factoryplus) | The Helm chart. `values.yaml` documents every setting and why it is not simply a default |
 | [`docs/kubernetes-migration-plan.md`](docs/kubernetes-migration-plan.md) | How the Kubernetes target was designed and why, phase by phase, including what was found by building it |
 | [`tests/`](tests) | Vendored IDTA AAS schema, and the conformance test-runner image |
-| [`CLAUDE.md`](CLAUDE.md) | Detailed design rationale and invariants for contributors |
 
 ---
 
@@ -449,8 +448,16 @@ Installation, the one-time GHCR visibility step, and what the release deliberate
 
 ## Contributing
 
-Read [`CLAUDE.md`](CLAUDE.md) first — it records the invariants and the reasoning behind them,
-including which pieces of JavaScript mirror SQL and must be kept in step.
+**The reasoning lives next to the thing it constrains**, not in one design document. A migration's
+header says why its schema is shaped that way, `values.yaml` says why each setting is not simply a
+default, and the component READMEs above carry the rest. Read the file you are about to change
+before you change it — several of them record a failure that is not visible from the code.
+
+Some logic is **mirrored across languages** and must be kept in step: `frontend/src/utils/` mirrors
+generated columns and views in `supabase/migrations/0001_baseline_schema.sql`, and the edge
+functions duplicate two mappers the browser bundle cannot share. Those pairs have drift checks
+(`scripts/check-mirror-drift.mjs`, `scripts/check-docs-drift.mjs`,
+`tests/test_aas_export.py`) — if you change one side, CI will tell you about the other.
 
 Two rules worth stating up front:
 

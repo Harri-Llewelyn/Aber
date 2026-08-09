@@ -49,6 +49,9 @@ function walk(dir, out = []) {
 }
 const allFiles = walk('.').map((f) => f.replace(/^\.\//, ''));
 
+/** Every markdown file in the repository. Derived, so deleting one moves no check. */
+const MARKDOWN = allFiles.filter((f) => f.endsWith('.md'));
+
 // -------------------------------------------------------------------------------------------------
 // 1. Every local markdown link resolves.
 //
@@ -56,7 +59,7 @@ const allFiles = walk('.').map((f) => f.replace(/^\.\//, ''));
 // documents point at nothing, silently, because nothing renders them in CI.
 // -------------------------------------------------------------------------------------------------
 {
-  const docs = allFiles.filter((f) => f.endsWith('.md'));
+  const docs = MARKDOWN;
   let broken = 0;
   for (const doc of docs) {
     const body = read(doc);
@@ -215,10 +218,21 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 6. Every applied migration is mentioned somewhere in README or CLAUDE.md.
+// 6. Every applied migration is mentioned in the documentation.
 //
-// Found stale: 0004 and 0005 existed and neither document acknowledged them, while README described
-// the applied set as "0001-0003".
+// Found stale: 0004 and 0005 existed and no document acknowledged them, while README described the
+// applied set as "0001-0003".
+//
+// SCOPED TO README, and narrowed rather than widened when the second document went away. This
+// read `README.md + CLAUDE.md` by name, and when CLAUDE.md was deleted it did not report a missing
+// document -- it CRASHED on ENOENT, taking the whole drift suite with it and failing the frontend
+// job with a stack trace naming no check at all.
+//
+// The obvious repair was to glob every markdown file, and that would have been WRONG: it makes the
+// check easier to satisfy the more documentation exists, and `supabase/migrations/archive/README.md`
+// alone mentions enough prefixes to pass it vacuously. README is the document that states which
+// migrations are applied -- the original failure was README describing the set as "0001-0003" while
+// 0004 and 0005 existed -- so that is the one to hold to it.
 // -------------------------------------------------------------------------------------------------
 {
   const migs = readdirSync(join(REPO, 'supabase/migrations'))
@@ -226,8 +240,8 @@ function edgeFunctionNames() {
     .map((f) => f.slice(0, 4))
     .filter((v, i, a) => a.indexOf(v) === i)
     .sort();
-  const both = read('README.md') + read('CLAUDE.md');
-  const missing = migs.filter((m) => !both.includes(m));
+  const readme = read('README.md');
+  const missing = migs.filter((m) => !readme.includes(m));
   if (missing.length) fail(`no doc mentions migration(s): ${missing.join(', ')}`);
   else pass(`all ${migs.length} applied migration prefixes are documented`);
 }

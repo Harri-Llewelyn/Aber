@@ -13,8 +13,9 @@ The 38 files in this directory are the original incremental migrations,
 They are the reasoning. The baseline files show *what* the schema is; these show *why* it is that
 way — why `metric_catalog.name` is immutable, why gateway staleness is a view rather than a cron
 writer, why the Realtime tenant must be addressed as `realtime-dev.supabase-realtime`, why the
-metric-group separator is `/` and not `.`. Several of those decisions are cited by migration number
-in `CLAUDE.md`, and re-deriving them from a squashed dump would not be possible.
+metric-group separator is `/` and not `.`. Several of those decisions are cited by filename from the
+applied migrations and the component READMEs, and re-deriving them from a squashed dump would not be
+possible.
 
 Treat this directory as documentation with a `.sql` extension.
 

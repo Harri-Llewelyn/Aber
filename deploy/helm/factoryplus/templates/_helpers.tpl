@@ -50,7 +50,7 @@ Prefixing them with the release name would break all of that and buy nothing: tw
 stack in one namespace is not a supported configuration (they would contend for the MQTT host
 port, the Realtime replication slot and the tenant name). Use two namespaces.
 
-Do not "tidy" a Service name. See CLAUDE.md "Deployment Targets".
+Do not "tidy" a Service name. deploy/k8s/README.md carries the divergence table this belongs to.
 */}}
 {{- define "factoryplus.labels" -}}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}

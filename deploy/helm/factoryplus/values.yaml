@@ -143,7 +143,7 @@ timescaledb:
   image:
     repository: timescale/timescaledb
     # Pinned to match docker-compose.yml. Both targets must pin the SAME tag -- see
-    # CLAUDE.md "Deployment Targets".
+    # scripts/check-image-tag-parity.mjs, which CI runs.
     tag: latest-pg15
     pullPolicy: IfNotPresent
   database: postgres
@@ -768,7 +768,7 @@ frontend:
   replicas: 2
   # Delivered to the browser through the /config.js ConfigMap, NOT baked into the image. That is
   # what makes these flippable with a `helm upgrade` here while the Compose path still needs an
-  # image rebuild -- see CLAUDE.md "Frontend Configuration".
+  # image rebuild -- see the header of frontend/src/config.js.
   #
   # Gates every supabase.channel() subscription. With it off the tabs fall back to a 3s poll.
   enableRealtime: true

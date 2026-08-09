@@ -64,7 +64,8 @@ const END_MARKER = '-- <<< END GENERATED mtconnect_vocabulary';
  * point of being a stable handle, and `semantic_id` is the one column downstream systems key on.
  *
  * The namespace is `factoryplus.local` and must stay that way: an id under `mtconnect.org` would
- * assert an interoperability nobody has agreed to. See CLAUDE.md, "Semantic Identity".
+ * assert an interoperability nobody has agreed to. See the header of
+ * supabase/migrations/archive/20260101000029_semantic_identifiers.sql.
  */
 const KIND_SEGMENT = {
   DATA_ITEM_TYPE: 'DataItemType',

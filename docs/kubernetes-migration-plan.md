@@ -139,9 +139,11 @@ is deferred — but the built `index.html` read in the opposite order to the one
 invites a later "fix". The tag now sits in `<head>`, and the test asserts the property that
 actually matters (no `type=`/`defer`/`async` on it) rather than mere document order.
 
-**This changed a documented invariant.** `CLAUDE.md` stated that `VITE_ENABLE_REALTIME` "is inlined
-by Vite at build time — flipping it requires rebuilding the frontend image". That is now true of the
-Compose path only; the paragraph has been updated in the same change.
+**This changed a documented invariant.** `VITE_ENABLE_REALTIME` used to be inlined by Vite at build
+time, so flipping it meant rebuilding the frontend image. That is now true of the **Compose path
+only** — on Kubernetes the value comes from a ConfigMap and changes with a `helm upgrade`.
+`frontend/src/config.js` resolves every `VITE_*` setting runtime-first, build-time-second, and its
+header records why.
 
 The anon key moving from bundle to ConfigMap is not a security change — it is `anon`, it is public
 by design, and it is already readable in the shipped bundle.

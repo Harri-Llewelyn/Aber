@@ -6,7 +6,7 @@
 -- WHAT THIS IS. The squashed structural baseline for the public beta. It replaces the 38
 -- incremental migrations `20260101000000` .. `20260101000037`, which are preserved verbatim under
 -- `supabase/migrations/archive/` -- they are not deleted, because they carry the reasoning behind
--- most of the decisions this file only shows the outcome of, and CLAUDE.md still cites them by
+-- most of the decisions this file only shows the outcome of, and the READMEs still cite them by
 -- number.
 --
 -- SCOPE: PURE DDL. No INSERT, no seeding, no data of any kind. Baseline data lives in

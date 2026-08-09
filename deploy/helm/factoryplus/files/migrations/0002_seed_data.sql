@@ -2081,7 +2081,7 @@ ON CONFLICT (event_key, url) DO NOTHING;
 -- ---------------------------------------------------------------------------------------------
 -- FIXES A DEFECT THE INCREMENTAL CHAIN CARRIED. `roles` is seeded with explicit ids, which does
 -- not advance `roles_id_seq` -- it sat at 1 while max(id) was 4, so inserting a NEW role without
--- naming an id failed on `roles_pkey`. CLAUDE.md documented the manual `setval` as the
+-- naming an id failed on `roles_pkey`. The manual `setval` used to be documented as the
 -- workaround; a squashed baseline is the right place to stop needing one.
 --
 -- `GREATEST(..., 1)` because setval rejects a value below the sequence minimum, which is what an
