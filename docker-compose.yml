@@ -57,6 +57,8 @@ services:
     volumes:
       # Note: Initialization scripts in /docker-entrypoint-initdb.d only run on an empty data directory.
       # Existing pgdata volumes must be recreated (docker compose down -v) to pick up schema changes.
+      # That is exactly why the retention policies are NOT here any more -- see
+      # timescaledb-retention below.
       - ./timescaledb/init:/docker-entrypoint-initdb.d:ro
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -64,6 +66,48 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Compression + retention reconciliation (runs on EVERY boot)
+  # ---------------------------------------------------------------------------
+  # Applies timescaledb/retention.sql with whatever intervals .env currently says, so changing
+  # TIMESCALE_COMPRESS_AFTER or TIMESCALE_RETAIN_FOR takes effect on the next `docker compose up`.
+  # It cannot live in /docker-entrypoint-initdb.d: those scripts run only on an empty data
+  # directory, so the intervals could only ever be chosen before the first telemetry row existed
+  # and no edit could reach a running stack.
+  #
+  # Retention is a HARD DELETE of raw telemetry with no undo, so the value is the operator's to
+  # set. `never` disables either policy.
+  timescaledb-retention:
+    container_name: factoryplus_timescaledb_retention
+    image: timescale/timescaledb:latest-pg15
+    environment:
+      PGPASSWORD: ${DB_PASSWORD}
+      TS_DBNAME: ${DB_NAME:-postgres}
+      TS_USER: ${DB_USER:-postgres}
+      TIMESCALE_COMPRESS_AFTER: ${TIMESCALE_COMPRESS_AFTER:-7 days}
+      TIMESCALE_RETAIN_FOR: ${TIMESCALE_RETAIN_FOR:-90 days}
+    volumes:
+      - ./timescaledb/retention.sql:/retention.sql:ro
+    # The healthcheck cannot be trusted to mean "init has finished": the postgres entrypoint runs
+    # initdb scripts against a temporary server that already answers on the unix socket, which is
+    # what `pg_isready` inside the container asks. So wait for the hypertable itself -- the object
+    # this script needs -- rather than for the port.
+    entrypoint: >
+      /bin/sh -e -c "
+      echo 'Waiting for the telemetry hypertable...';
+      i=0;
+      until psql -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -tAc \"SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'telemetry'\" | grep -q 1; do
+        i=$$((i+1));
+        if [ $$i -ge 60 ]; then echo 'timed out waiting for the telemetry hypertable (created by timescaledb/init/001_schema.sql on an EMPTY data directory)' >&2; exit 1; fi;
+        sleep 2;
+      done;
+      echo 'Reconciling compression and retention policies...';
+      psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -v compress_after=\"$$TIMESCALE_COMPRESS_AFTER\" -v retain_after=\"$$TIMESCALE_RETAIN_FOR\" -f /retention.sql;
+      "
+    depends_on:
+      timescaledb:
+        condition: service_healthy
 
   # ---------------------------------------------------------------------------
   # Self-Hosted Supabase Stack (Postgres, GoTrue Auth, PostgREST, Kong, Studio)
@@ -242,10 +286,15 @@ services:
   # Realtime v2: tails the Postgres WAL through a logical replication slot and fans
   # changes out over WebSockets, replacing the dashboard's 3s polling loops.
   #
-  # Only the metadata tables in the `supabase_realtime` publication are published.
+  # Only the metadata tables in the `supabase_realtime` publication are published --
+  # `cells`, `gateways` and `devices`, which is exactly what the dashboard subscribes to.
   # `public.telemetry` is deliberately excluded and cannot ever be included: it is a
-  # postgres_fdw foreign table (migration 0010) whose rows live in TimescaleDB's WAL,
-  # never this database's, so it would emit nothing.
+  # postgres_fdw foreign table (0001_baseline_schema.sql) whose rows live in TimescaleDB's
+  # WAL, never this database's, so it would emit nothing.
+  # `public.digital_thread` is excluded for a different reason -- an unauthenticated
+  # subscriber still receives the change ENVELOPE, so publishing the audit log leaks the
+  # timing of quarantine and reconfiguration events. Nothing subscribed to it. Reading it
+  # through PostgREST is unaffected; see the publication block in 0001_baseline_schema.sql.
   supabase-realtime:
     container_name: factoryplus_supabase_realtime
     # Pinned rather than :latest -- Realtime runs its own migrations against the
@@ -620,20 +669,44 @@ services:
   # ---------------------------------------------------------------------------
   # Messaging & Edge Infrastructure
   # ---------------------------------------------------------------------------
+  # Provisions the FIVE platform principals mosquitto.acl confines. There is deliberately no
+  # wildcard-write account any more -- see the header of mosquitto.acl for what that account could
+  # do and why verify_gateway_binding() could not catch it.
+  #
+  # NEVER `mosquitto_passwd -b -c` ON THE MERGED FILE except for the first account: `-c` CREATES
+  # the file and discards everything already in it, which on a stack with provisioned gateways
+  # means every physical gateway loses its credential at once. The first call below uses -c
+  # intentionally (this is the file's initial state); every subsequent call must not.
   mosquitto-init:
     container_name: factoryplus_mosquitto_init
     image: eclipse-mosquitto:2.0.20
     user: "0"
     environment:
-      MQTT_USER: ${MQTT_USER:-factoryplus}
-      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_INGESTION_USER: ${MQTT_INGESTION_USER:-factoryplus_ingestion}
+      MQTT_INGESTION_PASSWORD: ${MQTT_INGESTION_PASSWORD}
+      MQTT_I3X_USER: ${MQTT_I3X_USER:-factoryplus_i3x}
+      MQTT_I3X_PASSWORD: ${MQTT_I3X_PASSWORD}
+      MQTT_SIMULATOR_USER: ${MQTT_SIMULATOR_USER:-gwy100000000000400080000}
+      MQTT_SIMULATOR_PASSWORD: ${MQTT_SIMULATOR_PASSWORD}
+      MQTT_VALIDATOR_USER: ${MQTT_VALIDATOR_USER:-gwy110000000000400080000}
+      MQTT_VALIDATOR_PASSWORD: ${MQTT_VALIDATOR_PASSWORD}
+      MQTT_MONITOR_USER: ${MQTT_MONITOR_USER:-factoryplus_monitor}
+      MQTT_MONITOR_PASSWORD: ${MQTT_MONITOR_PASSWORD}
     volumes:
       - mosquitto_data:/mosquitto/config
     entrypoint: >
-      /bin/sh -c "
-      mosquitto_passwd -b -c /mosquitto/config/password_file \"$MQTT_USER\" \"$MQTT_PASSWORD\";
+      /bin/sh -e -c "
+      if [ -z \"$$MQTT_INGESTION_PASSWORD\" ] || [ -z \"$$MQTT_I3X_PASSWORD\" ] || [ -z \"$$MQTT_SIMULATOR_PASSWORD\" ] || [ -z \"$$MQTT_VALIDATOR_PASSWORD\" ] || [ -z \"$$MQTT_MONITOR_PASSWORD\" ]; then
+        echo 'One or more MQTT_*_PASSWORD values are empty. The broker runs allow_anonymous false, so an empty credential fails as CONNACK 5 with no useful log line at either end. Run: node scripts/setup.mjs' >&2;
+        exit 1;
+      fi;
+      mosquitto_passwd -b -c /mosquitto/config/password_file \"$$MQTT_INGESTION_USER\" \"$$MQTT_INGESTION_PASSWORD\";
+      mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_I3X_USER\" \"$$MQTT_I3X_PASSWORD\";
+      mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_SIMULATOR_USER\" \"$$MQTT_SIMULATOR_PASSWORD\";
+      mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_VALIDATOR_USER\" \"$$MQTT_VALIDATOR_PASSWORD\";
+      mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_MONITOR_USER\" \"$$MQTT_MONITOR_PASSWORD\";
       chmod 644 /mosquitto/config/password_file;
-      echo 'Mosquitto password file initialized';
+      echo \"Mosquitto password file initialized with $$(grep -c : /mosquitto/config/password_file) account(s)\";
       "
 
   mosquitto:
@@ -644,8 +717,10 @@ services:
       - "1883:1883"
       - "9001:9001"
     environment:
-      MQTT_USER: ${MQTT_USER:-factoryplus}
-      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      # The healthcheck's credential ONLY. It reads $SYS/# and can publish nothing, so the probe
+      # is not a standing wildcard credential sitting in the broker's own environment.
+      MQTT_MONITOR_USER: ${MQTT_MONITOR_USER:-factoryplus_monitor}
+      MQTT_MONITOR_PASSWORD: ${MQTT_MONITOR_PASSWORD}
     volumes:
       - mosquitto_data:/mosquitto/config
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
@@ -653,7 +728,7 @@ services:
       # it is repository-managed policy, not runtime state, and must not drift on the volume.
       - ./mosquitto.acl:/mosquitto/config/mosquitto.acl:ro
     healthcheck:
-      test: ["CMD-SHELL", "mosquitto_sub -u $${MQTT_USER:-factoryplus} -P $${MQTT_PASSWORD} -t '$$SYS/broker/version' -C 1 || exit 1"]
+      test: ["CMD-SHELL", "mosquitto_sub -u $${MQTT_MONITOR_USER:-factoryplus_monitor} -P $${MQTT_MONITOR_PASSWORD} -t '$$SYS/broker/version' -C 1 || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -701,8 +776,12 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       MQTT_HOST: ${MQTT_HOST:-mosquitto}
       MQTT_PORT: ${MQTT_PORT:-1883}
-      MQTT_USER: ${MQTT_USER:-factoryplus}
-      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      # The ingestion principal: reads spBv1.0/# and may publish ONLY rebirth NCMDs. It cannot
+      # publish DBIRTH or DDATA at all, which is what stops this daemon's credential being usable
+      # to forge telemetry for a device that is correctly bound -- the one forgery
+      # verify_gateway_binding() cannot detect, because such a message satisfies it by design.
+      MQTT_USER: ${MQTT_INGESTION_USER:-factoryplus_ingestion}
+      MQTT_PASSWORD: ${MQTT_INGESTION_PASSWORD}
       # MQTTS, opt-in and EMPTY BY DEFAULT -- this broker declares no TLS listener (see
       # mosquitto-tls.conf for why it is a separate file). An empty MQTT_TLS_ENABLED is a no-op in
       # ingestion.py, so the default path is unchanged. Passed through rather than omitted so that
@@ -759,8 +838,11 @@ services:
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
       MQTT_HOST: ${MQTT_HOST:-mosquitto}
       MQTT_PORT: ${MQTT_PORT:-1883}
-      MQTT_USER: ${MQTT_USER:-factoryplus}
-      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      # READ-ONLY at the broker, matching what this service already refuses to do in code: writes
+      # answer 405 and `/info` declares `update.current: false`. Sharing the ingestion account
+      # would hand a service designed not to write a credential that can publish NCMD.
+      MQTT_USER: ${MQTT_I3X_USER:-factoryplus_i3x}
+      MQTT_PASSWORD: ${MQTT_I3X_PASSWORD}
       MQTT_TLS_ENABLED: ${MQTT_TLS_ENABLED:-}
       MQTT_TLS_CA_FILE: ${MQTT_TLS_CA_FILE:-}
       # Subscription limits. The TTL is a spec MUST -- an abandoned subscription must be deleted, or
@@ -787,8 +869,13 @@ services:
     user: "0"
     environment:
       <<: *nodered-auth-env
-      MQTT_USER: ${MQTT_USER:-factoryplus}
-      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      # THE SIMULATOR IS A GATEWAY, so its credential is an ordinary per-gateway one: the username
+      # IS the `sparkplug_id` of the seeded Virtual_Gateway_NodeRED row, and mosquitto.acl's
+      # `pattern readwrite spBv1.0/+/+/%u/#` therefore confines the flow to its own edge node. It
+      # is only pre-provisionable because that row's UUID is pinned in 0002_seed_data.sql, which
+      # is what makes the generated sparkplug_id knowable before the row exists.
+      MQTT_USER: ${MQTT_SIMULATOR_USER:-gwy100000000000400080000}
+      MQTT_PASSWORD: ${MQTT_SIMULATOR_PASSWORD}
       # Seeding is first-run only, so editor changes survive `docker compose up`.
       # Set to true for a deliberate reset back to the repo's flow.
       NODE_RED_FORCE_SEED: ${NODE_RED_FORCE_SEED:-false}

@@ -926,8 +926,19 @@ keep` plus a `lookup` that carries the current contents through a re-render). Wi
 every `helm upgrade` would reset it and the whole fleet would fall off the broker at once with the
 upgrade as the only clue.
 
-The **platform** account is not in that Secret. It comes from `secrets.mqttPassword` and is
-re-applied on every pod start, so rotating it in values reaches the broker on the next restart.
+The five **platform** principals are not in that Secret. They come from the `secrets.mqtt*` values
+and are re-applied on every pod start, so rotating one in values reaches the broker on the next
+restart.
+
+> **There is no shared broker account.** `factoryplus`, which held `readwrite spBv1.0/#` and was
+> used by ingestion, i3X, Node-RED and the validator alike, has been deleted — it could forge
+> `DBIRTH`/`DDATA` for any machine on the site, which `verify_gateway_binding()` cannot detect for
+> a correctly bound device. `mosquitto.acl` now confines `factoryplus_ingestion` (read plus NCMD
+> only), `factoryplus_i3x` (read only), `factoryplus_monitor` (`$SYS` only) and two per-gateway
+> accounts. **The gateway usernames must be `sparkplug_id`s** — the chart fails the render
+> otherwise, because a friendly name authenticates perfectly and then has every publish silently
+> dropped by the broker. `secrets.mqttMonitorPassword` is required: the broker's own probes
+> authenticate as it, so an empty one leaves mosquitto permanently NotReady.
 
 ### Changing a hostname re-registers the OAuth clients — but only through Helm
 

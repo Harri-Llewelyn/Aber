@@ -138,8 +138,16 @@ spec:
             {{- include "factoryplus.noderedAuthEnv" . | nindent 12 }}
             # node-red-init also writes the broker credentials into flows_cred.json, so it needs
             # these two on top of the auth block.
-            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_USER") | nindent 12 }}
-            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_PASSWORD") | nindent 12 }}
+            {{- /*
+              THE SIMULATOR IS A GATEWAY, so it takes an ordinary per-gateway credential: the
+              username IS the `sparkplug_id` of the seeded Virtual_Gateway_NodeRED row, and
+              mosquitto.acl's `pattern readwrite spBv1.0/+/+/%u/#` therefore confines the flow to
+              its own edge node. It is pre-provisionable only because that row's UUID is pinned in
+              0002_seed_data.sql. A friendly name here authenticates fine and then has every
+              publish silently dropped by the broker.
+            */}}
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_SIMULATOR_USER") | nindent 12 }}
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_SIMULATOR_PASSWORD") | nindent 12 }}
             {{/*
               The broker's transport, from the same helper the ingestion daemon uses.
 

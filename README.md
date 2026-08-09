@@ -125,13 +125,14 @@ the obvious way — are in [`docs/kubernetes-migration-plan.md`](docs/kubernetes
 ## Quick Start (Docker Compose)
 
 ```bash
-npm run setup                   # creates .env from .env.example (cross-platform, no POSIX shell)
+npm run setup                   # writes .env with 14 FRESHLY GENERATED credentials
+                                # (cross-platform, no POSIX shell, no openssl needed)
 docker compose up --build -d    # launches the whole stack
 ```
 
 Every file in `supabase/migrations/` — the schema baseline (`0001`), seed data (`0002`), and the
 later additive migrations (`0003` audit immutability, `0004`, `0005`, `0006` Node-RED SSO, `0007`
-metric-name format, `0008` Sparkplug group) —
+metric-name format, `0008` Sparkplug group, `0009` withdraws the residual `anon` function grants) —
 plus demo accounts (`supabase/seed.sql`) are applied by `supabase-db-init` on startup, and
 re-applied harmlessly on every later start.
 
@@ -230,13 +231,12 @@ Two things worth knowing before the first install:
 | [`supabase/migrations/archive/`](supabase/migrations/archive) | The 38 pre-beta migrations, preserved for their reasoning. Never executed |
 | [`docs/openapi.yaml`](docs/openapi.yaml) | REST API specification rendered by Swagger UI |
 | [`grafana/`](grafana) | Datasource, dashboard and alerting provisioning |
-| [`timescaledb/init/`](timescaledb/init) | Hypertable schema and retention policy |
+| [`timescaledb/`](timescaledb) | Hypertable schema (`init/`, first boot only) and the compression/retention reconciliation applied on every boot |
 | [`scripts/`](scripts) | Setup, Node-RED seeding, storage bucket, MQTT credentials, vocabulary generation, chart-file sync, image tag parity |
 | **[`deploy/k8s/README.md`](deploy/k8s/README.md)** | Kubernetes runbook: install, upgrade, teardown, hardening, the divergence table, and what will bite you |
 | [`deploy/helm/factoryplus/`](deploy/helm/factoryplus) | The Helm chart. `values.yaml` documents every setting and why it is not simply a default |
 | [`docs/kubernetes-migration-plan.md`](docs/kubernetes-migration-plan.md) | How the Kubernetes target was designed and why, phase by phase, including what was found by building it |
 | [`tests/`](tests) | Vendored IDTA AAS schema, and the conformance test-runner image |
-| [`CLAUDE.md`](CLAUDE.md) | Detailed design rationale and invariants for contributors |
 
 ---
 
@@ -351,12 +351,17 @@ is why the schema builder offers a choice rather than a migration path.
 ## Testing
 
 ```bash
-# Frontend — 690 tests
+# Frontend — 713 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required
 python ingestion/test_gateway_binding.py
 python ingestion/test_declared_metrics.py
+# The Python half of the modelled-metrics mirror contract. Its JavaScript half runs in the
+# frontend suite above; both assert tests/fixtures/modelled-metrics.json, which is how two
+# implementations of one rule in two languages are held together — see scripts/check-mirror-drift.mjs
+# for the mirrors that can be compared as values instead.
+python ingestion/test_modelled_metrics_contract.py
 python ingestion/test_device_location.py
 python ingestion/test_health_heartbeat.py
 python ingestion/test_mqtt_tls.py
@@ -375,6 +380,7 @@ python supabase/migrations/test_schema_versioning.py
 
 # End-to-end — needs the running stack
 set -a && . ./.env && set +a && unset MQTT_HOST DB_HOST DB_PORT
+export MQTT_USER="$MQTT_VALIDATOR_USER" MQTT_PASSWORD="$MQTT_VALIDATOR_PASSWORD"
 python ingestion/validate.py
 ```
 
@@ -442,8 +448,16 @@ Installation, the one-time GHCR visibility step, and what the release deliberate
 
 ## Contributing
 
-Read [`CLAUDE.md`](CLAUDE.md) first — it records the invariants and the reasoning behind them,
-including which pieces of JavaScript mirror SQL and must be kept in step.
+**The reasoning lives next to the thing it constrains**, not in one design document. A migration's
+header says why its schema is shaped that way, `values.yaml` says why each setting is not simply a
+default, and the component READMEs above carry the rest. Read the file you are about to change
+before you change it — several of them record a failure that is not visible from the code.
+
+Some logic is **mirrored across languages** and must be kept in step: `frontend/src/utils/` mirrors
+generated columns and views in `supabase/migrations/0001_baseline_schema.sql`, and the edge
+functions duplicate two mappers the browser bundle cannot share. Those pairs have drift checks
+(`scripts/check-mirror-drift.mjs`, `scripts/check-docs-drift.mjs`,
+`tests/test_aas_export.py`) — if you change one side, CI will tell you about the other.
 
 Two rules worth stating up front:
 

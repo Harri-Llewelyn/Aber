@@ -23,10 +23,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
  * silently moving the other's, on an endpoint whose name mentions only one of them.
  */
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { resolveUserRole } from "../_shared/roles.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
 /**
  * Supabase RBAC role -> Node-RED permissions.
@@ -94,20 +92,10 @@ export default async function handler(req: Request): Promise<Response> {
     // couple this endpoint to the exact shape of that policy. The user id is already
     // authenticated above, so this is a lookup, not an authorisation decision.
     const supabaseAdmin = createClient(supabaseUrl, serviceKey);
-    const { data: roleRow, error: roleError } = await supabaseAdmin
-      .from("user_roles")
-      .select("roles(name)")
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    // A failed lookup is not evidence of a role. Returning no permissions lets Node-RED refuse
-    // the login, which is the correct answer to "we could not determine this user's privileges".
-    if (roleError) {
-      console.error(`role lookup failed for user ${user.id}: ${roleError.message}`);
-    }
-
-    const dbRole = (roleRow as { roles?: { name?: string } } | null)?.roles?.name;
-    const supabaseRole = typeof dbRole === "string" ? dbRole : null;
+    // A failed lookup is not evidence of a role: resolveUserRole logs and returns null, and
+    // returning no permissions lets Node-RED refuse the login — the correct answer to "we could
+    // not determine this user's privileges".
+    const supabaseRole = await resolveUserRole(supabaseAdmin, user.id);
     const permissions = supabaseRole ? PERMISSION_MAP[supabaseRole] : undefined;
 
     // Fail closed. Omitting the `permissions` key entirely (rather than guessing 'read') is what

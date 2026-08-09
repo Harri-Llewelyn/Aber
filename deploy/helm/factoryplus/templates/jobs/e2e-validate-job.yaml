@@ -47,13 +47,100 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- /*
+        CHECK 7b SIGNS IN THROUGH THE REAL OAUTH CHAIN, so it follows BROWSER-FACING URLs:
+        /auth/strategy redirects to `api.<publicBaseDomain>`, and GoTrue then hands back a callback
+        on `nodered.<publicBaseDomain>`. That is the point of the check -- it is what catches a
+        redirect_uri that disagrees with what the service advertises -- and it cannot be replaced by
+        in-cluster names without testing something else entirely.
+
+        But a pod does not resolve those names the way a browser does. With the dev domain
+        `127.0.0.1.nip.io` they resolve, correctly, to 127.0.0.1 -- which inside this pod is THE POD
+        ITSELF. Nothing listens, and 7b failed as `Connection refused`, reading as a broken Node-RED
+        rather than as a name pointing at the wrong host.
+
+        `e2e.ingressIp` maps those hostnames onto the ingress controller instead, so the Job walks
+        the same redirect chain a browser would. Left empty the aliases are simply absent, which is
+        right for any deployment whose public domain already resolves from inside the cluster.
+      */}}
+      {{- if .Values.e2e.ingressIp }}
+      hostAliases:
+        - ip: {{ .Values.e2e.ingressIp | quote }}
+          hostnames:
+            {{- range $sub := list "api" "nodered" "app" "grafana" }}
+            - {{ printf "%s.%s" $sub $.Values.global.publicBaseDomain | quote }}
+            {{- end }}
+      {{- end }}
       initContainers:
         {{/*
-          Waits for the gateway, not just the databases. validate.py reaches Supabase through Kong
-          with the service-role key; started too early it fails on connection refused and reports
-          "no quarantined device" -- a symptom three layers from the cause.
+          WAITS FOR THE MIGRATIONS, NOT FOR THE GATEWAY. This is a plain Job, so Kubernetes creates
+          it at `helm install` time -- alongside every Deployment and MINUTES BEFORE the
+          post-install hooks that bootstrap the database. It previously waited only on Kong, and
+          that failed in CI in the most misleading way available:
+
+            * Kong answers as soon as it is up, long before PostgREST has a schema behind it;
+            * the probe was `curl -s -o /dev/null`, with NO `-f`, so the 502 Kong returns while its
+              upstream is broken counted as SUCCESS.
+
+          So the Job started ~3 minutes early, found `supabase-db` still refusing connections, and
+          died reporting `relation "public.devices" does not exist` and a pydantic parse error
+          inside the PostgREST client. The pod ages are what gave it away: `e2e-validate` was
+          3m27s old while `db-init` was 43s old. Nothing in the failure named ordering.
+
+          Waiting on a QUERY against `public.devices` covers both halves at once -- `psql` exits
+          non-zero whether the server is down or the table does not exist yet -- and the answer to
+          both is the same: keep waiting. It is the same discipline `ingestion` uses against the
+          telemetry hypertable: probe the OBJECT the workload needs, not the process that serves it.
         */}}
-        {{- include "factoryplus.waitFor" (dict "ctx" . "name" "wait-for-kong" "image" "curlimages/curl:8.10.1" "command" (printf "curl -s -o /dev/null %s/rest/v1/" (include "factoryplus.supabase.internalUrl" .)) "describe" "supabase-kong") | nindent 8 }}
+        {{- include "factoryplus.waitForPostgres" (dict
+             "ctx" .
+             "name" "wait-for-migrations"
+             "host" (include "factoryplus.supabaseDb.host" .)
+             "port" (include "factoryplus.supabaseDb.port" .)
+             "user" "postgres"
+             "db" "postgres"
+             "passwordKey" "POSTGRES_PASSWORD"
+             "query" "SELECT 1 FROM public.devices LIMIT 1;"
+             "describe" "the Supabase migrations (public.devices) — db-init is a post-install hook and runs AFTER this Job is created")
+           | nindent 8 }}
+        {{/*
+          Kong second, and with `-f` this time. validate.py reaches Supabase THROUGH the gateway, so
+          the database being ready is necessary but not sufficient. `-f` matters: without it any
+          response at all -- including the 502 Kong returns while its upstream is down -- satisfies
+          the probe, which is exactly how this check came to pass while proving nothing.
+
+          BOTH HEADERS ARE REQUIRED, AND THEY DO DIFFERENT JOBS. `apikey` is what Kong's key-auth
+          plugin checks; it is treated as an opaque registered string and does not reach PostgREST
+          as an identity. `Authorization: Bearer` is what PostgREST reads to switch database role.
+          With the apikey alone the request passes the gateway and then runs as `anon`, which holds
+          no SELECT on `devices` -- so it answers 401 forever and this probe times out after 600s
+          against a stack that is completely healthy. Measured against a running stack:
+          apikey only -> 401, apikey + bearer -> 200, neither -> 401.
+        */}}
+        {{- include "factoryplus.waitFor" (dict "ctx" . "name" "wait-for-kong" "image" "curlimages/curl:8.10.1" "command" (printf "curl -sf -o /dev/null -H \"apikey: $SERVICE_ROLE_KEY\" -H \"Authorization: Bearer $SERVICE_ROLE_KEY\" '%s/rest/v1/devices?limit=1'" (include "factoryplus.supabase.internalUrl" .)) "describe" "supabase-kong routing to PostgREST with a live schema" "env" (include "factoryplus.secretEnv" (dict "name" "SERVICE_ROLE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY"))) | nindent 8 }}
+        {{/*
+          NODE-RED AND i3X TOO, because validate.py asserts against them directly -- checks 7/7b
+          drive a real editor sign-in and 12-12f exercise the i3X address space.
+
+          THIS JOB'S START TIME IS NOT ORDERED BY THE CI WORKFLOW. It is a plain Job created at
+          install, so its own initContainers are the only thing holding it back; CI's "wait for
+          every workload" step runs CONCURRENTLY with it, not before it. Once the database wait
+          above stopped it racing db-init, it simply raced these two instead -- and failed with
+          `Connection refused` and `HTTP 0`, which read as broken services rather than as a Job
+          that started too early. Both pods were 1/1 Running by the time diagnostics ran.
+
+          `curl -s` WITHOUT `-f` FOR NODE-RED, deliberately, and it is not the mistake corrected
+          above. curl still exits non-zero when it cannot connect, so this proves the port is open
+          and speaking HTTP -- and Node-RED's admin API answers 401 unauthenticated, which is what
+          check 7 asserts, so demanding a 2xx here would wait forever for something that must not
+          happen. i3X's /info is unauthenticated by specification, so `-f` is right there.
+        */}}
+        {{- if .Values.nodeRed.enabled }}
+        {{- include "factoryplus.waitFor" (dict "ctx" . "name" "wait-for-node-red" "image" "curlimages/curl:8.10.1" "command" "curl -s -o /dev/null http://node-red:1880/" "describe" "node-red (checks 7/7b sign in to the editor)") | nindent 8 }}
+        {{- end }}
+        {{- if .Values.i3xService.enabled }}
+        {{- include "factoryplus.waitFor" (dict "ctx" . "name" "wait-for-i3x" "image" "curlimages/curl:8.10.1" "command" "curl -sf -o /dev/null http://i3x-service:8090/v1/info" "describe" "i3x-service (checks 12-12f read its address space)") | nindent 8 }}
+        {{- end }}
       containers:
         - name: validate
           # The test-runner image: the ingestion image plus jsonschema and the AAS suite. Built from
@@ -86,8 +173,15 @@ spec:
               value: mosquitto
             - name: MQTT_PORT
               value: "1883"
-            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_USER") | nindent 12 }}
-            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_PASSWORD") | nindent 12 }}
+            {{- /*
+              The validator connects AS AN ORDINARY GATEWAY, confined by mosquitto.acl to its own
+              edge-node subtree exactly as a physical one is. The username is the `sparkplug_id`
+              generated from VAL_GW_UUID in validate.py -- pinned there precisely so this
+              credential can be issued before the row exists. A mismatch between the two shows up
+              as every publish being silently dropped, and the run failing as "no telemetry".
+            */}}
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_VALIDATOR_USER") | nindent 12 }}
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_VALIDATOR_PASSWORD") | nindent 12 }}
             - name: SUPABASE_URL
               value: {{ include "factoryplus.supabase.internalUrl" . | quote }}
             # WITHOUT THIS the script seeds nothing and fails about 12 of 20 checks in a way that
@@ -99,9 +193,44 @@ spec:
             # the webhook receiver -- and it has to be an end-to-end check: the fix is a runtime
             # property of the assembled stack, and a settings.js securing only /flows would leave the
             # webhook receiver open.
+            {{- /*
+              THE PUBLIC ORIGIN, NOT THE IN-CLUSTER ONE, AND THE COOKIE IS THE REASON.
+
+              This was `http://node-red:1880`, which is correct for check 7 and silently wrong for
+              7b. 7b drives the real browser handshake, and validate.py says why in its own comment:
+              "the state and PKCE verifier live in Node-RED's express session, so the callback has
+              to arrive carrying the cookie the /auth/strategy request set".
+
+              A cookie jar is HOST-SCOPED. Starting the flow at `node-red:1880` and receiving the
+              callback at `nodered.<publicBaseDomain>` -- which is what the OAuth client's
+              registered redirect_uri necessarily is -- means the session cookie is never sent
+              back. Node-RED then has no PKCE verifier for the code, and Passport fails the callback
+              with 403, surfacing as `AuthenticationError: Forbidden`. Nothing is broken; the
+              handshake was split across two origins.
+
+              Compose never hit this because both ends default to `http://localhost:1880`, so the
+              flow is single-origin there by accident of the topology rather than by design. Using
+              the public origin here makes Kubernetes single-origin too, and has the side benefit
+              that check 7 now exercises the ingress path a real operator uses.
+
+              Falls back to the in-cluster Service when no public domain is configured, so a stack
+              installed without one still runs the suite instead of rendering an unusable hostname.
+            */}}
             - name: NODERED_BASE_URL
-              value: http://node-red:1880
+              value: {{ (.Values.publicUrls.nodered | default (ternary (printf "%s://nodered.%s" .Values.global.scheme .Values.global.publicBaseDomain) "" (ne (.Values.global.publicBaseDomain | toString) ""))) | default "http://node-red:1880" | quote }}
             {{- include "factoryplus.secretEnv" (dict "name" "NODERED_OAUTH_CLIENT_SECRET" "secretName" $secretName "key" "NODERED_OAUTH_CLIENT_SECRET") | nindent 12 }}
+            {{- /*
+              I3X_BASE_URL WAS NEVER SET HERE, so checks 12-12f have never actually run on this
+              target. validate.py defaults it to `http://localhost:8090`, which inside this Job's
+              own pod is the Job itself -- nothing listens, and the suite reported `/info returned
+              HTTP 0`, indistinguishable from a broken i3X server. The service is named for its
+              Compose counterpart like every other, so this is the same in-cluster name the rest of
+              the stack uses.
+            */}}
+            {{- if .Values.i3xService.enabled }}
+            - name: I3X_BASE_URL
+              value: http://i3x-service:8090
+            {{- end }}
             - name: PYTHONUNBUFFERED
               value: "1"
           resources:

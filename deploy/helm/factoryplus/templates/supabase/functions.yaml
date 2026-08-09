@@ -96,8 +96,11 @@ spec:
               value: {{ .Values.supabaseFunctions.aas.modelPublicBase | default (printf "%s/storage/v1/object/public/%s" $supabasePublic .Values.supabaseStorage.bucket) | quote }}
             - name: STORAGE_MODEL_BUCKET
               value: {{ .Values.supabaseStorage.bucket | quote }}
+            {{- /* int64 first -- see supabase/storage.yaml. Rendered as "3.3554432e+07" this
+                   parses as 3, so every 3D model exceeded the bundling cap and the exporter fell
+                   back to a URL reference. The .aasx still validated, which is why nothing failed. */}}
             - name: AAS_MAX_BUNDLED_MODEL_BYTES
-              value: {{ .Values.supabaseFunctions.aas.maxBundledModelBytes | quote }}
+              value: {{ .Values.supabaseFunctions.aas.maxBundledModelBytes | int64 | quote }}
           # tcpSocket, NOT httpGet -- THIS RUNTIME EXPOSES NO HEALTH ROUTE. Verified against
           # supabase/edge-runtime:v1.74.2 by probing it directly:
           #

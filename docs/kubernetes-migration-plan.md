@@ -139,9 +139,11 @@ is deferred — but the built `index.html` read in the opposite order to the one
 invites a later "fix". The tag now sits in `<head>`, and the test asserts the property that
 actually matters (no `type=`/`defer`/`async` on it) rather than mere document order.
 
-**This changed a documented invariant.** `CLAUDE.md` stated that `VITE_ENABLE_REALTIME` "is inlined
-by Vite at build time — flipping it requires rebuilding the frontend image". That is now true of the
-Compose path only; the paragraph has been updated in the same change.
+**This changed a documented invariant.** `VITE_ENABLE_REALTIME` used to be inlined by Vite at build
+time, so flipping it meant rebuilding the frontend image. That is now true of the **Compose path
+only** — on Kubernetes the value comes from a ConfigMap and changes with a `helm upgrade`.
+`frontend/src/config.js` resolves every `VITE_*` setting runtime-first, build-time-second, and its
+header records why.
 
 The anon key moving from bundle to ConfigMap is not a security change — it is `anon`, it is public
 by design, and it is already readable in the shipped bundle.
@@ -616,10 +618,18 @@ Record **C** as the intended direction. Do not do it as part of this migration.
   `lookup` that carries the current contents through a re-render. `resource-policy` alone governs
   deletion, not update — without the lookup every `helm upgrade` would reset the Secret and the
   whole fleet would fall off the broker at once, with the upgrade as the only clue.
-- **The platform account is not in that Secret.** It comes from `secrets.mqttPassword` and is
-  re-applied on every start, so rotating it in values reaches the broker on restart; the Secret holds
-  only what the provisioning script adds. The sidecar re-adds it after every reload, because
-  dropping it would disconnect the ingestion daemon and Node-RED.
+- **The platform principals are not in that Secret.** They come from the `secrets.mqtt*` values and
+  are re-applied on every start, so rotating one reaches the broker on restart; the Secret holds
+  only what the provisioning script adds. The sidecar re-adds them after every reload, because
+  dropping them would disconnect the ingestion daemon, i3X and Node-RED — **and the broker's own
+  probes**, which authenticate as `factoryplus_monitor`, turning a credential rotation into a
+  NotReady pod.
+- **There is no shared `factoryplus` account any more.** One credential with `readwrite spBv1.0/#`
+  meant anything holding it could forge `DBIRTH`/`DDATA` for any machine on the site — a forgery
+  `verify_gateway_binding()` cannot detect, since a message published under a correctly bound device
+  satisfies it by construction. Five confined principals replace it, two of which are ordinary
+  per-gateway credentials whose usernames MUST be `sparkplug_id`s (the chart fails the render
+  otherwise; a friendly name authenticates and is then silently dropped by the broker).
 - **The readiness probe is a real authenticated `mosquitto_sub`, not `tcpSocket`.** The broker runs
   `allow_anonymous false`, so a TCP probe passes while every client is being refused with CONNACK 5
   — which is precisely the failure this stack has hit before (a stale or missing password file).

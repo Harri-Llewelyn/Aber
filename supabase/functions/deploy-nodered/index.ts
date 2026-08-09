@@ -1,16 +1,20 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { resolveUserRole } from "../_shared/roles.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
 const ALLOWED_ROLES = ["Administrator", "Shopfloor_Manager"];
 
-// Mounted read-only by docker-compose into this function's own directory. It has
-// to live here: an edge-runtime user worker can only read files beneath the
-// service path it was booted with, so a sibling directory is not visible to it.
+// The name of the committed flow, used only in messages -- the content arrives via the
+// environment (see loadCanonicalFlow below), never off disk.
+//
+// This previously read "it has to live here: an edge-runtime user worker can only read files
+// beneath the service path it was booted with, so a sibling directory is not visible to it".
+// That reasoning does NOT hold for module imports -- `../_shared/roles.ts` above is proof -- and
+// it was the stated basis for duplicating the role lookup into every function. It may still hold
+// for reading FILES at runtime, which is a different mechanism and a different permission, and
+// which is why the flow still travels as NODERED_FLOW_JSON rather than being read from the mount.
 const CANONICAL_FLOW_SOURCE = "node_red_flow.json";
 
 /**
@@ -37,43 +41,6 @@ function loadCanonicalFlow(): unknown[] {
     throw new Error(`${CANONICAL_FLOW_SOURCE} is not a Node-RED flow array`);
   }
   return parsed;
-}
-
-/**
- * Resolve the caller's RBAC role from public.user_roles, or null.
- *
- * public.user_roles IS THE ONLY SOURCE, and the absence of a row means no role.
- *
- * This used to fall back to the `app_metadata.role` claim in the caller's JWT whenever the
- * lookup produced nothing -- which inverted the meaning of a revocation. Deleting a user's
- * user_roles row IS how a role is revoked, so the fallback answered every revocation with the
- * privilege the user held before it, for as long as their existing token remained valid. RLS
- * was unaffected (public.has_role() reads the table), so the database and the edge functions
- * disagreed about who was privileged.
- *
- * The query error is honoured rather than discarded, for the same reason: a failed lookup is
- * not evidence of a role. Both failure modes return null and the caller answers 403.
- *
- * The caller reads its own row under "user_roles_select_own_or_privileged", so an empty result
- * is a real absence and not a policy artefact.
- */
-async function resolveUserRole(
-  supabaseUser: SupabaseClient<any, any, any>,
-  userId: string
-): Promise<string | null> {
-  const { data, error } = await supabaseUser
-    .from("user_roles")
-    .select("roles(name)")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (error) {
-    console.error(`role lookup failed for user ${userId}: ${error.message}`);
-    return null;
-  }
-
-  const dbRole = (data as { roles?: { name?: string } } | null)?.roles?.name;
-  return typeof dbRole === "string" ? dbRole : null;
 }
 
 export default async function handler(req: Request): Promise<Response> {

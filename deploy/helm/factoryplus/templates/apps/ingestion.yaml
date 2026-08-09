@@ -111,8 +111,16 @@ spec:
             {{- include "factoryplus.secretEnv" (dict "name" "DB_PASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
             {{- /* Host, port and TLS from one shared helper, so this and Node-RED cannot drift. */}}
             {{- include "factoryplus.brokerClientEnv" . | nindent 12 }}
-            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_USER") | nindent 12 }}
-            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_PASSWORD") | nindent 12 }}
+            {{- /*
+              THE INGESTION PRINCIPAL AND NOTHING WIDER. mosquitto.acl grants it `read spBv1.0/#`
+              plus `write spBv1.0/+/NCMD/+`, which is exactly what this daemon does -- it is a
+              consumer whose only publish() is the rebirth NCMD. It CANNOT publish DBIRTH or DDATA,
+              so this credential cannot forge telemetry for a device that is correctly bound to its
+              gateway: the one forgery verify_gateway_binding() cannot detect, because such a
+              message satisfies it by construction.
+            */}}
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_INGESTION_USER") | nindent 12 }}
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_INGESTION_PASSWORD") | nindent 12 }}
             # Through Kong, in-cluster. The daemon is a service-role client: it registers
             # discovered devices, sets is_quarantined, and stamps gateway heartbeats.
             - name: SUPABASE_URL

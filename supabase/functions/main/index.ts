@@ -17,10 +17,7 @@
  * closed. The gateway therefore does no JWT pre-verification here.
  */
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
 

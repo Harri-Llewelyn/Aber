@@ -119,8 +119,15 @@ spec:
             # needs the same PostgREST the rest of the stack uses to resolve the JWT's claims.
             - name: POSTGREST_URL
               value: http://supabase-rest:3000
+            {{- /*
+              `int64` BEFORE `quote`, AND IT IS LOAD-BEARING. Helm parses a bare 52428800 in
+              values.yaml as a FLOAT, so `quote` alone renders "5.24288e+07" -- which storage-api
+              reads with parseInt as **5**. Every upload over five bytes was then rejected as "The
+              object exceeded the maximum allowed size", on a stack where nothing else looked wrong.
+              Compose was never affected: it reads the number from .env as a string.
+            */}}
             - name: FILE_SIZE_LIMIT
-              value: {{ .Values.supabaseStorage.fileSizeLimit | quote }}
+              value: {{ .Values.supabaseStorage.fileSizeLimit | int64 | quote }}
             - name: STORAGE_BACKEND
               value: {{ .Values.supabaseStorage.backend | quote }}
             - name: FILE_STORAGE_BACKEND_PATH

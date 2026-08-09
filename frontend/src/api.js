@@ -126,6 +126,48 @@ const TELEMETRY_MAX_ROWS = 5000;
 export const TELEMETRY_EXPORT_MAX_ROWS = 50000;
 
 /**
+ * The lower time bound applied when a caller supplies none.
+ *
+ * WHY A FLOOR RATHER THAN A LIMIT. `public.telemetry` is a postgres_fdw projection of the
+ * standalone TimescaleDB hypertable, and postgres_fdw pushes the WHERE clause down but NOT the
+ * LIMIT. `.range()` is therefore applied by Supabase AFTER the remote has returned its rows, so a
+ * query with no time predicate makes TimescaleDB materialise an asset's entire history and ship
+ * it across the wrapper to be thrown away. `ORDER BY time DESC` is what makes it unavoidable:
+ * the sort cannot begin until every row has arrived.
+ *
+ * No caller in the UI currently omits a window -- `/telemetry/latest` defaults to 60 minutes,
+ * the Overview map and the device drawer both pass one, and the export dialog always sets
+ * absolute bounds. This exists so that the NEXT caller cannot reintroduce the unbounded scan by
+ * omitting an argument, which is a mistake that costs nothing to make and produces a symptom
+ * (the database is slow) three layers from its cause.
+ *
+ * 60 minutes matches what every live caller already asks for, so the floor changes no existing
+ * behaviour. A caller wanting more says so explicitly.
+ */
+export const TELEMETRY_DEFAULT_WINDOW_MINUTES = 60;
+
+/**
+ * Resolve the `time >= ...` bound for one telemetry query. Exported for the test that pins the
+ * "never unbounded" property; call sites go through queryTelemetry.
+ *
+ * An explicit `from` is honoured verbatim, including one far in the past -- the floor exists to
+ * catch an ABSENT bound, not to overrule a stated one. When only `to` is given the window is
+ * measured back from `to` rather than from now, so a caller asking about last Tuesday gets last
+ * Tuesday's hour instead of an empty result.
+ */
+export function telemetryLowerBound({ minutes, fromTime, toTime } = {}) {
+  if (fromTime) return fromTime;
+
+  const window = Number.isFinite(minutes) && minutes > 0 ? minutes : TELEMETRY_DEFAULT_WINDOW_MINUTES;
+  const anchor = toTime ? Date.parse(toTime) : Date.now();
+  // An unparseable `to` falls back to now rather than producing an Invalid Date, which would
+  // serialise as null and drop the predicate entirely -- the exact failure this guards against.
+  const end = Number.isFinite(anchor) ? anchor : Date.now();
+
+  return new Date(end - window * 60000).toISOString();
+}
+
+/**
  * `telemetry.asset_id` and `asset_config.asset_id` are keyed by the device's immutable
  * `sparkplug_id`, while the UI works in device UUIDs. Translate before querying either.
  *
@@ -151,6 +193,9 @@ function toTelemetryKey(assetId) {
  *                 `from`/`to` are not combined -- an explicit bound wins, because a caller that
  *                 supplies both has contradicted itself and the narrower reading of intent is
  *                 the one they typed.
+ *
+ * EVERY QUERY LEAVES HERE WITH A LOWER TIME BOUND, supplied by this function if the caller gave
+ * none. See TELEMETRY_DEFAULT_WINDOW_MINUTES.
  */
 async function queryTelemetry({ assetId, assetIds, metricName, minutes, from: fromTime, to: toTime, limit, offset } = {}) {
   const pageSize = Math.min(
@@ -161,8 +206,9 @@ async function queryTelemetry({ assetId, assetIds, metricName, minutes, from: fr
 
   const telemetryKey = toTelemetryKey(assetId);
   // Set by a tag filter, which resolves to a whole group of devices. The IN list grows with the
-  // fleet, and postgres_fdw pushes the WHERE down but not the LIMIT (README known issue #4), so
-  // the Telemetry tab requires a time window whenever this path is used.
+  // fleet, and postgres_fdw pushes the WHERE down but not the LIMIT (see
+  // TELEMETRY_DEFAULT_WINDOW_MINUTES), so the Telemetry tab requires a time window whenever this
+  // path is used -- the floor bounds the damage, it does not make an unwindowed fleet query wise.
   const telemetryKeys = (assetIds || []).map(toTelemetryKey).filter(Boolean);
 
   // An empty set means "a tag that matches no device", which must return nothing rather than
@@ -175,13 +221,10 @@ async function queryTelemetry({ assetId, assetIds, metricName, minutes, from: fr
   else if (assetIds) query = query.in('asset_id', telemetryKeys);
   if (metricName) query = query.eq('metric_name', metricName);
 
-  // Absolute bounds win over the relative window -- see the parameter note above.
-  if (fromTime || toTime) {
-    if (fromTime) query = query.gte('time', fromTime);
-    if (toTime)   query = query.lte('time', toTime);
-  } else if (Number.isFinite(minutes) && minutes > 0) {
-    query = query.gte('time', new Date(Date.now() - minutes * 60000).toISOString());
-  }
+  // Absolute bounds win over the relative window -- see the parameter note above. `to` is
+  // applied on its own if that is all the caller gave; the lower bound is never left to them.
+  if (toTime) query = query.lte('time', toTime);
+  query = query.gte('time', telemetryLowerBound({ minutes, fromTime, toTime }));
 
   const { data, error } = await query
     .order('time', { ascending: false })

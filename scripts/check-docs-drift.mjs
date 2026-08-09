@@ -49,6 +49,9 @@ function walk(dir, out = []) {
 }
 const allFiles = walk('.').map((f) => f.replace(/^\.\//, ''));
 
+/** Every markdown file in the repository. Derived, so deleting one moves no check. */
+const MARKDOWN = allFiles.filter((f) => f.endsWith('.md'));
+
 // -------------------------------------------------------------------------------------------------
 // 1. Every local markdown link resolves.
 //
@@ -56,7 +59,7 @@ const allFiles = walk('.').map((f) => f.replace(/^\.\//, ''));
 // documents point at nothing, silently, because nothing renders them in CI.
 // -------------------------------------------------------------------------------------------------
 {
-  const docs = allFiles.filter((f) => f.endsWith('.md'));
+  const docs = MARKDOWN;
   let broken = 0;
   for (const doc of docs) {
     const body = read(doc);
@@ -166,16 +169,42 @@ const allFiles = walk('.').map((f) => f.replace(/^\.\//, ''));
   else pass(`README lists all ${suites.length} Python test suites`);
 }
 
+/**
+ * The edge functions, read from `main/index.ts`'s FUNCTION_REGISTRY.
+ *
+ * A DIRECTORY IS NOT AN ENDPOINT, and this used to assume it was. `main/index.ts` resolves a
+ * request path against that registry and answers 404 for anything not named there, so the registry
+ * -- not the filesystem -- is what decides whether a directory is reachable. Its own header says
+ * as much: "Adding a function means adding it here. That is the intended friction: it is the one
+ * place where 'what may this code reach' is stated."
+ *
+ * Listing directories was fine while every directory happened to be a function. Adding
+ * `_shared/` -- a module imported by the functions, deliberately NOT routable -- made it report
+ * a seventh edge function and demand that README.md and openapi.yaml document an endpoint that
+ * does not exist. Which is the checker's own failure mode: a check that restates a definition
+ * instead of deriving it eventually disagrees with the thing it is checking.
+ *
+ * `main` is excluded because it is the router itself, not one of the functions it routes to.
+ */
+function edgeFunctionNames() {
+  const src = read('supabase/functions/main/index.ts');
+  const block = src.match(/const FUNCTION_REGISTRY[^{]*\{([\s\S]*?)\n\};/);
+  if (!block) {
+    fail('check-docs-drift: could not find FUNCTION_REGISTRY in supabase/functions/main/index.ts');
+    return [];
+  }
+  const names = [...block[1].matchAll(/^\s*"([a-z0-9-]+)"\s*:/gim)].map((m) => m[1]);
+  if (!names.length) fail('check-docs-drift: FUNCTION_REGISTRY parsed as empty; the shape must have changed');
+  return names.sort();
+}
+
 // -------------------------------------------------------------------------------------------------
 // 5. The edge-function count, and every function named in the topology diagram.
 //
 // Found stale: "four edge functions" with five on disk, and the diagram listed four.
 // -------------------------------------------------------------------------------------------------
 {
-  const fns = readdirSync(join(REPO, 'supabase/functions'), { withFileTypes: true })
-    .filter((e) => e.isDirectory() && e.name !== 'main')
-    .map((e) => e.name)
-    .sort();
+  const fns = edgeFunctionNames();
   const readme = read('README.md');
   const WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7 };
   const claimed = readme.match(/daemon, (\w+) edge functions/);
@@ -189,10 +218,21 @@ const allFiles = walk('.').map((f) => f.replace(/^\.\//, ''));
 }
 
 // -------------------------------------------------------------------------------------------------
-// 6. Every applied migration is mentioned somewhere in README or CLAUDE.md.
+// 6. Every applied migration is mentioned in the documentation.
 //
-// Found stale: 0004 and 0005 existed and neither document acknowledged them, while README described
-// the applied set as "0001-0003".
+// Found stale: 0004 and 0005 existed and no document acknowledged them, while README described the
+// applied set as "0001-0003".
+//
+// SCOPED TO README, and narrowed rather than widened when the second document went away. This
+// read `README.md + CLAUDE.md` by name, and when CLAUDE.md was deleted it did not report a missing
+// document -- it CRASHED on ENOENT, taking the whole drift suite with it and failing the frontend
+// job with a stack trace naming no check at all.
+//
+// The obvious repair was to glob every markdown file, and that would have been WRONG: it makes the
+// check easier to satisfy the more documentation exists, and `supabase/migrations/archive/README.md`
+// alone mentions enough prefixes to pass it vacuously. README is the document that states which
+// migrations are applied -- the original failure was README describing the set as "0001-0003" while
+// 0004 and 0005 existed -- so that is the one to hold to it.
 // -------------------------------------------------------------------------------------------------
 {
   const migs = readdirSync(join(REPO, 'supabase/migrations'))
@@ -200,8 +240,8 @@ const allFiles = walk('.').map((f) => f.replace(/^\.\//, ''));
     .map((f) => f.slice(0, 4))
     .filter((v, i, a) => a.indexOf(v) === i)
     .sort();
-  const both = read('README.md') + read('CLAUDE.md');
-  const missing = migs.filter((m) => !both.includes(m));
+  const readme = read('README.md');
+  const missing = migs.filter((m) => !readme.includes(m));
   if (missing.length) fail(`no doc mentions migration(s): ${missing.join(', ')}`);
   else pass(`all ${migs.length} applied migration prefixes are documented`);
 }
@@ -391,10 +431,9 @@ const allFiles = walk('.').map((f) => f.replace(/^\.\//, ''));
     .filter((r) => !relations.has(r))
     .sort();
 
-  const functions = readdirSync(join(REPO, 'supabase/functions'), { withFileTypes: true })
-    .filter((e) => e.isDirectory() && e.name !== 'main')
-    .map((e) => e.name)
-    .sort();
+  // Same source as check 5: what is ROUTABLE, not what is on disk. An unrouted directory has no
+  // URL, so requiring an OpenAPI path for it would demand documenting an endpoint that 404s.
+  const functions = edgeFunctionNames();
   const undocumentedFns = functions.filter((f) => !specPaths.has(`/functions/v1/${f}`));
 
   if (undocumented.length) {

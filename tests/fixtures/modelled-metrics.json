@@ -1,0 +1,90 @@
+{
+  "_comment": [
+    "THE CONTRACT BETWEEN TWO IMPLEMENTATIONS OF ONE RULE.",
+    "",
+    "`modelledMetrics()` in frontend/src/utils/deviceTags.js and `modelled_metrics()` in",
+    "ingestion/validate.py answer the same question — which metrics a schema models — and are",
+    "written in different languages because one runs in a browser and one in a validator. Neither",
+    "can import the other, so this file is the seam: both sides assert against it, in their own",
+    "test runner, in the CI job that already runs them.",
+    "",
+    "WHY A FIXTURE RATHER THAN A grep. The rule is behaviour, not a literal. A grep asserting that",
+    "both files mention `required` proves they both spell it, not that they agree about a schema",
+    "whose `required` is a string. Writing this file found a divergence that had been shipping:",
+    "for `properties: ['A','B']` the JS returned {'0','1'} — the ARRAY INDICES as metric names,",
+    "because `typeof [] === 'object'` and `Object.keys` on an array yields its indices — while the",
+    "Python returned null. A device with such a schema was judged against metrics called '0' and",
+    "'1' in the dashboard, so almost everything it published read as Unmodelled, while validate.py",
+    "reported it had no model at all.",
+    "",
+    "THE EXPECTED VALUES BELOW ARE THE PYTHON SEMANTICS, because they are the correct ones: an",
+    "array is not a valid JSON Schema `properties` object, and inventing metric names from its",
+    "indices is meaningless. deviceTags.js was corrected to match.",
+    "",
+    "`expected: null` means the schema declares neither and therefore CANNOT BE EVALUATED — which",
+    "is different from modelling nothing, and is why Unmodelled is not reported for a device with",
+    "no usable schema. Do not collapse null and [].",
+    "",
+    "Adding a case here is the way to extend the contract: both suites read every case."
+  ],
+  "cases": [
+    {
+      "name": "properties only",
+      "schema_definition": { "properties": { "Systems/TEMPERATURE": {}, "Axes/DISPLACEMENT": {} } },
+      "expected": ["Axes/DISPLACEMENT", "Systems/TEMPERATURE"]
+    },
+    {
+      "name": "required only",
+      "schema_definition": { "required": ["Controller/EXECUTION"] },
+      "expected": ["Controller/EXECUTION"]
+    },
+    {
+      "name": "both, overlapping — the union, not a duplicate",
+      "schema_definition": {
+        "properties": { "A": {}, "B": {} },
+        "required": ["B", "C"]
+      },
+      "expected": ["A", "B", "C"]
+    },
+    {
+      "name": "both, disjoint",
+      "schema_definition": { "properties": { "A": {} }, "required": ["Z"] },
+      "expected": ["A", "Z"]
+    },
+    {
+      "name": "empty definition — declares neither, so not evaluable",
+      "schema_definition": {},
+      "expected": null
+    },
+    {
+      "name": "explicitly empty properties and required — still not evaluable",
+      "schema_definition": { "properties": {}, "required": [] },
+      "expected": null
+    },
+    {
+      "name": "required is a string, not a list — ignored, properties still count",
+      "schema_definition": { "properties": { "A": {} }, "required": "A" },
+      "expected": ["A"]
+    },
+    {
+      "name": "properties is an ARRAY — malformed, contributes nothing (was the divergence)",
+      "schema_definition": { "properties": ["Temp", "Pressure"] },
+      "expected": null
+    },
+    {
+      "name": "properties is an array AND required is valid — only required counts",
+      "schema_definition": { "properties": ["Temp"], "required": ["Real/METRIC"] },
+      "expected": ["Real/METRIC"]
+    },
+    {
+      "name": "properties is a string — malformed, contributes nothing",
+      "schema_definition": { "properties": "Temp" },
+      "expected": null
+    },
+    {
+      "name": "no schema_definition at all",
+      "schema_definition": null,
+      "expected": null
+    }
+  ]
+}

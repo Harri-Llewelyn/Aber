@@ -46,8 +46,15 @@ spec:
         runAsUser: 10001
         fsGroup: 10001
       initContainers:
-        {{- include "factoryplus.waitFor" (dict "ctx" . "name" "mosquitto" "port" 1883) | nindent 8 }}
-        {{- include "factoryplus.waitFor" (dict "ctx" . "name" "supabase-kong" "port" 8000) | nindent 8 }}
+        {{/*
+          The broker port follows the SAME switch as the client env below and as the NetworkPolicy
+          edge -- 8883 once in-cluster clients are on TLS. A hardcoded 1883 here would wait on a
+          port nothing is listening on the moment `mosquitto.tls.internalClients` is turned on, and
+          would report as this service alone failing to start on an otherwise healthy stack.
+        */}}
+        {{- $brokerPort := ternary 8883 1883 (and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients) }}
+        {{- include "factoryplus.waitFor" (dict "ctx" . "name" "wait-for-mosquitto" "command" (printf "nc -z mosquitto %d" (int $brokerPort)) "describe" (printf "mosquitto:%d (the spBv1.0/# subscription that feeds every i3X value)" (int $brokerPort))) | nindent 8 }}
+        {{- include "factoryplus.waitFor" (dict "ctx" . "name" "wait-for-kong" "image" "curlimages/curl:8.10.1" "command" (printf "curl -s -o /dev/null %s/rest/v1/" (include "factoryplus.supabase.internalUrl" .)) "describe" "supabase-kong (every metadata read is a PostgREST call made as the caller)") | nindent 8 }}
       containers:
         - name: i3x-service
           image: {{ include "factoryplus.image" (dict "image" .Values.i3xService.image "ctx" $) | quote }}
@@ -66,6 +73,21 @@ spec:
             # key here "for convenience".
             {{- include "factoryplus.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" (include "factoryplus.secretName" .) "key" "SUPABASE_ANON_KEY") | nindent 12 }}
             {{- include "factoryplus.brokerClientEnv" . | nindent 12 }}
+            {{- /*
+              THE BROKER CREDENTIAL WAS MISSING HERE ENTIRELY, and this is a fix rather than a
+              rename. brokerClientEnv carries host, port and TLS only, so on Kubernetes this pod
+              connected anonymously to a broker running `allow_anonymous false` -- refused with
+              CONNACK 5, after which i3x_service falls back to its Python default and Compose
+              happened to supply the shared account that no longer exists. The service came up,
+              answered /info, and served an address space whose values never updated.
+
+              READ-ONLY, and separate from the ingestion account on purpose: this server refuses
+              writes in code (405 on PUT /objects/value, `update.current: false`), and that stance
+              is worth more when the broker enforces it too -- a credential that cannot publish
+              cannot be talked into publishing.
+            */}}
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_USER" "secretName" (include "factoryplus.secretName" .) "key" "MQTT_I3X_USER") | nindent 12 }}
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" (include "factoryplus.secretName" .) "key" "MQTT_I3X_PASSWORD") | nindent 12 }}
             - name: I3X_SUBSCRIPTION_TTL_SECONDS
               value: {{ .Values.i3xService.subscriptionTtlSeconds | quote }}
             - name: I3X_SUBSCRIPTION_QUEUE_LIMIT

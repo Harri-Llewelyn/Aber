@@ -118,11 +118,27 @@ jobs:
           [ "$fail" -eq 0 ] && echo "Schema version name derivation matches across SQL and frontend."
           exit $fail
 
+      # The four SQL-to-JavaScript mirrors that had no guard: the sparkplug_id derivation, the
+      # gateway staleness threshold, effective-cell resolution, and the location_source labels.
+      #
+      # IT COMPARES VALUES, not the presence of a literal. The three steps above assert that a
+      # characteristic string appears on both sides, which catches a rewrite and misses a
+      # re-tuning -- change `INTERVAL '90 seconds'` to 120 and every "does this file mention a
+      # threshold" check still passes. Verified by retuning each side in turn and confirming the
+      # step fails in both directions.
+      #
+      # `sparkplugId.js` is the one that matters most: it derives an IMMUTABLE WIRE IDENTITY, so a
+      # divergence yields ids that resolve in the UI and not on the wire -- and since `sparkplug_id`
+      # is GENERATED ALWAYS ... STORED off the row's UUID, the values already issued cannot be
+      # corrected. Every device would have to be re-provisioned.
+      - name: Verify SQL-to-JavaScript Mirrors Agree
+        run: node scripts/check-mirror-drift.mjs
+
       # The MTConnect vocabulary is generated, and now lives inside 0002_seed_data.sql rather than
-      # in a migration of its own. A plain file diff no longer has anything to compare, so the check
-      # compares the (kind, name, category) triples instead -- see the script's header for why the
-      # generator cannot simply write the seed section (it emits no semantic_id, which the seed
-      # carries).
+      # in a migration of its own. The generator writes that block directly and stamps a SHA-256
+      # into its BEGIN marker; this recomputes it, plus the semantic-id form, the category rules and
+      # (kind, name) uniqueness. It no longer diffs two committed files -- which is how the previous
+      # version passed for months while the generator wrote to an archived path that never ran.
       - name: Verify MTConnect Vocabulary Seed Is In Sync
         run: |
           node scripts/generate-mtconnect-vocabulary.mjs
@@ -764,6 +780,36 @@ jobs:
       # perfectly and puts it into `helm get manifest`, every CI log that renders the chart, and any
       # GitOps repository the manifests are committed to.
       #
+      # NO ENV VALUE MAY RENDER IN SCIENTIFIC NOTATION.
+      #
+      # Helm parses a bare large integer in values.yaml as a FLOAT, so `{{ .Values.x | quote }}`
+      # emits "5.24288e+07" for 52428800. Every consumer here reads its environment with parseInt
+      # or Number.parseInt, both of which stop at the '.', so that value arrives as **5**.
+      #
+      # It cost three real defects on this target, all silent: storage-api rejected every upload
+      # over five bytes as "The object exceeded the maximum allowed size", storage-init created the
+      # model bucket with a five-byte limit, and the AAS exporter treated its 32 MiB bundling cap as
+      # three bytes and fell back to a URL reference for every model -- producing an .aasx that
+      # still validated. Compose was never affected: it reads these from .env as strings.
+      #
+      # The fix is `| int64 | quote`. This asserts the OUTCOME so the next value added cannot
+      # reintroduce it, which no amount of remembering would achieve.
+      - name: Verify No Rendered Value Uses Scientific Notation
+        run: |
+          python3 - <<'PY'
+          import re, sys
+          text = open('/tmp/rendered.yaml', encoding='utf-8').read()
+          bad = []
+          for m in re.finditer(r'^\s*(?:-\s*)?(?:name:\s*(\S+)\s*\n\s*)?value:\s*"?(-?\d+\.\d+e[+-]\d+)"?\s*$',
+                               text, re.M):
+              bad.append(f"{m.group(1) or '<unnamed>'} = {m.group(2)}")
+          if bad:
+              print("::error::rendered in scientific notation, so parseInt reads it as a single "
+                    f"digit: {', '.join(sorted(set(bad)))}. Use `| int64 | quote` in the template.")
+              sys.exit(1)
+          print("No rendered value uses scientific notation.")
+          PY
+
       # THE CHECK IS ON THE `service_role` KEY SPECIFICALLY, decided by decoding the JWT's role
       # claim rather than by pattern-matching the string. The distinction is real and the chart
       # depends on it: `anon` is public by construction -- it ships inside the frontend bundle and
@@ -898,6 +944,16 @@ jobs:
       - name: Run Ingestion Birth-Metric Observation Unit Tests
         run: |
           python ingestion/test_declared_metrics.py
+
+      # The Python half of the modelled-metrics contract; the JavaScript half runs in
+      # frontend-build. Both assert tests/fixtures/modelled-metrics.json, because the rule is
+      # BEHAVIOUR and neither language can import the other -- grepping both files for `required`
+      # would prove they spell it, not that they agree about a schema whose `required` is a string.
+      # Writing the pair found a live divergence: for `properties: ['A','B']` the JS returned the
+      # array INDICES as metric names while the Python returned None.
+      - name: Run Modelled-Metrics Mirror Contract
+        run: |
+          python ingestion/test_modelled_metrics_contract.py
 
       # Pins the invariant that the daemon never writes an asset's location. devices.cell_id is
       # NULL-means-inherit with no column default (migration 0036), which only holds while
@@ -1120,11 +1176,26 @@ jobs:
       # is a better assertion anyway, because it runs AFTER the database is actually usable.
       - name: Install The Chart
         run: |
+          set -eu
           kubectl create namespace $NS
+
+          # THE INGRESS ADDRESS, for the validate Job's hostAliases only.
+          #
+          # Check 7b signs in through the real OAuth chain and therefore follows BROWSER-FACING
+          # URLs -- api.<domain> and nodered.<domain> -- which is exactly what lets it catch a
+          # redirect_uri that disagrees with what a service advertises. Inside a pod those names
+          # resolve to 127.0.0.1 (the dev domain is 127.0.0.1.nip.io), which is the POD ITSELF, so
+          # the check failed as `Connection refused` against a completely healthy stack.
+          #
+          # Read from k3d's bundled Traefik, which exists before this install.
+          INGRESS_IP=$(kubectl -n kube-system get svc traefik -o jsonpath='{.spec.clusterIP}')
+          echo "ingress ClusterIP: $INGRESS_IP"
+
           helm install $RELEASE deploy/helm/factoryplus \
             --namespace $NS \
             --values deploy/helm/factoryplus/values-dev.yaml \
             --set e2e.enabled=true \
+            --set e2e.ingressIp="$INGRESS_IP" \
             --timeout 15m
 
       - name: Wait For The Init Hooks
@@ -1335,9 +1406,14 @@ jobs:
           protoc --python_out=. sparkplug_b.proto
           cp sparkplug_b_pb2.py ingestion/
 
+      # `--demo` rather than `cp`, and CI is the one caller entitled to it. A pipeline needs the
+      # same credentials on every run — `values-dev.yaml` carries the same set for the same reason
+      # — but going through the script means "use the published demo keys" is a named request that
+      # prints its own warning, instead of a shell command that quietly bypasses generation.
+      # Developers get freshly minted credentials from a bare `npm run setup`.
       - name: Prepare Environment File
         run: |
-          cp .env.example .env
+          node scripts/setup.mjs --demo
 
       - name: Launch Unified Docker Compose Stack
         run: |
@@ -1349,7 +1425,7 @@ jobs:
           timeout 90s bash -c '
             until docker compose exec -T timescaledb pg_isready -U postgres >/dev/null 2>&1 && \
                   docker compose exec -T supabase-db pg_isready -U postgres >/dev/null 2>&1 && \
-                  docker compose exec -T mosquitto mosquitto_sub -u factoryplus -P factoryplus123 -t "\$SYS/broker/version" -C 1 >/dev/null 2>&1; do
+                  docker compose exec -T mosquitto mosquitto_sub -u factoryplus_monitor -P factoryplus123 -t "\$SYS/broker/version" -C 1 >/dev/null 2>&1; do
               echo "Waiting for TimescaleDB, Supabase DB, and Mosquitto to become ready..."
               sleep 2
             done

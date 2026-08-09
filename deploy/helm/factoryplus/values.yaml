@@ -85,10 +85,44 @@ secrets:
   # postgres-meta encrypts stored connection strings with this; Studio must be given the same.
   pgMetaCryptoKey: factoryplus-pg-meta-crypto-key
 
-  # MQTT platform account. Per-gateway credentials are provisioned separately -- see
-  # scripts/mosquitto-provision-gateway.mjs and plan §5.1.
-  mqttUser: factoryplus
-  mqttPassword: ""
+  # --- MQTT: FIVE PRINCIPALS, AND NO WILDCARD ACCOUNT ANYWHERE -------------------------------
+  # There used to be ONE `factoryplus` account holding `readwrite spBv1.0/#`, shared by the
+  # ingestion daemon, the i3X server, the Node-RED simulator and the E2E validator. Any of them
+  # could publish DBIRTH or DDATA for any machine on the site, and `verify_gateway_binding()`
+  # could not catch it -- a forged message under a CORRECTLY BOUND device satisfies that check by
+  # construction. mosquitto.acl now confines each account; see its header for the verified
+  # behaviour of each rule against the pinned broker image.
+  #
+  # THE TWO GATEWAY USERNAMES ARE NOT FREE TEXT. The ACL pins the topic's edge-node segment to
+  # `%u`, and that segment must be the gateway row's GENERATED `sparkplug_id` ('gwy' + the first
+  # 21 hex characters of its UUID) or ingestion rejects the message. Both rows therefore have
+  # pinned UUIDs, which is the only reason a credential can be issued before the row exists:
+  #   10000000-0000-4000-8000-000000000001 -> gwy100000000000400080000  (Virtual_Gateway_NodeRED)
+  #   11000000-0000-4000-8000-000000000001 -> gwy110000000000400080000  (validate.py's gateway)
+  # `factoryplus.validateMqttPrincipals` fails the render rather than letting a friendly name
+  # authenticate successfully and then have every publish silently dropped by the broker.
+  #
+  # Each password is independent. Confinement buys nothing if one leak opens all five.
+
+  # Reads spBv1.0/#; publishes ONLY rebirth NCMDs.
+  mqttIngestionUser: factoryplus_ingestion
+  mqttIngestionPassword: ""
+  # Read-only. The i3X server refuses writes in code (405); this says so where the broker can
+  # enforce it, which is the control that cannot be argued with.
+  mqttI3xUser: factoryplus_i3x
+  mqttI3xPassword: ""
+  # The Node-RED demo gateway. An ordinary per-gateway credential.
+  mqttSimulatorUser: gwy100000000000400080000
+  mqttSimulatorPassword: ""
+  # ingestion/validate.py's gateway. A FIXTURE -- a production install can leave this empty and
+  # set e2e.enabled: false, and no account is created.
+  mqttValidatorUser: gwy110000000000400080000
+  mqttValidatorPassword: ""
+  # $SYS only, for the broker probes and the Prometheus exporter sidecar. Can publish nothing.
+  # Without it the healthcheck never passes and every dependent workload fails to start, so it is
+  # load-bearing rather than optional.
+  mqttMonitorUser: factoryplus_monitor
+  mqttMonitorPassword: ""
 
   grafanaAdminUser: admin
   grafanaAdminPassword: ""
@@ -109,7 +143,7 @@ timescaledb:
   image:
     repository: timescale/timescaledb
     # Pinned to match docker-compose.yml. Both targets must pin the SAME tag -- see
-    # CLAUDE.md "Deployment Targets".
+    # scripts/check-image-tag-parity.mjs, which CI runs.
     tag: latest-pg15
     pullPolicy: IfNotPresent
   database: postgres
@@ -131,6 +165,24 @@ timescaledb:
   podSecurityContext:
     fsGroup: 70
     fsGroupChangePolicy: OnRootMismatch
+  # --- Telemetry lifecycle --------------------------------------------------------------------
+  # Applied by the `timescaledb-retention` hook Job on every install AND every upgrade, so these
+  # values are authoritative against a database that already holds data. That is the whole reason
+  # the policies moved out of the initdb scripts: those run only on an empty data directory, which
+  # on Kubernetes means the interval could not be changed without deleting the PVC.
+  #
+  # Both take any PostgreSQL interval ('7 days', '12 hours', '5 years'); `never` removes the policy.
+  retention:
+    enabled: true
+    # Compressed chunks are effectively read-only, so telemetry timestamped older than this is
+    # rejected rather than inserted. Ingestion already refuses anything over 24h old, so this only
+    # bites below a day.
+    compressAfter: "7 days"
+    # A HARD DELETE with no undo -- TimescaleDB drops whole chunks and nothing in this chart copies
+    # them anywhere first. 90 days is a starting point, NOT a compliance decision: manufacturing
+    # traceability obligations run from weeks to decades and only the operator knows which applies.
+    # `never` keeps everything, which is a valid choice and not an unconfigured one.
+    retainFor: "90 days"
   resources:
     requests:
       cpu: 100m
@@ -716,7 +768,7 @@ frontend:
   replicas: 2
   # Delivered to the browser through the /config.js ConfigMap, NOT baked into the image. That is
   # what makes these flippable with a `helm upgrade` here while the Compose path still needs an
-  # image rebuild -- see CLAUDE.md "Frontend Configuration".
+  # image rebuild -- see the header of frontend/src/config.js.
   #
   # Gates every supabase.channel() subscription. With it off the tabs fall back to a 3s poll.
   enableRealtime: true
@@ -819,6 +871,18 @@ e2e:
   waitTimeout: 900
   # Kept well after success: the whole value of a conformance run is its output.
   ttlSecondsAfterFinished: 86400
+  # The ingress controller's address, used ONLY to add hostAliases to the validate Job.
+  #
+  # Check 7b signs in through the real OAuth chain, so it follows BROWSER-FACING URLs -- which is
+  # what makes it able to catch a redirect_uri that disagrees with what a service advertises. A pod
+  # does not resolve those names the way a browser does: with the dev domain `127.0.0.1.nip.io`
+  # they resolve to 127.0.0.1, which inside that pod is the pod itself, and the check fails as
+  # `Connection refused` while every service is healthy.
+  #
+  # Set this to the ingress controller's ClusterIP (on k3d: `kubectl -n kube-system get svc traefik
+  # -o jsonpath='{.spec.clusterIP}'`). Leave it empty where the public domain already resolves from
+  # inside the cluster -- the aliases are then simply absent.
+  ingressIp: ""
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { memory: 1Gi }

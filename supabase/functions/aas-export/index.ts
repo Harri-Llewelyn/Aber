@@ -28,15 +28,12 @@
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { zipSync, strToU8 } from "https://esm.sh/fflate@0.8.2";
 import { sparkplugToXsd } from "./sparkplugToXsd.ts";
 import { modelContentType, modelFileName } from "./model3dContentType.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { resolveUserRole } from "../_shared/roles.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
 const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
 
@@ -87,43 +84,6 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 const json = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), { status, headers: jsonHeaders });
-
-/**
- * Resolve the caller's RBAC role from public.user_roles, or null.
- *
- * public.user_roles IS THE ONLY SOURCE, and the absence of a row means no role.
- *
- * This used to fall back to the `app_metadata.role` claim in the caller's JWT whenever the
- * lookup produced nothing -- which inverted the meaning of a revocation. Deleting a user's
- * user_roles row IS how a role is revoked, so the fallback answered every revocation with the
- * privilege the user held before it, for as long as their existing token remained valid. RLS
- * was unaffected (public.has_role() reads the table), so the database and the edge functions
- * disagreed about who was privileged.
- *
- * The query error is honoured rather than discarded, for the same reason: a failed lookup is
- * not evidence of a role. Both failure modes return null and the caller answers 403.
- *
- * The caller reads its own row under "user_roles_select_own_or_privileged", so an empty result
- * is a real absence and not a policy artefact.
- */
-async function resolveUserRole(
-  supabaseUser: SupabaseClient<any, any, any>,
-  userId: string,
-): Promise<string | null> {
-  const { data, error } = await supabaseUser
-    .from("user_roles")
-    .select("roles(name)")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (error) {
-    console.error(`role lookup failed for user ${userId}: ${error.message}`);
-    return null;
-  }
-
-  const dbRole = (data as { roles?: { name?: string } } | null)?.roles?.name;
-  return typeof dbRole === "string" ? dbRole : null;
-}
 
 /**
  * An AAS `Reference` to an external concept, or undefined when the concept is unmapped.

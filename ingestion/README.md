@@ -9,7 +9,7 @@ allowed to be heard at all.
 | File | Purpose |
 | :--- | :--- |
 | [`ingestion.py`](ingestion.py) | The daemon. Identity resolution, quarantine gating, telemetry mapping |
-| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 41 outcomes |
+| [`validate.py`](validate.py) | End-to-end validator — publishes real Sparkplug payloads and asserts 43 outcomes |
 | [`logging_config.py`](logging_config.py) | Structured logger used by both |
 | [`test_gateway_binding.py`](test_gateway_binding.py) | Gateway↔device binding, telemetry sanity window, append-only historian |
 | [`test_declared_metrics.py`](test_declared_metrics.py) | Birth-metric observation, change-only writes, alias resolution, rebirth rate limit, device watchdog |
@@ -200,8 +200,12 @@ On an unresolvable alias the daemon publishes `Node Control/Rebirth` to
   next one too, and retrying per message is exactly the flood the limit exists to prevent.
 - The daemon ignores `NCMD`/`DCMD` on its own wildcard subscription, so its own request coming
   straight back is not read as edge-node traffic.
-- `mosquitto.acl` already permits this: the `factoryplus` principal holds `readwrite spBv1.0/#`,
-  and each gateway's `spBv1.0/+/+/%u/#` covers its own NCMD topic.
+- `mosquitto.acl` permits **exactly this and nothing more**: the `factoryplus_ingestion` principal
+  holds `read spBv1.0/#` plus `write spBv1.0/+/NCMD/+`, so the daemon can ask for a rebirth and
+  cannot publish DBIRTH or DDATA at all. Each gateway's own `spBv1.0/+/+/%u/#` covers receiving it.
+  That split is the point: this credential cannot forge telemetry for a device that is correctly
+  bound to its gateway — the one forgery `verify_gateway_binding()` cannot detect, because such a
+  message satisfies it by construction.
 - **The demo Node-RED simulator does not answer a rebirth** — it publishes on a timer and
   subscribes to no command topic. That is a simulator limitation, not a daemon one.
 
@@ -248,7 +252,7 @@ published default is a silent security downgrade, and the failure mode is silenc
 | Variable | Default | Notes |
 | :--- | :--- | :--- |
 | `MQTT_HOST` / `MQTT_PORT` | `mosquitto` / `1883` | Compose-internal name |
-| `MQTT_USER` / `MQTT_PASSWORD` | `factoryplus` / **required** | |
+| `MQTT_USER` / `MQTT_PASSWORD` | `factoryplus_ingestion` / **required** | Its own principal. There is no shared broker account any more — see `mosquitto.acl` |
 | `DB_HOST` / `DB_PORT` | `timescaledb` / `5432` | Port defaults to `5433` when `DB_HOST` is unset, i.e. running from the host |
 | `DB_PASSWORD` | **required** | Unless `TIMESCALEDB_URL` is set |
 | `SUPABASE_URL` | `http://127.0.0.1:54321` | |
@@ -288,6 +292,7 @@ would expect.
 ```bash
 docker compose up -d
 set -a && . ./.env && set +a && unset MQTT_HOST DB_HOST DB_PORT
+export MQTT_USER="$MQTT_VALIDATOR_USER" MQTT_PASSWORD="$MQTT_VALIDATOR_PASSWORD"
 python ingestion/validate.py
 ```
 
@@ -345,6 +350,17 @@ Its cleanup uses a **direct owner connection** to Supabase Postgres for audit ro
 `public.digital_thread` is genuinely append-only — the trigger added in
 [`0003`](../supabase/migrations/0003_audit_immutability_and_quarantine_rpc.sql) refuses `DELETE`
 for `service_role` too. Clearing audit rows is meant to require owner authority.
+
+**That connection is proved at startup, not discovered at cleanup.** It is a second connection with
+its own credentials (`SUPABASE_DB_*`), and it was previously exercised only by the final cleanup —
+whose failures were swallowed into a generic warning. A wrong host, port or user therefore produced
+a fully green run that quietly left fixture audit rows behind for the next one to inherit.
+
+The preflight **tests authority, not reachability**: it performs the real `DELETE` inside a
+transaction and rolls it back. Connecting proves nothing, because `service_role` connects perfectly
+and is then refused by the trigger — which is the exact situation this connection exists to escape.
+A failed preflight is reported at the top of the log and carried into the exit status; the suite
+still runs, because its assertions are worth reporting either way.
 
 ---
 

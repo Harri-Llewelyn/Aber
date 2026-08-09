@@ -69,7 +69,10 @@ spec:
             - name: STORAGE_BUCKET
               value: {{ .Values.supabaseStorage.bucket | quote }}
             - name: STORAGE_FILE_SIZE_LIMIT
-              value: {{ .Values.supabaseStorage.fileSizeLimit | quote }}
+              {{- /* int64 first: `quote` alone renders this float as "5.24288e+07", which
+                     storage-init's parseInt reads as 5 -- creating the bucket with a five-byte
+                     limit. See the note in supabase/storage.yaml. */}}
+              value: {{ .Values.supabaseStorage.fileSizeLimit | int64 | quote }}
           command: ["node", "/app/storage-init.mjs"]
           volumeMounts:
             - name: script

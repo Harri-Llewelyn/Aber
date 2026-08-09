@@ -293,12 +293,35 @@ waiting for it**.
 Re-provisioning an existing gateway **replaces** its line rather than appending: Mosquitto reads the
 first match, so a duplicate would silently pin the old password.
 
-> **The shared `factoryplus` account is still exempt** and retains broad publish rights, because
-> the simulator and the E2E validator both publish under it (the validator creates its gateways at
-> runtime and cannot use a pre-provisioned credential). Anything using that account is constrained
-> instead by the application tier — `verify_gateway_binding()` in `ingestion/ingestion.py`. Moving
-> the simulator and validator onto per-gateway credentials is tracked as
-> [issue #3](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/3).
+### There is no shared broker account
+
+The `factoryplus` principal — one credential holding `readwrite spBv1.0/#`, shared by the ingestion
+daemon, the i3X server, this simulator and the E2E validator — **has been deleted**. Any of them
+could publish `DBIRTH` or `DDATA` for *any* machine on the site, and `verify_gateway_binding()`
+cannot catch that: a forged message published under a **correctly bound** device satisfies the
+binding check by construction.
+
+Five principals replace it, each confined by `mosquitto.acl`:
+
+| Principal | May do |
+| :--- | :--- |
+| `factoryplus_ingestion` | read `spBv1.0/#`; publish **only** `spBv1.0/+/NCMD/+` (rebirth) |
+| `factoryplus_i3x` | read `spBv1.0/#`. Publish nothing — it refuses writes in code (405), and this is that stance where the broker can enforce it |
+| `gwy100000000000400080000` | this simulator, confined to its own edge node by the ordinary `%u` pattern |
+| `gwy110000000000400080000` | `validate.py`, likewise |
+| `factoryplus_monitor` | read `$SYS/#` only — the health probes and the metrics exporter. Publishes nothing |
+
+**The two gateway usernames are `sparkplug_id`s and cannot be friendly names.** The ACL pins the
+topic's edge-node segment to `%u`, and that segment must equal the gateway row's *generated*
+`sparkplug_id` or ingestion rejects the message. Both rows therefore have **pinned UUIDs**, which is
+the only reason a credential can be issued before the row exists — that is what let the validator,
+which creates its gateway at runtime, move off the wildcard account at all. Only its *gateway* is
+pinned; its devices are still allocated dynamically, so the onboarding and quarantine checks still
+exercise genuinely unknown device ids.
+
+`scripts/check-broker-config.mjs` asserts all of this against the pinned broker image by whether a
+message is **delivered**, not by exit status — a denied publish at QoS 0 exits 0 and tells the
+client nothing.
 
 ---
 

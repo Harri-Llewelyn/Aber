@@ -27,7 +27,7 @@ THE NAME IS `timescaledb`, matching the Compose service name exactly.
 
 That is what makes `timescaledb:5432` resolve identically on both targets, so the postgres_fdw
 foreign server in 0001_baseline_schema.sql, the Grafana datasource and the ingestion daemon all
-work unchanged. See _helpers.tpl and CLAUDE.md "Deployment Targets" -- do not prefix it.
+work unchanged. See the Service-name note in _helpers.tpl -- do not prefix it.
 
 M2: PORT 5432, the port the server listens on. NOT 5433, which exists only as docker-compose's
 published port so it does not collide with a developer's local PostgreSQL. There is no port

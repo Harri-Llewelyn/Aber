@@ -82,7 +82,11 @@ SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 
 MQTT_HOST = os.getenv("MQTT_HOST", "mosquitto")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
-MQTT_USER = os.getenv("MQTT_USER", "factoryplus")
+# A READ-ONLY broker principal, matching what this service refuses to do in code: mosquitto.acl
+# grants `factoryplus_i3x` only `read spBv1.0/#`. Deliberately not the ingestion account, which
+# can publish NCMD -- a server whose durable control is that it cannot be talked into writing
+# should not hold a credential that could.
+MQTT_USER = os.getenv("MQTT_USER", "factoryplus_i3x")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
 MQTT_TLS_ENABLED = os.getenv("MQTT_TLS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
 MQTT_TLS_CA_FILE = os.getenv("MQTT_TLS_CA_FILE", "").strip()

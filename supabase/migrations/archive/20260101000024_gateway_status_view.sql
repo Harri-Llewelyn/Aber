@@ -11,7 +11,7 @@
 --   1. AUDIT BLOAT. log_digital_thread_event() is an unconditional AFTER INSERT OR UPDATE
 --      OR DELETE trigger on public.gateways (migration 0000). Every sweep that touched a row
 --      would append to digital_thread, which migration 0006 makes immutable -- unbounded
---      growth that cannot be cleaned up in place. This is the same failure mode CLAUDE.md
+--      growth that cannot be cleaned up in place. This is the same failure mode the archive
 --      already documents for birth-metric rewrites: "write only on change".
 --   2. IT WOULD BE LESS ACCURATE, NOT MORE. Staleness is a pure function of NOW() and
 --      last_heartbeat. Derived at read time it is exact; written by a job it is correct only
