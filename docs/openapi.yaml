@@ -500,6 +500,124 @@ paths:
         '401':
           description: Granted to authenticated users only; `anon` is refused.
 
+  /rest/v1/telemetry_latest:
+    get:
+      tags: [Telemetry]
+      summary: Read the newest sample per device and metric
+      description: |
+        One row per `(asset_id, metric_name)` — the most recent sample, whenever it arrived.
+
+        **Prefer this over `/rest/v1/telemetry` for "what is it reading now".** It is evaluated on
+        the TimescaleDB side, so `postgres_fdw` ships one row per series instead of a whole time
+        window. Asking `/rest/v1/telemetry` for the last 24 hours and keeping the newest of each
+        metric transfers a day of rows to discard almost all of them; this does not, and its cost
+        is bounded by the number of series rather than by how much history exists.
+
+        There is no time parameter, deliberately: "latest" is not a window. Filter on `time` if
+        you need to exclude series that have gone stale.
+      parameters:
+        - { name: asset_id, in: query, schema: { type: string }, description: 'Device Sparkplug ID, e.g. `eq.dev200000000000400080000`.' }
+        - { name: metric_name, in: query, schema: { type: string }, description: 'e.g. `eq.Systems/TEMPERATURE`.' }
+        - { name: time, in: query, schema: { type: string }, description: 'Staleness filter, e.g. `gte.2026-01-01T00:00:00Z`.' }
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Newest row per series.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TelemetryRow' } }
+        '401':
+          description: Granted to authenticated users only; `anon` is refused.
+
+  /rest/v1/telemetry_1m:
+    get:
+      tags: [Telemetry]
+      summary: Read one-minute telemetry rollups
+      description: |
+        Continuous aggregate over the hypertable, bucketed to one minute. Use it — or the coarser
+        views below — for trends and long windows instead of scanning raw.
+
+        `avg_double` is derived from a stored sum and count, so it is a true weighted mean across
+        the bucket. **`min_double` and `max_double` are carried too**: an average hides the
+        excursion, and in manufacturing the excursion is usually the point.
+
+        **State metrics are not lost.** `last_string` and `last_bool` carry the value each metric
+        held at the end of the bucket, which is the correct summary for a state such as
+        `Controller/EXECUTION`. `n_double` counts the numeric samples; `n_rows` counts all of them.
+
+        Buckets still being written are visible immediately — real-time aggregation unions the
+        materialised part with the raw tail, so this does not lag behind `/rest/v1/telemetry`.
+      parameters:
+        - { name: asset_id, in: query, schema: { type: string }, description: 'e.g. `eq.dev200000000000400080000`.' }
+        - { name: metric_name, in: query, schema: { type: string }, description: 'e.g. `eq.Systems/TEMPERATURE`.' }
+        - { name: bucket, in: query, schema: { type: string }, description: 'Bucket start, e.g. `gte.2026-01-01T00:00:00Z`.' }
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Matching rollup buckets.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TelemetryBucket' } }
+        '401':
+          description: Granted to authenticated users only; `anon` is refused.
+
+  /rest/v1/telemetry_5m:
+    get:
+      tags: [Telemetry]
+      summary: Read five-minute telemetry rollups
+      description: |
+        As `/rest/v1/telemetry_1m`, bucketed to five minutes and aggregated from it. Identical
+        columns.
+      parameters:
+        - { name: asset_id, in: query, schema: { type: string } }
+        - { name: metric_name, in: query, schema: { type: string } }
+        - { name: bucket, in: query, schema: { type: string }, description: 'e.g. `gte.2026-01-01T00:00:00Z`.' }
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Matching rollup buckets.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TelemetryBucket' } }
+        '401':
+          description: Granted to authenticated users only; `anon` is refused.
+
+  /rest/v1/telemetry_1h:
+    get:
+      tags: [Telemetry]
+      summary: Read hourly telemetry rollups
+      description: |
+        As `/rest/v1/telemetry_1m`, bucketed to one hour and aggregated from `telemetry_5m`.
+
+        **This view outlives the raw data.** Rollups are independent of the hypertable, so they
+        survive its retention policy — by default raw is dropped at 90 days while these buckets are
+        kept for five years. For any question about a period older than the raw window, this is the
+        only place an answer exists.
+      parameters:
+        - { name: asset_id, in: query, schema: { type: string } }
+        - { name: metric_name, in: query, schema: { type: string } }
+        - { name: bucket, in: query, schema: { type: string }, description: 'e.g. `gte.2026-01-01T00:00:00Z`.' }
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Matching rollup buckets.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TelemetryBucket' } }
+        '401':
+          description: Granted to authenticated users only; `anon` is refused.
+
   # --------------------------------------------------------------- Audit ----
   /rest/v1/digital_thread:
     get:
@@ -1743,6 +1861,27 @@ components:
         val_double: { type: number, nullable: true }
         val_string: { type: string, nullable: true, description: '`Controller/EXECUTION` and `Controller/EMERGENCY_STOP` are STRINGS. A stale `val_bool` test compares NULL, evaluates false, and stops alerting silently.' }
         val_bool: { type: boolean, nullable: true }
+
+    TelemetryBucket:
+      type: object
+      description: |
+        One rollup bucket for a (device, metric) series. Shared by telemetry_1m / _5m / _1h.
+
+        `avg_double` is a true weighted mean, derived from a stored sum and count rather than by
+        averaging coarser averages — buckets holding different numbers of samples would otherwise
+        be weighted equally.
+      properties:
+        bucket: { type: string, format: date-time, description: 'Start of the bucket.' }
+        asset_id: { type: string, example: dev200000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
+        metric_name: { type: string, example: Systems/TEMPERATURE }
+        avg_double: { type: number, nullable: true, description: 'Weighted mean of the numeric samples; NULL when the bucket held none.' }
+        min_double: { type: number, nullable: true, description: 'Kept deliberately — an average alone hides the excursion.' }
+        max_double: { type: number, nullable: true }
+        last_double: { type: number, nullable: true, description: 'Value at the end of the bucket.' }
+        last_string: { type: string, nullable: true, description: 'State metrics cannot be averaged, so they are carried as the value at the end of the bucket. `Controller/EXECUTION` and `Controller/EMERGENCY_STOP` are STRINGS.' }
+        last_bool: { type: boolean, nullable: true }
+        n_double: { type: integer, description: 'Number of numeric samples in the bucket.' }
+        n_rows: { type: integer, description: 'Number of samples of any type in the bucket.' }
 
     AssetConfigRow:
       type: object

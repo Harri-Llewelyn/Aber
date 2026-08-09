@@ -144,6 +144,23 @@ export const TELEMETRY_EXPORT_MAX_ROWS = 50000;
  * 60 minutes matches what every live caller already asks for, so the floor changes no existing
  * behaviour. A caller wanting more says so explicitly.
  */
+/**
+ * Rollup resolutions a caller may ask for, and the relation each maps to.
+ *
+ * These are continuous aggregates in TimescaleDB (see timescaledb/aggregates.sql), exposed over
+ * the FDW by migration 0010. They exist because `postgres_fdw` pushes WHERE down but not LIMIT:
+ * a trend over a month cannot be made cheap by asking for fewer rows, only by there BEING fewer
+ * rows. One hour of 1s samples is 3600 raw rows or 60 one-minute buckets.
+ *
+ * THE CSV EXPORT DELIBERATELY DOES NOT USE THESE. An export is a record of observations, and a
+ * bucket average under a column header reading "value" would be a reading no instrument produced.
+ */
+export const TELEMETRY_RESOLUTIONS = {
+  '1m': { relation: 'telemetry_1m', bucketMinutes: 1 },
+  '5m': { relation: 'telemetry_5m', bucketMinutes: 5 },
+  '1h': { relation: 'telemetry_1h', bucketMinutes: 60 }
+};
+
 export const TELEMETRY_DEFAULT_WINDOW_MINUTES = 60;
 
 /**
@@ -197,12 +214,28 @@ function toTelemetryKey(assetId) {
  * EVERY QUERY LEAVES HERE WITH A LOWER TIME BOUND, supplied by this function if the caller gave
  * none. See TELEMETRY_DEFAULT_WINDOW_MINUTES.
  */
-async function queryTelemetry({ assetId, assetIds, metricName, minutes, from: fromTime, to: toTime, limit, offset } = {}) {
+async function queryTelemetry({ assetId, assetIds, metricName, minutes, from: fromTime, to: toTime, limit, offset, resolution } = {}) {
   const pageSize = Math.min(
     Number.isFinite(limit) && limit > 0 ? limit : TELEMETRY_PAGE_SIZE,
     TELEMETRY_MAX_ROWS
   );
   const from = Number.isFinite(offset) && offset > 0 ? offset : 0;
+
+  // `resolution` selects a rollup instead of the raw hypertable. The time column is named
+  // `bucket` there, and the value columns differ (avg/min/max/last rather than val_*), so the
+  // caller gets a different row SHAPE -- documented as TelemetryBucket in docs/openapi.yaml.
+  //
+  // AN UNKNOWN RESOLUTION IS REFUSED, not quietly ignored. Falling back to raw would answer a
+  // request for a year of hourly buckets by scanning a year of raw rows -- the exact failure this
+  // exists to prevent, arrived at by a typo.
+  const rollup = TELEMETRY_RESOLUTIONS[resolution];
+  if (resolution && !rollup) {
+    throw new Error(
+      `unknown telemetry resolution '${resolution}'; expected one of ${Object.keys(TELEMETRY_RESOLUTIONS).join(', ')} (or omit it for raw)`
+    );
+  }
+  const relation = rollup ? rollup.relation : 'telemetry';
+  const timeColumn = rollup ? 'bucket' : 'time';
 
   const telemetryKey = toTelemetryKey(assetId);
   // Set by a tag filter, which resolves to a whole group of devices. The IN list grows with the
@@ -216,18 +249,19 @@ async function queryTelemetry({ assetId, assetIds, metricName, minutes, from: fr
   // issued at all.
   if (!telemetryKey && assetIds && telemetryKeys.length === 0) return [];
 
-  let query = supabase.from('telemetry').select('*');
+  let query = supabase.from(relation).select('*');
   if (telemetryKey) query = query.eq('asset_id', telemetryKey);
   else if (assetIds) query = query.in('asset_id', telemetryKeys);
   if (metricName) query = query.eq('metric_name', metricName);
 
   // Absolute bounds win over the relative window -- see the parameter note above. `to` is
   // applied on its own if that is all the caller gave; the lower bound is never left to them.
-  if (toTime) query = query.lte('time', toTime);
-  query = query.gte('time', telemetryLowerBound({ minutes, fromTime, toTime }));
+  // The floor applies to a rollup too: fewer rows per hour is not the same as few rows.
+  if (toTime) query = query.lte(timeColumn, toTime);
+  query = query.gte(timeColumn, telemetryLowerBound({ minutes, fromTime, toTime }));
 
   const { data, error } = await query
-    .order('time', { ascending: false })
+    .order(timeColumn, { ascending: false })
     .range(from, from + pageSize - 1);
 
   if (error) throw error;
@@ -235,20 +269,41 @@ async function queryTelemetry({ assetId, assetIds, metricName, minutes, from: fr
 }
 
 /**
- * Collapse a newest-first telemetry page to one row per (asset, metric).
+ * The newest sample per (asset, metric), read from `public.telemetry_latest`.
  *
- * Relies on queryTelemetry ordering `time` descending, so the FIRST row seen for a key is the
- * most recent one. Shared by the fleet-wide `/telemetry/latest` (the Overview map) and the
- * device-scoped one (the Devices page's telemetry drawer) so the two cannot disagree about what
- * "latest" means.
+ * THE COLLAPSE HAPPENS IN THE DATABASE NOW, and that is the entire point. This used to fetch a
+ * window through `queryTelemetry` and keep the first row per key locally -- so the device drawer
+ * pulled TWENTY-FOUR HOURS of rows for one machine to end up with about ten. `postgres_fdw`
+ * pushes WHERE down but not LIMIT, so every one of those rows genuinely crossed the wrapper.
+ *
+ * `telemetry_latest` is a view on the TimescaleDB side, so its `DISTINCT ON` runs there against
+ * the (asset_id, metric_name, time DESC) index -- verified as a SkipScan -- and only the answer
+ * is transferred. The cost is bounded by how many series exist, not by how much history does.
+ *
+ * `minutes` IS STILL HONOURED, AS A STALENESS BOUND rather than as a scan window. Dropping it
+ * would have quietly changed what the Overview map means: a machine that last reported in March
+ * would reappear with a March reading presented as its current state. Same visible behaviour as
+ * before, a fraction of the transfer.
  */
-function newestPerMetric(rows) {
-  const latest = new Map();
-  for (const row of rows || []) {
-    const key = `${row.asset_id}::${row.metric_name}`;
-    if (!latest.has(key)) latest.set(key, row);
-  }
-  return [...latest.values()];
+async function queryLatestTelemetry({ assetId, assetIds, metricName, minutes } = {}) {
+  const telemetryKey = toTelemetryKey(assetId);
+  const telemetryKeys = (assetIds || []).map(toTelemetryKey).filter(Boolean);
+
+  // An empty set means "a tag that matches no device" -- return nothing rather than widening to
+  // the whole fleet. Checked before the query is built, as in queryTelemetry.
+  if (!telemetryKey && assetIds && telemetryKeys.length === 0) return [];
+
+  let query = supabase.from('telemetry_latest').select('*');
+  if (telemetryKey) query = query.eq('asset_id', telemetryKey);
+  else if (assetIds) query = query.in('asset_id', telemetryKeys);
+  if (metricName) query = query.eq('metric_name', metricName);
+
+  const window = Number.isFinite(minutes) && minutes > 0 ? minutes : TELEMETRY_DEFAULT_WINDOW_MINUTES;
+  query = query.gte('time', new Date(Date.now() - window * 60000).toISOString());
+
+  const { data, error } = await query.limit(TELEMETRY_MAX_ROWS);
+  if (error) throw error;
+  return data || [];
 }
 
 const mapDigitalThreadRow = (t) => ({
@@ -470,12 +525,7 @@ export const api = {
       const match = path.match(/\/api\/v1\/devices\/(.+)\/telemetry\/latest/);
       const url = new URL(path, window.location.origin);
       const minutes = Number.parseInt(url.searchParams.get('minutes') || '1440', 10);
-      const rows = await queryTelemetry({
-        assetId: match[1],
-        minutes,
-        limit: TELEMETRY_MAX_ROWS
-      });
-      return newestPerMetric(rows);
+      return queryLatestTelemetry({ assetId: match[1], minutes });
     }
 
     if (path.match(/\/api\/v1\/devices\/(.+)\/config/)) {
@@ -783,8 +833,7 @@ export const api = {
     if (path.startsWith('/api/v1/telemetry/latest')) {
       const url = new URL(path, window.location.origin);
       const minutes = Number.parseInt(url.searchParams.get('minutes') || '60', 10);
-      const rows = await queryTelemetry({ minutes, limit: 1000 });
-      return newestPerMetric(rows);
+      return queryLatestTelemetry({ minutes });
     }
 
     if (path.startsWith('/api/v1/telemetry')) {
@@ -804,7 +853,10 @@ export const api = {
         from: url.searchParams.get('from'),
         to: url.searchParams.get('to'),
         limit: Number.parseInt(url.searchParams.get('limit') || '', 10),
-        offset: Number.parseInt(url.searchParams.get('offset') || '', 10)
+        offset: Number.parseInt(url.searchParams.get('offset') || '', 10),
+        // `?resolution=1m|5m|1h` reads a rollup instead of raw. Absent means raw, which is what
+        // the CSV export wants; see TELEMETRY_RESOLUTIONS.
+        resolution: url.searchParams.get('resolution') || undefined
       });
     }
 

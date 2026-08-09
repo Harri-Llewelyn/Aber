@@ -270,11 +270,15 @@ describe('telemetry queries', () => {
     expect(callFor('telemetry').filters).toContainEqual(['eq', 'asset_id', 'Simulated_CNC_01']);
   });
 
-  it('reduces the latest endpoint to one row per device and metric', async () => {
-    state.responses.telemetry = {
+  // THE COLLAPSE MOVED INTO THE DATABASE. `public.telemetry_latest` is a view over a remote
+  // DISTINCT ON, so the endpoint no longer fetches a window and keeps the first row per key --
+  // that transferred a day of rows through postgres_fdw to end up with about ten. What is asserted
+  // now is that it reads the right relation and still bounds staleness; asserting a local collapse
+  // would be asserting logic that should no longer exist.
+  it('reads the latest endpoint from telemetry_latest, not from a raw window', async () => {
+    state.responses.telemetry_latest = {
       data: [
         { time: '2026-01-01T00:00:20Z', asset_id: 'CNC_01', metric_name: 'temperature', val_double: 42 },
-        { time: '2026-01-01T00:00:10Z', asset_id: 'CNC_01', metric_name: 'temperature', val_double: 41 },
         { time: '2026-01-01T00:00:15Z', asset_id: 'CNC_01', metric_name: 'status', val_string: 'RUNNING' }
       ],
       error: null
@@ -282,8 +286,26 @@ describe('telemetry queries', () => {
 
     const rows = await api.get('/api/v1/telemetry/latest?minutes=60');
 
+    const call = callFor('telemetry_latest');
+    expect(call).toBeTruthy();
+    // Still bounded: dropping the window would let a machine that last reported in March show a
+    // March reading as its current state on the Overview map.
+    expect(call.filters.some(([op, col]) => op === 'gte' && col === 'time')).toBe(true);
     expect(rows).toHaveLength(2);
     expect(rows.find(r => r.metric_name === 'temperature').val_double).toBe(42);
+  });
+
+  it('reads a rollup when a resolution is asked for, and refuses an unknown one', async () => {
+    state.responses.telemetry_5m = { data: [], error: null };
+    await api.get('/api/v1/telemetry?resolution=5m&asset_id=dev200000000000400080000');
+    const call = callFor('telemetry_5m');
+    expect(call).toBeTruthy();
+    // The rollup's time column is `bucket`, not `time`.
+    expect(call.filters.some(([op, col]) => op === 'gte' && col === 'bucket')).toBe(true);
+
+    // An unknown resolution must NOT fall back to raw: answering a request for a year of hourly
+    // buckets by scanning a year of raw rows is the failure this whole change exists to prevent.
+    await expect(api.get('/api/v1/telemetry?resolution=30s')).rejects.toThrow(/unknown telemetry resolution/);
   });
 
   it('propagates query errors instead of returning placeholder rows', async () => {

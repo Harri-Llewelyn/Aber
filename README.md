@@ -132,7 +132,8 @@ docker compose up --build -d    # launches the whole stack
 
 Every file in `supabase/migrations/` — the schema baseline (`0001`), seed data (`0002`), and the
 later additive migrations (`0003` audit immutability, `0004`, `0005`, `0006` Node-RED SSO, `0007`
-metric-name format, `0008` Sparkplug group, `0009` withdraws the residual `anon` function grants) —
+metric-name format, `0008` Sparkplug group, `0009` withdraws the residual `anon` function grants,
+`0010` maps the telemetry rollups and the latest-value view) —
 plus demo accounts (`supabase/seed.sql`) are applied by `supabase-db-init` on startup, and
 re-applied harmlessly on every later start.
 
@@ -231,7 +232,7 @@ Two things worth knowing before the first install:
 | [`supabase/migrations/archive/`](supabase/migrations/archive) | The 38 pre-beta migrations, preserved for their reasoning. Never executed |
 | [`docs/openapi.yaml`](docs/openapi.yaml) | REST API specification rendered by Swagger UI |
 | [`grafana/`](grafana) | Datasource, dashboard and alerting provisioning |
-| [`timescaledb/`](timescaledb) | Hypertable schema (`init/`, first boot only) and the compression/retention reconciliation applied on every boot |
+| [`timescaledb/`](timescaledb) | Hypertable schema (`init/`, first boot only); `retention.sql` and `aggregates.sql` reconcile compression, retention and the 1m/5m/1h rollups on every boot |
 | [`scripts/`](scripts) | Setup, Node-RED seeding, storage bucket, MQTT credentials, vocabulary generation, chart-file sync, image tag parity |
 | **[`deploy/k8s/README.md`](deploy/k8s/README.md)** | Kubernetes runbook: install, upgrade, teardown, hardening, the divergence table, and what will bite you |
 | [`deploy/helm/factoryplus/`](deploy/helm/factoryplus) | The Helm chart. `values.yaml` documents every setting and why it is not simply a default |
@@ -351,7 +352,7 @@ is why the schema builder offers a choice rather than a migration path.
 ## Testing
 
 ```bash
-# Frontend — 713 tests
+# Frontend — 715 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required

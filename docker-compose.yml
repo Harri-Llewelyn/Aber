@@ -57,8 +57,8 @@ services:
     volumes:
       # Note: Initialization scripts in /docker-entrypoint-initdb.d only run on an empty data directory.
       # Existing pgdata volumes must be recreated (docker compose down -v) to pick up schema changes.
-      # That is exactly why the retention policies are NOT here any more -- see
-      # timescaledb-retention below.
+      # That is exactly why the retention policies and the rollups are NOT here -- see
+      # timescaledb-maintenance below.
       - ./timescaledb/init:/docker-entrypoint-initdb.d:ro
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -68,18 +68,22 @@ services:
       retries: 5
 
   # ---------------------------------------------------------------------------
-  # Compression + retention reconciliation (runs on EVERY boot)
+  # Telemetry lifecycle reconciliation (runs on EVERY boot)
   # ---------------------------------------------------------------------------
-  # Applies timescaledb/retention.sql with whatever intervals .env currently says, so changing
-  # TIMESCALE_COMPRESS_AFTER or TIMESCALE_RETAIN_FOR takes effect on the next `docker compose up`.
-  # It cannot live in /docker-entrypoint-initdb.d: those scripts run only on an empty data
-  # directory, so the intervals could only ever be chosen before the first telemetry row existed
-  # and no edit could reach a running stack.
+  # Applies timescaledb/retention.sql (compression + retention on raw) and
+  # timescaledb/aggregates.sql (the 1m/5m/1h rollups, their refresh and retention policies, and
+  # the telemetry_latest view) with whatever intervals .env currently says -- so changing any of
+  # them takes effect on the next `docker compose up`.
   #
-  # Retention is a HARD DELETE of raw telemetry with no undo, so the value is the operator's to
-  # set. `never` disables either policy.
-  timescaledb-retention:
-    container_name: factoryplus_timescaledb_retention
+  # NEITHER CAN LIVE IN /docker-entrypoint-initdb.d: those scripts run only on an empty data
+  # directory, so the intervals could only ever be chosen before the first telemetry row existed
+  # and no edit could reach a running stack. Rollups defined there would exist on fresh installs
+  # and silently not exist anywhere else.
+  #
+  # Retention is a HARD DELETE with no undo, so every interval is the operator's to set. `never`
+  # disables any individual policy.
+  timescaledb-maintenance:
+    container_name: factoryplus_timescaledb_maintenance
     image: timescale/timescaledb:latest-pg15
     environment:
       PGPASSWORD: ${DB_PASSWORD}
@@ -87,8 +91,15 @@ services:
       TS_USER: ${DB_USER:-postgres}
       TIMESCALE_COMPRESS_AFTER: ${TIMESCALE_COMPRESS_AFTER:-7 days}
       TIMESCALE_RETAIN_FOR: ${TIMESCALE_RETAIN_FOR:-90 days}
+      # The rollups outlive the raw data deliberately -- see aggregates.sql. Each is far smaller
+      # than the last, so a longer horizon costs little and answers questions the raw retention
+      # window has already closed.
+      TIMESCALE_ROLLUP_1M_RETAIN_FOR: ${TIMESCALE_ROLLUP_1M_RETAIN_FOR:-180 days}
+      TIMESCALE_ROLLUP_5M_RETAIN_FOR: ${TIMESCALE_ROLLUP_5M_RETAIN_FOR:-1 year}
+      TIMESCALE_ROLLUP_1H_RETAIN_FOR: ${TIMESCALE_ROLLUP_1H_RETAIN_FOR:-5 years}
     volumes:
       - ./timescaledb/retention.sql:/retention.sql:ro
+      - ./timescaledb/aggregates.sql:/aggregates.sql:ro
     # The healthcheck cannot be trusted to mean "init has finished": the postgres entrypoint runs
     # initdb scripts against a temporary server that already answers on the unix socket, which is
     # what `pg_isready` inside the container asks. So wait for the hypertable itself -- the object
@@ -104,6 +115,8 @@ services:
       done;
       echo 'Reconciling compression and retention policies...';
       psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -v compress_after=\"$$TIMESCALE_COMPRESS_AFTER\" -v retain_after=\"$$TIMESCALE_RETAIN_FOR\" -f /retention.sql;
+      echo 'Reconciling telemetry rollups...';
+      psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -v rollup_1m_retain=\"$$TIMESCALE_ROLLUP_1M_RETAIN_FOR\" -v rollup_5m_retain=\"$$TIMESCALE_ROLLUP_5M_RETAIN_FOR\" -v rollup_1h_retain=\"$$TIMESCALE_ROLLUP_1H_RETAIN_FOR\" -f /aggregates.sql;
       "
     depends_on:
       timescaledb:
@@ -213,6 +226,12 @@ services:
         condition: service_completed_successfully
       supabase-auth:
         condition: service_healthy
+      # 0010 MAPS objects that timescaledb-maintenance CREATES on the historian -- the rollups and
+      # telemetry_latest -- and its self-check reads each one over the FDW. Mapping them first
+      # would succeed (postgres_fdw is lazy) and then fail at the first dashboard query, so the
+      # dependency is real and stated here rather than left to start-up luck.
+      timescaledb-maintenance:
+        condition: service_completed_successfully
 
   supabase-auth:
     container_name: factoryplus_supabase_auth

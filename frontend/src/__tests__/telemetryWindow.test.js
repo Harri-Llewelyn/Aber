@@ -24,6 +24,9 @@ vi.mock('../lib/supabaseClient', () => {
     in: vi.fn((...a) => { calls.in.push(a); return builder; }),
     gte: vi.fn((...a) => { calls.gte.push(a); return builder; }),
     lte: vi.fn((...a) => { calls.lte.push(a); return builder; }),
+    // queryLatestTelemetry ends in .limit() rather than .range(): the result is bounded by
+    // series count, not paged.
+    limit: vi.fn(() => Promise.resolve({ data: [], error: null })),
     order: vi.fn(() => builder),
     range: vi.fn((...a) => { calls.range.push(a); return Promise.resolve({ data: [], error: null }); }),
     then: vi.fn((resolve) => resolve({ data: [], error: null }))
@@ -98,8 +101,17 @@ describe('queryTelemetry always bounds time', () => {
     expect(timeBounds()).toHaveLength(1);
   });
 
+  // The /latest routes read `telemetry_latest`, where the DISTINCT ON has already happened
+  // remotely. They still carry a lower bound -- as a STALENESS filter now rather than a scan
+  // window -- so that a machine which last reported months ago does not present that reading as
+  // its current state.
   it('bounds the fleet-wide latest query', async () => {
     await api.get('/api/v1/telemetry/latest');
+    expect(timeBounds()).toHaveLength(1);
+  });
+
+  it('bounds the device-scoped latest query', async () => {
+    await api.get(`/api/v1/devices/${key}/telemetry/latest`);
     expect(timeBounds()).toHaveLength(1);
   });
 

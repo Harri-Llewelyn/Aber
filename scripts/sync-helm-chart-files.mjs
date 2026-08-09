@@ -45,14 +45,14 @@ const MIRRORS = [
   },
   {
     source: 'timescaledb',
-    dest: 'timescaledb-retention',
+    dest: 'timescaledb-maintenance',
     // NOT part of the initdb mirror above, and the separation is the point. Everything in
-    // timescaledb/init runs ONLY on an empty data directory; this one runs on EVERY boot, which
-    // is what makes the compression and retention intervals a setting rather than a constant
-    // fixed before the first row was written. Mounting it into the initdb ConfigMap would silently
-    // restore the old behaviour.
-    match: (name) => name === 'retention.sql',
-    why: 'Compression/retention reconciliation; run on every boot by a hook Job with the configured intervals',
+    // timescaledb/init runs ONLY on an empty data directory; these run on EVERY boot, which is
+    // what makes the compression, retention and rollup definitions settings rather than constants
+    // fixed before the first row was written. Mounting them into the initdb ConfigMap would
+    // silently restore the old behaviour.
+    match: (name) => name === 'retention.sql' || name === 'aggregates.sql',
+    why: 'Telemetry lifecycle: compression/retention policies and the rollup views, reconciled on every boot',
   },
   {
     source: join('supabase', 'migrations'),
