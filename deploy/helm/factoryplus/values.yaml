@@ -871,6 +871,18 @@ e2e:
   waitTimeout: 900
   # Kept well after success: the whole value of a conformance run is its output.
   ttlSecondsAfterFinished: 86400
+  # The ingress controller's address, used ONLY to add hostAliases to the validate Job.
+  #
+  # Check 7b signs in through the real OAuth chain, so it follows BROWSER-FACING URLs -- which is
+  # what makes it able to catch a redirect_uri that disagrees with what a service advertises. A pod
+  # does not resolve those names the way a browser does: with the dev domain `127.0.0.1.nip.io`
+  # they resolve to 127.0.0.1, which inside that pod is the pod itself, and the check fails as
+  # `Connection refused` while every service is healthy.
+  #
+  # Set this to the ingress controller's ClusterIP (on k3d: `kubectl -n kube-system get svc traefik
+  # -o jsonpath='{.spec.clusterIP}'`). Leave it empty where the public domain already resolves from
+  # inside the cluster -- the aliases are then simply absent.
+  ingressIp: ""
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { memory: 1Gi }

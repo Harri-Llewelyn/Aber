@@ -47,6 +47,30 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- /*
+        CHECK 7b SIGNS IN THROUGH THE REAL OAUTH CHAIN, so it follows BROWSER-FACING URLs:
+        /auth/strategy redirects to `api.<publicBaseDomain>`, and GoTrue then hands back a callback
+        on `nodered.<publicBaseDomain>`. That is the point of the check -- it is what catches a
+        redirect_uri that disagrees with what the service advertises -- and it cannot be replaced by
+        in-cluster names without testing something else entirely.
+
+        But a pod does not resolve those names the way a browser does. With the dev domain
+        `127.0.0.1.nip.io` they resolve, correctly, to 127.0.0.1 -- which inside this pod is THE POD
+        ITSELF. Nothing listens, and 7b failed as `Connection refused`, reading as a broken Node-RED
+        rather than as a name pointing at the wrong host.
+
+        `e2e.ingressIp` maps those hostnames onto the ingress controller instead, so the Job walks
+        the same redirect chain a browser would. Left empty the aliases are simply absent, which is
+        right for any deployment whose public domain already resolves from inside the cluster.
+      */}}
+      {{- if .Values.e2e.ingressIp }}
+      hostAliases:
+        - ip: {{ .Values.e2e.ingressIp | quote }}
+          hostnames:
+            {{- range $sub := list "api" "nodered" "app" "grafana" }}
+            - {{ printf "%s.%s" $sub $.Values.global.publicBaseDomain | quote }}
+            {{- end }}
+      {{- end }}
       initContainers:
         {{/*
           WAITS FOR THE MIGRATIONS, NOT FOR THE GATEWAY. This is a plain Job, so Kubernetes creates
@@ -172,6 +196,18 @@ spec:
             - name: NODERED_BASE_URL
               value: http://node-red:1880
             {{- include "factoryplus.secretEnv" (dict "name" "NODERED_OAUTH_CLIENT_SECRET" "secretName" $secretName "key" "NODERED_OAUTH_CLIENT_SECRET") | nindent 12 }}
+            {{- /*
+              I3X_BASE_URL WAS NEVER SET HERE, so checks 12-12f have never actually run on this
+              target. validate.py defaults it to `http://localhost:8090`, which inside this Job's
+              own pod is the Job itself -- nothing listens, and the suite reported `/info returned
+              HTTP 0`, indistinguishable from a broken i3X server. The service is named for its
+              Compose counterpart like every other, so this is the same in-cluster name the rest of
+              the stack uses.
+            */}}
+            {{- if .Values.i3xService.enabled }}
+            - name: I3X_BASE_URL
+              value: http://i3x-service:8090
+            {{- end }}
             - name: PYTHONUNBUFFERED
               value: "1"
           resources:

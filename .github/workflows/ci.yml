@@ -1146,11 +1146,26 @@ jobs:
       # is a better assertion anyway, because it runs AFTER the database is actually usable.
       - name: Install The Chart
         run: |
+          set -eu
           kubectl create namespace $NS
+
+          # THE INGRESS ADDRESS, for the validate Job's hostAliases only.
+          #
+          # Check 7b signs in through the real OAuth chain and therefore follows BROWSER-FACING
+          # URLs -- api.<domain> and nodered.<domain> -- which is exactly what lets it catch a
+          # redirect_uri that disagrees with what a service advertises. Inside a pod those names
+          # resolve to 127.0.0.1 (the dev domain is 127.0.0.1.nip.io), which is the POD ITSELF, so
+          # the check failed as `Connection refused` against a completely healthy stack.
+          #
+          # Read from k3d's bundled Traefik, which exists before this install.
+          INGRESS_IP=$(kubectl -n kube-system get svc traefik -o jsonpath='{.spec.clusterIP}')
+          echo "ingress ClusterIP: $INGRESS_IP"
+
           helm install $RELEASE deploy/helm/factoryplus \
             --namespace $NS \
             --values deploy/helm/factoryplus/values-dev.yaml \
             --set e2e.enabled=true \
+            --set e2e.ingressIp="$INGRESS_IP" \
             --timeout 15m
 
       - name: Wait For The Init Hooks
