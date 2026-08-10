@@ -188,6 +188,28 @@ FACTORYPLUS_PAYLOAD_UUID = "11ad7b32-1d32-4c4a-b0c9-fa049208939a"
 # 0008). Used only to describe the fallback in a log line; resolution never assumes it.
 DEFAULT_SPARKPLUG_GROUP = "FactoryPlus"
 
+class DirectoryUnavailable(Exception):
+    """
+    The device/gateway directory could not be REACHED. Distinct from "not registered".
+
+    THESE WERE THE SAME VALUE UNTIL 2026-08. resolve_device() returned None both for a device
+    Supabase does not know about and for a Supabase it could not talk to, and process_dbirth()
+    reads None as "unregistered" -- a state it answers by WRITING A QUARANTINE ROW. So any
+    transport fault during a birth certificate (Kong restarting, a PostgREST error, a dropped
+    connection) would register a legitimate device as UNKNOWN_DEVICE.
+
+    That is the wrong severity for a transient error, because quarantine is not a retry state. It
+    persists in the database, it requires an operator to approve the device out of it
+    (approve_quarantined_device), and until they do every DDATA the device sends is dropped. One
+    unreachable moment would stop a real machine recording indefinitely, under a reason naming its
+    identity -- the one thing that was never in question.
+
+    "Fail closed" is right for TELEMETRY: an unverifiable row must not be written. It is wrong for
+    a STATE CHANGE about the device itself. Raising here keeps the first behaviour and removes the
+    second: callers drop the message, and the next one resolves normally.
+    """
+
+
 # Recorded on devices.quarantine_reason as "<CODE>: <detail>".
 REASON_UNKNOWN_DEVICE = "UNKNOWN_DEVICE"
 REASON_MALFORMED_IDENTITY = "MALFORMED_IDENTITY"
@@ -632,8 +654,9 @@ def resolve_device(wire_id: str, use_cache: bool = True):
     resolves to None, which callers treat as "quarantined" -- the fail-closed answer.
     """
     if not supabase_client:
-        logger.warning("Supabase client unavailable. Failing closed: device '%s' assumed QUARANTINED.", wire_id)
-        return None
+        raise DirectoryUnavailable(
+            "Supabase client is not configured; cannot resolve device '%s'" % wire_id
+        )
 
     if use_cache and wire_id in _device_cache:
         row, cached_at = _device_cache[wire_id]
@@ -684,9 +707,11 @@ def resolve_device(wire_id: str, use_cache: bool = True):
         return None
     except Exception as e:
         # Not cached: a transient Supabase failure must not pin this device to "unregistered"
-        # for the full TTL.
+        # for the full TTL -- and, since 2026-08, must not be REPORTED as "unregistered" either.
+        # Returning None here would let a brief outage quarantine a registered device, because
+        # that is how process_dbirth() answers an unregistered one. See DirectoryUnavailable.
         logger.error("Error resolving device identity '%s' in Supabase: %s", wire_id, e)
-        return None
+        raise DirectoryUnavailable(str(e)) from e
 
 
 def resolve_gateway(wire_id: str, group_id: str = None):
@@ -709,8 +734,12 @@ def resolve_gateway(wire_id: str, group_id: str = None):
     Gateways are never auto-created -- an unregistered edge node is logged and dropped,
     mirroring the fail-closed treatment of unregistered devices.
     """
-    if not supabase_client or not wire_id:
+    if not wire_id:
         return None
+    if not supabase_client:
+        raise DirectoryUnavailable(
+            "Supabase client is not configured; cannot resolve edge node '%s'" % wire_id
+        )
 
     # Keyed by the PAIR. A cache keyed on the node alone would hand a hit from one group to a
     # request from another, which is precisely the collision this change exists to close.
@@ -776,8 +805,12 @@ def resolve_gateway(wire_id: str, group_id: str = None):
         _gateway_cache[cache_key] = (None, time.time())
         return None
     except Exception as e:
+        # Raised rather than returned for the same reason as resolve_device: an unreachable
+        # directory must not read as "this edge node is not registered". verify_gateway_binding()
+        # turns that answer into a quarantine reason, so conflating the two reaches the same
+        # wrongly-quarantined device by a slightly longer route.
         logger.error("Error resolving gateway identity '%s' in Supabase: %s", wire_id, e)
-        return None
+        raise DirectoryUnavailable(str(e)) from e
 
 # -----------------------------------------------------------------------------
 # Sparkplug B Ingestion Handlers
@@ -1075,7 +1108,26 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
         return
 
     try:
-        device = resolve_device(wire_id, use_cache=False)
+        try:
+            device = resolve_device(wire_id, use_cache=False)
+        except DirectoryUnavailable as e:
+            # DROP THE BIRTH, CHANGE NOTHING. Without this arm the directory being unreachable is
+            # indistinguishable from the device being unregistered, and the branch below answers
+            # "unregistered" by writing a quarantine row -- so a transient fault here would
+            # register a legitimate device as UNKNOWN_DEVICE and drop its telemetry until an
+            # operator approved it back out.
+            #
+            # Returning is safe because a birth certificate is REPEATED, not once-only: the flow
+            # rebirths on a timer, and ingestion asks for one itself (request_rebirth) whenever it
+            # sees an alias it cannot decode. The aliases from this payload are already registered
+            # above, so nothing is lost by waiting for the next one.
+            logger.warning(
+                "DIRECTORY UNAVAILABLE: dropping DBIRTH for '%s' without registering it (%s). "
+                "The device is NOT quarantined -- this is a transport fault, not an identity "
+                "one. The next birth certificate will resolve normally.",
+                wire_id, e
+            )
+            return
 
         if device is None:
             device = quarantine_new_device(
@@ -1124,6 +1176,15 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
 
         # A birth is evidence of life, quarantined or not, so the watchdog counts it.
         mark_device_seen(device)
+    except DirectoryUnavailable as e:
+        # The directory went away PART WAY THROUGH -- after resolve_device() succeeded, inside
+        # verify_gateway_binding() or quarantine_new_device(). Caught explicitly rather than left
+        # to the generic arm below so the log says what happened; either way nothing further is
+        # written, which is the property that matters.
+        logger.warning(
+            "DIRECTORY UNAVAILABLE part way through DBIRTH for '%s' (%s). No device state was "
+            "changed; the next birth certificate will complete it.", wire_id, e
+        )
     except Exception as e:
         logger.error("Error checking/updating Supabase devices for DBIRTH: %s", e, exc_info=True)
 
@@ -1138,7 +1199,19 @@ def process_ddeath(wire_id: str, gateway_wire_id: str):
         logger.warning("Supabase client unavailable. Skipping DDEATH status update for '%s'", wire_id)
         return
 
-    device = resolve_device(wire_id)
+    try:
+        device = resolve_device(wire_id)
+    except DirectoryUnavailable as e:
+        # A death certificate is a status update, not telemetry. Losing one means the row keeps
+        # saying ONLINE until DEVICE_OFFLINE_TIMEOUT_SECONDS elapses and the watchdog corrects it,
+        # which is the mechanism that exists for exactly this -- a device that stops speaking
+        # without announcing it.
+        logger.warning(
+            "DIRECTORY UNAVAILABLE: dropping DDEATH for '%s' (%s). The watchdog will mark it "
+            "OFFLINE if it stays silent.", wire_id, e
+        )
+        return
+
     if device is None:
         logger.warning("DDEATH received for unregistered device '%s'; nothing to update", wire_id)
         return
@@ -1188,7 +1261,19 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     # clock, and edge node clocks drift (or, for a replayed payload, are plain wrong).
     heartbeat_dt = datetime.now(timezone.utc)
 
-    gateway = resolve_gateway(edge_node_id, group_id)
+    try:
+        gateway = resolve_gateway(edge_node_id, group_id)
+    except DirectoryUnavailable as e:
+        # Throttled on the same key as the unregistered-node warning below: a heartbeat arrives
+        # every 30s, and a directory that is down is down for all of them.
+        if _throttled(_unknown_gateway_warned, edge_node_id, UNKNOWN_GATEWAY_WARN_INTERVAL_SECONDS):
+            logger.warning(
+                "DIRECTORY UNAVAILABLE: dropping %s from edge node '%s' (%s). This is NOT the "
+                "unregistered-node path -- nothing is written and the next heartbeat retries.",
+                msg_type, edge_node_id, e
+            )
+        return
+
     if gateway is None:
         # Rate-limited: an unregistered node beats every 30s and would otherwise
         # fill the log with the same line forever.
@@ -1227,7 +1312,19 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     legitimately carries an alias and no name. A metric whose alias is unknown is skipped and a
     rebirth is requested for the node -- see request_node_rebirth().
     """
-    device = resolve_device(wire_id)
+    try:
+        device = resolve_device(wire_id)
+    except DirectoryUnavailable as e:
+        # Telemetry DOES fail closed -- a row that cannot be attributed is not written. The
+        # difference from the old behaviour is only that nothing is written about the DEVICE
+        # either: the message is dropped and the stream resumes on its own, instead of the device
+        # being pinned to "unregistered" for CACHE_TTL_SECONDS or quarantined by its next DBIRTH.
+        logger.warning(
+            "DIRECTORY UNAVAILABLE: dropping DDATA for '%s' (%s). Not quarantined; the stream "
+            "resumes when the directory returns.", wire_id, e
+        )
+        return
+
     if device is None or device.get("is_quarantined"):
         logger.warning("Dropping DDATA for quarantined/unregistered device '%s'", wire_id)
         return
@@ -1237,7 +1334,18 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     # letting an unbound publisher quarantine a healthy device would hand it the denial of
     # service this check exists to prevent. The device's own gateway keeps being believed and
     # its DBIRTH path is what raises the alarm.
-    binding_fault = verify_gateway_binding(device, gateway_wire_id, group_id)
+    try:
+        binding_fault = verify_gateway_binding(device, gateway_wire_id, group_id)
+    except DirectoryUnavailable as e:
+        # The binding could not be CHECKED, so the row must not be written -- an unverifiable
+        # attribution is exactly what this check exists to refuse. Dropped, not quarantined, for
+        # the reason stated above: a DDATA stream must never be able to quarantine a device.
+        logger.warning(
+            "DIRECTORY UNAVAILABLE: cannot verify gateway binding for '%s' (%s); dropping DDATA "
+            "rather than attributing it unverified.", wire_id, e
+        )
+        return
+
     if binding_fault:
         logger.warning(
             "Dropping DDATA for device '%s' published via edge node '%s': %s",

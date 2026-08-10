@@ -1,19 +1,27 @@
-# Kubernetes Hosting — Implementation Plan
+# Kubernetes Hosting — Design and Rationale
 
-**Status:** decisions confirmed; **all phases (0–7) complete**; all six mitigations (M1–M6) done.
-**Date:** 2026-08-03.
+This document is the **why** behind the Helm chart in `deploy/helm/factoryplus`: the decisions that
+are not obvious from reading the templates, and the failures each one exists to prevent. The
+operational half — install, upgrade, teardown, and the divergence table against Compose — is
+[`deploy/k8s/README.md`](../deploy/k8s/README.md).
 
-## Confirmed decisions
+Source files across the repository cite this document **by section number** (`§2.3`, `§5.1`, …), so
+those numbers are a stable interface: add sections, never renumber them.
 
-The four questions this plan originally left open are settled. They are recorded here rather than
-at the end because everything below now assumes them.
+Nearly every heading below records a failure mode rather than a feature. That is deliberate — in
+almost every case the symptom appears somewhere other than the cause, which is what makes these
+worth writing down at all.
 
-| # | Decision | Consequences threaded through this plan |
+## Foundational decisions
+
+Four decisions constrain everything that follows, so they are recorded first.
+
+| # | Decision | Where it shows up |
 |---|---|---|
 | 1 | **Target: local on-prem k3s.** PVCs on the built-in `local-path` StorageClass; MQTT exposed via k3s's built-in ServiceLB (Klipper) or NodePort | §3.3, §5.1, §7.2, §9-M5 |
 | 2 | **Mosquitto credentials: Option B** — `password_file` in a Secret, sidecar `SIGHUP` on change. Option C (`mosquitto-go-auth` against Supabase Postgres) stays the recorded future direction | §5.1, §9-M1 |
 | 3 | **Ingress: subdomain routing** under `global.publicBaseDomain` (`app.`, `api.`, `nodered.`, `grafana.`, `studio.`, `docs.`, `mqtt.`) | §7.1, §7.3, §9-M3 |
-| 4 | **Secrets: plain Kubernetes Secrets** with `values-dev` defaults for Phases 1–6. External Secrets Operator / SOPS deferred to Phase 7 | §3.2, §10 |
+| 4 | **Secrets: plain Kubernetes Secrets** with `values-dev` defaults. External Secrets Operator / SOPS are supported through the `existingSecret` seam rather than templated | §3.2, §10 |
 
 `local-path` is a **node-local hostPath provisioner**: a PVC is bound to the node that first
 schedules its pod, `ReadWriteOnce` is the only access mode, and there is no replication. That suits
@@ -78,26 +86,13 @@ anticipate, and a values-schema mismatch is a worse problem than 60 lines of Dep
 
 ---
 
-## 2. Phase 0 — prerequisite refactors (benefit both targets) — **COMPLETE**
+## 2. Substrate refactors shared by both targets
 
 These are code changes, not manifests. Each removes something that is merely awkward on Compose but
-is genuinely blocking on Kubernetes. Doing them first means the chart is written once against a
-sane substrate rather than written twice.
+genuinely blocking on Kubernetes, and each benefits both targets — which is why they live in the
+application code rather than in the chart.
 
-**All four are implemented and verified.** What shipped, and how it was checked:
-
-| § | Change | Verification |
-|---|---|---|
-| 2.1 | `frontend/src/config.js` + `frontend/public/config.js`; consumers moved off `import.meta.env`; `/config.js` served `no-store`; `VITE_RUNTIME_CONFIG` build arg | 697 frontend tests pass (14 new); both build modes exercised — baked bundle contains the URL, runtime bundle contains none and builds with no Supabase vars set |
-| 2.2 | `supabase/functions/Dockerfile`, plus `.dockerignore` at the root and in `frontend/` | Image built; container stays up; `NODERED_FLOW_JSON` confirmed present in PID 1's environment; `main/index.ts`'s allow-list 404s an unregistered name |
-| 2.3 | `kong.yml` gains `__REALTIME_UPSTREAM_URL__`; `supabase-kong-init` substitutes it, validates the tenant label, and scans for *any* leftover marker | Rendered with the Compose default and with the k8s value; a non-`realtime-dev` upstream is refused with a legible message |
-| 2.4 | `datasources.template.yml` moves to `__DB_PASSWORD__`; Grafana's entrypoint loses its double-escaped `sed` | `docker compose config` valid; same placeholder guard as Kong |
-| 2.5 | `validate.py` audited for in-cluster execution | Defect found and fixed — see §2.5 |
-
-Two things surfaced during implementation that the plan had not anticipated; both are recorded in
-place below (§2.1 on script ordering, §2.5 on the `SUPABASE_DB_PORT` default).
-
-### 2.1 Frontend: runtime configuration instead of build-time baking — **done**
+### 2.1 Frontend: runtime configuration instead of build-time baking
 
 `frontend/Dockerfile` bakes `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_ENABLE_REALTIME`
 and `VITE_GITHUB_REPO_URL` into the bundle, because Vite inlines `import.meta.env` at build. On
@@ -105,7 +100,7 @@ Compose that is fine — the image is built locally per stack. On Kubernetes it 
 cannot serve two environments**, which breaks the build-once-promote-the-artifact model that is the
 main reason to move to Kubernetes in the first place.
 
-**Implemented as follows.** `frontend/src/config.js` resolves each setting runtime-first,
+`frontend/src/config.js` resolves each setting runtime-first,
 build-time-second; `frontend/public/config.js` is a shipped no-op placeholder that a Kubernetes
 ConfigMap is mounted over. Both paths run the same code, so Compose behaves exactly as before.
 
@@ -132,7 +127,7 @@ ConfigMap is mounted over. Both paths run the same code, so Compose behaves exac
   dummies would sit in the bundle as a fallback that *masks* a missing ConfigMap instead of
   surfacing it.
 
-**Not anticipated, found by building it:** `vite build` **injects the bundle's `<script
+**A subtlety in the built output:** `vite build` **injects the bundle's `<script
 type="module">` into `<head>`**, which put it textually ahead of a `/config.js` tag left in
 `<body>`. Execution order was still correct — a classic script is parser-blocking, a module script
 is deferred — but the built `index.html` read in the opposite order to the one it ran in, which
@@ -148,7 +143,7 @@ header records why.
 The anon key moving from bundle to ConfigMap is not a security change — it is `anon`, it is public
 by design, and it is already readable in the shipped bundle.
 
-### 2.2 Edge runtime: build an image instead of mounting the repo — **done**
+### 2.2 Edge runtime: build an image instead of mounting the repo
 
 `supabase-functions` bind-mounts `./supabase/functions` and `./node_red_flow.json`, then uses a
 shell entrypoint to read the flow into `NODERED_FLOW_JSON` because an edge-runtime user worker has
@@ -172,7 +167,7 @@ image so the Deployment needs no command override.
 
 `deno_cache` stays a Compose-only volume; on Kubernetes an `emptyDir` covers it.
 
-### 2.3 Kong config: template, don't `sed` — **done**
+### 2.3 Kong config: template, don't `sed`
 
 `supabase-kong-init` exists solely because Kong 2.8 cannot read environment variables from
 declarative config and Compose has no templating. Helm does. `supabase/kong.yml` stays **one
@@ -201,10 +196,10 @@ Three changes made it usable from both:
 Related, and worth deciding now rather than later: the stack is on `kong:2.8.1-alpine`, which is
 unmaintained. Kong 3.x interpolates env vars in declarative config natively and would delete
 `supabase-kong-init` on the Compose side too, plus it makes the bundled `rate-limiting` plugin
-available (the stack currently has no rate limiting anywhere). See §9 — this is a **separate**
-piece of work and should not be bundled into the migration.
+available (the stack currently has no rate limiting anywhere). See §11 — this is a **separate**
+piece of work and deliberately not bundled into a hosting change.
 
-### 2.4 Grafana datasource: render, don't `sed` — **done**
+### 2.4 Grafana datasource: render, don't `sed`
 
 Grafana's entrypoint is a `sed` that substitutes `DB_PASSWORD` into a datasource template, which is
 why the `grafana_provisioning_datasources` volume exists. On Kubernetes, Helm renders the same
@@ -219,11 +214,10 @@ has.
 
 Grafana provisioning files also support `$__env{VAR}` interpolation — the mechanism `grafana.ini`
 already uses for `GRAFANA_OAUTH_CLIENT_SECRET` — which would remove the rendering step entirely on
-both targets. Deliberately **not** taken now: it is a behavioural bet that cannot be confirmed
-without running the stack, and it is an easy follow-up once the chart exists. Rendering is
-unambiguous and is what the chart will do.
+both targets. Deliberately **not** taken: it is a behavioural bet that cannot be confirmed without
+running the stack, and rendering is unambiguous. It remains an available simplification.
 
-### 2.5 `validate.py`: make it runnable in-cluster — **done, and it needed a fix**
+### 2.5 `validate.py` runs in-cluster
 
 `ingestion/validate.py` defaults to `localhost:5433` / `localhost:1883` because it normally runs on
 the host outside the Compose network. Under Kubernetes the natural place to run it is **as a Job
@@ -232,9 +226,9 @@ are kept identical to the Compose service names, in-cluster is the *simpler* of 
 configurations: no port-forwarding and no host/port rewriting, which is the opposite of the Compose
 case CI has to special-case today.
 
-The audit expected to find nothing (everything is already `os.getenv`). It found one real defect:
+Everything in the script was already `os.getenv`, but one default was wrong for that path:
 
-- **`SUPABASE_DB_PORT` defaulted unconditionally to `54322`**, the *published* port. `DB_PORT`
+- **`SUPABASE_DB_PORT` used to default unconditionally to `54322`**, the *published* port. `DB_PORT`
   already carried a conditional — 5433 only when `DB_HOST` is unset — but its Supabase counterpart
   did not, so an in-cluster run setting `SUPABASE_DB_HOST=supabase-db` would inherit 54322 and fail
   to connect. That path is only used by the fixture cleanup, so it would surface **late and
@@ -249,54 +243,53 @@ The audit expected to find nothing (everything is already `os.getenv`). It found
 
 ---
 
-## 3. Phase 1 — chart skeleton and the data tier — **COMPLETE**
+## 3. Chart skeleton and the data tier
 
-Delivered and verified: `helm lint` clean, nine objects render, all nine accepted by
-`kubectl apply --dry-run=client`, and every guard rail confirmed to refuse the configuration it
-exists to refuse.
+The foundation: the release Secret, the two databases as StatefulSets, and the Services whose names
+are load-bearing.
 
 | Object | Notes |
 |---|---|
-| `Secret` (release-prefixed) | Skipped entirely when `secrets.existingSecret` is set — the seam Phase 7 plugs into |
+| `Secret` (release-prefixed) | Skipped entirely when `secrets.existingSecret` is set — the seam external secret managers plug into (§10.4) |
 | `ConfigMap` timescaledb-init | Mirrored from `./timescaledb/init` by `scripts/sync-helm-chart-files.mjs` |
 | `Service` timescaledb + headless | Name matches Compose; port 5432 |
 | `Service` supabase-db + headless | Name matches Compose; port 5432 |
-| `Service` realtime-dev | Named for the **tenant** (§3.4); workload in Phase 2 |
+| `Service` realtime-dev | Named for the **tenant** (§3.4) |
 | `StatefulSet` timescaledb | 3 probes, `fsGroup: 999`, `local-path` PVC |
 | `StatefulSet` supabase-db | 3 probes, `fsGroup: 999`, `local-path` PVC |
 
-**Two things surfaced while building it**, both recorded below: Helm's comment chomping after a
-document separator (§3.1), and the fact that Helm cannot read the repository's own config files
-(§3.5).
+Two constraints here are pure Helm mechanics and cost real time to rediscover: comment chomping
+after a document separator (§3.1), and the fact that Helm cannot read the repository's own config
+files (§3.5).
 
 ### 3.1 Layout
-
-As built (✓), with the Phase 2+ paths kept so the shape does not move later:
 
 ```
 deploy/
   helm/factoryplus/
-    Chart.yaml                          ✓
-    values.yaml                         ✓  documented defaults; NO working credentials
-    values-dev.yaml                     ✓  local k3s: local-path, demo secrets from .env.example
-    values-prod.yaml.example            ✓  externalised secrets, real storage sizing
-    files/timescaledb-init/*.sql        ✓  mirrored from ./timescaledb/init — see §3.5
+    Chart.yaml
+    values.yaml                          documented defaults; NO working credentials
+    values-dev.yaml                      local k3s: local-path, demo secrets from .env.example
+    values-prod.yaml.example             externalised secrets, real storage sizing
+    files/**                             mirrored from the repository — see §3.5
     templates/
-      _helpers.tpl                      ✓  labels, validation, DSNs, the nodered-auth env block
-      NOTES.txt                         ✓  post-install output; also where validation is triggered
-      secret.yaml                       ✓  skipped when secrets.existingSecret is set
-      data/timescaledb-configmap.yaml   ✓
-      data/timescaledb-statefulset.yaml ✓
-      data/supabase-db-statefulset.yaml ✓
-      supabase/realtime-service.yaml    ✓  Service only; Deployment in Phase 2
-      supabase/{auth,rest,kong,functions,storage,meta,studio}.yaml
+      _helpers.tpl                       labels, validation, DSNs, the nodered-auth env block
+      NOTES.txt                          post-install output; also where validation is triggered
+      secret.yaml                        skipped when secrets.existingSecret is set
+      data/{timescaledb-configmap,timescaledb-statefulset,supabase-db-statefulset}.yaml
+      supabase/realtime-service.yaml     the name is the decision — §3.4
+      supabase/{auth,rest,kong,functions,storage,meta,studio,realtime-deployment}.yaml
       jobs/{db-roles-init,db-init,storage-init}.yaml
+      jobs/{backup-cronjob,timescaledb-maintenance}.yaml
+      jobs/{e2e-validate-job,e2e-aas-export-job}.yaml
       messaging/mosquitto.yaml
-      apps/{frontend,ingestion,node-red}.yaml
-      obs/{grafana,swagger-ui}.yaml
+      apps/{frontend,ingestion,node-red,i3x-service}.yaml
+      obs/{grafana,swagger-ui,servicemonitors}.yaml
+      tests/test-fdw.yaml                the helm-test gate — §9-M6
       ingress.yaml
-      networkpolicy.yaml                   phase 7
-  k8s/README.md                         ✓  install/upgrade/teardown runbook and divergence table
+      networkpolicy.yaml
+      {pdbs,hpas}.yaml
+  k8s/README.md                          install/upgrade/teardown runbook and divergence table
 ```
 
 **Validation is triggered from `NOTES.txt`.** It has to live somewhere that renders on every
@@ -320,23 +313,24 @@ A Helm template that generates a random `SUPABASE_JWT_SECRET` on install (the ob
 silently invalidates both pre-minted keys, and every request through Kong's `key-auth` then fails
 against a stack that otherwise looks healthy. The three are a **set**: either all three are
 supplied by the operator, or all three are generated together by a pre-install Job that mints the
-JWTs from the generated secret. Recommend **supplied**, with `values.yaml` refusing to install if
-they are absent (`fail` in a helper) and `values-dev.yaml` carrying the `.env.example` demo values
+JWTs from the generated secret. **Supplied** is the choice here: `values.yaml` refuses to install if
+they are absent (`fail` in a helper), and `values-dev.yaml` carries the `.env.example` demo values
 explicitly marked as such.
 
 Same class of constraint, less severe: `REALTIME_DB_ENC_KEY` must be exactly 16 characters and
 `REALTIME_SECRET_KEY_BASE` at least 64, or the container refuses to boot. Assert both in a helper
 so the failure is a legible Helm error rather than a CrashLoopBackOff.
 
-Secret *management* (SOPS / Sealed Secrets / External Secrets Operator) is deliberately deferred to
-§10. Phase 1 uses a plain Secret so the chart can be developed and tested.
+Secret *management* (SOPS / Sealed Secrets / External Secrets Operator) sits outside the chart — see
+§10.4. The chart itself renders a plain Secret.
 
-**As built.** `factoryplus.validateSecrets` fails the render listing every missing field by both
+`factoryplus.validateSecrets` fails the render listing every missing field by both
 its values path and its environment-variable name; `factoryplus.validateRealtime` asserts the two
 Realtime lengths. All are skipped when `secrets.existingSecret` is set, because the values are then
-not the chart's to see — that switch is the seam Phase 7 plugs into with no template rewrite, and
-it is exercised in CI so it cannot rot before then. The Secret's **keys are the environment-variable
-names**, not values-file names, so an externally-managed Secret has one obvious contract to satisfy.
+not the chart's to see — that switch is the seam an external secret manager plugs into with no
+template rewrite, and it is exercised in CI so it cannot rot. The Secret's **keys are the
+environment-variable names**, not values-file names, so an externally-managed Secret has one obvious
+contract to satisfy.
 
 ### 3.3 TimescaleDB and Supabase Postgres
 
@@ -360,11 +354,11 @@ same values, and §9-M6 is the test that pins it.** This is a verification oblig
   `startupProbe` with a generous `failureThreshold` (the Compose config already allows a 30s
   `start_period`).
 
-**Do not reach for CloudNativePG or an HA Postgres operator in this phase.** The `supabase/postgres`
+**Do not reach for CloudNativePG or an HA Postgres operator here.** The `supabase/postgres`
 image carries the extension set and the `supabase_admin` / `authenticator` / `supabase_auth_admin`
 role scaffolding that GoTrue, PostgREST, Realtime and Storage all assume; running it under an
 operator means a custom operator image and re-deriving that scaffolding. Single instance plus
-backups (§8) is the right first step, and the migration should not also be a database-HA project.
+backups (§10.3) is the deliberate position — see §11 for what taking it further would cost.
 
 ### 3.4 Realtime's tenant hostname — the one naming exception
 
@@ -378,8 +372,8 @@ upstream `Host` header from the service hostname, so an upstream URL of
 is the tenant `SEED_SELF_HOST` creates. This is the Kubernetes-native equivalent of the Compose
 alias and costs nothing.
 
-**As built.** The Service is rendered in Phase 1 even though its Deployment is Phase 2 work,
-because the *name* is the architectural decision and the workload behind it is ordinary.
+The Service is a separate template file from its Deployment, because the *name* is the architectural
+decision and the workload behind it is ordinary.
 `factoryplus.validateRealtimeServiceName` refuses any other name, mirroring the guard
 `supabase-kong-init` applies to `REALTIME_UPSTREAM_URL` on the Compose side — one invariant,
 enforced on both targets.
@@ -395,11 +389,11 @@ requires `DNS_NODES` configuration the stack does not have.
 
 ### 3.5 Helm cannot read the repository's own config files
 
-Not anticipated, and it affects every later phase. `.Files.Glob` is scoped to the chart directory
-and `..` is rejected outright — but the files the chart must mount are the *same files*
-`docker-compose.yml` bind-mounts: the TimescaleDB bootstrap scripts now, and later the Kong
-template, the Grafana datasource template, the Mosquitto config and ACL, and the Node-RED flow.
-Two hand-maintained copies of those is precisely the drift this migration exists to avoid.
+This constraint shapes every mounted config file in the chart. `.Files.Glob` is scoped to the chart
+directory and `..` is rejected outright — but the files the chart must mount are the *same files*
+`docker-compose.yml` bind-mounts: the TimescaleDB bootstrap scripts, the Kong template, the Grafana
+datasource template, the Mosquitto config and ACL, and the Node-RED flow. Two hand-maintained copies
+of those is precisely the drift a shared substrate exists to avoid.
 
 **`scripts/sync-helm-chart-files.mjs` mirrors them into the chart, and CI runs it with `--check`.**
 Same guard-rail discipline as `check-mtconnect-seed-sync.mjs` and the isUuid/metric-group checks.
@@ -417,21 +411,19 @@ Same guard-rail discipline as `check-mtconnect-seed-sync.mjs` and the isUuid/met
   cannot be repaired by re-running anything — the PVC has to be destroyed. An empty ConfigMap
   would mount cleanly, start cleanly, and fail at the first telemetry write.
 
-## 4. Phase 2 — Supabase control plane and the ordering problem — **COMPLETE**
-
-35 objects render, all accepted by `kubectl apply --dry-run=client`, `helm lint` clean, and eight
-CI guard rails verified to reject what they exist to reject.
+## 4. Supabase control plane and the ordering problem
 
 Nine Deployments (`kong`, `auth`, `rest`, `realtime`, `storage`, `functions`, `meta`, `studio`,
 `swagger-ui`), three hook Jobs, and the ConfigMaps carrying the migrations, the seed, the Kong
 template, the storage-init script and the OpenAPI spec.
 
-**Three findings, all from building it rather than from reading the compose file:**
+**Three things here cannot be derived from reading `docker-compose.yml`**, and each was established
+by probing the images directly:
 
 - **The edge runtime has no health endpoint** (§4.3).
-- **Rendering Kong's config in Helm would have silently disabled gateway authentication** on the
+- **Rendering Kong's config in Helm silently disables gateway authentication** on the
   `existingSecret` path (§4.5).
-- **The whole-document port grep had to be scoped**, because the seed legitimately contains
+- **The port-leak check must be scoped to wiring fields**, because the seed legitimately contains
   `postgres://localhost:5433` (§4.6).
 
 ### 4.1 `depends_on` has no equivalent — three mechanisms replace it
@@ -464,16 +456,16 @@ colliding on the name.
 **This is safe precisely because the migrations are idempotent.** `supabase-db-init` already replays
 every `*.sql` on every boot with no applied-migrations ledger — a property the beta squash to
 `0001_baseline_schema.sql` / `0002_seed_data.sql` was explicitly verified to preserve. A Helm
-upgrade re-running the whole set is therefore normal operation, not a risk. Anyone adding a `0003_…`
-must keep that property; the plan does not change the obligation, it just makes it load-bearing in
-one more place.
+upgrade re-running the whole set is therefore normal operation, not a risk. Every subsequent
+migration must keep that property; Kubernetes does not change the obligation, it just makes it
+load-bearing in one more place.
 
 ### 4.2 Stateless services
 
 `supabase-auth`, `supabase-rest`, `supabase-kong`, `supabase-functions`, `supabase-meta`,
 `supabase-studio`, `swagger-ui` → plain Deployments. `supabase-rest`, `supabase-kong` and
-`supabase-functions` are the horizontally scalable ones and are the sensible first HPA candidates
-(§8); the rest stay at 1.
+`supabase-functions` are the horizontally scalable ones and are the HPA candidates
+(§10.2); the rest stay at 1.
 
 ### 4.3 Probes — carry the hard-won details across
 
@@ -491,9 +483,9 @@ never report ready against perfectly healthy servers:
 - **Studio binds only its own interface without `HOSTNAME=0.0.0.0`**, so its probe fails with
   `ECONNREFUSED`. Keep the env var.
 
-**A fourth, found by probing the image rather than by reading the compose file — the edge runtime
-has no health endpoint at all.** Compose declares no healthcheck for `supabase-functions`, so
-nothing recorded this. Probed directly against `supabase/edge-runtime:v1.74.2`:
+**A fourth, invisible in the compose file — the edge runtime has no health endpoint at all.**
+Compose declares no healthcheck for `supabase-functions`, so nothing recorded this. Probed directly
+against `supabase/edge-runtime:v1.74.2`:
 
 | Path | Response |
 |---|---|
@@ -511,14 +503,14 @@ The probe is therefore **`tcpSocket`**, which for a request router holding no st
 pool is a fair readiness signal. Anything stronger means invoking a real function on every probe —
 spawning a worker isolate and hitting the database, on a 10s period, forever.
 
-**Assume nothing about a health path; probe the image.** Three of the five probes in this phase
-would have been wrong if copied from the pattern of the others.
+**Assume nothing about a health path; probe the image.** Three of the five probes here would have
+been wrong if copied from the pattern of the others.
 
 ### 4.4 Object storage
 
-`STORAGE_BACKEND=file` on a PVC works at `replicas: 1` and is the right Phase 2 target. For
-production, `STORAGE_BACKEND=s3` against MinIO or cloud S3 is the better answer and removes the
-single-writer constraint — note it in `values.yaml` as a supported switch, implement in §8.
+`STORAGE_BACKEND=file` on a PVC works at `replicas: 1` and is the default. For production,
+`STORAGE_BACKEND=s3` against MinIO or cloud S3 removes the single-writer constraint — it is a
+supported switch in `values.yaml`, and the remaining gap is recorded in §11.
 
 The `asset-3d-models` bucket stays **public-read**: an AAS `File` URL must be dereferenceable by a
 viewer holding no session. `AAS_MODEL_PUBLIC_BASE` must be the *ingress* hostname, not the
@@ -548,26 +540,26 @@ so **rotating an API key needs an explicit `kubectl rollout restart`** — recor
 
 ### 4.6 The port-leak check had to be scoped to wiring fields
 
-Phase 1's CI check grepped the whole rendered document for `5433`/`54322`. Phase 2 embeds ~400 KB
-of SQL, and it fires — on `directory_services` rows in the seed that legitimately carry
-`postgres://localhost:5433` as *display* metadata for the Directory tab, not as a connection this
-stack makes.
+The CI guard against a published port leaking into cluster wiring cannot grep the whole rendered
+document for `5433`/`54322`. The manifests embed ~400 KB of SQL, and a whole-document scan fires on
+`directory_services` rows in the seed that legitimately carry `postgres://localhost:5433` as
+*display* metadata for the Directory tab, not as a connection this stack makes.
 
-The check is now scoped to `value:` / `port:` / `containerPort:` / `targetPort:` lines, and was
-confirmed against a deliberate regression. **A check that reports a known-benign hit is worse than
-no check**, because the next real hit is dismissed with it.
+The check is therefore scoped to `value:` / `port:` / `containerPort:` / `targetPort:` lines, and
+was confirmed against a deliberate regression. **A check that reports a known-benign hit is worse
+than no check**, because the next real hit is dismissed with it.
 
 *Left deliberately unfixed:* those seed rows still read `localhost:5433` and `localhost:54322`,
 which is wrong on a cluster. They are display-only demo data and correcting them means
-parameterising more of the seed; noted here rather than folded into this phase.
+parameterising more of the seed.
 
 ---
 
-## 5. Phase 3 — messaging — **COMPLETE**
+## 5. Messaging
 
 `mosquitto` (policy ConfigMap, credential Secret, assembling initContainer, reload sidecar, plus a
-`mosquitto-external` LoadBalancer) and `ingestion`. M1 delivered in both halves — the sidecar in the
-chart, the forced reload in `scripts/mosquitto-provision-gateway.mjs --target=k8s`.
+`mosquitto-external` LoadBalancer) and `ingestion`. The credential-sync half of this lives in
+`scripts/mosquitto-provision-gateway.mjs --target=k8s` — see §9-M1.
 
 ### 5.1 Mosquitto — the item with real design work
 
@@ -587,7 +579,7 @@ For the credentials, three options:
 | **B** | `password_file` lives in a **Secret**; the provisioning script hashes with `mosquitto_passwd` locally and patches the Secret; a sidecar watches the projected file and sends `SIGHUP` on change | **Recommended.** Declarative, the credential set becomes reviewable/backed-up state, and it survives rescheduling |
 | **C** | Replace file auth with `mosquitto-go-auth` against Supabase Postgres | Architecturally the best fit — gateways already exist in the `gateways` table keyed by `sparkplug_id`, which is exactly the username the ACL's `%u` matches — but it is a broker-auth redesign |
 
-**Option B is the confirmed decision.** Concretely:
+**Option B is what the chart implements.** Concretely:
 
 - Secret `mosquitto-passwords`, key `password_file`, seeded by the chart with the platform
   `MQTT_USER` account (an initContainer runs `mosquitto_passwd -b -c` if the key is absent).
@@ -601,9 +593,10 @@ For the credentials, three options:
   `docker exec` mode for the Compose path — **same script, two backends**, so the ACL reasoning in
   its header stays in one place.
 
-Record **C** as the intended direction. Do not do it as part of this migration.
+**C** stays the recorded future direction — a broker-auth redesign, deliberately not bundled in with
+a hosting change.
 
-**As built, with four decisions worth recording:**
+**Six decisions worth recording:**
 
 - **`/mosquitto/config` is one assembled `emptyDir`, not three mounts.** `mosquitto.conf` names
   `/mosquitto/config/password_file` and `/mosquitto/config/mosquitto.acl` — paths shared with the
@@ -651,11 +644,9 @@ Sparkplug message — duplicate telemetry inserts and duplicate quarantine decis
 scaling a one-word change, so the constraint needs to be written down where someone about to scale it
 will read it.
 
-Add a liveness probe. There isn't one today (Compose has none), and a daemon whose MQTT loop has
-silently died is exactly the failure Kubernetes can fix for free.
-
-**No code change was needed — `ingestion.py` already has the heartbeat**, and it is better than the
-sketch above: `start_health_heartbeat()` touches `INGESTION_HEALTH_FILE` every
+**The liveness probe reads a heartbeat file, and `ingestion.py` already provides one** — Compose
+declares no healthcheck, but the mechanism was there:
+`start_health_heartbeat()` touches `INGESTION_HEALTH_FILE` every
 `INGESTION_HEALTH_INTERVAL` seconds **only while `client.is_connected()`**, so a wedged *or*
 disconnected loop lets the file go stale. It is env-gated and a no-op when the variable is unset,
 which is the Compose default, and it is deliberately forgiving of write errors — a read-only
@@ -672,7 +663,7 @@ Service, so one would have no consumer and would only add a second way for the p
 
 ---
 
-## 6. Phase 4 — edge and frontend — **COMPLETE**
+## 6. Edge and frontend
 
 ### 6.1 Node-RED
 
@@ -697,8 +688,8 @@ Service, so one would have no consumer and would only add a second way for the p
 ### 6.2 Frontend
 
 Deployment + Service + the `/config.js` ConfigMap from §2.1. Horizontally scalable; NGINX serving
-static files is the one thing here that can trivially run three replicas — default 2, and the first
-HPA candidate in Phase 7 alongside Kong and PostgREST.
+static files is the one thing here that can trivially run three replicas — default 2, and an HPA
+candidate alongside Kong and PostgREST (§10.2).
 
 **Two things worth recording:**
 
@@ -721,13 +712,12 @@ is built into a variable and used twice instead.
 
 ---
 
-## 7. Phase 5 — exposure and the URL split — **COMPLETE**
+## 7. Exposure and the URL split
 
 Grafana plus one `Ingress` carrying seven subdomain routes, with optional cert-manager TLS. The URL
-split is now enforced by CI rather than only documented — see §7.4.
+split is enforced by CI rather than only documented — see §7.4.
 
-
-This is where the Compose stack's most repeated hazard gets a real fix. Today a dozen settings
+This is where the Compose stack's most repeated hazard gets a real fix. A dozen settings
 encode "the browser follows this one, the container calls that one":
 
 | Setting | Browser-facing | In-cluster |
@@ -767,11 +757,11 @@ Subdomains avoid all three. Document single-host as unsupported rather than half
 Start with the **Ingress** API. On k3s that means **Traefik, which ships enabled by default** —
 `values-dev.yaml` assumes it and sets `ingressClassName: traefik`; leave `ingressClassName`
 templated so an ingress-nginx cluster needs only a values change. Structure the templates so the
-gateway is one file, so a later move to **Gateway API** is a template swap, not a chart redesign. Per the roadmap decision,
-the Kong→Envoy question is deliberately reframed at this point as *which Gateway API
+gateway is one file, so a later move to **Gateway API** is a template swap, not a chart redesign.
+
+Per the standing roadmap decision, the Kong→Envoy question is reframed here as *which Gateway API
 implementation* (Envoy Gateway being the likely answer, Istio overkill with no service-mesh
-requirement) — and it is **out of scope for this migration**, to be taken up once the chart is
-working.
+requirement). It is **deliberately not answered by this chart** — see §11.
 
 ### 7.2 MQTT cannot go through Ingress
 
@@ -788,8 +778,9 @@ Port 1883 is raw TCP. Shopfloor gateways connect to it directly.
   machine running both targets.
 - **9001** (MQTT over WebSockets) *can* ride the Ingress and should, on `mqtt.<domain>`.
 
-Flag for the security review, not for this plan: the broker is plaintext with password auth. Once it
-is reachable on a LoadBalancer IP rather than a Docker host port, TLS on 8883 stops being optional.
+The broker is plaintext with password auth on 1883. Once it is reachable on a LoadBalancer IP rather
+than a Docker host port, TLS on 8883 stops being optional — the MQTTS listener in §10.5 is that
+answer, and it is opt-in.
 
 ### 7.3 The callback URL is in the database
 
@@ -799,7 +790,7 @@ is reachable on a LoadBalancer IP rather than a Docker host port, TLS on 8883 st
 Job**, which a `helm upgrade` does anyway via the post-upgrade hook. This works, but only because the
 hook is `post-upgrade`; it is another reason not to make it `pre-`.
 
-### 7.4 As built — one helper, and CI enforces it
+### 7.4 One helper owns every URL, and CI enforces it
 
 `_helpers.tpl` owns every browser-facing URL (`frontendUrl`, `supabaseUrl`, `grafanaUrl`,
 `noderedUrl`, `studioUrl`, `docsUrl`, `mqttUrl`), plus `hostOf` — the host with the scheme stripped —
@@ -865,26 +856,26 @@ cannot supply both a file and a directory beneath it.
 anyone outside the operations team.
 ---
 
-## 8. Phase 6 — CI and drift control — **COMPLETE**
+## 8. CI and drift control
 
-The chart is now tested against a real cluster rather than against a schema. `k8s-validation` runs
+The chart is tested against a real cluster rather than against a schema. `k8s-validation` runs
 alongside `e2e-validation`, never instead of it.
 
-**Two things found by building it, both of which fail late and misleadingly:**
+**Two naming traps, both of which fail late and misleadingly:**
 
 - **The `fullname` helper collapses its prefix** when the release name already contains the chart
   name — so with release `factoryplus` the objects are `factoryplus-db-init`, the chart name appearing
-  once and not twice. CI had been written against the doubled form: the install succeeds, and the
-  *first* `kubectl logs` says `NotFound`. The release and namespace are now job-level variables, so
-  the rule is recorded where the names are used and a rename is one line.
-- **Image tag parity caught drift I had introduced myself.** Phases 3 and 5 pinned
-  `eclipse-mosquitto:2.0.20` and `grafana/grafana:11.6.1` in the chart while `docker-compose.yml`
-  still said `:latest`. The check found it on its first run; Compose is now pinned to match. See §8.3.
+  once and not twice. Written against the doubled form, the install succeeds and the *first*
+  `kubectl logs` says `NotFound`. The release and namespace are job-level variables, so the rule is
+  recorded where the names are used and a rename is one line.
+- **Image tags drift silently between the two targets.** The chart pinned
+  `eclipse-mosquitto:2.0.20` and `grafana/grafana:11.6.1` while `docker-compose.yml` still said
+  `:latest`; Compose is pinned to match, and §8.3 is the check that keeps it that way.
 
-### 8.1 New CI job: `k8s-validation`
+### 8.1 The `k8s-validation` CI job
 
-Added to `.github/workflows/ci.yml`, alongside — **not replacing** — the existing `e2e-validation`
-Compose job. Both targets must stay green.
+In `.github/workflows/ci.yml`, alongside — **not replacing** — the `e2e-validation` Compose job.
+Both targets must stay green.
 
 1. `helm lint` and `helm template` against `values-dev.yaml` (fast, runs on every PR).
 2. Spin up **k3d** — k3s in Docker, so CI matches the confirmed target (Traefik, ServiceLB and
@@ -896,7 +887,7 @@ Compose job. Both targets must stay green.
    hooks, and the hooks are this chart's bootstrap (`db-roles-init` issues the passwords that
    PostgREST, GoTrue, Realtime and storage-api wait for), so `--wait` deadlocks the first install
    and reports it as `context deadline exceeded` with no hook pod ever created.
-4. **`helm test` first (M6)** — the `postgres_fdw` cross-database check. It is seconds long and
+4. **`helm test` first (§9-M6)** — the `postgres_fdw` cross-database check. It is seconds long and
    turns a whole class of deep, misattributed `validate.py` failures into one legible one.
 5. Run `ingestion/validate.py` **as a Job in the namespace** (§2.5), then
    `supabase/functions/aas-export/test_aas_export.py` the same way — ordered after `validate.py`,
@@ -935,8 +926,8 @@ Two targets on different tags break exactly those couplings, and **asymmetricall
 migrated by a newer `storage-api` on one target is then read by an older one on the other, and the
 failure appears on whichever target was bumped *second*, days later, looking like that target's fault.
 
-The check parses both files with no YAML dependency (it must run before any `npm install`, and the two
-shapes it reads are narrow and stable), and it found real drift on its first run: §8's second bullet.
+The check parses both files with no YAML dependency — it must run before any `npm install`, and the
+two shapes it reads are narrow and stable.
 
 Three things it does that a plain `grep` would not:
 
@@ -959,10 +950,11 @@ direction, a service added to Kubernetes and never added to Compose.
 
 ## 9. Hardening register (M1–M6)
 
-Six mitigations threaded through the phases above, from the architectural review. Each names the
-failure it prevents, because in every case the symptom appears somewhere other than the cause.
+Six hazards from the architectural review, each threaded into a section above. They are collected
+here because each is a **cross-cutting failure whose symptom appears somewhere other than its
+cause** — the kind that is expensive to diagnose from the templates alone.
 
-### M1 — Mosquitto credential sync latency (Phase 3, §5.1)
+### M1 — Mosquitto credential sync latency (§5.1)
 
 **Failure:** a kubelet refreshes a projected Secret volume on its sync period, not on write —
 **60–90 seconds** in practice. A newly provisioned gateway credential therefore appears to not
@@ -986,7 +978,7 @@ reload — or a pod rescheduled between the two steps comes back without the cre
 The watching sidecar stays regardless: it is what makes a Secret edited by any other route (a
 `helm upgrade`, a restore, another operator) reach the running broker at all.
 
-**Delivered.** Both halves, plus three details found while building it:
+Four details make the difference between this working and appearing to:
 
 - **The hash is produced inside the broker pod**, by the broker's own `mosquitto_passwd`. Hashing on
   the operator's laptop would work only if they happened to have a compatible mosquitto installed at
@@ -1000,18 +992,18 @@ The watching sidecar stays regardless: it is what makes a Secret edited by any o
 - The script **reports which reload path it took**, because the fallback (`rollout restart`) drops
   every connected gateway and that is not something to discover from a graph later.
 
-### M2 — `postgres_fdw` connectivity (Phase 1, §3.3)
+### M2 — `postgres_fdw` connectivity (§3.3)
 
 **Failure:** the foreign server pointed at the *published* port 5433 instead of 5432. Every
 `public.telemetry` read then fails, and it fails as a relation-level error from PostgREST rather
 than as a connection error, so it reads as a schema fault.
 
-**Status: verified, no defect.** `0001_baseline_schema.sql` takes `ts_host`/`ts_port` as psql
-variables and defaults them to `timescaledb`/`5432`; Compose passes exactly those. **The obligation
-is on the chart** — the db-init Job must pass `TS_HOST=timescaledb`, `TS_PORT=5432` — and on M6,
-which is the test that catches it if it does not.
+`0001_baseline_schema.sql` takes `ts_host`/`ts_port` as psql variables and defaults them to
+`timescaledb`/`5432`; Compose passes exactly those. **The obligation is on the chart** — the db-init
+Job must pass `TS_HOST=timescaledb`, `TS_PORT=5432` — and on M6, which is the test that catches it
+if it does not.
 
-### M3 — Dynamic OAuth redirect URIs (Phase 5, §7.3)
+### M3 — Dynamic OAuth redirect URIs (§7.3)
 
 **Failure:** `NODERED_PUBLIC_URL` feeds both `settings.js`'s `callbackURL` *and* the `redirect_uris`
 registered in `auth.oauth_clients`. They must match exactly or `/oauth/authorize` answers
@@ -1023,25 +1015,25 @@ Changing the ingress hostname is precisely when this bites, and it is a plausibl
 `post-upgrade` hook, a `helm upgrade` that changes a hostname then re-registers it in the same
 operation — another reason the hook cannot be `pre-upgrade`.
 
-**Checked against the code, and the two clients differ.** This is not a hypothetical:
+**The two OAuth clients reached this differently**, which is worth knowing before touching either:
 
-- **Node-RED (`0006_nodered_oidc_auth.sql`) is already correct.** `redirect_uris` comes from
+- **Node-RED (`0006_nodered_oidc_auth.sql`) was always correct.** `redirect_uris` comes from
   `:nodered_redirect_uri`, derived from `NODERED_PUBLIC_URL` and passed in by db-init, and the
   `ON CONFLICT (id) DO UPDATE` re-applies it. Nothing to do — the chart only has to pass the value.
-- **Grafana (`0002_seed_data.sql`) HARDCODES `http://localhost:3002/login/generic_oauth`** as
+- **Grafana (`0002_seed_data.sql`) used to hardcode `http://localhost:3002/login/generic_oauth`** as
   `redirect_uris`, and `http://localhost:3002` as `client_uri`, with
   `ON CONFLICT (id) DO UPDATE SET redirect_uris = EXCLUDED.redirect_uris`. So the seed does not
   merely fail to track the hostname — **it actively rewrites the row back to `localhost` on every
-  boot**, and db-init replays on every boot. A manual correction survives until the next restart
-  and then silently reverts, which is the worst version of this failure: it looks fixed, then is
+  boot**, and db-init replays on every boot. A manual correction survived until the next restart
+  and then silently reverted, which is the worst version of this failure: it looks fixed, then is
   not, with no event marking the change.
 
-  **This is already a defect on Compose**, for any stack not reached at `localhost:3002` — it is
-  not specific to Kubernetes. Kubernetes only makes it certain, because subdomain ingress means no
-  deployment is ever at `localhost:3002`.
+  **That was a defect on Compose too**, for any stack not reached at `localhost:3002` — not
+  something Kubernetes introduced. Kubernetes only makes it certain, because subdomain ingress means
+  no deployment is ever at `localhost:3002`.
 
-**FIXED, and verified against a live database.** `GRAFANA_PUBLIC_URL` is now plumbed through
-db-init as the psql variable `:grafana_public_url`, exactly as `:nodered_redirect_uri` already was:
+`GRAFANA_PUBLIC_URL` is therefore plumbed through db-init as the psql variable
+`:grafana_public_url`, exactly as `:nodered_redirect_uri` already was:
 
 - `0002_seed_data.sql` stages it in a session GUC (psql does not substitute `:variables` inside
   dollar-quoted blocks) and derives both fields from it — `client_uri` is the origin,
@@ -1055,16 +1047,16 @@ db-init as the psql variable `:grafana_public_url`, exactly as `:nodered_redirec
   row and Grafana's own idea of where it lives cannot drift.
 - Unset falls back to `http://localhost:3002`, so the Compose path is byte-for-byte unchanged.
 
-Verified end to end against a running `supabase-db`, all four cases:
+The resulting behaviour, confirmed against a running `supabase-db`:
 
 | Case | Result |
 |---|---|
-| db-init with `GRAFANA_PUBLIC_URL=https://grafana.factory.example.com` | registered that origin |
-| **db-init replayed** — the actual bug | **value held; no revert to localhost** |
+| db-init with `GRAFANA_PUBLIC_URL=https://grafana.factory.example.com` | registers that origin |
+| **db-init replayed** — the case that used to break | **value holds; no revert to localhost** |
 | Value with a trailing slash | normalised, no double slash |
 | Variable unset | falls back to `http://localhost:3002` |
 
-### M4 — `pg_net` egress NetworkPolicy (Phase 7, §10) — **DONE**
+### M4 — `pg_net` egress NetworkPolicy (§10.1)
 
 **Failure:** a default-deny egress policy is the right posture, and it silently kills the
 quarantine webhook. `dispatch_device_quarantine_webhook()` fires outbound HTTP **from inside
@@ -1081,7 +1073,7 @@ alerts stopped.
 This is also why `webhook_endpoints` has no write RLS policy: a writable endpoint table plus
 database egress is an SSRF primitive. The NetworkPolicy is the second half of that mitigation.
 
-### M5 — Volume ownership and permissions (Phases 1, 3, 4)
+### M5 — Volume ownership and permissions (§3.3, §5.1, §6.1)
 
 **Failure:** `local-path` provisions a host directory owned by `root`, and several of these images
 run as a non-root user. The result is a crash loop on a permission error at a path the operator
@@ -1103,7 +1095,7 @@ did not choose and cannot easily inspect.
 properties and the images here are pinned for unrelated reasons. `fsGroupChangePolicy: OnRootMismatch`
 avoids a full recursive `chgrp` on every restart of a large volume.
 
-### M6 — `postgres_fdw` cross-database check before e2e (Phase 6, §8.1) — **DONE**
+### M6 — `postgres_fdw` cross-database check before e2e (§8.1)
 
 **Failure:** if the foreign server is misconfigured (M2), `validate.py` fails deep in its telemetry
 checks with errors that read as ingestion or schema problems. The cheap check is not run first.
@@ -1120,11 +1112,11 @@ A `SELECT 1` proves nothing — it never crosses the wrapper. The query must **t
 table**, so it exercises the server definition, the user mapping and reachability in one statement.
 Wire it as a gate: `helm test` first, `validate.py` only if it passes.
 
-## 10. Phase 7 — production hardening — **COMPLETE**
+## 10. Production hardening
 
-Deliberately last, because none of it is required to *have* Kubernetes hosting and all of it is
-easier once the chart exists. **All four features are off by default** — each needs a value the chart
-cannot infer, and each fails in a way that looks like something else.
+None of this is required to *have* Kubernetes hosting, which is why **all four features are off by
+default** — each needs a value the chart cannot infer, and each fails in a way that looks like
+something else.
 
 ### 10.1 NetworkPolicies (M4)
 
@@ -1142,9 +1134,9 @@ Two rules matter more than the rest:
   rather than a blocked packet. It would look exactly like the Service-naming mistakes this chart
   spends so much effort preventing. Both protocols because a response over 512 bytes falls back to
   TCP, so a UDP-only rule works until a query gets large enough and then fails *intermittently*.
-- **`supabase-db → node-red:1880`.** The task spec for this phase listed the `pg_net` allow as
-  Kong and the edge runtime. **Checked against the code, and the quarantine webhook does not go
-  through either**: `webhook_endpoints` seeds `http://node-red:1880/hooks/quarantine` directly. pg_net
+- **`supabase-db → node-red:1880`.** The obvious `pg_net` allow-list is Kong and the edge runtime,
+  and **the quarantine webhook goes through neither**:
+  `webhook_endpoints` seeds `http://node-red:1880/hooks/quarantine` directly. pg_net
   has no retries, no ordering and no DLQ, so blocking it drops every quarantine notification with no
   error, no queue and no log — the first sign is an operator noticing alerts stopped weeks earlier.
   CI asserts this flow specifically.
@@ -1162,8 +1154,7 @@ goes if your CNI does not exempt kubelet probes from policy.
 
 ### 10.2 Resources, PDBs and HPAs
 
-Requests and limits were already declared on every workload from Phase 1 onward; this phase adds the
-two things that act on them.
+Requests and limits are declared on every workload; these are the two things that act on them.
 
 **PDBs only for workloads that actually run more than one replica**, and each entry is guarded on the
 count. A PDB on a single-replica workload is *actively harmful*: `minAvailable: 1` against one pod can
@@ -1175,8 +1166,8 @@ change. With everything at one replica it renders nothing, which is correct rath
 **HPAs on four components, and the chart refuses the rest.** `factoryplus.validateAutoscaling` fails
 the render for any single-writer workload rather than warning, because the damage is silent — scaling
 `ingestion` duplicates every telemetry row, every quarantine decision and every append-only audit
-row, with no error and no crash, and an autoscaler does it under load. Verified: all eight refused,
-all four allowed.
+row, with no error and no crash, and an autoscaler does it under load. Eight workloads are refused;
+four are allowed.
 
 Two details that would otherwise waste an afternoon: **utilization is a percentage of the request**,
 so a memory target only means anything because every one of these declares
@@ -1207,9 +1198,9 @@ survives `helm uninstall` — deleting the release is precisely when the backups
 
 ### 10.4 Secret management
 
-`secrets.existingSecret` was built as the seam in Phase 1 and exercised in CI ever since, so this
-phase is documentation rather than templates: `values-prod.yaml.example` now carries the full key
-contract, an ESO `ExternalSecret` example, and the SOPS alternative.
+`secrets.existingSecret` (§3.2) is the whole mechanism, and it is exercised in CI, so this is a
+documentation contract rather than a set of templates: `values-prod.yaml.example` carries the full
+key contract, an ESO `ExternalSecret` example, and the SOPS alternative.
 
 **Rotation is not automatic even with ESO**, and that is the part worth writing down. Most values are
 read into a pod's environment at start, so a refreshed Secret reaches nothing until a restart. Two
@@ -1217,17 +1208,10 @@ need more: Kong's API keys are substituted by an initContainer (needs a rollout 
 OAuth client secrets are *hashed into `auth.oauth_clients`* by db-init (needs a `helm upgrade`, and
 both halves must move together or the handshake fails with `invalid_credentials`).
 
-### 10.5 Still outstanding
+### 10.5 TLS, MQTTS and self-monitoring
 
-- **Storage backend**: `supabase-storage` can be flipped to S3/MinIO (§4.4); still `file` by default.
-  With Slice 2's durability work done, what remains is a *scaling* question — the `file` backend is
-  what pins that Deployment to one replica — rather than a data-loss one.
-- **Postgres HA** remains out of scope — it needs an operator and a custom image carrying the
-  `supabase/postgres` extension set and role scaffolding, and it is two problems (timescaledb has its
-  own). Three couplings would each need answering: single-writer `ingestion`, Realtime's replication
-  slot, and `pg_cron` running on the primary only.
-
-**Closed since Phase 7, in Slice 1** (see `deploy/k8s/README.md` for the operational detail):
+Four features that came after the first working chart, each with a design note worth keeping (see
+`deploy/k8s/README.md` for the operational detail):
 
 - **Internal CA** (`deploy/k8s/internal-ca.yaml`) — a self-signed root booting a `factoryplus-ca`
   `ClusterIssuer`, deliberately outside Helm so `helm uninstall` cannot take the root private key.
@@ -1238,13 +1222,11 @@ both halves must move together or the handshake fails with `invalid_credentials`
   the two in-cluster clients with the CA projected `ca.crt`-only.
 - **`networkPolicy.extraIngress`** — the missing half of `extraEgress`; without it, enabling
   NetworkPolicies silently dropped every Prometheus scrape.
-- **A broker-config regression, found while doing the above.** `mosquitto.conf` declared
-  `password_file` twice, which mosquitto 2.0.x rejects (`Duplicate password_file value`, exit 3) and
-  2.1.x accepts — so pinning the image from `latest` to 2.0.20 in Phase 3/5 had broken the broker on
-  **both** targets. Fixed, and `scripts/check-broker-config.mjs` now runs the real config on the
-  pinned tag in CI, asserting both that it starts and that an unauthenticated client is refused.
-
-**Closed in Slice 2:**
+- **A broker-config trap worth knowing about.** `mosquitto.conf` once declared `password_file`
+  twice, which mosquitto 2.0.x rejects (`Duplicate password_file value`, exit 3) and 2.1.x accepts —
+  so pinning the image from `latest` to 2.0.20 broke the broker on **both** targets at once.
+  `scripts/check-broker-config.mjs` now runs the real config on the pinned tag in CI, asserting both
+  that it starts and that an unauthenticated client is refused.
 
 - **Storage durability.** The 3D model objects were in no backup while `devices.model_3d_path` was,
   so a database-only restore produced a fleet of rows referencing objects that were gone — a break
@@ -1264,37 +1246,24 @@ both halves must move together or the handshake fails with `invalid_credentials`
   an error naming the config file rather than the env var), and every ServiceMonitor port must
   resolve to a named port on the Service it selects.
 
-**Explicitly out of scope for this migration**, per the standing roadmap decision: the Kong→Envoy
-gateway change, MCP servers, and i3X support. The gateway question is reframed at §7.1 and taken up
-after. If the Kubernetes work slips by more than a few months, the interim Kong 3.x bump (§2.3)
-becomes worth doing on its own; if it lands soon, add rate limiting only.
-
 ---
 
-## 11. Sequencing and effort
+## 11. Deliberate limits
 
-| Phase | Content | Depends on | Size | Status |
-|---|---|---|---|---|
-| 0 | Frontend runtime config, edge-runtime image, Kong/Grafana templating, validate.py audit | — | M — real code, touches the frontend | **done** |
-| — | M3 pulled forward: Grafana OAuth redirect URI parameterised | 0 | S | **done** |
-| 1 | Chart skeleton, secrets, StatefulSets, Realtime naming, M2 + M5 | 0 | M | **done** |
-| 2 | Supabase control plane, init Jobs, probes | 1 | L — the ordering is the hard part | **done** |
-| 3 | Mosquitto + credential design, ingestion, M1 | 1 | M — §5.1 is the design work | **done** |
-| 4 | Node-RED, frontend, M5 | 2 | M | **done** |
-| 5 | Grafana, ingress, hostnames | 2, 3, 4 | M | **done** |
-| 6 | CI on k3d, M6 gate, drift-control checks, runbook | 5 | M | **done** |
-| 7 | Hardening, M4, backups, TLS | 6 | L, and incremental | **done** |
+Things this design does **not** do, recorded so they are recognisable as choices rather than
+oversights.
 
-Phases 3 and 4 can run in parallel with 2 once the skeleton exists.
-
-**M3 was pulled forward and is done** — `0002_seed_data.sql` no longer hardcodes Grafana's OAuth
-`redirect_uris`, and the replay that used to revert it is verified not to. See §9-M3.
-
-Remaining mitigations by phase: **M1** with Mosquitto (3), **M5** again with Node-RED (4), **M4**
-and backups in hardening (7). **M2** is verified and **M6** is its CI gate, due with Phase 6.
-
-## 12. Open decisions
-
-None outstanding — see **Confirmed decisions** at the top. Reopen here if the target cluster grows
-beyond a single node, at which point `local-path`'s node affinity (§3.3) and Klipper's host-port
-binding (§7.2) both need revisiting.
+- **Single node is assumed.** `local-path` binds a PVC to the node that first schedules its pod
+  (§3.3) and Klipper binds MQTT's port on the node (§7.2). Growing beyond one node means revisiting
+  both, and is the change most likely to invalidate assumptions elsewhere in this document.
+- **Postgres is not highly available.** It needs an operator plus a custom image carrying the
+  `supabase/postgres` extension set and role scaffolding, and it is two problems rather than one
+  (TimescaleDB has its own). Three couplings would each need answering: single-writer `ingestion`,
+  Realtime's replication slot, and `pg_cron` running on the primary only.
+- **Object storage stays on the `file` backend by default.** `supabaseStorage.backend: s3` is a
+  supported switch (§4.4). With the durability gap closed (§10.5), what remains is a *scaling*
+  question — the `file` backend is what pins that Deployment to one replica — not a data-loss one.
+- **The gateway is still Kong 2.8, which is unmaintained.** §2.3 covers the interim 3.x bump, which
+  would delete `supabase-kong-init` on the Compose side and make the bundled `rate-limiting` plugin
+  available; §7.1 covers the longer-term Gateway API question. Neither belongs in a hosting change.
+- **Backups are logical dumps, not PITR** (§10.3). The recovery floor is the last nightly run.
