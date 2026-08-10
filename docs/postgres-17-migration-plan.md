@@ -160,12 +160,19 @@ image **has** (users, distro, extensions, function signatures) and never checked
 **pre-configures**. The database image is not only a set of binaries, it is a set of defaults, and
 the defaults moved further than the version did.
 
-| Missed | Symptom at boot |
+| Missed | Symptom |
 |---|---|
 | `pgjwt` shipped but **not created** | 0006 self-check: "pgjwt (extensions.sign) is not installed" — five migrations after the real cause |
 | `storage` stub tables gone | 0001 aborts: `relation "storage.objects" does not exist` |
 | Grants on `storage.*` gone | storage-init: `400 new row violates row-level security policy`, real cause a 42501 nested in the payload |
 | `postgres` not owner of storage tables | `must be owner of table objects` |
+| `postgres` not owner of the `auth` schema | CI only, after merge: `permission denied for schema auth` bootstrapping the GoTrue helper functions |
+
+**`postgres` IS NOT A SUPERUSER ON 17.6, and that single fact caused three of the five.** Only
+`supabase_admin` is. Anything this stack does that creates or alters objects in a schema owned by
+one of the scoped admins — `storage` (supabase_storage_admin), `auth` (supabase_admin) — must
+connect as `supabase_admin`. Ordinary DML and the migrations themselves still run as `postgres`,
+verified against 17.6.1.160 rather than assumed.
 
 A future image bump should add: **which extensions are CREATED (not merely available), which
 schemas arrive populated, and what is granted on them** — `\dx`, `\dt <schema>.*` and

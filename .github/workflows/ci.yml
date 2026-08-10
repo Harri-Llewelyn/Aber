@@ -890,9 +890,19 @@ jobs:
       #                 'request.jwt.claims' JSON -> auth.uid() returns NULL and every
       #                 policy denies, silently failing the tests.
       # These are the definitions GoTrue installs in a real deployment.
+      #
+      # AS supabase_admin, NOT postgres. The `auth` schema is owned by supabase_admin and
+      # `postgres` is NOT a superuser in this image, so CREATE FUNCTION in that schema fails with
+      # "permission denied for schema auth". That is new at 17.6.1.160 -- the 15.x image allowed
+      # it -- and it is the same shape as the storage.objects ownership problem the PG17 bump hit:
+      # `postgres` is an ordinary role here and only supabase_admin is super.
+      #
+      # Only the BOOTSTRAP needs the elevated role. The migrations below still apply as `postgres`,
+      # which was verified against 17.6.1.160 rather than assumed -- all ten, plus this job's whole
+      # test suite.
       - name: Bootstrap Supabase Auth Helper Functions
         run: |
-          PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -h localhost -p 54322 -U postgres -d postgres -c "
+          PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -h localhost -p 54322 -U supabase_admin -d postgres -c "
             CREATE SCHEMA IF NOT EXISTS auth;
             CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS \$\$
               SELECT coalesce(
