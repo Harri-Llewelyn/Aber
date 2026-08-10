@@ -1,8 +1,10 @@
 # PostgreSQL 17 and TimescaleDB 2.29 — Implementation Plan
 
-**Status:** direction agreed and open decisions settled 2026-08-10; **nothing built**. Phase 0 is a
-gate and has not started.
-**Date:** plan drafted 2026-08-10.
+**Status (2026-08-10):** Phases **0, 2 and 3 are COMPLETE** and verified on the Compose target.
+Both databases run PostgreSQL 17; the historian runs TimescaleDB 2.29.1. Phase 1 (removing `pgjwt`)
+is **optional** and not started — Phase 0 demoted it from blocker to hardening. Phase 4 (Hypercore)
+is not started.
+**Date:** plan drafted 2026-08-10; executed the same day.
 
 ## Goal
 
@@ -290,22 +292,62 @@ plus `docker compose down -v` — the entire upgrade, in one step, exactly as in
 7. `timescaledb-maintenance` reconciles compression, retention and all three rollups against a
    2.29.1 hypertable.
 
-## Phase 3 — Take the free wins (no schema change)
+## Phase 3 — Take the free wins (no schema change) — ✅ COMPLETE (2026-08-10)
 
-- **Measure the `= ANY` improvement rather than assuming it.** PG17 collapses `= ANY(array)` into a
-  single btree index scan instead of one scan per value. `telemetry_gapfill()`
-  ([aggregates.sql:341](../timescaledb/aggregates.sql#L341)) is built almost entirely on
-  `asset_id = ANY($3::text[])` plus a per-series seed lookup against
-  `idx_telemetry_asset_metric_time`, which is the closest match in the repository between a PG17
-  optimisation and an existing hot path. Capture `EXPLAIN (ANALYZE, BUFFERS)` on 15 and on 17 for
-  the same window and series count, and record the numbers — a claimed speedup nobody measured is
-  the kind of thing this repository does not do. **This needs seeded data, so take the measurement
-  before Phase 2 wipes the volume, or reseed with the simulator.**
-- **`pg_stat_io` (PG16) and `pg_stat_checkpointer` (PG17)** report historian IO health that PG15
-  cannot. The overview dashboard
-  ([factoryplus-overview.json](../grafana/provisioning/dashboards/json/factoryplus-overview.json))
-  has no `pg_stat_*` panels at all today. This is the cheapest observability the upgrade offers.
-  `sync-helm-chart-files.mjs` mirrors it into the chart, so it is edited once.
+- **The `= ANY` improvement — MEASURED, and the predicted mechanism was wrong.**
+
+  The claim in this plan was that PG17 collapses `= ANY(array)` into a single btree scan instead
+  of one per value, and that `telemetry_gapfill()`
+  ([aggregates.sql:341](../timescaledb/aggregates.sql#L341)) would benefit because its `obs` CTE is
+  built on `asset_id = ANY($3::text[])`. **That is not what the plans show.** Both majors put
+  `= ANY` in the same `Index Cond` on `idx_telemetry_asset_metric_time` and touch essentially the
+  same buffers (61,303 vs 61,220) — the scan is not the difference.
+
+  The difference is the SORT, and it is structural:
+
+  | | Append node | Sort | Temp blocks |
+  |---|---|---|---|
+  | PG15.18 + TS2.28.3 | `ChunkAppend` | `Sort` → **external merge, 4808 kB** | read 601 / written 602 |
+  | PG17.10 + TS2.28.3 | `ConstraintAwareAppend` + `Merge Append` | `Incremental Sort`, quicksort, 59 kB peak | **none** |
+  | PG17.10 + TS2.29.1 | `ConstraintAwareAppend` + `Merge Append` | `Incremental Sort`, quicksort, 59 kB peak | **none** |
+
+  PG17 returns chunk rows already ordered by `(asset_id, metric_name)` through `Merge Append`,
+  which lets `Incremental Sort` finish the job in memory. PG15 sorts the whole result and spills
+  to disk.
+
+  **Attribution: PostgreSQL 17, not TimescaleDB 2.29.** The middle row isolates it — the same
+  TimescaleDB 2.28.3 spills on PG15 and does not on PG17. `work_mem` (7794 kB), `shared_buffers`
+  and `enable_incremental_sort` were identical across all three; PG15 has incremental sort
+  available and cannot use it, because `ChunkAppend` does not present sorted input.
+
+  Wall clock, best warm run of six, three passes, 960k rows / 300 assets × 8 metrics / 50-asset
+  subset: **PG15 116–140 ms, PG17 100–114 ms.** Directionally consistent every pass, but the
+  spread between passes is wide enough on a Docker Desktop VM that the honest figure is "roughly
+  10–20% here", not a precise number. TS2.28.3 vs 2.29.1 on PG17 is within that noise, as the
+  identical plans predict.
+
+  **The structural result is the one that matters, and it scales the wrong way for PG15**: the
+  spill grows with window width and series count, so a bigger query makes PG15 worse while PG17
+  stays in memory. The 4.8 MB spill here is a floor, not a typical case.
+- **`pg_stat_io` (PG16) and `pg_stat_checkpointer` (PG17) — DONE.** A
+  *Historian I/O & Checkpoints* row in
+  [factoryplus-overview.json](../grafana/provisioning/dashboards/json/factoryplus-overview.json):
+  shared buffer hit ratio, blocks read from disk, **requested checkpoints**, average checkpoint
+  write time, and a `pg_stat_io` breakdown by backend type and context.
+
+  `Requested Checkpoints` is the one worth watching. Timed checkpoints are the healthy path; a
+  requested count climbing beside them means `max_wal_size` is too small for the write rate, so
+  the historian checkpoints on ingest bursts instead of on a schedule. PG15 could not report it —
+  `pg_stat_bgwriter` conflated the counters that `pg_stat_checkpointer` separates.
+
+  **These are cumulative counters, not rates**, so they are `stat` and `table` panels rather than
+  time series: the views carry no time column, and a SQL datasource charting them would plot one
+  point per refresh with no history. Reading them as levels since `stats_reset` is the honest
+  presentation. A rate would need a scraper this stack does not run.
+
+  Verified against the running historian and through Grafana's own `/api/ds/query` proxy — all
+  five queries return data (hit ratio 99.75%). `sync-helm-chart-files.mjs` mirrors the dashboard
+  into the chart, so it is edited once.
 
 Explicitly **not** taken, so nobody re-derives it: `JSON_TABLE` has nothing to shred — no migration
 uses `jsonb_array_elements`. `MERGE ... RETURNING` must not touch the historian write, which is
@@ -350,7 +392,7 @@ migration.
 | 0 — Verification gate | — | ✅ complete | either |
 | 1 — Remove `pgjwt` (`0011`) — **optional** | 0 | **yes** | PG15 or PG17 |
 | 2 — Both targets to PG17 | 0 | yes (one commit, both targets) | PG17 |
-| 3 — Free wins | 2 | yes | PG17 |
+| 3 — Free wins | 2 | ✅ complete | PG17 |
 | 4 — Hypercore | 2 | yes | either |
 
 **Phase 2 no longer depends on Phase 1** — that edge existed only because `pgjwt` was believed to be
