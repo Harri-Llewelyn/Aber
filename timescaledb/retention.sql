@@ -82,7 +82,7 @@ BEGIN
   END IF;
 
   -- -------------------------------------------------------------------------------------------
-  -- Compression
+  -- Columnstore (Hypercore)
   -- -------------------------------------------------------------------------------------------
   -- The table must be TOLD HOW to compress before a policy can be attached.
   --   segmentby: rows for one asset/metric series compress together and stay individually
@@ -90,18 +90,36 @@ BEGIN
   --              see queryTelemetry in frontend/src/api.js).
   --   orderby:   time DESC matches both the query order and the supporting index.
   --
-  -- Applied only once. Re-issuing `SET (timescaledb.compress...)` with different segmentby
-  -- columns raises once compressed chunks exist, so this is guarded on the current state rather
-  -- than run unconditionally -- otherwise the SECOND boot of a compressed database would fail.
+  -- THE COLUMNSTORE API, NOT THE LEGACY COMPRESSION ONE. `add_columnstore_policy()` superseded
+  -- `add_compression_policy()` in TimescaleDB 2.18; the old spelling still works and is what this
+  -- file used until 2026-08. Two differences matter more than the rename:
+  --
+  --   1. THE NEW ENTRY POINTS ARE PROCEDURES, NOT FUNCTIONS. `add_columnstore_policy` and
+  --      `remove_columnstore_policy` must be reached with CALL; `PERFORM` fails with
+  --      "... is a procedure / HINT: To call a procedure, use CALL." Verified against 2.29.1,
+  --      including from inside this DO block and alongside an inner EXCEPTION handler.
+  --   2. The option names lose their `compress_` prefix and gain an explicit enable flag:
+  --      `timescaledb.compress` -> `timescaledb.enable_columnstore = true`,
+  --      `compress_segmentby`   -> `segmentby`, `compress_orderby` -> `orderby`.
+  --
+  -- What did NOT change: the job still reports as `policy_compression` in
+  -- timescaledb_information.jobs with `compress_after` in its config, and the hypertable's state
+  -- is still `compression_enabled` in timescaledb_information.hypertables -- there is no
+  -- columnstore-named equivalent of either. Both were checked rather than assumed, because a
+  -- rename there would have silently broken the guard below and the CI assertions.
+  --
+  -- Applied only once. Re-issuing the SET with different segmentby columns raises once compressed
+  -- chunks exist, so this is guarded on the current state rather than run unconditionally --
+  -- otherwise the SECOND boot of a compressed database would fail.
   SELECT h.compression_enabled INTO compressed
   FROM timescaledb_information.hypertables h
   WHERE h.hypertable_schema = 'public' AND h.hypertable_name = 'telemetry';
 
   IF v_compress IS NOT NULL AND NOT coalesce(compressed, false) THEN
     ALTER TABLE public.telemetry SET (
-      timescaledb.compress,
-      timescaledb.compress_segmentby = 'asset_id, metric_name',
-      timescaledb.compress_orderby   = 'time DESC'
+      timescaledb.enable_columnstore = true,
+      timescaledb.segmentby          = 'asset_id, metric_name',
+      timescaledb.orderby            = 'time DESC'
     );
   END IF;
 
@@ -109,16 +127,17 @@ BEGIN
   -- a DIFFERENT interval, add_* does not update it -- it emits a notice and does nothing, so a
   -- changed setting would appear to apply and would not. Removing first is what makes the value
   -- in the environment authoritative.
-  PERFORM remove_compression_policy('public.telemetry', if_exists => TRUE);
+  CALL remove_columnstore_policy('public.telemetry', if_exists => TRUE);
 
   IF v_compress IS NOT NULL THEN
-    PERFORM add_compression_policy('public.telemetry', v_compress);
-    RAISE NOTICE 'compression policy: chunks older than % are compressed', v_compress;
+    -- `after =>`, not the legacy positional `compress_after`.
+    CALL add_columnstore_policy('public.telemetry', after => v_compress);
+    RAISE NOTICE 'columnstore policy: chunks older than % are compressed', v_compress;
   ELSE
     -- Existing compressed chunks are deliberately left compressed. Decompressing a history that
     -- may be hundreds of gigabytes, unprompted, during a boot, is not something a config change
     -- should do; turning the policy off means "stop compressing new chunks".
-    RAISE NOTICE 'compression policy: DISABLED (existing compressed chunks are left as they are)';
+    RAISE NOTICE 'columnstore policy: DISABLED (existing compressed chunks are left as they are)';
   END IF;
 
   -- -------------------------------------------------------------------------------------------

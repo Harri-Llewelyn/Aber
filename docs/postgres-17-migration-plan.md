@@ -1,9 +1,9 @@
 # PostgreSQL 17 and TimescaleDB 2.29 — Implementation Plan
 
-**Status (2026-08-10):** Phases **0, 2 and 3 are COMPLETE** and verified on the Compose target.
-Both databases run PostgreSQL 17; the historian runs TimescaleDB 2.29.1. Phase 1 (removing `pgjwt`)
-is **optional** and not started — Phase 0 demoted it from blocker to hardening. Phase 4 (Hypercore)
-is not started.
+**Status (2026-08-10):** Phases **0, 2, 3 and 4 are COMPLETE** and verified on the Compose target.
+Both databases run PostgreSQL 17; the historian runs TimescaleDB 2.29.1 on the columnstore API.
+Phase 1 (removing `pgjwt`) is the only one outstanding, and it is **optional** — Phase 0 demoted it
+from blocker to hardening.
 **Date:** plan drafted 2026-08-10; executed the same day.
 
 ## Goal
@@ -355,24 +355,69 @@ deliberately `ON CONFLICT DO NOTHING` with a test asserting that literal SQL
 ([test_rbe_telemetry.py:348](../ingestion/test_rbe_telemetry.py#L348)) because an upsert would let a
 publisher rewrite history. `COPY ... ON_ERROR ignore` needs a bulk backfill path that does not exist.
 
-## Phase 4 — Hypercore / columnstore
+## Phase 4 — Hypercore / columnstore — ✅ COMPLETE (2026-08-10)
 
 Independent of the PostgreSQL bump — 2.18+ is enough and even 2.28.3 qualifies — but deliberately
 last, because it touches the boot-critical destructive path and does not belong inside a version
 migration.
 
-- [retention.sql:101](../timescaledb/retention.sql#L101) uses the legacy compression API.
-  `add_columnstore_policy()` superseded `add_compression_policy()` in 2.18; the old calls still work,
-  so this is modernisation, not repair. Keep the guard-on-current-state structure — the reason it is
-  not `if_not_exists` is recorded at [retention.sql:108](../timescaledb/retention.sql#L108) and
-  survives the rewrite unchanged.
-- **Re-test the claim at [values.yaml:177](../deploy/helm/factoryplus/values.yaml#L177)** that
-  compressed chunks are effectively read-only, so telemetry older than `compressAfter` is rejected.
-  Hypercore changed how writes into columnstore chunks behave, and that comment may already be stale
-  at 2.28.3. If it is, the late-arrival window for a gateway buffering through an outage is wider
-  than the configuration documents — which matters, because
-  [aggregates.sql:167](../timescaledb/aggregates.sql#L167) sizes the rollup refresh window against
-  exactly that assumption. Correct the comment or confirm it; do not leave it untested.
+### The API migration is not just a rename
+
+`retention.sql` now uses `add_columnstore_policy()` / `remove_columnstore_policy()`. Two differences
+mattered more than the names, both found by running it rather than reading about it:
+
+1. **The new entry points are PROCEDURES, not functions.** `add_columnstore_policy`,
+   `remove_columnstore_policy`, `convert_to_columnstore` and `convert_to_rowstore` all require
+   `CALL`; `PERFORM` fails with *"... is a procedure / HINT: To call a procedure, use CALL."* The
+   legacy `add_compression_policy` / `remove_compression_policy` / `compress_chunk` /
+   `decompress_chunk` remain functions. Since `retention.sql` drives everything from inside one
+   `DO` block, this is a rewrite of the call convention, not a substitution. `CALL` was verified to
+   work there, including alongside the inner `EXCEPTION` handler that parses the intervals.
+2. **The options lose their prefix and gain an enable flag**: `timescaledb.compress` →
+   `timescaledb.enable_columnstore = true`, `compress_segmentby` → `segmentby`, `compress_orderby`
+   → `orderby`.
+
+**What did not change, checked rather than assumed:** the job still reports as `policy_compression`
+in `timescaledb_information.jobs` with `compress_after` in its config, and hypertable state is still
+`compression_enabled` in `timescaledb_information.hypertables`. There is no columnstore-named
+equivalent of either, and a rename there would have silently broken the guard in `retention.sql`.
+
+Verified three ways: clean install on a fresh hypertable, a second run for idempotency, and — the
+one that matters — **applied over a database already carrying the legacy `timescaledb.compress`
+settings and an `add_compression_policy` job**, with a changed interval, which took effect. That is
+the upgrade path every existing deployment takes on its next boot.
+
+### The read-only claim was FALSE, and was already false before this upgrade
+
+[values.yaml](../deploy/helm/factoryplus/values.yaml) claimed *"compressed chunks are effectively
+read-only, so telemetry timestamped older than this is rejected rather than inserted."* Measured on
+2.29.1, against a row placed provably inside a compressed chunk:
+
+| Operation on a compressed chunk | Result |
+|---|---|
+| plain `INSERT` | **succeeds** |
+| `INSERT ... ON CONFLICT (time, asset_id, metric_name) DO NOTHING` (ingestion's exact form) | **succeeds** |
+| the same against an existing key | correctly inserts nothing — **the unique constraint is enforced against compressed data** |
+| `UPDATE` | **succeeds** |
+| `DELETE` | **succeeds** |
+| chunk afterwards | **still compressed** |
+
+**This is not a Hypercore change.** The identical test passes on 2.28.3 with the legacy compression
+API — the version this stack ran before. The note had simply outlived the behaviour it described.
+
+The operational consequence is what matters: **`compressAfter` does not bound the late-arrival
+window and never did on any version this stack has run.** The only bound is
+`TELEMETRY_MAX_AGE_SECONDS` (24h) in the ingestion daemon. Widening `compressAfter` does not widen
+the accepted window; narrowing it does not close it.
+
+[aggregates.sql:167](../timescaledb/aggregates.sql#L167) is unaffected and needed no change — it
+already sizes the 25-hour rollup refresh window against ingestion's 24h limit, not against
+compression. The reasoning there was right for the right reason.
+
+*A first attempt at this test proved nothing: a row "10 days old" landed in an UNCOMPRESSED chunk,
+because a 7-day `compressAfter` with 7-day chunks leaves the 7–14 day chunk uncompressed. The
+target timestamp has to be selected from `timescaledb_information.chunks WHERE is_compressed`, not
+assumed from its age.*
 
 ---
 
@@ -393,7 +438,7 @@ migration.
 | 1 — Remove `pgjwt` (`0011`) — **optional** | 0 | **yes** | PG15 or PG17 |
 | 2 — Both targets to PG17 | 0 | yes (one commit, both targets) | PG17 |
 | 3 — Free wins | 2 | ✅ complete | PG17 |
-| 4 — Hypercore | 2 | yes | either |
+| 4 — Hypercore | 2 | ✅ complete | either |
 
 **Phase 2 no longer depends on Phase 1** — that edge existed only because `pgjwt` was believed to be
 missing. Phase 1 is now independent of everything and can land before, after, or never. Phase 2 is

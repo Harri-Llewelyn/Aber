@@ -181,9 +181,23 @@ timescaledb:
   # Both take any PostgreSQL interval ('7 days', '12 hours', '5 years'); `never` removes the policy.
   retention:
     enabled: true
-    # Compressed chunks are effectively read-only, so telemetry timestamped older than this is
-    # rejected rather than inserted. Ingestion already refuses anything over 24h old, so this only
-    # bites below a day.
+    # How old a chunk must be before it is converted to the columnstore (Hypercore).
+    #
+    # THIS DOES NOT BOUND THE LATE-ARRIVAL WINDOW, and it used to say that it did: "compressed
+    # chunks are effectively read-only, so telemetry timestamped older than this is rejected
+    # rather than inserted". That was measured on 2.29.1 and is FALSE -- an INSERT into a
+    # compressed chunk succeeds, including the exact `ON CONFLICT (time, asset_id, metric_name)
+    # DO NOTHING` form the ingestion daemon uses, the unique constraint is still enforced against
+    # compressed data, UPDATE and DELETE both work, and the chunk stays compressed throughout.
+    #
+    # It was not the PG17/2.29 upgrade that changed this. The same test passes on 2.28.3, the
+    # version this stack ran before -- the note described much older TimescaleDB behaviour and had
+    # simply outlived it.
+    #
+    # So the ONLY thing bounding late arrivals is TELEMETRY_MAX_AGE_SECONDS in the ingestion
+    # daemon (24h). A gateway that buffers through an outage and flushes on reconnect is limited
+    # by that and by nothing here. Widening this value does not widen the accepted window, and
+    # narrowing it does not close it.
     compressAfter: "7 days"
     # A HARD DELETE with no undo -- TimescaleDB drops whole chunks and nothing in this chart copies
     # them anywhere first. 90 days is a starting point, NOT a compliance decision: manufacturing
