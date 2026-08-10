@@ -2,8 +2,15 @@
 
 **Status (2026-08-10):** Phases **0, 2, 3 and 4 are COMPLETE** and verified on the Compose target.
 Both databases run PostgreSQL 17; the historian runs TimescaleDB 2.29.1 on the columnstore API.
-Phase 1 (removing `pgjwt`) is the only one outstanding, and it is **optional** — Phase 0 demoted it
-from blocker to hardening.
+
+**Phase 1 (removing `pgjwt`) is DEFERRED — accepted technical debt, not unfinished work.** Phase 0
+demoted it from blocker to hardening when the extension turned out to still ship in
+`supabase/postgres:17.6.1.160` and sign correctly. The debt is small and bounded: Supabase has
+announced pgjwt's end for Postgres 17 and removed it from the hosted platform, so the self-hosted
+image retaining it is a reprieve rather than a reversal. **The trigger to pick this up is a
+`supabase/postgres` bump whose image no longer lists `pgjwt` in `pg_available_extensions`** — at
+which point `supabase-db-init` fails at `0001`, loudly and on the first boot, because 0001 now
+declares the extension explicitly. That is the failure mode you want: it cannot ship silently.
 **Date:** plan drafted 2026-08-10; executed the same day.
 
 ## Goal
@@ -435,7 +442,7 @@ assumed from its age.*
 | Phase | Depends on | Ships alone | Runs on |
 |---|---|---|---|
 | 0 — Verification gate | — | ✅ complete | either |
-| 1 — Remove `pgjwt` (`0011`) — **optional** | 0 | **yes** | PG15 or PG17 |
+| 1 — Remove `pgjwt` (`0011`) — **deferred** | 0 | **yes** | PG15 or PG17 |
 | 2 — Both targets to PG17 | 0 | yes (one commit, both targets) | PG17 |
 | 3 — Free wins | 2 | ✅ complete | PG17 |
 | 4 — Hypercore | 2 | ✅ complete | either |
