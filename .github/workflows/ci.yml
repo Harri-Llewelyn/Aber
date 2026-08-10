@@ -1540,6 +1540,19 @@ jobs:
       # names that only resolve between containers, so sourcing them wholesale made
       # every connection die with "Temporary failure in name resolution". Take the
       # credentials from .env, then point the topology at the published ports.
+      #
+      # MQTT_VALIDATOR_USER/MQTT_VALIDATOR_PASSWORD MUST REACH THE SCRIPT, and until 2026-08 the
+      # fact that they did not was hidden by a coincidence. validate.py defaulted its password to
+      # the literal `factoryplus123`; this job runs `setup.mjs --demo`, which copies .env.example
+      # VERBATIM, and .env.example sets MQTT_VALIDATOR_PASSWORD to exactly that string. So the
+      # default matched the account and CI went green -- while a developer running a plain
+      # `npm run setup`, which mints a random password per principal, got a broker rejection and
+      # nine failures about telemetry, aliases and rebirth that named nothing relevant.
+      #
+      # validate.py now reads the MQTT_VALIDATOR_* names directly and refuses to start without
+      # them, so this `. ./.env` is load-bearing rather than incidental. It is also why the suite
+      # is now WEAKER in CI than locally in one narrow sense: --demo's published credentials can
+      # never diverge from the account, so only a real setup exercises that path.
       - name: Run End-to-End Validation Script
         run: |
           set -a && . ./.env && set +a
