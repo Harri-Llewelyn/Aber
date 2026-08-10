@@ -229,8 +229,10 @@ Two things worth knowing before the first install:
 | **[`supabase/`](supabase/README.md)** | Migration baseline, RLS privilege matrix, triggers, audit immutability, edge functions, Kong |
 | **[`ingestion/`](ingestion/README.md)** | Sparkplug B parsing, identity resolution, gateway binding, TimescaleDB mapping, `validate.py` |
 | **[`simulators/`](simulators/README.md)** | Node-RED setup, flow provisioning, broker topics, device onboarding walkthrough |
+| **[`i3x/`](i3x/README.md)** | i3X 1.0 server: the address-space mapping, why it is a separate service, subscriptions, and connecting a client |
 | [`supabase/migrations/archive/`](supabase/migrations/archive) | The 38 pre-beta migrations, preserved for their reasoning. Never executed |
 | [`docs/openapi.yaml`](docs/openapi.yaml) | REST API specification rendered by Swagger UI |
+| [`docs/i3x-openapi.yaml`](docs/i3x-openapi.yaml) | The i3X server's spec — a separate document because it is not behind Kong. Same Swagger UI, second entry in the dropdown |
 | [`grafana/`](grafana) | Datasource, dashboard and alerting provisioning |
 | [`timescaledb/`](timescaledb) | Hypertable schema (`init/`, first boot only); `retention.sql` and `aggregates.sql` reconcile compression, retention and the 1m/5m/1h rollups on every boot |
 | [`scripts/`](scripts) | Setup, Node-RED seeding, storage bucket, MQTT credentials, vocabulary generation, chart-file sync, image tag parity |

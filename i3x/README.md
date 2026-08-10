@@ -109,6 +109,11 @@ All under `/v1`. `GET /info` is open; everything else requires `Authorization`.
 | POST | `/subscriptions/stream` | MAY. SSE, **one stream per subscription** |
 | PUT | `/objects/value`, `/objects/history` | **405** — see below |
 
+The full request and response reference is [`docs/i3x-openapi.yaml`](../docs/i3x-openapi.yaml),
+which swagger-ui serves in the same dropdown as the platform spec. It is a **separate document
+from `docs/openapi.yaml` on purpose**: this server is not behind Kong, takes no `apikey`, and
+`/v1/schema` already means something else there.
+
 ### Subscriptions
 
 Three rules are easy to get wrong and each fails quietly:
@@ -139,6 +144,47 @@ Three rules are easy to get wrong and each fails quietly:
 It is also the durable control. The MCP server has an `--enable-writes` flag, but that is
 client-side; a server that does not implement the verb cannot be talked into it. Writes belong on
 the Sparkplug/NCMD command path, where they are audited.
+
+## Connecting a client
+
+Two rules decide whether any i3X client works against this server, and both fail in ways that
+do not name the cause.
+
+**1. The base URL includes `/v1`.** Clients are given a base URL and append the spec's paths to
+it; this server answers **404 for anything outside `/v1`**, including `/info`. A client pointed
+at `http://localhost:8090` fails its version probe and quietly decides the server is pre-1.0,
+after which nothing it sends is in the right shape.
+
+**2. The token is a user access token, not the anon key.** The anon key authenticates at Kong
+and is then rejected by the data layer — `401 The supplied credentials were rejected by the data
+layer` — because RLS grants reads to `authenticated`, not `anon`. Get one with:
+
+```bash
+curl -s -X POST "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
+  -H "apikey: $SUPABASE_ANON_KEY" -H "Content-Type: application/json" \
+  -d '{"email":"admin@factoryplus.local","password":"factoryplus123"}' \
+  | python -c "import sys,json; print(json.load(sys.stdin)['access_token'])"
+```
+
+**It expires in an hour.** A client that persists its connection profile — Explorer does — starts
+401-ing on settings that worked earlier, which reads as a broken server rather than a stale token.
+
+### i3X Explorer
+
+[`ace-technologies-inc/i3X-Explorer`](https://github.com/ace-technologies-inc/i3X-Explorer) is a
+generic browse client for any i3X server, and the practical way to eyeball the address space.
+
+| Field | Value |
+| :--- | :--- |
+| Server URL | `http://localhost:8090/v1` |
+| Authentication | `Bearer Token` |
+| Token | the `access_token` above |
+
+**Use the desktop build, not `npx vite`.** This server sends no CORS headers and answers `OPTIONS`
+with `501`, so a browser cannot call it cross-origin. Explorer's Electron shell sets
+`webSecurity: false` specifically to reach arbitrary i3X servers, so the desktop app is unaffected;
+browser mode would fail every request at the preflight. The same limitation is why swagger-ui's
+"Try it out" does not work against this service.
 
 ## MCP
 

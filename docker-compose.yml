@@ -674,16 +674,24 @@ services:
     ports:
       - "${SWAGGER_PORT:-8088}:8080"
     environment:
-      # The curated spec is mounted; the PostgREST entry is fetched by the browser from
+      # The two curated specs are mounted; the PostgREST entry is fetched by the browser from
       # Kong, so it needs the CORS origin allowed in supabase/kong.yml.
+      #
+      # i3X is a SECOND spec rather than a section of the first: it is served by i3x-service on
+      # 8090, not by Kong, so it cannot share a `servers:` block -- and /v1/schema is already the
+      # Factory+ Directory adapter's on this gateway. Its "Try it out" does not work, because the
+      # i3X server sends no CORS headers and answers OPTIONS with 501; the spec's description says
+      # so rather than leaving the button to fail mysteriously.
       URLS: >-
         [{"url":"/openapi.yaml","name":"Factory+ Platform API"},
+         {"url":"/i3x-openapi.yaml","name":"i3X 1.0 Server"},
          {"url":"${SUPABASE_URL:-http://127.0.0.1:54321}/rest/v1/","name":"PostgREST (live database schema)"}]
       URLS_PRIMARY_NAME: Factory+ Platform API
       DEEP_LINKING: "true"
       DISPLAY_REQUEST_DURATION: "true"
     volumes:
       - ./docs/openapi.yaml:/usr/share/nginx/html/openapi.yaml:ro
+      - ./docs/i3x-openapi.yaml:/usr/share/nginx/html/i3x-openapi.yaml:ro
 
   # ---------------------------------------------------------------------------
   # Messaging & Edge Infrastructure
