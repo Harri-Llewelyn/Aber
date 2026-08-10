@@ -68,6 +68,21 @@ CREATE EXTENSION IF NOT EXISTS pg_cron;
 CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions;
 CREATE EXTENSION IF NOT EXISTS supabase_vault WITH SCHEMA vault;
 
+-- pgjwt: DECLARED HERE FROM THE PG17 BUMP ONWARD, and its absence from this list until then was
+-- not an oversight -- it was a dependency on a default. Supabase enabled pgjwt on every project up
+-- to Postgres 17, so `extensions.sign()` simply existed and 0006 could call it. The 17.6.1.160
+-- image still SHIPS the extension but no longer CREATES it, so the first thing that noticed was
+-- 0006's own self-check, several migrations later, reporting a missing function rather than a
+-- missing extension.
+--
+-- Being explicit is the improvement here regardless of version: a required extension belongs in
+-- the list of required extensions. It also reduces removing pgjwt to a two-line change -- this
+-- declaration and the signer in 0006 -- which is what the deprecation eventually forces. Supabase
+-- has announced pgjwt's end for Postgres 17 and removed it from the hosted platform; the
+-- self-hosted image retaining it is a reprieve, not a reversal.
+-- See docs/postgres-17-migration-plan.md, Phase 1.
+CREATE EXTENSION IF NOT EXISTS pgjwt WITH SCHEMA extensions;
+
 -- Vault holds only secrets that must be read *from SQL* -- in practice the Node-RED admin token
 -- the quarantine webhook attaches to its outbound request. Neither browser-facing role may read
 -- the store, so the revocation is part of the structure rather than of the seeding.
@@ -401,7 +416,7 @@ BEGIN
   -- security_invoker is load-bearing. Without it the view executes as its owner (postgres)
   -- and silently bypasses the RLS on public.gateways, exposing every gateway to any role
   -- holding SELECT on the view. With it, each caller's own policies apply exactly as on the
-  -- base table. Requires PG15+; this stack is on supabase/postgres 15.6.
+  -- base table. Requires PG15+; this stack is on supabase/postgres 17.6.
   CREATE VIEW public.gateway_status
   WITH (security_invoker = true) AS
   SELECT
@@ -2387,58 +2402,29 @@ ALTER TABLE public.digital_thread REPLICA IDENTITY DEFAULT;
 
 
 -- ---------------------------------------------------------------------------------------------
--- 6. Storage policies for the 3D model bucket
+-- 6. Storage policies for the 3D model bucket -- MOVED OUT OF THIS FILE
 -- ---------------------------------------------------------------------------------------------
--- The bucket ROW is created by scripts/storage-init.mjs, not here -- see this file's header for
--- why. These policies are here because `storage.objects` exists from the image's stub schema
--- onward, and they are the access control, so they belong with the structure.
+-- They now live in `supabase/storage-policies.sql`, applied by the `supabase-storage-policies`
+-- service (Compose) and Job (Helm) AFTER `supabase-storage` reports healthy.
 --
--- Public read, because an AAS `File` element's URL has to be dereferenceable by a viewer holding
--- no Factory+ session; a signed URL would expire and break every shell already handed out.
--- WRITES are gated on device-management authority, NOT merely on `authenticated`: an upload
--- changes what a shell publishes *and* puts bytes at a world-readable URL.
+-- THIS SECTION NUMBER IS DELIBERATELY LEFT IN PLACE. The policies were here, this is where a
+-- reader looking for storage access control will come, and an empty gap between 5 and 7 would
+-- read as an accident.
 --
--- Depends on public.has_role(), created in section 4.
-
-ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "asset_3d_models_public_read" ON storage.objects;
-CREATE POLICY "asset_3d_models_public_read" ON storage.objects
-  FOR SELECT TO anon, authenticated
-  USING (bucket_id = 'asset-3d-models');
-
-DROP POLICY IF EXISTS "asset_3d_models_insert_privileged" ON storage.objects;
-CREATE POLICY "asset_3d_models_insert_privileged" ON storage.objects
-  FOR INSERT TO authenticated
-  WITH CHECK (
-    bucket_id = 'asset-3d-models'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
-  );
-
-DROP POLICY IF EXISTS "asset_3d_models_update_privileged" ON storage.objects;
-CREATE POLICY "asset_3d_models_update_privileged" ON storage.objects
-  FOR UPDATE TO authenticated
-  USING (
-    bucket_id = 'asset-3d-models'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
-  )
-  WITH CHECK (
-    bucket_id = 'asset-3d-models'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
-  );
-
-DROP POLICY IF EXISTS "asset_3d_models_delete_privileged" ON storage.objects;
-CREATE POLICY "asset_3d_models_delete_privileged" ON storage.objects
-  FOR DELETE TO authenticated
-  USING (
-    bucket_id = 'asset-3d-models'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
-  );
-
-GRANT USAGE ON SCHEMA storage TO anon, authenticated;
-GRANT SELECT ON storage.objects TO anon, authenticated;
-GRANT INSERT, UPDATE, DELETE ON storage.objects TO authenticated;
-GRANT SELECT ON storage.buckets TO anon, authenticated;
+-- WHY THEY COULD NOT STAY. This section attached policies to `storage.objects` and relied on that
+-- table existing from first boot, which was true only because `supabase/postgres:15.6.1.143`
+-- shipped a STUB storage schema (buckets/objects/migrations). `supabase/postgres:17.6.1.160`
+-- ships the schema EMPTY -- so this file aborted on `relation "storage.objects" does not exist`
+-- and took the whole boot with it.
+--
+-- It is not an ordering problem that could be solved by moving this section later in the file:
+-- `storage.objects` is created by storage-api's OWN migrations when the supabase-storage service
+-- boots, and that service depends on db-init having COMPLETED. No migration can attach a policy
+-- to a table that, by construction, cannot exist until every migration has finished.
+--
+-- Same reasoning that already put the bucket ROW in scripts/storage-init.mjs rather than here.
+-- The parts of `storage` that a migration cannot own are exactly the parts storage-api creates
+-- for itself, and the boundary moved when the image stopped shipping the stub.
 
 
 -- ---------------------------------------------------------------------------------------------

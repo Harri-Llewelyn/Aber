@@ -717,8 +717,13 @@ jobs:
       # WHICH IS EXACTLY WHAT NOBODY DID FOR THE TWO DATABASES. Both said 999 -- here AND in
       # values.yaml -- from the day they were written, and the note above telling the next person to
       # confirm was the only thing standing behind either number. `timescale/timescaledb` is Alpine
-      # (uid/gid 70) and `supabase/postgres` is Debian (105:106); neither is 999, which is stock
-      # Debian `postgres` and belongs to a third image that is not in this chart.
+      # (uid/gid 70); neither was 999, which is stock Debian `postgres` and belongs to a third image
+      # that is not in this chart.
+      #
+      # AND THE VALUE THAT MOVES IS `supabase-db`. At 15.x that image was Ubuntu 20.04 with
+      # `postgres` at 105:106. At 17.6.1.160 it is **Alpine 3.23**, Nix-built, with `postgres` at
+      # 100:**101** -- so the PG17 bump changed the base distribution, not merely the server
+      # version. This number was re-measured against the pinned tag, not carried forward.
       #
       # It never surfaced because both images run their entrypoint as ROOT and chown the data
       # directory to their own postgres user before dropping privileges, so fsGroup is decorative
@@ -731,7 +736,7 @@ jobs:
           python3 - <<'PY'
           import re, sys
           EXPECTED = {
-              'timescaledb': '70', 'supabase-db': '106',
+              'timescaledb': '70', 'supabase-db': '101',
               'supabase-storage': '1000', 'node-red': '1000', 'mosquitto': '1883',
           }
           docs = open('/tmp/rendered.yaml', encoding='utf-8').read().split('\n---\n')
@@ -851,7 +856,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: supabase/postgres:15.6.1.143
+        image: supabase/postgres:17.6.1.160
         env:
           POSTGRES_PASSWORD: postgres
         ports:

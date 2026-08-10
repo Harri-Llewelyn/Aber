@@ -1,0 +1,368 @@
+# PostgreSQL 17 and TimescaleDB 2.29 — Implementation Plan
+
+**Status:** direction agreed and open decisions settled 2026-08-10; **nothing built**. Phase 0 is a
+gate and has not started.
+**Date:** plan drafted 2026-08-10.
+
+## Goal
+
+Move both databases from PostgreSQL 15 to PostgreSQL 17, and the historian's TimescaleDB extension
+from 2.28.3 to 2.29.1. This buys roughly five years of upstream support in place of fifteen months,
+and it resolves a supply problem that has **already happened** rather than one that arrives in 2027.
+
+The upgrade is not primarily about new features. Two optimisations land on hot paths this codebase
+already has, and they are taken in Phase 3 — but the reason to do this work now is that
+`timescale/timescaledb:latest-pg15` stopped moving on 2026-07-16 and nothing in the repository
+noticed.
+
+**The timing is the point.** This stack has one installation, it is a development one, and it holds
+no operator data. Every hard part of a PostgreSQL major upgrade — `pg_upgrade`, the pgsodium key,
+compressed-chunk dump/restore, a rehearsed restore, a scheduled outage — is a **data** problem, and
+there is no data. Doing this after a shopfloor deployment would mean doing all of it. Doing it now
+means changing pins and recreating volumes.
+
+### Scope boundaries, already settled
+
+- **The ceiling is PostgreSQL 17, not 18.** Three constraints compound. `supabase/postgres`
+  publishes no PG18 image — the only lines are `15.x`, `17.6.x`, and `17.9.x-orioledb`, and orioledb
+  is a different storage engine rather than a version bump. The backup CronJob reuses the
+  `supabase/postgres` image's `pg_dump` against **both** databases
+  ([backup-cronjob.yaml:134](../deploy/helm/factoryplus/templates/jobs/backup-cronjob.yaml#L134)),
+  and `pg_dump` refuses a server newer than itself, so the historian's major version is capped by
+  Supabase's. And keeping both ends on one major keeps the `postgres_fdw` link uninteresting.
+- **Do not split the two databases across majors** to reach PG18 on the historian. It breaks backups
+  in exactly the way the comment at `backup-cronjob.yaml:134` was written to prevent, and the
+  failure appears at 02:00 in a CronJob log rather than at upgrade time.
+- **No data-migration path is built.** There is nothing to migrate, and a runbook written from
+  theory against a procedure nobody will run is worse than no runbook — it would be trusted. If a
+  future major upgrade has to move real data, that plan gets written then, against that data.
+- **Not an orioledb evaluation.** `17.9.0.013-orioledb` is a separate decision with a separate risk
+  profile and does not belong inside a version bump.
+- **Not a Postgres HA project.** PG17's failover-safe logical replication slots remove one argument
+  against the HA work deferred in
+  [kubernetes-migration-plan.md §3.3](kubernetes-migration-plan.md), because `supabase-realtime`
+  holds a logical slot. That is a note for whoever picks HA up, not scope here.
+
+### Decisions settled 2026-08-10
+
+| Decision | Resolution |
+|---|---|
+| Data-migration runbook | **Not needed.** One installation, development only, no operator data |
+| Historian tag | **Pinned** — `2.29.1-pg17`, not `latest-pg17` |
+| Signer migration number | **`0011`** — see below |
+
+`0011` is also wanted by [vocabulary-expansion-plan.md](vocabulary-expansion-plan.md), which is
+Phase-0-gated on paid standards documents and has not started. This work is unblocked and lands
+first, so it takes `0011` and the vocabulary work starts at `0012`.
+
+## What the reconnaissance found
+
+- **`latest-pg15` is a dead branch.** TimescaleDB 2.29.0 dropped PostgreSQL 15; 2.28.x was the final
+  minor to support it. The tag still resolves, still pulls, and will never advance again. The pin at
+  [docker-compose.yml:49](../docker-compose.yml#L49) reads as "track upstream" and no longer does.
+- **The historian's extension is already current.** `latest-pg15` is 2.28.3, so the TimescaleDB
+  *extension* is one minor behind. The gap is entirely in the PostgreSQL major underneath it.
+- **Supabase is two lines behind, not one.** [docker-compose.yml:130](../docker-compose.yml#L130)
+  pins `15.6.1.143`; upstream 15.x is now `15.14.1.160`. The stack is behind on the version it is
+  already running, independently of any major bump.
+- **`pgjwt` was expected to be a hard blocker. It is not** — see Phase 0. The changelog says the
+  PG17 bundle drops it; the image still ships it and it works.
+  [0006_nodered_oidc_auth.sql:207](../supabase/migrations/0006_nodered_oidc_auth.sql#L207) signs the
+  quarantine-webhook token with `extensions.sign()` and
+  [0006:263](../supabase/migrations/0006_nodered_oidc_auth.sql#L263) raises if it is absent, so this
+  *would* have stopped `supabase-db-init` at migration 0006. It does not. Phase 1 survives as
+  hardening against a deprecation Supabase has announced and will eventually act on.
+- **The PG17 bundle also drops `timescaledb`, which costs nothing here.** The historian is a
+  separate container. The split pays off.
+- **Compose and Helm must be bumped in the same commit.** `check-image-tag-parity.mjs` compares the
+  two targets and exits non-zero on any mismatch — verified by running it. Bumping one first is not
+  a smaller step, it is a red CI run. This is why Phase 2 is one phase and not two.
+- **Migrations are mirrored automatically.** `scripts/sync-helm-chart-files.mjs` copies
+  `supabase/migrations/*.sql` into `deploy/helm/factoryplus/files/migrations/`, and CI runs it with
+  `--check`. Migrations are edited once and synced, never edited twice. The same holds for the
+  Grafana dashboard JSON and the `timescaledb/` scripts.
+- **The backup Job follows the pin on its own.** It renders
+  `{{ .Values.supabaseDb.image.repository }}:{{ .Values.supabaseDb.image.tag }}`, so the image
+  tracks automatically. Only the *stated constraint* in its comment needs revising.
+- **Migration head is `0010_telemetry_aggregates.sql`.**
+
+---
+
+## Phase 0 — Verification gate — ✅ COMPLETE (2026-08-10)
+
+The bump invalidates several **facts asserted in the repository as constants**, and a restated
+constant in a checker is not a check — [ci.yml:727](../.github/workflows/ci.yml#L727) already learnt
+this the hard way when `fsGroup` read 999 in two places while both were wrong.
+
+Verified against `timescale/timescaledb:2.29.1-pg17` and `supabase/postgres:17.6.1.160` in isolated
+probe containers, using the command documented at [ci.yml:715](../.github/workflows/ci.yml#L715).
+
+| Fact | Repository claims | Measured on the new tags | Verdict |
+|---|---|---|---|
+| `timescale/timescaledb` uid/gid | 70 | **70:70** | ✅ unchanged |
+| `timescale/timescaledb` base OS | Alpine | **Alpine 3.23** (was 3.22) | ✅ unchanged |
+| `supabase/postgres` uid/gid | 105:106 | **100:101** | ❌ **changed** |
+| `supabase/postgres` base OS | Debian / Ubuntu 20.04 | **Alpine 3.23**, Nix-built | ❌ **changed** |
+| `pgjwt` available | assumed **dropped** on 17 | **present (0.2.0), installs, signs correctly** — but no longer CREATED by default, which 0001 had relied on | ❌ **assumption wrong** |
+| `storage` stub tables | [0001 §6](../supabase/migrations/0001_baseline_schema.sql) relied on `storage.objects` existing at migration time | PG15 shipped `buckets`/`objects`/`migrations`; **17.6 ships the schema EMPTY** | ❌ **changed** |
+| Grants on `storage.*` | assumed present | PG15 stub granted ALL to anon/authenticated/service_role; **17.6 grants nothing** | ❌ **changed** |
+| `pg_cron`, `pg_net`, `pgcrypto`, `postgres_fdw`, `supabase_vault` | required by [0001:66-69](../supabase/migrations/0001_baseline_schema.sql#L66) | all present; `pg_cron`/`pg_net` in `shared_preload_libraries` | ✅ |
+| `vault.create_secret` / `update_secret` / `decrypted_secrets` | used by [0002:2205](../supabase/migrations/0002_seed_data.sql#L2205), [0006:134](../supabase/migrations/0006_nodered_oidc_auth.sql#L134) | signatures unchanged, view present | ✅ |
+| `/etc/postgresql/postgresql.conf` ships | [supabase-db-statefulset.yaml:100](../deploy/helm/factoryplus/templates/data/supabase-db-statefulset.yaml#L100) | present, plus a `postgresql.conf.d/` | ✅ |
+| No `aws` CLI in the image | [k8s README:665](../deploy/k8s/README.md#L665) | still absent; `pg_dump` is 17.6 | ✅ |
+| Locale provider | unstated | PG15 **libc** → PG17 **ICU**, both `en_US.UTF-8` | ⚠ note |
+| TimescaleDB 2.29.1 runs this repo's SQL | — | `init/001_schema.sql`, `retention.sql`, `aggregates.sql` all apply, **and are idempotent on a second run** | ✅ |
+
+### Findings that change the plan
+
+1. **`pgjwt` is NOT dropped from the self-hosted image.** Supabase's changelog deprecates it for
+   Postgres 17 and the self-hosting guide lists it among removed extensions, but
+   `supabase/postgres:17.6.1.160` still ships `pgjwt 0.2.0`; it installs into `extensions` and
+   `extensions.sign()` returns a correct HS256 JWT. **Phase 1 is therefore hardening, not a
+   blocker** — it does not gate Phase 2. This is precisely what this gate exists to catch: the
+   changelog and the image disagree, and only the image is authoritative.
+2. **`supabase/postgres` changed base OS, and that is the larger change.** Ubuntu 20.04 → Alpine
+   3.23, Nix-built, `postgres` moving from 105:106 to **100:101**. `fsGroup` must become `101` in
+   [values.yaml:229](../deploy/helm/factoryplus/values.yaml#L229),
+   [ci.yml:734](../.github/workflows/ci.yml#L734) and
+   [backup-cronjob.yaml:129](../deploy/helm/factoryplus/templates/jobs/backup-cronjob.yaml#L129),
+   and every comment describing this image as Debian is now false —
+   [values.yaml:224](../deploy/helm/factoryplus/values.yaml#L224),
+   [ci.yml:720](../.github/workflows/ci.yml#L720),
+   [backup-cronjob.yaml:126](../deploy/helm/factoryplus/templates/jobs/backup-cronjob.yaml#L126).
+   The two databases are now **both** Alpine, which retires the "different lineage" note at
+   [values.yaml:224](../deploy/helm/factoryplus/values.yaml#L224).
+3. **The locale provider changes from libc to ICU.** Harmless here because volumes are recreated
+   empty — collation changes only corrupt *existing* indexes — and `asset_id` is ASCII
+   (`dev` + hex). It can reorder `ORDER BY` on free-text device and cell names in edge cases. Worth
+   one line in the divergence notes, not a phase.
+4. **`retention.sql` and `aggregates.sql` need no changes for 2.29.1.** The legacy compression API
+   still works and now answers in columnstore vocabulary — `remove_compression_policy` reports
+   "columnstore policy not found", confirming the internal rename. Compression enables, all four
+   retention policies and three refresh policies register, and a second run is clean. Phase 4 stays
+   optional modernisation.
+
+**Gate result: PASSED** for what it asked. Phase 2 may proceed.
+
+### What this gate MISSED, recorded so the next one asks better
+
+Phase 2 hit three failures this table did not predict, and they share a shape: it checked what the
+image **has** (users, distro, extensions, function signatures) and never checked what the image
+**pre-configures**. The database image is not only a set of binaries, it is a set of defaults, and
+the defaults moved further than the version did.
+
+| Missed | Symptom at boot |
+|---|---|
+| `pgjwt` shipped but **not created** | 0006 self-check: "pgjwt (extensions.sign) is not installed" — five migrations after the real cause |
+| `storage` stub tables gone | 0001 aborts: `relation "storage.objects" does not exist` |
+| Grants on `storage.*` gone | storage-init: `400 new row violates row-level security policy`, real cause a 42501 nested in the payload |
+| `postgres` not owner of storage tables | `must be owner of table objects` |
+
+A future image bump should add: **which extensions are CREATED (not merely available), which
+schemas arrive populated, and what is granted on them** — `\dx`, `\dt <schema>.*` and
+`information_schema.role_table_grants`, diffed old tag against new. All three misses would have
+been caught by that diff in about a minute, before any of them cost a boot cycle.
+
+## Phase 1 — Remove the `pgjwt` dependency (`0011`, runs on PG15) — OPTIONAL
+
+**Phase 0 demoted this from blocker to hardening**, and it no longer gates Phase 2. `pgjwt 0.2.0`
+ships in `supabase/postgres:17.6.1.160` and signs correctly. What remains true is that Supabase has
+*documented* it as deprecated for Postgres 17 and removed it from the hosted platform, so the image
+retaining it is a reprieve rather than a reversal — this is a dependency with an announced end.
+
+Do it on its own schedule. The one piece of this work that is **fully testable before any image
+moves**, and the argument for doing it sooner is that the acceptance test below gets harder the day
+the reprieve ends.
+
+Replace `extensions.sign()` with a local HS256 signer. The idiom already exists in the tree:
+[0002:2292](../supabase/migrations/0002_seed_data.sql#L2292) and
+[0006:76](../supabase/migrations/0006_nodered_oidc_auth.sql#L76) already build base64url digests via
+`extensions.digest`, so `pgcrypto` is present and the encoding dance is already written. The signer
+is `extensions.hmac(...)` plus the same `rtrim(translate(encode(...), '+/', '-_'), '=')`.
+
+- `0011` defines the signer and redefines `dispatch_device_quarantine_webhook()` to call it.
+- Rewrite the self-check at [0006:263](../supabase/migrations/0006_nodered_oidc_auth.sql#L263) to
+  assert the *new* function. The guard's purpose is unchanged: an unsigned webhook fails silently
+  hours later, at a quarantined device, which is the worst possible place to discover it.
+- Run `node scripts/sync-helm-chart-files.mjs`.
+
+**Acceptance:** the emitted token is **byte-identical** to what `extensions.sign()` produced for the
+same claims and key. That is the whole test — `settings.js` in Node-RED verifies it, and if the wire
+format matches there is nothing to change at the consumer. Verify by generating both on a PG15
+container where `pgjwt` is still present and comparing strings, before `pgjwt` is gone and the
+comparison is impossible.
+
+**Why it ships alone:** it is worth doing even if the rest of this plan is abandoned. It removes a
+dependency Supabase has walked away from, and the existing `edge-function-auth-test` CI job runs on
+PG15 today, so it proves out on the current stack with no new infrastructure.
+
+## Phase 2 — Both targets to PG17 (one commit) — ✅ COMPLETE (2026-08-10)
+
+**Verified on the Compose target from empty volumes.** `supabase-db` reports 17.6, `timescaledb`
+reports 17.10 with TimescaleDB 2.29.1, every init service exits 0, and:
+
+- `ingestion/validate.py` — **passes end to end** (telemetry, rename safety, alias resolution,
+  node-scoped aliases, rebirth request and rate limit, quarantine gating, directory, i3X live
+  values, RLS scoping, anon privilege baseline).
+- `test_aas_export.py` — **58/58 pass**, including validation against the official IDTA schema and
+  the 3D model upload, which exercises the new storage grants end to end.
+- Realtime completes the WebSocket upgrade through Kong (`101 Switching Protocols`); publication
+  is scoped to `cells`/`devices`/`gateways`; `wal_level = logical`. The replication slot is created
+  lazily on first subscribe, so its absence with no client attached is expected, not a fault.
+- **The backup CronJob's constraint tested directly**: `pg_dump` from the `supabase/postgres` image
+  (17.6) successfully dumps the historian (17.10) and its own server. Different PATCH levels across
+  the two images are fine — `pg_dump` caps at major — but it is worth knowing they differ, because
+  it is the same axis that would break at the next major divergence.
+
+Three things had to change beyond the pins; all are Phase 0 misses, tabulated above.
+
+### The four fixes Phase 2 actually required
+
+1. **`CREATE EXTENSION pgjwt`** added to 0001's extension block. It was never declared because
+   Supabase created it by default up to PG17; the image still ships it but no longer creates it.
+   Declaring it is an improvement independent of version, and it reduces Phase 1 to a two-line
+   change.
+2. **Storage RLS moved out of 0001** into `supabase/storage-policies.sql` — see that file's header
+   and the service/Job that apply it.
+3. **Storage grants written explicitly**, because the stub used to bring them. The result is
+   *tighter* than PG15 ever was: `anon` previously held DELETE on `storage.buckets` at the grant
+   layer with RLS as the only guard.
+4. **Applied as `supabase_admin`, not `postgres`** — the storage tables are owned by
+   `supabase_storage_admin`, and `postgres` is neither superuser nor a member of it.
+
+### Ordering, which is the part worth remembering
+
+`supabase-storage` (healthy) → **`supabase-storage-policies`** → `supabase-storage-init`. The
+policies must precede bucket creation, because storage-api serves that call by assuming
+`service_role`, which holds nothing until the grants land. Helm hook weights: db-init 10,
+**storage-policies 18**, storage-init 20.
+
+---
+
+### Original scope, for reference
+
+The parity check forces Compose and Helm into a single change. With no data anywhere, this is pins
+plus `docker compose down -v` — the entire upgrade, in one step, exactly as intended by doing it now.
+
+**Pins:**
+
+- [docker-compose.yml:49](../docker-compose.yml#L49), [:87](../docker-compose.yml#L87) →
+  `timescale/timescaledb:2.29.1-pg17`
+- [docker-compose.yml:130](../docker-compose.yml#L130), [:151](../docker-compose.yml#L151),
+  [:168](../docker-compose.yml#L168) → `supabase/postgres:17.6.1.160`
+- [values.yaml:147](../deploy/helm/factoryplus/values.yaml#L147) and
+  [:217](../deploy/helm/factoryplus/values.yaml#L217) → the same two
+- [ci.yml:854](../.github/workflows/ci.yml#L854) service pin
+
+**Facts that move with them:**
+
+- **`fsGroup` for `supabase-db`: 106 → `101`**, per Phase 0, in three places —
+  [values.yaml:229](../deploy/helm/factoryplus/values.yaml#L229),
+  [ci.yml:734](../.github/workflows/ci.yml#L734) and
+  [backup-cronjob.yaml:129](../deploy/helm/factoryplus/templates/jobs/backup-cronjob.yaml#L129).
+  TimescaleDB stays at 70. Miss the CronJob one and a restore Job cannot read what the backup wrote.
+- **Every comment calling `supabase/postgres` Debian is now false** — it is Alpine 3.23. Correct
+  [values.yaml:224](../deploy/helm/factoryplus/values.yaml#L224),
+  [ci.yml:720](../.github/workflows/ci.yml#L720) and
+  [backup-cronjob.yaml:126](../deploy/helm/factoryplus/templates/jobs/backup-cronjob.yaml#L126). The
+  "not the same lineage as TimescaleDB" note at values.yaml:224 is now backwards: both are Alpine.
+- The comment at [values.yaml:145](../deploy/helm/factoryplus/values.yaml#L145) currently says the
+  tag is "pinned to match docker-compose.yml". Replace it with the reason it is now pinned rather
+  than floating: **2.28.x was the end of the PG15 line, `latest-pg15` is frozen, and a floating tag
+  hid that for a month.** That is the sentence worth leaving behind.
+- [backup-cronjob.yaml:134](../deploy/helm/factoryplus/templates/jobs/backup-cronjob.yaml#L134)
+  should state the constraint these pins create: the historian's major version is capped by
+  Supabase's, and that is why the historian is on pg17 and not pg18.
+- Version prose: [README.md:248-261](../README.md#L248),
+  [0001:24](../supabase/migrations/0001_baseline_schema.sql#L24),
+  [0001:404](../supabase/migrations/0001_baseline_schema.sql#L404).
+
+**Gate — all of these green from empty volumes, on both targets:**
+
+1. Every migration `0001`–`0010` applies clean on 17.6 (plus `0011` if Phase 1 has landed).
+2. The Compose e2e job and the `k8s-validation` job both pass.
+3. The quarantine webhook signs and Node-RED accepts the token.
+4. AAS export produces a schema-valid shell.
+5. `postgres_fdw` reads across the link: the foreign table at
+   [0001:1190](../supabase/migrations/0001_baseline_schema.sql#L1190) and the rollup views `0010`
+   maps, whose self-check already exercises exactly this.
+6. Realtime creates its logical slot and the dashboard receives changes.
+7. `timescaledb-maintenance` reconciles compression, retention and all three rollups against a
+   2.29.1 hypertable.
+
+## Phase 3 — Take the free wins (no schema change)
+
+- **Measure the `= ANY` improvement rather than assuming it.** PG17 collapses `= ANY(array)` into a
+  single btree index scan instead of one scan per value. `telemetry_gapfill()`
+  ([aggregates.sql:341](../timescaledb/aggregates.sql#L341)) is built almost entirely on
+  `asset_id = ANY($3::text[])` plus a per-series seed lookup against
+  `idx_telemetry_asset_metric_time`, which is the closest match in the repository between a PG17
+  optimisation and an existing hot path. Capture `EXPLAIN (ANALYZE, BUFFERS)` on 15 and on 17 for
+  the same window and series count, and record the numbers — a claimed speedup nobody measured is
+  the kind of thing this repository does not do. **This needs seeded data, so take the measurement
+  before Phase 2 wipes the volume, or reseed with the simulator.**
+- **`pg_stat_io` (PG16) and `pg_stat_checkpointer` (PG17)** report historian IO health that PG15
+  cannot. The overview dashboard
+  ([factoryplus-overview.json](../grafana/provisioning/dashboards/json/factoryplus-overview.json))
+  has no `pg_stat_*` panels at all today. This is the cheapest observability the upgrade offers.
+  `sync-helm-chart-files.mjs` mirrors it into the chart, so it is edited once.
+
+Explicitly **not** taken, so nobody re-derives it: `JSON_TABLE` has nothing to shred — no migration
+uses `jsonb_array_elements`. `MERGE ... RETURNING` must not touch the historian write, which is
+deliberately `ON CONFLICT DO NOTHING` with a test asserting that literal SQL
+([test_rbe_telemetry.py:348](../ingestion/test_rbe_telemetry.py#L348)) because an upsert would let a
+publisher rewrite history. `COPY ... ON_ERROR ignore` needs a bulk backfill path that does not exist.
+
+## Phase 4 — Hypercore / columnstore
+
+Independent of the PostgreSQL bump — 2.18+ is enough and even 2.28.3 qualifies — but deliberately
+last, because it touches the boot-critical destructive path and does not belong inside a version
+migration.
+
+- [retention.sql:101](../timescaledb/retention.sql#L101) uses the legacy compression API.
+  `add_columnstore_policy()` superseded `add_compression_policy()` in 2.18; the old calls still work,
+  so this is modernisation, not repair. Keep the guard-on-current-state structure — the reason it is
+  not `if_not_exists` is recorded at [retention.sql:108](../timescaledb/retention.sql#L108) and
+  survives the rewrite unchanged.
+- **Re-test the claim at [values.yaml:177](../deploy/helm/factoryplus/values.yaml#L177)** that
+  compressed chunks are effectively read-only, so telemetry older than `compressAfter` is rejected.
+  Hypercore changed how writes into columnstore chunks behave, and that comment may already be stale
+  at 2.28.3. If it is, the late-arrival window for a gateway buffering through an outage is wider
+  than the configuration documents — which matters, because
+  [aggregates.sql:167](../timescaledb/aggregates.sql#L167) sizes the rollup refresh window against
+  exactly that assumption. Correct the comment or confirm it; do not leave it untested.
+
+---
+
+## Definition of done — applies to every phase
+
+- Both deployment targets moved together. `check-image-tag-parity.mjs` is not a formality: several
+  of these pins hold a coupling, and a target bumped second fails looking like its own fault.
+- Every version number stated in prose matches the pins.
+- `node scripts/sync-helm-chart-files.mjs` run after any migration, dashboard or `timescaledb/`
+  change.
+- No fact asserted from a changelog. Phase 0's table is the source for image properties.
+
+## Sequencing
+
+| Phase | Depends on | Ships alone | Runs on |
+|---|---|---|---|
+| 0 — Verification gate | — | ✅ complete | either |
+| 1 — Remove `pgjwt` (`0011`) — **optional** | 0 | **yes** | PG15 or PG17 |
+| 2 — Both targets to PG17 | 0 | yes (one commit, both targets) | PG17 |
+| 3 — Free wins | 2 | yes | PG17 |
+| 4 — Hypercore | 2 | yes | either |
+
+**Phase 2 no longer depends on Phase 1** — that edge existed only because `pgjwt` was believed to be
+missing. Phase 1 is now independent of everything and can land before, after, or never. Phase 2 is
+the gate that decides whether 3 and 4 proceed.
+
+Take Phase 3's baseline measurement **before** Phase 2, while a PG15 volume with seeded telemetry
+still exists — and note the running stack is currently that volume.
+
+## Rollback
+
+Every phase is an ordinary `git revert` plus `docker compose down -v`. There is no data format to
+migrate back, no `data.bak.pg15` to retain, and no outage window to schedule. **This is the entire
+argument for doing the upgrade now rather than after the first shopfloor deployment**, and it is
+worth stating plainly because it will not be true a second time.

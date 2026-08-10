@@ -71,6 +71,12 @@ const MIRRORS = [
   },
   {
     source: 'supabase',
+    dest: 'storage-policies',
+    match: (name) => name === 'storage-policies.sql',
+    why: 'RLS on storage.objects; runs after storage-api has migrated the schema into existence',
+  },
+  {
+    source: 'supabase',
     dest: 'kong',
     match: (name) => name === 'kong.yml',
     why: 'Gateway declarative config; a TEMPLATE, rendered into a Secret by the chart',

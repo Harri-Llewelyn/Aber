@@ -46,7 +46,7 @@ services:
   # ---------------------------------------------------------------------------
   timescaledb:
     container_name: factoryplus_timescaledb
-    image: timescale/timescaledb:latest-pg15
+    image: timescale/timescaledb:2.29.1-pg17
     restart: always
     environment:
       POSTGRES_DB: ${DB_NAME:-postgres}
@@ -84,7 +84,7 @@ services:
   # disables any individual policy.
   timescaledb-maintenance:
     container_name: factoryplus_timescaledb_maintenance
-    image: timescale/timescaledb:latest-pg15
+    image: timescale/timescaledb:2.29.1-pg17
     environment:
       PGPASSWORD: ${DB_PASSWORD}
       TS_DBNAME: ${DB_NAME:-postgres}
@@ -127,7 +127,7 @@ services:
   # ---------------------------------------------------------------------------
   supabase-db:
     container_name: factoryplus_supabase_db
-    image: supabase/postgres:15.6.1.143
+    image: supabase/postgres:17.6.1.160
     restart: always
     ports:
       - "${SUPABASE_DB_PORT:-54322}:5432"
@@ -148,7 +148,7 @@ services:
 
   supabase-db-roles-init:
     container_name: factoryplus_supabase_db_roles_init
-    image: supabase/postgres:15.6.1.143
+    image: supabase/postgres:17.6.1.160
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
     entrypoint: >
@@ -165,7 +165,7 @@ services:
 
   supabase-db-init:
     container_name: factoryplus_supabase_db_init
-    image: supabase/postgres:15.6.1.143
+    image: supabase/postgres:17.6.1.160
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
       # TimescaleDB connection settings, handed to the migrations as psql variables so
@@ -376,12 +376,16 @@ services:
   # Object storage for binary asset artefacts -- today, the 3D visual models an AAS
   # `VisualRepresentation` submodel points at (migration 0035).
   #
-  # It owns the `storage` schema, which the supabase/postgres image ships only a stub of
-  # (buckets/objects/migrations, no `public` or `file_size_limit` columns). storage-api runs
-  # its OWN migrations against that schema on boot and upgrades it. That is why the bucket is
-  # created by supabase-storage-init afterwards rather than by a SQL migration: supabase-db-init
-  # finishes long before this service starts, so a migration inserting into storage.buckets would
-  # run against the stub schema on a fresh stack and could not set `public` at all.
+  # It owns the `storage` schema and runs its OWN migrations against it on boot. Up to
+  # supabase/postgres:15.6.1.143 the database image shipped a STUB of that schema
+  # (buckets/objects/migrations, no `public` or `file_size_limit` columns); 17.6.1.160 ships the
+  # schema EMPTY. That is why the bucket is created by supabase-storage-init afterwards rather
+  # than by a SQL migration: supabase-db-init finishes long before this service starts, so a
+  # migration inserting into storage.buckets would once have hit the stub and been unable to set
+  # `public` -- and would now hit no table at all.
+  #
+  # The RLS policies on storage.objects moved out of migration 0001 for the same reason when the
+  # stub disappeared. See supabase-storage-policies below.
   #
   # Pinned rather than :latest for the same reason as supabase-realtime -- it migrates a shared
   # schema on boot and is coupled to the Postgres image version.
@@ -434,6 +438,44 @@ services:
     volumes:
       - ./scripts/storage-init.mjs:/app/storage-init.mjs:ro
     command: ["node", "/app/storage-init.mjs"]
+    restart: "no"
+    depends_on:
+      # NOT `supabase-storage: service_healthy` -- that is necessary but not sufficient. Creating
+      # the bucket is served by storage-api AS service_role, so it needs the grants that
+      # supabase-storage-policies applies. Without them the call fails 400 "new row violates
+      # row-level security policy", which names the wrong mechanism entirely.
+      supabase-storage-policies:
+        condition: service_completed_successfully
+
+  # RLS policies and grants on storage.buckets / storage.objects.
+  #
+  # A SEPARATE SERVICE RATHER THAN A MIGRATION, and that is forced rather than chosen. These were
+  # section 6 of 0001_baseline_schema.sql until the PG17 bump: `supabase/postgres:15.6.1.143`
+  # shipped a stub `storage` schema so `storage.objects` existed from first boot, and 17.6.1.160
+  # ships that schema EMPTY. storage-api creates the tables in its own migrations when it boots,
+  # and it depends on supabase-db-init having COMPLETED -- so no migration can attach a policy to
+  # them, on either target, by construction.
+  #
+  # BETWEEN supabase-storage AND supabase-storage-init, in that order. See the file's header: the
+  # bucket cannot be created until service_role has been granted the privileges this applies.
+  #
+  # Uses the supabase/postgres image for its psql, the same way supabase-db-roles-init does.
+  supabase-storage-policies:
+    container_name: factoryplus_supabase_storage_policies
+    image: supabase/postgres:17.6.1.160
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - ./supabase/storage-policies.sql:/storage-policies.sql:ro
+    # AS supabase_admin, NOT postgres -- the same role supabase-db-roles-init uses. The storage
+    # tables are owned by `supabase_storage_admin` (storage-api created them), and `postgres` is
+    # neither a superuser nor a member of that role in this image, so `ALTER TABLE ... ENABLE ROW
+    # LEVEL SECURITY` fails with "must be owner of table objects". Verified against 17.6.1.160.
+    entrypoint: >
+      /bin/sh -e -c "
+      echo 'Applying storage policies and grants...';
+      psql -v ON_ERROR_STOP=1 -h supabase-db -U supabase_admin -d postgres -f /storage-policies.sql;
+      "
     restart: "no"
     depends_on:
       supabase-storage:

@@ -245,9 +245,9 @@ Two things worth knowing before the first install:
 
 | Service | Container | Image | Port |
 | :--- | :--- | :--- | :--- |
-| `supabase-db` | `factoryplus_supabase_db` | `supabase/postgres:15.6.1.143` | `54322:5432` |
-| `supabase-db-roles-init` | `factoryplus_supabase_db_roles_init` | `supabase/postgres:15.6.1.143` | — |
-| `supabase-db-init` | `factoryplus_supabase_db_init` | `supabase/postgres:15.6.1.143` | — |
+| `supabase-db` | `factoryplus_supabase_db` | `supabase/postgres:17.6.1.160` | `54322:5432` |
+| `supabase-db-roles-init` | `factoryplus_supabase_db_roles_init` | `supabase/postgres:17.6.1.160` | — |
+| `supabase-db-init` | `factoryplus_supabase_db_init` | `supabase/postgres:17.6.1.160` | — |
 | `supabase-auth` | `factoryplus_supabase_auth` | `supabase/gotrue:v2.189.0` | — |
 | `supabase-rest` | `factoryplus_supabase_rest` | `postgrest/postgrest:v12.2.0` | — |
 | `supabase-kong-init` | `factoryplus_supabase_kong_init` | `alpine:3.20` | — |
@@ -258,7 +258,7 @@ Two things worth knowing before the first install:
 | `supabase-storage-init` | `factoryplus_supabase_storage_init` | `node:20-alpine` | — |
 | `supabase-meta` | `factoryplus_supabase_meta` | `supabase/postgres-meta:v0.96.6` | — |
 | `supabase-studio` | `factoryplus_supabase_studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `54323:3000` |
-| `timescaledb` | `factoryplus_timescaledb` | `timescale/timescaledb:latest-pg15` | `5433:5432` |
+| `timescaledb` | `factoryplus_timescaledb` | `timescale/timescaledb:2.29.1-pg17` | `5433:5432` |
 | `mosquitto-init` | `factoryplus_mosquitto_init` | `eclipse-mosquitto:2.0.20` | — |
 | `mosquitto` | `factoryplus_mosquitto` | `eclipse-mosquitto:2.0.20` | `1883`, `9001` |
 | `frontend` | `factoryplus_frontend` | `./frontend/Dockerfile` | `3000:3000` |
