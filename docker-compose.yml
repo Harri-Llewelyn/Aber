@@ -565,6 +565,15 @@ services:
       KONG_PLUGINS: request-transformer,cors,key-auth,prometheus
     volumes:
       - kong_config:/usr/local/kong/declarative:ro
+    # ADDED so `ingestion` can wait on it -- see that service's depends_on for the failure this
+    # closes. `kong health` checks the local node's own workers, which is the right question here:
+    # "can this container route a request yet", not "is an upstream up".
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
     depends_on:
       supabase-kong-init:
         condition: service_completed_successfully
@@ -868,6 +877,20 @@ services:
         condition: service_healthy
       supabase-db-init:
         condition: service_completed_successfully
+      # EVERY DEVICE LOOKUP GOES THROUGH KONG (SUPABASE_URL above is http://supabase-kong:8000),
+      # and this dependency was missing. `supabase-db-init` completing says the DATA is there; it
+      # says nothing about the gateway that reads it, which starts in parallel with this service.
+      #
+      # Ordering only, and deliberately NOT the safety property. What makes an unresolvable lookup
+      # harmless is ingestion.py refusing to read "unreachable" as "unregistered" -- see
+      # DirectoryUnavailable, and process_dbirth(), which answers "unregistered" by writing a
+      # quarantine row. That guard is the one that matters, because Kong can become unreachable
+      # long after boot, where no depends_on helps at all.
+      #
+      # This is here so the daemon's first lookups do not fail for a reason the stack already
+      # knows about, which keeps the startup log free of errors that are not faults.
+      supabase-kong:
+        condition: service_healthy
 
   # i3X 1.0 server (CESMII Industrial Information Interoperability eXchange).
   #

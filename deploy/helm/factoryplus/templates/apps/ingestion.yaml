@@ -60,6 +60,17 @@ spec:
       {{- end }}
       initContainers:
         {{/*
+          Waits for the API gateway, which is how EVERY device lookup is made (SUPABASE_URL is
+          http://supabase-kong:8000). The Compose target declares the same dependency.
+
+          ORDERING ONLY. The property that makes an unresolvable lookup harmless lives in
+          ingestion.py: an unreachable directory raises DirectoryUnavailable instead of resolving
+          to None, because process_dbirth() answers None -- "unregistered" -- by writing a
+          quarantine row, which persists and needs an operator to clear. Relying on start order
+          for that would leave the same fault reachable any time Kong restarts.
+        */}}
+        {{- include "factoryplus.waitFor" (dict "ctx" . "name" "wait-for-kong" "image" "curlimages/curl:8.10.1" "command" "curl -sf -o /dev/null http://supabase-kong:8000/auth/v1/health" "describe" "supabase-kong (every device lookup is routed through it)") | nindent 8 }}
+        {{/*
           Waits for the historian's SCHEMA, not just for the server. The daemon writes to the
           `telemetry` hypertable on its first DDATA, and TimescaleDB's bootstrap scripts run only on
           an empty data directory -- so "server up" and "schema present" are genuinely different
