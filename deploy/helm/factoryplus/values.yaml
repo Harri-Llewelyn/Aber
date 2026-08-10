@@ -435,7 +435,7 @@ supabaseStorage:
   bucket: asset-3d-models
   fileSizeLimit: 52428800
   # file | s3. s3 (MinIO or cloud) is the better production answer and removes the single-writer
-  # constraint; file is the Phase 2 target.
+  # constraint; file is the default. See docs/kubernetes-migration-plan.md §4.4 and §11.
   backend: file
   persistence:
     enabled: true

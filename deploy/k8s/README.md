@@ -4,7 +4,7 @@ The chart is `deploy/helm/factoryplus`. The design and its reasoning are in
 [`docs/kubernetes-migration-plan.md`](../../docs/kubernetes-migration-plan.md); this file is the
 operational half.
 
-> **All seven phases are implemented.** The whole stack renders, is reachable on
+> **The whole stack is in the chart.** It renders, is reachable on
 > `*.<publicBaseDomain>`, is exercised in CI against a real k3d cluster, and the hardening features
 > (NetworkPolicies, PDBs, HPAs, backups) are available — **all four off by default**, because each
 > needs a value the chart cannot infer. See *Hardening* below.
@@ -426,17 +426,19 @@ kubectl -n factoryplus get pvc          # delete deliberately, never as cleanup 
 
 | Component | Status |
 |---|---|
-| `timescaledb`, `supabase-db` StatefulSets | **Phase 1 — deployed** |
-| `supabase-kong`, `supabase-auth`, `supabase-rest` | **Phase 2 — deployed** |
-| `realtime-dev` Service + `supabase-realtime` Deployment | **Phase 2 — deployed** |
-| `supabase-storage`, `supabase-functions` | **Phase 2 — deployed** |
-| `supabase-meta`, `supabase-studio`, `swagger-ui` | **Phase 2 — deployed** |
-| `db-roles-init`, `db-init`, `storage-init` hooks | **Phase 2 — deployed** |
-| `mosquitto` + `mosquitto-external`, `ingestion` | **Phase 3 — deployed** |
-| `node-red`, `frontend` | **Phase 4 — deployed** |
-| `grafana`, `Ingress` (7 subdomain routes) | **Phase 5 — deployed** |
-| `helm test` FDW gate, in-cluster E2E Jobs, k3d CI | **Phase 6 — deployed** |
-| NetworkPolicies, PDBs, HPAs, backup CronJob | **Phase 7 — available, off by default** |
+| `timescaledb`, `supabase-db` StatefulSets | deployed |
+| `supabase-kong`, `supabase-auth`, `supabase-rest` | deployed |
+| `realtime-dev` Service + `supabase-realtime` Deployment | deployed |
+| `supabase-storage`, `supabase-functions` | deployed |
+| `supabase-meta`, `supabase-studio`, `swagger-ui` | deployed |
+| `db-roles-init`, `db-init`, `storage-init` hooks | deployed |
+| `mosquitto` + `mosquitto-external`, `ingestion` | deployed |
+| `node-red`, `frontend` | deployed |
+| `i3x-service` | deployed |
+| `grafana`, `Ingress` (7 subdomain routes) | deployed |
+| `helm test` FDW gate, in-cluster E2E Jobs, k3d CI | deployed |
+| NetworkPolicies, PDBs, HPAs, backup CronJob | **available, off by default** |
+| MQTTS on 8883, internal CA, ServiceMonitors | **available, off by default** |
 
 ### Images you must build
 
@@ -775,8 +777,8 @@ kubectl get prometheus -A -o jsonpath='{.items[*].spec.serviceMonitorSelector}'
   so a failover silently stops the archive purge. The backup CronJob plus a **tested** restore is
   the proportionate answer.
 
-Done since Phase 7: **broker TLS on 8883**, the **internal CA**, `networkPolicy.extraIngress`
-(Slice 1); **storage durability** and **self-monitoring** (Slice 2) — all above.
+Also available, all documented above: **broker TLS on 8883**, the **internal CA**,
+`networkPolicy.extraIngress`, **storage durability** and **self-monitoring**.
 
 ---
 
@@ -831,8 +833,8 @@ Options, in rough order of how often they suit this stack:
 `docker-compose.yml` publishes TimescaleDB on 5433 (and Supabase Postgres on 54322) only to avoid
 colliding with a developer's local PostgreSQL. There is no port mapping in Kubernetes: everything
 is the standard 5432. A `postgres_fdw` foreign server pointed at 5433 fails as a *relation-level*
-error from PostgREST, which reads as a schema fault rather than a connection one — Phase 6's
-`helm test` exists to catch exactly that.
+error from PostgREST, which reads as a schema fault rather than a connection one — the `helm test`
+FDW gate exists to catch exactly that.
 
 ### Rotating an API key does not restart Kong
 
@@ -913,7 +915,7 @@ Two mechanisms, doing different jobs:
 - **The `credential-reload` sidecar converges.** It compares the projected Secret against the file in
   use (by content — a projected volume's mtime moves on every sync whether or not the data changed)
   and SIGHUPs on a real difference. It is what makes a Secret changed by **any other route** — a
-  `helm upgrade`, a restore, another operator's `kubectl`, an External Secrets refresh in Phase 7 —
+  `helm upgrade`, a restore, another operator's `kubectl`, an External Secrets refresh —
   reach the running broker at all.
 
 The Secret is always written **first**. Forcing the reload accelerates a change already committed; a
@@ -1003,8 +1005,10 @@ node scripts/sync-helm-chart-files.mjs           # update the copies
 node scripts/sync-helm-chart-files.mjs --check   # fail if stale (what CI runs)
 ```
 
-Currently mirrored: `timescaledb/init/*.sql`. Later phases add the Kong template, the Grafana
-datasource template, the Mosquitto config and ACL, and the Node-RED flow.
+Mirrored: the TimescaleDB init and maintenance SQL, the Supabase migrations and seed, the Kong
+template, `storage-init.mjs`, `docs/openapi.yaml`, the Mosquitto config and ACL, the Node-RED flow
+and init script, and Grafana's `grafana.ini`, datasource template, dashboards and alerting rules.
+`scripts/sync-helm-chart-files.mjs` is the authoritative list.
 
 ---
 
