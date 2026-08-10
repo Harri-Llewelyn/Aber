@@ -180,8 +180,16 @@ spec:
               credential can be issued before the row exists. A mismatch between the two shows up
               as every publish being silently dropped, and the run failing as "no telemetry".
             */}}
-            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_VALIDATOR_USER") | nindent 12 }}
-            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_VALIDATOR_PASSWORD") | nindent 12 }}
+            {{/*
+              THE ENV NAMES MUST BE MQTT_VALIDATOR_*, not the generic MQTT_USER/MQTT_PASSWORD they
+              were until 2026-08. This Job always read the right SECRET KEYS; it exposed them under
+              names that invited the exact confusion validate.py now refuses -- the generic pair is
+              what the INGESTION service is given, and that principal cannot publish DBIRTH or
+              DDATA at all. validate.py reads the validator names directly and exits naming the
+              variable if they are absent, so a rename here is not cosmetic: it is the wiring.
+            */}}
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_VALIDATOR_USER" "secretName" $secretName "key" "MQTT_VALIDATOR_USER") | nindent 12 }}
+            {{- include "factoryplus.secretEnv" (dict "name" "MQTT_VALIDATOR_PASSWORD" "secretName" $secretName "key" "MQTT_VALIDATOR_PASSWORD") | nindent 12 }}
             - name: SUPABASE_URL
               value: {{ include "factoryplus.supabase.internalUrl" . | quote }}
             # WITHOUT THIS the script seeds nothing and fails about 12 of 20 checks in a way that

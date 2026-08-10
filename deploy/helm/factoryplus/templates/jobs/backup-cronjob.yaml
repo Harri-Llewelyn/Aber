@@ -122,11 +122,16 @@ spec:
           {{- end }}
           {{- if eq .Values.backup.destination "pvc" }}
           # Same gid as supabase-db, whose image this Job reuses for its pg_dump -- so a restore Job
-          # running from that same image can read what this one wrote. 106 is that image's `postgres`
-          # group, verified against the pinned tag; it read 999 here for the same reason it did in
-          # values.yaml and in the CI checker, which is that nobody had looked.
+          # running from that same image can read what this one wrote. 101 is that image's `postgres`
+          # group at 17.6.1.160, verified against the pinned tag; it read 999 here for the same
+          # reason it did in values.yaml and in the CI checker, which is that nobody had looked.
+          #
+          # IT MOVED AT THE PG17 BUMP -- 106 on the Ubuntu-based 15.x image, 101 on the Alpine-based
+          # 17.x one -- and this is the copy most likely to be missed, because getting it wrong here
+          # does not break the backup. It breaks the RESTORE, months later, on files that were
+          # written correctly.
           securityContext:
-            fsGroup: 106
+            fsGroup: 101
             fsGroupChangePolicy: OnRootMismatch
           {{- end }}
           containers:
@@ -134,6 +139,13 @@ spec:
               # The supabase/postgres image, for its pg_dump. THE DUMPING CLIENT MUST BE AT LEAST THE
               # SERVER'S VERSION -- an older pg_dump refuses outright ("server version mismatch"),
               # which is why this reuses the server's own image rather than a generic postgres-client.
+              #
+              # AND THAT IS WHY THE HISTORIAN IS ON pg17 RATHER THAN pg18. This Job dumps BOTH
+              # databases with THIS image's pg_dump, so the historian's PostgreSQL major is capped
+              # by whatever `supabase/postgres` ships -- currently 17.6, with no PG18 line published
+              # at all. TimescaleDB does build a pg18 image, and taking it would break nothing at
+              # boot and nothing in a dashboard: it would break this Job, at 02:00, in a log nobody
+              # is reading. Raise the historian only when supabaseDb.image.tag can go with it.
               image: "{{ .Values.supabaseDb.image.repository }}:{{ .Values.supabaseDb.image.tag }}"
               imagePullPolicy: {{ .Values.supabaseDb.image.pullPolicy }}
               env:

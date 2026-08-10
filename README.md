@@ -238,7 +238,7 @@ Two things worth knowing before the first install:
 | [`scripts/`](scripts) | Setup, Node-RED seeding, storage bucket, MQTT credentials, vocabulary generation, chart-file sync, image tag parity |
 | **[`deploy/k8s/README.md`](deploy/k8s/README.md)** | Kubernetes runbook: install, upgrade, teardown, hardening, the divergence table, and what will bite you |
 | [`deploy/helm/factoryplus/`](deploy/helm/factoryplus) | The Helm chart. `values.yaml` documents every setting and why it is not simply a default |
-| [`docs/kubernetes-migration-plan.md`](docs/kubernetes-migration-plan.md) | How the Kubernetes target was designed and why, phase by phase, including what was found by building it |
+| [`docs/kubernetes-migration-plan.md`](docs/kubernetes-migration-plan.md) | Why the Kubernetes target is built the way it is — the decisions, and the failure each one prevents. Source comments cite it by section |
 | [`tests/`](tests) | Vendored IDTA AAS schema, and the conformance test-runner image |
 
 ---
@@ -247,9 +247,9 @@ Two things worth knowing before the first install:
 
 | Service | Container | Image | Port |
 | :--- | :--- | :--- | :--- |
-| `supabase-db` | `factoryplus_supabase_db` | `supabase/postgres:15.6.1.143` | `54322:5432` |
-| `supabase-db-roles-init` | `factoryplus_supabase_db_roles_init` | `supabase/postgres:15.6.1.143` | — |
-| `supabase-db-init` | `factoryplus_supabase_db_init` | `supabase/postgres:15.6.1.143` | — |
+| `supabase-db` | `factoryplus_supabase_db` | `supabase/postgres:17.6.1.160` | `54322:5432` |
+| `supabase-db-roles-init` | `factoryplus_supabase_db_roles_init` | `supabase/postgres:17.6.1.160` | — |
+| `supabase-db-init` | `factoryplus_supabase_db_init` | `supabase/postgres:17.6.1.160` | — |
 | `supabase-auth` | `factoryplus_supabase_auth` | `supabase/gotrue:v2.189.0` | — |
 | `supabase-rest` | `factoryplus_supabase_rest` | `postgrest/postgrest:v12.2.0` | — |
 | `supabase-kong-init` | `factoryplus_supabase_kong_init` | `alpine:3.20` | — |
@@ -260,7 +260,7 @@ Two things worth knowing before the first install:
 | `supabase-storage-init` | `factoryplus_supabase_storage_init` | `node:20-alpine` | — |
 | `supabase-meta` | `factoryplus_supabase_meta` | `supabase/postgres-meta:v0.96.6` | — |
 | `supabase-studio` | `factoryplus_supabase_studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `54323:3000` |
-| `timescaledb` | `factoryplus_timescaledb` | `timescale/timescaledb:latest-pg15` | `5433:5432` |
+| `timescaledb` | `factoryplus_timescaledb` | `timescale/timescaledb:2.29.1-pg17` | `5433:5432` |
 | `mosquitto-init` | `factoryplus_mosquitto_init` | `eclipse-mosquitto:2.0.20` | — |
 | `mosquitto` | `factoryplus_mosquitto` | `eclipse-mosquitto:2.0.20` | `1883`, `9001` |
 | `frontend` | `factoryplus_frontend` | `./frontend/Dockerfile` | `3000:3000` |
@@ -348,6 +348,10 @@ is why the schema builder offers a choice rather than a migration path.
 > License. Locally-minted semantic ids live under `https://factoryplus.local/semantics/…` — the
 > namespace is the honesty mechanism, and an id under `mtconnect.org` would assert an
 > interoperability that does not exist.
+
+Further vocabularies (OPC 40501, OPC 40450, OPC UA energy, PackML, ASHRAE 223P) and IDTA Submodel
+templates are planned but **not built** — the phasing, and the decisions still open, are in
+[`docs/vocabulary-expansion-plan.md`](docs/vocabulary-expansion-plan.md).
 
 ---
 

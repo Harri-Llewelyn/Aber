@@ -786,10 +786,33 @@ def run_simulation():
     # VAL_GW_SPARKPLUG_ID, confined by mosquitto.acl to its own edge-node subtree. There is no
     # wildcard account to fall back on any more, so a mismatch between this credential and
     # VAL_GW_UUID shows up as every publish being silently dropped by the broker.
-    client.username_pw_set(
-        os.getenv("MQTT_USER", VAL_GW_SPARKPLUG_ID),
-        os.getenv("MQTT_PASSWORD", "factoryplus123"),
-    )
+    #
+    # READ FROM MQTT_VALIDATOR_*, the same names docker-compose hands mosquitto-init, so .env is
+    # the single source and there is no second spelling to drift out of step.
+    #
+    # IT DELIBERATELY NO LONGER READS `MQTT_USER`/`MQTT_PASSWORD`. Those are the GENERIC names the
+    # ingestion service is given (`MQTT_USER: ${MQTT_INGESTION_USER}` in docker-compose), and that
+    # principal may only read spBv1.0/# and publish NCMD -- it cannot publish DBIRTH or DDATA at
+    # all. Sourcing an environment that defines them would connect this publisher as the ingestion
+    # daemon, be accepted by the broker, and then have every publish discarded by the ACL: the
+    # silent-drop failure the comment above warns about, arriving from the environment rather than
+    # from a typo.
+    #
+    # AND THERE IS NO DEFAULT PASSWORD ANY MORE. `factoryplus123` dates from before per-gateway
+    # credentials existed. Once it stopped being a real account it stopped being a convenience and
+    # became a way to fail invisibly -- the broker rejects it, and every check that depends on
+    # telemetry fails for reasons that have nothing to do with the credential.
+    mqtt_user = os.getenv("MQTT_VALIDATOR_USER") or VAL_GW_SPARKPLUG_ID
+    mqtt_pass = os.getenv("MQTT_VALIDATOR_PASSWORD") or ""
+    if not mqtt_pass:
+        raise SystemExit(
+            "MQTT_VALIDATOR_PASSWORD is not set.\n"
+            "  This publisher connects as its own gateway and the broker runs allow_anonymous\n"
+            "  false, so without it every publish is refused and the suite reports failures about\n"
+            "  telemetry, aliases and rebirth -- none of which would be the actual fault.\n"
+            "  Source the stack's .env before running, or generate one with: node scripts/setup.mjs"
+        )
+    client.username_pw_set(mqtt_user, mqtt_pass)
 
     # Capture the daemon's own NCMD rebirth requests. Check 9 asserts one is issued for an
     # unknown alias and that the second is suppressed, so both the presence and the ABSENCE of a
@@ -798,7 +821,23 @@ def run_simulation():
         CAPTURED_NCMD.append((msg.topic, msg.payload))
 
     client.message_callback_add("spBv1.0/+/NCMD/+", on_ncmd)
-    client.on_connect = lambda c, *_: c.subscribe("spBv1.0/+/NCMD/+")
+    # THE CONNACK RETURN CODE IS THE POINT, and discarding it was the second half of the same bug.
+    #
+    # paho's connect() completes the TCP handshake and returns; the broker's verdict on the
+    # CREDENTIAL arrives asynchronously, in this callback, and nowhere else. The previous
+    # `lambda c, *_: c.subscribe(...)` accepted every argument and ignored all of them, so a
+    # rejected login was indistinguishable from a good one -- `connected = True`, loop_start(),
+    # and then a full run in which every publish went nowhere. Observed: nine failures across
+    # telemetry, rename safety, alias resolution, rebirth and i3X live values, and the single line
+    # naming the cause was in the BROKER's log, not this one.
+    connack = []
+
+    def on_connect(c, _userdata, _flags, rc):
+        connack.append(rc)
+        if rc == 0:
+            c.subscribe("spBv1.0/+/NCMD/+")
+
+    client.on_connect = on_connect
 
     connected = False
     for attempt in range(5):
@@ -815,6 +854,38 @@ def run_simulation():
         return
 
     client.loop_start()
+
+    # Nothing may be published until the broker has ACCEPTED the connection. Waiting here rather
+    # than trusting connect() is what turns an authentication failure into one line naming the
+    # credential, instead of a passing-looking run whose every assertion is about something else.
+    for _ in range(50):
+        if connack:
+            break
+        time.sleep(0.1)
+
+    if not connack:
+        raise SystemExit(
+            f"MQTT: no CONNACK from {MQTT_HOST}:{MQTT_PORT} within 5s. The socket opened, so the\n"
+            "  broker is reachable but never answered the CONNECT -- check the mosquitto logs."
+        )
+    if connack[0] != 0:
+        # 4 and 5 are the two this actually produces: 4 is bad username/password, 5 is
+        # not-authorised. Both mean the credential, not the topic ACL -- an ACL refusal happens
+        # later, per-publish, and is silent by design.
+        meaning = {
+            1: "unacceptable protocol version",
+            2: "identifier rejected",
+            3: "server unavailable",
+            4: "bad username or password",
+            5: "not authorised",
+        }.get(connack[0], "unknown")
+        raise SystemExit(
+            f"MQTT: broker refused the connection (CONNACK {connack[0]}: {meaning}).\n"
+            f"  Connected as '{mqtt_user}' using MQTT_VALIDATOR_USER/MQTT_VALIDATOR_PASSWORD.\n"
+            "  That account is provisioned by mosquitto-init from the same .env values, so this\n"
+            "  means the two have diverged -- re-run `docker compose up -d mosquitto-init` after\n"
+            "  confirming .env, or regenerate credentials with: node scripts/setup.mjs"
+        )
 
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     gw = SEEDED.get("gateway_id") or VAL_GW_NAME

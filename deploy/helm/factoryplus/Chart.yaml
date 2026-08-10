@@ -38,8 +38,9 @@ keywords:
   - industrial-iot
 
 annotations:
-  # All seven phases of docs/kubernetes-migration-plan.md are in this chart: the data tier, the
-  # Supabase control plane, messaging, the edge and frontend, ingress, hardening and telemetry.
+  # The whole stack is in this chart: the data tier, the Supabase control plane, messaging, the
+  # edge and frontend, ingress, hardening and telemetry. The design reasoning for each is in
+  # docs/kubernetes-migration-plan.md, which source comments cite by section number.
   #
   # This said `"1"` until the chart was first published, months after phase 7 landed -- harmless
   # while the only reader was someone with the repository open beside it, and actively misleading

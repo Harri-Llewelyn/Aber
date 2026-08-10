@@ -144,7 +144,14 @@ timescaledb:
     repository: timescale/timescaledb
     # Pinned to match docker-compose.yml. Both targets must pin the SAME tag -- see
     # scripts/check-image-tag-parity.mjs, which CI runs.
-    tag: latest-pg15
+    #
+    # A VERSION, NOT `latest-pg17`, and that is a correction rather than a preference. This read
+    # `latest-pg15` until 2026-08, which looked like tracking upstream and had silently stopped
+    # being that: TimescaleDB 2.29.0 dropped PostgreSQL 15, so `latest-pg15` froze at 2.28.3 on
+    # 2026-07-16 and will never move again. A floating tag that stops floating gives no signal at
+    # all. Every other pin in this file states a version; this one now does too, and bumping it is
+    # a decision someone makes rather than one that happens.
+    tag: 2.29.1-pg17
     pullPolicy: IfNotPresent
   database: postgres
   username: postgres
@@ -174,9 +181,23 @@ timescaledb:
   # Both take any PostgreSQL interval ('7 days', '12 hours', '5 years'); `never` removes the policy.
   retention:
     enabled: true
-    # Compressed chunks are effectively read-only, so telemetry timestamped older than this is
-    # rejected rather than inserted. Ingestion already refuses anything over 24h old, so this only
-    # bites below a day.
+    # How old a chunk must be before it is converted to the columnstore (Hypercore).
+    #
+    # THIS DOES NOT BOUND THE LATE-ARRIVAL WINDOW, and it used to say that it did: "compressed
+    # chunks are effectively read-only, so telemetry timestamped older than this is rejected
+    # rather than inserted". That was measured on 2.29.1 and is FALSE -- an INSERT into a
+    # compressed chunk succeeds, including the exact `ON CONFLICT (time, asset_id, metric_name)
+    # DO NOTHING` form the ingestion daemon uses, the unique constraint is still enforced against
+    # compressed data, UPDATE and DELETE both work, and the chunk stays compressed throughout.
+    #
+    # It was not the PG17/2.29 upgrade that changed this. The same test passes on 2.28.3, the
+    # version this stack ran before -- the note described much older TimescaleDB behaviour and had
+    # simply outlived it.
+    #
+    # So the ONLY thing bounding late arrivals is TELEMETRY_MAX_AGE_SECONDS in the ingestion
+    # daemon (24h). A gateway that buffers through an outage and flushes on reconnect is limited
+    # by that and by nothing here. Widening this value does not widen the accepted window, and
+    # narrowing it does not close it.
     compressAfter: "7 days"
     # A HARD DELETE with no undo -- TimescaleDB drops whole chunks and nothing in this chart copies
     # them anywhere first. 90 days is a starting point, NOT a compliance decision: manufacturing
@@ -214,19 +235,27 @@ supabaseDb:
   enabled: true
   image:
     repository: supabase/postgres
-    tag: 15.6.1.143
+    tag: 17.6.1.160
     pullPolicy: IfNotPresent
   persistence:
     enabled: true
     size: 20Gi
     storageClass: ""
     accessMode: ReadWriteOnce
-  # VERIFIED against the pinned tag: `supabase/postgres` is Debian and its `postgres` user is
-  # uid 105 / gid **106**. It is not "the same lineage as TimescaleDB" — that one is Alpine at 70 —
-  # and it was never 999. Same caveat as above: the entrypoint runs as root and chowns, so this is
-  # a statement of fact rather than a working part. See the statefulset for what DID break here.
+  # VERIFIED against the pinned tag: `supabase/postgres:17.6.1.160` is **Alpine 3.23** (Nix-built)
+  # and its `postgres` user is uid 100 / gid **101**.
+  #
+  # BOTH NUMBERS AND THE DISTRO CHANGED AT 17.6, which is worth stating because this comment
+  # previously said the opposite and was right at the time: the 15.x image was Ubuntu 20.04 with
+  # `postgres` at 105:106, and the note here explained that it was NOT the same lineage as
+  # TimescaleDB. It is now — both databases are Alpine, and TimescaleDB remains 70:70, so they
+  # still differ from each other and still need separate values.
+  #
+  # Same caveat as above: the entrypoint runs as root and chowns, so this is a statement of fact
+  # rather than a working part today. It becomes the whole permission story the moment anyone sets
+  # `runAsUser`. See the statefulset for what DID break here.
   podSecurityContext:
-    fsGroup: 106
+    fsGroup: 101
     fsGroupChangePolicy: OnRootMismatch
   resources:
     requests:
@@ -406,7 +435,7 @@ supabaseStorage:
   bucket: asset-3d-models
   fileSizeLimit: 52428800
   # file | s3. s3 (MinIO or cloud) is the better production answer and removes the single-writer
-  # constraint; file is the Phase 2 target.
+  # constraint; file is the default. See docs/kubernetes-migration-plan.md §4.4 and §11.
   backend: file
   persistence:
     enabled: true
