@@ -21,6 +21,7 @@ reachable from the logic under test.
 """
 import os
 import sys
+import time
 import types
 import unittest
 from unittest.mock import MagicMock
@@ -98,10 +99,23 @@ class DataMetric:
         return field in self._present
 
 
+# FIXED AT IMPORT, NOT HARDCODED, and the difference is a test that expired.
+#
+# This default used to be the literal 1786284000000 -- 2026-08-09T14:00:00Z. `_timestamp_is_sane()`
+# rejects a metric more than 24 hours old, so every telemetry write in TestSparseDdataIngestion
+# silently stopped being issued at 2026-08-10T14:00:00Z and five tests began failing on a file
+# nobody had touched. The last green run on main beat that deadline by 41 minutes.
+#
+# Computed ONCE per process rather than per payload, because these tests also assert on the
+# hypertable's (time, asset_id, metric_name) collision behaviour -- two payloads have to be able to
+# share a timestamp for that to mean anything.
+FIXTURE_TIMESTAMP_MS = int(time.time() * 1000)
+
+
 class DataPayload:
-    def __init__(self, metrics, timestamp=1786284000000):
+    def __init__(self, metrics, timestamp=None):
         self.metrics = metrics
-        self.timestamp = timestamp
+        self.timestamp = FIXTURE_TIMESTAMP_MS if timestamp is None else timestamp
 
 
 class FakeMetricList(list):
