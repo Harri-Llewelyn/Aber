@@ -70,6 +70,16 @@ const MODEL_PUBLIC_BASE = (
 const MODEL_BUCKET = Deno.env.get("STORAGE_MODEL_BUCKET") ?? "asset-3d-models";
 
 /**
+ * The IDTA Digital Nameplate template whose element semanticIds this exporter attaches.
+ *
+ * NOT an environment variable, and not on the exported submodel either -- it selects rows from
+ * `idta_submodel_templates` (seeded by migration 0011) and nothing more. The version is part of
+ * the identifier: 2.0 lives under admin-shell.io/zvei, 3.0 under admin-shell.io/idta, and a shell
+ * that mixed them would name two different templates.
+ */
+const NAMEPLATE_TEMPLATE_ID = "https://admin-shell.io/idta/nameplate/3/0/Nameplate";
+
+/**
  * Cap on a model bundled into an AASX. The bucket's own limit is 50 MB, but that governs what may
  * be *stored*; this governs what may be held in memory, deflated and concatenated inside a single
  * edge worker. Over the cap the export falls back to the URL reference, which is still a valid
@@ -365,15 +375,24 @@ export default async function handler(req: Request): Promise<Response> {
     //
     // `device_schemas` (migration 0034) is the union of the device_submodels join and the legacy
     // 1:1 devices.schema_id, so this resolves for a device provisioned by either path.
-    const [{ data: configRows }, { data: linkRows }, { data: catalogRows }, { data: gatewayRows }] =
-      await Promise.all([
-        supabaseAdmin.from("asset_config").select("*").eq("asset_id", device.sparkplug_id),
-        supabaseAdmin.from("device_schemas").select("schema_id, submodel_key").eq("device_id", device.id),
-        supabaseAdmin.from("metric_catalog").select("*"),
-        device.gateway_id
-          ? supabaseAdmin.from("gateways").select("name,sparkplug_id").eq("id", device.gateway_id)
-          : Promise.resolve({ data: [] }),
-      ]);
+    const [
+      { data: configRows },
+      { data: linkRows },
+      { data: catalogRows },
+      { data: gatewayRows },
+      { data: nameplateRows },
+      { data: templateRows },
+    ] = await Promise.all([
+      supabaseAdmin.from("asset_config").select("*").eq("asset_id", device.sparkplug_id),
+      supabaseAdmin.from("device_schemas").select("schema_id, submodel_key").eq("device_id", device.id),
+      supabaseAdmin.from("metric_catalog").select("*"),
+      device.gateway_id
+        ? supabaseAdmin.from("gateways").select("name,sparkplug_id").eq("id", device.gateway_id)
+        : Promise.resolve({ data: [] }),
+      supabaseAdmin.from("device_nameplate").select("*").eq("device_id", device.id),
+      supabaseAdmin.from("idta_submodel_templates").select("id_short, semantic_id")
+        .eq("template_id", NAMEPLATE_TEMPLATE_ID),
+    ]);
 
     const links = linkRows ?? [];
     const schemaIds = links.map((l) => l.schema_id).filter(Boolean);
@@ -429,12 +448,89 @@ export default async function handler(req: Request): Promise<Response> {
     };
 
     // ---- Submodel 1: Digital Nameplate -------------------------------------------------------
-    // Identity and provenance. Drawn from `devices` plus the birth parameters ingestion recorded;
-    // the metrics a nameplate wants (firmware, serial) are published at DBIRTH, not as telemetry.
+    //
+    // ELEMENT-LEVEL semanticIds ONLY, and the submodel deliberately carries NONE.
+    //
+    // Putting https://admin-shell.io/idta/nameplate/3/0/Nameplate on the submodel would assert
+    // conformance to IDTA 02006, whose mandatory elements include URIOfTheProduct,
+    // ManufacturerName and an AddressInformation collection -- none of which this platform can
+    // guarantee for a device somebody registered this morning. Claiming the template id and then
+    // omitting its mandatory elements is the AAS version of minting an id under mtconnect.org:
+    // it asserts an interoperability nobody agreed to, and a consumer that trusts the id gets a
+    // shell that fails validation against the template it names. The IRDIs below say what each
+    // property MEANS, which is the useful half and is true.
+    //
+    // Values are resolved device-first: where a device publishes its own identification, that is
+    // what the shell reports, and `device_nameplate` is the fallback for the many devices that
+    // publish none. The join is on SEMANTIC ID, not on metric name -- a device may call its serial
+    // number anything, and the catalog's semantic_id is precisely the assertion that two
+    // differently-named metrics mean the same concept.
+    const nameplate = nameplateRows?.[0] ?? null;
+    const nameplateSemanticId = new Map<string, string>(
+      (templateRows ?? []).map((row) => [String(row.id_short), String(row.semantic_id)]),
+    );
+
+    const catalogBySemanticId = new Map<string, Record<string, unknown>>();
+    for (const metric of catalog) {
+      const id = metric.semantic_id as string | null;
+      if (id && !catalogBySemanticId.has(id)) catalogBySemanticId.set(id, metric);
+    }
+    /** The device's own answer for a concept, or null when it publishes nothing for it. */
+    const publishedValue = (semanticId: string): unknown => {
+      const metric = catalogBySemanticId.get(semanticId);
+      return metric ? valueFor(String(metric.name)) : null;
+    };
+
+    /**
+     * One nameplate property, sourced device-first and carrying its published IRDI.
+     *
+     * `source` is recorded in the description rather than as a sibling property: an AAS consumer
+     * reading ManufacturerName wants the name, and a second element next to it saying where the
+     * name came from would be indistinguishable from a second nameplate field.
+     */
+    const nameplateProperty = (
+      idShort: string,
+      operatorValue: unknown,
+      opcSemanticId?: string,
+    ) => {
+      const published = opcSemanticId ? publishedValue(opcSemanticId) : null;
+      const value = published ?? operatorValue ?? null;
+      if (value === null || value === undefined || value === "") return null;
+      return property(idShort, "xs:string", value, {
+        semanticId: nameplateSemanticId.get(idShort) ?? null,
+        description: published !== null
+          ? "Published by the device at DBIRTH."
+          : "Recorded against the asset by an operator.",
+      });
+    };
+
+    const OPC_MACHINERY = "http://opcfoundation.org/UA/Machinery/";
     const nameplateProps = [
-      property("ManufacturerProductDesignation", "xs:string", device.name),
-      property("SerialNumber", "xs:string", valueFor("SERIAL_NUMBER")),
-      property("FirmwareVersion", "xs:string", valueFor("Controller/FIRMWARE")),
+      nameplateProperty("URIOfTheProduct", nameplate?.uri_of_the_product, `${OPC_MACHINERY}ProductInstanceUri`),
+      nameplateProperty("ManufacturerName", nameplate?.manufacturer_name, `${OPC_MACHINERY}Manufacturer`),
+      // Falls back to the device's own name, which is the only designation that always exists.
+      nameplateProperty(
+        "ManufacturerProductDesignation",
+        nameplate?.manufacturer_product_designation ?? device.name,
+        `${OPC_MACHINERY}Model`,
+      ),
+      nameplateProperty("ManufacturerProductType", nameplate?.manufacturer_product_type),
+      // SERIAL_NUMBER by name is the pre-semantic-id fallback: the demo schema publishes it under
+      // that literal name, and metrics created before 0029 carry no semantic id to join on.
+      nameplateProperty(
+        "SerialNumber",
+        nameplate?.serial_number ?? valueFor("SERIAL_NUMBER"),
+        `${OPC_MACHINERY}SerialNumber`,
+      ),
+      nameplateProperty("YearOfConstruction", nameplate?.year_of_construction, `${OPC_MACHINERY}YearOfConstruction`),
+      nameplateProperty("DateOfManufacture", nameplate?.date_of_manufacture),
+      nameplateProperty("HardwareVersion", nameplate?.hardware_version),
+      nameplateProperty("FirmwareVersion", nameplate?.firmware_version ?? valueFor("Controller/FIRMWARE")),
+      nameplateProperty("SoftwareVersion", nameplate?.software_version, `${OPC_MACHINERY}SoftwareRevision`),
+      nameplateProperty("CountryOfOrigin", nameplate?.country_of_origin),
+
+      // Factory+ concepts. No semanticId, because IDTA defines none for them and inventing one
+      // under admin-shell.io would be a forgery -- see supabase/migrations/0029's header.
       property("AssetSparkplugId", "xs:string", device.sparkplug_id, {
         description: "Immutable wire identity; the same value keys telemetry in the historian.",
       }),
@@ -442,7 +538,7 @@ export default async function handler(req: Request): Promise<Response> {
       property("EdgeGatewayName", "xs:string", gateway?.name ?? null),
       property("EdgeGatewaySparkplugId", "xs:string", gateway?.sparkplug_id ?? null),
       property("Status", "xs:string", device.status),
-    ];
+    ].filter((element): element is Record<string, unknown> => element !== null);
 
     const submodels: Record<string, unknown>[] = [
       {

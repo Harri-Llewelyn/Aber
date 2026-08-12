@@ -38,12 +38,15 @@ export function opcuaVocabularyTab({ vocabulary, catalog, onUsePoint }) {
   return {
     id: STANDARDS.OPCUA,
     label: 'OPC UA',
-    hint: 'Companion specification data points — OPC 40001 Machinery and OPC 40010 Robotics.',
+    hint: 'Companion specification data points — machinery, robotics, machine tools, additive, PackML and energy.',
     searchPlaceholder: 'Search data points…',
     description: (
       <>
         Data points defined by the OPC UA companion specifications — <span className="mono">OPC 40001</span>{' '}
-        (Machinery) and <span className="mono">OPC 40010</span> (Robotics). Like MTConnect these are
+        (Machinery), <span className="mono">OPC 40010</span> (Robotics), <span className="mono">OPC 40501</span>{' '}
+        (Machine Tools), <span className="mono">OPC 40540</span> (Additive Manufacturing),{' '}
+        <span className="mono">OPC 30050</span> (PackML) and{' '}
+        <span className="mono">OPC 40001-4</span> (Machinery Energy). Like MTConnect these are
         positional: <span className="mono">ActualPosition</span> becomes{' '}
         <span className="mono">MotionDevice/J1/ActualPosition</span> once you say which axis.
         The group is taken from the browse path, which is already <span className="mono">/</span>-delimited.{' '}

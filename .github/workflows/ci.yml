@@ -144,6 +144,25 @@ jobs:
           node scripts/generate-mtconnect-vocabulary.mjs
           node scripts/check-mtconnect-seed-sync.mjs
 
+      # Same arrangement for the OPC UA companion specifications, with one extra property: the
+      # generator asserts each NodeSet's ModelUri, Version and PublicationDate against a pin, so an
+      # upstream release of OPC 40501 or 40540 fails HERE rather than being absorbed into the seed
+      # unreviewed. That is deliberate -- a companion spec revision can rename or retype a browse
+      # name, and the vocabulary would otherwise go on describing a document nobody publishes.
+      - name: Verify OPC UA Vocabulary Seed Is In Sync
+        run: |
+          node scripts/generate-opcua-vocabulary.mjs
+          node scripts/check-opcua-seed-sync.mjs
+
+      # ASHRAE 223P is the one vocabulary whose STANDARD IS NOT PUBLISHED -- it is still in public
+      # review -- so the generator pins the ontology version and refuses to run when upstream moves.
+      # That is the point of regenerating here rather than only checking the digest: a concept
+      # renamed before publication should fail a build, not arrive unnoticed in a migration.
+      - name: Verify ASHRAE 223P Vocabulary Seed Is In Sync
+        run: |
+          node scripts/generate-ashrae223-vocabulary.mjs
+          node scripts/check-ashrae223-seed-sync.mjs
+
       # Prose ages gracefully; NUMBERS AND LISTS DO NOT. A documentation audit found six factual
       # drifts in README.md alone -- a test count 77 stale, "three jobs" when CI had five, two image
       # tags still recorded as :latest after being pinned, "four edge functions" when a fifth had

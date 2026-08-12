@@ -16,11 +16,20 @@ const ACTOR_LABELS = {
   service:   { label: 'Service',           title: 'Written by an automated service on the service-role key' }
 }
 
-export function DigitalThreadTab() {
+/**
+ * `initialEntity` is a handover from another page's "Digital Thread" action: `{ id, type }`.
+ *
+ * It is applied to the ordinary filters rather than held as a separate mode, so the page an
+ * operator lands on is the page they already know -- every control still works, Clear Filters
+ * really does clear, and the export covers what is on screen. The id goes into the name filter
+ * because that filter already matches on id as well as name (see namedEntityIds), which makes the
+ * handover exact: two devices may share a name, but the id is the row.
+ */
+export function DigitalThreadTab({ initialEntity, onClearEntity }) {
   const [events, setEvents]           = useState([])
   const [loading, setLoading]         = useState(true)
-  const [entityTypeFilter, setEntityTypeFilter] = useState('')
-  const [nameFilter, setNameFilter]   = useState('')
+  const [entityTypeFilter, setEntityTypeFilter] = useState(initialEntity?.type || '')
+  const [nameFilter, setNameFilter]   = useState(initialEntity?.id || '')
   const [actionFilter, setActionFilter] = useState('')
   const [devices, setDevices]         = useState([])
   const [gateways, setGateways]       = useState([])
@@ -76,11 +85,22 @@ export function DigitalThreadTab() {
       .catch(() => setLoading(false))
   }, [entityTypeFilter, actionFilter, namedEntityIds])
 
+  // A later handover -- clicking Digital Thread on a second device without leaving the page --
+  // replaces the filter rather than being ignored because state was already initialised.
+  useEffect(() => {
+    if (!initialEntity?.id) return
+    setEntityTypeFilter(initialEntity.type || '')
+    setNameFilter(initialEntity.id)
+  }, [initialEntity?.id, initialEntity?.type])
+
   const activeFilterCount =
     (entityTypeFilter ? 1 : 0) + (nameFilter ? 1 : 0) + (actionFilter ? 1 : 0)
 
   const resetFilters = () => {
     setEntityTypeFilter(''); setNameFilter(''); setActionFilter('')
+    // Also drop the handover, or the effect above would immediately re-apply it and Clear Filters
+    // would appear to do nothing.
+    onClearEntity?.()
   }
 
   // Same wrapper TelemetryTab needs: AutoRefreshControl wires onRefresh straight to onClick, so
@@ -101,6 +121,10 @@ export function DigitalThreadTab() {
           <AutoRefreshControl onRefresh={handleRefresh} defaultInterval={0} />
         </div>
       </div>
+
+      <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
+        Complete immutable historical audit trace timeline across Cells, Gateways, and Devices with case-insensitive search and metadata inspection.
+      </p>
 
       {/* Moved out of the section header into the same `.filter-bar` the Gateways and Devices
           pages use. Two filter surfaces on one page crowded the header and put the filters in a
@@ -147,9 +171,6 @@ export function DigitalThreadTab() {
           </button>
         )}
       </div>
-      <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
-        Complete immutable historical audit trace timeline across Cells, Gateways, and Devices with case-insensitive search and metadata inspection.
-      </p>
 
       <div className="card" style={{ padding: '24px' }}>
         {loading ? (

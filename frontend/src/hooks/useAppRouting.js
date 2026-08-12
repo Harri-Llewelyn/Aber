@@ -13,7 +13,7 @@ const getTabFromPath = () => {
  * @param {Function} setSelectedSchemaFilter - State setter for the Devices page's schema filter
  * @param {Function} setSelectedCellFilter - State setter for the Cells page's search filter
  */
-export function useAppRouting(setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter) {
+export function useAppRouting(setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter, setSelectedThreadEntity, setPendingVocabularyEntry) {
   const [tab, setTabState] = useState(getTabFromPath)
 
   const setTab = useCallback((newTab, queryParams = {}) => {
@@ -37,8 +37,12 @@ export function useAppRouting(setSelectedDeviceFilter, setSelectedGatewayFilter,
     if (setSelectedGatewayFilter) setSelectedGatewayFilter('')
     if (setSelectedSchemaFilter) setSelectedSchemaFilter('')
     if (setSelectedCellFilter) setSelectedCellFilter('')
+    // Including the audit-trace handover: clicking "Digital Thread" in the nav means "show me
+    // everything", not "show me whichever device I last drilled into".
+    if (setSelectedThreadEntity) setSelectedThreadEntity(null)
+    if (setPendingVocabularyEntry) setPendingVocabularyEntry(null)
     setTab(tabId)
-  }, [setTab, setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter])
+  }, [setTab, setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter, setSelectedThreadEntity, setPendingVocabularyEntry])
 
   useEffect(() => {
     if (window.location.search.includes('code=') || window.location.search.includes('state=')) return

@@ -23,6 +23,7 @@ import {
 } from '../../utils/standards'
 import { kpis, kpiByName, iso22400Prefill } from '../../utils/iso22400'
 import { dataPointByName, opcuaSections, opcuaPrefill } from '../../utils/opcua'
+import { conceptByName, ashrae223Prefill } from '../../utils/ashrae223'
 
 // Sentinel for the "not in the list yet" option in the group picker. Not a valid group name --
 // the CHECK constraint on metric_groups.name rejects anything containing the separator.
@@ -59,17 +60,13 @@ import {
   canForkSchema, nextVersion, isCurrentSchema, SCHEMA_STATUS
 } from '../../utils/schemaVersion'
 import CopyableId from '../common/CopyableId'
-import { VocabularyPanel } from '../common/VocabularyPanel'
-import { mtconnectVocabularyTab } from '../common/MTConnectVocabularyPanel'
-import { iso22400VocabularyTab } from '../common/ISO22400VocabularyPanel'
-import { opcuaVocabularyTab } from '../common/OPCUAVocabularyPanel'
 import {
   IconCheck, IconPlus, IconFileCode, IconAlertTriangle, IconArchive,
   IconChevronDown, IconChevronUp, IconX, IconLock, IconGitBranch, IconPencil, IconDownload
 } from '../common/Icons'
 import { ActionMenu } from '../common/ActionMenu'
 
-export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
+export function SchemasTab({ showToast, hasPermission, onSelectSchema, pendingVocabularyEntry, onConsumeVocabularyEntry }) {
   const [schemas, setSchemas]         = useState([])
   const [catalog, setCatalog]         = useState([])
   const [gateways, setGateways]       = useState([])
@@ -81,6 +78,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
   const [vocabulary, setVocabulary]   = useState([])
   const [isoVocabulary, setIsoVocabulary]     = useState([])
   const [opcuaVocabulary, setOpcuaVocabulary] = useState([])
+  const [s223Vocabulary, setS223Vocabulary] = useState([])
   const [showAddMetric, setShowAddMetric] = useState(false)
   // The metric name is composed from its MTConnect parts rather than typed whole: component
   // ("group"), an optional component instance, the data item type, and an optional subType.
@@ -131,18 +129,19 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [sch, cat, grp, voc, iso, opc, gw, dev] = await Promise.all([
+      const [sch, cat, grp, voc, iso, opc, s223, gw, dev] = await Promise.all([
         api.get('/api/v1/schemas'),
         api.get('/api/v1/metric-catalog'),
         api.get('/api/v1/metric-groups'),
         api.get('/api/v1/mtconnect-vocabulary'),
         api.get('/api/v1/iso22400-vocabulary'),
         api.get('/api/v1/opcua-vocabulary'),
+        api.get('/api/v1/ashrae223-vocabulary'),
         api.get('/api/v1/gateways'),
         api.get('/api/v1/devices'),
       ])
       setSchemas(sch); setCatalog(cat); setGroups(grp); setVocabulary(voc)
-      setIsoVocabulary(iso); setOpcuaVocabulary(opc)
+      setIsoVocabulary(iso); setOpcuaVocabulary(opc); setS223Vocabulary(s223)
       setGateways(gw); setDevices(dev)
     } finally { setLoading(false) }
   }, [])
@@ -198,6 +197,38 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
 
   const handleUseKpi = (kpi) => applyPrefill(iso22400Prefill(kpi))
   const handleUseOpcuaPoint = (point) => applyPrefill(opcuaPrefill(point))
+
+  /**
+   * Arrival from the Vocabulary page's Use action.
+   *
+   * The handover carries IDENTIFIERS, not a prefilled form, and is resolved here for a reason: the
+   * rules that turn a vocabulary row into a metric -- which fields the standard decides, which
+   * semantic id is authoritative, which group to suggest -- live in applyPrefill and nowhere else.
+   * Sending a form over would put a second copy of them on the other page, free to drift.
+   *
+   * Waits for the vocabularies to load, since the entry cannot be resolved before then, and clears
+   * the handover once applied so returning to this page later does not reopen the form.
+   */
+  useEffect(() => {
+    if (!pendingVocabularyEntry || loading) return
+    const entry = pendingVocabularyEntry
+
+    if (entry.standard === STANDARDS.MTCONNECT && entry.type) {
+      handleUseVocabularyType(entry.type)
+    } else if (entry.standard === STANDARDS.ISO22400) {
+      const kpi = kpiByName(isoVocabulary, entry.name)
+      if (kpi) applyPrefill(iso22400Prefill(kpi))
+    } else if (entry.standard === STANDARDS.OPCUA) {
+      const point = dataPointByName(opcuaVocabulary, entry.companionSpec, entry.name)
+      if (point) applyPrefill(opcuaPrefill(point))
+    } else if (entry.standard === STANDARDS.ASHRAE223) {
+      const concept = conceptByName(s223Vocabulary, entry.name)
+      if (concept) applyPrefill(ashrae223Prefill(concept))
+    }
+
+    onConsumeVocabularyEntry?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingVocabularyEntry, loading, isoVocabulary, opcuaVocabulary, s223Vocabulary])
 
   /** Selecting an entry in the type picker prefills everything that entry determines. */
   const handleTypeChange = (value) => {
@@ -1075,28 +1106,6 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema }) {
           </div>
         )}
       </div>
-
-      {/* One reference card for all three standards, below the catalog: the catalog is this
-          deployment's state and comes first, the standards behind it follow. Tab order is by size —
-          MTConnect is ~600 entries and the one most metrics come from, then the two smaller
-          specialised ones. */}
-      {!loading && (
-        <VocabularyPanel
-          title="Standard Vocabulary Reference"
-          canAddMetric={canManageSchema}
-          tabs={[
-            mtconnectVocabularyTab({
-              vocabulary, catalog, onUseType: handleUseVocabularyType
-            }),
-            iso22400VocabularyTab({
-              vocabulary: isoVocabulary, catalog, onUseKpi: handleUseKpi
-            }),
-            opcuaVocabularyTab({
-              vocabulary: opcuaVocabulary, catalog, onUsePoint: handleUseOpcuaPoint
-            })
-          ]}
-        />
-      )}
 
       <div className="card">
         <div className="card-header">

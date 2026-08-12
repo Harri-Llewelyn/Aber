@@ -30,6 +30,31 @@ import {
 // carry the Sparkplug name here instead. That one exception was why the UI and the
 // approve-quarantine edge function both had to sniff whether an id was a UUID or a name
 // before they knew which column to address.
+/**
+ * The IDTA Digital Nameplate template the editor and the AAS exporter both work against.
+ *
+ * Mirrors NAMEPLATE_TEMPLATE_ID in supabase/functions/aas-export/index.ts. The version is part of
+ * the identifier -- 2.0 lives under admin-shell.io/zvei, 3.0 under admin-shell.io/idta -- so these
+ * two must move together or the shell would name a different template than the form filled in.
+ */
+const NAMEPLATE_TEMPLATE_ID = 'https://admin-shell.io/idta/nameplate/3/0/Nameplate';
+
+/**
+ * Which nameplate fields a device can answer for itself, and the OPC UA concept that answers them.
+ *
+ * Mirrors the exporter's resolution order: a published value WINS over a stored one, so the form
+ * shows these as read-only when the device publishes them. Keyed by `device_nameplate` column so
+ * the form can look up a field without a second mapping.
+ */
+const NAMEPLATE_PUBLISHED_BY = new Map([
+  ['uri_of_the_product', 'http://opcfoundation.org/UA/Machinery/ProductInstanceUri'],
+  ['manufacturer_name', 'http://opcfoundation.org/UA/Machinery/Manufacturer'],
+  ['manufacturer_product_designation', 'http://opcfoundation.org/UA/Machinery/Model'],
+  ['serial_number', 'http://opcfoundation.org/UA/Machinery/SerialNumber'],
+  ['year_of_construction', 'http://opcfoundation.org/UA/Machinery/YearOfConstruction'],
+  ['software_version', 'http://opcfoundation.org/UA/Machinery/SoftwareRevision']
+]);
+
 const mapDeviceRow = (d, gateway, location) => {
   const loc = location || resolveDeviceLocation(d, gateway);
   return {
@@ -528,6 +553,56 @@ export const api = {
       return queryLatestTelemetry({ assetId: match[1], minutes });
     }
 
+    /**
+     * Everything the nameplate editor needs, in one round trip: the template's element list, the
+     * stored row, and what the device publishes for itself.
+     *
+     * THE THIRD PART IS THE POINT. The AAS exporter prefers a device-published value over a stored
+     * one (migration 0011), so a form that did not show which fields the device already answers
+     * would let an operator type a serial number, save it, and never see it in the export -- with
+     * nothing on screen explaining why. The join is on `semantic_id`, exactly as the exporter does
+     * it, because a device may call its serial number anything.
+     */
+    if (path.match(/\/api\/v1\/devices\/(.+)\/nameplate/)) {
+      const deviceId = path.match(/\/api\/v1\/devices\/(.+)\/nameplate/)[1];
+      const [{ data: stored }, { data: template, error: templateError }, { data: catalog }] =
+        await Promise.all([
+          supabase.from('device_nameplate').select('*').eq('device_id', deviceId),
+          supabase.from('idta_submodel_templates')
+            .select('id_short, semantic_id, semantic_id_type, description, is_mandatory, ordinal')
+            .eq('template_id', NAMEPLATE_TEMPLATE_ID)
+            .order('ordinal', { ascending: true }),
+          supabase.from('metric_catalog').select('name, semantic_id').not('semantic_id', 'is', null)
+        ]);
+      if (templateError) throw templateError;
+
+      const bySemanticId = new Map();
+      for (const metric of catalog || []) {
+        if (!bySemanticId.has(metric.semantic_id)) bySemanticId.set(metric.semantic_id, metric.name);
+      }
+      const wanted = [...NAMEPLATE_PUBLISHED_BY.values()]
+        .map(id => bySemanticId.get(id)).filter(Boolean);
+
+      let published = {};
+      if (wanted.length > 0) {
+        const { data: config } = await supabase
+          .from('asset_config')
+          .select('metric_name, val_string, val_double, val_bool')
+          .eq('asset_id', toTelemetryKey(deviceId))
+          .in('metric_name', wanted);
+        const valueOf = row =>
+          row.val_string ?? (row.val_double ?? (row.val_bool === null ? null : String(row.val_bool)));
+        const byMetricName = new Map((config || []).map(row => [row.metric_name, valueOf(row)]));
+        published = Object.fromEntries(
+          [...NAMEPLATE_PUBLISHED_BY.entries()]
+            .map(([field, semanticId]) => [field, byMetricName.get(bySemanticId.get(semanticId))])
+            .filter(([, value]) => value !== undefined && value !== null && value !== '')
+        );
+      }
+
+      return { stored: stored?.[0] || null, template: template || [], published };
+    }
+
     if (path.match(/\/api\/v1\/devices\/(.+)\/config/)) {
       const match = path.match(/\/api\/v1\/devices\/(.+)\/config/);
       // asset_config is keyed by the device's sparkplug_id, written by the ingestion daemon
@@ -716,6 +791,19 @@ export const api = {
         formula: k.formula,
         semantic_id: k.semantic_id
       }));
+    }
+
+    if (path.startsWith('/api/v1/ashrae223-vocabulary')) {
+      // Reference data (migration 0013), generated from the open223 ontology. Ordered by the
+      // hierarchy the panel sections on, then by label -- the panel re-sorts, but arriving grouped
+      // keeps a 640-row payload cheap to render on first paint.
+      const { data, error } = await supabase
+        .from('ashrae223_vocabulary')
+        .select('*')
+        .order('subclass_of', { ascending: true, nullsFirst: true })
+        .order('label', { ascending: true });
+      if (error) throw error;
+      return data || [];
     }
 
     if (path.startsWith('/api/v1/opcua-vocabulary')) {
@@ -1237,6 +1325,44 @@ export const api = {
       const { data, error } = await supabase.from('gateways').update(patch).eq('id', id).select();
       if (error) throw error;
       return data[0];
+    }
+
+    /**
+     * Upsert a device's nameplate. An empty field clears the column rather than being skipped:
+     * blanking a wrong serial number has to be expressible, and a PATCH that ignored empties
+     * would make the form unable to undo its own mistakes.
+     *
+     * The row is DELETED when every field comes back empty, because "no nameplate data" is
+     * modelled as no row -- migration 0011's exporter rule is that a submodel with nothing in it
+     * is omitted, and a row of nulls would leave the device looking edited rather than untouched.
+     */
+    if (path.match(/\/api\/v1\/devices\/(.+)\/nameplate/)) {
+      const deviceId = path.match(/\/api\/v1\/devices\/(.+)\/nameplate/)[1];
+      const fields = [
+        'manufacturer_name', 'manufacturer_product_designation', 'manufacturer_product_type',
+        'serial_number', 'year_of_construction', 'date_of_manufacture', 'hardware_version',
+        'firmware_version', 'software_version', 'country_of_origin', 'uri_of_the_product'
+      ];
+      const patch = Object.fromEntries(fields.map(f => [f, emptyToNull(body[f])]));
+
+      if (fields.every(f => patch[f] === null)) {
+        const { error } = await supabase.from('device_nameplate').delete().eq('device_id', deviceId);
+        if (error) throw error;
+        return null;
+      }
+
+      const { data: session } = await supabase.auth.getSession();
+      const { data, error } = await supabase
+        .from('device_nameplate')
+        .upsert({
+          device_id: deviceId,
+          ...patch,
+          updated_at: new Date().toISOString(),
+          updated_by: session?.session?.user?.id ?? null
+        }, { onConflict: 'device_id' })
+        .select();
+      if (error) throw error;
+      return data?.[0] || null;
     }
 
     if (path.startsWith('/api/v1/devices/')) {

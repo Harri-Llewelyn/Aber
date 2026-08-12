@@ -16,13 +16,13 @@ const allowSignUp = readFlag('VITE_ALLOW_SIGNUP')
 const OAUTH_CONSENT_PATH = '/oauth/consent'
 
 import {
-  IconCog,
   IconFactory,
   IconRadio,
   IconCpu,
   IconActivity,
   IconLayoutDashboard,
   IconClipboardList,
+  IconFileCode,
   IconArchive,
   IconBookOpen,
   IconHistory,
@@ -45,6 +45,7 @@ const DigitalThreadTab = lazy(() => import('./components/tabs/DigitalThreadTab')
 // Reached only via GoTrue's OAuth redirect, so it is never in the main bundle's critical path.
 const OAuthConsent     = lazy(() => import('./pages/OAuthConsent').then(m => ({ default: m.OAuthConsent })))
 const SchemasTab       = lazy(() => import('./components/tabs/SchemasTab').then(m => ({ default: m.SchemasTab })))
+const VocabularyTab    = lazy(() => import('./components/tabs/VocabularyTab').then(m => ({ default: m.VocabularyTab })))
 const DirectoryTab     = lazy(() => import('./components/tabs/DirectoryTab').then(m => ({ default: m.DirectoryTab })))
 const ArchivesTab      = lazy(() => import('./components/tabs/ArchivesTab').then(m => ({ default: m.ArchivesTab })))
 
@@ -55,6 +56,9 @@ const TABS = [
   { id: 'devices',        label: 'Devices',           icon: <IconCpu size={15} /> },
   { id: 'digital-thread', label: 'Digital Thread',    icon: <IconHistory size={15} /> },
   { id: 'schemas',        label: 'Schemas',           icon: <IconClipboardList size={15} /> },
+  // Split out of Schemas: the registry and catalog are state you edit, the vocabularies are
+  // reference you read, and the reference half grows with every standard adopted.
+  { id: 'vocabulary',     label: 'Vocabulary',        icon: <IconFileCode size={15} /> },
   { id: 'directory',      label: 'Directory',         icon: <IconBookOpen size={15} /> },
   { id: 'archives',       label: 'Archives',          icon: <IconArchive size={15} />, permission: PERMISSION_UUIDS.ARCHIVE_MANAGE },
 ]
@@ -109,7 +113,7 @@ function AuthScreen({ onLoginSuccess, notice }) {
       <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '32px', borderRadius: '16px', background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)' }}>
         <div style={{ textAlign: 'center', marginBottom: '24px' }}>
           <div style={{ display: 'inline-flex', padding: '12px', borderRadius: '12px', background: 'var(--accent-dim)', color: 'var(--accent)', marginBottom: '12px' }}>
-            <IconCog size={36} />
+            <IconFactory size={36} />
           </div>
           <h2 style={{ fontSize: '22px', fontWeight: 700, margin: '0 0 6px 0', color: 'var(--text-primary)' }}>Factory+ Supabase Portal</h2>
           <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>Sign in with your Supabase BaaS credentials</p>
@@ -190,11 +194,25 @@ function Dashboard({ session, onSignOut }) {
   const [selectedSchemaFilter, setSelectedSchemaFilter] = useState('')
   // Set when a cell zone is clicked on the Overview shopfloor map; consumed by CellsTab.
   const [selectedCellFilter, setSelectedCellFilter] = useState('')
+  // Set by a "Digital Thread" action on an asset row; consumed by DigitalThreadTab as { id, type }.
+  // That page replaced a per-asset modal, which was a smaller copy of it with no export, no
+  // auto-refresh and no action filter.
+  const [selectedThreadEntity, setSelectedThreadEntity] = useState(null)
+  // Set by Use on the Vocabulary page; consumed by SchemasTab, which resolves it against the
+  // vocabularies it already holds and opens its Add Metric form.
+  const [pendingVocabularyEntry, setPendingVocabularyEntry] = useState(null)
   const [showBugReport, setShowBugReport] = useState(false)
 
   const { tab, setTab, handleNavClick } = useAppRouting(
-    setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter
+    setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter,
+    setSelectedThreadEntity, setPendingVocabularyEntry
   )
+
+  /** Drill into one asset's audit trace on the page that owns it, rather than in a dialog. */
+  const viewThreadFor = (id, type) => {
+    setSelectedThreadEntity({ id, type })
+    setTab('digital-thread', { entity: id })
+  }
   const { theme, toggleTheme } = useTheme()
   const { toast, showToast, clearToast } = useToast()
 
@@ -220,10 +238,10 @@ function Dashboard({ session, onSignOut }) {
       {/* Top Bar */}
       <header className="topbar">
         <div className="topbar-brand">
-          <div className="brand-icon" title="Factory+ Platform Logo"><IconCog size={20} /></div>
+          <div className="brand-icon" title="ACS Cymru Platform Logo"><IconFactory size={20} /></div>
           <div>
-            <div className="brand-name">Factory+ Asset Tracking Platform</div>
-            <div className="brand-sub">Supabase BaaS + Standalone TimescaleDB + AAS Architecture</div>
+            <div className="brand-name">AMRC Connectivity Stack - Cymru</div>
+            <div className="brand-sub">Shopfloor to Digital Twin Pipeline</div>
           </div>
         </div>
 
@@ -267,11 +285,17 @@ function Dashboard({ session, onSignOut }) {
       <main className="content">
         <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
           {tab === 'overview'       && <OverviewTab onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }} onSelectGateway={id => { setSelectedGatewayFilter(id); setTab('gateways', { search: id }) }} onSelectCell={id => { setSelectedCellFilter(id); setTab('cells', { search: id }) }} showToast={showToast} hasPermission={hasPermission} onNavigateTab={t => setTab(t)} />}
-          {tab === 'cells'          && <CellsTab showToast={showToast} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
-          {tab === 'gateways'       && <GatewaysTab showToast={showToast} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
-          {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} />}
-          {tab === 'digital-thread' && <DigitalThreadTab />}
-          {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={uuid => { setSelectedSchemaFilter(uuid); setTab('devices', { schema: uuid }) }} />}
+          {tab === 'cells'          && <CellsTab showToast={showToast} onViewThread={c => viewThreadFor(c.cell_id, 'CELL')} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
+          {tab === 'gateways'       && <GatewaysTab showToast={showToast} onViewThread={g => viewThreadFor(g.gateway_id, 'GATEWAY')} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
+          {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }} onViewThread={a => viewThreadFor(a.asset_id, 'DEVICE')} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} />}
+          {tab === 'digital-thread' && (
+            <DigitalThreadTab
+              initialEntity={selectedThreadEntity}
+              onClearEntity={() => setSelectedThreadEntity(null)}
+            />
+          )}
+          {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={uuid => { setSelectedSchemaFilter(uuid); setTab('devices', { schema: uuid }) }} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} />}
+          {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('schemas') }} />}
           {tab === 'directory'      && <DirectoryTab showToast={showToast} hasPermission={hasPermission} />}
           {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} />}
         </Suspense>

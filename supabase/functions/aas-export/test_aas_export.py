@@ -330,6 +330,58 @@ class TestAasExportLive(unittest.TestCase):
         for expected in ("SerialNumber", "FirmwareVersion", "AssetSparkplugId"):
             self.assertIn(expected, elements)
 
+    def test_nameplate_elements_carry_published_idta_identifiers(self):
+        """
+        The IDTA elements say what they mean, using IDTA's own identifiers.
+
+        These IRDIs come from IDTA 02006-3-0-1 and are seeded by migration 0011; the exporter looks
+        them up rather than hard-coding them, so this asserts the lookup actually reached the
+        table. A missing semanticId here means the join silently produced nothing, which is exactly
+        the failure that would otherwise ship as a valid-looking shell full of anonymous strings.
+        """
+        elements = {e["idShort"]: e for e in self.submodels["DigitalNameplate"]["submodelElements"]}
+        expected = {
+            "SerialNumber": "0112/2///61987#ABA951#009",
+            "ManufacturerProductDesignation": "0112/2///61987#ABA567#009",
+            "FirmwareVersion": "0112/2///61987#ABA302#006",
+        }
+        for id_short, irdi in expected.items():
+            element = elements.get(id_short)
+            if element is None:
+                continue  # Only emitted when a value exists; absence is covered elsewhere.
+            keys = element.get("semanticId", {}).get("keys", [])
+            self.assertTrue(keys, f"{id_short} carries no semanticId")
+            self.assertEqual(keys[0]["value"], irdi, f"{id_short} carries the wrong identifier")
+            self.assertEqual(element["semanticId"]["type"], "ExternalReference")
+
+    def test_nameplate_does_not_claim_the_idta_template(self):
+        """
+        The submodel carries NO semanticId, and that is a deliberate refusal.
+
+        Naming https://admin-shell.io/idta/nameplate/3/0/Nameplate would assert conformance to a
+        template whose mandatory elements include AddressInformation, which this platform does not
+        model. A consumer trusting the id would validate the shell against the template and fail.
+        Element-level identifiers say what each property means without making that claim.
+        """
+        nameplate = self.submodels["DigitalNameplate"]
+        self.assertNotIn(
+            "semanticId", nameplate,
+            "the Nameplate submodel must not claim an IDTA template it cannot fully populate",
+        )
+
+    def test_factoryplus_nameplate_properties_are_not_given_invented_identifiers(self):
+        """AssetSparkplugId and friends are ours; IDTA defines nothing for them, so they carry
+        nothing. An id minted under admin-shell.io for a local concept would be a forgery."""
+        elements = {e["idShort"]: e for e in self.submodels["DigitalNameplate"]["submodelElements"]}
+        for id_short in ("AssetSparkplugId", "ConnectionMethod", "EdgeGatewayName", "Status"):
+            element = elements.get(id_short)
+            if element is None:
+                continue
+            self.assertNotIn(
+                "semanticId", element,
+                f"{id_short} is a Factory+ concept and must not carry a standard identifier",
+            )
+
     def test_telemetry_holds_metrics_and_a_linked_segment(self):
         # The one carrying a Segments collection: with several schemas attached only the telemetry
         # aspects have one, and any of them is a valid subject for this assertion.

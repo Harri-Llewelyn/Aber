@@ -544,108 +544,59 @@ describe('Metric Catalog table — standard and semantic id columns', () => {
   })
 })
 
-describe('Standard Vocabulary Reference', () => {
-  const card = () => within(screen.getByRole('heading', { name: /Standard Vocabulary Reference/ }).closest('.card'))
-  const standardTab = (name) => card().getByRole('tab', { name })
+describe('Vocabulary handover — arriving from the Vocabulary page', () => {
+  // The panel itself now lives on the Vocabulary page (see VocabularyTab.test.jsx). What this page
+  // still owns is the rule that turns a vocabulary row into a metric, so the handover is resolved
+  // HERE rather than being sent over as a filled-in form -- one copy of that rule, not two.
+  const renderWith = (entry, onConsume = vi.fn()) => render(
+    <SchemasTab
+      showToast={vi.fn()}
+      hasPermission={() => true}
+      onSelectSchema={vi.fn()}
+      pendingVocabularyEntry={entry}
+      onConsumeVocabularyEntry={onConsume}
+    />
+  )
 
-  it('renders one card for all three standards, not three cards', async () => {
-    renderTab()
+  it('opens the form on an ISO 22400 KPI, resolved from its name', async () => {
+    renderWith({ standard: 'ISO 22400', name: 'AVAILABILITY' })
     await waitForCatalog()
-
-    expect(screen.getAllByRole('heading', { name: /Standard Vocabulary Reference/ })).toHaveLength(1)
-    expect(screen.queryByRole('heading', { name: /MTConnect Vocabulary/ })).toBeNull()
-    expect(screen.queryByRole('heading', { name: /ISO 22400 Vocabulary/ })).toBeNull()
-    expect(screen.queryByRole('heading', { name: /OPC UA Vocabulary/ })).toBeNull()
-  })
-
-  it('offers every standard as a tab, with its entry count visible', async () => {
-    // All three counts visible at once is the point of a segmented control over a dropdown: it is
-    // what shows the vocabularies are different sizes and different kinds of thing.
-    renderTab()
-    await waitForCatalog()
-
-    expect(within(standardTab(/MTConnect/)).getByText('4')).toBeTruthy()
-    expect(within(standardTab(/ISO 22400/)).getByText('2')).toBeTruthy()
-    expect(within(standardTab(/OPC UA/)).getByText('2')).toBeTruthy()
-  })
-
-  it('opens on MTConnect and marks only that tab selected', async () => {
-    renderTab()
-    await waitForCatalog()
-
-    expect(standardTab(/MTConnect/).getAttribute('aria-selected')).toBe('true')
-    expect(standardTab(/ISO 22400/).getAttribute('aria-selected')).toBe('false')
-  })
-
-  it('swaps the rendered dataset when a tab is selected', async () => {
-    renderTab()
-    await waitForCatalog()
-
-    // MTConnect sections are data item types and components; ISO 22400's are KPI families.
-    expect(card().queryByRole('button', { name: /OEE/ })).toBeNull()
-    fireEvent.click(standardTab(/ISO 22400/))
-    expect(card().getByRole('button', { name: /OEE/ })).toBeTruthy()
-    expect(card().queryByRole('button', { name: /Data Item Types/ })).toBeNull()
-  })
-
-  it('starts every section collapsed - the vocabularies are reference, not the working set', async () => {
-    renderTab()
-    await waitForCatalog()
-
-    fireEvent.click(standardTab(/ISO 22400/))
-    // Chips are found by title: the tab's own blurb quotes AVAILABILITY in the same markup a chip
-    // uses, and only the chip carries a tooltip.
-    expect(card().getByRole('button', { name: /OEE/ })).toBeTruthy()
-    expect(card().queryByTitle(/^AVAILABILITY \(A\)/)).toBeNull()
-  })
-
-  it('keeps the search text across a tab switch', async () => {
-    // "Which standard has a word for this?" should be one query, not three.
-    renderTab()
-    await waitForCatalog()
-
-    fireEvent.change(card().getByPlaceholderText(/Search/), { target: { value: 'availability' } })
-    fireEvent.click(standardTab(/ISO 22400/))
-
-    expect(card().getByPlaceholderText(/Search/).value).toBe('availability')
-    expect(card().getByTitle(/^AVAILABILITY \(A\)/)).toBeTruthy()
-  })
-
-  it('starts a metric from a KPI chip, switching the form to ISO 22400', async () => {
-    renderTab()
-    await waitForCatalog()
-
-    fireEvent.click(standardTab(/ISO 22400/))
-    fireEvent.click(card().getByRole('button', { name: /OEE/ }))
-    fireEvent.click(card().getByTitle(/^AVAILABILITY \(A\)/))
 
     expect(standardSelect().value).toBe('ISO 22400')
     expect(semanticIdInput().value).toBe('https://factoryplus.local/semantics/iso22400/AVAILABILITY')
     expect(within(namePreview()).getByText('OEE/AVAILABILITY')).toBeTruthy()
   })
 
-  it('starts a metric from an OPC UA data point chip', async () => {
-    renderTab()
+  it('opens the form on an OPC UA point, resolved from spec and name together', async () => {
+    renderWith({ standard: 'OPC UA', companionSpec: 'OPC 40010 Robotics', name: 'ActualPosition' })
     await waitForCatalog()
-
-    fireEvent.click(standardTab(/OPC UA/))
-    fireEvent.click(card().getByRole('button', { name: /OPC 40010 Robotics/ }))
-    fireEvent.click(card().getByTitle(/^ActualPosition —/))
 
     expect(standardSelect().value).toBe('OPC UA')
     expect(within(namePreview()).getByText('MotionDevice/ActualPosition')).toBeTruthy()
   })
 
-  it('does not offer the chips as actions without the manage permission', async () => {
-    render(<SchemasTab showToast={vi.fn()} hasPermission={() => false} onSelectSchema={vi.fn()} />)
+  it('opens the form on an MTConnect data item type', async () => {
+    renderWith({ standard: 'MTConnect', type: 'ANGLE' })
     await waitForCatalog()
 
-    fireEvent.click(standardTab(/ISO 22400/))
-    fireEvent.click(card().getByRole('button', { name: /OEE/ }))
-    const chip = card().getByTitle(/^AVAILABILITY \(A\)/)
-    expect(chip.getAttribute('role')).toBeNull()
-    fireEvent.click(chip)
-    expect(screen.queryByText('KPI')).toBeNull()
+    expect(standardSelect().value).toBe('MTConnect')
+  })
+
+  it('consumes the handover so returning here later does not reopen the form', async () => {
+    const onConsume = vi.fn()
+    renderWith({ standard: 'ISO 22400', name: 'AVAILABILITY' }, onConsume)
+    await waitForCatalog()
+
+    await waitFor(() => expect(onConsume).toHaveBeenCalled())
+  })
+
+  it('ignores an entry naming something no vocabulary has', async () => {
+    // A stale handover -- a KPI removed between pages -- must not open a form half-filled with
+    // whatever survived, which is what applying an unresolved entry would do.
+    renderWith({ standard: 'ISO 22400', name: 'NO_SUCH_KPI' })
+    await waitForCatalog()
+
+    expect(screen.queryByText(/Devices will publish this metric as/)).toBeNull()
   })
 })
 

@@ -66,10 +66,10 @@ describe('App Component', () => {
     render(<App />)
 
     await waitFor(() => {
-      expect(screen.getByText('Factory+ Asset Tracking Platform')).toBeInTheDocument()
+      expect(screen.getByText('AMRC Connectivity Stack - Cymru')).toBeInTheDocument()
     })
 
-    expect(screen.getByText('Supabase BaaS + Standalone TimescaleDB + AAS Architecture')).toBeInTheDocument()
+    expect(screen.getByText('Shopfloor to Digital Twin Pipeline')).toBeInTheDocument()
     expect(screen.getByText('admin@factoryplus.local')).toBeInTheDocument()
   })
 
@@ -92,7 +92,7 @@ describe('App Component', () => {
     expect(screen.getByText(/session is no longer valid/i)).toBeInTheDocument()
     // Stale tokens are dropped locally; the server-side session is already gone.
     expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
-    expect(screen.queryByText('Factory+ Asset Tracking Platform')).not.toBeInTheDocument()
+    expect(screen.queryByText('AMRC Connectivity Stack - Cymru')).not.toBeInTheDocument()
   })
 
   it('stays signed in when the auth server is unreachable', async () => {
@@ -105,7 +105,7 @@ describe('App Component', () => {
     render(<App />)
 
     await waitFor(() => {
-      expect(screen.getByText('Factory+ Asset Tracking Platform')).toBeInTheDocument()
+      expect(screen.getByText('AMRC Connectivity Stack - Cymru')).toBeInTheDocument()
     })
     expect(supabase.auth.signOut).not.toHaveBeenCalled()
   })
