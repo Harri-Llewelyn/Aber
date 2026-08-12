@@ -957,11 +957,15 @@ paths:
       tags: [Registry]
       summary: Read the OPC UA companion-specification data points
       description: |
-        25 data points from OPC 40001 (Machinery) and OPC 40010 (Robotics).
+        76 data points from six companion specifications: OPC 40001 (Machinery), OPC 40001-4
+        (Machinery Energy), OPC 40010 (Robotics), OPC 30050 (PackML), OPC 40501 (Machine Tools)
+        and OPC 40540 (Additive Manufacturing).
 
         **`node_id` is a browse path, not a numeric NodeId** — `nsu=<ns>;s=<BrowsePath>`. The
-        numeric ids live in each spec's NodeSet2 XML, which is not vendored; they were not
-        invented. The browse names are transcribed and need confirming against those files.
+        numeric ids live in each spec's NodeSet2 XML. The Machinery and Robotics rows were
+        transcribed by hand; the other three are generated from the NodeSets by
+        `scripts/generate-opcua-vocabulary.mjs`, which verifies each browse name and reads its
+        datatype from the specification.
       parameters:
         - $ref: '#/components/parameters/Select'
         - $ref: '#/components/parameters/Order'
@@ -973,6 +977,97 @@ paths:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/OPCUAVocabularyEntry' } }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
+
+  /rest/v1/ashrae223_vocabulary:
+    get:
+      tags: [Registry]
+      summary: Read the ASHRAE 223P building-system concepts
+      description: |
+        640 concepts generated from the open223 ontology (`v1.0.0-2026`, Apache-2.0) by
+        `scripts/generate-ashrae223-vocabulary.mjs`. Reference data: a row is a concept the
+        standard defines.
+
+        Unlike the machine vocabularies these name **things, not readings** — `Fan` is a class of
+        equipment, so a point using it still has to say what is measured. `subclass_of` is the
+        immediate superclass and is what the vocabulary panel sections on.
+
+        **⚠ The standard is not published.** ASHRAE 223 is still 223P / 223-202x and in public
+        review; concepts may change before it is final.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - { name: concept_kind, in: query, schema: { type: string }, description: 'e.g. `eq.Class`' }
+        - { name: subclass_of, in: query, schema: { type: string }, description: 'e.g. `eq.Equipment`' }
+      responses:
+        '200':
+          description: 223P concepts.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ASHRAE223Concept' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
+  /rest/v1/idta_submodel_templates:
+    get:
+      tags: [Registry]
+      summary: Read the IDTA submodel-template element definitions
+      description: |
+        Reference data: the elements an IDTA Asset Administration Shell submodel template defines,
+        with the identifiers IDTA publishes for them. Currently IDTA 02006-3-0-1 Digital Nameplate
+        (`template_id` `https://admin-shell.io/idta/nameplate/3/0/Nameplate`).
+
+        **`semantic_id` is issued by IDTA, IEC CDD or ECLASS — never minted here.** Most are IRDIs
+        (`0112/2///61987#ABA951#009`); a few are admin-shell.io IRIs. `semantic_id_type` says which.
+
+        `is_mandatory` records what the template requires. It is descriptive: the AAS exporter
+        deliberately does **not** claim the template id on the submodel it builds, because a shell
+        that named the template while omitting mandatory elements would fail validation against it.
+      parameters:
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+        - { name: template_id, in: query, schema: { type: string }, description: 'e.g. `eq.https://admin-shell.io/idta/nameplate/3/0/Nameplate`' }
+      responses:
+        '200':
+          description: Template element definitions.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/IDTASubmodelTemplateElement' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
+  /rest/v1/device_nameplate:
+    get:
+      tags: [Registry]
+      summary: Read operator-supplied nameplate data for a device
+      description: |
+        One row per device, and **only for devices somebody has filled in** — a device with no
+        nameplate data has no row rather than a row of nulls.
+
+        This is the *fallback* source. Where a device publishes its own identification as birth
+        metrics (OPC 40001 Machinery `Manufacturer`, `SerialNumber`, `YearOfConstruction`), the AAS
+        exporter prefers what the device said and uses this only to fill the gaps. Deliberately not
+        stored in `asset_config`, which ingestion overwrites from every DBIRTH.
+      parameters:
+        - { name: device_id, in: query, schema: { type: string, format: uuid }, description: 'e.g. `eq.<uuid>`' }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Matching nameplate rows.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DeviceNameplate' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+    post:
+      tags: [Registry]
+      summary: Record nameplate data for a device
+      description: 'Administrator or Shopfloor_Manager only. Use `Prefer: resolution=merge-duplicates` to upsert.'
+      parameters: [{ $ref: '#/components/parameters/Prefer' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeviceNameplate' }
+      responses:
+        '201': { description: Created. }
+        '403': { description: 'Caller lacks Administrator or Shopfloor_Manager.' }
 
   /rest/v1/documents:
     get:
@@ -2038,6 +2133,52 @@ components:
         datatype: { type: string, nullable: true }
         unit: { type: string, nullable: true }
         semantic_id: { type: string, nullable: true, description: 'The companion spec''s own namespace URI plus browse name — derived from something the OPC Foundation publishes, but still not a concept URI it registers.' }
+
+    ASHRAE223Concept:
+      type: object
+      readOnly: true
+      properties:
+        name: { type: string, example: Fan, description: 'The RDF local name, unique within the s223 namespace.' }
+        concept_kind: { type: string, enum: [Class, AbstractClass, Concept, Relation, EnumerationKind] }
+        label: { type: string, example: Fan }
+        description: { type: string, nullable: true }
+        subclass_of: { type: string, nullable: true, example: Equipment, description: 'Immediate s223 superclass, or null at the top of the hierarchy.' }
+        semantic_id: { type: string, example: 'http://data.ashrae.org/standard223#Fan', description: 'Issued by ASHRAE. A CHECK constrains every row to this namespace.' }
+
+    IDTASubmodelTemplateElement:
+      type: object
+      readOnly: true
+      properties:
+        template_id: { type: string, example: 'https://admin-shell.io/idta/nameplate/3/0/Nameplate' }
+        template_name: { type: string, example: Digital Nameplate }
+        template_version: { type: string, example: '3.0', description: 'Part of the identity, not metadata: 2.0 lives under admin-shell.io/zvei and 3.0 under admin-shell.io/idta.' }
+        id_short: { type: string, example: SerialNumber }
+        semantic_id: { type: string, example: '0112/2///61987#ABA951#009', description: 'Issued by IDTA, IEC CDD or ECLASS. Never minted by this deployment.' }
+        semantic_id_type: { type: string, enum: [IRI, IRDI] }
+        description: { type: string, nullable: true }
+        is_mandatory: { type: boolean, description: 'What the template requires. Descriptive only — the exporter does not claim the template.' }
+        ordinal: { type: integer, description: 'Order in the published template.' }
+
+    DeviceNameplate:
+      type: object
+      description: |
+        Operator-supplied IDTA 02006 nameplate fields for one device. Every field is optional: a
+        nameplate is filled in as it is discovered, and a partially known asset is the normal case.
+      properties:
+        device_id: { type: string, format: uuid }
+        manufacturer_name: { type: string, nullable: true }
+        manufacturer_product_designation: { type: string, nullable: true }
+        manufacturer_product_type: { type: string, nullable: true }
+        serial_number: { type: string, nullable: true, description: 'The manufacturer''s serial number. NOT sparkplug_id, which this platform issues.' }
+        year_of_construction: { type: string, nullable: true, example: '2024', description: 'Four digits. A string in IDTA''s template, not an integer.' }
+        date_of_manufacture: { type: string, format: date, nullable: true }
+        hardware_version: { type: string, nullable: true }
+        firmware_version: { type: string, nullable: true }
+        software_version: { type: string, nullable: true }
+        country_of_origin: { type: string, nullable: true }
+        uri_of_the_product: { type: string, nullable: true, description: 'Must be an absolute IRI; a bare string is rejected by a CHECK.' }
+        updated_at: { type: string, format: date-time, readOnly: true }
+        updated_by: { type: string, format: uuid, nullable: true }
 
     SparkplugAddress:
       type: object

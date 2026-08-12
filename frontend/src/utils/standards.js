@@ -17,6 +17,7 @@ export const STANDARDS = {
   MTCONNECT: 'MTConnect',
   ISO22400: 'ISO 22400',
   OPCUA: 'OPC UA',
+  ASHRAE223: 'ASHRAE 223P',
   /** A local extension. Stored as NULL, not as the string 'Custom'. */
   CUSTOM: ''
 }
@@ -41,6 +42,11 @@ export const STANDARD_OPTIONS = [
     value: STANDARDS.OPCUA,
     label: 'OPC UA',
     hint: 'Companion specification data points — OPC 40001 Machinery and OPC 40010 Robotics.'
+  },
+  {
+    value: STANDARDS.ASHRAE223,
+    label: 'ASHRAE 223P',
+    hint: 'Building systems — HVAC, electrical and the sensing around them. The standard is still in public review, so its concepts may change.'
   },
   {
     value: STANDARDS.CUSTOM,

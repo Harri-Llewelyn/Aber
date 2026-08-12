@@ -1,4 +1,4 @@
-# Factory+ Asset Tracking Platform
+# AMRC Connectivity Stack - Cymru
 
 [![CI Pipeline](https://github.com/Harri-Llewelyn/acs-cymru/actions/workflows/ci.yml/badge.svg)](https://github.com/Harri-Llewelyn/acs-cymru/actions/workflows/ci.yml)
 
@@ -133,7 +133,9 @@ docker compose up --build -d    # launches the whole stack
 Every file in `supabase/migrations/` — the schema baseline (`0001`), seed data (`0002`), and the
 later additive migrations (`0003` audit immutability, `0004`, `0005`, `0006` Node-RED SSO, `0007`
 metric-name format, `0008` Sparkplug group, `0009` withdraws the residual `anon` function grants,
-`0010` maps the telemetry rollups and the latest-value view) —
+`0010` maps the telemetry rollups and the latest-value view, `0011` adds the IDTA Digital Nameplate
+template vocabulary and per-device nameplate data, `0012` records the permitted values of a
+discrete metric, `0013` adds the ASHRAE 223P vocabulary) —
 plus demo accounts (`supabase/seed.sql`) are applied by `supabase-db-init` on startup, and
 re-applied harmlessly on every later start.
 
@@ -314,7 +316,7 @@ which is the whole reason binary storage exists here — a shell naming a model 
 would be a broken reference.
 
 > **The bucket is public-read, and that follows from what it is for.** An exported AAS `File` URL
-> must be dereferenceable by an arbitrary viewer holding no Factory+ session; a signed URL would
+> must be dereferenceable by an arbitrary viewer holding no ACS-Cymru session; a signed URL would
 > expire and turn every shell already handed out into a time bomb. So anything in this bucket is
 > readable by whoever learns its path, and must carry nothing beyond machine geometry.
 >
@@ -337,8 +339,9 @@ Known issues and accepted risks are tracked as
 | :--- | :--- |
 | **Sparkplug B** | The wire protocol. Identity is `sparkplug_id`, carried in the topic |
 | **MTConnect** (2.x) | Machine-tool vocabulary — 249 data item types, 123 subtypes, 100 units, 126 component types |
-| **OPC UA** (40001, 40010) | Machinery and robotics companion-specification data points |
+| **OPC UA** (40001, 40001-4, 40010, 30050, 40501, 40540) | Companion-specification data points: machinery, energy, robotics, PackML, machine tools and additive. Generated from the OPC Foundation NodeSets by [`scripts/generate-opcua-vocabulary.mjs`](scripts/generate-opcua-vocabulary.mjs) |
 | **ISO 22400** | Computed KPIs, which MTConnect and OPC UA deliberately exclude |
+| **ASHRAE 223P** | Building-system semantics — 640 concepts generated from the open223 ontology. ⚠ The standard is still in public review |
 | **AAS / IEC 63278** | V3 export as JSON or AASX, validated against the official IDTA schema |
 
 These are **three vocabularies, not three alternatives** — a mixed fleet needs all of them, which
@@ -349,8 +352,8 @@ is why the schema builder offers a choice rather than a migration path.
 > namespace is the honesty mechanism, and an id under `mtconnect.org` would assert an
 > interoperability that does not exist.
 
-Further vocabularies (OPC 40501, OPC 40450, OPC UA energy, PackML, ASHRAE 223P) and IDTA Submodel
-templates are planned but **not built** — the phasing, and the decisions still open, are in
+The four new OPC UA companion specifications above are **built**, as is the IDTA Digital
+Nameplate. All of the planned vocabularies are now built; the phasing and the decisions behind them are in
 [`docs/vocabulary-expansion-plan.md`](docs/vocabulary-expansion-plan.md).
 
 ---
@@ -358,7 +361,7 @@ templates are planned but **not built** — the phasing, and the decisions still
 ## Testing
 
 ```bash
-# Frontend — 735 tests
+# Frontend — 779 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required

@@ -745,6 +745,17 @@ tbody tr:hover { background: var(--bg-glass); }
   box-shadow: var(--shadow);
   animation: slideUp 0.2s ease;
   color: var(--text-primary);
+
+  /* A modal whose content is longer than the viewport used to grow past both edges: the overlay
+     centres it, so the overflow went off the TOP as well as the bottom and the title scrolled
+     out of reach entirely -- no scrollbar, nothing to grab, and on the Configuration Parameters
+     dialog (one row per modelled metric) that is the normal case rather than an edge case.
+     Capping the height here fixes every modal at once, which is right: none of them can predict
+     how much content they will be given.
+     ActionMenu portals itself to <body> precisely so a scroll container cannot clip it, so this
+     does not trap the one popup that would have been at risk. */
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
 }
 
 @keyframes slideUp {

@@ -117,6 +117,32 @@ describe('opcuaSections', () => {
     const keys = opcuaSections(vocabulary).map(s => s.key)
     expect(new Set(keys).size).toBe(keys.length)
   })
+
+  // The seed carries six companion specifications, and a section with no hint renders as a bare
+  // spec number -- readable to whoever added it and to nobody else. This is the cheapest place to
+  // notice that a seventh was seeded without one.
+  it('has a hint for every companion specification the seed carries', () => {
+    // In the order opcuaSections sorts them, which is lexical on the spec number -- so PackML's
+    // 30050 leads, ahead of the 40000-series.
+    const seeded = [
+      'OPC 30050 PackML',
+      'OPC 40001 Machinery',
+      'OPC 40001-4 Machinery Energy',
+      'OPC 40010 Robotics',
+      'OPC 40501 Machine Tools',
+      'OPC 40540 Additive Manufacturing'
+    ]
+    const sections = opcuaSections(seeded.map((companion_spec, i) => ({
+      name: `Point${i}`,
+      companion_spec,
+      node_id: `nsu=http://example.invalid/;s=Thing/Point${i}`,
+      datatype: 'Double'
+    })))
+    expect(sections.map(s => s.title)).toEqual(seeded)
+    for (const section of sections) {
+      expect(section.hint, `${section.title} has no hint`).toBeTruthy()
+    }
+  })
 })
 
 describe('dataPointByName', () => {

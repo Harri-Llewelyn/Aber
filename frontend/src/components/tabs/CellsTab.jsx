@@ -10,7 +10,6 @@ import CopyableId from '../common/CopyableId'
 import { InlineDocumentAccordion } from '../common/InlineDocumentAccordion'
 import { StatusBadge } from '../common/StatusBadge'
 import { ArchiveModal } from '../modals/ArchiveModal'
-import { DigitalThreadModal } from '../modals/DigitalThreadModal'
 import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
 import {
   IconFactory,
@@ -26,7 +25,7 @@ import {
   IconX
 } from '../common/Icons'
 
-export function CellsTab({ showToast, onSelectDevice, hasPermission, initialSearchFilter, onClearFilter }) {
+export function CellsTab({ showToast, onSelectDevice, onViewThread, hasPermission, initialSearchFilter, onClearFilter }) {
   /**
    * A cell handed over from the Overview shopfloor map arrives as `?search=<cell_id>`.
    *
@@ -51,7 +50,6 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission, initialSear
   const blank = { cell_name: '', access_url: '' }
   const [formVal, setFormVal]   = useState(blank)
   const [archiveTarget, setArchiveTarget] = useState(null)
-  const [threadFor, setThreadFor] = useState(null)
   const [docsForCell, setDocsForCell] = useState(null)
   const [docRefreshKey, setDocRefreshKey] = useState(0)
   // Document link counts for the collapsed accordion badge, keyed by cell id. `c.document_count`
@@ -330,7 +328,7 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission, initialSear
                   <button className="btn btn-ghost btn-sm" onClick={() => setDocsForCell(c)} title="View & attach external documents for this cell">
                     <IconBookOpen size={13} /> Docs
                   </button>
-                  <button className="btn btn-ghost btn-sm" onClick={() => setThreadFor(c)} title="View Digital Thread audit trace for this cell">
+                  <button className="btn btn-ghost btn-sm" onClick={() => onViewThread?.(c)} title="Open the Digital Thread audit trace for this cell">
                     <IconHistory size={13} /> Thread
                   </button>
                   {c.is_archived ? (
@@ -491,10 +489,6 @@ export function CellsTab({ showToast, onSelectDevice, hasPermission, initialSear
           entityType="cells" entityId={archiveTarget.cell_id} displayName={archiveTarget.cell_name}
           onArchive={archiveCell} onCancel={() => setArchiveTarget(null)}
         />
-      )}
-
-      {threadFor && (
-        <DigitalThreadModal entityType="cells" entityId={threadFor.cell_id} displayName={threadFor.cell_name} onClose={() => setThreadFor(null)} />
       )}
 
       {docsForCell && (

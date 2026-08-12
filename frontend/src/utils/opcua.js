@@ -107,7 +107,11 @@ export function opcuaSections(vocabulary) {
 
   const hints = {
     'OPC 40001 Machinery': 'Identification and lifecycle state common to any machine.',
-    'OPC 40010 Robotics': 'Motion device model — axes, safety states and task control.'
+    'OPC 40010 Robotics': 'Motion device model — axes, safety states and task control.',
+    'OPC 40001-4 Machinery Energy': 'Utility flow measurements — compressed air, water and gas.',
+    'OPC 40501 Machine Tools': 'Channel overrides and state, spindles, production counters and tool management.',
+    'OPC 40540 Additive Manufacturing': 'Feedstock condition and in-process sensor readings.',
+    'OPC 30050 PackML': 'Unit status, mode, and the state and mode time accumulators.'
   }
 
   return [...buckets.keys()].sort().map(key => ({

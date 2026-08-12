@@ -52,10 +52,21 @@ UNASSIGNED_ELEMENT_ID = "i3x:unassigned"
 # true because the transport changed.
 NS_LOCAL = "https://factoryplus.local/i3x"
 NS_RELATIONSHIPS = "https://factoryplus.local/i3x/relationships"
+
+# THE KEYS ARE `metric_catalog.standard` VALUES, VERBATIM, and that is the whole contract. They are
+# the strings in frontend/src/utils/standards.js `STANDARDS` -- spaces, not hyphens. `namespaces()`
+# looks them up and SKIPS anything it cannot resolve, so a key that does not match the column drops
+# a whole vocabulary out of GET /namespaces with no error anywhere: the endpoint answers 200 with a
+# shorter list, which reads as "this deployment does not use that standard" rather than as a bug.
+# `ISO-22400` and `OPC-UA` were spelled that way here and matched nothing for exactly that reason.
+# test_standard_namespaces_cover_every_known_standard pins them against standards.js.
 STANDARD_NAMESPACES = {
     "MTConnect": "https://mtconnect.org/v2.0",
-    "ISO-22400": "https://factoryplus.local/semantics/iso22400",
-    "OPC-UA": "https://opcfoundation.org/UA",
+    "ISO 22400": "https://factoryplus.local/semantics/iso22400",
+    "OPC UA": "https://opcfoundation.org/UA",
+    # Issued by ASHRAE, not minted here -- migration 0013 CHECKs that every seeded id sits under
+    # this namespace.
+    "ASHRAE 223P": "http://data.ashrae.org/standard223#",
 }
 
 # Synthetic ObjectTypes for the three levels that have no `schemas` row. Cells and gateways are

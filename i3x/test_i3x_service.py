@@ -447,5 +447,62 @@ class TestMirroredConstants(unittest.TestCase):
         self.assertIn("MAX_ALIASES_PER_NODE", mine)
 
 
+class TestStandardNamespaces(unittest.TestCase):
+    """
+    `STANDARD_NAMESPACES` is keyed on `metric_catalog.standard`, and a key that does not match the
+    column fails SILENTLY -- `namespaces()` skips what it cannot resolve, so the endpoint answers
+    200 with a shorter list. Nothing raises, nothing logs, and the omission reads as "this
+    deployment does not use that standard".
+
+    That is not hypothetical: the keys were `ISO-22400` and `OPC-UA` while the column has held
+    `ISO 22400` and `OPC UA` since 0030/0031, so two of the three vocabularies were missing from
+    GET /namespaces. Adding a vocabulary is the moment this recurs, which is why the second test
+    pins the key set against the frontend's canonical list rather than against a literal here.
+    """
+
+    def test_namespaces_emit_every_standard_in_use(self):
+        result = A.namespaces({"MTConnect", "ISO 22400", "OPC UA"})
+        uris = {n["uri"] for n in result}
+        self.assertIn(A.NS_LOCAL, uris)
+        self.assertIn(A.NS_RELATIONSHIPS, uris)
+        for standard in ("MTConnect", "ISO 22400", "OPC UA"):
+            self.assertIn(
+                A.STANDARD_NAMESPACES[standard],
+                uris,
+                f"{standard!r} is in use but contributed no namespace to GET /namespaces",
+            )
+
+    def test_unknown_standard_is_skipped_rather_than_invented(self):
+        # A standard with no registered URI must not fall back to the local namespace: that would
+        # assert this deployment minted the concept, which is the opposite of what provenance means.
+        result = A.namespaces({"Not A Standard"})
+        self.assertEqual(
+            [n["uri"] for n in result],
+            [A.NS_LOCAL, A.NS_RELATIONSHIPS],
+        )
+
+    def test_standard_namespaces_cover_every_known_standard(self):
+        import re
+
+        here = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(here, "..", "frontend", "src", "utils", "standards.js")
+        src = open(path, encoding="utf-8").read()
+        block = re.search(r"export const STANDARDS = \{(.*?)\}", src, re.S)
+        self.assertIsNotNone(block, "STANDARDS not found in standards.js")
+        # Key/value lines only. A bare `'([^']*)'` would also match the quoted word in the comment
+        # that documents the CUSTOM entry.
+        values = re.findall(r"^\s*[A-Z0-9_]+:\s*'([^']*)'", block.group(1), re.M)
+        self.assertTrue(values, "no STANDARDS values parsed from standards.js")
+        for value in values:
+            if not value:
+                continue  # CUSTOM is stored as NULL -- it is the absence of a standard.
+            self.assertIn(
+                value,
+                A.STANDARD_NAMESPACES,
+                f"{value!r} is offered as a standard but has no i3X namespace, so metrics carrying "
+                f"it would be dropped from GET /namespaces",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

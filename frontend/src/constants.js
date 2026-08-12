@@ -24,7 +24,8 @@ export const PERMISSION_UUIDS = {
 };
 
 export const VALID_TABS = [
-  'overview', 'cells', 'gateways', 'devices', 'digital-thread', 'schemas', 'directory', 'archives'
+  'overview', 'cells', 'gateways', 'devices', 'digital-thread', 'schemas', 'vocabulary', 'directory',
+  'archives'
 ];
 
 export const PERSONAS = [

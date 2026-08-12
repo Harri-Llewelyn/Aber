@@ -13,7 +13,6 @@ import { TagList } from '../common/TagList'
 import { InlineDocumentAccordion } from '../common/InlineDocumentAccordion'
 import { StatusBadge } from '../common/StatusBadge'
 import { ArchiveModal } from '../modals/ArchiveModal'
-import { DigitalThreadModal } from '../modals/DigitalThreadModal'
 import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
 import {
   IconRadio,
@@ -28,7 +27,7 @@ import {
   IconX
 } from '../common/Icons'
 
-export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onClearFilter, onBugReport }) {
+export function GatewaysTab({ showToast, onViewThread, hasPermission, initialSearchFilter, onClearFilter, onBugReport }) {
   const [gateways, setGateways] = useState([])
   const [assets, setAssets]     = useState([])
   const [cells, setCells]       = useState([])
@@ -42,7 +41,6 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
   // gateway is usually site-wide, but conflating them would relocate assets on a checkbox.
   const blank = { gateway_id: '', gateway_name: '', status: 'OFFLINE', is_virtual: false, access_url: '', cell_id: '', location_scope: SCOPE_CELL }
   const [form, setForm]         = useState(blank)
-  const [threadFor, setThreadFor] = useState(null)
   const [docsForGw, setDocsForGw] = useState(null)
   const [docRefreshKey, setDocRefreshKey] = useState(0)
   const [filterMode, setFilterMode] = useState('all')
@@ -441,8 +439,8 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
                                    key: 'thread',
                                    icon: <IconHistory size={13} />,
                                    label: 'Digital Thread',
-                                   title: 'View gateway Digital Thread audit trace',
-                                   onClick: () => setThreadFor(g)
+                                   title: 'Open the Digital Thread audit trace for this gateway',
+                                   onClick: () => onViewThread?.(g)
                                  },
                                  { separator: true },
                                  // Archive only: Restore is promoted into the row above, so the
@@ -592,10 +590,6 @@ export function GatewaysTab({ showToast, hasPermission, initialSearchFilter, onC
           entityType="gateways" entityId={archiveTarget.gateway_id} displayName={archiveTarget.gateway_name}
           onArchive={archiveGateway} onCancel={() => setArchiveTarget(null)}
         />
-      )}
-
-      {threadFor && (
-        <DigitalThreadModal entityType="gateways" entityId={threadFor.gateway_id} displayName={threadFor.gateway_name} onClose={() => setThreadFor(null)} />
       )}
 
       {docsForGw && (

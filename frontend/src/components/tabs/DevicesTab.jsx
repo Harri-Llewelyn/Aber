@@ -20,7 +20,7 @@ import { QuarantinePayloadCell } from '../common/QuarantinePayloadCell'
 import { ApproveQuarantineModal } from '../modals/ApproveQuarantineModal'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { AssetConfigModal } from '../modals/AssetConfigModal'
-import { DigitalThreadModal } from '../modals/DigitalThreadModal'
+import { DeviceNameplateModal } from '../modals/DeviceNameplateModal'
 import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
 import { TelemetryExportModal } from '../modals/TelemetryExportModal'
 import { isProvisioningOverdue, isNeverSeen } from '../../utils/deviceProvisioning'
@@ -29,7 +29,8 @@ import {
   resolveDeviceLocation, needsCellAssignment, unassignedHint
 } from '../../utils/cellResolution'
 import {
-  unmodelledMetrics, schemasForDevice, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG
+  unmodelledMetrics, schemasForDevice, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG,
+  OUT_OF_VOCABULARY_TAG
 } from '../../utils/deviceTags'
 import { suggestMatches } from '../../utils/quarantineMatching'
 import {
@@ -53,7 +54,7 @@ import {
 const CELL_FILTER_UNASSIGNED = '__unassigned__'
 const CELL_FILTER_SITE_WIDE = '__site_wide__'
 
-export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter }) {
+export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter }) {
   const [assets, setAssets]     = useState([])
   const [cells, setCells]       = useState([])
   const [gateways, setGateways] = useState([])
@@ -65,12 +66,16 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
   const [approveItem, setApproveItem] = useState(null)
   const [archiveTarget, setArchiveTarget] = useState(null)
   const [configAsset, setConfigAsset] = useState(null)
-  const [threadFor, setThreadFor] = useState(null)
+  const [nameplateFor, setNameplateFor] = useState(null)
   const [docsForDevice, setDocsForDevice] = useState(null)
   const [docRefreshKey, setDocRefreshKey] = useState(0)
   // Document link counts for the collapsed accordion badge, keyed by device id. One request for
   // the whole page -- /api/v1/documents accepts entity_type on its own.
   const [docCounts, setDocCounts] = useState({})
+  // sparkplug_id -> { metric_name: last value }, for the Out-of-vocabulary finding. Keyed on the
+  // WIRE identity, not the row id: telemetry.asset_id is the sparkplug_id.
+  const [latestBySparkplugId, setLatestBySparkplugId] = useState(new Map())
+  const [catalog, setCatalog] = useState([])
   // { device, metricNames } while the telemetry CSV export dialog is open.
   const [exportTelemetry, setExportTelemetry] = useState(null)
   // No asset_type: a device's classification is now derived from the metric groups its schema
@@ -104,6 +109,45 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
       .catch(() => {})
     return () => { cancelled = true }
   }, [docRefreshKey])
+
+  /**
+   * Latest reported value per (device, metric), plus the catalog that says which values are legal.
+   *
+   * DELIBERATELY OUTSIDE loadAll(), which runs on a 3s poll and on every Realtime event. This
+   * finding compares a last-known value against a vocabulary; neither side moves fast enough to
+   * justify re-reading the whole fleet's telemetry at that rate, and `telemetry_latest` is a view
+   * over the hypertable rather than a cheap table scan.
+   *
+   * Non-fatal: a failure leaves the finding unavailable rather than failing the device list, and
+   * deviceTagList treats "no telemetry loaded" as "no finding" rather than as a clean bill.
+   */
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([
+      api.get('/api/v1/telemetry/latest?minutes=1440'),
+      api.get('/api/v1/metric-catalog')
+    ])
+      .then(([rows, cat]) => {
+        if (cancelled) return
+        const byAsset = new Map()
+        for (const row of rows || []) {
+          const key = row.asset_id
+          if (!byAsset.has(key)) byAsset.set(key, {})
+          // telemetry_latest splits the value across three typed columns, as asset_config does.
+          // `??` rather than `||`, so a legitimate 0 or false is not read as "no value".
+          byAsset.get(key)[row.metric_name] =
+            row.val_string ?? row.val_double ?? row.val_bool ?? null
+        }
+        setLatestBySparkplugId(byAsset)
+        setCatalog(cat || [])
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [docRefreshKey])
+
+  /** This device's last reported values, keyed the way telemetry keys them. */
+  const latestFor = (device) =>
+    latestBySparkplugId.get(effectiveSparkplugId(device)) || null
 
   const getInitialSearch = () => {
     const params = new URLSearchParams(window.location.search)
@@ -435,7 +479,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
     // Matches either the legacy 1:1 column or any attached submodel, so a device filtered by
     // schema is found however it was provisioned.
     if (schemaFilter && !schemasForDevice(a, schemas).some(s => s.schema_uuid === schemaFilter)) return false
-    if (tagFilter && !deviceHasTag(a, schemasForDevice(a, schemas), tagFilter)) return false
+    if (tagFilter && !deviceHasTag(a, schemasForDevice(a, schemas), tagFilter, latestFor(a), catalog)) return false
     if (gatewayFilter && (a.active_gateway_id || '') !== gatewayFilter) return false
     // The resolved cell, not the explicit override -- filtering on cell_id would match only
     // devices someone had explicitly filed and silently hide every inherited one. The two
@@ -472,7 +516,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
   // number disagree with the rows shown the moment the filter is switched on, and would
   // double-count every pending device across the two badges.
   const attentionCount = assets.filter(a => !a.is_quarantined && needsAttention(a)).length
-  const tagOptions = availableTags(assets, schemas)
+  const tagOptions = availableTags(assets, schemas, latestFor, catalog)
   const activeFilterCount =
     [schemaFilter, statusFilter, tagFilter, gatewayFilter, cellFilter, searchQuery].filter(Boolean).length +
     (attentionOnly ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
@@ -488,7 +532,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
               most likely wants. Projected in explicitly. */}
           <button className="btn btn-ghost btn-sm" onClick={() => downloadCSV(filteredAssets.map(a => ({
             ...a,
-            device_tags: deviceTagList(a, schemasForDevice(a, schemas)).join(' ')
+            device_tags: deviceTagList(a, schemasForDevice(a, schemas), latestFor(a), catalog).join(' ')
           })), 'devices-export.csv')} title="Download the filtered devices list as CSV"><IconDownload size={13} /> Export CSV</button>
           <button
             className={`btn btn-primary ${!canManage ? 'btn-disabled' : ''}`}
@@ -719,7 +763,7 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                         <td>
                           {(() => {
                             const schema = schemasForDevice(a, schemas)
-                            const tags = deviceTagList(a, schema)
+                            const tags = deviceTagList(a, schema, latestFor(a), catalog)
                             const extra = unmodelledMetrics(a, schema)
                             if (tags.length === 0 && !a.asset_type) return '—'
 
@@ -849,8 +893,13 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                                   key: 'thread',
                                   icon: <IconHistory size={13} />,
                                   label: 'Digital Thread',
-                                  title: 'View device Digital Thread audit trace',
-                                  onClick: () => setThreadFor(a)
+                                  // Navigates to the Digital Thread page filtered to this device
+                                  // rather than opening a second, smaller copy of it in a dialog.
+                                  // The page has the export, the auto-refresh and the action
+                                  // filters; the modal had none of them and could not be widened
+                                  // without becoming the page.
+                                  title: 'Open the Digital Thread audit trace for this device',
+                                  onClick: () => onViewThread?.(a)
                                 },
                                 {
                                   key: 'config',
@@ -871,6 +920,17 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
                                    inside a real one it is just two actions. Available to every
                                    role that can see the device -- an export is a read, and handing
                                    a partner a shell is the point. */
+                                // Sits directly above the two exports on purpose: it is the only
+                                // thing in this menu that changes what they contain.
+                                {
+                                  key: 'nameplate',
+                                  icon: <IconClipboardList size={13} />,
+                                  label: 'Digital Nameplate…',
+                                  title: canManage
+                                    ? "Manufacturer, serial number and versions — exported in this device's AAS"
+                                    : 'View this device\'s nameplate (editing requires Admin permissions)',
+                                  onClick: () => setNameplateFor(a)
+                                },
                                 {
                                   key: 'export-json',
                                   icon: <IconDownload size={13} />,
@@ -1166,7 +1226,14 @@ export function DevicesTab({ showToast, onSelectDevice, hasPermission, initialSe
           onClose={() => setConfigAsset(null)}
         />
       )}
-      {threadFor && <DigitalThreadModal entityType="devices" entityId={threadFor.asset_id} displayName={threadFor.asset_name} onClose={() => setThreadFor(null)} />}
+      {nameplateFor && (
+        <DeviceNameplateModal
+          asset={nameplateFor}
+          canManage={canManage}
+          showToast={showToast}
+          onClose={() => setNameplateFor(null)}
+        />
+      )}
       {docsForDevice && (
         <EntityDocumentsModal entityType="device" entityId={docsForDevice.asset_id} entityName={docsForDevice.asset_name} onClose={() => { setDocsForDevice(null); setDocRefreshKey(k => k + 1) }} showToast={showToast} hasPermission={hasPermission} />
       )}

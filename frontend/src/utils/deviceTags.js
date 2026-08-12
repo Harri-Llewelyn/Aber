@@ -162,36 +162,110 @@ export function deviceGroupTags(device, schemaOrSchemas) {
   return [...groups].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
 }
 
+/** The tag applied to a device reporting a value outside its metric's declared vocabulary. */
+export const OUT_OF_VOCABULARY_TAG = 'Out of vocabulary'
+
+/**
+ * Metrics whose last reported value is not in the vocabulary their catalog entry declares.
+ *
+ * DERIVED, NEVER STORED -- same as Unmodelled above, gateway staleness and resolved device
+ * location. Nothing writes this and no migration records it: it is a comparison between two things
+ * already on screen, and the moment it were stored it could disagree with either.
+ *
+ * The failure it makes visible is a quiet one. A device publishing `RUNNING` where MTConnect says
+ * `ACTIVE` sends a valid string in a valid DDATA against a real metric, so ingestion accepts it,
+ * the historian stores it, and a dashboard renders it -- and every downstream consumer that keys
+ * on the state is silently wrong. This actually happened here: the Node-RED demo flow set
+ * `Controller/EXECUTION` to `RUNNING`, a value MTConnect does not define.
+ *
+ * `latestValues` is `metric_name -> last reported value` for this device, from `telemetry_latest`.
+ * Absent or empty means no finding -- "we have not looked" and "we looked and it is fine" are
+ * different, and only the second deserves a clean bill.
+ *
+ * A metric with no `permitted_values` is unconstrained and never contributes: most metrics are,
+ * and every continuous SAMPLE is.
+ */
+export function outOfVocabularyMetrics(latestValues, catalog) {
+  if (!latestValues || !catalog) return []
+  const entries = latestValues instanceof Map ? [...latestValues] : Object.entries(latestValues)
+  if (entries.length === 0) return []
+
+  const domains = new Map()
+  for (const metric of catalog) {
+    const permitted = metric?.permitted_values
+    if (Array.isArray(permitted) && permitted.length > 0) domains.set(metric.name, permitted)
+  }
+  if (domains.size === 0) return []
+
+  const findings = []
+  for (const [name, value] of entries) {
+    const permitted = domains.get(name)
+    if (!permitted) continue
+    // Nothing reported is not a violation; it is the absence of evidence either way.
+    if (value === null || value === undefined || value === '') continue
+    // Compared as strings because a discrete Sparkplug metric is published as one, and the
+    // vocabulary is a list of strings. A numeric enum would compare on its rendered form, which
+    // is what the historian holds anyway.
+    if (!permitted.includes(String(value))) {
+      findings.push({ name, value: String(value), permitted })
+    }
+  }
+  return findings.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+}
+
+/** True when at least one of the device's last reported values is outside its vocabulary. */
+export function hasOutOfVocabularyValues(latestValues, catalog) {
+  return outOfVocabularyMetrics(latestValues, catalog).length > 0
+}
+
 /**
  * Every tag a device carries: its schema's metric groups, plus `Unmodelled` when it declared
- * metrics outside that schema. Ordered with Unmodelled last, since it is a finding rather than
- * a classification.
+ * metrics outside that schema, plus `Out of vocabulary` when it reported a value its metric does
+ * not permit. Ordered with the two findings last, since they are findings rather than
+ * classifications.
+ *
+ * `latestValues` and `catalog` are optional: a caller that has not loaded telemetry gets the tags
+ * it can actually justify rather than a silently absent finding.
  */
-export function deviceTagList(device, schemaOrSchemas) {
+export function deviceTagList(device, schemaOrSchemas, latestValues, catalog) {
   const tags = deviceGroupTags(device, schemaOrSchemas)
-  return hasUnmodelledMetrics(device, schemaOrSchemas) ? [...tags, UNMODELLED_TAG] : tags
+  if (hasUnmodelledMetrics(device, schemaOrSchemas)) tags.push(UNMODELLED_TAG)
+  if (hasOutOfVocabularyValues(latestValues, catalog)) tags.push(OUT_OF_VOCABULARY_TAG)
+  return tags
 }
 
 /** Whether a device carries a given tag. */
-export function deviceHasTag(device, schemaOrSchemas, tag) {
+export function deviceHasTag(device, schemaOrSchemas, tag, latestValues, catalog) {
   if (!tag) return true
-  return deviceTagList(device, schemaOrSchemas).includes(tag)
+  return deviceTagList(device, schemaOrSchemas, latestValues, catalog).includes(tag)
 }
 
 /**
  * Every tag present across a fleet, for populating a filter. Unmodelled is offered only when at
  * least one device actually has it -- an empty finding is not worth a filter option.
  */
-export function availableTags(devices, schemas) {
+/**
+ * `latestFor` is a FUNCTION from device to its last reported values, not a map, because telemetry
+ * is keyed on `sparkplug_id` while a device row is keyed on its uuid. Passing the map would put
+ * that mismatch in every caller, and getting it wrong produces no finding rather than an error --
+ * a filter option that silently never appears.
+ */
+export function availableTags(devices, schemas, latestFor, catalog) {
   const groups = new Set()
   let anyUnmodelled = false
+  let anyOutOfVocabulary = false
 
   for (const device of devices || []) {
     const attached = schemasForDevice(device, schemas)
     for (const tag of deviceGroupTags(device, attached)) groups.add(tag)
     if (!anyUnmodelled && hasUnmodelledMetrics(device, attached)) anyUnmodelled = true
+    if (!anyOutOfVocabulary && typeof latestFor === 'function') {
+      anyOutOfVocabulary = hasOutOfVocabularyValues(latestFor(device), catalog)
+    }
   }
 
   const sorted = [...groups].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-  return anyUnmodelled ? [...sorted, UNMODELLED_TAG] : sorted
+  if (anyUnmodelled) sorted.push(UNMODELLED_TAG)
+  if (anyOutOfVocabulary) sorted.push(OUT_OF_VOCABULARY_TAG)
+  return sorted
 }
