@@ -8,10 +8,14 @@
  * a blank author now means a genuine gap rather than "a machine did something routine".
  */
 import React from 'react'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
 import { DigitalThreadTab } from '../components/tabs/DigitalThreadTab'
 import { api } from '../api'
+
+const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -124,7 +128,16 @@ describe('Digital Thread attribution', () => {
 
     // The operator recognises the machine, not its UUID.
     expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument()
-    expect(screen.getByText('[dev-1]')).toBeInTheDocument()
+    // The id is a CopyableId button now, not a bracketed span -- it is the value carried out of
+    // this page into a query or a ticket, and selecting it by hand was the only way to get it.
+    expect(screen.getByRole('button', { name: /Copy entity id dev-1/ })).toBeInTheDocument()
+  })
+
+  it('offers the audit row its own id, distinct from the entity it touched', async () => {
+    // Two edits a second apart on the same device are one entity id and two mutation ids, so
+    // quoting the entity does not identify the change being talked about.
+    await show()
+    expect(screen.getByRole('button', { name: /Copy mutation id 1$/ })).toBeInTheDocument()
   })
 
   it('labels a user-made change as User', async () => {
@@ -160,8 +173,25 @@ describe('Digital Thread — removed tag filter', () => {
   it('leaves exactly three filter controls', async () => {
     await show()
 
-    const controls = document.querySelectorAll('.filter-bar select, .filter-bar input')
+    // Direct children only. Export and auto-refresh now fold into the right-hand end of this
+    // same bar (`.filter-bar-actions`), and the refresh interval is a <select> -- so a
+    // descendant selector would count a control that filters nothing and this guard would be
+    // asserting the wrong thing.
+    const controls = document.querySelectorAll('.filter-bar > select, .filter-bar > input')
     expect(controls.length).toBe(3)
+  })
+
+  it('folds export and auto-refresh into the filter bar rather than a row of their own', async () => {
+    // What the export writes is decided by the filters, so the button belongs at the end of the
+    // row that decides it. Removing the separate `.page-actions` row is also a whole band of
+    // vertical space off the top of the page.
+    await show()
+
+    expect(document.querySelector('.page-actions')).toBeNull()
+    const actions = document.querySelector('.filter-bar .filter-bar-actions')
+    expect(actions).toBeTruthy()
+    expect(within(actions).getByTitle('Download audit events as CSV')).toBeInTheDocument()
+    expect(within(actions).getByTitle('Auto-refresh interval')).toBeInTheDocument()
   })
 
   it('no longer fetches schemas, which it needed only to derive tags', async () => {
@@ -175,5 +205,28 @@ describe('Digital Thread — removed tag filter', () => {
     fireEvent.change(screen.getByPlaceholderText(/Search by entity name or ID/), { target: { value: 'Press' } })
 
     await waitFor(() => expect(lastThreadUrl()).toContain('entity_ids=dev-2'))
+  })
+})
+
+/**
+ * Timeline density.
+ *
+ * This page renders up to 200 audit rows and each is a bordered box: at 16px between boxes and
+ * 14px of padding inside them, the separation was being paid for three times over -- margin,
+ * border and padding all saying the same thing. jsdom does no layout, so the numbers are read
+ * from App.css; the point of guarding them is that "tighten the spacing" is the kind of change
+ * that gets reverted by the next person who finds the page cramped without knowing it holds 200
+ * rows rather than a dozen.
+ */
+describe('Digital Thread timeline density', () => {
+  const rule = (selector) =>
+    APP_CSS.match(new RegExp(`\\n${selector.replace(/[.:()\\-]/g, '\\$&')} \\{([\\s\\S]*?)\\n\\}`))?.[1]
+
+  it('keeps the gap between events to 10px', () => {
+    expect(rule('.timeline-item')).toMatch(/margin-bottom:\s*10px/)
+  })
+
+  it('keeps the padding inside an event to 10px', () => {
+    expect(rule('.timeline-content')).toMatch(/padding:\s*10px/)
   })
 })

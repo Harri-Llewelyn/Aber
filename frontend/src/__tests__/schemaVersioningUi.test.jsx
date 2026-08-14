@@ -62,15 +62,39 @@ const renderTab = (canManage = true) => render(
   <SchemasTab showToast={showToast} hasPermission={() => canManage} onSelectSchema={vi.fn()} />
 )
 
-/** The registry table is the last table on the page; the catalog is the first. */
-const registryTable = () => {
-  const tables = document.querySelectorAll('table')
-  return tables[tables.length - 1]
+/**
+ * Located by its heading, not by its position on the page.
+ *
+ * These used to be `document.querySelector('table')` and `tables[tables.length - 1]` -- the first
+ * table was the catalog and the last was the registry. Then the two cards swapped order, and every
+ * assertion in both files silently pointed at the wrong table. Naming what is wanted costs one
+ * helper and cannot rot that way.
+ */
+const cardTable = (heading) => {
+  const title = [...document.querySelectorAll('.card-header .section-title')]
+    .find(h => h.textContent.includes(heading))
+  return title?.closest('.card')?.querySelector('table')
 }
+
+const registryTable = () => cardTable('Registered Schemas')
 
 const rowFor = (name) => {
   const cell = within(registryTable()).getByText(name)
   return cell.closest('tr')
+}
+
+/**
+ * Select a schema row and return its context panel.
+ *
+ * The Actions column is gone: View / Edit Draft / Create Version / More all moved into the
+ * right-hand drawer, so the row now carries identity and state and the panel carries what you can
+ * DO about it. These assertions moved with them -- the rules being checked (a published version is
+ * never editable, a lineage holds one draft, a fork is blocked with a reason rather than hidden)
+ * are unchanged; only where they are rendered has moved.
+ */
+const panelFor = (name) => {
+  fireEvent.click(within(registryTable()).getByText(name))
+  return within(document.querySelector('.context-panel'))
 }
 
 beforeEach(() => {
@@ -111,12 +135,12 @@ describe('Registry — read-only protections and status badges', () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
-    const row = rowFor('Robot_Arm_Schema')
-    expect(within(row).getByText('View')).toBeTruthy()
+    const panel = panelFor('Robot_Arm_Schema')
+    expect(panel.getByText('View Schema Detail')).toBeTruthy()
     // Not a disabled Edit button: editing an active schema is not a thing that can be done,
     // permissions notwithstanding, so the shape of the action is never offered.
-    expect(within(row).queryByText('Edit Draft')).toBeNull()
-    expect(within(row).getByText(/Create Version \(v2\)/)).toBeTruthy()
+    expect(panel.queryByText('Edit Draft')).toBeNull()
+    expect(panel.getByText(/Create Version \(v2\)/)).toBeTruthy()
   })
 
   it('shows the change description in the registry', async () => {
@@ -129,7 +153,7 @@ describe('Registry — read-only protections and status badges', () => {
     renderTab(false)
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
-    const button = within(rowFor('Robot_Arm_Schema')).getByTitle('Requires Admin permissions')
+    const button = panelFor('Robot_Arm_Schema').getByTitle('Requires Admin permissions')
     expect(button.disabled).toBe(true)
   })
 
@@ -138,7 +162,7 @@ describe('Registry — read-only protections and status badges', () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
-    const button = within(rowFor('Robot_Arm_Schema')).getByTitle(
+    const button = panelFor('Robot_Arm_Schema').getByTitle(
       'A draft (Robot_Arm_Schema_v2) already exists — publish or discard it first'
     )
     expect(button.disabled).toBe(true)
@@ -151,11 +175,13 @@ describe('Registry — draft rows', () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
 
-    const row = rowFor('Robot_Arm_Schema_v2')
-    expect(within(row).getByText('v2 · Draft')).toBeTruthy()
-    expect(within(row).getByText('Edit Draft')).toBeTruthy()
+    // The badge stays on the row -- it is state, not an action.
+    expect(within(rowFor('Robot_Arm_Schema_v2')).getByText('v2 · Draft')).toBeTruthy()
+
+    const panel = panelFor('Robot_Arm_Schema_v2')
+    expect(panel.getByText('Edit Draft')).toBeTruthy()
     // A draft is not the lineage head, so it cannot itself be forked.
-    expect(within(row).queryByText(/Create Version/)).toBeNull()
+    expect(panel.queryByText(/Create Version/)).toBeNull()
   })
 })
 
@@ -164,7 +190,7 @@ describe('Forking — the change description prompt', () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
-    fireEvent.click(within(rowFor('Robot_Arm_Schema')).getByText(/Create Version \(v2\)/))
+    fireEvent.click(panelFor('Robot_Arm_Schema').getByText(/Create Version \(v2\)/))
 
     expect(screen.getByText('Create Version v2')).toBeTruthy()
     expect(screen.getByLabelText(/Change Description/)).toBeTruthy()
@@ -177,7 +203,7 @@ describe('Forking — the change description prompt', () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
-    fireEvent.click(within(rowFor('Robot_Arm_Schema')).getByText(/Create Version \(v2\)/))
+    fireEvent.click(panelFor('Robot_Arm_Schema').getByText(/Create Version \(v2\)/))
     fireEvent.change(screen.getByLabelText(/Change Description/), {
       target: { value: 'Added spindle temperature threshold' }
     })
@@ -199,7 +225,7 @@ describe('Forking — the change description prompt', () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
-    fireEvent.click(within(rowFor('Robot_Arm_Schema')).getByText(/Create Version \(v2\)/))
+    fireEvent.click(panelFor('Robot_Arm_Schema').getByText(/Create Version \(v2\)/))
     fireEvent.click(screen.getByText('Create Draft v2'))
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
@@ -232,19 +258,20 @@ describe('Downloading a version definition', () => {
   const downloadedText = () => captured[0].text()
 
   const clickRowDownload = async (name) => {
-    fireEvent.click(within(rowFor(name)).getByTitle('More'))
-    await waitFor(() => expect(screen.getByText('Download definition (JSON)')).toBeTruthy())
-    fireEvent.click(screen.getByText('Download definition (JSON)'))
+    fireEvent.click(panelFor(name).getByText('Download Definition (JSON)'))
   }
 
-  it('offers the download from the row overflow menu, not as a third button', async () => {
+  it('offers the download from the context panel, not from the row', async () => {
+    // It was the only item behind the row's "More" menu. With the Actions column gone, a
+    // three-dot menu holding one entry would have been a click to reveal a click, so the
+    // download became a direct panel action instead.
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
     const row = rowFor('Robot_Arm_Schema')
-    // Two primary controls visible; the rest behind "More" -- the Devices/Gateways row shape.
-    expect(within(row).queryByText('Download definition (JSON)')).toBeNull()
-    expect(within(row).getByTitle('More')).toBeTruthy()
+    expect(within(row).queryByText(/Download/i)).toBeNull()
+    expect(within(row).queryByTitle('More')).toBeNull()
+    expect(panelFor('Robot_Arm_Schema').getByText('Download Definition (JSON)')).toBeTruthy()
   })
 
   it('writes the stored definition verbatim, with no injected wrapper or title', async () => {
@@ -306,8 +333,7 @@ describe('Downloading a version definition', () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
 
-    fireEvent.click(within(rowFor('Robot_Arm_Schema')).getByTitle('More'))
-    const item = screen.getByText('Download definition (JSON)').closest('button')
+    const item = panelFor('Robot_Arm_Schema').getByText('Download Definition (JSON)').closest('button')
     expect(item.disabled).toBe(true)
     expect(item.getAttribute('title')).toBe('This version has no definition to download')
   })
@@ -315,7 +341,7 @@ describe('Downloading a version definition', () => {
   it('offers the download as a visible button inside the detail modal', async () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
-    fireEvent.click(within(rowFor('Robot_Arm_Schema')).getByText('View'))
+    fireEvent.click(panelFor('Robot_Arm_Schema').getByText('View Schema Detail'))
 
     const modal = document.querySelector('.modal')
     fireEvent.click(within(modal).getByText('Download JSON'))
@@ -328,7 +354,7 @@ describe('Downloading a version definition', () => {
     schemaRows = [V1, DRAFT_V2]
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
-    fireEvent.click(within(rowFor('Robot_Arm_Schema_v2')).getByText('Edit Draft'))
+    fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('Edit Draft'))
 
     const modal = document.querySelector('.modal')
     fireEvent.click(within(modal).getByLabelText('Systems/SPINDLE_TEMPERATURE'))
@@ -343,7 +369,7 @@ describe('Detail modal — read-only vs draft', () => {
   it('renders a published version as a list, with no metric checkboxes', async () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
-    fireEvent.click(within(rowFor('Robot_Arm_Schema')).getByText('View'))
+    fireEvent.click(panelFor('Robot_Arm_Schema').getByText('View Schema Detail'))
 
     // Scoped to the modal: the badge is deliberately on the row too, so an unscoped query
     // matches twice and would pass for the wrong reason.
@@ -358,7 +384,7 @@ describe('Detail modal — read-only vs draft', () => {
   it('shows the change description prominently on a published version', async () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
-    fireEvent.click(within(rowFor('Robot_Arm_Schema')).getByText('View'))
+    fireEvent.click(panelFor('Robot_Arm_Schema').getByText('View Schema Detail'))
 
     const modal = document.querySelector('.modal')
     expect(within(modal).getByText('Change Description')).toBeTruthy()
@@ -372,7 +398,7 @@ describe('Detail modal — read-only vs draft', () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
 
-    fireEvent.click(within(rowFor('Robot_Arm_Schema_v2')).getByText('Edit Draft'))
+    fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('Edit Draft'))
 
     // Add a metric the forked definition did not carry.
     fireEvent.click(screen.getByLabelText('Systems/SPINDLE_TEMPERATURE'))
@@ -395,7 +421,7 @@ describe('Detail modal — read-only vs draft', () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
 
-    fireEvent.click(within(rowFor('Robot_Arm_Schema_v2')).getByText('Edit Draft'))
+    fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('Edit Draft'))
     fireEvent.click(screen.getByLabelText('Systems/SPINDLE_TEMPERATURE'))
     fireEvent.click(screen.getByText('Publish Version v2'))
 
@@ -409,7 +435,7 @@ describe('Detail modal — read-only vs draft', () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
 
-    fireEvent.click(within(rowFor('Robot_Arm_Schema_v2')).getByText('Edit Draft'))
+    fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('Edit Draft'))
     fireEvent.click(screen.getByLabelText('Systems/SPINDLE_TEMPERATURE'))
     fireEvent.click(screen.getByText('Publish Version v2'))
 
@@ -422,7 +448,7 @@ describe('Detail modal — read-only vs draft', () => {
     schemaRows = [ARCHIVED_V1, ACTIVE_V2]
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
-    fireEvent.click(within(rowFor('Robot_Arm_Schema_v2')).getByText('View'))
+    fireEvent.click(panelFor('Robot_Arm_Schema_v2').getByText('View Schema Detail'))
 
     const modal = document.querySelector('.modal')
     expect(within(modal).getByText(/Version History/)).toBeTruthy()
@@ -433,7 +459,7 @@ describe('Detail modal — read-only vs draft', () => {
   it('omits the history heading for a schema nobody has versioned', async () => {
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema')).toBeTruthy())
-    fireEvent.click(within(rowFor('Robot_Arm_Schema')).getByText('View'))
+    fireEvent.click(panelFor('Robot_Arm_Schema').getByText('View Schema Detail'))
 
     expect(screen.queryByText(/Version History/)).toBeNull()
   })

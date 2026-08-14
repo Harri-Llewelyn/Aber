@@ -5,11 +5,17 @@ import { groupCatalog } from '../../utils/metricGroup'
 import {
   STANDARD_OPTIONS, SEMANTIC_ID_TYPES, inferSemanticIdType, LOCAL_EXTENSION_LABEL
 } from '../../utils/standards'
+import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 /** Sentinel for the standard filter's default. Not a `standard` value -- '' means local extension. */
 const ANY_STANDARD = '__any__'
 
 export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
+  // Escape closes. Via the shared stack rather than a listener of this component's own,
+  // because a ConfirmModal can open on top of this one and a bare document listener on each
+  // would let one keypress dismiss both.
+  useEscapeKey(onCancel)
+
   const [schemaName, setSchemaName] = useState('')
   const [description, setDescription] = useState('')
   const [search, setSearch] = useState('')
@@ -81,7 +87,7 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
 
   return (
     <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 560 }}>
+      <div className="modal">
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <IconFileCode size={18} />
           <span>Build Schema from Catalog</span>
@@ -162,7 +168,7 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
               groupCatalog(filteredCatalog).map(group => (
                 <div key={group.label}>
                   <div
-                    style={{ position: 'sticky', top: 0, background: 'var(--bg-glass)', backdropFilter: 'blur(4px)', padding: '5px 12px', borderBottom: '1px solid var(--border)', fontSize: '10px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: group.isUngrouped ? 'var(--text-muted)' : 'var(--accent)' }}
+                    style={{ position: 'sticky', top: 0, background: 'var(--bg-glass)', backdropFilter: 'blur(4px)', padding: '5px 12px', borderBottom: '1px solid var(--border)', fontSize: '11px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: group.isUngrouped ? 'var(--text-muted)' : 'var(--accent)' }}
                     title={group.isUngrouped ? 'Metric names carrying no "Group/Metric" prefix' : `Metrics named "${group.label}/…"`}
                   >
                     {group.label} <span style={{ opacity: 0.7 }}>({group.metrics.length})</span>
@@ -175,7 +181,7 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
                       {/* Which standard a metric came from is what makes a mixed-standard schema
                           legible; the tick marks the ones carrying an AAS semantic id. */}
                       <span
-                        style={{ fontSize: '10px', color: 'var(--text-dim)' }}
+                        style={{ fontSize: '11px', color: 'var(--text-dim)' }}
                         title={m.semantic_id ? `${m.standard || LOCAL_EXTENSION_LABEL} — semantic id ${m.semantic_id}` : (m.standard || LOCAL_EXTENSION_LABEL)}
                       >
                         {m.standard || LOCAL_EXTENSION_LABEL}{m.semantic_id ? ' ✓' : ''}

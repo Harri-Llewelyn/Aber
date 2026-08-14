@@ -1,6 +1,8 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
 import { VocabularyTab } from '../components/tabs/VocabularyTab'
 import { api } from '../api'
 
@@ -72,13 +74,23 @@ beforeEach(() => {
   })
 })
 
+const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
+
 const renderTab = (props = {}) =>
   render(<VocabularyTab hasPermission={() => true} onUseEntry={vi.fn()} {...props} />)
 
 const card = () =>
-  within(screen.getAllByRole('heading', { name: /Standard Vocabulary Reference/ })[0].closest('.card')
-    || screen.getByRole('tablist').closest('.card'))
-const standardTab = (name) => card().getByRole('tab', { name })
+  within(screen.getAllByRole('heading', { name: /Standard Vocabulary Reference/ })[0].closest('.card'))
+
+/**
+ * The standard pills live in the page's `.filter-bar`, not in the card.
+ *
+ * They used to sit inside it, under the header, with the search box floating in that header beside
+ * the title -- so the two halves of one decision ("which vocabulary" and "which word in it") were
+ * separated by a heading, and the title had to wrap around a 220px input unrelated to it. Both are
+ * now one control row above the card, the shape every other page uses.
+ */
+const standardTab = (name) => screen.getByRole('tab', { name })
 const ready = async () => {
   await waitFor(() => expect(screen.getByRole('tablist')).toBeTruthy())
 }
@@ -136,10 +148,11 @@ describe('Vocabulary page', () => {
     renderTab()
     await ready()
 
-    fireEvent.change(card().getByPlaceholderText(/Search/), { target: { value: 'availability' } })
+    // The search box is in the filter bar beside the pills now, not floating in the card header.
+    fireEvent.change(screen.getByPlaceholderText(/Search/), { target: { value: 'availability' } })
     fireEvent.click(standardTab(/ISO 22400/))
 
-    expect(card().getByPlaceholderText(/Search/).value).toBe('availability')
+    expect(screen.getByPlaceholderText(/Search/).value).toBe('availability')
     expect(card().getByTitle(/^AVAILABILITY \(A\)/)).toBeTruthy()
   })
 })
@@ -187,5 +200,96 @@ describe('Vocabulary page — Use hands off to the Schemas page', () => {
     expect(chip.getAttribute('role')).toBeNull()
     fireEvent.click(chip)
     expect(onUseEntry).not.toHaveBeenCalled()
+  })
+})
+
+describe('Vocabulary page — control row and description structure', () => {
+  it('puts the standard pills and the search in one filter bar, outside the card', async () => {
+    // "Which vocabulary" and "which word in it" are two halves of one decision. They used to be
+    // separated by a heading: the pills sat inside the card under its header, and the search box
+    // floated in that header beside the title -- which the title then had to wrap around.
+    renderTab()
+    await ready()
+
+    const bar = document.querySelector('.filter-bar')
+    expect(bar).toBeTruthy()
+    expect(within(bar).getByRole('tablist')).toBeTruthy()
+    expect(within(bar).getByPlaceholderText(/Search/)).toBeTruthy()
+
+    // The card header is now the title and its explanation, and nothing else.
+    const header = document.querySelector('.card-header')
+    expect(within(header).queryByRole('tablist')).toBeNull()
+    expect(within(header).queryByPlaceholderText(/Search/)).toBeNull()
+    expect(within(header).getByRole('heading', { name: /Standard Vocabulary Reference/ })).toBeTruthy()
+  })
+
+  it('pushes the search to the right-hand end of the bar', async () => {
+    renderTab()
+    await ready()
+    expect(screen.getByPlaceholderText(/Search/).className).toMatch(/filter-bar-spacer/)
+  })
+
+  it('breaks the explanation into a lead and labelled notes', async () => {
+    // It was one paragraph of six sentences running the width of the card, with the two facts in
+    // it that stop someone making a mistake buried mid-run.
+    renderTab()
+    await ready()
+
+    const description = document.querySelector('.vocab-description')
+    expect(description).toBeTruthy()
+    expect(description.querySelectorAll('p').length).toBeGreaterThan(1)
+
+    // The two load-bearing MTConnect caveats are now their own labelled lines.
+    expect(within(description).getByText('Reference only.')).toBeTruthy()
+    expect(within(description).getByText('Names are composed.')).toBeTruthy()
+  })
+
+  it('gives every standard its own notes, not just the default tab', async () => {
+    renderTab()
+    await ready()
+
+    fireEvent.click(standardTab(/ISO 22400/))
+    const description = document.querySelector('.vocab-description')
+    // The AVAILABILITY name clash is the one thing on this tab that causes a real mistake.
+    expect(within(description).getByText('Beware the name clash.')).toBeTruthy()
+  })
+})
+
+/**
+ * The explanatory text runs the full width of the card.
+ *
+ * It was capped at a measure (90ch on the subtitle, 96ch on the description) on the usual
+ * reasoning that a very long line is one the eye loses its place returning to. That reasoning is
+ * right for a column of body copy and wrong here: this is two or three sentences at the top of a
+ * full-width card, and capping them stacked each into six short lines with the rest of the row
+ * left empty -- more vertical space spent than readability gained, on a page whose whole purpose
+ * is to get a long list of vocabulary terms on screen.
+ *
+ * jsdom does no layout, so this is asserted against App.css directly: a rendering test cannot
+ * tell a wrapped line from an unwrapped one, and the cap is exactly the kind of thing that gets
+ * reintroduced by someone applying the general rule without seeing this page.
+ */
+describe('Vocabulary page — text is not measure-capped', () => {
+  const rule = (selector) =>
+    APP_CSS.match(new RegExp(`\\n${selector.replace(/[.:()\\-]/g, '\\$&')} \\{([\\s\\S]*?)\\n\\}`))?.[1]
+
+  it('leaves the subtitle uncapped', () => {
+    const subtitle = rule('.vocab-subtitle')
+    expect(subtitle).toBeTruthy()
+    expect(subtitle).toMatch(/max-width:\s*none/)
+    expect(subtitle).not.toMatch(/max-width:\s*\d+ch/)
+  })
+
+  it('leaves the description and its notes uncapped', () => {
+    const description = rule('.vocab-description')
+    expect(description).toBeTruthy()
+    expect(description).toMatch(/max-width:\s*none/)
+    expect(description).not.toMatch(/max-width:\s*\d+ch/)
+  })
+
+  // The notes are <p> children of .vocab-description, so a cap reintroduced one level down would
+  // undo this just as completely.
+  it('does not cap the paragraphs inside the description either', () => {
+    expect(APP_CSS).toMatch(/\.vocab-description p \{[^}]*max-width:\s*none/)
   })
 })

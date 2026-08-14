@@ -85,6 +85,14 @@ afterEach(() => {
 // -- which is exactly what a user now does.
 const enableRearrange = () => fireEvent.click(screen.getByRole('button', { name: /Rearrang/i }))
 
+// The shopfloor grid now holds the two derived lanes AND the physical cells, so "a tile" is no
+// longer "the first .shopfloor-zone". Cells carry .shopfloor-cell; lanes carry .shopfloor-lane.
+const cellTiles = () => [...document.querySelectorAll('.shopfloor-grid > .shopfloor-cell')]
+const cellTileFor = (name) => cellTiles().find(z => within(z).queryByText(name))
+const laneTiles = () => [...document.querySelectorAll('.shopfloor-grid > .shopfloor-lane')]
+const kpiItem = (label) => [...document.querySelectorAll('.kpi-item')]
+  .find(n => label.test(n.textContent))
+
 describe('CellsTab shows the gateways and devices attached to a cell', () => {
   it('lists a cell\'s gateways and the devices reachable through them', async () => {
     api.get.mockImplementation(routeGet())
@@ -93,11 +101,14 @@ describe('CellsTab shows the gateways and devices attached to a cell', () => {
 
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
-    expect(screen.getByText('Assigned Edge Gateways (1)')).toBeInTheDocument()
+    // The "Assigned Edge Gateways (n)" / "Assigned Devices (n)" nested boxes are gone: they were
+    // titled sub-cards wrapping tables that had their own header rows, and the counts they carried
+    // are already badges on the card header above them.
+    expect(screen.queryByText(/Assigned Edge Gateways/)).toBeNull()
+    expect(screen.queryByText(/Assigned Devices/)).toBeNull()
     // Once in the gateway table, once as the device's resolved gateway (it used to
     // render the raw gateway UUID there).
     expect(screen.getAllByText('Virtual_Gateway_NodeRED')).toHaveLength(2)
-    expect(screen.getByText('Assigned Devices (1)')).toBeInTheDocument()
     expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument()
     // Heartbeat age, not a raw timestamp
     expect(screen.getByText('20s ago')).toBeInTheDocument()
@@ -170,7 +181,9 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: /^Edit/i }))
+    // Edit moved into the context panel with the rest of the gateway ACTIONS column.
+    fireEvent.click(within(document.querySelector('.page-main')).getByText('Virtual_Gateway_NodeRED'))
+    fireEvent.click(within(document.querySelector('.context-panel')).getByText('Edit Details'))
     fireEvent.click(screen.getByLabelText(/Site-Wide/i))
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }))
 
@@ -187,7 +200,8 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: /^Edit/i }))
+    fireEvent.click(within(document.querySelector('.page-main')).getByText('Virtual_Gateway_NodeRED'))
+    fireEvent.click(within(document.querySelector('.context-panel')).getByText('Edit Details'))
     fireEvent.click(screen.getByLabelText(/Mark as Virtual Gateway/i))
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }))
 
@@ -220,17 +234,19 @@ describe('OverviewTab shopfloor map', () => {
 
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
-    expect(screen.getByText('Active Edge Gateways (1)')).toBeInTheDocument()
-    expect(screen.getByText('Operating Devices (1)')).toBeInTheDocument()
+    // The two "Active Edge Gateways (n)" / "Operating Devices (n)" section headings inside each
+    // tile were replaced by one count pair in its header. They cost ~40px per tile to say what
+    // eleven characters say now, which a tile this size cannot afford.
+    const zone = cellTileFor('Assembly Line 1')
+    expect(within(zone).getByText('GW: 1 | Dev: 1')).toBeInTheDocument()
     expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument()
-    // The gateway card keeps its three-bucket breakdown; it reads 1 online because its
-    // heartbeat is fresh.
-    expect(screen.getAllByText('1 Online / 0 Offline / 0 Archived')).toHaveLength(1)
-    // The device card now reports Quarantined as a fourth, mutually exclusive bucket, so its
-    // text is read from the node rather than matched whole (it is split across spans so the
-    // quarantine figure can be styled independently).
-    const statSubs = [...document.querySelectorAll('.stat-sub')].map(n => n.textContent)
-    expect(statSubs).toContain('1 Online / 0 Offline / 0 Quarantined / 0 Archived')
+    expect(within(zone).getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument()
+
+    // The ribbon reports live/total per row. The full breakdown the stat cards printed underneath
+    // moved onto each item's title, so it is read from there.
+    expect(kpiItem(/Cells/).textContent).toContain('1/1')
+    expect(kpiItem(/Gateways/)).toHaveAttribute('title', expect.stringContaining('1 online / 0 offline / 0 archived'))
+    expect(kpiItem(/Devices/)).toHaveAttribute('title', expect.stringContaining('1 online / 0 offline / 0 archived'))
   })
 
   // A quarantined device is stored with status OFFLINE. It used to be counted in the Offline
@@ -248,12 +264,16 @@ describe('OverviewTab shopfloor map', () => {
     )
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
-    const statSubs = [...document.querySelectorAll('.stat-sub')].map(n => n.textContent)
-    // Not counted as Offline, and the four buckets still sum to the card's total of 1.
-    expect(statSubs).toContain('0 Online / 0 Offline / 1 Quarantined / 0 Archived')
+    // Not counted as Online, and the four buckets still sum to the ribbon item's total of 1.
+    const devices = kpiItem(/Devices/)
+    expect(devices.textContent).toContain('0/1')
+    expect(devices).toHaveAttribute('title', expect.stringContaining('1 device awaiting zero-touch onboarding approval'))
+    expect(devices).toHaveAttribute('title', expect.stringContaining('0 online / 0 offline / 0 archived, of 1'))
 
-    // The card raises the warning treatment so the state is visible without reading the text.
-    expect(document.querySelector('.stat-card-alert')).not.toBeNull()
+    // The item raises the warning treatment so the state is visible without reading the title --
+    // and spells the word out beside the figure, so the signal is not colour alone.
+    expect(devices.className).toMatch(/kpi-item-alert/)
+    expect(within(devices).getByText(/1 Quarantined/)).toBeInTheDocument()
   })
 
   it('shows no alert treatment when nothing is quarantined', async () => {
@@ -266,7 +286,8 @@ describe('OverviewTab shopfloor map', () => {
     )
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
-    expect(document.querySelector('.stat-card-alert')).toBeNull()
+    expect(document.querySelector('.kpi-item-alert')).toBeNull()
+    expect(screen.queryByText(/Quarantined/)).toBeNull()
   })
 
   it('files a dropped device into the target cell even when that cell has no gateway', async () => {
@@ -407,8 +428,10 @@ describe('OverviewTab shopfloor map', () => {
     expect(screen.getByText('Site-Wide')).toBeInTheDocument()
     expect(screen.getByText('Orphan_CNC')).toBeInTheDocument()
     expect(screen.getByText('Site_BMS')).toBeInTheDocument()
-    // Labelled as derived so they do not read as cells someone could rename or archive.
-    expect(screen.getAllByText('DERIVED')).toHaveLength(2)
+    // Still marked as derived so they do not read as cells someone could rename or archive --
+    // but by their tint, border and name title rather than by a pill that was eating the name.
+    // See 'shows the lane names in full' below.
+    expect(laneTiles().map(t => t.className.includes('shopfloor-lane'))).toEqual([true, true])
   })
 
   it('lists gateways in the lanes, not just devices', async () => {
@@ -457,10 +480,22 @@ describe('OverviewTab shopfloor map', () => {
     expect(within(unassignedLane).getByText(/All clear/i)).toBeInTheDocument()
   })
 
-  describe('the Unassigned lane minimises when empty', () => {
+  /**
+   * The tiles are UNIFORM now, and that is a deliberate reversal.
+   *
+   * An empty zone used to collapse to its header, because a 320px-wide, 180px-tall card saying
+   * "no gateways serving this zone" three times over pushed the cells that did have contents
+   * below the fold. At ~296px in a six-column grid an empty tile costs about 110px in one
+   * column, and a grid of ragged half-height tiles is harder to scan than an even one -- so the
+   * density that made the collapse necessary is also what made it unnecessary.
+   *
+   * What must NOT change is the meaning: an empty queue still says "All clear" rather than
+   * describing what could go in it, and it is still a drop target.
+   */
+  describe('empty tiles keep their shape and their meaning', () => {
     const laneOf = (title) => screen.getByTitle(title)
 
-    it('collapses to a single line with no body when nothing is stranded', async () => {
+    it('says the queue has drained rather than collapsing to say so', async () => {
       api.get.mockImplementation(routeGet())
 
       render(
@@ -470,17 +505,14 @@ describe('OverviewTab shopfloor map', () => {
       await waitFor(() => expect(screen.getByText('Unassigned')).toBeInTheDocument())
 
       const lane = laneOf(/work queue, not a location/i)
-      expect(lane.className).toMatch(/shopfloor-zone-mini/)
-      expect(lane.querySelector('.zone-body')).toBeNull()
+      // Same shape as every other tile: header, counts, body.
+      expect(lane.querySelector('.zone-body')).toBeTruthy()
+      expect(within(lane).getByText('GW: 0 | Dev: 0')).toBeInTheDocument()
+      // "All clear" -- empty here is a RESULT, not an invitation to fill it.
       expect(within(lane).getByText(/All clear/i)).toBeInTheDocument()
-      // The two "nothing here" panels are what made an empty queue louder than the cells.
-      expect(within(lane).queryByText(/Active Edge Gateways/i)).not.toBeInTheDocument()
-      expect(within(lane).queryByText(/Operating Devices/i)).not.toBeInTheDocument()
     })
 
-    it('leaves no gap beside it, because the lanes are stacked', async () => {
-      // Side by side, a collapsed queue left half a page of nothing under it, which read as a
-      // rendering fault rather than as good news. Stacking is what makes collapsing look right.
+    it('keeps the lanes and the cells in one grid, at one tile size', async () => {
       api.get.mockImplementation(routeGet())
 
       const { container } = render(
@@ -489,17 +521,16 @@ describe('OverviewTab shopfloor map', () => {
       )
       await waitFor(() => expect(screen.getByText('Unassigned')).toBeInTheDocument())
 
-      const lanes = container.querySelector('.shopfloor-lanes')
-      // One full-width column, so a short lane simply takes less height.
-      expect(lanes.className).not.toMatch(/lanes-with-minimised/)
-      expect(lanes.querySelectorAll(':scope > .shopfloor-zone')).toHaveLength(2)
+      // The separate full-width lane stack above the grid is gone.
+      expect(container.querySelector('.shopfloor-lanes')).toBeNull()
+      expect(laneTiles()).toHaveLength(2)
+      // No tile opts out of the shared shape.
+      expect(container.querySelectorAll('.shopfloor-zone-mini')).toHaveLength(0)
     })
 
-    it('is still a drop target while minimised', async () => {
-      // An empty queue is exactly when someone wants to drag something into it, so collapsing
-      // it must not take that away.
-      // Default fixture: the only gateway serves a cell, so nothing is stranded and the lane
-      // is in its collapsed form.
+    it('is still a drop target while empty', async () => {
+      // An empty queue is exactly when someone wants to drag something into it.
+      // Default fixture: the only gateway serves a cell, so nothing is stranded.
       const showToast = vi.fn()
       api.get.mockImplementation(routeGet())
       api.put.mockResolvedValue({})
@@ -511,7 +542,7 @@ describe('OverviewTab shopfloor map', () => {
       await waitFor(() => expect(screen.getByText('Unassigned')).toBeInTheDocument())
 
       const lane = laneOf(/work queue, not a location/i)
-      expect(lane.className).toMatch(/shopfloor-zone-mini/)
+      expect(within(lane).getByText(/All clear/i)).toBeInTheDocument()
 
       enableRearrange()
       fireEvent.drop(lane, {
@@ -527,7 +558,7 @@ describe('OverviewTab shopfloor map', () => {
       expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: '', location_scope: 'cell' })
     })
 
-    it('expands again as soon as something is stranded', async () => {
+    it('fills with the stranded asset as soon as there is one', async () => {
       api.get.mockImplementation(routeGet({
         devices: [{ ...gateway.devices[0], asset_id: 'dev-u', asset_name: 'Orphan_CNC',
                     effective_cell_id: null, gateway_cell_id: null, location_source: 'unassigned' }]
@@ -540,12 +571,12 @@ describe('OverviewTab shopfloor map', () => {
       await waitFor(() => expect(screen.getByText('Orphan_CNC')).toBeInTheDocument())
 
       const lane = laneOf(/work queue, not a location/i)
-      expect(lane.className).not.toMatch(/shopfloor-zone-mini/)
-      expect(lane.querySelector('.zone-body')).toBeTruthy()
-      expect(within(lane).getByText(/0 gw \/ 1 dev/)).toBeInTheDocument()
+      expect(within(lane).queryByText(/All clear/i)).toBeNull()
+      expect(within(lane).getByText('GW: 0 | Dev: 1')).toBeInTheDocument()
+      expect(within(lane).getByText('Orphan_CNC')).toBeInTheDocument()
     })
 
-    it('expands for a stranded gateway even with no stranded devices', async () => {
+    it('holds a stranded gateway even with no stranded devices', async () => {
       api.get.mockImplementation(routeGet({
         gateways: [{ ...gateway, gateway_name: 'Homeless_Gateway', cell_id: null, location_scope: 'cell' }]
       }))
@@ -557,49 +588,49 @@ describe('OverviewTab shopfloor map', () => {
       await waitFor(() => expect(screen.getByText('Unassigned')).toBeInTheDocument())
 
       const lane = laneOf(/work queue, not a location/i)
-      expect(lane.className).not.toMatch(/shopfloor-zone-mini/)
+      expect(within(lane).queryByText(/All clear/i)).toBeNull()
       expect(within(lane).getByText('Homeless_Gateway')).toBeInTheDocument()
     })
 
-    it('collapses an empty physical cell the same way', async () => {
-      // A newly created cell has neither, so a stack being set up was mostly full-height cards
-      // saying "no gateways serving this zone" — pushing the cells that do have contents down.
+    it('gives an empty physical cell the same tile as a full one', async () => {
       api.get.mockImplementation(routeGet({
         cells: [cell, { cell_id: 'cell-empty', cell_name: 'Bay 9', is_archived: false, gateways: [], gateway_count: 0 }]
       }))
 
-      const { container } = render(
+      render(
         <OverviewTab onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} showToast={vi.fn()}
           hasPermission={() => true} onNavigateTab={vi.fn()} />
       )
       await waitFor(() => expect(screen.getByText('Bay 9')).toBeInTheDocument())
 
-      const zones = [...container.querySelectorAll('.shopfloor-grid > .shopfloor-zone')]
-      const empty = zones.find(z => within(z).queryByText('Bay 9'))
-      const populated = zones.find(z => within(z).queryByText('Assembly Line 1'))
+      const empty = cellTileFor('Bay 9')
+      const populated = cellTileFor('Assembly Line 1')
 
-      expect(empty.className).toMatch(/shopfloor-zone-mini/)
-      expect(empty.querySelector('.zone-body')).toBeNull()
-      expect(within(empty).getByText('empty')).toBeInTheDocument()
-      // The cell that has contents is untouched.
-      expect(populated.className).not.toMatch(/shopfloor-zone-mini/)
+      // Both have a body; the empty one states its emptiness inside it rather than by shrinking.
+      expect(empty.querySelector('.zone-body')).toBeTruthy()
+      expect(within(empty).getByText('GW: 0 | Dev: 0')).toBeInTheDocument()
+      expect(within(empty).getByText(/No gateways or devices in this cell zone/i)).toBeInTheDocument()
       expect(populated.querySelector('.zone-body')).toBeTruthy()
+      expect(within(populated).getByText('GW: 1 | Dev: 1')).toBeInTheDocument()
     })
 
-    it('keeps an empty cell a drop target, and keeps its zone id', async () => {
+    it('keeps an empty cell a drop target, and keeps its zone id reachable', async () => {
       api.get.mockImplementation(routeGet({
         cells: [{ cell_id: 'cell-empty', cell_name: 'Bay 9', is_archived: false, gateways: [], gateway_count: 0 }]
       }))
       api.put.mockResolvedValue({})
 
-      const { container } = render(
+      render(
         <OverviewTab onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} showToast={vi.fn()}
           hasPermission={() => true} onNavigateTab={vi.fn()} />
       )
       await waitFor(() => expect(screen.getByText('Bay 9')).toBeInTheDocument())
 
-      const zone = container.querySelector('.shopfloor-grid > .shopfloor-zone')
-      expect(within(zone).getByText(/Zone #cell-empty/)).toBeInTheDocument()
+      const zone = cellTileFor('Bay 9')
+      // The zone id used to be printed in the header. That slot now carries the GW/Dev counts,
+      // which are read far more often, and the id moved onto the name's title -- still one hover
+      // away, and no longer competing with the counts for eleven characters of tile.
+      expect(within(zone).getByTitle(/Zone #cell-empty/)).toBeInTheDocument()
 
       enableRearrange()
       fireEvent.drop(zone, {
@@ -610,23 +641,23 @@ describe('OverviewTab shopfloor map', () => {
       expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: 'cell-empty' })
     })
 
-    it('expands a cell that has a gateway but no devices', async () => {
-      // A gateway chip is content worth showing; only a zone with nothing at all collapses.
+    it('fills a cell that has a gateway but no devices', async () => {
       api.get.mockImplementation(routeGet({ devices: [] }))
 
-      const { container } = render(
+      render(
         <OverviewTab onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} showToast={vi.fn()}
           hasPermission={() => true} onNavigateTab={vi.fn()} />
       )
       await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
-      const zone = container.querySelector('.shopfloor-grid > .shopfloor-zone')
-      expect(zone.className).not.toMatch(/shopfloor-zone-mini/)
+      const zone = cellTileFor('Assembly Line 1')
       expect(within(zone).getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument()
+      expect(within(zone).getByText('GW: 1 | Dev: 0')).toBeInTheDocument()
     })
 
-    it('does not minimise Site-Wide, which is not a queue', async () => {
-      // An empty Site-Wide is not an achievement, and shrinking it would make the pair jump about.
+    it('describes an empty Site-Wide as a home to fill, not as a queue that has drained', async () => {
+      // The two lanes mean different things and their empty states have to say so: Site-Wide is
+      // somewhere to put things, Unassigned is somewhere things should stop being.
       api.get.mockImplementation(routeGet())
 
       render(
@@ -636,14 +667,15 @@ describe('OverviewTab shopfloor map', () => {
       await waitFor(() => expect(screen.getByText('Site-Wide')).toBeInTheDocument())
 
       const lane = laneOf(/permanent home, not a queue/i)
-      expect(lane.className).not.toMatch(/shopfloor-zone-mini/)
-      expect(lane.querySelector('.zone-body')).toBeTruthy()
+      expect(within(lane).getByText(/Drop a BMS, AGV or ambient sensor here/i)).toBeInTheDocument()
+      expect(within(lane).queryByText(/All clear/i)).toBeNull()
     })
   })
 
-  it('places the lanes above the physical cells, outside the cell grid', async () => {
-    // Inside the grid they reflowed between the bays as cells were added, so the queue moved
-    // somewhere new on every stack.
+  it('pins the lanes to the front of the grid, ahead of every cell', async () => {
+    // They share the cell grid now, so what stops the queue moving as cells are added is the
+    // pinning -- document order plus the CSS `order` that .shopfloor-lane sets. Without both,
+    // the queue lands somewhere new on every render, and a queue nobody can find never drains.
     api.get.mockImplementation(routeGet())
 
     const { container } = render(
@@ -652,28 +684,80 @@ describe('OverviewTab shopfloor map', () => {
     )
     await waitFor(() => expect(screen.getByText('Site-Wide')).toBeInTheDocument())
 
-    const lanes = container.querySelector('.shopfloor-lanes')
     const grid = container.querySelector('.shopfloor-grid')
-    expect(lanes).toBeTruthy()
-    expect(lanes.querySelectorAll('.shopfloor-zone')).toHaveLength(2)
-    // Neither lane leaked into the cell grid.
-    expect(grid.contains(screen.getByTitle(/permanent home, not a queue/i))).toBe(false)
-    // And the lanes come first in document order.
-    expect(lanes.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const tiles = [...grid.querySelectorAll(':scope > .shopfloor-zone')]
+
+    // Both lanes are in the grid, and they are its first two tiles.
+    expect(tiles.slice(0, 2)).toEqual(laneTiles())
+    expect(tiles.slice(2).every(t => t.className.includes('shopfloor-cell'))).toBe(true)
   })
 
-  it('stacks the lanes infrastructure-first, queue-second', async () => {
+  it('orders the lanes infrastructure-first, queue-second', async () => {
     api.get.mockImplementation(routeGet())
 
-    const { container } = render(
+    render(
       <OverviewTab onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} showToast={vi.fn()}
         hasPermission={() => true} onNavigateTab={vi.fn()} />
     )
     await waitFor(() => expect(screen.getByText('Site-Wide')).toBeInTheDocument())
 
-    const [first, second] = container.querySelectorAll('.shopfloor-lanes .shopfloor-zone')
+    const [first, second] = laneTiles()
     expect(within(first).getByText('Site-Wide')).toBeInTheDocument()
     expect(within(second).getByText('Unassigned')).toBeInTheDocument()
+    // Each lane carries its OWN hue, not one shared "derived" treatment. They are not two of a
+    // kind -- one is a permanent home, the other a queue that should drain -- and colouring them
+    // alike made the pair read as a single category that the cells were simply not in.
+    expect(first.className).toMatch(/shopfloor-lane-site/)
+    expect(second.className).toMatch(/shopfloor-lane-queue/)
+  })
+
+  it('gives the whole chip to the asset name, and keeps the id on its title', async () => {
+    // The UUID used to render inline beside the name, capped at ~72px. Six characters of an opaque
+    // identifier are not enough to recognise a device by, and they were the reason a name as
+    // ordinary as "Simulated_CNC_01" clipped. Removing it is only safe while the id stays
+    // REACHABLE, which is what the second half of this pins.
+    api.get.mockImplementation(routeGet({ telemetry: [] }))
+
+    render(
+      <OverviewTab onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} showToast={vi.fn()}
+        hasPermission={() => true} onNavigateTab={vi.fn()} />
+    )
+    await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
+
+    const zone = cellTileFor('Assembly Line 1')
+    expect(zone.querySelectorAll('.chip-id')).toHaveLength(0)
+    expect(within(zone).queryByText(/dev-1/)).toBeNull()
+    expect(within(zone).queryByText(/gw-1/)).toBeNull()
+
+    // Both ids survive on the chip each belongs to.
+    expect(within(zone).getByText('Simulated_CNC_01').closest('.chip'))
+      .toHaveAttribute('title', expect.stringContaining('dev-1'))
+    expect(within(zone).getByText('Virtual_Gateway_NodeRED').closest('.chip'))
+      .toHaveAttribute('title', expect.stringContaining('gw-1'))
+    // The gateway's own device count went the same way as the ids -- the tile header totals both
+    // for the zone, and the per-gateway figure is a hover away.
+    expect(within(zone).getByText('Virtual_Gateway_NodeRED').closest('.chip'))
+      .toHaveAttribute('title', expect.stringContaining('1 device(s)'))
+  })
+
+  it('shows the lane names in full, rather than a badge explaining what they are', async () => {
+    // The DERIVED pill was `flex-shrink: 0` in a header it shared with the name, so it took its
+    // width first and left "Site-Wide" and "Unassigned" rendering as "S..." and "U...". The word
+    // moved onto the name's title; the tint and border carry "not a cell" on their own.
+    api.get.mockImplementation(routeGet())
+
+    render(
+      <OverviewTab onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} showToast={vi.fn()}
+        hasPermission={() => true} onNavigateTab={vi.fn()} />
+    )
+    await waitFor(() => expect(screen.getByText('Site-Wide')).toBeInTheDocument())
+
+    for (const [tile, name] of [[laneTiles()[0], 'Site-Wide'], [laneTiles()[1], 'Unassigned']]) {
+      const label = within(tile).getByText(name)
+      expect(label).toHaveClass('zone-name')
+      expect(label).toHaveAttribute('title', expect.stringContaining('derived lane, not a cell'))
+    }
+    expect(screen.queryByText('DERIVED')).toBeNull()
   })
 
   it('renders the lanes even when no cell exists at all', async () => {
@@ -849,7 +933,7 @@ describe('Overview hands a cell over to the Cells page', () => {
     renderOverview({ onSelectCell })
 
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
-    fireEvent.click(screen.getByTitle("Click to view Cell 'Assembly Line 1' on Cells page"))
+    fireEvent.click(screen.getByTitle(/Cell 'Assembly Line 1'.*Click to view on Cells page/))
 
     // The id, not the name: it is stable and unique, and CellsTab's predicate matches either.
     expect(onSelectCell).toHaveBeenCalledWith('cell-1')
@@ -861,7 +945,7 @@ describe('Overview hands a cell over to the Cells page', () => {
     renderOverview({ onNavigateTab })
 
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
-    fireEvent.click(screen.getByTitle("Click to view Cell 'Assembly Line 1' on Cells page"))
+    fireEvent.click(screen.getByTitle(/Cell 'Assembly Line 1'.*Click to view on Cells page/))
 
     expect(onNavigateTab).toHaveBeenCalledWith('cells')
   })

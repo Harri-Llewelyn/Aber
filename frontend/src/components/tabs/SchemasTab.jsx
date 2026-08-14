@@ -60,11 +60,11 @@ import {
   canForkSchema, nextVersion, isCurrentSchema, SCHEMA_STATUS
 } from '../../utils/schemaVersion'
 import CopyableId from '../common/CopyableId'
+import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import {
   IconCheck, IconPlus, IconFileCode, IconAlertTriangle, IconArchive,
   IconChevronDown, IconChevronUp, IconX, IconLock, IconGitBranch, IconPencil, IconDownload
 } from '../common/Icons'
-import { ActionMenu } from '../common/ActionMenu'
 
 export function SchemasTab({ showToast, hasPermission, onSelectSchema, pendingVocabularyEntry, onConsumeVocabularyEntry }) {
   const [schemas, setSchemas]         = useState([])
@@ -101,6 +101,9 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, pendingVo
   // Version lifecycle (migration 0037). `detailSchema` is the version being read or edited;
   // `forkTarget` is the one a new version is being cut from. Two states rather than one mode flag,
   // because forking is reachable both from the table and from inside the detail modal.
+  // An ID, not the schema object -- this page reloads its list after every fork, publish and
+  // deprecate, so a captured object would go stale the moment the thing it describes changed.
+  const [selectedId, setSelectedId] = useState(null)
   const [detailSchema, setDetailSchema] = useState(null)
   const [forkTarget, setForkTarget] = useState(null)
   // Archived versions are hidden by default -- see isCurrentSchema() for why history interleaved
@@ -588,33 +591,148 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, pendingVo
     // than nulled on the way out, so the operator sees the field they left half-filled.
     (semanticIdValue !== '' || semanticIdTypeValue === '')
 
+  // Resolved fresh every render -- see the note on selectedId.
+  const selectedSchema = schemas.find(s => s.schema_uuid === selectedId) || null
+  const selectedStatus = selectedSchema ? schemaStatus(selectedSchema) : null
+  // The same two facts the row's Create Version button read. A lineage may hold at most one open
+  // draft (enforced by a partial unique index), so forking again before it is published or
+  // discarded would create a second head.
+  const selectedDraft = selectedSchema
+    ? schemas.find(s => s.parent_schema_id === selectedSchema.schema_uuid && schemaStatus(s) === SCHEMA_STATUS.DRAFT)
+    : null
+  const selectedForkBlocked = !canManageSchema || !!selectedDraft
+
   return (
-    <>
-      <div className="section-header" style={{ marginBottom: '8px' }}>
-        <h2 className="section-title">Factory+ Schema Registry <span className="section-count">{schemas.length}</span></h2>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button className="btn btn-ghost btn-sm" onClick={() => setShowValidateModal(true)} disabled={schemas.length === 0} title="Test sample telemetry payload against registered schema rules">
-            <IconCheck size={14} /> Validate Candidate Payload
-          </button>
-          {/* The only way to create a schema. "Register New Schema" used to sit beside this,
-              taking a raw JSON Schema document as free text -- which meant a schema could name
-              metrics that were not in the catalog, had no standard, and carried no semantic id.
-              Every derived feature reads schemas: device tags, unmodelled detection, the tag
-              filters on three pages. Building from the catalog is what guarantees those inputs
-              exist, so it is now the single path rather than the more careful of two. */}
-          <button
-            className={`btn btn-primary btn-sm ${!canManageSchema ? 'btn-disabled' : ''}`}
-            disabled={!canManageSchema}
-            onClick={() => canManageSchema && setShowBuilderModal(true)}
-            title={!canManageSchema ? 'Requires Admin permissions' : 'Build a schema from the metric catalog, then download a spec sheet or provision a device'}
-          >
-            <IconFileCode size={14} /> Build Schema from Catalog
-          </button>
+    <div className="page-layout">
+      <div className="page-main">
+
+      {/* REGISTERED SCHEMAS FIRST, catalog second.
+          The catalog was on top because it is what a schema is BUILT from, which is the order you
+          meet them in exactly once -- the first time you create one. Every visit after that is to
+          read or version a schema that already exists, and those were below ~600 rows of metric
+          groups. The page now opens on its subject and keeps the raw material underneath it. */}
+      <div className="card" style={{ marginBottom: '24px' }}>
+        <div className="card-header">
+          <h3 className="section-title">
+            Registered Schemas <span className="section-count">{visibleSchemas.length}</span>
+          </h3>
+          {/* The page's two primary actions, in the header of the card they act on. They had a
+              row of their own above the catalog, which put "Build Schema from Catalog" nowhere
+              near the schemas and left a 34px band holding two buttons. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setShowValidateModal(true)} disabled={schemas.length === 0} title="Test sample telemetry payload against registered schema rules">
+              <IconCheck size={14} /> Validate Candidate Payload
+            </button>
+            {/* The only way to create a schema. "Register New Schema" used to sit beside this,
+                taking a raw JSON Schema document as free text -- which meant a schema could name
+                metrics that were not in the catalog, had no standard, and carried no semantic id.
+                Every derived feature reads schemas: device tags, unmodelled detection, the tag
+                filters on three pages. Building from the catalog is what guarantees those inputs
+                exist, so it is now the single path rather than the more careful of two. */}
+            <button
+              className={`btn btn-primary btn-sm ${!canManageSchema ? 'btn-disabled' : ''}`}
+              disabled={!canManageSchema}
+              onClick={() => canManageSchema && setShowBuilderModal(true)}
+              title={!canManageSchema ? 'Requires Admin permissions' : 'Build a schema from the metric catalog, then download a spec sheet or provision a device'}
+            >
+              <IconFileCode size={14} /> Build Schema from Catalog
+            </button>
+
+          {archivedCount > 0 && (
+            <button
+              className="btn btn-ghost btn-sm"
+              aria-expanded={showArchivedVersions}
+              onClick={() => setShowArchivedVersions(v => !v)}
+              title={showArchivedVersions
+                ? 'Hide superseded versions'
+                : `Show the ${archivedCount} archived version${archivedCount === 1 ? '' : 's'} kept as history`}
+            >
+              {showArchivedVersions ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
+              {' '}Archived Versions <span className="section-count">{archivedCount}</span>
+            </button>
+          )}
+          </div>
         </div>
+        <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '12px 20px 0' }}>
+          A published schema is <strong>read-only</strong>. Devices are provisioned against the exact metric names it
+          models, so changing one in place would silently redefine the contract a fleet is judged against. Changes are
+          made by creating the next version — <span className="mono">v1 → v2 → v3</span> — which forks the definition into
+          an editable draft. Publishing a draft activates it, archives its predecessor, and moves every device across in
+          one transaction. Version numbers are assigned by the database and cannot be chosen.
+        </p>
+        {loading ? <div className="loading-wrap"><div className="spinner" /> Loading schemas…</div> : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th title="Schema descriptive name">Schema Name</th><th title="Lineage position and lifecycle state. Only a draft is editable.">Version</th><th title="Why this version exists, recorded when it was created">Change Description</th><th title="Schema unique UUID">Schema UUID</th><th title="Devices provisioned with this schema">Devices</th></tr></thead>
+              <tbody>
+                {visibleSchemas.map(sch => {
+                  const count = deviceCountFor(sch.schema_uuid)
+                  const status = schemaStatus(sch)
+                  const draft = schemas.find(s =>
+                    s.parent_schema_id === sch.schema_uuid && schemaStatus(s) === SCHEMA_STATUS.DRAFT
+                  )
+                  const forkBlocked = !canManageSchema || !!draft
+                  return (
+                    <tr
+                      key={sch.schema_uuid}
+                      className={`row-selectable${selectedId === sch.schema_uuid ? ' row-selected' : ''}`}
+                      style={status === SCHEMA_STATUS.ARCHIVED ? { opacity: 0.6 } : undefined}
+                      onClick={rowSelectHandler(() => setSelectedId(id => id === sch.schema_uuid ? null : sch.schema_uuid))}
+                      title="Click to inspect this schema in the details panel"
+                    >
+                      <td>
+                        <strong>{sch.schema_name}</strong>
+                        {/* A published version is read-only, and the lock says so on the row
+                            rather than only once the modal is open. */}
+                        {!isSchemaEditable(sch) && (
+                          <span
+                            style={{ marginLeft: '6px', color: 'var(--text-dim)', verticalAlign: 'middle' }}
+                            title={`Read-only — this version is ${statusLabel(status)}`}
+                          >
+                            <IconLock size={11} />
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <span
+                          className={`badge ${statusBadgeClass(status)}`}
+                          title={isSchemaEditable(sch)
+                            ? 'Draft — editable until published'
+                            : `${statusLabel(status)} and immutable`}
+                        >
+                          {schemaVersionLabel(sch)}
+                        </span>
+                      </td>
+                      {/* Constrained: a change description is free text and `.table-wrap` scrolls
+                          horizontally, so an unbounded cell pushes the action buttons off-screen.
+                          Third time this table shape has taught that lesson. */}
+                      <td style={{ maxWidth: '280px', color: sch.change_description ? 'var(--text-muted)' : 'var(--text-dim)', fontSize: '12px' }}>
+                        {sch.change_description || '—'}
+                      </td>
+                      <td><CopyableId value={sch.schema_uuid} label="schema UUID" onNotify={showToast} /></td>
+                      <td>
+                        {/* The count is the natural entry point to "which devices are these?",
+                            so it navigates to the Devices page filtered to this schema. */}
+                        <button
+                          type="button"
+                          className="count-link"
+                          disabled={count === 0}
+                          onClick={() => count > 0 && onSelectSchema?.(sch.schema_uuid)}
+                          title={count === 0
+                            ? 'No devices are provisioned with this schema'
+                            : `Show the ${count} device${count === 1 ? '' : 's'} using this schema`}
+                        >
+                          <span className="section-count">{count}</span>
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
-      <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
-        Centralized JSON Schema Registry for defining, registering, and interactively validating telemetry payload data structures against industrial standards.
-      </p>
 
       <div className="card" style={{ marginBottom: '24px' }}>
         {/* `.card-header`, not `.section-header`: the card has no padding of its own, so a plain
@@ -1010,19 +1128,19 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, pendingVo
                         {/* MTConnect permits local extensions, so this marks provenance rather
                             than flagging a problem. */}
                         {!m.standard && m.category && (
-                          <span style={{ fontSize: '10px', color: 'var(--text-dim)', marginLeft: '6px', fontStyle: 'italic' }} title="Local extension — not drawn from a standard vocabulary">
+                          <span style={{ fontSize: '11px', color: 'var(--text-dim)', marginLeft: '6px', fontStyle: 'italic' }} title="Local extension — not drawn from a standard vocabulary">
                             local
                           </span>
                         )}
                       </td>
                       <td>
                         {m.standard
-                          ? <span className="badge badge-neutral" style={{ fontSize: '10px' }} title={`Named from the ${m.standard} vocabulary`}>{m.standard}</span>
+                          ? <span className="badge badge-neutral" style={{ fontSize: '11px' }} title={`Named from the ${m.standard} vocabulary`}>{m.standard}</span>
                           : <span style={{ color: 'var(--text-dim)', fontSize: '11px' }}>{LOCAL_EXTENSION_LABEL}</span>}
                       </td>
                       <td>
                         {m.category
-                          ? <span className="badge badge-neutral" style={{ fontSize: '10px' }} title={`MTConnect ${m.category} observation`}>{m.category}</span>
+                          ? <span className="badge badge-neutral" style={{ fontSize: '11px' }} title={`MTConnect ${m.category} observation`}>{m.category}</span>
                           : <span style={{ color: 'var(--text-dim)' }}>—</span>}
                       </td>
                       <td style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{m.units || '—'}</td>
@@ -1089,7 +1207,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, pendingVo
                     <td>{m.category || '—'}</td>
                     <td style={{ fontSize: '11px' }}>{m.units || '—'}</td>
                     <td>{datatypeLabel(m.datatype)}</td>
-                    <td className="mono" style={{ fontSize: '10px', maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.semantic_id || ''}>
+                    <td className="mono" style={{ fontSize: '11px', maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.semantic_id || ''}>
                       {m.semantic_id || '—'}
                     </td>
                     <td style={{ color: 'var(--text-muted)' }}>
@@ -1102,152 +1220,6 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, pendingVo
                 ))}
               </tbody>
               )}
-            </table>
-          </div>
-        )}
-      </div>
-
-      <div className="card">
-        <div className="card-header">
-          <h3 className="section-title">
-            Registered Schemas <span className="section-count">{visibleSchemas.length}</span>
-          </h3>
-          {archivedCount > 0 && (
-            <button
-              className="btn btn-ghost btn-sm"
-              aria-expanded={showArchivedVersions}
-              onClick={() => setShowArchivedVersions(v => !v)}
-              title={showArchivedVersions
-                ? 'Hide superseded versions'
-                : `Show the ${archivedCount} archived version${archivedCount === 1 ? '' : 's'} kept as history`}
-            >
-              {showArchivedVersions ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
-              {' '}Archived Versions <span className="section-count">{archivedCount}</span>
-            </button>
-          )}
-        </div>
-        <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '12px 20px 0' }}>
-          A published schema is <strong>read-only</strong>. Devices are provisioned against the exact metric names it
-          models, so changing one in place would silently redefine the contract a fleet is judged against. Changes are
-          made by creating the next version — <span className="mono">v1 → v2 → v3</span> — which forks the definition into
-          an editable draft. Publishing a draft activates it, archives its predecessor, and moves every device across in
-          one transaction. Version numbers are assigned by the database and cannot be chosen.
-        </p>
-        {loading ? <div className="loading-wrap"><div className="spinner" /> Loading schemas…</div> : (
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th title="Schema descriptive name">Schema Name</th><th title="Lineage position and lifecycle state. Only a draft is editable.">Version</th><th title="Why this version exists, recorded when it was created">Change Description</th><th title="Schema unique UUID">Schema UUID</th><th title="Devices provisioned with this schema">Devices</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
-              <tbody>
-                {visibleSchemas.map(sch => {
-                  const count = deviceCountFor(sch.schema_uuid)
-                  const status = schemaStatus(sch)
-                  const draft = schemas.find(s =>
-                    s.parent_schema_id === sch.schema_uuid && schemaStatus(s) === SCHEMA_STATUS.DRAFT
-                  )
-                  const forkBlocked = !canManageSchema || !!draft
-                  return (
-                    <tr key={sch.schema_uuid} style={status === SCHEMA_STATUS.ARCHIVED ? { opacity: 0.6 } : undefined}>
-                      <td>
-                        <strong>{sch.schema_name}</strong>
-                        {/* A published version is read-only, and the lock says so on the row
-                            rather than only once the modal is open. */}
-                        {!isSchemaEditable(sch) && (
-                          <span
-                            style={{ marginLeft: '6px', color: 'var(--text-dim)', verticalAlign: 'middle' }}
-                            title={`Read-only — this version is ${statusLabel(status)}`}
-                          >
-                            <IconLock size={11} />
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <span
-                          className={`badge ${statusBadgeClass(status)}`}
-                          title={isSchemaEditable(sch)
-                            ? 'Draft — editable until published'
-                            : `${statusLabel(status)} and immutable`}
-                        >
-                          {schemaVersionLabel(sch)}
-                        </span>
-                      </td>
-                      {/* Constrained: a change description is free text and `.table-wrap` scrolls
-                          horizontally, so an unbounded cell pushes the action buttons off-screen.
-                          Third time this table shape has taught that lesson. */}
-                      <td style={{ maxWidth: '280px', color: sch.change_description ? 'var(--text-muted)' : 'var(--text-dim)', fontSize: '12px' }}>
-                        {sch.change_description || '—'}
-                      </td>
-                      <td><CopyableId value={sch.schema_uuid} label="schema UUID" onNotify={showToast} /></td>
-                      <td>
-                        {/* The count is the natural entry point to "which devices are these?",
-                            so it navigates to the Devices page filtered to this schema. */}
-                        <button
-                          type="button"
-                          className="count-link"
-                          disabled={count === 0}
-                          onClick={() => count > 0 && onSelectSchema?.(sch.schema_uuid)}
-                          title={count === 0
-                            ? 'No devices are provisioned with this schema'
-                            : `Show the ${count} device${count === 1 ? '' : 's'} using this schema`}
-                        >
-                          <span className="section-count">{count}</span>
-                        </button>
-                      </td>
-                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => setDetailSchema(sch)}
-                          title={isSchemaEditable(sch)
-                            ? 'Edit this draft version and publish it'
-                            : 'View this version — its definition, change description and lineage'}
-                        >
-                          {isSchemaEditable(sch) ? <><IconPencil size={12} /> Edit Draft</> : <>View</>}
-                        </button>
-                        {/* One primary action per published version. Disabled with a reason rather
-                            than hidden, so "why can I not change this?" is answerable in place. */}
-                        {canForkSchema(sch) && (
-                          <button
-                            className={`btn btn-primary btn-sm ${forkBlocked ? 'btn-disabled' : ''}`}
-                            style={{ marginLeft: '6px' }}
-                            disabled={forkBlocked}
-                            onClick={() => !forkBlocked && setForkTarget(sch)}
-                            title={!canManageSchema
-                              ? 'Requires Admin permissions'
-                              : draft
-                                ? `A draft (${draft.schema_name}) already exists — publish or discard it first`
-                                : `Fork this schema into an editable draft at v${nextVersion(sch)}`}
-                          >
-                            <IconGitBranch size={12} /> Create Version (v{nextVersion(sch)})
-                          </button>
-                        )}
-                        {/* Download lives in the overflow menu, not beside the other two. It is a
-                            secondary action, and this is the row shape Devices and Gateways
-                            already use -- two primary controls visible, everything else behind
-                            "More". That rule exists because the Devices cell reached seven
-                            buttons one feature at a time; the menu is where the next schema
-                            action goes, so this one starts it rather than adding a third button. */}
-                        <span style={{ marginLeft: '6px', display: 'inline-block', verticalAlign: 'middle' }}>
-                          <ActionMenu
-                            label="More"
-                            testId={`schema-actions-${sch.schema_uuid}`}
-                            items={[
-                              {
-                                key: 'download',
-                                icon: <IconDownload size={13} />,
-                                label: 'Download definition (JSON)',
-                                title: sch.schema_definition
-                                  ? `Save ${sch.schema_name}.schema.json to open in an editor or JSON Schema tool`
-                                  : 'This version has no definition to download',
-                                disabled: !sch.schema_definition,
-                                onClick: () => handleDownloadSchema(sch)
-                              }
-                            ]}
-                          />
-                        </span>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
             </table>
           </div>
         )}
@@ -1293,6 +1265,93 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, pendingVo
           onCancel={() => setDeprecateTarget(null)}
         />
       )}
-    </>
+      </div>
+
+      <ContextPanel
+        open={!!selectedSchema}
+        onClose={() => setSelectedId(null)}
+        type="SCHEMA"
+        onCopy={showToast}
+        title={selectedSchema?.schema_name || ''}
+        subtitle={selectedSchema && (
+          <>
+            <span className={`badge ${statusBadgeClass(selectedStatus)}`} style={{ fontSize: '11px' }}>
+              {statusLabel(selectedStatus)}
+            </span>
+            <span className="badge badge-neutral" style={{ fontSize: '11px' }}>{schemaVersionLabel(selectedSchema)}</span>
+          </>
+        )}
+        fields={selectedSchema ? [
+          { label: 'Schema UUID', value: selectedSchema.schema_uuid, mono: true, copyable: true },
+          { label: 'Version', value: schemaVersionLabel(selectedSchema) },
+          {
+            label: 'Lifecycle',
+            value: statusLabel(selectedStatus),
+            title: isSchemaEditable(selectedSchema)
+              ? 'A draft. This is the only state in which a schema can be edited.'
+              : 'Published or archived, and therefore immutable. Fork it to make changes.'
+          },
+          { label: 'Change Description', value: selectedSchema.change_description || null, full: true },
+          {
+            label: 'Parent Schema',
+            value: selectedSchema.parent_schema_id
+              ? (schemas.find(s => s.schema_uuid === selectedSchema.parent_schema_id)?.schema_name || selectedSchema.parent_schema_id)
+              : null,
+            full: true,
+            title: 'The version this one was forked from. Absent on the first version of a lineage.'
+          },
+          {
+            label: 'Provisioned Devices',
+            value: String(deviceCountFor(selectedSchema.schema_uuid)),
+            title: 'Devices registered against this exact version.'
+          },
+        ] : []}
+        actions={selectedSchema ? [
+          {
+            label: isSchemaEditable(selectedSchema) ? 'Edit Draft' : 'View Schema Detail',
+            icon: isSchemaEditable(selectedSchema) ? <IconPencil size={13} /> : <IconFileCode size={13} />,
+            onClick: () => setDetailSchema(selectedSchema),
+            primary: true,
+            title: isSchemaEditable(selectedSchema)
+              ? 'Edit this draft version and publish it'
+              : 'View this version — its definition, change description and lineage'
+          },
+          // Offered only on a version that CAN be forked -- a draft is not a lineage head, and
+          // an archived version is history. Same rule the row button used: the shape of the action
+          // is never shown where it is meaningless, and only DISABLED where it is meaningful but
+          // currently blocked, so "why can I not do this?" stays answerable in place.
+          canForkSchema(selectedSchema) && {
+            label: `Create Version (v${nextVersion(selectedSchema)})`,
+            icon: <IconGitBranch size={13} />,
+            onClick: () => setForkTarget(selectedSchema),
+            disabled: selectedForkBlocked,
+            title: !canManageSchema
+              ? 'Requires Admin permissions'
+              : selectedDraft
+                ? `A draft (${selectedDraft.schema_name}) already exists — publish or discard it first`
+                : `Fork this schema into an editable draft at v${nextVersion(selectedSchema)}`
+          },
+          {
+            label: `View ${deviceCountFor(selectedSchema.schema_uuid)} Provisioned Device(s)`,
+            icon: <IconCheck size={13} />,
+            onClick: () => onSelectSchema?.(selectedSchema.schema_uuid),
+            disabled: deviceCountFor(selectedSchema.schema_uuid) === 0,
+            title: deviceCountFor(selectedSchema.schema_uuid) === 0
+              ? 'No device is provisioned with this schema version'
+              : 'Open the Devices page filtered to this schema'
+          },
+          {
+            // Was the sole item behind the row's "More" menu. With the Actions column gone this is
+            // its only home, and here it costs a line rather than a click to reveal a click.
+            label: 'Download Definition (JSON)', icon: <IconDownload size={13} />,
+            onClick: () => handleDownloadSchema(selectedSchema),
+            disabled: !selectedSchema.schema_definition,
+            title: selectedSchema.schema_definition
+              ? `Save ${selectedSchema.schema_name}.schema.json to open in an editor or JSON Schema tool`
+              : 'This version has no definition to download'
+          },
+        ].filter(Boolean) : []}
+      />
+    </div>
   )
 }

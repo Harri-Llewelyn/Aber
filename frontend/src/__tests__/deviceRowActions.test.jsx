@@ -42,95 +42,111 @@ const show = async (rows, hasPermission = () => true) => {
   await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 }
 
-const openMenu = (id = 'aaaaaaaa-0000-4000-8000-000000000001') =>
-  fireEvent.click(screen.getByTestId(`device-actions-${id}`))
+const inRow = () => within(document.querySelector('.page-main'))
 
-const menuLabels = () =>
-  within(screen.getByRole('menu')).getAllByRole('menuitem').map(i => i.textContent)
+/**
+ * Every action the row used to hold, now in the panel it opens.
+ *
+ * Scoped to `.context-panel-actions`, not to the whole drawer: the 3D uploader renders below the
+ * action list and has controls of its own, and one of the tests below turns on the uploader NOT
+ * being advertised as an action.
+ */
+const panelLabels = () => {
+  openPanel()
+  return [...document.querySelectorAll('.context-panel-actions .context-action')]
+    .map(b => b.textContent.trim()).join('|')
+}
+
+/**
+ * Select a device row and return its context panel.
+ *
+ * The documents accordion, the 3D model uploader and the telemetry inspector used to be mounted
+ * once PER ROW, collapsed. They now belong to the selected device instead: one drawer rather than
+ * one per device, and a table that is a table again instead of alternating data and drawers.
+ *
+ * The rules being checked are unchanged -- lazy fetch, the uploader beside the empty state, the
+ * read-only role told the state but not offered the write. Only where they render has moved.
+ */
+const openPanel = (name = 'CNC_01') => {
+  fireEvent.click(within(document.querySelector('.page-main')).getByText(name))
+  return within(document.querySelector('.context-panel'))
+}
 
 beforeEach(() => vi.clearAllMocks())
 
 describe('device row actions', () => {
-  it('keeps only the primary action in the row itself', async () => {
-    // The cell used to carry seven controls and take over half the row's width.
+  it('leaves no action controls in the row at all', async () => {
+    // The cell carried seven controls and took over half the row's width. The row is identity and
+    // state now; every action lives in the drawer the row opens.
     await show([device()])
 
-    expect(screen.getByRole('button', { name: /^Edit/i })).toBeInTheDocument()
-    // Telemetry is no longer a button here: it navigated to a separate page and made you
-    // re-select the device you were already looking at. It is now a drawer on the row below.
-    expect(screen.queryByRole('button', { name: /^Telemetry$/i })).not.toBeInTheDocument()
-    expect(screen.getByText('Telemetry')).toBeInTheDocument()
-    // Everything else moved behind the overflow menu.
-    expect(screen.queryByRole('button', { name: /^Config/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /^Thread/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /^Archive/i })).not.toBeInTheDocument()
+    expect(inRow().queryByRole('button', { name: /^Edit/i })).not.toBeInTheDocument()
+    // Telemetry is not a row control at all now: it is a panel ACTION opening a modal, reached by
+    // selecting the device rather than by navigating to a separate page and re-finding it.
+    expect(inRow().queryByText('Telemetry')).not.toBeInTheDocument()
+    expect(openPanel().getByText('View Realtime Telemetry')).toBeInTheDocument()
+    expect(inRow().queryByRole('button', { name: /^Config/i })).not.toBeInTheDocument()
+    expect(inRow().queryByRole('button', { name: /^Thread/i })).not.toBeInTheDocument()
+    expect(inRow().queryByRole('button', { name: /^Archive/i })).not.toBeInTheDocument()
+    expect(document.querySelector('[data-testid^="device-actions-"]')).toBeNull()
   })
 
-  it('collects the secondary actions in the menu', async () => {
+  it('collects every action in the panel', async () => {
     await show([device()])
-    openMenu()
 
-    const labels = menuLabels().join('|')
+    const labels = panelLabels()
     for (const expected of [/Digital Thread/i, /Configuration Parameters/i,
-      /Export AAS JSON/i, /Export AASX package/i, /Archive device/i]) {
+      /Export AAS JSON/i, /Export AASX package/i, /Archive Device/i,
+      /Digital Nameplate/i, /Realtime Telemetry/i, /Edit Details/i]) {
       expect(labels).toMatch(expected)
     }
-    // Documents left the menu: the accordion is rendered inline on every row, so there is
-    // nothing here to toggle. This also returns a slot to a menu that had grown to seven items.
-    expect(labels).not.toMatch(/documents/i)
+    // Documents are BOTH here: the accordion below lists the links, and this opens the editor
+    // that attaches one. The accordion's own "Manage Links" pill was removed as the duplicate.
+    expect(labels).toMatch(/Manage Documents/i)
   })
 
-  it('promotes Restore into the row for an archived device', async () => {
-    // Restore is the ONLY action that means anything on an archived row. Burying it in the menu
-    // would make archived devices harder to work with, which is the opposite of the point.
+  it('replaces Edit with Restore on an archived device', async () => {
+    // Restore is the ONLY write that means anything on an archived device, and Edit is refused
+    // there anyway -- so the panel offers one or the other, never a disabled pair.
     await show([device({ is_archived: true })])
 
-    expect(screen.getByRole('button', { name: /Restore/i })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /^Edit/i })).not.toBeInTheDocument()
+    const panel = openPanel()
+    expect(panel.getByText(/Restore Device/i)).toBeInTheDocument()
+    expect(panel.queryByText('Edit Details')).not.toBeInTheDocument()
   })
 
   it('never offers Archive and Restore at once', async () => {
     await show([device({ is_archived: true })])
-    openMenu()
 
-    expect(menuLabels().join('|')).not.toMatch(/Archive device/i)
-    // ...and no stray separator is left behind where the Archive item was filtered out.
-    expect(within(screen.getByRole('menu')).queryAllByRole('separator').length).toBeLessThanOrEqual(1)
+    expect(panelLabels()).not.toMatch(/Archive Device/i)
   })
 
   it('disables the write actions for a role that cannot manage devices', async () => {
     await show([device()], () => false)
-    openMenu()
+    const panel = openPanel()
 
-    const menu = within(screen.getByRole('menu'))
-    expect(menu.getByRole('menuitem', { name: /Archive device/i }).disabled).toBe(true)
+    const btn = (name) => panel.getByText(name).closest('button')
+    expect(btn(/Archive Device/i).disabled).toBe(true)
+    expect(btn('Edit Details').disabled).toBe(true)
     // Reads are not gated: an export is a read, and so is the audit trace -- and so, now that
     // the 3D uploader has moved out of it, is Configuration Parameters. It shows what the
-    // device declared at birth and writes nothing.
-    expect(menu.getByRole('menuitem', { name: /Digital Thread/i }).disabled).toBe(false)
-    expect(menu.getByRole('menuitem', { name: /Export AAS JSON/i }).disabled).toBe(false)
-    expect(menu.getByRole('menuitem', { name: /Configuration Parameters/i }).disabled).toBe(false)
+    // device declared at birth, which is not a privileged fact.
+    expect(btn(/Digital Thread/i).disabled).toBe(false)
+    expect(btn(/Export AAS JSON/i).disabled).toBe(false)
+    expect(btn(/Configuration Parameters/i).disabled).toBe(false)
   })
 
-  // Standardised on the Cells page's treatment: the accordion is part of the row, collapsed,
-  // rather than something to be revealed through an overflow menu first.
-  it('renders the documents accordion inline on every row, with no menu step', async () => {
+  it('reaches documents through the panel action, not an accordion', async () => {
+    // The accordion is gone from both places. It was mounted once per row (a hundred collapsed
+    // drawers on a hundred-device page), then once in the drawer -- where it was a cramped list
+    // in a 360px column. Manage Documents opens the full editor instead.
     await show([device()])
 
-    expect(screen.getByText('Attached Document Links')).toBeInTheDocument()
-    // Present but closed: it fetches only on first expand, so an always-mounted row costs
-    // no request.
-    expect(screen.queryByText(/No external document links attached/)).not.toBeInTheDocument()
-  })
+    expect(inRow().queryByText('Attached Document Links')).toBeNull()
 
-  it('expands in place to reveal the links', async () => {
-    await show([device()])
-
-    fireEvent.click(screen.getByText('Attached Document Links'))
-
-    await waitFor(() =>
-      expect(screen.getByText(/No external document links attached to this device/)).toBeInTheDocument()
-    )
+    const panel = openPanel()
+    expect(panel.queryByText('Attached Document Links')).toBeNull()
+    expect(panel.getByText('Manage Documents')).toBeInTheDocument()
   })
 })
 
@@ -138,43 +154,40 @@ describe('device row actions', () => {
 // an attachment, like a document link -- and it was the only control in that modal that wrote
 // anything, which is why the modal is now open to every role.
 describe('device 3D model attachment', () => {
-  it('offers the uploader inside the expanded documents accordion', async () => {
+  it('offers the uploader as its own panel section', async () => {
+    // It was the documents accordion's footer, and outlived it: a 3D model is an attachment like
+    // a document link -- which is why it is not in the Configuration modal, a read-only view of
+    // what the device REPORTED -- and one upload control fits a narrow column perfectly well,
+    // unlike a list of links.
     await show([device()])
 
-    // Collapsed: the uploader is part of the accordion body, so it is not mounted yet.
     expect(screen.queryByTestId('model-3d-input')).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByText('Attached Document Links'))
-
-    await waitFor(() => expect(screen.getByTestId('model-3d-input')).toBeInTheDocument())
+    const panel = openPanel()
+    expect(panel.getByText('3D Model')).toBeInTheDocument()
+    expect(panel.getByTestId('model-3d-input')).toBeInTheDocument()
   })
 
-  it('shows the uploader even when the device has no document links', async () => {
-    // The footer renders alongside the empty state, not instead of it -- otherwise a device with
-    // a model but no links would have nowhere to show the model.
+  it('shows the uploader regardless of whether the device has document links', async () => {
+    // It used to render inside the documents accordion, so a device with a model but no links
+    // needed the footer to render alongside the empty state. Standing alone, that cannot regress.
     await show([device()])
 
-    fireEvent.click(screen.getByText('Attached Document Links'))
-
-    await waitFor(() =>
-      expect(screen.getByText(/No external document links attached to this device/)).toBeInTheDocument()
-    )
-    expect(screen.getByTestId('model-3d-input')).toBeInTheDocument()
+    expect(openPanel().getByTestId('model-3d-input')).toBeInTheDocument()
   })
 
-  it('no longer advertises the 3D model from the Configuration menu item', async () => {
+  it('no longer advertises the 3D model from the Configuration action', async () => {
     await show([device()])
-    openMenu()
 
-    const labels = menuLabels().join('|')
+    // The ACTION LIST must not advertise it -- the uploader is a section below, not a button.
+    const labels = panelLabels()
     expect(labels).toMatch(/Configuration Parameters/i)
     expect(labels).not.toMatch(/3D model/i)
   })
 
   it('withholds the upload controls from a role that cannot manage devices', async () => {
     await show([device()], () => false)
-
-    fireEvent.click(screen.getByText('Attached Document Links'))
+    openPanel()
 
     // Both sides asserted, so this cannot pass just because the copy changed: a read-only role
     // is told the state ("No 3D model attached") and is NOT offered the drop prompt. RLS refuses
@@ -185,8 +198,7 @@ describe('device 3D model attachment', () => {
 
   it('offers the drop prompt to a role that can manage devices', async () => {
     await show([device()])
-
-    fireEvent.click(screen.getByText('Attached Document Links'))
+    openPanel()
 
     await waitFor(() => expect(screen.getByText(/Drop a 3D model here/i)).toBeInTheDocument())
   })

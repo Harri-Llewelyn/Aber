@@ -19,6 +19,7 @@ import {
   IconGithub,
   IconGlobe
 } from '../common/Icons'
+import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 const TAG_ICONS = {
   image:             <IconImage size={12} />,
@@ -39,10 +40,10 @@ const TAG_LABELS = {
 function getDomainBadgeIcon(url = '') {
   const lower = url.toLowerCase()
   if (lower.includes('sharepoint.com')) {
-    return <span className="badge" style={{ background: 'rgba(0,120,212,0.15)', color: '#0078d4', border: '1px solid #0078d4', gap: '4px' }}><IconSharePoint size={12} /> SharePoint</span>
+    return <span className="badge badge-brand badge-sharepoint"><IconSharePoint size={12} /> SharePoint</span>
   }
   if (lower.includes('drive.google.com') || lower.includes('docs.google.com')) {
-    return <span className="badge" style={{ background: 'rgba(15,157,88,0.15)', color: '#0f9d58', border: '1px solid #0f9d58', gap: '4px' }}><IconDrive size={12} /> Google Drive</span>
+    return <span className="badge badge-brand badge-drive"><IconDrive size={12} /> Google Drive</span>
   }
   if (lower.includes('github.com')) {
     return <span className="badge badge-neutral" style={{ gap: '4px' }}><IconGithub size={12} /> GitHub</span>
@@ -51,6 +52,11 @@ function getDomainBadgeIcon(url = '') {
 }
 
 export function EntityDocumentsModal({ entityType, entityId, entityName, onClose, showToast, hasPermission }) {
+  // Escape closes. Via the shared stack rather than a listener of this component's own,
+  // because a ConfirmModal can open on top of this one and a bare document listener on each
+  // would let one keypress dismiss both.
+  useEscapeKey(onClose)
+
   const [docs, setDocs]               = useState([])
   const [loading, setLoading]         = useState(true)
   const [showForm, setShowForm]       = useState(false)
@@ -119,7 +125,7 @@ export function EntityDocumentsModal({ entityType, entityId, entityName, onClose
 
   return (
     <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 640 }}>
+      <div className="modal modal-lg">
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <IconBookOpen size={18} style={{ color: 'var(--accent)' }} />
@@ -182,7 +188,7 @@ export function EntityDocumentsModal({ entityType, entityId, entityName, onClose
                    <div style={{ minWidth: 0, flex: 1 }}>
                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                        <strong style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{d.display_name}</strong>
-                       <span className="badge badge-neutral" style={{ fontSize: '10px', gap: '4px' }}>
+                       <span className="badge badge-neutral" style={{ fontSize: '11px', gap: '4px' }}>
                          {TAG_ICONS[d.document_tag] || <IconFileText size={12} />}
                          {TAG_LABELS[d.document_tag] || 'Other'}
                        </span>

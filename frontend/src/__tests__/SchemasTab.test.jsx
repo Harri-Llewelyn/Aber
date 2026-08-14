@@ -73,7 +73,21 @@ const renderTab = () => render(
 )
 
 /** The catalog table is the first one on the page; the vocabulary panel below it is not a table. */
-const catalogTable = () => document.querySelector('table')
+/**
+ * Located by its heading, not by its position on the page.
+ *
+ * These used to be `document.querySelector('table')` and `tables[tables.length - 1]` -- the first
+ * table was the catalog and the last was the registry. Then the two cards swapped order, and every
+ * assertion in both files silently pointed at the wrong table. Naming what is wanted costs one
+ * helper and cannot rot that way.
+ */
+const cardTable = (heading) => {
+  const title = [...document.querySelectorAll('.card-header .section-title')]
+    .find(h => h.textContent.includes(heading))
+  return title?.closest('.card')?.querySelector('table')
+}
+
+const catalogTable = () => cardTable('Metric Catalog')
 
 /**
  * Waits for the catalog to render, then opens every group.

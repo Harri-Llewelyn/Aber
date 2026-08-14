@@ -33,6 +33,22 @@
      tokens exist so call sites express intent and the light theme can diverge. */
   --warning-text: #ffb300;
   --success-text: #00e896;
+  /* The ink for a button FILLED with --warning, the amber counterpart to --accent-contrast.
+     Archive and Deprecate both painted `color: '#000'` inline for this, which is the one thing
+     Phase 1 ruled out -- and it was a guess that happened to be right rather than a measured
+     choice. White on amber is 3.18:1 in the light theme; dark ink is 6.59:1. */
+  --warning-contrast: #0b0e14;
+  /* ===== Brand marks =====
+     A document provider's own colour, used to make a SharePoint link recognisable at a glance
+     as a SharePoint link. Deliberately IDENTICAL in both themes and deliberately not derived
+     from anything: it is Microsoft's blue and Google's green, and a theme has no opinion on
+     those. They are tokens rather than inline hex only so this file remains the one place any
+     colour is written down.
+
+     TINT AND BORDER ONLY -- never text. #0078d4 as a label on the dark card measures 3.73:1,
+     which is why the badge label is --text-primary and the brand colour is the surround. */
+  --brand-sharepoint: #0078d4;
+  --brand-drive:      #0f9d58;
   /* Completes the trio. --danger (#ff4d6d) clears AA on a bare card (6.6:1) but only 4.45:1 on
      the 0.15 rose tint the error toast and .badge-offline sit on -- just under the bar, and the
      error toast is the message a user most needs to read. One step lighter clears it at 5.3:1
@@ -77,18 +93,40 @@
      4.99:1 respectively. */
   --warning-text: #b45309;
   --success-text: #047857;
+  /* Amber-600 is 3.18:1 under white and 5.35:1 under slate-900, so the ink stays dark here too
+     -- unlike --accent-contrast, which flips between the themes. */
+  --warning-contrast: #0f172a;
   /* --danger (#e11d48) measures 4.72:1 on a white card -- a pass -- but drops to 3.94:1 once the
      0.15 rose tint lightens the surface under it. Rose-700 clears that at 5.21:1. */
   --danger-text:  #be123c;
   --shadow:       0 4px 20px rgba(0, 0, 0, 0.06);
 }
 
+/* ===== The type scale =====
+   Raised a step throughout for shopfloor kiosk displays, which are read standing up at a metre
+   or more rather than sitting at a desk.
+
+   BE AWARE OF WHAT THIS LINE DOES AND DOES NOT DO. Almost every rule in this file sets its own
+   font-size in px, so changing the root alone moves only the handful of elements that inherit --
+   it is not the global control it looks like. The scale was raised at each of those rules to
+   match, and the steps are now:
+
+     9px, 10px  -- GONE. Nothing in the app is below 11px.
+     11px       -- the floor: dense chrome only (field labels, chips, ids in the drawer)
+     12px       -- secondary metadata and captions: .cell-meta, .kpi-label, .badge, th
+     13px       -- small controls (.btn-sm, filter-bar inputs), monospace values
+     14px       -- body: table cells, form inputs, buttons, nav
+     15px       -- the root, inherited by prose that sets nothing of its own
+
+   Table row heights were HELD, not allowed to grow with the text: `td` padding came down 13px to
+   12px as its text went 13px to 14px, so a hundred-device list occupies the same screen it did.
+   The point of the phase was legibility, not fewer rows per screen. */
 html, body, #root {
   height: 100%;
   background: var(--bg-base);
   color: var(--text-primary);
   font-family: 'Outfit', sans-serif;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   transition: background-color 0.25s ease, color 0.25s ease;
@@ -108,13 +146,23 @@ html, body, #root {
   overflow: hidden;
 }
 
-/* ===== Top Bar ===== */
+/* ===== Top Bar =====
+   ONE row carries the brand, the primary navigation and the session controls.
+   These used to be two stacked bars -- a 60px header and a 54px tab strip -- which cost 114px of
+   every viewport before the page had said anything. On a 1366x768 shopfloor terminal that, plus
+   the page heading and description each tab repeated, pushed the Overview map's first cell card
+   entirely below the fold. Merging them recovers 62px on every page at once.
+
+   The three regions do not share the space equally. Nav and controls are fixed-size and must
+   never be clipped -- a navigation item you cannot see is a page you cannot reach -- so the BRAND
+   is the flexible one and truncates first (see .brand-name). That is also the right thing to
+   sacrifice: it says the same thing on every page, and the tab bar beside it does not. */
 .topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 28px;
-  height: 60px;
+  gap: 16px;
+  padding: 0 20px;
+  height: 52px;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -125,41 +173,177 @@ html, body, #root {
 .topbar-brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  /* SHRINK-ONLY (`0 1 auto`), not grow-and-shrink.
+     It is still the only region allowed to give up space -- `min-width: 0` is what actually lets a
+     flex item shrink below its content width, and without it the default `min-width: auto` makes
+     the brand rigid and the overflow lands on the nav instead.
+     But it must not GROW either: a growing brand swallows the bar's free space, and the nav's auto
+     margins then have nothing left to centre it with. */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .brand-icon {
-  width: 32px;
-  height: 32px;
-  background: var(--accent);
-  color: #ffffff;
-  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  /* The filled-button pair, not bare --accent with white ink. In the light theme --accent is
+     #0284c7, on which white measures APCA Lc 36.6 -- the "passes WCAG 2, unreadable on screen"
+     case the button tokens exist to avoid. */
+  background: var(--accent-strong);
+  color: var(--accent-contrast);
+  border-radius: 7px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
-  box-shadow: 0 0 16px var(--accent-glow);
+  flex-shrink: 0;
+  box-shadow: 0 0 14px var(--accent-glow);
 }
 
+.brand-text {
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Truncates rather than wrapping or pushing: the bar is a fixed 52px, so a second line would be
+   clipped mid-glyph. The element carries a `title` in App.jsx, so the full name stays reachable. */
 .brand-name {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--text-primary);
-  letter-spacing: 0.5px;
+  letter-spacing: 0.4px;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .brand-sub {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-muted);
-  letter-spacing: 1px;
+  letter-spacing: 0.9px;
   text-transform: uppercase;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ===== Primary Navigation (in the top bar) =====
+   Centre region. Fixed-size and never clipped -- see the .topbar comment for why this wins the
+   space fight against the brand.
+
+   `margin: 0 auto` is what centres it: auto margins on a flex item absorb the row's leftover space
+   equally on both sides, which is why the brand had to stop growing. Note this centres the nav in
+   the space LEFT OVER by the brand and the controls, so if those two differ in width the nav sits
+   off the bar's true centre by half that difference. That is the honest trade for never
+   overlapping either of them, which absolute centring would risk at narrow widths. */
+.topbar-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin: 0 auto;
 }
 
 .topbar-right {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
+  flex-shrink: 0;
 }
+
+/* ===== Account pill and menu =====
+   Replaces the icon + email + role badge + Sign Out button that used to sit side by side in the
+   bar, about 330px of it. See the UserMenu comment in App.jsx for why the role badge stays on the
+   pill while the address and the sign-out action move behind it. */
+.user-menu { position: relative; }
+
+.user-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: 'Outfit', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+  white-space: nowrap;
+}
+
+.user-pill:hover { border-color: var(--accent); }
+.user-pill-open { border-color: var(--accent); background: var(--accent-dim); }
+.user-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.user-pill-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+.user-pill-role { font-size: 11px; }
+.user-pill-caret { color: var(--text-muted); transition: transform 0.2s ease; flex-shrink: 0; }
+.user-pill-caret-open { transform: rotate(180deg); }
+
+/* Escapes the bar downward. `.app-shell` clips at the viewport, not here, and `.topbar` carries
+   z-index 100, so the popover paints above the page without needing a portal. */
+.user-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 230px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  z-index: 200;
+}
+
+.user-popover-head {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Wraps rather than truncating: this is the one place the address is shown in full, so an
+   ellipsis here would defeat the reason it exists. */
+.user-popover-email {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  word-break: break-all;
+  line-height: 1.35;
+}
+
+.user-popover-role {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+.user-popover-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-family: 'Outfit', sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.user-popover-action:hover { background: var(--bg-glass); color: var(--danger-text); }
+.user-popover-action:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 .topbar-status {
   display: flex;
@@ -183,98 +367,102 @@ html, body, #root {
   50% { opacity: 0.5; transform: scale(0.85); }
 }
 
-/* ===== Ecosystem Services Quick Links ===== */
-.topbar-apps {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.app-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  background: var(--bg-glass);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-size: 11px;
-  font-weight: 500;
-  text-decoration: none;
-  transition: var(--transition);
-}
-
-.app-link:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: var(--accent-dim);
-}
-
 /* ===== Nav Tabs ===== */
-.nav-tabs {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 12px 28px 0;
-  background: var(--bg-surface);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  transition: background-color 0.25s ease;
-}
-
 .nav-tab {
   position: relative;
-  padding: 10px 20px;
-  border: none;
+  padding: 7px 11px;
+  /* A transparent border, not `none`: the active pill adds a 1px accent border, and a tab that
+     only grows a border when selected would shift its neighbours by 2px on every navigation. */
+  border: 1px solid transparent;
   background: none;
   color: var(--text-muted);
   font-family: 'Outfit', sans-serif;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  border-radius: var(--radius-sm);
   transition: var(--transition);
   letter-spacing: 0.3px;
   display: inline-flex;
   align-items: center;
+  white-space: nowrap;
 }
 
 .nav-tab:hover { color: var(--text-primary); background: var(--bg-glass); }
 
+/* The active page is a filled pill. It used to be a 2px underline pinned to the bottom of the
+   tab strip -- a treatment that only reads as "selected" when the strip has an edge for it to sit
+   on, which the merged bar does not. It also has to survive the icon-only mode below, where the
+   label is gone and the pill is the ONLY thing distinguishing the current page. Three signals
+   carry it, so none of them is doing the job alone: fill, border and weight. */
 .nav-tab.active {
   color: var(--accent);
   background: var(--accent-dim);
+  border-color: var(--accent);
+  font-weight: 600;
 }
 
-.nav-tab.active::after {
-  content: '';
-  position: absolute;
-  bottom: -1px;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: var(--accent);
-  border-radius: 2px 2px 0 0;
+.nav-tab.active:hover { background: var(--accent-dim); color: var(--accent); }
+
+.nav-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
-.tab-icon { margin-right: 8px; display: inline-flex; }
+.tab-icon { margin-right: 7px; display: inline-flex; flex-shrink: 0; }
+
+/* ===== Top Bar Responsive Collapse =====
+   NO HORIZONTAL SCROLLING, at any width. A scrolling nav hides pages behind a gesture nobody
+   performs on a bar that looks complete, so the labels are dropped instead: nine icons always fit,
+   and every tab keeps a `title` carrying its full name.
+
+   Three bands, each shedding the least useful thing left:
+     >= 1600px  everything
+     >= 1400px  brand tagline and the user's email drop out (both are context, not controls)
+      < 1400px  tab labels drop out; the nav becomes icons only */
+@media (max-width: 1599px) {
+  .brand-sub { display: none; }
+  /* The role badge stays -- it is the standing answer to "why is that button disabled". The name
+     is recoverable from the pill's title and, in full, from the menu behind it. */
+  .user-pill-name { display: none; }
+}
+
+@media (max-width: 1399px) {
+  .nav-tab-label { display: none; }
+  .nav-tab { padding: 7px 9px; }
+  .tab-icon { margin-right: 0; }
+  /* Below this the right-hand controls are what would overflow next. The icons stay, so nothing
+     becomes unreachable -- each keeps the `title` it already had. */
+  .btn-label { display: none; }
+}
 
 /* ===== Main Content ===== */
 .content {
   flex: 1;
   overflow-y: auto;
-  padding: 28px;
+  padding: 18px 24px 24px;
 }
 
-/* ===== Section Header ===== */
-.section-header {
+/* ===== Page Action Row =====
+   What is left of `.section-header` on a tab once its heading and description moved out. The top
+   bar already names the current page, so the h2 restated it and the paragraph under it was ~40px
+   of prose read once and scrolled past forever. The actions still need a home; this is that row
+   and nothing else. Pages with no actions render no row at all. */
+.page-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 20px;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
 }
 
+/* ===== Section Header =====
+   `.section-header` -- a full-width heading row above a card -- is gone. Every page-level use of it
+   was a heading restating the name of the tab already highlighted in the top bar, and the two
+   in-card uses that were left (Archives, Directory) moved into `.card-header`, which rides an edge
+   the card had anyway. `.section-title` and `.section-count` survive because the card headers,
+   which still exist, are built from them. See `.page-actions` for what replaced the action half. */
 .section-title {
   font-size: 20px;
   font-weight: 600;
@@ -346,20 +534,21 @@ html, body, #root {
   height: 34px;
   padding-top: 0;
   padding-bottom: 0;
-  font-size: 12px;
-}
-
-.filter-label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: var(--text-muted);
-  margin-right: -4px;
+  font-size: 13px;
 }
 
 /* Pushes everything after it to the right-hand end of the bar. */
 .filter-bar-spacer { margin-left: auto; }
+
+/* A GROUP at the right-hand end, for pages whose export and refresh controls fold into the
+   filter row rather than sitting on a `.page-actions` row of their own above it. Carrying the
+   spacer on the group rather than on its first child keeps the right-hand end stable when one
+   of the controls is conditional. */
+.filter-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 
 /* A cell rendered as an action -- used for counts that navigate elsewhere (e.g. a schema's
    device count opening the Devices page filtered to it). Reads as a link, not a button. */
@@ -383,74 +572,120 @@ html, body, #root {
   color: var(--accent);
 }
 
-/* ===== Stats Row ===== */
-.stats-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 16px;
-  margin-bottom: 28px;
-}
+/* ===== KPI Ribbon =====
+   Three 126px stat cards in a 154px grid row became one 48px bar -- ~106px back on the page every
+   operator lands on.
 
-.stat-card {
+   The cards spent that height on a 32px accent numeral each. It was the loudest thing on the
+   Overview page and it was reporting a figure that changes a handful of times a week, sitting
+   directly above a live map of the floor. The ribbon keeps every number and every click target and
+   drops only the size.
+
+   What the cards' sub-line carried -- the Offline/Archived split -- moves onto each item's
+   `title`. The headline is now "n/N Active", because the question this bar answers at a glance is
+   "is everything up?", which a bare total cannot answer at all. */
+/* THREE EQUAL COLUMNS, not three centred items.
+   Centring a flex row put the three metrics in the middle as one clump whose segments were as wide
+   as their own text, so "Gateways" occupied more of the bar than "Cells" and the dividers landed at
+   arbitrary places. An equal grid gives each metric an identical third of the width, which is what
+   makes the dividers read as structure rather than as punctuation.
+
+   `align-items: stretch`, NOT `center`. The items must run the full 48px or their right borders
+   collapse into 20px stubs floating in the middle of the bar. The content is still vertically
+   centred -- each item centres its own, see .kpi-item. */
+.kpi-ribbon {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-items: stretch;
+  width: 100%;
+  height: 48px;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
+  border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+
+.kpi-item {
+  display: flex;
+  /* `center`, not `baseline`. Baseline lined the label, the figure and the unit up on a common
+     baseline -- correct typographically -- but in a stretched 48px item it also pinned that
+     baseline to the TOP of the bar, so the whole group sat high with all the slack beneath it.
+     Centring costs a little optical alignment between the 15px figure and the 11px label, and
+     buys the group sitting where it belongs in the bar. */
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 8px;
+  /* The grid track now supplies the width, so this is only breathing room -- and it has to stay
+     modest, because the content is `nowrap` and a wide padding would overflow its third of the bar
+     on a narrow window rather than wrapping. */
+  padding: 0 16px;
+  border: none;
+  background: none;
+  font-family: 'Outfit', sans-serif;
+  cursor: pointer;
   transition: var(--transition);
+  white-space: nowrap;
+  min-width: 0;
 }
 
-.stat-card:hover {
-  border-color: var(--border-hover);
-  box-shadow: 0 0 20px var(--accent-dim);
-  transform: translateY(-1px);
-}
+/* Rules between the columns rather than gaps: the ribbon is one object, and gaps between three
+   floating groups read as three objects again -- which is what it stopped being. The items stretch
+   to the bar's height, so each border runs its full 48px. Last item excluded so the ribbon does not
+   grow a redundant inner edge against its own right border. */
+.kpi-item:not(:last-child) { border-right: 1px solid var(--border); }
 
-/* Raised on a stat card whose figure needs an operator to act -- currently the Total Devices
-   card while any device is held in quarantine. The left bar gives the card a distinct shape
-   in peripheral vision; the border and tint keep it legible in both themes. Colour is never
-   the only signal: the card also shows an icon and the word "Quarantined". */
-.stat-card-alert {
-  border-color: var(--warning);
-  border-left: 3px solid var(--warning);
-  background: linear-gradient(to right, rgba(255, 179, 0, 0.07), var(--bg-card) 60%);
-}
+.kpi-item:hover { background: var(--bg-glass); }
+.kpi-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-.stat-card-alert:hover {
-  border-color: var(--warning);
-  box-shadow: 0 0 20px rgba(255, 179, 0, 0.25);
-}
-
-/* The alert card's amber tint lightens the surface, which costs the sub-text contrast: in
-   dark mode --text-dim drops from 4.50:1 to 3.95:1 against the tinted background and stops
-   clearing AA. Step this card's sub-text up one tier to claw it back (4.52:1). */
-.stat-card-alert .stat-sub {
-  color: var(--text-muted);
-}
-
-.stat-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: var(--text-muted);
-  margin-bottom: 10px;
-}
-
-.stat-value {
-  font-size: 32px;
-  font-weight: 700;
-  color: var(--accent);
-  line-height: 1;
-  text-shadow: 0 0 20px var(--accent-glow);
-}
-
-.stat-sub {
-  margin-top: 8px;
-  /* 11px was small enough that the low dark-mode contrast compounded into genuine
-     illegibility. The colour is fixed at the token level; this recovers the rest. */
+.kpi-label {
   font-size: 12px;
-  color: var(--text-dim);
-  line-height: 1.5;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.9px;
+  color: var(--text-muted);
+}
+
+.kpi-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+/* The denominator is deliberately quieter than the numerator. "1/1" and "1/9" want to be told
+   apart at a glance, and it is the first number that moves. */
+.kpi-total { color: var(--text-muted); font-weight: 500; }
+
+.kpi-unit { font-size: 11px; color: var(--text-muted); }
+
+/* Raised on the item whose figure needs an operator to act -- currently Devices, while any device
+   is held in quarantine. Inherited wholesale from the stat card this replaced, including the
+   0.07 amber overlay, so the contrast case themeContrast.test.js already measures
+   ("--warning-text on alert card") still describes what ships.
+
+   COLOUR IS NEVER THE ONLY SIGNAL: the item also grows an icon and the word "Quarantined". */
+/* The amber bar is an INSET SHADOW, not a border-left. As a border it sat immediately beside the
+   1px divider on the item before it, and the two painted as one confused 4px line. An inset shadow
+   occupies no layout, so the divider stays a clean 1px and the bar reads as belonging to this
+   item. */
+.kpi-item-alert {
+  box-shadow: inset 3px 0 0 var(--warning);
+  background: linear-gradient(to right, rgba(255, 179, 0, 0.07), var(--bg-card) 70%);
+}
+
+.kpi-item-alert:hover { background: rgba(255, 179, 0, 0.12); }
+
+.kpi-alert-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--warning-text);
 }
 
 /* ===== Table ===== */
@@ -471,7 +706,7 @@ thead tr {
 th {
   padding: 12px 16px;
   text-align: left;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.8px;
@@ -480,8 +715,8 @@ th {
 }
 
 td {
-  padding: 13px 16px;
-  font-size: 13px;
+  padding: 12px 16px;
+  font-size: 14px;
   color: var(--text-primary);
   border-bottom: 1px solid var(--border);
 }
@@ -496,9 +731,35 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .mono {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--accent);
 }
+
+/* A secondary cell: a timestamp, an age, anything read only after the row has been identified
+   by something else. Was an inline `{ fontSize: '11px', color: 'var(--text-muted)' }` copied
+   into four tables, which is how two of them ended up a pixel apart. */
+.cell-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* The retention deadline on an archived row. Danger-coloured because it is a date on which
+   data disappears, not merely a date. */
+   Compounded with .mono, which it is always used alongside: .mono sets its own colour and size,
+   and relying on source order to beat it is the specificity trap that cost the shopfloor lanes
+   their borders twice. */
+.mono.cell-purge-date {
+  font-size: 11px;
+  color: var(--danger);
+}
+
+/* Buttons in a table cell, held to the right-hand edge of the row. */
+.row-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.row-actions .btn + .btn { margin-left: 8px; }
 
 /* ===== Copyable identifiers =====
    Sparkplug ids are opaque 24-character strings that engineers have to transcribe into
@@ -566,7 +827,7 @@ tbody tr:hover { background: var(--bg-glass); }
   gap: 5px;
   padding: 3px 10px;
   border-radius: 100px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -593,7 +854,7 @@ tbody tr:hover { background: var(--bg-glass); }
   border: none;
   border-radius: var(--radius-sm);
   font-family: 'Outfit', sans-serif;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: var(--transition);
@@ -617,14 +878,39 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 .btn-ghost:hover { border-color: var(--border-hover); color: var(--accent); }
 
+/* --danger-text, not --danger. This is TEXT on a rose-tinted fill, which is the exact case the
+   -text tier exists for: --danger on the 0.2 hover tint measures 4.09:1 in dark and 3.69:1 in
+   light, both under AA. The toast and .badge-offline were moved off --danger for this reason;
+   the button was missed because it reads as a control rather than as text. */
 .btn-danger {
   background: rgba(255, 77, 109, 0.12);
-  color: var(--danger);
+  color: var(--danger-text);
   border: 1px solid rgba(255, 77, 109, 0.25);
 }
 .btn-danger:hover { background: rgba(255, 77, 109, 0.2); box-shadow: 0 0 12px rgba(255, 77, 109, 0.2); }
 
-.btn-sm { padding: 6px 12px; font-size: 12px; }
+/* A destructive action that sits in a table row rather than in a dialog, where a permanently
+   red button would be the loudest thing on a page of otherwise routine rows and would pull the
+   eye to the one control nobody should reach for by accident. It rests as an ordinary ghost
+   button and takes on the danger colour once pointed at -- by which point the pointer is
+   already there and the colour is a warning rather than an advertisement.
+   --text-muted, not --text-dim: this still has to be readable at rest. */
+   Compounded with .btn-danger for the same reason .mono.cell-purge-date is: .btn-danger declares
+   the same three properties and source order is not a guarantee worth resting on. */
+.btn-danger.btn-danger-reveal {
+  background: var(--bg-glass);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.btn-danger.btn-danger-reveal:hover,
+.btn-danger.btn-danger-reveal:focus-visible {
+  background: rgba(255, 77, 109, 0.2);
+  color: var(--danger-text);
+  border-color: rgba(255, 77, 109, 0.35);
+}
+
+.btn-sm { padding: 6px 12px; font-size: 13px; }
 
 .btn-disabled {
   opacity: 0.45 !important;
@@ -705,9 +991,24 @@ tbody tr:hover { background: var(--bg-glass); }
   background: var(--border);
 }
 
+/* A document provider's badge. The provider's own colour tints the fill and draws the border --
+   enough to make a SharePoint link recognisable as one across a list -- while the LABEL takes
+   --text-primary, because the brand colours are not legible as text: #0078d4 on the dark card is
+   3.73:1 against a 4.5:1 bar. The icon beside the label carries the identity that the ink used
+   to try to. `color-mix` keeps the tint derived from the one place the colour is written. */
+.badge-brand {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--badge-brand-color) 15%, transparent);
+  border: 1px solid var(--badge-brand-color);
+  gap: 4px;
+}
+
+.badge-sharepoint { --badge-brand-color: var(--brand-sharepoint); }
+.badge-drive      { --badge-brand-color: var(--brand-drive); }
+
 /* ===== Collapsed tag list ===== */
 .tag-overflow {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-muted);
   background: transparent;
   border: 1px dashed var(--border);
@@ -763,6 +1064,53 @@ tbody tr:hover { background: var(--bg-glass); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* ===== The modal width scale =====
+   Every dialog used to carry its own `style={{ maxWidth: N }}`, and the fifteen of them landed
+   on 400, 460, 480, 520, 560, 640, 720 and 900 -- six of which were the same size wearing
+   different numbers, and none of which said what the size was FOR. The steps below are named
+   after the kind of content that earns them, so a new dialog picks a category rather than a
+   number, and two dialogs showing the same kind of thing cannot drift 20px apart.
+
+   `.modal` itself is the default step (480px): a column of stacked form fields, which is what
+   most dialogs here are. Nothing needs a class to get it.
+
+   Every step inherits `.modal`'s height cap and internal scrolling, so widening a dialog can
+   never be what makes its title scroll off the top of the viewport. */
+
+/* A yes/no question and nothing else. Narrower than a form on purpose: a short line of text set
+   across 480px reads as an unfinished dialog. */
+.modal-sm { max-width: 400px; }
+
+/* A form with a list in it -- a picker, a payload editor. The list needs the width; the fields
+   above it do not suffer from having it. */
+.modal-md { max-width: 560px; }
+
+/* Content rather than input: a document list, a schema definition, a config dump. */
+.modal-lg { max-width: 640px; }
+
+/* Two columns of fields. Only the nameplate needs this, and it needs it because IEC 63278 gives
+   it sixteen properties that read as pairs. */
+.modal-xl { max-width: 720px; }
+
+/* For a modal holding a TABLE rather than a form. `.modal`'s 480px is sized for stacked fields;
+   the telemetry inspector is four columns and was unreadable at that width -- which is the whole
+   reason it left the 360px context panel. */
+.modal-wide {
+  max-width: 900px;
+  padding: 20px 22px;
+}
+
+.modal-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
 .modal-title {
   font-size: 17px;
   font-weight: 600;
@@ -774,9 +1122,24 @@ tbody tr:hover { background: var(--bg-glass); }
   margin-bottom: 16px;
 }
 
+/* A checkbox and its label on one line. The label carries `.form-label`, which is a block with
+   its own bottom margin -- correct above an input, wrong beside one -- so the two rules that
+   turn it into a row live here rather than being written inline at each call site. */
+.form-group-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-group-check input,
+.form-group-check .form-label {
+  margin-bottom: 0;
+  cursor: pointer;
+}
+
 .form-label {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.8px;
@@ -792,7 +1155,7 @@ tbody tr:hover { background: var(--bg-glass); }
   border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-family: 'Outfit', sans-serif;
-  font-size: 13px;
+  font-size: 14px;
   transition: var(--transition);
   outline: none;
 }
@@ -845,7 +1208,7 @@ tbody tr:hover { background: var(--bg-glass); }
 /* ===== Telemetry Grid ===== */
 .telemetry-value {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .val-double { color: var(--accent); }
@@ -939,23 +1302,25 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 .shopfloor-map-bg {
-  padding: 24px;
+  padding: 14px 16px 16px;
 }
 
 .shopfloor-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
-  padding-bottom: 14px;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
   border-bottom: 1px solid var(--border);
 }
 
 .shopfloor-title {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 16px;
+  gap: 8px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -963,59 +1328,105 @@ tbody tr:hover { background: var(--bg-glass); }
 .shopfloor-legend {
   display: flex;
   align-items: center;
-  gap: 16px;
-  font-size: 12px;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 11px;
   color: var(--text-muted);
 }
 
+/* A FLOOR PLAN, NOT A LIST OF CARDS.
+   320px minimums gave five columns on a 1080p screen and pushed everything past the third cell
+   below the fold.
+
+   280px is the minimum, but ~296px is what actually renders at 1920: the map card offers 1838px of
+   inner width, which fits exactly SIX 280px tracks plus their gaps and then distributes the
+   remainder back through `1fr`. So the minimum sets the column COUNT and the fraction sets the
+   width -- 6 substantial tiles rather than 7 tight ones, without a media query pinning a count that
+   would break on a 1366px laptop. That degrades cleanly: 5 columns at 1600, 4 at 1366, all of them
+   ~295-310px.
+
+   `auto-fill`, not `auto-fit`: with `auto-fit` the tracks COLLAPSE when there are fewer cells than
+   columns, so a floor with three bays would stretch each one across a third of the display and the
+   grid would change shape as cells are added. `auto-fill` keeps the track width stable, which is
+   what makes this read as a plan of a floor rather than as however many cards happen to exist. */
 .shopfloor-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 20px;
-}
-
-/* The two derived lanes sit ABOVE the physical cells, not inside their grid.
-   Site-Wide and Unassigned are not cells -- they are a permanent home for facility-scoped
-   assets and a work queue that should drain -- so letting them reflow between the bays as the
-   cell count changes buries them, and the queue is the one thing on this page that should never
-   be hard to find.
-
-   STACKED, NOT SIDE BY SIDE. Two columns left a dead corner whenever the lanes were unequal,
-   which is most of the time: an empty Unassigned collapses to one line, and a half-page of
-   nothing beneath it read as a rendering fault rather than as good news. Full width also suits
-   what these hold -- rows of chips, which wrap better across the page than down a column. The
-   order still carries the meaning, now top-to-bottom: infrastructure first, then the queue. */
-.shopfloor-lanes {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 20px;
-  margin-bottom: 20px;
-}
-
-/* Still a drop target, so it keeps the zone's border and hover treatment -- just no body. */
-.shopfloor-zone-mini .zone-header {
-  border-bottom: none;
-  padding: 10px 14px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 12px;
+  align-items: start;
 }
 
-/* Grid items stretch to the tallest in their row by default, which would give a collapsed cell
-   the height of the fullest one beside it and undo the collapse entirely. Scoped to the mini
-   variant so cards with contents still line up with each other. */
-.shopfloor-grid > .shopfloor-zone-mini {
-  align-self: start;
+/* THE DERIVED LANES ARE THE FIRST TWO TILES.
+   Site-Wide and Unassigned are not cells -- one is a permanent home for facility-scoped assets,
+   the other a queue that should drain -- and they used to sit in their own full-width stack above
+   the grid so they could not reflow between the bays as cells were added.
+
+   Inside the grid they are PINNED by `order`, which is what keeps that guarantee: they hold
+   positions 1 and 2 whatever the cell list does, so the queue is always in the same corner. What
+   the separate stack bought beyond that was mostly height, and at this tile size it is cheaper to
+   mark them than to segregate them.
+
+   EACH LANE GETS ITS OWN HUE, not one shared "derived" treatment. They are not two of a kind: one
+   is a permanent home and the other is a queue that should drain, and colouring them alike made
+   the pair read as a single category the cells were not in. Blue is the system/infrastructure
+   signal used elsewhere in the app; amber is the same "needs a decision" signal the quarantine
+   ribbon item and the Unassigned drop-hint already use.
+
+   The tints are single rgba literals rather than per-theme tokens, matching .stat-card-alert and
+   the .chip-* fills: a coloured overlay at this alpha reads correctly over both the dark card and
+   the white one, and one value means one contrast case to measure rather than two.
+   themeContrast.test.js measures --text-muted over both of these, which is what .zone-empty --
+   the only text sitting directly on a lane's ground -- is set in. */
+/* A 4px coloured cap along the top of each lane, on top of the 1px border and the fill.
+   THE CAP IS DOING MOST OF THE WORK, and that is forced rather than chosen: the fills below are
+   already at the strongest alpha that keeps `.zone-empty` clear of WCAG AA (see the note there and
+   the cases in themeContrast.test.js), so "make the lanes stand out more" cannot come from a
+   darker tint. A solid 4px edge costs no contrast at all, reads from across a room, and survives
+   both themes -- and it is the one part of the tile a physical cell never has.
+
+   Only the top edge thickens, so the lanes stay the same shape as the cells beside them. They are
+   the same kind of object in the grid; they are just not cells.
+
+   EVERY RULE HERE IS COMPOUNDED WITH .shopfloor-zone, AND MUST STAY THAT WAY.
+   These were single class selectors, which tie 0-1-0 with `.shopfloor-zone` below -- and that rule
+   is declared LATER, so it won the tie and the lanes rendered as ordinary tiles. It was not only
+   the border: `.shopfloor-zone` sets `background` and the `border` SHORTHAND, and a shorthand
+   resets colour, width and style together, so a single-class lane rule lost its cap, its border
+   colour and its tint in one go.
+
+   Compounding takes these to 0-2-0, which wins on specificity and therefore no longer depends on
+   where in the file anyone happens to move them. Do not "simplify" these back to one class. */
+.shopfloor-zone.shopfloor-lane {
+  order: -1;
+  border-style: solid;
+  border-width: 1px;
+  border-top-width: 4px;
 }
 
-.shopfloor-section-label {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: var(--text-muted);
-  margin-bottom: 10px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.shopfloor-zone.shopfloor-lane-site {
+  border-color: var(--accent);
+  background: rgba(0, 212, 255, 0.05);
+}
+
+/* The queue comes second: infrastructure first, then the thing to act on, sitting immediately
+   before the cells its contents are waiting to be filed into. */
+.shopfloor-zone.shopfloor-lane-queue {
+  order: 0;
+  border-color: var(--warning);
+  background: rgba(255, 179, 0, 0.06);
+}
+
+/* The cap must survive hover. `.shopfloor-zone:hover` repaints border-color and box-shadow for
+   every tile, which would drop a lane's identity exactly when someone is pointing at it -- and it
+   is declared later, so these need the compound (0-3-0) to beat it too. */
+.shopfloor-zone.shopfloor-lane-site:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 14px rgba(0, 212, 255, 0.2);
+}
+
+.shopfloor-zone.shopfloor-lane-queue:hover {
+  border-color: var(--warning);
+  box-shadow: 0 0 14px rgba(255, 179, 0, 0.2);
 }
 
 .shopfloor-zone {
@@ -1024,71 +1435,536 @@ tbody tr:hover { background: var(--bg-glass); }
   border-radius: var(--radius-sm);
   overflow: hidden;
   transition: var(--transition);
+  display: flex;
+  flex-direction: column;
+  /* Uniform tiles. Collapsing an empty one to its header used to be worth it when a card was
+     320px wide and 180px tall; at this size an empty tile costs about 110px in one of eight
+     columns, and a grid of ragged half-height tiles is harder to scan than one that is even. */
+  min-height: 112px;
 }
 
 .shopfloor-zone:hover {
   border-color: var(--border-hover);
-  box-shadow: 0 0 20px var(--accent-dim);
+  box-shadow: 0 0 14px var(--accent-dim);
+}
+
+/* An archived cell is still on the plan -- the bay exists and may still hold assets -- but it is
+   out of commission, so it recedes rather than disappearing. The header also carries an "ARCH"
+   flag, so this is not colour on its own.
+
+   Compounded for the same reason as the lanes above. This one did render, but only by being
+   declared after `.shopfloor-zone` -- and it still lost its amber border to `.shopfloor-zone:hover`
+   (0-2-0) the moment anyone pointed at it. Both variants now state their identity at a specificity
+   that hover cannot take away. */
+.shopfloor-zone.shopfloor-zone-archived {
+  border-color: var(--warning);
+  border-style: dashed;
+  opacity: 0.75;
+}
+
+.shopfloor-zone.shopfloor-zone-archived:hover {
+  border-color: var(--warning);
 }
 
 .zone-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px;
+  gap: 6px;
+  padding: 8px 10px;
   background: var(--bg-glass);
   border-bottom: 1px solid var(--border);
 }
 
+/* `min-width: 0` is what lets the name actually truncate -- a flex item defaults to
+   `min-width: auto`, which refuses to shrink below its text and pushes the counts off the tile
+   instead of clipping the name. */
 .zone-title {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text-primary);
 }
 
-.zone-body {
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+.zone-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.zone-section-title {
+/* The count pair, e.g. "GW: 2 | Dev: 4". Replaces the two "Active Edge Gateways (n)" /
+   "Operating Devices (n)" section headings inside the body, which cost ~40px per tile to say
+   what eleven characters say here. */
+.zone-counts {
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
   color: var(--text-muted);
-  margin-bottom: 8px;
+  letter-spacing: -0.2px;
+}
+
+/* ===== Cell health rollup dot =====
+   One dot per tile, the worst state of the devices resolving to it. It is what makes eight
+   columns scannable: without it you have to read the chips inside every tile to find the one
+   that needs attention.
+
+   Never colour alone -- the dot carries a `title` naming the state, and the chips below it keep
+   their own icons and text. */
+.tile-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tile-dot-normal  { background: var(--success); box-shadow: 0 0 6px var(--success); }
+.tile-dot-warning { background: var(--warning); box-shadow: 0 0 6px var(--warning); }
+.tile-dot-alarm   { background: var(--danger);  box-shadow: 0 0 6px var(--danger); }
+/* No glow: "nothing live in here" should not draw the eye the way a fault does. */
+.tile-dot-idle    { background: var(--text-dim); }
+
+.zone-body {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+}
+
+/* --text-muted, not --text-dim. This is the one piece of text that sits directly on a tile's
+   ground rather than on a chip, and the lane tints lighten that ground -- which costs contrast.
+   --text-dim measures exactly 4.50:1 on a bare card, so any tint at all drops it below AA;
+   --text-muted keeps it clear over both lane fills (4.70:1 and 4.63:1 in dark, 7.3:1 in light).
+   See the cases in themeContrast.test.js. */
+.zone-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.35;
 }
 
 .zone-chips {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
 }
 
+/* Chips STACK now rather than wrapping in rows. In a ~296px track a wrapped row fits one chip
+   anyway, and a column lets each one truncate cleanly instead of the row height changing with the
+   longest name in it. */
 .chip {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 12px;
+  gap: 5px;
+  padding: 3px 7px;
+  border-radius: 5px;
+  font-size: 11px;
+  line-height: 1.3;
   background: var(--bg-base);
   border: 1px solid var(--border);
   color: var(--text-primary);
+  min-width: 0;
 }
 
+/* The name gets the whole chip. It used to share it with a truncated UUID, which is not enough of
+   an identifier to recognise anything by and was the reason a name as ordinary as
+   "Simulated_CNC_01" clipped. Ids now live on the chip's `title` only.
+   The ellipsis rules stay: a name long enough to overrun a tile still has to end somewhere,
+   and the title is where it leads. */
+.chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chip-flag {
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* A gateway name is `.mono`, which carries its own 12px. Inside a chip that is a point larger than
+   everything beside it and it grew the row it sits in. The colour is deliberately NOT reset --
+   accent is what distinguishes a gateway chip from a device chip at a glance. */
+.chip .mono { font-size: inherit; }
+
 .chip-gw { border-color: rgba(0, 232, 150, 0.3); }
-.chip-asset { border-color: rgba(255, 179, 0, 0.3); }
 .chip-success { border-color: var(--success); background: rgba(0, 232, 150, 0.12); color: var(--text-primary); }
 .chip-warning { border-color: var(--warning); background: rgba(255, 179, 0, 0.12); color: var(--text-primary); }
 .chip-danger  { border-color: var(--danger);  background: rgba(255, 77, 109, 0.15); color: var(--danger); font-weight: 600; }
 .chip-offline { border-color: rgba(123, 132, 152, 0.4); background: rgba(255, 255, 255, 0.05); color: var(--text-muted); font-weight: 500; }
+
+/* ===== Context Panel =====
+   The right-hand drawer, and the flex row that lets it PUSH rather than cover.
+
+   `.page-layout` is the row; `.page-main` is the list. `min-width: 0` on the main column is what
+   actually lets it give up width -- a flex item defaults to `min-width: auto` and refuses to
+   shrink below its content, so without it a wide table would simply overflow the viewport and the
+   panel would be pushed off screen instead of the table narrowing.
+
+   `align-items: flex-start` so the panel does not stretch to the height of a thousand-row table. */
+.page-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.page-main {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The drawer collapses by WIDTH, which is what animates the table getting its space back. The
+   inner element keeps a fixed width so the content does not reflow while the outer collapses --
+   text re-wrapping through a 250ms transition is what makes a sliding panel look broken.
+
+   `visibility: hidden` on the closed state (not `display: none`) keeps the transition alive while
+   still taking the panel out of the accessibility tree and hit testing. It is delayed until the
+   width transition finishes so the panel does not vanish before it has finished sliding. */
+.context-panel {
+  flex-shrink: 0;
+  width: 0;
+  visibility: hidden;
+  overflow: hidden;
+  position: sticky;
+  /* Sticks inside `.content`, which is the scrolling ancestor. Keeps the detail on screen while
+     someone scrolls the list beside it -- otherwise selecting row 200 shows a panel 200 rows up. */
+  top: 0;
+  max-height: calc(100vh - 84px);
+  transition: width 0.25s ease, visibility 0s linear 0.25s;
+}
+
+.context-panel-open {
+  width: 360px;
+  visibility: visible;
+  transition: width 0.25s ease, visibility 0s;
+}
+
+.context-panel-inner {
+  width: 360px;
+  max-height: calc(100vh - 84px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.context-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-glass);
+  flex-shrink: 0;
+}
+
+.context-panel-heading { min-width: 0; }
+
+.context-panel-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-panel-subtitle {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.context-panel-close {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.context-panel-close:hover { color: var(--danger-text); border-color: var(--danger); }
+.context-panel-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Scrolls independently of the page. A device with twenty metadata rows must not make the panel
+   taller than the viewport, or the actions at its foot become unreachable. */
+.context-panel-body {
+  padding: 12px 14px 14px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.context-panel-fields { display: flex; flex-direction: column; gap: 9px; }
+
+/* Label above value, not beside it. A side-by-side pair inside 360px gives the value ~180px, which
+   is not enough for a UUID or a Sparkplug topic path -- the two things most often read here. */
+.context-field { min-width: 0; }
+
+.context-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+/* `break-word`, not an ellipsis. A truncated UUID is useless and a truncated topic path is worse
+   than useless -- it looks like a shorter path. These wrap instead. */
+.context-field-value {
+  font-size: 12px;
+  color: var(--text-primary);
+  line-height: 1.4;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  margin: 0;
+}
+
+.context-field-value.mono {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  /* Overrides `.mono`'s accent colour: in this panel a monospace value is a plain fact, not a
+     link, and colouring every id would make the whole list read as actionable. */
+  color: var(--text-primary);
+}
+
+.context-field-empty { color: var(--text-muted); font-style: italic; }
+
+.context-panel-actions {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.context-panel-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+/* Full-width and left-aligned: these are a menu of things to do to this entity, and a row of
+   centred pills reads as a toolbar whose items are alternatives to each other. */
+.context-action {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 8px;
+  text-decoration: none;
+}
+
+/* Wraps, unlike the truncated tag cluster the table row shows. The panel is where "which devices"
+   gets answered, so a list that clips at the fifth name would defeat the point of opening it. */
+.context-device-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+/* Archive and its kin. Separated from the reads above it rather than tinted red on arrival: this
+   is a list someone scans, and a permanently red row teaches people to ignore red. The colour
+   arrives on hover, when the pointer is already on it. */
+.context-action-danger {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+
+.context-action-danger:hover:not(:disabled) {
+  color: var(--danger-text);
+  border-color: var(--danger);
+}
+
+/* Page-supplied FACTS, sitting with the metadata rather than after the actions -- a gateway's
+   device list is another thing the panel says, not another thing it does. Spaced from the fields
+   above but not ruled off from them: a rule would read as a change of subject. */
+.context-panel-facts { margin-top: 12px; }
+
+/* A section label with an icon beside it -- the 3D model section, where the icon is what the
+   uploader lost when its own two-row heading was removed. */
+.context-panel-section-label-icon {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Page-supplied TOOLS: the 3D uploader. After the actions, so a section of unknown height cannot
+   push the action list off the bottom of the drawer. */
+.context-panel-extras {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* A copyable identifier inside the panel is a block, not an inline chip. It wraps to as many
+   lines as the value needs (see `.copyable-id-wrap`), so the negative margin `.copyable-id`
+   carries for table cells would pull it out of alignment with the label above it. */
+.context-field-value .copyable-id {
+  margin: 0;
+  padding: 3px 5px;
+  width: 100%;
+  font-size: 11px;
+}
+
+/* A selected row is marked on the row itself, not only in the panel. With the panel open and the
+   list still live, "which of these am I looking at" is otherwise unanswerable. */
+tr.row-selected > td { background: var(--accent-dim); }
+tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+
+.row-selectable { cursor: pointer; }
+
+/* The card equivalent of `.row-selected`, for the Cells page. Same job: with the panel open and
+   the list still live, "which of these am I looking at" is otherwise unanswerable. Uses an
+   outline rather than a border so the card does not shift by 1px when selected. */
+.cell-card-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* A cell with no gateways and no devices renders as its header alone -- name, id and two zero
+   counts on one line. A floor in the middle of being set up was otherwise a column of full-height
+   cards each saying "nothing here" twice, with the cells that DO have contents pushed below them.
+   The header keeps its full treatment, so an empty cell is still selectable and still opens the
+   panel; it just stops claiming 200px to say it is empty. */
+.cell-card-empty { margin-bottom: 10px; }
+.cell-card-empty .cell-card-header { padding-top: 10px; padding-bottom: 10px; }
+
+/* Below this the drawer would leave the table too little room to be worth reading. It becomes an
+   overlay instead -- still not modal, still dismissible, but no longer stealing half the list. */
+@media (max-width: 1100px) {
+  .context-panel-open {
+    position: fixed;
+    top: 52px;
+    right: 0;
+    bottom: 0;
+    width: 360px;
+    max-height: none;
+    z-index: 90;
+  }
+  .context-panel-inner {
+    max-height: none;
+    height: 100%;
+    border-radius: 0;
+    border-right: none;
+  }
+}
+
+/* The two tables inside a cell card share one column grid, so the eye runs straight down Name,
+   Sparkplug ID and Status across both instead of re-finding each column when it crosses from
+   gateways to devices.
+
+   `table-layout: fixed` is what makes that true. Without it the browser sizes columns from their
+   CONTENT, so the same percentages produce two different grids the moment one table holds a longer
+   gateway name than the other holds a device name -- which is most of the time. */
+.cell-card-table {
+  table-layout: fixed;
+}
+
+/* Fixed layout clips rather than widening, so anything that could overrun has to say so. */
+.cell-card-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ===== A table inside a modal =====
+   Auto layout sizes columns to their content, which sounds like the helpful default and is the
+   opposite here: four columns of badges, datatypes and timestamps each take a fixed amount, and
+   whatever is left goes to the one column holding variable-length text. So the metric name -- the
+   only column whose width actually matters -- ends up with the leftovers, and the table overflows
+   its `.table-wrap` sideways instead. Fixed layout plus a `<colgroup>` inverts that: the
+   proportions are declared, the table fits its container, and nothing scrolls horizontally. */
+.modal-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+/* Header labels are short and the columns are proportional, so nowrap has nothing to protect
+   here -- and under fixed layout it would clip a heading rather than widen its column. */
+.modal-table th { white-space: normal; }
+
+/* Sparkplug metric names are paths -- `Axes/X/DISPLACEMENT`, `Controller/EMERGENCY_STOP` -- with
+   no spaces to break at, so without this they are one unbreakable 30-character word that either
+   overflows the cell or forces the column wider.
+   Wrapped rather than ellipsised, because these names differ in the MIDDLE: truncating
+   `Axes/X/DISPLACEMENT` and `Axes/Y/DISPLACEMENT` produces two identical rows. */
+.modal-table .config-metric-name {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.45;
+}
+
+/* The value column holds anything the device reported, including strings nobody sized for. */
+.modal-table .telemetry-value { overflow-wrap: anywhere; }
+
+/* ===== Vocabulary Reference =====
+   The header carries the title and its explanation and nothing else. The standard pills and the
+   search box moved out to a `.filter-bar` above the card, so neither has to be wrapped around. */
+.vocab-header {
+  display: block;
+  padding-bottom: 12px;
+}
+
+.vocab-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 3px;
+  line-height: 1.5;
+  /* Deliberately UNCAPPED. A measure cap (this was 90ch) is the right instinct for a column of
+     body copy, but this is two or three sentences at the top of a full-width card: capping it
+     wrapped them into six stacked lines with the rest of the row left empty, which cost more
+     vertical space than the long line cost in readability. The card's own width is the limit. */
+  max-width: none;
+  width: 100%;
+}
+
+.vocab-description {
+  padding: 12px 20px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  /* Same reasoning as .vocab-subtitle: the notes are one or two lines each, not paragraphs. */
+  max-width: none;
+  width: 100%;
+}
+
+.vocab-description p { margin: 0; line-height: 1.55; max-width: none; }
+
+/* Each caveat on its own line with its point in front of it. This was one paragraph of six
+   sentences, and the two facts in it that stop someone making a mistake were mid-run. */
+.vocab-note { margin-top: 5px; }
+
+.vocab-note-label { color: var(--text-primary); font-weight: 600; }
 
 /* ===== Cell Card Layout ===== */
 .cell-card {
@@ -1126,26 +2002,6 @@ tbody tr:hover { background: var(--bg-glass); }
   width: 100%;
 }
 
-.nested-box {
-  background: var(--bg-glass);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 14px;
-  width: 100%;
-}
-
-.nested-box-title {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  color: var(--text-muted);
-  margin-bottom: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
 /* ===== Digital Thread Timeline ===== */
 .timeline {
   position: relative;
@@ -1163,9 +2019,12 @@ tbody tr:hover { background: var(--bg-glass); }
   background: var(--border);
 }
 
+/* 16px was the gap between two boxes that already carry a 1px border and 10px of padding each,
+   so the separation was being paid for three times over. At ~200 audit rows the saving is a
+   screenful. */
 .timeline-item {
   position: relative;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 
 .timeline-dot {
@@ -1184,7 +2043,7 @@ tbody tr:hover { background: var(--bg-glass); }
   background: var(--bg-glass);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 14px;
+  padding: 10px;
 }
 
 .timeline-header {
@@ -1204,10 +2063,28 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 .timeline-time {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   color: var(--text-muted);
 }
+
+/* The identifiers in a timeline row: the entity id in the header and the audit row's own id
+   beside the timestamp. Both are `CopyableId` buttons, so they need the size and colour the
+   plain spans they replaced were carrying inline. */
+.timeline-id {
+  font-size: 11px;
+  color: var(--accent);
+}
+
+/* The mutation id is a reference, not the thing you read the row for -- it sits in the muted
+   colour of the timestamp it shares a line with, and brightens only when pointed at. */
+.timeline-time .timeline-id { color: var(--text-muted); }
+.timeline-time .timeline-id:hover,
+.timeline-time .timeline-id:focus-visible { color: var(--accent); }
 
 .timeline-desc {
   font-size: 13px;

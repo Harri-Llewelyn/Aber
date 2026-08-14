@@ -11,6 +11,7 @@ import {
   schemaVersion, schemaStatus, statusLabel, statusBadgeClass, schemaVersionLabel,
   isSchemaEditable, canForkSchema, nextVersion, lineageOf, SCHEMA_STATUS
 } from '../../utils/schemaVersion'
+import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 /**
  * One modal, two modes, decided by the schema's own status rather than by a prop.
@@ -34,6 +35,11 @@ export function SchemaDetailModal({
   schema, schemas = [], catalog = [], deviceCount = 0, canManage = false,
   onFork, onPublish, onSaveDraft, onDownload, onClose, showToast
 }) {
+  // Escape closes. Via the shared stack rather than a listener of this component's own,
+  // because a ConfirmModal can open on top of this one and a bare document listener on each
+  // would let one keypress dismiss both.
+  useEscapeKey(onClose)
+
   const editable = isSchemaEditable(schema)
   const status = schemaStatus(schema)
 
@@ -150,7 +156,7 @@ export function SchemaDetailModal({
 
   return (
     <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 640 }}>
+      <div className="modal modal-lg">
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           {editable ? <IconGitBranch size={18} /> : <IconLock size={18} />}
           <span>{schema?.schema_name}</span>
@@ -171,7 +177,7 @@ export function SchemaDetailModal({
             marginBottom: '16px', borderLeft: '3px solid var(--accent)'
           }}
         >
-          <div style={{ fontSize: '10px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '5px' }}>
+          <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '5px' }}>
             Change Description
           </div>
           {editable ? (
@@ -251,7 +257,7 @@ export function SchemaDetailModal({
                   groupCatalog(filteredCatalog).map(group => (
                     <div key={group.label}>
                       <div
-                        style={{ position: 'sticky', top: 0, background: 'var(--bg-glass)', backdropFilter: 'blur(4px)', padding: '5px 12px', borderBottom: '1px solid var(--border)', fontSize: '10px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: group.isUngrouped ? 'var(--text-muted)' : 'var(--accent)' }}
+                        style={{ position: 'sticky', top: 0, background: 'var(--bg-glass)', backdropFilter: 'blur(4px)', padding: '5px 12px', borderBottom: '1px solid var(--border)', fontSize: '11px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: group.isUngrouped ? 'var(--text-muted)' : 'var(--accent)' }}
                       >
                         {group.label} <span style={{ opacity: 0.7 }}>({group.metrics.length})</span>
                       </div>
@@ -265,7 +271,7 @@ export function SchemaDetailModal({
                           />
                           <span className="mono" style={{ fontSize: '12px' }}>{m.name}</span>
                           <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{datatypeLabel(m.datatype)}</span>
-                          <span style={{ fontSize: '10px', color: 'var(--text-dim)' }}>{m.standard || LOCAL_EXTENSION_LABEL}</span>
+                          <span style={{ fontSize: '11px', color: 'var(--text-dim)' }}>{m.standard || LOCAL_EXTENSION_LABEL}</span>
                         </label>
                       ))}
                     </div>
@@ -319,7 +325,7 @@ export function SchemaDetailModal({
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span className={`badge ${statusBadgeClass(schemaStatus(v))}`} style={{ fontSize: '10px' }}>
+                      <span className={`badge ${statusBadgeClass(schemaStatus(v))}`} style={{ fontSize: '11px' }}>
                         {schemaVersionLabel(v)}
                       </span>
                       <span className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{v.schema_name}</span>

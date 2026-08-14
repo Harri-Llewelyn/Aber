@@ -37,25 +37,41 @@ const show = async (rows, hasPermission = () => true) => {
   await waitFor(() => expect(screen.getByText(rows[0].gateway_name)).toBeInTheDocument())
 }
 
-const openMenu = (id = 'gw-1') => fireEvent.click(screen.getByTestId(`gateway-actions-${id}`))
-const menuLabels = () => within(screen.getByRole('menu')).getAllByRole('menuitem').map(i => i.textContent)
+/**
+ * Select a gateway row and return its context panel.
+ *
+ * The overflow menu is gone. Digital Thread and Documents moved into the drawer, which left a
+ * three-dot menu holding one item -- a click to reveal a click -- so Archive was promoted into the
+ * row beside Edit and the menu was removed. The documents accordion moved with them: it was
+ * mounted once per row, collapsed, and is now mounted once for the selected gateway.
+ *
+ * The rules under test are unchanged. Only where they render has moved.
+ */
+const openPanel = (name = 'Virtual_Gateway_NodeRED') => {
+  fireEvent.click(within(document.querySelector('.page-main')).getByText(name))
+  return within(document.querySelector('.context-panel'))
+}
+const inRow = () => within(document.querySelector('.page-main'))
 
 beforeEach(() => vi.clearAllMocks())
 
 describe('gateway row actions', () => {
-  it('keeps Launch UI and Edit in the row, and nothing else', async () => {
+  it('leaves no action controls in the row at all', async () => {
+    // The ACTIONS column is gone. The row is identity and state; every action lives in the
+    // drawer the row opens.
     await show([gateway()])
 
-    expect(screen.getByRole('link', { name: /Launch UI/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^Edit/i })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /^Thread/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /^Archive/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /^Docs/i })).not.toBeInTheDocument()
+    expect(inRow().queryByRole('link', { name: /Launch UI/i })).not.toBeInTheDocument()
+    expect(inRow().queryByRole('button', { name: /^Edit/i })).not.toBeInTheDocument()
+    expect(inRow().queryByRole('button', { name: /^Archive/i })).not.toBeInTheDocument()
+    expect(inRow().queryByRole('button', { name: /^Thread/i })).not.toBeInTheDocument()
+    expect(inRow().queryByRole('button', { name: /^Docs/i })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('gateway-actions-gw-1')).not.toBeInTheDocument()
   })
 
   it('keeps Launch UI prominent — it is the only action that leaves the dashboard', async () => {
     await show([gateway()])
-    const launch = screen.getByRole('link', { name: /Launch UI/i })
+    const launch = openPanel().getByRole('link', { name: /Launch UI/i })
 
     expect(launch.className).toMatch(/btn-primary/)
     expect(launch.getAttribute('href')).toBe('http://localhost:1880')
@@ -65,78 +81,67 @@ describe('gateway row actions', () => {
   it('omits Launch UI for a gateway with no access URL', async () => {
     await show([gateway({ access_url: null })])
 
-    expect(screen.queryByRole('link', { name: /Launch UI/i })).not.toBeInTheDocument()
-    // The row still works: Edit and the menu are unaffected.
-    expect(screen.getByRole('button', { name: /^Edit/i })).toBeInTheDocument()
-    expect(screen.getByTestId('gateway-actions-gw-1')).toBeInTheDocument()
+    const panel = openPanel()
+    expect(panel.queryByRole('link', { name: /Launch UI/i })).not.toBeInTheDocument()
+    // The panel still works: Edit and Archive are unaffected.
+    expect(panel.getByText('Edit Details')).toBeInTheDocument()
+    expect(panel.getByText(/Archive Gateway/i)).toBeInTheDocument()
   })
 
-  it('collects the secondary actions in the menu', async () => {
+  it('collects the secondary actions in the panel', async () => {
     await show([gateway()])
-    openMenu()
+    const panel = openPanel()
 
-    const labels = menuLabels().join('|')
-    expect(labels).toMatch(/Digital Thread/i)
-    expect(labels).toMatch(/Archive gateway/i)
-    // Documents left the menu: the accordion is rendered inline on every row, so there is
-    // nothing here to toggle. Asserted negatively so a reinstated menu item is caught.
-    expect(labels).not.toMatch(/documents/i)
+    expect(panel.getByText(/View Digital Thread/i)).toBeTruthy()
+    expect(panel.getByText(/Manage Documents/i)).toBeTruthy()
+    expect(panel.getByText(/Edit Details/i)).toBeTruthy()
   })
 
   it('promotes Restore into the row for an archived gateway', async () => {
     await show([gateway({ is_archived: true })])
 
-    expect(screen.getByRole('button', { name: /Restore/i })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /^Edit/i })).not.toBeInTheDocument()
+    const panel = openPanel()
+    expect(panel.getByText(/Restore Gateway/i)).toBeInTheDocument()
+    expect(panel.queryByText('Edit Details')).not.toBeInTheDocument()
   })
 
   it('never offers Archive and Restore at once', async () => {
     await show([gateway({ is_archived: true })])
-    openMenu()
 
-    expect(menuLabels().join('|')).not.toMatch(/Archive gateway/i)
+    const panel = openPanel()
+    expect(panel.getByText(/Restore Gateway/i)).toBeInTheDocument()
+    expect(panel.queryByText(/Archive Gateway/i)).not.toBeInTheDocument()
   })
 
   it('disables the write action for a role that cannot manage gateways', async () => {
     await show([gateway()], () => false)
 
-    expect(screen.getByRole('button', { name: /^Edit/i }).disabled).toBe(true)
-
-    openMenu()
-    const menu = within(screen.getByRole('menu'))
-    expect(menu.getByRole('menuitem', { name: /Archive gateway/i }).disabled).toBe(true)
+    const panel = openPanel()
+    expect(panel.getByText('Edit Details').closest('button').disabled).toBe(true)
+    expect(panel.getByText(/Archive Gateway/i).closest('button').disabled).toBe(true)
     // Reads stay open, as on Devices.
-    expect(menu.getByRole('menuitem', { name: /Digital Thread/i }).disabled).toBe(false)
+    expect(panel.getByText(/View Digital Thread/i).closest('button').disabled).toBe(false)
   })
 
-  // Standardised on the Cells page's treatment: the accordion is part of the row, collapsed,
-  // rather than something to be revealed through an overflow menu first. Reaching a document
-  // link used to take two clicks and a menu nobody would think to open for it.
-  it('renders the documents accordion inline on every row, with no menu step', async () => {
+  it('reaches documents through the panel action, not an accordion', async () => {
+    // The accordion is gone from both places. It was mounted once per row (a hundred collapsed
+    // drawers on a hundred-gateway page), then once in the drawer -- where it was a cramped list
+    // in a 360px column. Manage Documents opens the full editor instead.
     await show([gateway()])
 
-    expect(screen.getByText('Attached Document Links')).toBeInTheDocument()
-    // Present but closed: the accordion fetches only on first expand, so an always-mounted row
-    // costs no request.
-    expect(screen.queryByText(/No external document links attached/)).not.toBeInTheDocument()
-  })
+    expect(inRow().queryByText('Attached Document Links')).toBeNull()
 
-  it('expands in place to reveal the links', async () => {
-    await show([gateway()])
-
-    fireEvent.click(screen.getByText('Attached Document Links'))
-
-    await waitFor(() =>
-      expect(screen.getByText(/No external document links attached to this gateway/)).toBeInTheDocument()
-    )
+    const panel = openPanel()
+    expect(panel.queryByText('Attached Document Links')).toBeNull()
+    expect(panel.getByText('Manage Documents')).toBeInTheDocument()
   })
 })
 
-// The collapsed badge used to read 0 on every row for every entity type, because it was fed
-// `g.document_count` / `c.document_count` / `a.document_count` -- a field api.js has never
-// produced for any of them. It only became correct after expanding, when the accordion could
-// count its own fetch. Harmless while the accordion was hidden behind a menu; visibly wrong once
-// it is on every row. The count is now fetched once per page and grouped by entity id.
+// Document link counts are still fetched once per page and grouped by entity id -- the request
+// that used to feed the accordion badges. The badges themselves are gone with the accordion, but
+// the fetch is what EntityDocumentsModal's "n attached" figure and any future badge rest on, and
+// it must stay off the poll: ingestion stamps last_heartbeat ~every 30s per gateway, so folding it
+// into load() would issue a documents query on the busiest subscription in the app.
 describe('gateway document link counts', () => {
   const withDocs = (rows, docs) => (path) => {
     if (path.startsWith('/api/v1/documents')) return Promise.resolve(docs)
@@ -146,35 +151,17 @@ describe('gateway document link counts', () => {
     return Promise.resolve([])
   }
 
-  it('shows the attached link count before the accordion is ever expanded', async () => {
-    api.get.mockImplementation(withDocs([gateway()], [
-      { id: 'd1', entity_type: 'gateway', entity_id: 'gw-1', display_name: 'Manual', url: 'https://x/1' },
-      { id: 'd2', entity_type: 'gateway', entity_id: 'gw-1', display_name: 'Schematic', url: 'https://x/2' }
-    ]))
+  it('asks for every gateway document once, not once per row', async () => {
+    api.get.mockImplementation(withDocs([gateway()], []))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
 
-    await waitFor(() => expect(screen.getByText('Attached Document Links')).toBeInTheDocument())
-    await waitFor(() => {
-      const badge = screen.getByText('Attached Document Links').parentElement.querySelector('.badge')
-      expect(badge.textContent).toBe('2')
-    })
+    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    const docCalls = api.get.mock.calls.filter(([p]) => p.startsWith('/api/v1/documents'))
+    expect(docCalls).toHaveLength(1)
+    expect(docCalls[0][0]).toBe('/api/v1/documents?entity_type=gateway')
   })
 
-  it('counts only the links belonging to that gateway', async () => {
-    api.get.mockImplementation(withDocs([gateway()], [
-      { id: 'd1', entity_type: 'gateway', entity_id: 'gw-1', display_name: 'Manual', url: 'https://x/1' },
-      { id: 'd2', entity_type: 'gateway', entity_id: 'gw-OTHER', display_name: 'Elsewhere', url: 'https://x/2' }
-    ]))
-    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
-
-    await waitFor(() => expect(screen.getByText('Attached Document Links')).toBeInTheDocument())
-    await waitFor(() => {
-      const badge = screen.getByText('Attached Document Links').parentElement.querySelector('.badge')
-      expect(badge.textContent).toBe('1')
-    })
-  })
-
-  it('leaves the badge at zero when the count cannot be fetched, rather than failing the page', async () => {
+  it('renders the page even when the count cannot be fetched', async () => {
     api.get.mockImplementation((path) => {
       if (path.startsWith('/api/v1/documents')) return Promise.reject(new Error('boom'))
       return withDocs([gateway()], [])(path)
@@ -182,7 +169,5 @@ describe('gateway document link counts', () => {
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
-    const badge = screen.getByText('Attached Document Links').parentElement.querySelector('.badge')
-    expect(badge.textContent).toBe('0')
   })
 })

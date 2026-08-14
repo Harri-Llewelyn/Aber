@@ -12,8 +12,6 @@ import {
 import {
   IconMap,
   IconFactory,
-  IconRadio,
-  IconCpu,
   IconArchive,
   IconExternalLink,
   IconLock,
@@ -239,6 +237,39 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
     return 'chip-success'
   }, [telemetryBySparkplugId])
 
+  /**
+   * The tile's health dot: the WORST state of the devices resolving to it.
+   *
+   * This is what makes an eight-column grid scannable at all. Without it you have to read the
+   * chips inside every tile to find the one that needs attention, which is the job the old
+   * five-column layout could just about get away with and this one cannot.
+   *
+   * Archived devices are skipped rather than counted as a warning. getDeviceStatusColor() returns
+   * chip-warning for them because an archived chip should look inert, but a decommissioned machine
+   * is not a fault and must not raise its whole cell to amber. Offline devices contribute nothing
+   * either way: a tile of nothing but offline devices is idle, not normal and not broken.
+   */
+  const rollupStatus = useCallback((devices) => {
+    let sawWarning = false
+    let sawNormal = false
+    for (const d of devices) {
+      if (d.is_archived) continue
+      const cls = getDeviceStatusColor(d)
+      if (cls === 'chip-danger') return 'alarm'   // worst state wins outright
+      if (cls === 'chip-warning') sawWarning = true
+      else if (cls === 'chip-success') sawNormal = true
+    }
+    if (sawWarning) return 'warning'
+    return sawNormal ? 'normal' : 'idle'
+  }, [getDeviceStatusColor])
+
+  const STATUS_LABEL = {
+    alarm: 'Alarm — a device here is in emergency stop, interrupted, or over temperature',
+    warning: 'Warning — a device here is in feed hold or waiting to run',
+    normal: 'Normal — every live device here is running',
+    idle: 'Nothing live — no device here is currently reporting'
+  }
+
   // One renderer for cell cards and both lanes. A device dragged out of Unassigned has to look
   // and behave exactly like one already in a cell, or the lanes read as a different kind of thing
   // rather than as somewhere the same asset currently sits.
@@ -255,13 +286,16 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
         onDragStart={(e) => handleDragStart(e, a)}
         onClick={() => onSelectDevice(a.asset_id)}
         style={{ cursor: isInactive ? 'pointer' : canRearrange ? 'grab' : 'pointer', userSelect: 'none', opacity: isArch ? 0.7 : 1 }}
-        title={isArch ? 'Device Archived (Out of Commission) — Click to view on Devices page' : isOff ? 'Device Offline (DDEATH Received) — Click to view on Devices page' : canRearrange ? 'Drag to reassign Cell or Click to view on Devices page' : 'Click to view on Devices page'}
+        title={`${a.asset_name} [${a.asset_id}] — ${isArch ? 'Device Archived (Out of Commission)' : isOff ? 'Device Offline (DDEATH Received)' : 'Operating'} — ${canRearrange && !isInactive ? 'Drag to reassign Cell, or click' : 'Click'} to view on Devices page`}
       >
-        {isArch ? <IconArchive size={12} /> : <IconCog size={12} />}
-        <span>{a.asset_name}</span>
-        <span className="mono" style={{ fontSize: '10px' }}>[{a.asset_id}]</span>
-        {isArch && <span style={{ fontSize: '10px', fontWeight: 600, color: 'var(--warning-text)', marginLeft: '2px' }}>(ARCHIVED)</span>}
-        {isOff && !isArch && <span style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-muted)', marginLeft: '2px' }}>(OFFLINE)</span>}
+        {isArch ? <IconArchive size={11} /> : <IconCog size={11} />}
+        {/* NAME ONLY. The UUID used to sit inline beside it, capped at ~72px, and it was buying
+            almost nothing: six characters of an opaque identifier are not enough to recognise a
+            device by, and they were the reason a name as ordinary as "Simulated_CNC_01" clipped.
+            The full id is on the `title` above, where it is actually readable. */}
+        <span className="chip-name">{a.asset_name}</span>
+        {isArch && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>ARCH</span>}
+        {isOff && !isArch && <span className="chip-flag" style={{ color: 'var(--text-muted)' }}>OFF</span>}
       </span>
     )
   }
@@ -272,18 +306,76 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
     const isGwArch = g.is_archived
     const gwStatus = gatewayLiveStatus(g)
     return (
-      <span key={g.gateway_id} className="chip chip-gw" title={`Gateway ${g.gateway_name} ${g.is_virtual ? '(Virtual Gateway)' : ''} ${isGwArch ? '(Archived)' : `(${gwStatus}, heartbeat ${formatHeartbeat(g.last_heartbeat)})`} — ${g.device_count} device(s) — Click to view on Gateways page`} onClick={() => onSelectGateway(g.gateway_id)} style={{ cursor: 'pointer', borderColor: isGwArch ? 'var(--warning)' : g.is_virtual ? 'var(--accent)' : undefined, opacity: isGwArch ? 0.75 : 1 }}>
+      <span
+        key={g.gateway_id}
+        className="chip chip-gw"
+        title={`Gateway ${g.gateway_name} [${g.gateway_id}] ${g.is_virtual ? '(Virtual Gateway)' : ''} ${isGwArch ? '(Archived)' : `(${gwStatus}, heartbeat ${formatHeartbeat(g.last_heartbeat)})`} — ${g.device_count} device(s) — Click to view on Gateways page`}
+        onClick={() => onSelectGateway(g.gateway_id)}
+        style={{ cursor: 'pointer', borderColor: isGwArch ? 'var(--warning)' : g.is_virtual ? 'var(--accent)' : undefined, opacity: isGwArch ? 0.75 : 1 }}
+      >
         {isGwArch ? <IconArchive size={11} style={{ color: 'var(--warning-text)' }} /> : <span className={`badge-dot ${gwStatus === 'ONLINE' ? 'badge-online' : 'badge-offline'}`} />}
-        <span className="mono">{g.gateway_name}</span> ({g.device_count} devices)
-        {g.is_virtual && !isGwArch && <span className="badge badge-warning" style={{ background: 'rgba(0,212,255,0.15)', color: 'var(--accent)', border: '1px solid var(--accent)', padding: '1px 5px', fontSize: '9px', marginLeft: '4px', display: 'inline-flex', alignItems: 'center', gap: '2px' }}><IconZap size={9} /> VIRTUAL</span>}
-        {isGwArch && <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', padding: '1px 5px', fontSize: '9px', marginLeft: '4px' }}>ARCHIVED</span>}
+        {/* Name only, same as the device chip. The per-gateway "N dev" that used to sit here went
+            with the UUIDs: the tile header already totals GW and Dev for the whole zone, and the
+            per-gateway figure is on this chip's title. The VIRTUAL and ARCHIVED badges are down to
+            single flags for the same reason -- a bordered pill left no room for the name it
+            describes. */}
+        <span className="chip-name mono">{g.gateway_name}</span>
+        {g.is_virtual && !isGwArch && <span className="chip-flag" style={{ color: 'var(--accent)' }} title="Virtual Gateway"><IconZap size={9} /></span>}
+        {isGwArch && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>ARCH</span>}
       </span>
     )
   }
 
+  /**
+   * THE ONE TILE SHAPE, used by the derived lanes and the physical cells alike.
+   *
+   * They were separate blocks of near-identical JSX, which is how the lanes ended up with a
+   * "DERIVED" badge and the cells with a Dashboard link but neither had the other's spacing. A
+   * lane has to read as the same kind of object in a different place -- that is the whole premise
+   * of dragging a device from one into the other -- so they now differ only in the props below.
+   */
+  const floorTile = ({ key, className, name, nameTitle, Icon, status, gateways, devices, counts, hint, onDrop, onNameClick, headerRight, empty, badge }) => (
+    <div
+      key={key}
+      className={`shopfloor-zone${className ? ' ' + className : ''}`}
+      onDragOver={handleDragOver}
+      onDrop={onDrop}
+      title={hint}
+    >
+      <div className="zone-header">
+        <span className={`tile-dot tile-dot-${status}`} title={STATUS_LABEL[status]} />
+        <div
+          className="zone-title"
+          style={onNameClick ? { cursor: 'pointer' } : undefined}
+          onClick={onNameClick}
+        >
+          {Icon && <Icon size={13} style={{ flexShrink: 0 }} />}
+          {/* Titled as well as truncated -- a long cell name still outruns a ~296px tile
+              and the ellipsis has to lead somewhere. Where the name is also a link, its title
+              carries the destination too, so one hover answers both questions. */}
+          <span className="zone-name" title={nameTitle || name}>{name}</span>
+          {badge}
+        </div>
+        {headerRight || <span className="zone-counts" title={`${gateways.length} gateway(s), ${devices.length} device(s)`}>{counts}</span>}
+      </div>
+
+      <div className="zone-body">
+        {gateways.length === 0 && devices.length === 0
+          ? <div className="zone-empty">{empty}</div>
+          : (
+            <div className="zone-chips">
+              {gateways.map(gatewayChip)}
+              {devices.map(deviceChip)}
+            </div>
+          )}
+      </div>
+    </div>
+  )
+
   // Site-Wide first: it is infrastructure and its contents are stable, so it reads as context for
-  // the queue below it. Unassigned comes second because it is the thing to act on and empty, and
-  // it sits directly above the cells its contents are waiting to be filed into.
+  // the queue beside it. Unassigned comes second because it is the thing to act on, and it sits
+  // directly before the cells its contents are waiting to be filed into. Both are pinned to the
+  // front of the grid by CSS `order` -- see .shopfloor-lane in App.css.
   //
   // A gateway's lane is read from its OWN columns, not from the resolution a device goes through
   // -- gateways have no inheritance to resolve. Unassigned means "cell-scoped but no cell yet",
@@ -294,43 +386,31 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
       key: SOURCE_SITE_WIDE,
       title: 'Site-Wide',
       icon: IconMap,
-      colour: 'var(--accent)',
+      className: 'shopfloor-lane shopfloor-lane-site',
       matchGateway: (g) => g.location_scope === SCOPE_SITE_WIDE,
-      emptyGateways: 'No site-wide gateways. Mark a host-run or central connector Site-Wide on the Gateways page.',
-      empty: 'No site-wide devices. Drop a BMS, AGV or ambient sensor here.',
+      empty: 'No site-wide assets. Drop a BMS, AGV or ambient sensor here.',
       hint: 'A permanent home, not a queue. Facility-wide and mobile assets live here rather than being filed in an arbitrary bay.'
     },
     {
       key: SOURCE_UNASSIGNED,
       title: 'Unassigned',
       icon: IconShieldAlert,
-      colour: 'var(--warning)',
+      className: 'shopfloor-lane shopfloor-lane-queue',
       matchGateway: (g) => g.location_scope !== SCOPE_SITE_WIDE && !g.cell_id,
-      emptyGateways: 'Every gateway has a cell or is Site-Wide.',
-      empty: 'Nothing waiting — every device resolves to a cell or is Site-Wide.',
-      hint: 'A work queue, not a location. Drop a device here to clear the cell set on it; if its gateway serves a cell it will inherit that instead.',
-      // Collapses to a single line when it holds nothing. This is the one lane where empty is a
-      // RESULT rather than a state: the queue has drained, and a full-height card devoted to
-      // saying so competes for attention with the cells that actually have contents. Site-Wide
-      // deliberately does not do this -- an empty Site-Wide is not an achievement, and shrinking
-      // it would just make the pair jump about.
-      minimiseWhenEmpty: true,
-      minimisedLabel: 'All clear — every asset resolves to a cell or is Site-Wide'
+      // Empty here is a RESULT, not a state -- the queue has drained -- so it says so rather than
+      // describing what could go in it. The tile no longer collapses to a single line to make the
+      // point: in a grid of uniform tiles a half-height one leaves a hole in the row, and at
+      // ~296px there is no longer enough height at stake to be worth it.
+      empty: 'All clear — every asset resolves to a cell or is Site-Wide.',
+      hint: 'A work queue, not a location. Drop a device here to clear the cell set on it; if its gateway serves a cell it will inherit that instead.'
     }
   ]
 
-  // A lane that has collapsed is STILL A DROP TARGET: an empty queue is exactly when someone
-  // wants to drag something into it, so shrinking it must not take that away.
-  const laneViews = LANES.map(lane => {
-    const devices = laneDevices[lane.key] || []
-    const gateways = gwList.filter(lane.matchGateway)
-    return {
-      lane,
-      devices,
-      gateways,
-      minimised: !!lane.minimiseWhenEmpty && devices.length === 0 && gateways.length === 0
-    }
-  })
+  const laneViews = LANES.map(lane => ({
+    lane,
+    devices: laneDevices[lane.key] || [],
+    gateways: gwList.filter(lane.matchGateway)
+  }))
 
   if (loading) return <div className="loading-wrap"><div className="spinner" /> Loading shopfloor overview…</div>
 
@@ -358,51 +438,62 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
 
   return (
     <>
-      <div className="section-header" style={{ marginBottom: '8px' }}>
-        <h2 className="section-title">System Overview</h2>
-      </div>
-      <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
-        Interactive shopfloor spatial map and high-level operational metric summaries across cells, edge gateways, devices, and real-time telemetry streams.
-      </p>
-      
-      <div className="stats-row">
-        <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => onNavigateTab && onNavigateTab('cells')} title="Total active cell zones configured. Click to view Cells."><div className="stat-label">Cells</div><div className="stat-value">{stats.cells}</div><div className="stat-sub">{activeCellsCount} Active / {archivedCellsCount} Archived</div></div>
-        <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => onNavigateTab && onNavigateTab('gateways')} title="Total registered edge gateways. Click to view Gateways."><div className="stat-label">Total Gateways</div><div className="stat-value">{stats.gateways}</div><div className="stat-sub">{onlineGwCount} Online / {offlineGwCount} Offline / {archivedGwCount} Archived</div></div>
+      {/* No page heading and no description paragraph. The top bar's active tab already names this
+          page, and the paragraph that used to sit here cost 41px on every load to say what the
+          stat cards and the map below state directly. */}
+      {/* Every figure and every click target the three stat cards carried, in 48px instead of 154.
+          The headline is "live / total" rather than a bare total: the question this bar answers
+          from across a room is "is everything up?", which a total alone cannot answer. The
+          breakdown the cards printed underneath moves onto each item's `title`. */}
+      <div className="kpi-ribbon">
+        <button
+          className="kpi-item"
+          onClick={() => onNavigateTab && onNavigateTab('cells')}
+          title={`${activeCellsCount} active / ${stats.cells} total cell zones (${archivedCellsCount} archived). Click to view Cells.`}
+        >
+          <span className="kpi-label">Cells</span>
+          <span className="kpi-value">{activeCellsCount}<span className="kpi-total">/{stats.cells}</span></span>
+          <span className="kpi-unit">Active</span>
+        </button>
+
+        <button
+          className="kpi-item"
+          onClick={() => onNavigateTab && onNavigateTab('gateways')}
+          title={`${onlineGwCount} online / ${offlineGwCount} offline / ${archivedGwCount} archived, of ${stats.gateways} registered edge gateways. Click to view Gateways.`}
+        >
+          <span className="kpi-label">Gateways</span>
+          <span className="kpi-value">{onlineGwCount}<span className="kpi-total">/{stats.gateways}</span></span>
+          <span className="kpi-unit">Online</span>
+        </button>
+
         {/*
           The separate "Pending Quarantine" card was folded in here. It reported the same
           device the Offline figure already counted, and quarantine is a sub-state of the
           device population rather than a population of its own.
 
           Losing the dedicated card must not lose the prominence, since quarantine is the one
-          state on this page that requires an operator to act. The card therefore raises a
-          warning treatment while any device is held: a coloured border, an icon beside the
-          label, and the count called out in the breakdown. The icon and the word
-          "Quarantined" carry the meaning on their own, so the signal does not depend on
-          colour alone.
+          state on this page that requires an operator to act. The item therefore raises a
+          warning treatment while any device is held: a coloured left bar and tint, plus an icon
+          and the word "Quarantined" spelled out beside the figure. The icon and the word carry
+          the meaning on their own, so the signal does not depend on colour alone.
         */}
-        <div
-          className={`stat-card${quarantinedAssetsCount > 0 ? ' stat-card-alert' : ''}`}
-          style={{ cursor: 'pointer' }}
+        <button
+          className={`kpi-item${quarantinedAssetsCount > 0 ? ' kpi-item-alert' : ''}`}
           onClick={() => onNavigateTab && onNavigateTab('devices')}
           title={quarantinedAssetsCount > 0
-            ? `${quarantinedAssetsCount} device${quarantinedAssetsCount === 1 ? '' : 's'} awaiting zero-touch onboarding approval. Click to review the quarantine queue.`
-            : 'Total registered shopfloor devices. Click to view Devices.'}
+            ? `${quarantinedAssetsCount} device${quarantinedAssetsCount === 1 ? '' : 's'} awaiting zero-touch onboarding approval. ${onlineAssetsCount} online / ${offlineAssetsCount} offline / ${archivedAssetsCount} archived, of ${stats.assets}. Click to review the quarantine queue.`
+            : `${onlineAssetsCount} online / ${offlineAssetsCount} offline / ${archivedAssetsCount} archived, of ${stats.assets} registered shopfloor devices. Click to view Devices.`}
         >
-          <div className="stat-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            Total Devices
-            {quarantinedAssetsCount > 0 && (
-              <IconShieldAlert size={13} style={{ color: 'var(--warning-text)' }} aria-label="Devices awaiting quarantine approval" />
-            )}
-          </div>
-          <div className="stat-value">{stats.assets}</div>
-          <div className="stat-sub">
-            {onlineAssetsCount} Online / {offlineAssetsCount} Offline /{' '}
-            <span style={quarantinedAssetsCount > 0 ? { color: 'var(--warning-text)', fontWeight: 700 } : undefined}>
+          <span className="kpi-label">Devices</span>
+          <span className="kpi-value">{onlineAssetsCount}<span className="kpi-total">/{stats.assets}</span></span>
+          <span className="kpi-unit">Online</span>
+          {quarantinedAssetsCount > 0 && (
+            <span className="kpi-alert-flag">
+              <IconShieldAlert size={12} aria-hidden="true" />
               {quarantinedAssetsCount} Quarantined
             </span>
-            {' '}/ {archivedAssetsCount} Archived
-          </div>
-        </div>
+          )}
+        </button>
       </div>
 
       <div className="shopfloor-map-card">
@@ -412,11 +503,15 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
               <IconMap size={18} />
               <span>Shopfloor Dashboard</span>
             </div>
+            {/* The legend now describes the TILE DOTS, which are new and are the only thing a
+                reader has to decode to scan the grid. It used to describe the chips, whose
+                meaning is on each chip's own `title` and in its icon -- and one of its four
+                entries ("Amber: Archived") did not match what amber meant on a chip anyway. */}
             <div className="shopfloor-legend">
-              <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title="Normal operating condition"><span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--success)' }} /> Green: Normal</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title="Device in idle or maintenance state"><span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--warning)' }} /> Amber: Archived</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title="Critical alarm or temperature limit exceeded"><span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--danger)' }} /> Red: Alarm</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title="Device offline (Sparkplug B DDEATH payload received)"><span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--text-muted)' }} /> Muted Gray: Offline (DDEATH)</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.normal}><span className="tile-dot tile-dot-normal" /> Normal</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.warning}><span className="tile-dot tile-dot-warning" /> Warning</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.alarm}><span className="tile-dot tile-dot-alarm" /> Alarm</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.idle}><span className="tile-dot tile-dot-idle" /> Nothing live</span>
               {canManageDevice ? (
                 <button
                   className={`btn btn-sm ${rearranging ? 'btn-primary' : 'btn-ghost'}`}
@@ -448,189 +543,98 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
             </div>
           )}
 
-          {/* THE DERIVED LANES, ABOVE THE PHYSICAL CELLS.
-              Site-Wide and Unassigned are not cells, so they do not belong in the cell grid --
-              inside it they reflowed between the bays as cells were added and the queue moved
-              somewhere new on every stack. Stacked full-width at the top they are always in the
-              same place: infrastructure first, then the queue that should drain.
+          {/* ONE GRID. The derived lanes are its first two tiles, pinned there by CSS `order`
+              (see .shopfloor-lane) so they cannot drift as cells are added -- which is the
+              guarantee the separate full-width stack above the grid used to buy, at the cost of a
+              section label and a row of its own.
 
               Each lane holds BOTH gateways and devices. A gateway with no cell is exactly as
               stranded as a device with no cell -- and it is usually the CAUSE of the devices
               beside it being stranded, since they had nothing to inherit. Showing only the
               devices left the reason off-screen. */}
-          <div className="shopfloor-lanes">
-            {laneViews.map(({ lane, devices: laneAssets, gateways: laneGateways, minimised }) => {
-              const LaneIcon = lane.icon
-              return (
-                <div
-                  key={lane.key}
-                  className={`shopfloor-zone${minimised ? ' shopfloor-zone-mini' : ''}`}
-                  onDragOver={handleDragOver}
-                  onDrop={(e) => handleLaneDrop(e, lane.key)}
-                  style={{ minHeight: minimised ? 0 : '180px', borderStyle: 'dashed', borderColor: lane.colour, background: 'transparent' }}
-                  title={lane.hint}
-                >
-                  <div className="zone-header">
-                    <div className="zone-title" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                      <LaneIcon size={16} /> <span>{lane.title}</span>
-                      {!minimised && (
-                        <span className="badge badge-neutral" style={{ fontSize: '9px' }} title="A derived lane, not a cell — it has no record in the database">DERIVED</span>
-                      )}
-                    </div>
-                    {minimised ? (
-                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                        {lane.minimisedLabel}
-                      </span>
-                    ) : (
-                      <span className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                        {laneGateways.length} gw / {laneAssets.length} dev
-                      </span>
-                    )}
-                  </div>
-
-                  {/* The body is dropped entirely when minimised -- two "nothing here" panels are
-                      what made an empty queue louder than the cells that have contents. The zone
-                      itself stays, so it is still somewhere you can drag an asset to.
-
-                      There is no standing caption either: what a lane means is on the zone's
-                      `title`, so the explanation is a hover away rather than a permanent line of
-                      prose competing with the assets it describes. */}
-                  {!minimised && (
-                  <div className="zone-body">
-                    <div>
-                      <div className="zone-section-title" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <IconRadio size={12} /> Active Edge Gateways ({laneGateways.length})
-                      </div>
-                      {laneGateways.length === 0 ? (
-                        <div style={{ fontSize: '11px', color: 'var(--text-dim)', fontStyle: 'italic' }}>{lane.emptyGateways}</div>
-                      ) : (
-                        <div className="zone-chips">
-                          {laneGateways.map(gatewayChip)}
-                        </div>
-                      )}
-                    </div>
-
-                    <div>
-                      <div className="zone-section-title" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <IconCpu size={12} /> Operating Devices ({laneAssets.length})
-                      </div>
-                      {laneAssets.length === 0 ? (
-                        <div style={{ fontSize: '11px', color: 'var(--text-dim)', fontStyle: 'italic', border: '1px dashed var(--border)', padding: '12px', borderRadius: '6px', textAlign: 'center' }}>
-                          {lane.empty}
-                        </div>
-                      ) : (
-                        <div className="zone-chips">
-                          {laneAssets.map(deviceChip)}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-
-          <div className="shopfloor-section-label">
-            <IconFactory size={12} /> Physical Cells ({cells.length})
-          </div>
-
           <div className="shopfloor-grid">
-            {cells.length === 0 && (
+            {cells.length === 0 && laneViews.every(v => v.gateways.length === 0 && v.devices.length === 0) && (
               <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
                 <div className="empty-icon"><IconFactory size={36} /></div>
                 <div className="empty-text">No active cells configured to display on the shopfloor blueprint.</div>
               </div>
             )}
+
+            {laneViews.map(({ lane, devices: laneAssets, gateways: laneGateways }) => floorTile({
+              key: lane.key,
+              className: lane.className,
+              name: lane.title,
+              Icon: lane.icon,
+              // A lane's dot reports the health of what is PARKED in it, exactly as a cell's does.
+              // An Unassigned device in alarm is still in alarm.
+              status: rollupStatus(laneAssets),
+              gateways: laneGateways,
+              devices: laneAssets,
+              counts: `GW: ${laneGateways.length} | Dev: ${laneAssets.length}`,
+              hint: lane.hint,
+              onDrop: (e) => handleLaneDrop(e, lane.key),
+              empty: lane.empty,
+              // THE "DERIVED" BADGE IS GONE FROM THE TILE, and the word moved onto the name's
+              // title instead. It was a `flex-shrink: 0` element sharing a narrow header with the
+              // name, so it took its width first and left "Site-Wide" and "Unassigned" rendering
+              // as "S..." and "U..." -- a badge explaining what a tile is, at the cost of the
+              // tile's name. The colour and the border now carry "not a cell" on their own.
+              nameTitle: `${lane.title} — a derived lane, not a cell: it has no record in the database`
+            }))}
+
             {cells.map(c => {
-                // Cells own gateways; gateways own devices. Deriving the gateway list
-                // from the devices instead hid every gateway that has no device yet.
-                const cellGateways = gwList.filter(g => g.cell_id === c.cell_id)
-                // Devices that RESOLVE to this cell, grouped from the list this page already
-                // loads. /api/v1/cells no longer returns them -- on a 3s poll, having that
-                // endpoint fetch the device table as well meant reading it twice a tick.
-                const cellAssets = devicesByCell.get(c.cell_id) || []
-                // Same rule as the Unassigned lane: a zone with nothing in it collapses to its
-                // header. A newly created cell has no gateway and no device, so a stack in the
-                // middle of being set up was mostly full-height cards saying "no gateways
-                // serving this zone" three times over -- and the cells that DO have contents,
-                // which are the reason to look at this page, were pushed below the fold.
-                const cellIsEmpty = cellGateways.length === 0 && cellAssets.length === 0
+              // Cells own gateways; gateways own devices. Deriving the gateway list
+              // from the devices instead hid every gateway that has no device yet.
+              const cellGateways = gwList.filter(g => g.cell_id === c.cell_id)
+              // Devices that RESOLVE to this cell, grouped from the list this page already
+              // loads. /api/v1/cells no longer returns them -- on a 3s poll, having that
+              // endpoint fetch the device table as well meant reading it twice a tick.
+              const cellAssets = devicesByCell.get(c.cell_id) || []
 
-                return (
-                  <div
-                    key={c.cell_id}
-                    className={`shopfloor-zone${cellIsEmpty ? ' shopfloor-zone-mini' : ''}`}
-                    onDragOver={handleDragOver}
-                    onDrop={(e) => handleDrop(e, c.cell_id)}
-                    style={{ minHeight: cellIsEmpty ? 0 : '180px', borderStyle: 'dashed', borderColor: c.is_archived ? 'var(--warning)' : undefined, background: c.is_archived ? 'rgba(255,179,0,0.03)' : undefined, opacity: c.is_archived ? 0.85 : 1 }}
-                    title={c.is_archived ? `Cell Zone #${c.cell_id} (Archived / Out of Commission)` : `Cell Zone #${c.cell_id}: Drag device node here to reassign`}
+              return floorTile({
+                key: c.cell_id,
+                // `shopfloor-cell` marks the physical bays apart from the two derived lanes now
+                // that they share one grid -- it is what "every tile except the lanes" selects on,
+                // in CSS and in the tests.
+                className: `shopfloor-cell${c.is_archived ? ' shopfloor-zone-archived' : ''}`,
+                name: c.cell_name,
+                nameTitle: `Cell '${c.cell_name}' (Zone #${c.cell_id}) — Click to view on Cells page`,
+                Icon: IconFactory,
+                status: rollupStatus(cellAssets),
+                gateways: cellGateways,
+                devices: cellAssets,
+                counts: `GW: ${cellGateways.length} | Dev: ${cellAssets.length}`,
+                hint: c.is_archived
+                  ? `Cell Zone #${c.cell_id} (Archived / Out of Commission)`
+                  : `Cell Zone #${c.cell_id}: Drag device node here to reassign`,
+                onDrop: (e) => handleDrop(e, c.cell_id),
+                // Hands the cell's id over so the Cells page arrives filtered to it. This used to
+                // call onNavigateTab('cells'), which dropped the identity and landed on an
+                // unfiltered list. onSelectCell mirrors onSelectDevice/onSelectGateway; it falls
+                // back to a plain navigation so the tile still works if a caller wires only the
+                // tab handler.
+                onNameClick: () => onSelectCell ? onSelectCell(c.cell_id) : onNavigateTab && onNavigateTab('cells'),
+                empty: canRearrange ? 'Drag & drop a device node here to assign.' : 'No gateways or devices in this cell zone.',
+                badge: c.is_archived
+                  ? <span className="chip-flag" style={{ color: 'var(--warning-text)' }} title="Shopfloor Cell zone archived">ARCH</span>
+                  : null,
+                // The Dashboard link displaces the count pair when a cell has one: it is the only
+                // action a tile offers, and at this width there is room for one or the other. The
+                // counts stay reachable on the tile's own `title`.
+                headerRight: c.access_url ? (
+                  <a
+                    href={c.access_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-primary btn-sm"
+                    style={{ textDecoration: 'none', gap: '3px', padding: '1px 6px', fontSize: '11px', flexShrink: 0 }}
+                    title={`Open Cell Dashboard / Grafana UI — ${cellGateways.length} gateway(s), ${cellAssets.length} device(s)`}
                   >
-                    <div className="zone-header">
-                      {/* Hands the cell's id over so the Cells page arrives filtered to it. This
-                          used to call onNavigateTab('cells'), which dropped the identity and
-                          landed on an unfiltered list -- while the title below promised
-                          otherwise. onSelectCell mirrors onSelectDevice/onSelectGateway above;
-                          it falls back to a plain navigation so the card still works if a
-                          caller wires only the tab handler. */}
-                      <div className="zone-title" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }} onClick={() => onSelectCell ? onSelectCell(c.cell_id) : onNavigateTab && onNavigateTab('cells')} title={`Click to view Cell '${c.cell_name}' on Cells page`}>
-                        <IconFactory size={16} /> <span>{c.cell_name}</span>
-                        {c.is_archived && (
-                          <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', padding: '1px 6px', fontSize: '9px', display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Shopfloor Cell zone archived">
-                            <IconArchive size={10} /> ARCHIVED
-                          </span>
-                        )}
-                        {cellIsEmpty && (
-                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic', fontWeight: 400 }}>empty</span>
-                        )}
-                      </div>
-                      {/* The Dashboard link and zone id stay in the collapsed form: they are the
-                          only two things an empty cell still offers. */}
-                      {c.access_url ? (
-                        <a href={c.access_url} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm" style={{ textDecoration: 'none', gap: '4px', padding: '2px 8px', fontSize: '11px' }} title="Open Cell Dashboard / Grafana UI">
-                          <IconExternalLink size={11} /> Dashboard
-                        </a>
-                      ) : (
-                        <span className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Zone #{c.cell_id}</span>
-                      )}
-                    </div>
-
-                    {!cellIsEmpty && (
-                    <div className="zone-body">
-                      <div>
-                        <div className="zone-section-title" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <IconRadio size={12} /> Active Edge Gateways ({cellGateways.length})
-                        </div>
-                        {cellGateways.length === 0 ? (
-                          <div style={{ fontSize: '11px', color: 'var(--text-dim)', fontStyle: 'italic' }}>No active gateways serving this zone.</div>
-                        ) : (
-                          <div className="zone-chips">
-                            {cellGateways.map(gatewayChip)}
-                          </div>
-                        )}
-                      </div>
-
-                      <div>
-                        <div className="zone-section-title" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <IconCpu size={12} /> Operating Devices ({cellAssets.length})
-                        </div>
-                        {cellAssets.length === 0 ? (
-                          <div style={{ fontSize: '11px', color: 'var(--text-dim)', fontStyle: 'italic', border: '1px dashed var(--border)', padding: '12px', borderRadius: '6px', textAlign: 'center' }}>
-                            {/* Not a standing instruction for a gesture that is off. */}
-                            {canRearrange ? 'Drag & drop device node here to assign' : 'No devices in this cell zone.'}
-                          </div>
-                        ) : (
-                          <div className="zone-chips">
-                            {cellAssets.map(deviceChip)}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    )}
-                  </div>
-                )
-              })}
-
+                    <IconExternalLink size={10} /> Dash
+                  </a>
+                ) : null
+              })
+            })}
           </div>
         </div>
       </div>

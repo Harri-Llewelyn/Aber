@@ -14,11 +14,21 @@ vi.mock('../api', () => ({ api: { get: vi.fn() } }));
 
 const DEVICE_ID = '11111111-2222-3333-4444-555555555555';
 
+/**
+ * Post-mapping shape, which is what the component actually receives.
+ *
+ * These rows used to carry the RAW column names -- `id`, `action`, `recorded_at` -- which are
+ * what PostgREST returns and what `mapDigitalThreadRow` in api.js renames on the way out. But
+ * api.get is mocked here, so the mapper never runs and the component was reading `event_id`,
+ * `event_type` and `timestamp` off rows that had none of them: an undefined React key on every
+ * row (the console warning this fixture was producing), an "Invalid Date", and a blank event
+ * badge. Nothing asserted on any of that, so the tests passed on a shape that cannot occur.
+ */
 const events = [
   {
-    id: 'dt-1', entity_type: 'DEVICE', entity_id: DEVICE_ID, action: 'UPDATE',
-    description: 'Device renamed', recorded_at: '2026-08-10T10:00:00Z',
-    changed_by: 'admin@factoryplus.local', actor_source: 'user'
+    event_id: 'dt-1', entity_type: 'DEVICE', entity_id: DEVICE_ID, event_type: 'UPDATE',
+    description: 'Device renamed', timestamp: '2026-08-10T10:00:00Z',
+    changed_by: 'admin@factoryplus.local', actor_source: 'user', metadata: {}
   }
 ];
 
@@ -81,5 +91,18 @@ describe('DigitalThreadTab handover', () => {
 
     await waitFor(() =>
       expect(screen.getByPlaceholderText(/Search by entity name or ID/).value).toBe(other));
+  });
+
+  // The fixture above is now the shape api.js emits, so the row it produces has to render
+  // completely. Asserted so the fixture cannot quietly drift back to raw column names -- the
+  // previous version produced an undefined key, an Invalid Date and a blank badge, and no test
+  // noticed.
+  it('renders the handed-over event in full', async () => {
+    render(<DigitalThreadTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
+
+    expect(await screen.findByText('Device renamed')).toBeInTheDocument();
+    expect(screen.getByText('UPDATE')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Copy mutation id dt-1/ })).toBeInTheDocument();
+    expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument();
   });
 });

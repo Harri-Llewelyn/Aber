@@ -1,8 +1,14 @@
 import React, { useState } from 'react'
 import CopyableId from '../common/CopyableId'
 import { IconShieldAlert, IconAlertTriangle } from '../common/Icons'
+import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onApprove, onMerge, onCancel }) {
+  // Escape closes. Via the shared stack rather than a listener of this component's own,
+  // because a ConfirmModal can open on top of this one and a bare document listener on each
+  // would let one keypress dismiss both.
+  useEscapeKey(onCancel)
+
   const isGateway = item.entity_type === 'GATEWAY'
   const [assetName, setAssetName] = useState(item.asset_name)
   const [connMethod, setConnMethod] = useState('Sparkplug B')
@@ -45,7 +51,7 @@ export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onAp
 
   return (
     <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 460 }}>
+      <div className="modal">
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <IconShieldAlert size={18} />
           <span>Approve Discovered {isGateway ? 'Gateway' : 'Device'} <span className="mono">[{item.asset_name}]</span></span>

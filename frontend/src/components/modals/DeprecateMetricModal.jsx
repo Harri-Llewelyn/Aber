@@ -1,14 +1,20 @@
 import React, { useState } from 'react'
 import { IconAlertTriangle } from '../common/Icons'
+import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 export function DeprecateMetricModal({ metric, usageCount, catalog, onConfirm, onCancel }) {
+  // Escape closes. Via the shared stack rather than a listener of this component's own,
+  // because a ConfirmModal can open on top of this one and a bare document listener on each
+  // would let one keypress dismiss both.
+  useEscapeKey(onCancel)
+
   const [supersededBy, setSupersededBy] = useState('')
 
   const replacementCandidates = (catalog || []).filter(m => !m.deprecated && m.metric_uuid !== metric.metric_uuid)
 
   return (
     <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 460 }}>
+      <div className="modal">
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--warning-text)' }}>
           <IconAlertTriangle size={18} />
           <span>Deprecate Metric <span className="mono">{metric.name}</span></span>
@@ -36,7 +42,7 @@ export function DeprecateMetricModal({ metric, usageCount, catalog, onConfirm, o
 
         <div className="modal-actions">
           <button className="btn btn-ghost" onClick={onCancel} title="Cancel">Cancel</button>
-          <button className="btn btn-primary" style={{ background: 'var(--warning)', color: '#000' }} onClick={() => onConfirm(supersededBy || null)} title="Confirm deprecation">
+          <button className="btn btn-primary" style={{ background: 'var(--warning)', color: 'var(--warning-contrast)' }} onClick={() => onConfirm(supersededBy || null)} title="Confirm deprecation">
             Deprecate Metric
           </button>
         </div>

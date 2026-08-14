@@ -71,7 +71,17 @@ const show = async (rows, options = {}) => {
   await waitFor(() => expect(screen.getByText(options.expect || 'CNC_01')).toBeTruthy())
 }
 
-const openEdit = () => fireEvent.click(screen.getByRole('button', { name: /^Edit/i }))
+/**
+ * Open the edit form for a device.
+ *
+ * Two clicks now, not one: the row's Edit button moved into the context panel with the rest of the
+ * ACTIONS column, so a device is selected first and edited from the drawer. The form itself, and
+ * everything these tests assert about it, is unchanged.
+ */
+const openEdit = (name = 'CNC_01') => {
+  fireEvent.click(within(document.querySelector('.page-main')).getByText(name))
+  fireEvent.click(within(document.querySelector('.context-panel')).getByText('Edit Details'))
+}
 
 beforeEach(() => vi.clearAllMocks())
 
@@ -236,7 +246,11 @@ describe('the Sparkplug topic in the edit form', () => {
   // The help text used to read "Click to copy" beneath a plain <span>. Nothing there was
   // clickable -- only the id above it was -- so the dialog promised an affordance it did not
   // have. A rendered string cannot be asserted to be copyable by eye, hence these.
-  const topicButton = () => screen.getByRole('button', { name: /Copy Sparkplug topic/i })
+  // Scoped to the dialog. The context panel behind it now shows a copyable "Sparkplug Topic Path"
+  // of its own, so an unscoped query matches two buttons -- which is correct behaviour, not a
+  // clash: the panel answers "what does this device publish on" without opening the editor.
+  const topicButton = () =>
+    within(document.querySelector('.modal')).getByRole('button', { name: /Copy Sparkplug topic/i })
 
   it('renders the topic as a copy button, not as prose', async () => {
     await show([device()])
@@ -304,7 +318,11 @@ describe('needs attention', () => {
 })
 
 describe('approving a quarantined device', () => {
+  // quarantine_id is the row's identity and the React key DevicesTab renders it under. Without
+  // it the key was undefined on every quarantine row -- the console warning this fixture was
+  // producing, and a real divergence from the API, which keys the table on it.
   const quarantined = {
+    quarantine_id: 'qtn-0000-4000-8000-000000000003',
     asset_id: 'cccccccc-0000-4000-8000-000000000003',
     asset_name: 'Unknown_Robot',
     reported_identity: 'devffffffffffffffffffff1',

@@ -1,12 +1,18 @@
 import React, { useState } from 'react'
 import { IconArchive } from '../common/Icons'
+import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 export function ArchiveModal({ entityType, entityId, displayName, onArchive, onCancel }) {
+  // Escape closes. Via the shared stack rather than a listener of this component's own,
+  // because a ConfirmModal can open on top of this one and a bare document listener on each
+  // would let one keypress dismiss both.
+  useEscapeKey(onCancel)
+
   const [retentionDays, setRetentionDays] = useState(30)
 
   return (
     <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 460 }}>
+      <div className="modal">
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--warning-text)' }}>
           <IconArchive size={18} />
           <span>Archive Entity (Decommission)</span>
@@ -27,7 +33,7 @@ export function ArchiveModal({ entityType, entityId, displayName, onArchive, onC
 
         <div className="modal-actions">
           <button className="btn btn-ghost" onClick={onCancel} title="Cancel archival action">Cancel</button>
-          <button className="btn btn-primary" style={{ background: 'var(--warning)', color: '#000' }} onClick={() => onArchive(retentionDays)} title="Archive entity and activate retention timer">
+          <button className="btn btn-primary" style={{ background: 'var(--warning)', color: 'var(--warning-contrast)' }} onClick={() => onArchive(retentionDays)} title="Archive entity and activate retention timer">
             Archive & Set Timer
           </button>
         </div>

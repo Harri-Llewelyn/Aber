@@ -1,8 +1,14 @@
 import React, { useState } from 'react'
 import { GITHUB_REPO_URL } from '../../constants'
 import { IconBug, IconExternalLink } from '../common/Icons'
+import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 export function BugReportModal({ onClose, showToast, persona, activeTab }) {
+  // Escape closes. Via the shared stack rather than a listener of this component's own,
+  // because a ConfirmModal can open on top of this one and a bare document listener on each
+  // would let one keypress dismiss both.
+  useEscapeKey(onClose)
+
   const [title, setTitle]       = useState('')
   const [category, setCategory] = useState('UI Dashboard')
   const [severity, setSeverity] = useState('Medium')
@@ -44,7 +50,7 @@ ${desc || 'No detailed steps provided.'}
 
   return (
     <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 520 }}>
+      <div className="modal">
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <IconBug size={18} style={{ color: 'var(--danger)' }} /> Report Platform Bug / Create GitHub Issue
         </div>

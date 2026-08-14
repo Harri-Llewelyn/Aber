@@ -18,7 +18,7 @@ import { IconChevronDown, IconChevronUp, IconCheck, IconX } from './Icons'
  * Sections start collapsed -- MTConnect alone is ~600 entries. Searching expands only the sections
  * that match, so a query answers "where does this live?" as well as "does it exist?".
  */
-export function VocabularyPanel({ title = 'Standard Vocabulary Reference', tabs, canAddMetric }) {
+export function VocabularyPanel({ title = 'Standard Vocabulary Reference', subtitle, tabs, canAddMetric }) {
   const available = (tabs || []).filter(Boolean)
   const [activeId, setActiveId] = useState(available[0]?.id)
   const [search, setSearch] = useState('')
@@ -57,60 +57,77 @@ export function VocabularyPanel({ title = 'Standard Vocabulary Reference', tabs,
   const toggle = (key) => setExpanded(prev => ({ ...prev, [key]: !isOpen(key) }))
 
   return (
+    <>
+      {/* ONE CONTROL ROW, the shape every other page uses: what you are looking at on the left,
+          what you are looking for on the right. The standard pills used to sit inside the card
+          under its header and the search box floated in that header beside the title, so the two
+          halves of one decision were separated by a heading -- and the title and its explanation
+          had to wrap around a 220px input that had nothing to do with them. */}
+      <div className="filter-bar">
+        {/* A segmented control rather than a dropdown because the whole point is that all four
+            counts are visible at once -- that is what tells you the vocabularies are different
+            sizes and different kinds of thing. The search text deliberately survives a switch, so
+            "which standard has a word for this?" is one query rather than four. */}
+        <div role="tablist" aria-label="Standard" style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+          {available.map(tab => {
+            const selected = tab.id === active.id
+            return (
+              <button
+                key={tab.id}
+                role="tab"
+                aria-selected={selected}
+                onClick={() => setActiveId(tab.id)}
+                className={`btn btn-sm ${selected ? 'btn-primary' : 'btn-ghost'}`}
+                title={tab.hint || `Browse the ${tab.label} vocabulary`}
+              >
+                {tab.label}
+                <span className="section-count" style={{ marginLeft: '6px' }}>
+                  {(tab.sections || []).reduce((n, s) => n + s.items.length, 0)}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+
+        <input
+          className="form-control filter-bar-spacer"
+          style={{ width: '240px' }}
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder={active.searchPlaceholder || 'Search the vocabulary…'}
+          title="Filter the selected standard by name or description"
+        />
+        {search && (
+          <button className="btn btn-ghost btn-sm" onClick={() => setSearch('')} title="Clear the search">
+            <IconX size={13} />
+          </button>
+        )}
+      </div>
+
     <div className="card" style={{ marginBottom: '24px' }}>
-      <div className="card-header">
-        <h3 className="section-title">
-          {title} <span className="section-count">{query ? `${matches} / ${total}` : total}</span>
-        </h3>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <input
-            className="form-control form-control-sm"
-            style={{ width: '220px' }}
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder={active.searchPlaceholder || 'Search the vocabulary…'}
-            title="Filter the selected standard by name or description"
-          />
-          {search && (
-            <button className="btn btn-ghost btn-sm" onClick={() => setSearch('')} title="Clear the search">
-              <IconX size={13} />
-            </button>
-          )}
+      {/* The header is the title and its explanation, full width, with nothing floating in it. */}
+      <div className="card-header vocab-header">
+        <div>
+          <h3 className="section-title">
+            {title} <span className="section-count">{query ? `${matches} / ${total}` : total}</span>
+          </h3>
+          {subtitle && <div className="vocab-subtitle">{subtitle}</div>}
         </div>
       </div>
 
-      {/* The standard selector. A segmented control rather than a dropdown because the whole point
-          is that all three counts are visible at once -- that is what tells you the vocabularies
-          are different sizes and different kinds of thing. The search text deliberately survives a
-          switch, so "which standard has a word for this?" is one query rather than three. */}
-      <div
-        role="tablist"
-        aria-label="Standard"
-        style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', padding: '12px 20px 0' }}
-      >
-        {available.map(tab => {
-          const selected = tab.id === active.id
-          return (
-            <button
-              key={tab.id}
-              role="tab"
-              aria-selected={selected}
-              onClick={() => setActiveId(tab.id)}
-              className={`btn btn-sm ${selected ? 'btn-primary' : 'btn-ghost'}`}
-              title={tab.hint || `Browse the ${tab.label} vocabulary`}
-            >
-              {tab.label}
-              <span className="section-count" style={{ marginLeft: '6px' }}>
-                {(tab.sections || []).reduce((n, s) => n + s.items.length, 0)}
-              </span>
-            </button>
-          )
-        })}
+      {/* Lead sentence, then the caveats as separate labelled lines.
+          This was one paragraph of six sentences that ran the width of the card, and the two facts
+          in it that stop someone making a mistake -- "reference only, not what your devices
+          publish", and how a name is actually composed -- were buried mid-run. */}
+      <div className="vocab-description">
+        <p>{active.description}</p>
+        {(active.notes || []).map((note, i) => (
+          <p key={i} className="vocab-note">
+            {note.label && <strong className="vocab-note-label">{note.label}</strong>}
+            {note.body}
+          </p>
+        ))}
       </div>
-
-      <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '12px 20px 0' }}>
-        {active.description}
-      </p>
 
       {query && filtered.length === 0 && (
         <div className="empty-state">
@@ -118,7 +135,7 @@ export function VocabularyPanel({ title = 'Standard Vocabulary Reference', tabs,
         </div>
       )}
 
-      <div style={{ padding: '12px 20px 20px' }}>
+      <div style={{ padding: '4px 20px 16px' }}>
         {filtered.map(section => {
           const open = isOpen(section.key)
           const used = active.isUsed ? section.items.filter(i => active.isUsed(i)).length : 0
@@ -129,8 +146,11 @@ export function VocabularyPanel({ title = 'Standard Vocabulary Reference', tabs,
                 onClick={() => toggle(section.key)}
                 aria-expanded={open}
                 style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: '8px',
-                  padding: '10px 2px', background: 'none', border: 'none', cursor: 'pointer',
+                  width: '100%', display: 'flex', alignItems: 'center', gap: '7px',
+                  /* 10px -> 6px. With ~14 sections per standard this was ~56px of padding alone
+                     between the first heading and the last, on a page whose job is to let someone
+                     scan a list of section names. */
+                  padding: '6px 2px', background: 'none', border: 'none', cursor: 'pointer',
                   color: 'var(--text)', textAlign: 'left', font: 'inherit'
                 }}
                 title={open ? 'Collapse this section' : 'Expand this section'}
@@ -146,7 +166,7 @@ export function VocabularyPanel({ title = 'Standard Vocabulary Reference', tabs,
               </button>
 
               {open && (
-                <div style={{ paddingBottom: '12px' }}>
+                <div style={{ paddingBottom: '9px' }}>
                   {section.hint && (
                     <p style={{ color: 'var(--text-muted)', fontSize: '11px', margin: '0 0 8px 22px' }}>{section.hint}</p>
                   )}
@@ -192,5 +212,6 @@ export function VocabularyPanel({ title = 'Standard Vocabulary Reference', tabs,
         })}
       </div>
     </div>
+    </>
   )
 }

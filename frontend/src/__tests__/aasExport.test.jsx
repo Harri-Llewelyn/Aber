@@ -47,15 +47,22 @@ const routeGet = (path) => {
   return Promise.resolve([])
 }
 
-// Both export formats live in the row's overflow menu. They used to be a <select> that faked a
-// menu (value="" plus a self-resetting onChange); inside a real one they are just two items.
-const openMenu = () => fireEvent.click(screen.getByTestId(`device-actions-${DEVICE.asset_id}`))
-const menu = () => screen.getByRole('menu')
+/**
+ * Both export formats are actions on the device's context panel.
+ *
+ * They have moved twice: from a <select> that faked a menu (value="" plus a self-resetting
+ * onChange), to a real overflow menu on the row, to the drawer -- which is where every other
+ * per-device action ended up when the ACTIONS column was removed. What is asserted below is the
+ * request each one issues and the file it writes, none of which changed.
+ */
+const openPanel = () => {
+  fireEvent.click(within(document.querySelector('.page-main')).getByText(DEVICE.asset_name))
+  return within(document.querySelector('.context-panel'))
+}
 const chooseFormat = (format) => {
-  openMenu()
-  fireEvent.click(within(menu()).getByRole('menuitem', {
-    name: format === 'aasx' ? /Export AASX package/i : /Export AAS JSON/i
-  }))
+  fireEvent.click(openPanel().getByText(
+    format === 'aasx' ? /Export AASX package/i : /Export AAS JSON/i
+  ))
 }
 
 const renderDevices = (showToast = vi.fn()) => {
@@ -73,8 +80,7 @@ describe('Export AAS action', () => {
   it('offers both formats on every device row', async () => {
     renderDevices()
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
-    openMenu()
-    const items = within(menu()).getAllByRole('menuitem').map(i => i.textContent)
+    const items = openPanel().getAllByRole('button').map(i => i.textContent)
     expect(items.some(t => /Export AAS JSON/i.test(t))).toBe(true)
     expect(items.some(t => /Export AASX package/i.test(t))).toBe(true)
   })
@@ -83,10 +89,10 @@ describe('Export AAS action', () => {
     render(<DevicesTab showToast={vi.fn()} onSelectDevice={() => {}} hasPermission={() => false} />)
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeTruthy())
 
-    openMenu()
-    // Enabled even for a role that cannot manage the device, unlike Config and Archive beside it.
+    const panel = openPanel()
+    // Enabled even for a role that cannot manage the device, unlike Edit and Archive beside it.
     for (const name of [/Export AAS JSON/i, /Export AASX package/i]) {
-      expect(within(menu()).getByRole('menuitem', { name }).disabled).toBe(false)
+      expect(panel.getByText(name).closest('button').disabled).toBe(false)
     }
   })
 
@@ -176,10 +182,10 @@ describe('Export AAS action', () => {
 
     chooseFormat('json')
 
-    // The trigger is disabled while exporting (and labelled "Exporting…"); a failure must clear
-    // that rather than leaving the row permanently unable to retry.
+    // Both export actions are disabled while exporting (and labelled "Exporting AAS…"); a failure
+    // must clear that rather than leaving the device permanently unable to retry.
     await waitFor(() =>
-      expect(screen.getByTestId(`device-actions-${DEVICE.asset_id}`).disabled).toBe(false))
+      expect(openPanel().getByText(/Export AAS JSON/i).closest('button').disabled).toBe(false))
   })
 })
 

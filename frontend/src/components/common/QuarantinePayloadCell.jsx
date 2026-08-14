@@ -54,7 +54,7 @@ export function QuarantinePayloadCell({ metrics, fallbackJson }) {
             key={name}
             className="mono"
             style={{
-              fontSize: '10px', padding: '2px 6px', borderRadius: 'var(--radius)',
+              fontSize: '11px', padding: '2px 6px', borderRadius: 'var(--radius)',
               border: '1px solid var(--border)', background: 'var(--bg-glass)',
               color: 'var(--text-muted)', maxWidth: '100%',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
@@ -71,7 +71,7 @@ export function QuarantinePayloadCell({ metrics, fallbackJson }) {
             onClick={() => setExpanded(v => !v)}
             aria-expanded={expanded}
             className="btn btn-ghost btn-sm"
-            style={{ fontSize: '10px', padding: '2px 6px' }}
+            style={{ fontSize: '11px', padding: '2px 6px' }}
             title={expanded ? 'Collapse the payload' : `Show the remaining ${hidden} metric${hidden === 1 ? '' : 's'}`}
           >
             {expanded
@@ -81,7 +81,7 @@ export function QuarantinePayloadCell({ metrics, fallbackJson }) {
         )}
       </div>
 
-      <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '3px' }}>
+      <div style={{ fontSize: '11px', color: 'var(--text-dim)', marginTop: '3px' }}>
         {names.length} metric{names.length === 1 ? '' : 's'} declared at birth
       </div>
     </td>

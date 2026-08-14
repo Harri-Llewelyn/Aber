@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { IconGitBranch, IconAlertTriangle } from '../common/Icons'
 import { nextVersion, nextVersionName, schemaVersion } from '../../utils/schemaVersion'
+import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 /**
  * Prompt for the change description that a new schema version carries.
@@ -17,6 +18,11 @@ import { nextVersion, nextVersionName, schemaVersion } from '../../utils/schemaV
  * existing beside its parent.
  */
 export function SchemaForkModal({ schema, deviceCount = 0, onConfirm, onCancel }) {
+  // Escape closes. Via the shared stack rather than a listener of this component's own,
+  // because a ConfirmModal can open on top of this one and a bare document listener on each
+  // would let one keypress dismiss both.
+  useEscapeKey(onCancel)
+
   const [changeDescription, setChangeDescription] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -34,7 +40,7 @@ export function SchemaForkModal({ schema, deviceCount = 0, onConfirm, onCancel }
 
   return (
     <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 520 }}>
+      <div className="modal">
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <IconGitBranch size={18} />
           <span>Create Version v{next}</span>

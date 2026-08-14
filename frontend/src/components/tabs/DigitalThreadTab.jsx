@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../api'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { AutoRefreshControl } from '../common/AutoRefreshControl'
+import CopyableId from '../common/CopyableId'
 import { IconHistory, IconDownload, IconX } from '../common/Icons'
 
 /**
@@ -114,21 +115,14 @@ export function DigitalThreadTab({ initialEntity, onClearEntity }) {
 
   return (
     <>
-      <div className="section-header" style={{ marginBottom: '8px' }}>
-        <h2 className="section-title">Digital Thread Audit Trace Timeline <span className="section-count">{events.length}</span></h2>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <button className="btn btn-ghost btn-sm" onClick={() => downloadCSV(events, 'digital-thread-export.csv')} title="Download audit events as CSV"><IconDownload size={13} /> Export CSV</button>
-          <AutoRefreshControl onRefresh={handleRefresh} defaultInterval={0} />
-        </div>
-      </div>
+      {/* Heading and description removed: the top bar names the page. The event count moved onto
+          the export button, which is the one control whose behaviour depends on it -- it writes
+          exactly these rows.
 
-      <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
-        Complete immutable historical audit trace timeline across Cells, Gateways, and Devices with case-insensitive search and metadata inspection.
-      </p>
-
-      {/* Moved out of the section header into the same `.filter-bar` the Gateways and Devices
-          pages use. Two filter surfaces on one page crowded the header and put the filters in a
-          different place on every tab; this is the one shape an operator learns once. */}
+          Export and auto-refresh used to sit in a `.page-actions` row of their own ABOVE the
+          filters, which is backwards: what the export writes is decided by the filters, so the
+          button belongs at the end of the row that decides it, not on a separate row before it.
+          Folding them in also removes a whole 34px band from the top of the page. */}
       <div className="filter-bar">
         <select
           className="form-control"
@@ -166,10 +160,17 @@ export function DigitalThreadTab({ initialEntity, onClearEntity }) {
         </select>
 
         {activeFilterCount > 0 && (
-          <button className="btn btn-ghost btn-sm filter-bar-spacer" onClick={resetFilters} title="Clear every filter">
+          <button className="btn btn-ghost btn-sm" onClick={resetFilters} title="Clear every filter">
             <IconX size={13} /> Clear filters ({activeFilterCount})
           </button>
         )}
+
+        {/* The spacer moved off Clear Filters and onto this group, so the right-hand end of the
+            bar holds the same thing whether or not a filter happens to be set. */}
+        <div className="filter-bar-spacer filter-bar-actions">
+          <button className="btn btn-ghost btn-sm" onClick={() => downloadCSV(events, 'digital-thread-export.csv')} title="Download audit events as CSV"><IconDownload size={13} /> Export CSV ({events.length})</button>
+          <AutoRefreshControl onRefresh={handleRefresh} defaultInterval={0} />
+        </div>
       </div>
 
       <div className="card" style={{ padding: '24px' }}>
@@ -195,7 +196,16 @@ export function DigitalThreadTab({ initialEntity, onClearEntity }) {
                       {entityNames.get(e.entity_id)
                         ? <strong title="Asset name">{entityNames.get(e.entity_id)}</strong>
                         : null}
-                      <span className="mono" style={{ color: 'var(--accent)', fontSize: '11px' }} title="Target Entity ID">[{e.entity_id}]</span>
+                      {/* Copyable, because this id is the thing an operator carries OUT of this
+                          page -- into a Supabase query, a support ticket, or the search box on
+                          another tab. It was previously plain text they had to select by hand,
+                          bracket characters and all. */}
+                      <CopyableId
+                        value={e.entity_id}
+                        label="entity id"
+                        title="Target entity ID — click to copy"
+                        className="timeline-id"
+                      />
                       <span className="badge badge-warning" title="Audit event type">{e.event_type}</span>
                       {/* Who, or failing that what. actor_source is never null on a row written
                           since migration 0005, so "Unattributed" now means a real gap rather
@@ -211,7 +221,18 @@ export function DigitalThreadTab({ initialEntity, onClearEntity }) {
                           : (ACTOR_LABELS[e.actor_source]?.label || '⚠ Unattributed')}
                       </span>
                     </div>
-                    <div className="timeline-time" title="Event timestamp">{new Date(e.timestamp).toLocaleString()}</div>
+                    <div className="timeline-time">
+                      {/* The audit row's own id. It identifies THIS mutation rather than the
+                          asset it touched, which is what you need to quote when two edits a
+                          second apart are being told apart. */}
+                      <CopyableId
+                        value={String(e.event_id)}
+                        label="mutation id"
+                        title="Audit row ID for this single change — click to copy"
+                        className="timeline-id"
+                      />
+                      <span title="Event timestamp">{new Date(e.timestamp).toLocaleString()}</span>
+                    </div>
                   </div>
                   <div className="timeline-desc">{e.description}</div>
                   {e.metadata && Object.keys(e.metadata).length > 0 && (
