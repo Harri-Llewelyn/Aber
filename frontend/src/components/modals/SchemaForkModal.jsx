@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { IconGitBranch, IconAlertTriangle } from '../common/Icons'
+import { ActionButton } from '../common/ActionButton'
 import { nextVersion, nextVersionName, schemaVersion } from '../../utils/schemaVersion'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 
@@ -93,14 +94,16 @@ export function SchemaForkModal({ schema, deviceCount = 0, onConfirm, onCancel }
 
         <div className="modal-actions">
           <button className="btn btn-ghost" onClick={onCancel} disabled={busy}>Cancel</button>
-          <button
-            className={`btn btn-primary ${busy ? 'btn-disabled' : ''}`}
-            disabled={busy}
+          {/* btn-disabled dropped in favour of btn-loading: this button is working, not refused,
+              and greying it out said the opposite at the one moment it mattered. */}
+          <ActionButton
+            pending={busy}
+            pendingLabel="Creating…"
             onClick={handleConfirm}
             title={`Fork this schema into an editable draft at v${next}`}
           >
-            <IconGitBranch size={13} /> {busy ? 'Creating…' : `Create Draft v${next}`}
-          </button>
+            <IconGitBranch size={13} /> {`Create Draft v${next}`}
+          </ActionButton>
         </div>
       </div>
     </div>

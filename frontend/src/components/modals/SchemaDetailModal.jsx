@@ -3,6 +3,7 @@ import {
   IconGitBranch, IconLock, IconHistory, IconAlertTriangle, IconCheck, IconDownload
 } from '../common/Icons'
 import CopyableId from '../common/CopyableId'
+import { ActionButton } from '../common/ActionButton'
 import { datatypeLabel, datatypeToJsonSchemaType } from '../../utils/sparkplugDatatype'
 import { groupCatalog } from '../../utils/metricGroup'
 import { modelledMetrics } from '../../utils/deviceTags'
@@ -52,7 +53,9 @@ export function SchemaDetailModal({
   const [description, setDescription] = useState(schema?.description || '')
   const [changeDescription, setChangeDescription] = useState(schema?.change_description || '')
   const [search, setSearch] = useState('')
-  const [busy, setBusy] = useState(false)
+  // Which write is running, not merely whether one is -- see `run` below.
+  const [busyAction, setBusyAction] = useState(null)
+  const busy = busyAction !== null
 
   const activeCatalog = useMemo(() => (catalog || []).filter(m => !m.deprecated), [catalog])
 
@@ -107,9 +110,15 @@ export function SchemaDetailModal({
     description !== (schema?.description || '') ||
     changeDescription !== (schema?.change_description || '')
 
-  const run = async (fn) => {
+  /**
+   * @param {string} name Which action is running -- 'save' or 'publish'. Was a bare boolean, which
+   *   was enough to lock both buttons but not to say which of them the operator had clicked, so
+   *   neither could report its own wait. They still SHARE the lock: publishing writes the draft
+   *   first, so the two cannot overlap.
+   */
+  const run = async (name, fn) => {
     if (busy) return
-    setBusy(true)
+    setBusyAction(name)
     try {
       await fn()
     } catch (e) {
@@ -125,11 +134,11 @@ export function SchemaDetailModal({
       // rejection from some future caller that does not report is still diagnosable.
       console.error('Schema action failed:', e)
     } finally {
-      setBusy(false)
+      setBusyAction(null)
     }
   }
 
-  const handleSaveDraft = () => run(async () => {
+  const handleSaveDraft = () => run('save', async () => {
     await onSaveDraft?.({
       schema_definition: buildDefinition(),
       description,
@@ -137,7 +146,7 @@ export function SchemaDetailModal({
     })
   })
 
-  const handlePublish = () => run(async () => {
+  const handlePublish = () => run('publish', async () => {
     // Saved first, unconditionally-if-dirty, so publishing can never activate a version that is
     // missing the edits sitting in front of the operator. Two writes rather than one because the
     // publish RPC takes no payload -- it activates what is stored, and what is stored has to be
@@ -361,23 +370,30 @@ export function SchemaDetailModal({
             <IconDownload size={13} /> Download JSON
           </button>
 
+          {/* Both write buttons are locked by `busy` -- publishing writes the draft first, so the
+              two cannot overlap -- but only the one that was CLICKED spins. That is what
+              busyAction buys over the boolean it replaced. */}
           {editable && (
-            <button
+            <ActionButton
               className={`btn btn-ghost ${!canSaveDraft || !dirty ? 'btn-disabled' : ''}`}
               disabled={!canSaveDraft || !dirty || busy}
+              pending={busyAction === 'save'}
+              pendingLabel="Saving…"
               onClick={handleSaveDraft}
               title={!canManage
                 ? 'Requires Admin permissions'
                 : !dirty ? 'No changes to save' : 'Save this draft without activating it'}
             >
               Save Draft
-            </button>
+            </ActionButton>
           )}
 
           {editable && (
-            <button
+            <ActionButton
               className={`btn btn-primary ${!canSaveDraft ? 'btn-disabled' : ''}`}
               disabled={!canSaveDraft || busy}
+              pending={busyAction === 'publish'}
+              pendingLabel="Publishing…"
               onClick={handlePublish}
               title={!canManage
                 ? 'Requires Admin permissions'
@@ -385,8 +401,8 @@ export function SchemaDetailModal({
                   ? 'A published version must model at least one metric'
                   : `Activate v${schemaVersion(schema)}, archive its predecessor, and move every device across`}
             >
-              <IconCheck size={13} /> {busy ? 'Publishing…' : `Publish Version v${schemaVersion(schema)}`}
-            </button>
+              <IconCheck size={13} /> {`Publish Version v${schemaVersion(schema)}`}
+            </ActionButton>
           )}
 
           {/* The single primary action on a read-only version. Rendered only when the schema is

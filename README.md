@@ -118,7 +118,8 @@ group, `0009` withdraws residual `anon` function grants, `0010` telemetry rollup
 view, `0011` IDTA Digital Nameplate and per-device nameplate data, `0012` permitted values of a
 discrete metric, `0013` ASHRAE 223P vocabulary, `0014` repoints locally-minted semantic
 identifiers onto the `acs-cymru.local` namespace, `0015` moves the default Sparkplug group to
-`ACS-Cymru` — plus demo accounts (`supabase/seed.sql`).
+`ACS-Cymru`, `0016` drops the dashboard's own service-directory entry and renames the Node-RED
+one to say it is the simulator — plus demo accounts (`supabase/seed.sql`).
 
 | Interface | URL |
 | :--- | :--- |
@@ -301,7 +302,7 @@ Digital Nameplate; what each one covers and how its identity was verified is in
 ## Testing
 
 ```bash
-# Frontend
+# Frontend — 1016 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required

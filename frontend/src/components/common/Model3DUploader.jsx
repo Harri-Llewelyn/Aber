@@ -7,6 +7,7 @@ import {
   modelFileName
 } from '../../utils/model3d'
 import { IconCube, IconUpload, IconTrash, IconExternalLink, IconAlertTriangle } from './Icons'
+import { ActionButton } from './ActionButton'
 
 /**
  * Attach one 3D visual model to a device.
@@ -167,14 +168,17 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
               >
                 <IconUpload size={12} /> Replace
               </button>
-              <button
+              {/* `busy` covers upload AND removal -- both write to the same device row -- but only
+                  Remove can report, because Replace merely opens the file picker. */}
+              <ActionButton
                 className="btn btn-ghost"
-                disabled={busy}
+                pending={busy}
+                pendingLabel="Removing…"
                 onClick={handleRemove}
                 title="Detach this model and delete it from storage"
               >
                 <IconTrash size={12} /> Remove
-              </button>
+              </ActionButton>
             </div>
           )}
         </div>

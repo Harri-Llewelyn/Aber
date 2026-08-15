@@ -168,6 +168,63 @@ html, body, #root {
   flex-shrink: 0;
   z-index: 100;
   transition: background-color 0.25s ease;
+  /* Anchors .topbar-progress. Safe to add: the account popover anchors to .user-menu, which
+     carries its own `position: relative`, so nothing else was resolving to this element. */
+  position: relative;
+}
+
+/* ===== Global activity line =====
+   A 2px indeterminate line on the bar's bottom edge, up whenever API work has been outstanding
+   long enough to be worth mentioning (see useApiActivity for what "long enough" means and why
+   the 3s poll must not trip it).
+
+   IT IS INDETERMINATE ON PURPOSE. Nothing here knows how far along a request is -- there is no
+   progress event to read -- so a filling bar would be inventing a number. A moving band says
+   "working" and claims nothing else.
+
+   Bottom edge of the bar rather than the top of the page: it reads as belonging to the chrome
+   rather than to whichever tab happens to be mounted, which is right, because the work it
+   reports is often not the visible tab's.
+
+   `bottom: -1px` puts it OVER the 1px border-bottom rather than above it, so the bar does not
+   grow by a pixel when the line appears and the layout below never shifts. */
+.topbar-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  overflow: hidden;
+  /* Never intercepts a click aimed at the bar or the content beneath it. */
+  pointer-events: none;
+}
+
+.topbar-progress::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  /* Faded at both ends so the band has no hard edge to catch the eye when it wraps. */
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: topbar-progress-slide 1.1s ease-in-out infinite;
+}
+
+@keyframes topbar-progress-slide {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(350%); }
+}
+
+/* Motion is the entire mechanism here, so under a reduced-motion preference it becomes a steady
+   line instead of nothing: the information -- that the app is working -- still has to arrive. */
+@media (prefers-reduced-motion: reduce) {
+  .topbar-progress::before {
+    width: 100%;
+    background: var(--accent);
+    opacity: 0.7;
+    animation: none;
+  }
 }
 
 .topbar-brand {
@@ -744,7 +801,8 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 /* The retention deadline on an archived row. Danger-coloured because it is a date on which
-   data disappears, not merely a date. */
+   data disappears, not merely a date.
+
    Compounded with .mono, which it is always used alongside: .mono sets its own colour and size,
    and relying on source order to beat it is the specificity trap that cost the shopfloor lanes
    their borders twice. */
@@ -760,6 +818,47 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 .row-actions .btn + .btn { margin-left: 8px; }
+
+/* ===== Directory service tables =====
+   The Directory page renders one table PER CATEGORY -- applications, ingestion, backend -- rather
+   than one list of everything. That is three separate <table> elements, and three tables sized
+   from their own content pick three different sets of column widths: SERVICE TYPE would start at
+   a different x on each card and the page would read as three unrelated tables rather than one
+   list broken into sections. `table-layout: fixed` plus the widths below pins all three to the
+   same grid.
+
+   The widths are set on the header cells only; under `table-layout: fixed` the first row decides
+   every column, so repeating them on the body cells would be inert duplication. */
+.table-directory {
+  table-layout: fixed;
+  /* Below this the fixed columns crush rather than wrap, so `.table-wrap` scrolls instead. */
+  min-width: 760px;
+}
+
+.table-directory th:nth-child(1) { width: 26%; }  /* Service name */
+.table-directory th:nth-child(2) { width: 16%; }  /* Service type */
+.table-directory th:nth-child(3) { width: 30%; }  /* Endpoint URL */
+.table-directory th:nth-child(4) { width: 14%; }  /* Status */
+.table-directory th:nth-child(5) { width: 14%; }  /* Last heartbeat */
+
+/* Compact rows. The directory is a reference list read top to bottom, not a work surface with
+   per-row actions, so the 12px the action tables need is dead vertical space here -- at the
+   default padding the three cards do not fit one screen and the grouping stops paying for
+   itself. */
+.table-directory th { padding: 9px 16px; }
+
+.table-directory td {
+  padding: 8px 16px;
+  font-size: 13px;
+}
+
+/* An endpoint is one unbroken token (`http://127.0.0.1:54321/functions/v1`), which a fixed
+   column cannot break at a space. Without this it overruns its cell into STATUS. */
+.table-directory .cell-endpoint { overflow-wrap: anywhere; }
+
+/* Between the category cards. Deliberately not `.card + .card`: several pages stack cards that
+   are meant to sit tight against each other. */
+.directory-group + .directory-group { margin-top: 16px; }
 
 /* ===== Copyable identifiers =====
    Sparkplug ids are opaque 24-character strings that engineers have to transcribe into
@@ -894,7 +993,8 @@ tbody tr:hover { background: var(--bg-glass); }
    eye to the one control nobody should reach for by accident. It rests as an ordinary ghost
    button and takes on the danger colour once pointed at -- by which point the pointer is
    already there and the colour is a warning rather than an advertisement.
-   --text-muted, not --text-dim: this still has to be readable at rest. */
+   --text-muted, not --text-dim: this still has to be readable at rest.
+
    Compounded with .btn-danger for the same reason .mono.cell-purge-date is: .btn-danger declares
    the same three properties and source order is not a guarantee worth resting on. */
 .btn-danger.btn-danger-reveal {
@@ -923,6 +1023,29 @@ tbody tr:hover { background: var(--bg-glass); }
   filter: grayscale(0.9) !important;
   box-shadow: none !important;
   transform: none !important;
+}
+
+/* ===== Button pending state =====
+   A button whose action is in flight. DELIBERATELY NOT `.btn-disabled`: that state means "you may
+   not do this" and greys the control out, whereas this one means "this is happening" and has to
+   stay legible while it says so. Greying it would read as the click having been refused.
+
+   The `disabled` attribute is set alongside this class by ActionButton -- the class is the
+   appearance, the attribute is the double-submit guard, and neither substitutes for the other.
+
+   `cursor: wait` still applies on a disabled button: pointer EVENTS are suppressed, the cursor
+   property is not. */
+.btn-loading {
+  cursor: wait;
+  /* Enough to read as inactive without losing the label. */
+  opacity: 0.9;
+}
+
+/* The hover affordances are the button claiming it will respond to another click. It will not. */
+.btn-loading:hover {
+  filter: none;
+  box-shadow: none;
+  transform: none;
 }
 
 .btn-group { display: flex; gap: 8px; }
@@ -1280,6 +1403,21 @@ tbody tr:hover { background: var(--bg-glass); }
   animation: spin 0.7s linear infinite;
 }
 
+/* The in-button size. Sits on the text baseline of a 14px label, so it is sized to the cap height
+   rather than to the 18px the page-level spinner uses -- an 18px ring inside a 34px button forces
+   the row taller and the button visibly grows the moment it is clicked.
+
+   The rest track is currentColor at low alpha rather than --border: this spins on --accent-strong
+   (primary), on --bg-glass (ghost) and on a rose tint (danger), and a fixed grey ring disappears
+   entirely against the first of those. */
+.spinner-sm {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+  border-color: color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
+}
+
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .loading-wrap {
@@ -1464,6 +1602,42 @@ tbody tr:hover { background: var(--bg-glass); }
 
 .shopfloor-zone.shopfloor-zone-archived:hover {
   border-color: var(--warning);
+}
+
+/* ===== A tile with a drop still in flight =====
+   Between releasing a device over a tile and the api.put resolving, the tile shows nothing: the
+   device is still drawn in the zone it came from, because the reload has not happened yet. On a
+   slow link that is indistinguishable from a drop that was refused, and the reliable operator
+   response is to drag it again -- which is how one move became two writes.
+
+   `pointer-events: none` is the functional half and not merely a cursor nicety: it makes the
+   destination refuse a second drop for exactly as long as the first one is outstanding.
+
+   Compounded, and repeated for :hover, for the reason the two blocks above spell out -- the
+   pointer is by definition ON this tile, having just dropped something there, so a state that
+   loses to `.shopfloor-zone:hover` (0-2-0) would never once be seen. */
+.shopfloor-zone.shopfloor-zone-pending {
+  border-color: var(--accent);
+  pointer-events: none;
+  animation: shopfloor-zone-pending-pulse 1.2s ease-in-out infinite;
+}
+
+.shopfloor-zone.shopfloor-zone-pending:hover {
+  border-color: var(--accent);
+}
+
+@keyframes shopfloor-zone-pending-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 0.85; }
+}
+
+/* Held at the dimmer end rather than dropped to full opacity: the tile still has to read as
+   waiting, and opacity is the only part of this state that survives without the animation. */
+@media (prefers-reduced-motion: reduce) {
+  .shopfloor-zone.shopfloor-zone-pending {
+    animation: none;
+    opacity: 0.55;
+  }
 }
 
 .zone-header {

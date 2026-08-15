@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { api } from '../../api'
 import { IconClipboardList, IconCheck, IconAlertTriangle } from '../common/Icons'
+import { ActionButton } from '../common/ActionButton'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 /**
@@ -206,14 +207,18 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage }) {
           <button className="btn btn-ghost" onClick={() => onClose(false)} disabled={saving}>
             Cancel
           </button>
-          <button
-            className="btn btn-primary"
+          {/* Was a bare text swap to 'Saving…' with no spinner and no busy state. The label was
+              already right; this puts it on the same standardized control as every other
+              submission in the app, which is where the spinner and aria-busy come from. */}
+          <ActionButton
+            pending={saving}
+            pendingLabel="Saving…"
             onClick={save}
             disabled={!canSave || loading}
             title={canManage ? 'Save this nameplate' : 'Requires Administrator or Shopfloor_Manager'}
           >
-            {saving ? 'Saving…' : 'Save'}
-          </button>
+            Save
+          </ActionButton>
         </div>
       </div>
     </div>

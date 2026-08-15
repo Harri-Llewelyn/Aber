@@ -4,6 +4,7 @@ import { usePermissions } from './hooks/usePermissions'
 import { useAppRouting } from './hooks/useAppRouting'
 import { useTheme } from './hooks/useTheme'
 import { useToast } from './hooks/useToast'
+import { useApiActivity } from './hooks/useApiActivity'
 import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
 import { clearInvalidSession, isSessionRejected } from './utils/sessionError'
 import { PERMISSION_UUIDS, REALTIME_ENABLED } from './constants'
@@ -293,6 +294,10 @@ function Dashboard({ session, onSignOut }) {
   const { userRole, hasPermission } = usePermissions(session)
   useQuarantineAlerts(showToast)
 
+  // Fed by the counter every call through `api` increments, so it covers a save on a modal and a
+  // tab's reconciliation poll alike without either having to report anything.
+  const apiBusy = useApiActivity()
+
   // The app-wide "something changed" toast that used to live here has been removed.
   //
   // It subscribed to every table in the `public` schema and raised a toast per change. With a
@@ -361,6 +366,20 @@ function Dashboard({ session, onSignOut }) {
 
           <UserMenu persona={persona} userRole={userRole} onSignOut={onSignOut} />
         </div>
+
+        {/* The one piece of chrome that reports work rather than state. Rendered only while busy
+            so there is no inert element to mistake for a stalled bar.
+
+            `role="progressbar"` with no value: the work is genuinely indeterminate (see the CSS),
+            and publishing a made-up aria-valuenow would be worse than publishing none. */}
+        {apiBusy && (
+          <div
+            className="topbar-progress"
+            role="progressbar"
+            aria-label="Loading"
+            title="Working…"
+          />
+        )}
       </header>
 
       {/* Main Content */}

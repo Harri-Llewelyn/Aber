@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import CopyableId from '../common/CopyableId'
+import { ActionButton } from '../common/ActionButton'
+import { usePendingKey } from '../../hooks/usePendingAction'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { IconArchive, IconRefreshCw, IconTrash } from '../common/Icons'
 
@@ -16,6 +18,10 @@ export function ArchivesTab({ showToast, hasPermission }) {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // Which row is mid-restore. This table mixes cells, gateways and devices, so the row identity
+  // is what the operator is tracking; one shared boolean would spin all of them.
+  const [restoringId, runRestore] = usePendingKey()
 
   const restore = async (item) => {
     try {
@@ -34,9 +40,12 @@ export function ArchivesTab({ showToast, hasPermission }) {
    * independent of the entity they describe.
    */
   const purge = async (item) => {
-    setConfirmPurge(null)
     try {
       await api.delete(`/api/v1/${item.entity_type}s/${item.entity_id}`)
+      // Dismissed AFTER the delete, not before. Clearing it first closed the dialog on the click
+      // and ran the irreversible half unobserved -- for the one action in the app that cannot be
+      // undone, the confirmation is exactly where the wait belongs.
+      setConfirmPurge(null)
       load(); showToast(`Entity '${item.name}' permanently deleted`, 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
@@ -84,14 +93,16 @@ export function ArchivesTab({ showToast, hasPermission }) {
                          delete only takes on its danger colour when pointed at. A row of two
                          filled buttons invites the wrong one to be clicked at a glance. */}
                      <td className="row-actions">
-                       <button
+                       <ActionButton
                          className={`btn btn-sm btn-ghost ${!canArchive ? 'btn-disabled' : ''}`}
                          disabled={!canArchive}
-                         onClick={() => restore(a)}
+                         pending={restoringId === a.entity_id}
+                         pendingLabel="Restoring…"
+                         onClick={() => runRestore(a.entity_id, () => restore(a))}
                          title={!canArchive ? 'Requires Admin permissions' : 'Restore entity back to active service'}
                        >
                          <IconRefreshCw size={12} /> Restore
-                       </button>
+                       </ActionButton>
                        <button
                          className={`btn btn-sm btn-danger btn-danger-reveal ${!canArchive ? 'btn-disabled' : ''}`}
                          disabled={!canArchive}
@@ -118,6 +129,7 @@ export function ArchivesTab({ showToast, hasPermission }) {
             'This removes the record from the database immediately. It cannot be restored, and ' +
             'it does not wait for the retention timer. Its digital thread history is kept.'
           }
+          pendingLabel="Deleting…"
           onConfirm={() => purge(confirmPurge)}
           onCancel={() => setConfirmPurge(null)}
         />

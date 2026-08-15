@@ -2424,15 +2424,20 @@ ON CONFLICT (device_id, schema_id) DO NOTHING;
 
 
 -- -------------------------------------------------------------------------------------------
--- Service directory  (13 rows)
+-- Service directory  (12 rows)
+--
+-- The dashboard itself is deliberately NOT among them. A directory entry linking to the page the
+-- directory is rendered on is a link to where you already are; f1111111-...0002 held it, and 0016
+-- removes it from databases seeded before this. That id is retired, not reused.
 -- -------------------------------------------------------------------------------------------
 
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000001', 'Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
 ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000002', 'ACS-Cymru Web Dashboard', 'GRAPHICAL_UI', 'http://localhost:3000', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
-ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000003', 'Node-RED Edge Gateway', 'EDGE_NODE', 'http://localhost:1880', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
-ON CONFLICT (service_name) DO NOTHING;
+-- ON CONFLICT (id), not (service_name), for this row alone: a database seeded before 0016 holds
+-- this id under the OLD name, and a name-targeted clause does not catch a primary-key collision
+-- -- the insert would raise on every boot instead of being skipped. 0016 then does the rename.
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000003', 'Node-RED (Virtual Edge Gateway Simulator)', 'EDGE_NODE', 'http://localhost:1880', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000004', 'Mosquitto MQTT Broker', 'MQTT_BROKER', 'mqtt://localhost:1883', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
 ON CONFLICT (service_name) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000005', 'TimescaleDB Telemetry Store', 'TIME_SERIES_DB', 'postgres://localhost:5433', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)

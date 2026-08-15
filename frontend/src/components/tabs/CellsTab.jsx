@@ -8,6 +8,8 @@ import { effectiveSparkplugId, gatewaySparkplugId } from '../../utils/sparkplugI
 import { groupDevicesByCell, SOURCE_SITE_WIDE } from '../../utils/cellResolution'
 import CopyableId from '../common/CopyableId'
 import { StatusBadge } from '../common/StatusBadge'
+import { ActionButton } from '../common/ActionButton'
+import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
@@ -131,17 +133,26 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   // without touching a single `cells` row.
   useRealtimeTable(['cells', 'gateways', 'devices'], loadAll, { enabled: REALTIME_ENABLED })
 
+  // In-flight state for the form's Save and for whichever row is restoring. See
+  // hooks/usePendingAction.js for why the row list needs a key rather than a second boolean.
+  const [saving, runSave] = usePendingAction()
+  const [restoringId, runRestore] = usePendingKey()
+
   const save = async () => {
     try {
       if (editing) await api.put(`/api/v1/cells/${editing.cell_id}`, formVal)
       else         await api.post('/api/v1/cells', formVal)
-      setShowForm(false); loadAll(); showToast('Cell saved', 'success')
+      setShowForm(false); loadAll(); showToast(editing ? 'Cell saved' : 'Cell created', 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
 
   const archiveCell = async (days) => {
     try {
       await api.post(`/api/v1/cells/${archiveTarget.cell_id}/archive`, { auto_delete_days: days })
+      // Already closed after the request rather than before it, which is what lets ArchiveModal
+      // hold its Archiving… state for the whole round trip. Left alone deliberately -- the two
+      // places that DID dismiss on the click (ArchivesTab.purge, DirectoryTab's GitOps sync) were
+      // the ones that had to move.
       setArchiveTarget(null); loadAll(); showToast(`Cell '${archiveTarget.cell_name}' archived (Out of Commission)`, 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
@@ -478,8 +489,17 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
               <input className="form-control" value={formVal.access_url || ''} onChange={e => setFormVal(f => ({ ...f, access_url: e.target.value }))} placeholder="e.g. http://localhost:3002/d/cell-1" title="Enter Grafana dashboard or UI management URL" />
             </div>
             <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={() => setShowForm(false)} title="Cancel">Cancel</button>
-              <button className="btn btn-primary" onClick={save} title="Save cell zone">Save</button>
+              <button className="btn btn-ghost" onClick={() => setShowForm(false)} disabled={saving} title="Cancel">Cancel</button>
+              <ActionButton
+                pending={saving}
+                // Named for the act, not for the button: creating a cell and editing one are
+                // different waits and the operator knows which they asked for.
+                pendingLabel={editing ? 'Saving…' : 'Creating…'}
+                onClick={() => runSave(save)}
+                title="Save cell zone"
+              >
+                Save
+              </ActionButton>
             </div>
           </div>
         </div>
@@ -556,7 +576,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
           // like the four that went before it.
           selectedCell.is_archived ? {
             label: 'Restore Cell', icon: <IconRefreshCw size={13} />,
-            onClick: () => restoreCell(selectedCell.cell_id, selectedCell.cell_name),
+            onClick: () => runRestore(selectedCell.cell_id, () => restoreCell(selectedCell.cell_id, selectedCell.cell_name)),
+            pending: restoringId === selectedCell.cell_id,
+            pendingLabel: 'Restoring…',
             disabled: !canArchive,
             title: !canArchive ? 'Requires Admin permissions' : 'Restore cell back to active service'
           } : {
