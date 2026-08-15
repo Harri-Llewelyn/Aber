@@ -38,15 +38,32 @@ export function mtconnectVocabularyTab({ vocabulary, catalog, onUseType }) {
     searchPlaceholder: 'Search the vocabulary…',
     description: (
       <>
-        The controlled vocabularies a metric name is built from, generated from the{' '}
-        <span className="mono">mtconnect/schema</span> repository. Reference only — this is the
-        standard's list of available words, not a list of metrics your devices publish. A metric is
-        a component path plus a data item type, so <span className="mono">ANGLE</span> here becomes{' '}
-        <span className="mono">Axes/C/ANGLE</span> in the catalog above. Entries already used by a
-        catalog metric are ticked. Each carries a local-namespace semantic id, shown on hover —
-        minted by this deployment, not issued by MTConnect, which publishes none.
+        The controlled vocabularies an MTConnect metric name is built from, generated from the{' '}
+        <span className="mono">mtconnect/schema</span> repository.
       </>
     ),
+    // The run-on paragraph this replaced buried its two load-bearing facts -- "these are words,
+    // not your metrics" and "a name is composed, not picked" -- in the middle of six sentences.
+    notes: [
+      {
+        label: 'Reference only.',
+        body: " The standard's list of available words, not a list of metrics your devices publish."
+      },
+      {
+        label: 'Names are composed.',
+        body: (
+          <>
+            {' '}A metric is a component path plus a data item type, so{' '}
+            <span className="mono">ANGLE</span> here becomes <span className="mono">Axes/C/ANGLE</span>{' '}
+            in the catalog.
+          </>
+        )
+      },
+      {
+        label: 'Semantic ids are local.',
+        body: ' Each entry carries one, shown on hover — minted by this deployment, not issued by MTConnect, which publishes none. Entries already used by a catalog metric are ticked.'
+      }
+    ],
     sections,
     isUsed: item => adopted.has(item.name),
     tooltipFor: item => {

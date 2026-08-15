@@ -3,6 +3,7 @@ import { api, TELEMETRY_PAGE_SIZE, TELEMETRY_EXPORT_MAX_ROWS } from '../../api'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { telemetryValue, telemetryValueType } from '../../utils/telemetryValue'
 import { IconDownload, IconAlertTriangle, IconX } from '../common/Icons'
+import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 /**
  * CSV export for a selection of one device's metrics over a chosen time range.
@@ -39,6 +40,11 @@ function toLocalInputValue(date) {
 }
 
 export function TelemetryExportModal({ device, metricNames, onClose, showToast }) {
+  // Escape closes. Via the shared stack rather than a listener of this component's own,
+  // because a ConfirmModal can open on top of this one and a bare document listener on each
+  // would let one keypress dismiss both.
+  useEscapeKey(onClose)
+
   const [mode, setMode]       = useState('preset')   // 'preset' | 'custom'
   const [preset, setPreset]   = useState('1h')
   const [customFrom, setCustomFrom] = useState(() => toLocalInputValue(new Date(Date.now() - 3600_000)))
@@ -159,7 +165,7 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
 
   return (
     <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 560 }}>
+      <div className="modal modal-md">
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <IconDownload size={18} />
           <span>Export Telemetry — <span className="mono">{deviceName}</span></span>
@@ -169,7 +175,7 @@ export function TelemetryExportModal({ device, metricNames, onClose, showToast }
           <label className="form-label">Selected metrics ({metricNames.length})</label>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '96px', overflowY: 'auto', padding: '8px', background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: '6px' }}>
             {metricNames.map(name => (
-              <span key={name} className="badge badge-neutral" style={{ fontSize: '10px' }}>{name}</span>
+              <span key={name} className="badge badge-neutral" style={{ fontSize: '11px' }}>{name}</span>
             ))}
           </div>
         </div>

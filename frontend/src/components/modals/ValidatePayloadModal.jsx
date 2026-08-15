@@ -1,8 +1,14 @@
 import React, { useState } from 'react'
 import { api } from '../../api'
 import { IconCheck } from '../common/Icons'
+import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 export function ValidatePayloadModal({ schemas, onClose }) {
+  // Escape closes. Via the shared stack rather than a listener of this component's own,
+  // because a ConfirmModal can open on top of this one and a bare document listener on each
+  // would let one keypress dismiss both.
+  useEscapeKey(onClose)
+
   const [selectedSchemaUuid, setSelectedSchemaUuid] = useState(schemas[0]?.schema_uuid || '')
   // MTConnect names and value vocabularies: EXECUTION is READY/ACTIVE/INTERRUPTED/…,
   // EMERGENCY_STOP is ARMED/TRIGGERED. See archive/20260101000019_mtconnect_catalog_migration.sql.
@@ -30,7 +36,7 @@ export function ValidatePayloadModal({ schemas, onClose }) {
 
   return (
     <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 560 }}>
+      <div className="modal modal-md">
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <IconCheck size={18} />
           <span>Interactive Payload Schema Validator</span>

@@ -127,15 +127,12 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
   const publicUrl = path ? model3dPublicUrl(path) : null
 
   return (
-    <div style={{ marginTop: '20px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-        <IconCube size={15} />
-        <strong style={{ fontSize: '13px' }}>3D Visual Model</strong>
-        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-          Exported as an AAS <span className="mono">VisualRepresentation</span> submodel
-        </span>
-      </div>
-
+    /* NO HEADING OF ITS OWN. This used to carry "3D Visual Model" plus a line explaining that the
+       file becomes an AAS VisualRepresentation submodel -- two rows of chrome above a dropzone, in
+       a 360px column, restating the section label its container already prints beside the icon.
+       The AAS fact has not been lost: it is on the dropzone's own title, and the public-read
+       banner below still states the consequence that actually affects a decision. */
+    <div>
       {path ? (
         <div
           className="card"
@@ -190,6 +187,10 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
           role="button"
           tabIndex={canManage ? 0 : -1}
           aria-label="Upload a 3D model"
+          /* Where the removed heading's second line went. The AAS consequence still matters --
+             this is a publishing action, not a convenience upload -- but it is context for the
+             gesture rather than two permanent rows above it. */
+          title="Attached models are exported as an AAS VisualRepresentation submodel"
           onKeyDown={(e) => {
             if ((e.key === 'Enter' || e.key === ' ') && canManage && !busy) {
               e.preventDefault()

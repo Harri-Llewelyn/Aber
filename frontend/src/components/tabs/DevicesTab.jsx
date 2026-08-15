@@ -13,24 +13,23 @@ import CopyableId from '../common/CopyableId'
 import { effectiveSparkplugId } from '../../utils/sparkplugId'
 import { ActionMenu } from '../common/ActionMenu'
 import { TagList } from '../common/TagList'
-import { InlineDocumentAccordion } from '../common/InlineDocumentAccordion'
 import { Model3DUploader } from '../common/Model3DUploader'
-import { InlineTelemetryAccordion } from '../common/InlineTelemetryAccordion'
 import { QuarantinePayloadCell } from '../common/QuarantinePayloadCell'
+import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { ApproveQuarantineModal } from '../modals/ApproveQuarantineModal'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { AssetConfigModal } from '../modals/AssetConfigModal'
 import { DeviceNameplateModal } from '../modals/DeviceNameplateModal'
 import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
 import { TelemetryExportModal } from '../modals/TelemetryExportModal'
+import { TelemetryModal } from '../modals/TelemetryModal'
 import { isProvisioningOverdue, isNeverSeen } from '../../utils/deviceProvisioning'
 import {
   SCOPE_CELL, SCOPE_SITE_WIDE, SOURCE_EXPLICIT, SOURCE_SITE_WIDE,
   resolveDeviceLocation, needsCellAssignment, unassignedHint
 } from '../../utils/cellResolution'
 import {
-  unmodelledMetrics, schemasForDevice, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG,
-  OUT_OF_VOCABULARY_TAG
+  unmodelledMetrics, schemasForDevice, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG
 } from '../../utils/deviceTags'
 import { suggestMatches } from '../../utils/quarantineMatching'
 import {
@@ -42,12 +41,15 @@ import {
   IconActivity,
   IconHistory,
   IconClipboardList,
+  IconBookOpen,
+  IconCube,
   IconShieldAlert,
   IconAlertTriangle,
   IconLock,
   IconDownload,
   IconX
 } from '../common/Icons'
+import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 // Sentinel values for the cell filter's two derived lanes. Prefixed so they can never collide
 // with a cell UUID, and kept out of `cells` because neither lane is a row in that table.
@@ -62,11 +64,19 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
   const [quarantine, setQuarantine] = useState([])
   const [loading, setLoading]   = useState(true)
   const [showForm, setShowForm] = useState(false)
+  // See GatewaysTab: an inline modal is still a modal, and Escape has to close it.
+  useEscapeKey(() => setShowForm(false), showForm)
   const [editing, setEditing]   = useState(null)
   const [approveItem, setApproveItem] = useState(null)
   const [archiveTarget, setArchiveTarget] = useState(null)
   const [configAsset, setConfigAsset] = useState(null)
   const [nameplateFor, setNameplateFor] = useState(null)
+  // An ID, not the device object -- this page polls, so a captured object would freeze while the
+  // row beside it kept updating. Resolved against `assets` every render.
+  const [selectedId, setSelectedId] = useState(null)
+  // The device whose telemetry inspector is open, or null. A modal rather than a panel section:
+  // the inspector is a four-column table and the drawer is 360px wide.
+  const [telemetryFor, setTelemetryFor] = useState(null)
   const [docsForDevice, setDocsForDevice] = useState(null)
   const [docRefreshKey, setDocRefreshKey] = useState(0)
   // Document link counts for the collapsed accordion badge, keyed by device id. One request for
@@ -522,31 +532,19 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
     (attentionOnly ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
   const schemaName = schemas.find(s => s.schema_uuid === schemaFilter)?.schema_name
 
+  // Resolved fresh every render -- see the note on selectedId. A device that is archived out of
+  // the current filter, or deleted, resolves to null and the drawer closes itself.
+  const selectedDevice = assets.find(a => a.asset_id === selectedId) || null
+  const selectedGateway = selectedDevice
+    ? gateways.find(g => g.gateway_id === selectedDevice.active_gateway_id) || null
+    : null
+  // The panel reports the RESOLVED cell, so it has to run the same resolution the table does
+  // rather than reading `cell_id` directly -- an inherited device has none of its own.
+  const selectedLocation = selectedDevice ? resolveDeviceLocation(selectedDevice, selectedGateway) : null
+
   return (
-    <>
-      <div className="section-header" style={{ marginBottom: '8px' }}>
-        <h2 className="section-title">Shopfloor Devices <span className="section-count">{assets.length}</span></h2>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          {/* Tags are derived at render time, so a raw row dump would export a device list with
-              no classification in it at all -- the one column an engineer reading the export
-              most likely wants. Projected in explicitly. */}
-          <button className="btn btn-ghost btn-sm" onClick={() => downloadCSV(filteredAssets.map(a => ({
-            ...a,
-            device_tags: deviceTagList(a, schemasForDevice(a, schemas), latestFor(a), catalog).join(' ')
-          })), 'devices-export.csv')} title="Download the filtered devices list as CSV"><IconDownload size={13} /> Export CSV</button>
-          <button
-            className={`btn btn-primary ${!canManage ? 'btn-disabled' : ''}`}
-            disabled={!canManage}
-            onClick={() => canManage && (setEditing(null), setForm(blank), setShowForm(true))}
-            title={!canManage ? 'Requires Admin permissions' : 'Register new shopfloor device'}
-          >
-            <IconPlus size={14} /> New Device
-          </button>
-        </div>
-      </div>
-      <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '16px' }}>
-        Manage shopfloor manufacturing devices, review Zero-Touch onboarding quarantine queue, inspect DBIRTH configuration parameters, and decommission assets.
-      </p>
+    <div className="page-layout">
+      <div className="page-main">
 
       {/* Filters live on their own row: the header outgrew a single line once schema, status and
           relationship filters arrived, and the primary actions were being pushed off screen. */}
@@ -629,6 +627,18 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
             <IconX size={13} /> Clear filters ({activeFilterCount})
           </button>
         )}
+
+        {/* The page's one primary action, at the far end of the row it shares with the filters.
+            It had a row of its own -- a 34px band holding a single button, above a filter bar that
+            was already the page's control surface. `.filter-bar-spacer` pushes it right. */}
+        <button
+          className={`btn btn-primary btn-sm ${activeFilterCount > 0 ? '' : 'filter-bar-spacer'} ${!canManage ? 'btn-disabled' : ''}`}
+          disabled={!canManage}
+          onClick={() => canManage && (setEditing(null), setForm(blank), setShowForm(true))}
+          title={!canManage ? 'Requires Admin permissions' : 'Register new shopfloor device'}
+        >
+          <IconPlus size={14} /> New Device
+        </button>
       </div>
 
       {schemaName && (
@@ -667,13 +677,13 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
                     <td style={{ maxWidth: '280px' }}>
                       <strong>{q.asset_name}</strong>
                       {q.quarantine_reason && (
-                        <div style={{ fontSize: '10px', color: 'var(--danger)', marginTop: '3px', display: 'flex', alignItems: 'flex-start', gap: '3px' }}>
+                        <div style={{ fontSize: '11px', color: 'var(--danger)', marginTop: '3px', display: 'flex', alignItems: 'flex-start', gap: '3px' }}>
                           <IconAlertTriangle size={10} style={{ flexShrink: 0, marginTop: '1px' }} />
                           <span style={{ minWidth: 0 }}>{q.quarantine_reason}</span>
                         </div>
                       )}
                       {suggestion && (
-                        <div style={{ fontSize: '10px', color: 'var(--warning-text)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '3px' }} title={suggestion.evidence}>
+                        <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '3px' }} title={suggestion.evidence}>
                           <IconAlertTriangle size={10} /> Possible match: {suggestion.candidateName}
                         </div>
                       )}
@@ -721,13 +731,20 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
          ) : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th title="Human-readable device name">Name</th><th title="Sparkplug B id this device publishes under">Sparkplug ID</th><th title="Device status">Status</th><th title="Device classification">Type</th><th title="Assigned cell zone">Cell</th><th title="Serving edge gateway (reassignable)">Serving Edge Gateway</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
+              <thead><tr><th title="Human-readable device name">Name</th><th title="Sparkplug B id this device publishes under">Sparkplug ID</th><th title="Device status">Status</th><th style={{ width: 'auto' }} title="Device classification">Type</th><th title="Assigned cell zone">Cell</th></tr></thead>
               <tbody>
                 {filteredAssets.map(a => {
                   const isOff = a.status === 'OFFLINE'
                   return (
                     <React.Fragment key={a.asset_id}>
-                      <tr style={{ background: a.is_archived ? 'rgba(255,179,0,0.06)' : undefined }}>
+                      {/* Clicks originating on a button, link or input inside the row are ignored
+                          -- see rowSelectHandler. Without that, pressing Edit would also select. */}
+                      <tr
+                        className={`row-selectable${selectedId === a.asset_id ? ' row-selected' : ''}`}
+                        style={{ background: a.is_archived ? 'rgba(255,179,0,0.06)' : undefined }}
+                        onClick={rowSelectHandler(() => setSelectedId(id => id === a.asset_id ? null : a.asset_id))}
+                        title="Click to inspect this device in the details panel"
+                      >
                         <td>
                           <strong>{a.asset_name}</strong>
                           {a.is_archived && (
@@ -739,7 +756,7 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
                         <td>
                           <CopyableId value={effectiveSparkplugId(a)} label="Sparkplug device id" onNotify={showToast} />
                           {a.identity_source === 'legacy_name' && (
-                            <div style={{ fontSize: '10px', color: 'var(--warning-text)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '3px' }} title="This device is still matched by name. Reconfigure its gateway to publish the Sparkplug ID; name matching will be removed.">
+                            <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '3px' }} title="This device is still matched by name. Reconfigure its gateway to publish the Sparkplug ID; name matching will be removed.">
                               <IconAlertTriangle size={10} /> Legacy name matching
                             </div>
                           )}
@@ -775,13 +792,13 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
                               key: tag,
                               priority: true,
                               className: 'badge badge-warning',
-                              style: { background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', fontSize: '10px' },
+                              style: { background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', fontSize: '11px' },
                               title: `Declared at its last birth but absent from schema '${schema?.schema_name}': ${extra.join(', ')}`,
                               content: <><IconAlertTriangle size={10} /> {tag} ({extra.length})</>
                             } : {
                               key: tag,
                               className: 'badge badge-neutral',
-                              style: { fontSize: '10px' },
+                              style: { fontSize: '11px' },
                               title: `This device's schema models ${tag}.* metrics`,
                               content: tag
                             })
@@ -791,13 +808,13 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
                             if (a.asset_type) {
                               entries.push({
                                 key: a.asset_type,
-                                style: { fontSize: '10px', color: 'var(--text-dim)', fontStyle: 'italic' },
+                                style: { fontSize: '11px', color: 'var(--text-dim)', fontStyle: 'italic' },
                                 title: 'Legacy free-text classification. Assign a schema to derive this instead.',
                                 content: a.asset_type
                               })
                             }
 
-                            return <TagList tags={entries} limit={2} />
+                            return <TagList limit={4} tags={entries} limit={2} />
                           })()}
                         </td>
                         <td style={{ maxWidth: '170px' }}>
@@ -809,12 +826,12 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
                             const cellName = cells.find(c => c.cell_id === a.effective_cell_id)?.cell_name
 
                             if (a.location_source === SOURCE_SITE_WIDE) {
-                              return <span className="badge badge-neutral" style={{ fontSize: '10px' }} title="Asserted to have no single cell — facility-wide or mobile">Site-Wide</span>
+                              return <span className="badge badge-neutral" style={{ fontSize: '11px' }} title="Asserted to have no single cell — facility-wide or mobile">Site-Wide</span>
                             }
                             if (!cellName) {
                               return (
                                 <span className="badge badge-warning"
-                                      style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', fontSize: '10px' }}
+                                      style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', fontSize: '11px' }}
                                       title={unassignedHint(a, gw) || 'No cell resolved'}>
                                   <IconAlertTriangle size={10} /> Unassigned
                                 </span>
@@ -824,13 +841,13 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
                               <>
                                 <div>{cellName}</div>
                                 {a.location_source === SOURCE_EXPLICIT && (
-                                  <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}
+                                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}
                                        title="Set on the device itself — it will not move if the gateway is reassigned">
                                     Set on device
                                   </div>
                                 )}
                                 {a.cell_mismatch && (
-                                  <div style={{ fontSize: '10px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '3px' }}
+                                  <div style={{ fontSize: '11px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '3px' }}
                                        title={`Its gateway serves ${cells.find(c => c.cell_id === a.gateway_cell_id)?.cell_name || 'another cell'}`}>
                                     <IconAlertTriangle size={10} /> Gateway elsewhere
                                   </div>
@@ -838,166 +855,6 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
                               </>
                             )
                           })()}
-                        </td>
-                        <td>
-                          <select className="form-control form-control-sm" style={{ width: '100%' }} value={a.active_gateway_id || ''} onChange={e => reassignGatewayInline(a, e.target.value)} disabled={!canManage || a.is_archived}>
-                            <option value="">Unassigned</option>
-                            {gateways.map(g => <option key={g.gateway_id} value={g.gateway_id}>{g.gateway_name}</option>)}
-                          </select>
-                        </td>
-                        <td style={{ textAlign: 'right' }}>
-                          {/* Two primary actions stay visible; the rest live in the overflow menu.
-                              The cell previously held seven controls and took more than half the
-                              row's width, and every feature added landed here.
-
-                              Which two: Telemetry is the most-reached-for read, Edit the
-                              most-reached-for write. RESTORE REPLACES EDIT on an archived row --
-                              it is the only action that means anything there, and burying it
-                              would make archived devices harder to work with, not easier. */}
-                          <div className="btn-group" style={{ justifyContent: 'flex-end' }}>
-                            {/* Telemetry is no longer a button that leaves this page -- it is a
-                                drawer on the row below. The button navigated to a separate
-                                Telemetry tab and then made you re-select the device you were
-                                already looking at. */}
-
-                            {a.is_archived ? (
-                              <button
-                                className={`btn btn-primary btn-sm ${!canArchive ? 'btn-disabled' : ''}`}
-                                disabled={!canArchive}
-                                onClick={() => canArchive && restoreDevice(a.asset_id, a.asset_name)}
-                                title={!canArchive ? 'Requires Admin permissions' : 'Restore device back to active service'}
-                              >
-                                <IconRefreshCw size={12} /> Restore
-                              </button>
-                            ) : (
-                              <button
-                                className={`btn btn-ghost btn-sm ${!canManage || isOff ? 'btn-disabled' : ''}`}
-                                disabled={!canManage || isOff}
-                                onClick={() => canManage && !isOff && (setEditing(a), setForm(a), setShowForm(true))}
-                                title={!canManage ? 'Requires Admin permissions' : isOff ? 'Device is offline (DDEATH received)' : 'Edit device parameters'}
-                              >
-                                <IconPencil size={13} /> Edit
-                              </button>
-                            )}
-
-                            <ActionMenu
-                              label={exportingAas === a.asset_id ? 'Exporting…' : 'More'}
-                              disabled={exportingAas === a.asset_id}
-                              testId={`device-actions-${a.asset_id}`}
-                              items={[
-                                // No 'Show documents' item: the accordion below is always
-                                // mounted, so there is nothing to toggle from here. This also
-                                // returns one slot to a menu the row comment above calls out as
-                                // having grown too long.
-                                {
-                                  key: 'thread',
-                                  icon: <IconHistory size={13} />,
-                                  label: 'Digital Thread',
-                                  // Navigates to the Digital Thread page filtered to this device
-                                  // rather than opening a second, smaller copy of it in a dialog.
-                                  // The page has the export, the auto-refresh and the action
-                                  // filters; the modal had none of them and could not be widened
-                                  // without becoming the page.
-                                  title: 'Open the Digital Thread audit trace for this device',
-                                  onClick: () => onViewThread?.(a)
-                                },
-                                {
-                                  key: 'config',
-                                  icon: <IconClipboardList size={13} />,
-                                  // No longer "& 3D model": the uploader moved to the document
-                                  // accordion on this row. What is left is a read of what the
-                                  // device declared at birth, so it is no longer gated on
-                                  // device:manage or refused for an archived device -- same
-                                  // reasoning as the AAS export and the schema download, both of
-                                  // which are open to any role because a read is a read.
-                                  label: 'Configuration Parameters',
-                                  title: 'Inspect the DBIRTH metric parameters this device reported',
-                                  onClick: () => setConfigAsset(a)
-                                },
-                                { separator: true },
-                                /* Two menu items rather than the <select> this used to be. That
-                                   control set value="" and reset itself on change to fake a menu;
-                                   inside a real one it is just two actions. Available to every
-                                   role that can see the device -- an export is a read, and handing
-                                   a partner a shell is the point. */
-                                // Sits directly above the two exports on purpose: it is the only
-                                // thing in this menu that changes what they contain.
-                                {
-                                  key: 'nameplate',
-                                  icon: <IconClipboardList size={13} />,
-                                  label: 'Digital Nameplate…',
-                                  title: canManage
-                                    ? "Manufacturer, serial number and versions — exported in this device's AAS"
-                                    : 'View this device\'s nameplate (editing requires Admin permissions)',
-                                  onClick: () => setNameplateFor(a)
-                                },
-                                {
-                                  key: 'export-json',
-                                  icon: <IconDownload size={13} />,
-                                  label: 'Export AAS JSON (V3)',
-                                  title: "Download this device's Asset Administration Shell as AAS Part 5 JSON",
-                                  onClick: () => exportAas(a, 'json')
-                                },
-                                {
-                                  key: 'export-aasx',
-                                  icon: <IconDownload size={13} />,
-                                  label: 'Export AASX package',
-                                  title: 'Download an AASX (OPC) package, with any attached 3D model bundled in',
-                                  onClick: () => exportAas(a, 'aasx')
-                                },
-                                { separator: true },
-                                // Archive only: Restore is promoted out to the row above, so the
-                                // menu never carries both.
-                                !a.is_archived && {
-                                  key: 'archive',
-                                  icon: <IconArchive size={13} />,
-                                  label: 'Archive device',
-                                  danger: true,
-                                  disabled: !canArchive,
-                                  title: !canArchive ? 'Requires Admin permissions' : 'Decommission & Archive Device',
-                                  onClick: () => setArchiveTarget(a)
-                                }
-                              ]}
-                            />
-                          </div>
-                        </td>
-                      </tr>
-                      {/* Always mounted, collapsed by default. The accordion fetches lazily on
-                          first expand, so a permanently-present row costs one badge and no
-                          request until someone opens it. */}
-                      <tr key={`docs-${a.asset_id}`} style={{ background: 'rgba(0,0,0,0.2)' }}>
-                        <td colSpan={7} style={{ padding: '8px 16px' }}>
-                          <InlineDocumentAccordion
-                            entityType="device"
-                            entityId={a.asset_id}
-                            entityName={a.asset_name}
-                            onOpenModal={() => setDocsForDevice(a)}
-                            hasPermission={hasPermission}
-                            refreshKey={docRefreshKey}
-                            documentCount={docCounts[a.asset_id] || 0}
-                            footer={
-                              /* The 3D model lives here rather than inside the Configuration
-                                 modal. It is an attachment, like a document link -- the config
-                                 modal is a read-only view of what the device REPORTED, and an
-                                 upload control was the one thing in it that wrote anything.
-                                 onChange reloads so the row's model_3d_path cannot go stale,
-                                 which is what the modal's onClose used to guarantee. */
-                              <Model3DUploader
-                                device={a}
-                                canManage={canManage && !a.is_archived}
-                                showToast={showToast}
-                                onChange={() => loadAll()}
-                              />
-                            }
-                          />
-
-                          {/* Beneath the documents drawer, as its own collapsed row. Both are
-                              lazy: neither issues a request until it is opened. */}
-                          <InlineTelemetryAccordion
-                            device={a}
-                            hasPermission={hasPermission}
-                            onExport={(dev, names) => setExportTelemetry({ device: dev, metricNames: names })}
-                          />
                         </td>
                       </tr>
                     </React.Fragment>
@@ -1011,7 +868,7 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
 
       {showForm && (
         <div className="modal-overlay">
-          <div className="modal" style={{ maxWidth: 480 }}>
+          <div className="modal">
             <div className="modal-title">{editing ? 'Edit Device Configuration' : 'Register New Device'}</div>
             
             {/* Name first: it is the human handle. The identifiers below are machine-issued
@@ -1170,7 +1027,7 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
                     return <span style={{ fontSize: '12px' }}>Assign a schema below to classify this device</span>
                   }
                   return preview.map(t => (
-                    <span key={t} className="badge badge-neutral" style={{ fontSize: '10px' }}>{t}</span>
+                    <span key={t} className="badge badge-neutral" style={{ fontSize: '11px' }}>{t}</span>
                   ))
                 })()}
               </div>
@@ -1237,6 +1094,14 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
       {docsForDevice && (
         <EntityDocumentsModal entityType="device" entityId={docsForDevice.asset_id} entityName={docsForDevice.asset_name} onClose={() => { setDocsForDevice(null); setDocRefreshKey(k => k + 1) }} showToast={showToast} hasPermission={hasPermission} />
       )}
+      {telemetryFor && (
+        <TelemetryModal
+          device={telemetryFor}
+          hasPermission={hasPermission}
+          onExport={(dev, names) => setExportTelemetry({ device: dev, metricNames: names })}
+          onClose={() => setTelemetryFor(null)}
+        />
+      )}
       {exportTelemetry && (
         <TelemetryExportModal
           device={exportTelemetry.device}
@@ -1245,6 +1110,207 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
           showToast={showToast}
         />
       )}
-    </>
+      </div>
+
+      <ContextPanel
+        open={!!selectedDevice}
+        onClose={() => setSelectedId(null)}
+        type="DEVICE"
+        onCopy={showToast}
+        title={selectedDevice?.asset_name || ''}
+        subtitle={selectedDevice && (
+          <>
+            <span className={`badge ${selectedDevice.status === 'OFFLINE' ? 'badge-neutral' : 'badge-online'}`} style={{ fontSize: '11px' }}>
+              {selectedDevice.status || 'ONLINE'}
+            </span>
+            {selectedDevice.is_quarantined && <span className="badge badge-warning" style={{ fontSize: '11px' }}>QUARANTINED</span>}
+            {selectedDevice.is_archived && <span className="badge badge-warning" style={{ fontSize: '11px' }}>ARCHIVED</span>}
+          </>
+        )}
+        fields={selectedDevice ? [
+          { label: 'Device UUID', value: selectedDevice.asset_id, mono: true, copyable: true },
+          // The WIRE identity. Distinct from the UUID above and from the editable name: telemetry
+          // is keyed on this, so it is what a trace or an export is actually matched by.
+          { label: 'Sparkplug Device ID', value: effectiveSparkplugId(selectedDevice), mono: true, copyable: true },
+          {
+            // The group comes from the SERVING GATEWAY, because that is where it lives: migration
+            // 0008 put `sparkplug_group` on gateways, and a device's address is its edge node's
+            // address plus its own id. Reading it here rather than printing `+` is the difference
+            // between a topic you can paste into an MQTT client and one you have to finish first.
+            label: 'Sparkplug Topic Path',
+            value: `spBv1.0/${selectedGateway?.sparkplug_group || '+'}/DDATA/${selectedGateway ? (selectedGateway.sparkplug_id || selectedGateway.gateway_id) : '+'}/${effectiveSparkplugId(selectedDevice)}`,
+            mono: true,
+            copyable: true,
+            title: !selectedGateway
+              ? 'The DDATA topic this device would publish on. It has no serving gateway, so the group and edge node segments are wildcards.'
+              : selectedGateway.sparkplug_group
+                ? 'The DDATA topic this device publishes on.'
+                : "The DDATA topic this device publishes on. No Sparkplug group is recorded on its gateway, so that segment is a wildcard."
+          },
+          {
+            // The inline <select> that used to be a whole table column, moved here and kept as a
+            // control rather than flattened to text. It was ~170px of every row spent on a write
+            // almost nobody performs, and a dropdown in a row someone is trying to READ is one
+            // mis-scroll away from silently rebinding a device.
+            label: 'Serving Gateway',
+            full: true,
+            value: (
+              <select
+                className="form-control form-control-sm"
+                style={{ width: '100%' }}
+                value={selectedDevice.active_gateway_id || ''}
+                onChange={e => reassignGatewayInline(selectedDevice, e.target.value)}
+                disabled={!canManage || selectedDevice.is_archived}
+                title={!canManage
+                  ? 'Requires Admin permissions'
+                  : "Rebind this device to another edge node. This changes the DATA PATH, not the device's location."}
+              >
+                <option value="">Unassigned</option>
+                {gateways.map(g => <option key={g.gateway_id} value={g.gateway_id}>{g.gateway_name}</option>)}
+              </select>
+            ),
+            title: "The edge node carrying this device's data. Changing it changes the data path, not the location."
+          },
+          {
+            // RESOLVED, not the explicit override -- the two read the same in the common case and
+            // showing the wrong one is the exact confusion migration 0036 exists to prevent.
+            label: 'Cell Zone (resolved)',
+            value: selectedLocation?.location_scope === SCOPE_SITE_WIDE
+              ? 'Site-Wide'
+              : (cells.find(c => c.cell_id === selectedLocation?.effective_cell_id)?.cell_name || null),
+            title: selectedLocation?.location_source === SOURCE_EXPLICIT
+              ? 'Set on the device itself, so it stays here regardless of its gateway.'
+              : selectedLocation?.location_scope === SCOPE_SITE_WIDE
+                ? 'Marked Site-Wide: it belongs to no single cell.'
+                : 'Inherited from its gateway. It will follow the gateway if that moves.'
+          },
+          {
+            label: 'Location Source',
+            value: selectedLocation?.location_source || null,
+            title: 'explicit = set on the device; inherited = from its gateway; site_wide = no single cell; unassigned = nothing to inherit.'
+          },
+          { label: 'Schema', value: schemas.find(s => s.schema_uuid === selectedDevice.schema_id)?.schema_name || null },
+          { label: 'Connection Method', value: selectedDevice.connection_method || null },
+          {
+            label: 'Classification',
+            value: deviceTagList(selectedDevice, schemasForDevice(selectedDevice, schemas), latestFor(selectedDevice), catalog).join(', ') || null,
+            full: true,
+            title: "Derived from the metric groups this device's schema models, plus any live findings."
+          },
+        ] : []}
+        actions={selectedDevice ? [
+          // THE WHOLE OF THE OLD ACTIONS COLUMN, which was two visible buttons plus a six-item
+          // overflow menu occupying the right-hand quarter of every row. All of it applies to one
+          // device you have already picked, which is exactly what this drawer is.
+          selectedDevice.is_archived ? {
+            label: 'Restore Device', icon: <IconRefreshCw size={13} />,
+            onClick: () => restoreDevice(selectedDevice.asset_id, selectedDevice.asset_name),
+            disabled: !canArchive,
+            primary: true,
+            title: !canArchive ? 'Requires Admin permissions' : 'Restore device back to active service'
+          } : {
+            label: 'Edit Details', icon: <IconPencil size={13} />,
+            onClick: () => { setEditing(selectedDevice); setForm(selectedDevice); setShowForm(true) },
+            disabled: !canManage || selectedDevice.status === 'OFFLINE',
+            primary: true,
+            title: !canManage
+              ? 'Requires Admin permissions'
+              : selectedDevice.status === 'OFFLINE'
+                ? 'Device is offline (DDEATH received)'
+                : 'Edit device parameters'
+          },
+          {
+            // Opens the modal rather than a section of this panel. The inspector is a four-column
+            // table and 360px is not a table -- see TelemetryModal for the full history.
+            label: 'View Realtime Telemetry', icon: <IconActivity size={13} />,
+            onClick: () => setTelemetryFor(selectedDevice),
+            title: "Open this device's metric inspector"
+          },
+          {
+            // A read of what the device declared at birth, so it is deliberately NOT gated on
+            // device:manage and not refused for an archived device -- same reasoning as the AAS
+            // export and the schema download.
+            label: 'Configuration Parameters', icon: <IconClipboardList size={13} />,
+            onClick: () => setConfigAsset(selectedDevice),
+            title: 'Inspect the DBIRTH metric parameters this device reported'
+          },
+          {
+            // Directly above the two exports on purpose: it is the only thing here that changes
+            // what they contain.
+            label: 'Digital Nameplate…', icon: <IconClipboardList size={13} />,
+            onClick: () => setNameplateFor(selectedDevice),
+            title: canManage
+              ? "Manufacturer, serial number and versions — exported in this device's AAS"
+              : "View this device's nameplate (editing requires Admin permissions)"
+          },
+          {
+            label: exportingAas === selectedDevice.asset_id ? 'Exporting AAS…' : 'Export AAS JSON (V3)',
+            icon: <IconDownload size={13} />,
+            onClick: () => exportAas(selectedDevice, 'json'),
+            disabled: exportingAas === selectedDevice.asset_id,
+            title: "Download this device's Asset Administration Shell as AAS Part 5 JSON"
+          },
+          {
+            label: exportingAas === selectedDevice.asset_id ? 'Exporting AAS…' : 'Export AASX package',
+            icon: <IconDownload size={13} />,
+            onClick: () => exportAas(selectedDevice, 'aasx'),
+            disabled: exportingAas === selectedDevice.asset_id,
+            title: 'Download an AASX (OPC) package, with any attached 3D model bundled in'
+          },
+          {
+            // The accordion below lists the links; this is how a new one gets attached. Both are
+            // needed now that the accordion no longer carries its own Manage button.
+            label: 'Manage Documents', icon: <IconBookOpen size={13} />,
+            onClick: () => setDocsForDevice(selectedDevice),
+            title: 'Attach or edit external document links for this device'
+          },
+          {
+            label: 'View Digital Thread', icon: <IconHistory size={13} />,
+            onClick: () => onViewThread?.(selectedDevice),
+            title: 'Open the immutable audit trace for this device'
+          },
+          // Archive only, never beside Restore: the two are mutually exclusive states of the
+          // same row, and offering both would make one of them a no-op.
+          !selectedDevice.is_archived && {
+            label: 'Archive Device', icon: <IconArchive size={13} />,
+            onClick: () => setArchiveTarget(selectedDevice),
+            disabled: !canArchive,
+            danger: true,
+            title: !canArchive ? 'Requires Admin permissions' : 'Decommission & Archive Device'
+          },
+        ].filter(Boolean) : []}
+      >
+        {/* The two row accordions, relocated. They are unchanged components -- both still fetch
+            lazily on first expand -- but they now belong to ONE device instead of being mounted
+            once per row. On a a hundred-device page that is a hundred collapsed drawers replaced
+            by one, and the table below is a table again rather than alternating data and drawers. */}
+        {selectedDevice && (
+          <>
+            {/* The documents accordion is gone -- a cramped list inside a 360px column, and the
+                Manage Documents action above opens the full editor.
+
+                THE 3D MODEL STAYS, because it was the accordion's footer and has nowhere else to
+                go. It is an attachment like a document link, which is why it does not belong in
+                the Configuration modal (a read-only view of what the device REPORTED) -- and
+                unlike a list of links, one upload control fits a narrow column perfectly well.
+                onChange reloads so model_3d_path cannot go stale. */}
+            <div>
+              {/* The icon is what the uploader gave up when its own two-row heading came off --
+                  it identified the section at a glance, and a bare text label does not. */}
+              <div className="context-panel-section-label context-panel-section-label-icon">
+                <IconCube size={13} /> 3D Model
+              </div>
+              <Model3DUploader
+                device={selectedDevice}
+                canManage={canManage && !selectedDevice.is_archived}
+                showToast={showToast}
+                onChange={() => loadAll()}
+              />
+            </div>
+
+          </>
+        )}
+      </ContextPanel>
+    </div>
   )
 }

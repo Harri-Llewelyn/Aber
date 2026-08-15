@@ -39,14 +39,26 @@ export function ashrae223VocabularyTab({ vocabulary, catalog, onUseConcept }) {
     description: (
       <>
         The semantic concepts defined by <span className="mono">ASHRAE 223P</span> for building
-        systems — HVAC, electrical, and the sensing around them. Unlike the other tabs these name{' '}
-        <strong>things rather than readings</strong>: <span className="mono">Fan</span> is a class of
-        equipment, not a measurement, so selecting one says what a point is attached to and leaves
-        what is measured to you. Sections follow the standard's own class hierarchy.{' '}
-        <strong>The standard is still in public review</strong> — these concepts come from the
-        open223 pre-publication ontology and may change before ASHRAE 223 is published.
+        systems — HVAC, electrical, and the sensing around them. Sections follow the standard's own
+        class hierarchy.
       </>
     ),
+    notes: [
+      {
+        label: 'These name things, not readings.',
+        body: (
+          <>
+            {' '}Unlike the other tabs: <span className="mono">Fan</span> is a class of equipment,
+            not a measurement, so selecting one says what a point is attached to and leaves what is
+            measured to you.
+          </>
+        )
+      },
+      {
+        label: 'Still in public review.',
+        body: ' These concepts come from the open223 pre-publication ontology and may change before ASHRAE 223 is published.'
+      }
+    ],
     sections,
     isUsed: item => !!item.concept.semantic_id && semanticIds.has(item.concept.semantic_id),
     tooltipFor: item => conceptTooltip(item.concept),

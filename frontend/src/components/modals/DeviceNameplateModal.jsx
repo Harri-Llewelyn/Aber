@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { api } from '../../api'
 import { IconClipboardList, IconCheck, IconAlertTriangle } from '../common/Icons'
+import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 /**
  * Edit a device's IDTA 02006 Digital Nameplate (migration 0011).
@@ -35,6 +36,11 @@ const FIELDS = [
 const blankForm = () => Object.fromEntries(FIELDS.map(f => [f.column, '']))
 
 export function DeviceNameplateModal({ asset, onClose, showToast, canManage }) {
+  // Escape closes. Via the shared stack rather than a listener of this component's own,
+  // because a ConfirmModal can open on top of this one and a bare document listener on each
+  // would let one keypress dismiss both.
+  useEscapeKey(onClose)
+
   const [form, setForm] = useState(blankForm)
   const [template, setTemplate] = useState([])
   const [published, setPublished] = useState({})
@@ -90,7 +96,7 @@ export function DeviceNameplateModal({ asset, onClose, showToast, canManage }) {
 
   return (
     <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 720 }}>
+      <div className="modal modal-xl">
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <IconClipboardList size={18} />
           <span>Digital Nameplate — <span className="mono">{asset.asset_name}</span></span>

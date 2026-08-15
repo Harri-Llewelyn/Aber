@@ -1,6 +1,10 @@
 /**
- * The per-device telemetry drawer and its CSV export, which together replaced the standalone
+ * The per-device telemetry inspector and its CSV export, which together replaced the standalone
  * Telemetry page.
+ *
+ * The inspector has moved twice since -- row accordion, then context panel, now a modal -- for the
+ * same reason each time: it is a four-column table and kept being given somewhere too narrow to be
+ * one. None of that changes what it MEANS, which is what these pin.
  *
  * The behaviour worth pinning is the metric list: DECLARED UNION OBSERVED. Observed-only would
  * drop a metric the moment it stopped reporting -- which is precisely the fault an operator is
@@ -9,7 +13,7 @@
 import React from 'react'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { InlineTelemetryAccordion } from '../components/common/InlineTelemetryAccordion'
+import { TelemetryModal } from '../components/modals/TelemetryModal'
 import { TelemetryExportModal } from '../components/modals/TelemetryExportModal'
 import { PERMISSION_UUIDS, } from '../constants'
 import { api, TELEMETRY_EXPORT_MAX_ROWS } from '../api'
@@ -36,9 +40,10 @@ const observed = [
   { time: new Date(NOW - 30_000).toISOString(), asset_id: 'dev1', metric_name: 'Controller/EXECUTION', val_double: null, val_string: 'ACTIVE', val_bool: null }
 ]
 
+// No expand step: a modal has no collapsed state to defer the request to, and opening it is
+// already the deliberate act the accordion used its first expand for.
 const showDrawer = async (props = {}) => {
-  render(<InlineTelemetryAccordion device={device()} hasPermission={() => true} onExport={vi.fn()} {...props} />)
-  fireEvent.click(screen.getByText('Telemetry'))
+  render(<TelemetryModal device={device()} hasPermission={() => true} onExport={vi.fn()} onClose={vi.fn()} {...props} />)
   await waitFor(() => expect(api.get).toHaveBeenCalled())
 }
 
@@ -48,11 +53,22 @@ beforeEach(() => {
 })
 
 describe('device telemetry drawer', () => {
-  it('is collapsed on arrival and issues no request until opened', () => {
-    render(<InlineTelemetryAccordion device={device()} hasPermission={() => true} />)
+  it('names the device it is showing, and reads on open', async () => {
+    render(<TelemetryModal device={device()} hasPermission={() => true} onClose={vi.fn()} />)
 
-    expect(screen.getByText('Telemetry')).toBeInTheDocument()
-    expect(api.get).not.toHaveBeenCalled()
+    expect(screen.getByText(/Telemetry — Simulated_CNC_01/)).toBeInTheDocument()
+    await waitFor(() => expect(api.get).toHaveBeenCalled())
+  })
+
+  it('closes on Escape and on the X, so it is never a trap', async () => {
+    const onClose = vi.fn()
+    render(<TelemetryModal device={device()} hasPermission={() => true} onClose={onClose} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /close telemetry/i }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalledTimes(2)
   })
 
   it('queries only this device, not the whole fleet', async () => {
@@ -90,8 +106,7 @@ describe('device telemetry drawer', () => {
     api.get.mockResolvedValue([
       { time: new Date(NOW).toISOString(), asset_id: 'dev1', metric_name: 'Controller/ESTOP', val_double: null, val_string: null, val_bool: false }
     ])
-    render(<InlineTelemetryAccordion device={device({ last_birth_metrics: [] })} hasPermission={() => true} />)
-    fireEvent.click(screen.getByText('Telemetry'))
+    render(<TelemetryModal device={device({ last_birth_metrics: [] })} hasPermission={() => true} onClose={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText('false')).toBeInTheDocument())
   })
@@ -106,12 +121,11 @@ describe('device telemetry drawer', () => {
 
   it('gates on telemetry:read, and says so rather than showing an empty list', async () => {
     render(
-      <InlineTelemetryAccordion
+      <TelemetryModal
         device={device()}
         hasPermission={(p) => p !== PERMISSION_UUIDS.TELEMETRY_READ}
       />
     )
-    fireEvent.click(screen.getByText('Telemetry'))
 
     await waitFor(() =>
       expect(screen.getByText(/role does not include telemetry access/i)).toBeInTheDocument()

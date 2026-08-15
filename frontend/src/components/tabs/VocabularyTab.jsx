@@ -65,20 +65,19 @@ export function VocabularyTab({ onUseEntry, hasPermission }) {
 
   return (
     <>
-      <div className="section-header" style={{ marginBottom: '8px' }}>
-        <h2 className="section-title">Standard Vocabulary Reference</h2>
-      </div>
-
-      <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 14px 0' }}>
-        What the standards define, not what this deployment publishes — a row here is a concept the standard names. The Metric Catalog on the Schemas page is the other half: what devices actually report. Entries already in your catalog are marked, and
-        {canUse ? ' Use starts a catalog entry from one.' : ' adding one to the catalog requires Admin permissions.'}
-      </p>
-
+      {/* The page heading was a word-for-word duplicate of the panel's own card title, so it went
+          with the rest of them. The explanation below it did NOT: the Vocabulary page and the
+          Schemas page's Metric Catalog look alike and mean different things, and that sentence is
+          the only place the difference is stated. It moved into the panel header as a subtitle. */}
       {loading && <div style={{ color: 'var(--text-muted)', padding: '24px 0' }}>Loading vocabularies…</div>}
 
       {!loading && (
         <VocabularyPanel
           title="Standard Vocabulary Reference"
+          subtitle={<>
+            What the standards define, not what this deployment publishes — a row here is a concept the standard names. The Metric Catalog on the Schemas page is the other half: what devices actually report. Entries already in your catalog are marked, and
+            {canUse ? ' Use starts a catalog entry from one.' : ' adding one to the catalog requires Admin permissions.'}
+          </>}
           canAddMetric={canUse}
           tabs={[
             mtconnectVocabularyTab({

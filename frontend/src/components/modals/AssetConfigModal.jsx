@@ -3,10 +3,16 @@ import { api } from '../../api'
 import { SPARKPLUG_TYPES } from '../../constants'
 import { modelledMetricsAcross, schemasForDevice } from '../../utils/deviceTags'
 import { IconClipboardList, IconShieldAlert, IconFileCode, IconCheck, IconAlertTriangle } from '../common/Icons'
+import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 // showToast/hasPermission are gone with the 3D uploader: this modal now only reads. Everything
 // it displays comes from asset_config and the device's own row.
 export function AssetConfigModal({ asset, schemas, onClose }) {
+  // Escape closes. Via the shared stack rather than a listener of this component's own,
+  // because a ConfirmModal can open on top of this one and a bare document listener on each
+  // would let one keypress dismiss both.
+  useEscapeKey(onClose)
+
   const [config, setConfig]   = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
@@ -75,7 +81,12 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
 
   return (
     <div className="modal-overlay">
-      <div className="modal" style={{ maxWidth: 640 }}>
+      {/* Wide, for the same reason TelemetryModal is: this is a five-column table, not a form.
+          At the 640px step the metric-name column was down to ~190px, which clips exactly the
+          part of a Sparkplug name that distinguishes one metric from another -- `Axes/X/...`
+          and `Axes/Y/...` differ in the middle, so a truncated path is not merely shortened,
+          it is ambiguous. Height cap and internal scrolling come from `.modal` either way. */}
+      <div className="modal modal-wide">
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <IconClipboardList size={18} />
           <span>Device Configuration Parameters — <span className="mono">{asset.asset_id}</span></span>
@@ -114,18 +125,32 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
             </div>
           ) : (
             <div className="table-wrap">
-              <table>
+              <table className="modal-table">
+                {/* Proportions, not content-sizing. Left to itself the browser gives the name
+                    column whatever is left after four columns of fixed-width badges and
+                    timestamps have taken theirs -- which is how the one column that needs the
+                    room ended up with the least of it. */}
+                <colgroup>
+                  <col style={{ width: '35%' }} />
+                  <col style={{ width: '15%' }} />
+                  <col style={{ width: '20%' }} />
+                  <col style={{ width: '12%' }} />
+                  <col style={{ width: '18%' }} />
+                </colgroup>
                 <thead>
                   <tr><th title="Metric parameter key">Metric Parameter</th><th title="Conformance to the assigned schema">Status</th><th title="Reported value">Reported Value</th><th title="Sparkplug B datatype">Datatype</th><th title="Last updated timestamp">Last Updated</th></tr>
                 </thead>
                 <tbody>
                   {comparisonRows.map(row => (
                     <tr key={row.metric_name}>
-                      <td><strong>{row.metric_name}</strong></td>
+                      {/* Wraps at the path separators rather than truncating, and carries the
+                          full name in `title` regardless -- a wrapped name is still readable,
+                          but the tooltip is what survives a column squeezed by a narrow window. */}
+                      <td className="config-metric-name"><strong title={row.metric_name}>{row.metric_name}</strong></td>
                       <td>{statusBadge(row.status)}</td>
-                      <td className="telemetry-value">{fmtVal(row.reported)}</td>
+                      <td className="telemetry-value" title={String(fmtVal(row.reported))}>{fmtVal(row.reported)}</td>
                       <td>{row.reported ? <span className="badge badge-neutral">{SPARKPLUG_TYPES[row.reported.datatype] || row.reported.datatype || '—'}</span> : '—'}</td>
-                      <td style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
+                      <td className="cell-meta">
                         {row.reported ? new Date(row.reported.updated_at).toLocaleString() : '—'}
                       </td>
                     </tr>
@@ -141,17 +166,25 @@ export function AssetConfigModal({ asset, schemas, onClose }) {
           </div>
         ) : (
           <div className="table-wrap">
-            <table>
+            <table className="modal-table">
+              {/* Same proportions with the Status column absent -- its 15% goes to the metric
+                  name, which is the column that was short in the first place. */}
+              <colgroup>
+                <col style={{ width: '45%' }} />
+                <col style={{ width: '23%' }} />
+                <col style={{ width: '13%' }} />
+                <col style={{ width: '19%' }} />
+              </colgroup>
               <thead>
                 <tr><th title="Metric parameter key">Metric Parameter</th><th title="Reported value">Value</th><th title="Sparkplug B datatype">Datatype</th><th title="Last updated timestamp">Last Updated</th></tr>
               </thead>
               <tbody>
                 {config.map(row => (
                   <tr key={row.metric_name}>
-                    <td><strong>{row.metric_name}</strong></td>
-                    <td className="telemetry-value">{fmtVal(row)}</td>
+                    <td className="config-metric-name"><strong title={row.metric_name}>{row.metric_name}</strong></td>
+                    <td className="telemetry-value" title={String(fmtVal(row))}>{fmtVal(row)}</td>
                     <td><span className="badge badge-neutral">{SPARKPLUG_TYPES[row.datatype] || row.datatype || '—'}</span></td>
-                    <td style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
+                    <td className="cell-meta">
                       {new Date(row.updated_at).toLocaleString()}
                     </td>
                   </tr>

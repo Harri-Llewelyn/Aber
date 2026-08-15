@@ -361,7 +361,7 @@ Nameplate. All of the planned vocabularies are now built; the phasing and the de
 ## Testing
 
 ```bash
-# Frontend — 779 tests
+# Frontend — 970 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required

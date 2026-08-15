@@ -46,15 +46,26 @@ export function opcuaVocabularyTab({ vocabulary, catalog, onUsePoint }) {
         (Machinery), <span className="mono">OPC 40010</span> (Robotics), <span className="mono">OPC 40501</span>{' '}
         (Machine Tools), <span className="mono">OPC 40540</span> (Additive Manufacturing),{' '}
         <span className="mono">OPC 30050</span> (PackML) and{' '}
-        <span className="mono">OPC 40001-4</span> (Machinery Energy). Like MTConnect these are
-        positional: <span className="mono">ActualPosition</span> becomes{' '}
-        <span className="mono">MotionDevice/J1/ActualPosition</span> once you say which axis.
-        The group is taken from the browse path, which is already <span className="mono">/</span>-delimited.{' '}
-        <strong>The node ids here are browse paths, not resolvable numeric NodeIds</strong> — the numeric
-        identifiers live in each spec's NodeSet2 file and must be looked up there before wiring a
-        real OPC UA client.
+        <span className="mono">OPC 40001-4</span> (Machinery Energy).
       </>
     ),
+    notes: [
+      {
+        label: 'Names are positional.',
+        body: (
+          <>
+            {' '}As in MTConnect: <span className="mono">ActualPosition</span> becomes{' '}
+            <span className="mono">MotionDevice/J1/ActualPosition</span> once you say which axis.
+            The group comes from the browse path, which is already{' '}
+            <span className="mono">/</span>-delimited.
+          </>
+        )
+      },
+      {
+        label: 'These are browse paths, not NodeIds.',
+        body: " The numeric identifiers live in each spec's NodeSet2 file and must be looked up there before wiring a real OPC UA client."
+      }
+    ],
     sections,
     isUsed: item =>
       (item.point.semantic_id && semanticIds.has(item.point.semantic_id)) || nameSegments.has(item.name),

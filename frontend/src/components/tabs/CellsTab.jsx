@@ -7,8 +7,8 @@ import { gatewayLiveStatus, formatHeartbeat } from '../../utils/gatewayStatus'
 import { effectiveSparkplugId, gatewaySparkplugId } from '../../utils/sparkplugId'
 import { groupDevicesByCell, SOURCE_SITE_WIDE } from '../../utils/cellResolution'
 import CopyableId from '../common/CopyableId'
-import { InlineDocumentAccordion } from '../common/InlineDocumentAccordion'
 import { StatusBadge } from '../common/StatusBadge'
+import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
 import {
@@ -19,13 +19,13 @@ import {
   IconRefreshCw,
   IconBookOpen,
   IconHistory,
-  IconActivity,
   IconExternalLink,
   IconShieldAlert,
   IconX
 } from '../common/Icons'
+import { useEscapeKey } from '../../hooks/useEscapeKey'
 
-export function CellsTab({ showToast, onSelectDevice, onViewThread, hasPermission, initialSearchFilter, onClearFilter }) {
+export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThread, hasPermission, initialSearchFilter, onClearFilter }) {
   /**
    * A cell handed over from the Overview shopfloor map arrives as `?search=<cell_id>`.
    *
@@ -46,6 +46,8 @@ export function CellsTab({ showToast, onSelectDevice, onViewThread, hasPermissio
   const [assets, setAssets]     = useState([])
   const [loading, setLoading]   = useState(true)
   const [showForm, setShowForm] = useState(false)
+  // See GatewaysTab: an inline modal is still a modal, and Escape has to close it.
+  useEscapeKey(() => setShowForm(false), showForm)
   const [editing, setEditing]   = useState(null)
   const blank = { cell_name: '', access_url: '' }
   const [formVal, setFormVal]   = useState(blank)
@@ -151,6 +153,10 @@ export function CellsTab({ showToast, onSelectDevice, onViewThread, hasPermissio
     } catch (e) { showToast(e.message, 'error') }
   }
 
+  // An ID, not the cell object -- this page polls, so a captured object would freeze while the
+  // card beside it kept updating. Resolved against `cells` every render.
+  const [selectedId, setSelectedId] = useState(null)
+
   const canManage = hasPermission(PERMISSION_UUIDS.CELL_MANAGE)
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
 
@@ -204,26 +210,15 @@ export function CellsTab({ showToast, onSelectDevice, onViewThread, hasPermissio
   const activeFilterCount =
     (searchQuery ? 1 : 0) + (attentionOnly ? 1 : 0) + (emptyOnly ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
 
-  return (
-    <>
-      <div className="section-header" style={{ marginBottom: '8px' }}>
-        <h2 className="section-title">Shopfloor Cells <span className="section-count">{cells.length}</span></h2>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <button
-            className={`btn btn-primary ${!canManage ? 'btn-disabled' : ''}`}
-            disabled={!canManage}
-            onClick={() => canManage && (setEditing(null), setFormVal(blank), setShowForm(true))}
-            title={!canManage ? 'Requires Admin permissions' : 'Configure new shopfloor cell zone'}
-          >
-            <IconPlus size={14} /> New Cell
-          </button>
-        </div>
-      </div>
-      <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '16px' }}>
-        Manage physical and logical shopfloor cell zones, inspect assigned edge gateways and devices, and monitor zone lifecycle audit history.
-        A device belongs to the cell set on it, or to its gateway's cell if it has none of its own.
-      </p>
+  // Resolved fresh every render -- see the note on selectedId. A cell that is archived out of the
+  // current filter, or deleted, resolves to null and the drawer closes itself.
+  const selectedCell = cells.find(c => c.cell_id === selectedId) || null
+  const selectedCellGateways = selectedCell?.gateways || []
+  const selectedCellDevices = selectedCell ? (devicesByCell.get(selectedCell.cell_id) || []) : []
 
+  return (
+    <div className="page-layout">
+      <div className="page-main">
       <div className="filter-bar">
         {/* Lifecycle lives here rather than as a separate segmented control in the header: it is
             a filter like the rest, and having two filter surfaces on one page meant the header
@@ -274,6 +269,18 @@ export function CellsTab({ showToast, onSelectDevice, onViewThread, hasPermissio
             <IconX size={13} /> Clear filters ({activeFilterCount})
           </button>
         )}
+
+        {/* The page's one primary action, at the far end of the row it shares with the filters.
+            It had a row of its own -- a 34px band holding a single button, above a filter bar that
+            was already the page's control surface. `.filter-bar-spacer` is what pushes it right. */}
+        <button
+          className={`btn btn-primary btn-sm filter-bar-spacer ${!canManage ? 'btn-disabled' : ''}`}
+          disabled={!canManage}
+          onClick={() => canManage && (setEditing(null), setFormVal(blank), setShowForm(true))}
+          title={!canManage ? 'Requires Admin permissions' : 'Configure new shopfloor cell zone'}
+        >
+          <IconPlus size={14} /> New Cell
+        </button>
       </div>
 
       {unlinkedDevices.length > 0 && (
@@ -302,16 +309,32 @@ export function CellsTab({ showToast, onSelectDevice, onViewThread, hasPermissio
           const cellGateways = c.gateways || []
           // Devices that RESOLVE to this cell, not those merely reachable through its gateways.
           const cellAssets = devicesByCell.get(c.cell_id) || []
+          // A cell with neither collapses to its header. A newly created zone has no gateway and
+          // no device, so a floor in the middle of being set up was a column of full-height cards
+          // each saying "nothing here" twice -- and the cells that DO have contents, which are the
+          // reason to open this page, were pushed below them.
+          const cellIsEmpty = cellGateways.length === 0 && cellAssets.length === 0
 
           return (
-            <div key={c.cell_id} className="cell-card" style={{ opacity: c.is_archived ? 0.9 : 1, border: c.is_archived ? '1px solid var(--warning)' : '1px solid var(--border)' }}>
+            <div key={c.cell_id} className={`cell-card${selectedId === c.cell_id ? ' cell-card-selected' : ''}${cellIsEmpty ? ' cell-card-empty' : ''}`} style={{ opacity: c.is_archived ? 0.9 : 1, border: c.is_archived ? '1px solid var(--warning)' : '1px solid var(--border)' }}>
               <div className="cell-card-header" style={{ background: c.is_archived ? 'rgba(255,179,0,0.06)' : 'var(--bg-glass)' }}>
-                <div className="cell-card-title">
+                {/* The TITLE selects, not the whole card. A cell card is a container of gateway and
+                    device rows that are themselves clickable, so a card-wide handler would fire on
+                    every one of them -- and unlike a table row there is no single "empty" area to
+                    aim at. The title is the part that names the thing the panel describes. */}
+                <div
+                  className="cell-card-title row-selectable"
+                  onClick={() => setSelectedId(id => id === c.cell_id ? null : c.cell_id)}
+                  title="Click to inspect this cell in the details panel"
+                >
                   <IconFactory size={18} />
                   <span>{c.cell_name}</span>
                   <span className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>ID: {c.cell_id}</span>
-                  <span className="badge badge-neutral" title="Count of edge gateways assigned to this cell">{cellGateways.length} Gateways</span>
-                  <span className="badge badge-neutral" title="Count of devices located in this cell — its gateways' devices, plus any device filed here explicitly">{cellAssets.length} Devices</span>
+                  <span className="badge badge-neutral" title="Count of edge gateways assigned to this cell">{cellGateways.length} Gateway/s</span>
+                  <span className="badge badge-neutral" title="Count of devices located in this cell — its gateways' devices, plus any device filed here explicitly">{cellAssets.length} Device/s</span>
+                  {cellIsEmpty && !c.is_archived && (
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic', fontWeight: 400 }}>empty</span>
+                  )}
                   {c.is_archived && (
                     <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Cell decommissioned and archived">
                       <IconArchive size={11} /> ARCHIVED (OUT OF COMMISSION)
@@ -319,48 +342,9 @@ export function CellsTab({ showToast, onSelectDevice, onViewThread, hasPermissio
                   )}
                 </div>
 
-                <div className="btn-group">
-                  {c.access_url && (
-                    <a href={c.access_url} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm" style={{ textDecoration: 'none', gap: '4px', padding: '4px 10px' }} title="Open Cell Dashboard / Grafana UI">
-                      <IconExternalLink size={12} /> Dashboard
-                    </a>
-                  )}
-                  <button className="btn btn-ghost btn-sm" onClick={() => setDocsForCell(c)} title="View & attach external documents for this cell">
-                    <IconBookOpen size={13} /> Docs
-                  </button>
-                  <button className="btn btn-ghost btn-sm" onClick={() => onViewThread?.(c)} title="Open the Digital Thread audit trace for this cell">
-                    <IconHistory size={13} /> Thread
-                  </button>
-                  {c.is_archived ? (
-                    <button
-                      className={`btn btn-primary btn-sm ${!canArchive ? 'btn-disabled' : ''}`}
-                      disabled={!canArchive}
-                      onClick={() => canArchive && restoreCell(c.cell_id, c.cell_name)}
-                      title={!canArchive ? 'Requires Admin permissions' : 'Restore cell back to active service'}
-                    >
-                      <IconRefreshCw size={13} /> Restore
-                    </button>
-                  ) : (
-                    <button
-                      className={`btn btn-ghost btn-sm ${!canArchive ? 'btn-disabled' : ''}`}
-                      disabled={!canArchive}
-                      onClick={() => canArchive && setArchiveTarget(c)}
-                      title={!canArchive ? 'Requires Admin permissions' : 'Decommission & Archive Cell'}
-                    >
-                      <IconArchive size={13} /> Archive
-                    </button>
-                  )}
-                  <button
-                    className={`btn btn-ghost btn-sm ${!canManage || c.is_archived ? 'btn-disabled' : ''}`}
-                    disabled={!canManage || c.is_archived}
-                    onClick={() => canManage && !c.is_archived && (setEditing(c), setFormVal({ cell_name: c.cell_name, access_url: c.access_url || '' }), setShowForm(true))}
-                    title={!canManage ? 'Requires Admin permissions' : c.is_archived ? 'Cell is archived' : 'Edit cell name'}
-                  >
-                    <IconPencil size={13} /> Edit
-                  </button>
-                </div>
               </div>
 
+              {!(cellIsEmpty && !c.is_archived) && (
               <div className="cell-card-body">
                 {c.is_archived && (
                   <div style={{ background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', fontSize: '13px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '10px', width: '100%' }}>
@@ -371,94 +355,111 @@ export function CellsTab({ showToast, onSelectDevice, onViewThread, hasPermissio
                   </div>
                 )}
 
-                <div className="nested-box">
-                  <div className="nested-box-title">Assigned Edge Gateways ({cellGateways.length})</div>
-                  {cellGateways.length === 0 ? (
-                    <div style={{ fontStyle: 'italic', fontSize: '12px', color: 'var(--text-dim)' }}>
-                      No gateways assigned to this cell zone. Assign one on the Gateways page — its devices then inherit this cell unless they carry one of their own.
-                    </div>
-                  ) : (
-                    <div className="table-wrap">
-                      <table>
-                        <thead><tr><th title="Gateway Name">Name</th><th title="Sparkplug B edge node id">Sparkplug ID</th><th title="Connectivity status">Status</th><th title="Last Sparkplug B node heartbeat">Last Heartbeat</th><th title="Devices served by this gateway">Devices</th></tr></thead>
-                        <tbody>
-                          {cellGateways.map(g => (
-                            <tr key={g.gateway_id} style={{ background: g.is_archived ? 'rgba(255,179,0,0.06)' : undefined }}>
-                              <td><strong>{g.gateway_name}</strong></td>
-                              <td><CopyableId value={g.sparkplug_id || gatewaySparkplugId(g.gateway_id)} label="Sparkplug edge node id" onNotify={showToast} /></td>
+                {/* NO NESTED HEADER BOXES. A cell card held two titled sub-cards, each with its
+                    own border and heading, each containing a table with its own header row -- four
+                    levels of chrome around two short lists. The counts are already on the card
+                    header above, so the headings restated them.
+
+                    Every row is a link. A gateway or device named on a cell card is the same
+                    entity as the one on its own page, and the card is where you find out it exists
+                    -- so reading its name and then going to find it by hand was the missing half
+                    of this page. */}
+                {cellGateways.length > 0 && (
+                  <div className="table-wrap">
+                    {/* The two tables on a cell card share a column grid, so a reader's eye runs
+                        straight down Name, Sparkplug ID and Status across both rather than
+                        re-finding each column when it crosses from gateways to devices. The
+                        widths only bind under `table-layout: fixed` -- see .cell-card-table. */}
+                    <table className="cell-card-table">
+                      <colgroup>
+                        <col style={{ width: '28%' }} />
+                        <col style={{ width: '26%' }} />
+                        <col style={{ width: '22%' }} />
+                        <col style={{ width: '16%' }} />
+                        <col style={{ width: '8%' }} />
+                      </colgroup>
+                      <thead><tr><th title="Gateway Name">Name</th><th title="Sparkplug B edge node id">Sparkplug ID</th><th title="Connectivity status">Status</th><th title="Last Sparkplug B node heartbeat">Last Heartbeat</th><th title="Devices served by this gateway">Devices</th></tr></thead>
+                      <tbody>
+                        {cellGateways.map(g => (
+                          <tr
+                            key={g.gateway_id}
+                            className="row-selectable"
+                            style={{ background: g.is_archived ? 'rgba(255,179,0,0.06)' : undefined }}
+                            onClick={rowSelectHandler(() => onSelectGateway?.(g.gateway_id))}
+                            title={`Open '${g.gateway_name}' on the Gateways page`}
+                          >
+                            <td><strong>{g.gateway_name}</strong></td>
+                            <td><CopyableId value={g.sparkplug_id || gatewaySparkplugId(g.gateway_id)} label="Sparkplug edge node id" onNotify={showToast} /></td>
+                            <td>
+                              {g.is_archived
+                                ? <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)' }}>DECOMMISSIONED</span>
+                                : <StatusBadge status={gatewayLiveStatus(g)} />}
+                            </td>
+                            <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{formatHeartbeat(g.last_heartbeat)}</td>
+                            <td><span className="badge badge-neutral">{g.device_count}</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {cellAssets.length > 0 && (
+                  <div className="table-wrap">
+                    {/* Same grid as the gateway table above. The first three columns match exactly;
+                        the fourth spans what that table splits between Last Heartbeat and Devices,
+                        so every column boundary the eye follows still lines up. */}
+                    <table className="cell-card-table">
+                      <colgroup>
+                        <col style={{ width: '28%' }} />
+                        <col style={{ width: '26%' }} />
+                        <col style={{ width: '22%' }} />
+                        <col style={{ width: '24%' }} />
+                      </colgroup>
+                      <thead><tr><th title="Device Name">Name</th><th title="Sparkplug B device id">Sparkplug ID</th><th title="Status">Status</th><th title="Connected Edge Gateway">Gateway</th></tr></thead>
+                      <tbody>
+                        {cellAssets.map(a => {
+                          const isOff = a.status === 'OFFLINE'
+                          const isArch = a.is_archived
+                          return (
+                            <tr
+                              key={a.asset_id}
+                              className="row-selectable"
+                              style={{ background: isArch ? 'rgba(255,179,0,0.06)' : undefined }}
+                              onClick={rowSelectHandler(() => onSelectDevice?.(a.asset_id))}
+                              title={`Open '${a.asset_name}' on the Devices page`}
+                            >
                               <td>
-                                {g.is_archived
-                                  ? <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)' }}>DECOMMISSIONED</span>
-                                  : <StatusBadge status={gatewayLiveStatus(g)} />}
+                                <strong>{a.asset_name}</strong>
+                                {isArch && (
+                                  <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Decommissioned device">
+                                    <IconArchive size={11} /> ARCHIVED
+                                  </span>
+                                )}
                               </td>
-                              <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{formatHeartbeat(g.last_heartbeat)}</td>
-                              <td><span className="badge badge-neutral">{g.device_count}</span></td>
+                              <td><CopyableId value={effectiveSparkplugId(a)} label="Sparkplug device id" onNotify={showToast} /></td>
+                              <td>
+                                {isArch ? (
+                                  <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Decommissioned device (Out of Commission)">
+                                    <IconArchive size={11} /> ARCHIVED (OUT OF COMMISSION)
+                                  </span>
+                                ) : (
+                                  <span className={`badge ${isOff ? 'badge-neutral' : 'badge-online'}`} title={isOff ? 'Sparkplug B DDEATH Received — Device Offline' : 'Device Active'}>
+                                    <span className="badge-dot" style={{ background: isOff ? 'var(--text-muted)' : 'var(--success)' }} />
+                                    {isOff ? 'OFFLINE / DDEATH' : 'ONLINE'}
+                                  </span>
+                                )}
+                              </td>
+                              <td><span className="mono" style={{ color: 'var(--warning-text)' }} title={a.active_gateway_id || 'No gateway assigned'}>{a.gateway_name || a.active_gateway_id || '—'}</span></td>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-
-                <div className="nested-box">
-                  <div className="nested-box-title">Assigned Devices ({cellAssets.length})</div>
-                  {cellAssets.length === 0 ? <div style={{ fontStyle: 'italic', fontSize: '12px', color: 'var(--text-dim)' }}>No devices located in this cell zone.</div> : (
-                    <div className="table-wrap">
-                      <table>
-                        <thead><tr><th title="Device Name">Name</th><th title="Sparkplug B device id">Sparkplug ID</th><th title="Status">Status</th><th title="Connected Edge Gateway">Gateway</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
-                        <tbody>
-                          {cellAssets.map(a => {
-                            const isOff = a.status === 'OFFLINE'
-                            const isArch = a.is_archived
-                            return (
-                              <tr key={a.asset_id} style={{ background: isArch ? 'rgba(255,179,0,0.06)' : undefined }}>
-                                <td>
-                                  <strong>{a.asset_name}</strong>
-                                  {isArch && (
-                                    <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Decommissioned device">
-                                      <IconArchive size={11} /> ARCHIVED
-                                    </span>
-                                  )}
-                                </td>
-                                <td><CopyableId value={effectiveSparkplugId(a)} label="Sparkplug device id" onNotify={showToast} /></td>
-                                <td>
-                                  {isArch ? (
-                                    <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Decommissioned device (Out of Commission)">
-                                      <IconArchive size={11} /> ARCHIVED (OUT OF COMMISSION)
-                                    </span>
-                                  ) : (
-                                    <span className={`badge ${isOff ? 'badge-neutral' : 'badge-online'}`} title={isOff ? 'Sparkplug B DDEATH Received — Device Offline' : 'Device Active'}>
-                                      <span className="badge-dot" style={{ background: isOff ? 'var(--text-muted)' : 'var(--success)' }} />
-                                      {isOff ? 'OFFLINE / DDEATH' : 'ONLINE'}
-                                    </span>
-                                  )}
-                                </td>
-                                <td><span className="mono" style={{ color: 'var(--warning-text)' }} title={a.active_gateway_id || 'No gateway assigned'}>{a.gateway_name || a.active_gateway_id || '—'}</span></td>
-                                <td style={{ textAlign: 'right' }}>
-                                  <button className="btn btn-ghost btn-sm" onClick={() => onSelectDevice(a.asset_id)} title="Show this device on the Devices page, where its telemetry drawer lives">
-                                    <IconActivity size={12} /> Telemetry
-                                  </button>
-                                </td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-
-                <InlineDocumentAccordion
-                  entityType="cell"
-                  entityId={c.cell_id}
-                  entityName={c.cell_name}
-                  onOpenModal={() => setDocsForCell(c)}
-                  hasPermission={hasPermission}
-                  refreshKey={docRefreshKey}
-                  documentCount={docCounts[c.cell_id] || 0}
-                />
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
+              )}
             </div>
           )
         })
@@ -494,6 +495,80 @@ export function CellsTab({ showToast, onSelectDevice, onViewThread, hasPermissio
       {docsForCell && (
         <EntityDocumentsModal entityType="cell" entityId={docsForCell.cell_id} entityName={docsForCell.cell_name} onClose={() => { setDocsForCell(null); setDocRefreshKey(k => k + 1) }} showToast={showToast} hasPermission={hasPermission} />
       )}
-    </>
+      </div>
+
+      <ContextPanel
+        open={!!selectedCell}
+        onClose={() => setSelectedId(null)}
+        type="CELL"
+        onCopy={showToast}
+        title={selectedCell?.cell_name || ''}
+        subtitle={selectedCell && (
+          <>
+            <span className="badge badge-neutral" style={{ fontSize: '11px' }}>
+              {selectedCellGateways.length} GW / {selectedCellDevices.length} DEV
+            </span>
+            {selectedCell.is_archived && <span className="badge badge-warning" style={{ fontSize: '11px' }}>ARCHIVED</span>}
+          </>
+        )}
+        fields={selectedCell ? [
+          { label: 'Cell UUID', value: selectedCell.cell_id, mono: true, copyable: true },
+          {
+            label: 'Assigned Gateways',
+            value: selectedCellGateways.length
+              ? selectedCellGateways.map(g => g.gateway_name).join(', ')
+              : null,
+            full: true,
+            title: 'Edge nodes serving this zone. Their devices resolve here unless a device carries a cell of its own.'
+          },
+          {
+            label: 'Located Devices',
+            value: selectedCellDevices.length
+              ? `${selectedCellDevices.length} (${selectedCellDevices.filter(a => a.status !== 'OFFLINE' && !a.is_archived).length} online)`
+              : null,
+            title: "This zone's gateways' devices, plus any device filed here explicitly."
+          },
+          { label: 'Dashboard URL', value: selectedCell.access_url || null, mono: true, copyable: true, full: true },
+        ] : []}
+        actions={selectedCell ? [
+          selectedCell.access_url && {
+            label: 'Open Dashboard', icon: <IconExternalLink size={13} />, href: selectedCell.access_url, primary: true,
+            title: 'Open Cell Dashboard / Grafana UI'
+          },
+          {
+            label: 'Edit Details', icon: <IconPencil size={13} />,
+            onClick: () => { setEditing(selectedCell); setFormVal(selectedCell); setShowForm(true) },
+            disabled: !canManage || selectedCell.is_archived,
+            title: !canManage ? 'Requires Admin permissions' : selectedCell.is_archived ? 'Restore this cell before editing it' : 'Edit cell configuration'
+          },
+          {
+            label: 'View Digital Thread', icon: <IconHistory size={13} />,
+            onClick: () => onViewThread?.(selectedCell),
+            title: 'Open the immutable audit trace for this cell'
+          },
+          {
+            label: 'Manage Documents', icon: <IconBookOpen size={13} />,
+            onClick: () => setDocsForCell(selectedCell),
+            title: 'Attach or edit external document links for this cell'
+          },
+          // The last control to leave the card. Archive is not a property of the card in the way
+          // the note there once claimed -- it is a thing done to one cell you have chosen, exactly
+          // like the four that went before it.
+          selectedCell.is_archived ? {
+            label: 'Restore Cell', icon: <IconRefreshCw size={13} />,
+            onClick: () => restoreCell(selectedCell.cell_id, selectedCell.cell_name),
+            disabled: !canArchive,
+            title: !canArchive ? 'Requires Admin permissions' : 'Restore cell back to active service'
+          } : {
+            label: 'Archive Cell', icon: <IconArchive size={13} />,
+            onClick: () => setArchiveTarget(selectedCell),
+            disabled: !canArchive,
+            danger: true,
+            title: !canArchive ? 'Requires Admin permissions' : 'Decommission & Archive Cell'
+          },
+        ].filter(Boolean) : []}
+      />
+
+    </div>
   )
 }

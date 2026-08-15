@@ -1,4 +1,4 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react'
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react'
 import { supabase } from './lib/supabaseClient'
 import { usePermissions } from './hooks/usePermissions'
 import { useAppRouting } from './hooks/useAppRouting'
@@ -19,7 +19,6 @@ import {
   IconFactory,
   IconRadio,
   IconCpu,
-  IconActivity,
   IconLayoutDashboard,
   IconClipboardList,
   IconFileCode,
@@ -30,7 +29,8 @@ import {
   IconMoon,
   IconUser,
   IconBug,
-  IconLock
+  IconLogOut,
+  IconChevronDown
 } from './components/common/Icons'
 
 import { Toast } from './components/common/Toast'
@@ -120,13 +120,13 @@ function AuthScreen({ onLoginSuccess, notice }) {
         </div>
 
         {notice && !authError && (
-          <div style={{ background: 'rgba(255,179,0,0.15)', border: '1px solid #ffb300', color: '#ffb300', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '18px' }}>
+          <div style={{ background: 'rgba(255,179,0,0.15)', border: '1px solid var(--warning)', color: 'var(--warning-text)', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '18px' }}>
             {notice}
           </div>
         )}
 
         {authError && (
-          <div style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid #ef4444', color: '#ef4444', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '18px' }}>
+          <div style={{ background: 'rgba(255,77,109,0.15)', border: '1px solid var(--danger)', color: 'var(--danger-text)', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '18px' }}>
             {authError}
           </div>
         )}
@@ -175,7 +175,7 @@ function AuthScreen({ onLoginSuccess, notice }) {
           <button
             type="button"
             className="btn btn-ghost"
-            style={{ fontSize: '12px', color: 'var(--accent, #38bdf8)', background: 'none', border: 'none', cursor: 'pointer' }}
+            style={{ fontSize: '12px', color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer' }}
             onClick={() => setIsSignUp(!isSignUp)}
           >
             {isSignUp ? 'Already have an account? Sign In' : 'Need an account? Sign Up'}
@@ -183,6 +183,80 @@ function AuthScreen({ onLoginSuccess, notice }) {
         </div>
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * The session control, collapsed into one pill with a popover behind it.
+ *
+ * It used to be four things laid out side by side in the bar: an icon, the full email, a role
+ * badge and a Sign Out button, together about 330px. That was the widest block on the right-hand
+ * side and it was spending it on two pieces of standing text -- the address you are signed in as,
+ * and a button you press when you leave -- neither of which is read more than once a session. The
+ * pill is ~150px narrower, and the space goes to the nav, which is the thing that runs out first.
+ *
+ * The email survives in full inside the popover AND on the pill's `title`, so it is still
+ * verifiable at a glance. The role badge does NOT collapse into the menu: it is the standing
+ * answer to "why is that button disabled", which is a question asked while looking at the button
+ * rather than at this control.
+ *
+ * Click, not hover. A hover-triggered menu holding the sign-out button puts an irreversible action
+ * one stray mouse movement from the cursor's resting corner.
+ */
+function UserMenu({ persona, userRole, onSignOut }) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    // `mousedown`, not `click`: closing on click would fire after a button inside the popover had
+    // already been pressed, and closing on blur would beat the press entirely.
+    const onPointer = (e) => { if (!wrapRef.current?.contains(e.target)) setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onPointer)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onPointer)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  // The local part only. Addresses on one deployment share a domain, so it is the half that
+  // identifies anybody -- and the full address is a hover or a click away.
+  const shortName = persona.includes('@') ? persona.split('@')[0] : persona
+
+  return (
+    <div className="user-menu" ref={wrapRef}>
+      <button
+        className={`user-pill${open ? ' user-pill-open' : ''}`}
+        onClick={() => setOpen(v => !v)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        title={`Signed in as ${persona} (${userRole}) — open account menu`}
+      >
+        <IconUser size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+        <span className="user-pill-name">{shortName}</span>
+        <span className="badge badge-neutral user-pill-role">{userRole}</span>
+        <IconChevronDown size={11} className={open ? 'user-pill-caret user-pill-caret-open' : 'user-pill-caret'} />
+      </button>
+
+      {open && (
+        <div className="user-popover" role="menu">
+          <div className="user-popover-head">
+            <div className="user-popover-email">{persona}</div>
+            <div className="user-popover-role">{userRole}</div>
+          </div>
+          <button
+            className="user-popover-action"
+            role="menuitem"
+            onClick={() => { setOpen(false); onSignOut() }}
+            title="Sign out of the Supabase session"
+          >
+            <IconLogOut size={14} /> Sign Out
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -235,57 +309,65 @@ function Dashboard({ session, onSignOut }) {
 
   return (
     <div className="app-shell">
-      {/* Top Bar */}
+      {/*
+        ONE bar: brand, navigation and session controls. The tab strip that used to sit under this
+        header is now the centre region, which gives every page back 62px of viewport.
+
+        The nav labels collapse to icons below 1400px rather than scrolling -- see the responsive
+        block in App.css. Every tab therefore carries a `title` with its full name at all times,
+        because below that width the title is the only thing naming the page.
+      */}
       <header className="topbar">
         <div className="topbar-brand">
-          <div className="brand-icon" title="ACS Cymru Platform Logo"><IconFactory size={20} /></div>
-          <div>
-            <div className="brand-name">AMRC Connectivity Stack - Cymru</div>
+          <div className="brand-icon" title="ACS Cymru Platform Logo"><IconFactory size={18} /></div>
+          <div className="brand-text">
+            {/* Titled because .brand-name truncates: it is the region that yields space when the
+                nav and the session controls have taken theirs. */}
+            <div className="brand-name" title="AMRC Connectivity Stack - Cymru">AMRC Connectivity Stack - Cymru</div>
             <div className="brand-sub">Shopfloor to Digital Twin Pipeline</div>
           </div>
         </div>
 
-        <div className="topbar-right">
-          {/* Supabase User & Role Badge */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--bg-glass)', padding: '4px 10px', borderRadius: '8px', border: '1px solid var(--border)' }}>
-            <IconUser size={13} style={{ color: 'var(--accent)' }} />
-            <span style={{ fontSize: '12px', fontWeight: 600 }}>{persona}</span>
-            <span className="badge badge-neutral" style={{ fontSize: '10px' }}>{userRole}</span>
-            <button className="btn btn-ghost btn-sm" onClick={onSignOut} style={{ padding: '2px 8px', fontSize: '11px', marginLeft: '6px' }}>
-              Sign Out
+        <nav className="topbar-nav" aria-label="Primary">
+          {TABS.map(t => (
+            <button
+              key={t.id}
+              className={`nav-tab ${tab === t.id ? 'active' : ''}`}
+              onClick={() => handleNavClick(t.id)}
+              title={`Navigate to ${t.label} page`}
+              aria-current={tab === t.id ? 'page' : undefined}
+            >
+              <span className="tab-icon">{t.icon}</span>
+              <span className="nav-tab-label">{t.label}</span>
             </button>
-          </div>
+          ))}
+        </nav>
 
-          <button className="btn btn-ghost btn-sm" onClick={() => setShowBugReport(true)} title="Report an application bug" style={{ gap: '6px' }}>
-            <IconBug size={14} style={{ color: 'var(--danger)' }} /> Report Bug
-          </button>
-
-          <button className="btn btn-ghost btn-sm" onClick={toggleTheme} title="Toggle Light / Dark UI Theme">
-            {theme === 'dark' ? <IconSun size={14} /> : <IconMoon size={14} />}
-          </button>
+        <div className="topbar-right">
           <div
             className="topbar-status"
             title={REALTIME_ENABLED
               ? 'Live: tabs update on Realtime change events, with a 60s reconciliation refresh'
               : 'Polling: tabs refresh every 3s (Realtime disabled)'}
           ><div className="pulse-dot" /> {REALTIME_ENABLED ? 'Live' : 'Polling'}</div>
+
+          <button className="btn btn-ghost btn-sm" onClick={toggleTheme} title="Toggle Light / Dark UI Theme">
+            {theme === 'dark' ? <IconSun size={14} /> : <IconMoon size={14} />}
+          </button>
+
+          <button className="btn btn-ghost btn-sm" onClick={() => setShowBugReport(true)} title="Report an application bug" style={{ gap: '6px' }}>
+            <IconBug size={14} style={{ color: 'var(--danger)' }} /> <span className="btn-label">Report Bug</span>
+          </button>
+
+          <UserMenu persona={persona} userRole={userRole} onSignOut={onSignOut} />
         </div>
       </header>
-
-      {/* Nav */}
-      <nav className="nav-tabs">
-        {TABS.map(t => (
-          <button key={t.id} className={`nav-tab ${tab === t.id ? 'active' : ''}`} onClick={() => handleNavClick(t.id)} title={`Navigate to ${t.label} page`}>
-            <span className="tab-icon">{t.icon}</span>{t.label}
-          </button>
-        ))}
-      </nav>
 
       {/* Main Content */}
       <main className="content">
         <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
           {tab === 'overview'       && <OverviewTab onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }} onSelectGateway={id => { setSelectedGatewayFilter(id); setTab('gateways', { search: id }) }} onSelectCell={id => { setSelectedCellFilter(id); setTab('cells', { search: id }) }} showToast={showToast} hasPermission={hasPermission} onNavigateTab={t => setTab(t)} />}
-          {tab === 'cells'          && <CellsTab showToast={showToast} onViewThread={c => viewThreadFor(c.cell_id, 'CELL')} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
+          {tab === 'cells'          && <CellsTab showToast={showToast} onViewThread={c => viewThreadFor(c.cell_id, 'CELL')} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }} onSelectGateway={id => { setSelectedGatewayFilter(id); setTab('gateways', { search: id }) }} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
           {tab === 'gateways'       && <GatewaysTab showToast={showToast} onViewThread={g => viewThreadFor(g.gateway_id, 'GATEWAY')} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
           {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }} onViewThread={a => viewThreadFor(a.asset_id, 'DEVICE')} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} />}
           {tab === 'digital-thread' && (

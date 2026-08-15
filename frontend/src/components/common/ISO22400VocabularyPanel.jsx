@@ -40,14 +40,30 @@ export function iso22400VocabularyTab({ vocabulary, catalog, onUseKpi }) {
     description: (
       <>
         The manufacturing KPIs defined by ISO 22400-2 — the computed measures MTConnect
-        deliberately leaves out, since it reports raw machine state and stops there. A KPI is
-        selected whole rather than composed: <span className="mono">AVAILABILITY</span> becomes{' '}
-        <span className="mono">OEE/AVAILABILITY</span> in the catalog, carrying the KPI's unit and
-        semantic id with it. Formulas are shown in the standard's symbol language on hover.{' '}
-        <strong>MTConnect's own <span className="mono">AVAILABILITY</span> is a different thing
-        entirely</strong> — an EVENT meaning the device is connected, not this ratio.
+        deliberately leaves out, since it reports raw machine state and stops there.
       </>
     ),
+    notes: [
+      {
+        label: 'KPIs are picked whole.',
+        body: (
+          <>
+            {' '}Not composed like an MTConnect name: <span className="mono">AVAILABILITY</span>{' '}
+            becomes <span className="mono">OEE/AVAILABILITY</span> in the catalog, carrying the
+            KPI's unit and semantic id with it. Formulas are on hover, in the standard's symbols.
+          </>
+        )
+      },
+      {
+        label: 'Beware the name clash.',
+        body: (
+          <>
+            {' '}MTConnect's own <span className="mono">AVAILABILITY</span> is a different thing
+            entirely — an EVENT meaning the device is connected, not this ratio.
+          </>
+        )
+      }
+    ],
     sections,
     isUsed: item =>
       (item.kpi.semantic_id && semanticIds.has(item.kpi.semantic_id)) || nameTokens.has(item.name),

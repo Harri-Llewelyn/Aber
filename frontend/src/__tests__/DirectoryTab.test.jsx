@@ -20,6 +20,14 @@ const SERVICES = [
     endpoint_url: 'http://localhost:54321',
     status: 'ONLINE',
     last_heartbeat: '2026-07-25T10:00:00Z'
+  },
+  {
+    service_uuid: 'svc-2',
+    service_name: 'Sparkplug Ingestion Daemon',
+    service_type: 'MQTT',
+    endpoint_url: 'mqtt://localhost:1883',
+    status: 'ONLINE',
+    last_heartbeat: '2026-07-25T10:00:00Z'
   }
 ]
 
@@ -107,5 +115,87 @@ describe('DirectoryTab GitOps sync guard', () => {
       )
     })
     expect(showToast).toHaveBeenCalledWith(expect.any(String), 'success')
+  })
+})
+
+/**
+ * The page's own controls, in the `.filter-bar` every other list page uses.
+ *
+ * Refresh moved in from a `.page-actions` row that sat ABOVE the GitOps deployment panel, where
+ * it read as an action on the deployment rather than on the table it actually reloads. Search
+ * and the type picker are new: a stack with an ingestion daemon, a broker, Node-RED, Kong,
+ * PostgREST and a handful of Edge Functions is past the point where scanning beats filtering.
+ */
+describe('DirectoryTab filter bar', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    api.get.mockResolvedValue(SERVICES)
+  })
+
+  const search = () => screen.getByPlaceholderText(/Search services/)
+  const typePicker = () => screen.getByTitle(/Show only one kind of service/)
+
+  it('holds the search, the type picker and Refresh in one bar', async () => {
+    await renderTab(vi.fn().mockReturnValue(true))
+
+    const bar = document.querySelector('.filter-bar')
+    expect(bar).toBeTruthy()
+    expect(bar.contains(search())).toBe(true)
+    expect(bar.contains(typePicker())).toBe(true)
+    expect(bar.contains(screen.getByTitle(/Refresh service directory heartbeats/))).toBe(true)
+    // And no row of its own left behind.
+    expect(document.querySelector('.page-actions')).toBeNull()
+  })
+
+  it('filters on name', async () => {
+    await renderTab(vi.fn().mockReturnValue(true))
+    fireEvent.change(search(), { target: { value: 'ingestion' } })
+
+    expect(screen.getByText('Sparkplug Ingestion Daemon')).toBeInTheDocument()
+    expect(screen.queryByText('Kong Gateway')).not.toBeInTheDocument()
+  })
+
+  // An endpoint is often what an engineer has to hand -- a port from a compose file, a URL from
+  // a log line -- rather than the service's registered name.
+  it('filters on the endpoint URL too', async () => {
+    await renderTab(vi.fn().mockReturnValue(true))
+    fireEvent.change(search(), { target: { value: '1883' } })
+
+    expect(screen.getByText('Sparkplug Ingestion Daemon')).toBeInTheDocument()
+    expect(screen.queryByText('Kong Gateway')).not.toBeInTheDocument()
+  })
+
+  it('filters by service type', async () => {
+    await renderTab(vi.fn().mockReturnValue(true))
+    fireEvent.change(typePicker(), { target: { value: 'MQTT' } })
+
+    expect(screen.getByText('Sparkplug Ingestion Daemon')).toBeInTheDocument()
+    expect(screen.queryByText('Kong Gateway')).not.toBeInTheDocument()
+  })
+
+  // Derived from the rows, not hardcoded: the directory is a registry anything can register
+  // into, so a fixed <option> list would silently hide a service type nobody anticipated.
+  it('offers the service types actually present, not a fixed list', async () => {
+    await renderTab(vi.fn().mockReturnValue(true))
+
+    const options = [...typePicker().options].map(o => o.value)
+    expect(options).toEqual(['', 'HTTP', 'MQTT'])
+  })
+
+  // A heading that says 2 above a table showing 1 is worse than no count at all, because it is
+  // the number that gets quoted.
+  it('counts what is on screen, not what was fetched', async () => {
+    await renderTab(vi.fn().mockReturnValue(true))
+    expect(screen.getByRole('heading', { name: /Active Stack Microservices/ }).textContent).toContain('2')
+
+    fireEvent.change(typePicker(), { target: { value: 'MQTT' } })
+    expect(screen.getByRole('heading', { name: /Active Stack Microservices/ }).textContent).toContain('1')
+  })
+
+  it('says so when a filter matches nothing', async () => {
+    await renderTab(vi.fn().mockReturnValue(true))
+    fireEvent.change(search(), { target: { value: 'nothing-registered-under-this' } })
+
+    expect(screen.getByText(/No services match the filter/)).toBeInTheDocument()
   })
 })

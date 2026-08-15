@@ -70,7 +70,11 @@ describe('App Component', () => {
     })
 
     expect(screen.getByText('Shopfloor to Digital Twin Pipeline')).toBeInTheDocument()
-    expect(screen.getByText('admin@factoryplus.local')).toBeInTheDocument()
+    // The address is behind the account pill now, which shows the local part and the role. It is
+    // still on the pill's title, so it stays verifiable without opening anything.
+    expect(screen.getByRole('button', { name: /admin/i })).toHaveAttribute(
+      'title', expect.stringContaining('admin@factoryplus.local')
+    )
   })
 
   it('returns to the login screen when the stored session no longer exists on the server', async () => {

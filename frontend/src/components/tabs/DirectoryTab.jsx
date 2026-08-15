@@ -10,6 +10,8 @@ export function DirectoryTab({ showToast, hasPermission }) {
   const [services, setServices] = useState([])
   const [loading, setLoading]   = useState(true)
   const [confirmSync, setConfirmSync] = useState(false)
+  const [search, setSearch]     = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
 
   const loadAll = useCallback(async () => {
     setLoading(true)
@@ -37,15 +39,23 @@ export function DirectoryTab({ showToast, hasPermission }) {
   // same pair the deploy-nodered Edge Function enforces server-side.
   const canManageGitops = hasPermission(PERMISSION_UUIDS.GITOPS_MANAGE)
 
+  // Derived from the rows rather than hardcoded: the directory is a registry anything can
+  // register into, so a fixed <option> list would silently hide a service type nobody thought
+  // of when this select was written.
+  const serviceTypes = [...new Set(services.map(s => s.service_type).filter(Boolean))].sort()
+
+  const visible = services.filter(s => {
+    if (typeFilter && s.service_type !== typeFilter) return false
+    const q = search.trim().toLowerCase()
+    if (!q) return true
+    return [s.service_name, s.service_type, s.endpoint_url]
+      .some(v => String(v || '').toLowerCase().includes(q))
+  })
+
   return (
     <>
-      <div className="section-header" style={{ marginBottom: '8px' }}>
-        <h2 className="section-title">Factory+ Service Directory</h2>
-        <button className="btn btn-ghost btn-sm" onClick={loadAll} title="Refresh service directory heartbeats"><IconRefresh size={14} /> Refresh Directory</button>
-      </div>
-      <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px' }}>
-        Catalog tracking microservice health heartbeats, HTTP/MQTT service endpoints, and Edge GitOps deployment flow synchronization.
-      </p>
+      {/* Heading and description removed: the top bar names the page, and the two sections below
+          -- the GitOps panel and the microservices card -- already say what each of them is. */}
 
       {/* No deployment status is shown: nothing here can observe what Node-RED is
           actually running, and a badge asserting a state it has not checked is
@@ -81,27 +91,70 @@ export function DirectoryTab({ showToast, hasPermission }) {
         />
       )}
 
-      {/* Active Stack Microservices */}
-      <div className="section-header">
-        <h3 className="section-title" style={{ fontSize: '16px' }}>Active Stack Microservices <span className="section-count">{services.length}</span></h3>
+      {/* Active Stack Microservices. The heading moved INSIDE the card for the same reason as the
+          one on the Archives page: as a `.section-header` above it, it was a standalone 36px row
+          for one line of text; as a `.card-header` it rides the top edge the card already had. */}
+      {/* The page's own controls, in the same `.filter-bar` the Gateways and Devices pages use.
+          Refresh moved in from a `.page-actions` row of its own above the GitOps panel, where it
+          read as an action on the GitOps deployment rather than on the table it actually
+          reloads. The search and type picker are new: a stack with an ingestion daemon, a broker,
+          Node-RED, Kong, PostgREST and a handful of Edge Functions is already past the point
+          where scanning is quicker than filtering. */}
+      <div className="filter-bar">
+        <input
+          className="form-control"
+          style={{ width: '240px' }}
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search services…"
+          title="Filter by service name, type or endpoint URL"
+        />
+
+        <select
+          className="form-control"
+          style={{ width: '170px' }}
+          value={typeFilter}
+          onChange={e => setTypeFilter(e.target.value)}
+          title="Show only one kind of service"
+        >
+          <option value="">All service types</option>
+          {serviceTypes.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+
+        <div className="filter-bar-spacer filter-bar-actions">
+          <button className="btn btn-ghost btn-sm" onClick={loadAll} title="Refresh service directory heartbeats"><IconRefresh size={14} /> Refresh Directory</button>
+        </div>
       </div>
+
       <div className="card">
+        <div className="card-header">
+          {/* The count follows the filter. A heading that says 9 above a table showing 2 is
+              worse than no count, because it is the number the operator will quote. */}
+          <h3 className="section-title">Active Stack Microservices <span className="section-count">{visible.length}</span></h3>
+        </div>
         {loading ? <div className="loading-wrap"><div className="spinner" /> Loading directory…</div> : (
           <div className="table-wrap">
             <table>
               <thead><tr><th title="Service name">Service Name</th><th title="Architecture category">Service Type</th><th title="HTTP/MQTT endpoint URL">Endpoint URL</th><th title="Heartbeat status">Status</th><th title="Last heartbeat timestamp">Last Heartbeat</th></tr></thead>
               <tbody>
-                {services.map(s => (
+                {visible.map(s => (
                   <tr key={s.service_uuid}>
                     <td><strong>{s.service_name}</strong></td>
                     <td><span className="badge badge-neutral">{s.service_type}</span></td>
                     <td><a className="mono" href={s.endpoint_url} target="_blank" rel="noreferrer" title="Click to open endpoint URL">{s.endpoint_url} <IconExternalLink size={10} /></a></td>
                     <td><StatusBadge status={s.status} /></td>
-                    <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{new Date(s.last_heartbeat).toLocaleString()}</td>
+                    {/* .cell-meta rather than the inline 11px/muted pair this and the Archives
+                        table were each carrying their own copy of. */}
+                    <td className="cell-meta">{new Date(s.last_heartbeat).toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {!loading && visible.length === 0 && (
+          <div className="empty-state">
+            <div className="empty-text">No services match the filter.</div>
           </div>
         )}
       </div>
