@@ -116,7 +116,7 @@ spec:
   replicas: 1
   strategy:
     # Single writer: the default backend is a SQLite file on a ReadWriteOnce PVC. Scaling Grafana
-    # out means moving its database to Postgres first, which is a Phase 7 concern.
+    # out means moving its database to Postgres first, which is a separate concern.
     type: Recreate
   selector:
     matchLabels:

@@ -59,8 +59,15 @@ NO INGRESS. Reach the HTTP services with port-forward:
   kubectl -n {{ .Release.Namespace }} port-forward svc/supabase-kong 54321:8000
 {{- end }}
 
-NOT YET DEPLOYED, and expected rather than broken: in-cluster CI (Phase 6) and hardening (Phase 7) --
-NetworkPolicies, backups, resource limits, HPAs and externally-managed secrets.
+OFF BY DEFAULT, and opt-in rather than missing. Each is built and tested; enable what the cluster
+warrants:
+
+  networkPolicy.enabled          default-deny plus the allow-list this stack needs
+  backup.enabled                 nightly logical dumps (not PITR -- see the runbook)
+  podDisruptionBudgets.enabled   eviction floors
+  autoscaling.enabled            HPAs on the three stateless workloads only
+  e2e.enabled                    the conformance suites as in-cluster Jobs
+  secrets.existingSecret         externally-managed secrets (External Secrets / SOPS)
 
 Gateways need their own MQTT credential — the ACL confines each client to its own sparkplug_id
 subtree, which only constrains anything if the username IS that id:

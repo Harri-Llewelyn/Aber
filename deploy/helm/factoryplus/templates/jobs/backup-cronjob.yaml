@@ -18,7 +18,7 @@ Scheduled logical backups -- AND THE ONLY RECOVERY PATH THIS STACK HAS.
 
 `local-path` is a node-local hostPath provisioner: one node, no replication, no snapshots. Neither
 database is replicated either -- both are deliberately single instances (an operator and a custom
-image would be needed for Postgres HA, which plan §3.3 keeps out of scope). So there is no storage
+image would be needed for Postgres HA, which architecture §3.3 keeps out of scope). So there is no storage
 layer underneath to fall back on, and this is it.
 
 WHAT IS WORTH BACKING UP, AND WHAT IS NOT:

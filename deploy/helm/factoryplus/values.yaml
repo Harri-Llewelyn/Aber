@@ -14,9 +14,9 @@ global:
   # The DNS suffix every ingress hostname is built from: app.<domain>, api.<domain>,
   # nodered.<domain>, grafana.<domain>, studio.<domain>, docs.<domain>, mqtt.<domain>.
   # Subdomains rather than paths -- Grafana, Node-RED and Studio all assume they own a root, and
-  # Node-RED's webhook path is registered in the database. See plan §7.1.
+  # Node-RED's webhook path is registered in the database. See architecture §7.1.
   #
-  # Unused in Phase 1 (no ingress yet) but declared here so the value's home does not move later.
+  # Required when `ingress.enabled`; the render fails rather than emitting empty `host:` fields.
   publicBaseDomain: ""
 
   # http | https. Decides the scheme in every browser-facing URL the chart composes.
@@ -54,11 +54,11 @@ global:
 # Generate a matching set with any JWT tool, signing HS256 with jwtSecret and the claims
 # {"iss":"supabase","role":"anon"} / {"iss":"supabase","role":"service_role"}.
 #
-# Phase 7 replaces this block with External Secrets / SOPS. Until then it renders a plain Secret.
+# Renders a plain Secret. External Secrets / SOPS attach through `existingSecret` below.
 # ---------------------------------------------------------------------------------------------
 secrets:
   # Reference an EXISTING Secret instead of rendering one. When set, every value below is ignored
-  # and the named Secret must carry the same keys. This is the seam Phase 7's secret management
+  # and the named Secret must carry the same keys. This is the seam external secret management
   # plugs into without a template rewrite.
   existingSecret: ""
 
@@ -135,7 +135,7 @@ secrets:
   noderedAdminToken: ""
 
 # ---------------------------------------------------------------------------------------------
-# Data tier (Phase 1)
+# Data tier
 # ---------------------------------------------------------------------------------------------
 
 timescaledb:
@@ -283,7 +283,7 @@ realtime:
   # header, not from the JWT, and `realtime-dev` is the tenant SEED_SELF_HOST creates. Naming the
   # Service for the tenant is what makes Kong's upstream Host header correct through ordinary
   # in-cluster DNS, with no header rewriting. This is the ONE Service whose name deliberately
-  # differs from its Compose service name (`supabase-realtime`). See plan §3.4.
+  # differs from its Compose service name (`supabase-realtime`). See architecture §3.4.
   serviceName: realtime-dev
   port: 4000
   resources:
@@ -316,7 +316,7 @@ publicUrls:
   mqtt: ""
 
 # ---------------------------------------------------------------------------------------------
-# Supabase control plane (Phase 2)
+# Supabase control plane
 #
 # Every image tag here is pinned to the tag docker-compose.yml runs, and several of those pins
 # carry a paragraph of reasoning in the compose file. TWO TARGETS ON DIFFERENT TAGS BREAK PRECISELY
@@ -346,7 +346,7 @@ supabaseRest:
     repository: postgrest/postgrest
     tag: v12.2.0
     pullPolicy: IfNotPresent
-  # Stateless and horizontally scalable -- one of the three sensible HPA candidates in Phase 7.
+  # Stateless and horizontally scalable -- one of the three sensible HPA candidates.
   replicas: 1
   resources:
     requests: { cpu: 50m, memory: 128Mi }
@@ -389,7 +389,7 @@ supabaseKong:
 supabaseFunctions:
   enabled: true
   image:
-    # BUILT FROM supabase/functions/Dockerfile (Phase 0), not pulled: the functions and
+    # BUILT FROM supabase/functions/Dockerfile, not pulled: the functions and
     # node_red_flow.json are baked in, because there is no repository on a cluster node to mount
     # and a rollback must roll the functions back with the image.
     #   docker build -f supabase/functions/Dockerfile -t <repo>:<tag> .
@@ -435,7 +435,7 @@ supabaseStorage:
   bucket: asset-3d-models
   fileSizeLimit: 52428800
   # file | s3. s3 (MinIO or cloud) is the better production answer and removes the single-writer
-  # constraint; file is the default. See docs/kubernetes-migration-plan.md §4.4 and §11.
+  # constraint; file is the default. See docs/kubernetes-architecture.md §4.4 and §11.
   backend: file
   persistence:
     enabled: true
@@ -513,7 +513,7 @@ swaggerUi:
     limits: { memory: 256Mi }
 
 # ---------------------------------------------------------------------------------------------
-# Initialisation Jobs (Phase 2)
+# Initialisation Jobs
 #
 # The replacements for docker-compose's `depends_on: condition: service_completed_successfully`.
 # All three are post-install/post-upgrade Helm hooks, ordered by weight, and all three are SAFE TO
@@ -530,7 +530,7 @@ initJobs:
   ttlSecondsAfterFinished: 3600
 
 # ---------------------------------------------------------------------------------------------
-# Messaging (Phase 3)
+# Messaging
 # ---------------------------------------------------------------------------------------------
 mosquitto:
   enabled: true
@@ -758,7 +758,7 @@ i3xService:
     limits: { memory: 512Mi }
 
 # ---------------------------------------------------------------------------------------------
-# Edge and frontend (Phase 4)
+# Edge and frontend
 # ---------------------------------------------------------------------------------------------
 nodeRed:
   enabled: true
@@ -801,7 +801,7 @@ frontend:
     #   docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
     #     -t <repo>:<tag> frontend
     #
-    # That build arg is the whole point of Phase 0: it bakes nothing, so this ONE image serves any
+    # That build arg is the whole point of that arg: it bakes nothing, so this ONE image serves any
     # environment and reads its configuration from the /config.js ConfigMap below.
     #
     # PUBLISHED -- see supabaseFunctions.image for what the empty tag means. It bakes nothing, so
@@ -810,7 +810,7 @@ frontend:
     tag: ""
     pullPolicy: IfNotPresent
   # The only component here that scales freely -- NGINX serving static files, no state, no upstream
-  # connection pool. First HPA candidate in Phase 7 alongside Kong and PostgREST.
+  # connection pool. First HPA candidate alongside Kong and PostgREST.
   replicas: 2
   # Delivered to the browser through the /config.js ConfigMap, NOT baked into the image. That is
   # what makes these flippable with a `helm upgrade` here while the Compose path still needs an
@@ -830,7 +830,7 @@ frontend:
     limits: { memory: 128Mi }
 
 # ---------------------------------------------------------------------------------------------
-# Observability and exposure (Phase 5)
+# Observability and exposure
 # ---------------------------------------------------------------------------------------------
 grafana:
   enabled: true
@@ -884,7 +884,7 @@ ingress:
   #  docs: false
 
 # ---------------------------------------------------------------------------------------------
-# In-cluster conformance suites (Phase 6)
+# In-cluster conformance suites
 #
 # OFF BY DEFAULT. These SEED AND DELETE fixtures, drive real MQTT traffic and take minutes -- not
 # something to attach to an ordinary install. Enable them in CI, or deliberately against a stack you
@@ -934,7 +934,7 @@ e2e:
     limits: { memory: 1Gi }
 
 # ---------------------------------------------------------------------------------------------
-# Hardening (Phase 7)
+# Hardening
 # ---------------------------------------------------------------------------------------------
 
 # M4. Default-deny both directions, with one explicit allow per flow. See

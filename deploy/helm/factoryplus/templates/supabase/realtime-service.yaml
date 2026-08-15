@@ -22,14 +22,14 @@ per-Service alias of that shape -- but it does not need one: NAMING THE SERVICE 
 makes the leading label fall out of ordinary in-cluster DNS. `http://realtime-dev:4000/socket/` is
 then correct with no header rewriting at all.
 
-That is why supabase/kong.yml carries `__REALTIME_UPSTREAM_URL__` as a placeholder (Phase 0)
+That is why supabase/kong.yml carries `__REALTIME_UPSTREAM_URL__` as a placeholder
 rather than a literal: it is the one upstream that genuinely differs between the two targets.
 
 factoryplus.validateRealtimeServiceName in _helpers.tpl refuses any other name, matching the guard
 supabase-kong-init applies to REALTIME_UPSTREAM_URL on the Compose side.
 
-THE DEPLOYMENT LANDS IN PHASE 2. The Service is declared now because the NAME is the architectural
-decision and the thing later work must not undo; the workload behind it is ordinary.
+THE SERVICE NAME IS THE ARCHITECTURAL DECISION here, and the thing later work must not undo; the
+workload behind it is ordinary.
 =================================================================================================
 */ -}}
 apiVersion: v1
@@ -41,7 +41,7 @@ metadata:
   annotations:
     factoryplus.io/tenant-note: >-
       Named for the Realtime TENANT, not the workload. Renaming breaks every WebSocket handshake
-      with a bare 403. See plan §3.4.
+      with a bare 403. See architecture §3.4.
     {{- with .Values.global.commonAnnotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}

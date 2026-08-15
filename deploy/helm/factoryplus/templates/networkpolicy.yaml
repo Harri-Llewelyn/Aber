@@ -406,7 +406,7 @@ spec:
 ---
 {{/*
 =================================================================================================
-The INGRESS escape hatch. `extraEgress` has existed since Phase 7; this is its missing half, and
+The INGRESS escape hatch. `extraEgress` is its counterpart; this is the missing half, and
 the asymmetry was itself a defect.
 
 WHY IT IS NEEDED AT ALL, given the edge list generates ingress automatically: the edge list can only

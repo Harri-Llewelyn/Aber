@@ -40,14 +40,8 @@ keywords:
 annotations:
   # The whole stack is in this chart: the data tier, the Supabase control plane, messaging, the
   # edge and frontend, ingress, hardening and telemetry. The design reasoning for each is in
-  # docs/kubernetes-migration-plan.md, which source comments cite by section number.
-  #
-  # This said `"1"` until the chart was first published, months after phase 7 landed -- harmless
-  # while the only reader was someone with the repository open beside it, and actively misleading
-  # the moment `helm show chart` became the way people meet this chart. What is and is not
-  # deployed is in deploy/k8s/README.md; the four hardening features are off by default and each
-  # says why in values.yaml.
-  factoryplus.io/phase: "7"
+  # docs/kubernetes-architecture.md, which source comments cite by section number. What is and is
+  # not deployed is in deploy/k8s/README.md.
 
   # OFF BY DEFAULT, and named here because they are the difference between a chart that installs
   # and one that installs correctly for a given cluster. Each needs a value the chart cannot

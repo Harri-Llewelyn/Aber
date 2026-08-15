@@ -223,7 +223,7 @@ redirect; empty means /oauth/authorize sends the browser to `/oauth/consent` wit
 Grafana and Node-RED SSO both fail at the consent step with nothing naming the cause. The OAuth
 `redirect_uris` db-init registers would be empty too, so the clients could never match.
 
-Phase 1 (data tier only) genuinely does not need a domain, which is why this is gated on
+A data-tier-only install genuinely does not need a domain, which is why this is gated on
 supabaseAuth rather than asserted unconditionally.
 */}}
 {{- define "factoryplus.validatePublicUrls" -}}
@@ -554,7 +554,7 @@ URL a service is told to advertise can never disagree.
 Every ingress route in one place: subdomain, backend Service, port, and whether it is deployed.
 
 Built here rather than in ingress.yaml so the ingress and anything else that needs to reason about
-the public surface (NOTES.txt, and Phase 7's NetworkPolicies) read one definition.
+the public surface (NOTES.txt, and the NetworkPolicies) read one definition.
 */}}
 {{- define "factoryplus.ingressRoutes" -}}
 {{- $routes := list -}}
@@ -754,7 +754,7 @@ file was written and absent when it is read makes the settings look wrong on eve
 rewritten forever -- silently, because an unloadable settings.js is already handled as "replace
 it". One definition, included twice, is what prevents that.
 
-Consumed in Phase 4; defined here so the anchor's guarantee is established with the helpers rather
+Defined here, with the helpers, so the anchor's guarantee is established rather
 than bolted on beside the Deployment that happens to need it first.
 */}}
 {{- define "factoryplus.noderedAuthEnv" -}}

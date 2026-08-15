@@ -60,7 +60,7 @@ spec:
   serviceName: timescaledb-headless
   # ONE REPLICA, AND NOT A TUNABLE. This is a single Postgres instance with no replication --
   # scaling it would start a second server against a second empty volume, not a replica. HA needs
-  # an operator and a custom image (the supabase/postgres extension set), which plan §3.3 keeps
+  # an operator and a custom image (the supabase/postgres extension set), which architecture §3.3 keeps
   # deliberately out of scope. Recovery is backups, not replicas.
   replicas: 1
   # Recreate semantics: never run two instances against the same data directory.

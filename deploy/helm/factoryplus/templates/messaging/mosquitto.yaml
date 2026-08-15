@@ -134,7 +134,7 @@ the initContainer (and the reload sidecar) on every start, so rotating one in va
 broker on restart. This Secret holds only what the provisioning script adds.
 
 Option C (mosquitto-go-auth against the `gateways` table, where the username is already the
-sparkplug_id the ACL's %u matches) remains the recorded future direction -- see plan §5.1.
+sparkplug_id the ACL's %u matches) remains the recorded future direction -- see architecture §5.1.
 */}}
 {{- $existing := lookup "v1" "Secret" .Release.Namespace .Values.mosquitto.credentials.secretName }}
 apiVersion: v1
@@ -208,7 +208,7 @@ MQTT IS RAW TCP AND CANNOT RIDE AN HTTP INGRESS. On k3s the built-in ServiceLB (
 1883 must BE free: a Compose stack running on the same machine holds it and this Service sits
 <pending> with nothing naming the conflict.
 
-The WebSocket listener (9001) is exposed here too for parity, but it can also ride the Phase 5
+The WebSocket listener (9001) is exposed here too for parity, but it can also ride the
 Ingress, which is the better place for it once TLS terminates there.
 */}}
 apiVersion: v1
@@ -481,7 +481,7 @@ spec:
           IT IS STILL REQUIRED even with the script forcing reloads, and this is the part worth
           keeping: it is the only path by which a Secret changed by ANY OTHER ROUTE -- a
           `helm upgrade`, a restore from backup, another operator's kubectl, an External Secrets
-          refresh in Phase 7 -- reaches the running broker at all.
+          refresh -- reaches the running broker at all.
           =========================================================================================
         */}}
         - name: credential-reload

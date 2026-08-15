@@ -14,8 +14,8 @@
 
 global:
   # k3s ships Traefik and CoreDNS; `localhost` here means the ingress hosts resolve via /etc/hosts
-  # or nip.io during development. Phase 5 wires the Ingress objects -- until then this only feeds
-  # the browser-facing URLs the OAuth clients are registered with.
+  # or nip.io during development. Feeds both the Ingress rules and the browser-facing URLs the
+  # OAuth clients are registered with -- one value, so they cannot disagree.
   publicBaseDomain: 127.0.0.1.nip.io
   scheme: http
   # k3s's built-in provisioner. Node-local and ReadWriteOnce -- see values.yaml.

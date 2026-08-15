@@ -162,8 +162,8 @@ spec:
               value: {{ .Values.timescaledb.username | quote }}
             {{- include "factoryplus.secretEnv" (dict "name" "DB_PASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
             # Supabase's own database, reached directly for the audit-row cleanup that migration
-            # 0003 deliberately put out of reach of service_role. The Phase 0 fix to
-            # SUPABASE_DB_PORT's conditional default is what makes this correct in-cluster.
+            # 0003 deliberately put out of reach of service_role. SUPABASE_DB_PORT's conditional
+            # default is what makes this correct in-cluster.
             - name: SUPABASE_DB_HOST
               value: {{ include "factoryplus.supabaseDb.host" . | quote }}
             - name: SUPABASE_DB_PORT

@@ -27,7 +27,7 @@ window.__FACTORYPLUS_CONFIG__ = window.__FACTORYPLUS_CONFIG__ || {
 ---
 {{/*
 =================================================================================================
-THE RUNTIME CONFIGURATION -- this ConfigMap is the whole point of Phase 0 §2.1.
+THE RUNTIME CONFIGURATION -- this ConfigMap is the whole point of §2.1.
 
 The frontend image is built with VITE_RUNTIME_CONFIG=true, which bakes NOTHING. Vite inlines
 `import.meta.env` at build time, so a baked bundle carries whichever Supabase URL it was built
@@ -84,7 +84,7 @@ metadata:
 spec:
   # THE ONE COMPONENT HERE THAT SCALES FREELY: NGINX serving static files, no state, no upstream
   # connection pool, nothing per-instance. Default 2 for availability during a rollout; the first
-  # HPA candidate in Phase 7 alongside Kong and PostgREST.
+  # HPA candidate alongside Kong and PostgREST.
   replicas: {{ .Values.frontend.replicas }}
   strategy:
     type: RollingUpdate
