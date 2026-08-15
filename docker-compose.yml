@@ -173,14 +173,56 @@ services:
     image: supabase/postgres:17.6.1.160
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
-    entrypoint: >
-      /bin/sh -c "
-      echo 'Setting passwords for scoped Supabase roles...';
-      psql -h supabase-db -U supabase_admin -d postgres -c \"ALTER USER supabase_auth_admin WITH PASSWORD '${POSTGRES_PASSWORD:-postgres}';\";
-      psql -h supabase-db -U supabase_admin -d postgres -c \"ALTER USER authenticator WITH PASSWORD '${POSTGRES_PASSWORD:-postgres}';\";
-      psql -h supabase-db -U supabase_admin -d postgres -c \"ALTER USER supabase_storage_admin WITH PASSWORD '${POSTGRES_PASSWORD:-postgres}';\";
-      echo 'Scoped role passwords set successfully.';
-      "
+    # Exec form with a literal block, NOT the folded `>` string form -- same reasoning as
+    # supabase-kong-init, and additionally because `sh -c "a; b; c; echo done"` HAS NO ERROR
+    # HANDLING: every psql failure is skipped and the exit status is the echo's, so this Job
+    # reported "passwords set successfully" while having set none, and
+    # `service_completed_successfully` was satisfied by a Job that did nothing. The cost landed
+    # two services away, as GoTrue restarting on
+    # `password authentication failed for user "supabase_auth_admin"`.
+    entrypoint:
+      - /bin/sh
+      - -e
+      - -c
+      - |
+        echo 'Setting passwords for scoped Supabase roles...'
+
+        # PREFLIGHT, because this is the failure people actually hit. POSTGRES_PASSWORD is read by
+        # the postgres image ONLY AT INITDB -- that is, on a first boot against an empty data
+        # directory. Change it in .env with supabase_db_data already populated and the database
+        # keeps the OLD password, so this connection is the first thing to fail, and the message
+        # below is the only place that can explain why.
+        if ! psql -h supabase-db -U supabase_admin -d postgres -c 'SELECT 1' >/dev/null 2>&1; then
+          echo '' >&2
+          echo 'ERROR: cannot authenticate to supabase-db as supabase_admin.' >&2
+          echo '' >&2
+          echo 'POSTGRES_PASSWORD in .env does not match what this data volume was initialised' >&2
+          echo 'with. The postgres image applies POSTGRES_PASSWORD at initdb only, so rotating it' >&2
+          echo 'against an existing volume never reaches the database. Either:' >&2
+          echo '' >&2
+          echo '  * recreate the volume:  docker compose down -v && docker compose up -d' >&2
+          echo '    (destroys all data), or' >&2
+          echo '  * set the old password back in .env, then ALTER USER supabase_admin by hand.' >&2
+          echo '' >&2
+          exit 1
+        fi
+
+        # :'pw' rather than interpolating the password into the SQL text. Compose would otherwise
+        # bake it into the entrypoint, where `docker inspect` shows it to anyone who can reach the
+        # daemon; read from PGPASSWORD it stays in the environment. psql also quotes it correctly,
+        # so a generated password containing a quote cannot break the statement.
+        #
+        # READ FROM A FILE, NOT PASSED VIA -c. psql expands :variables only in input it READS --
+        # a file or standard input. A -c string goes to the server unexpanded, so it receives the
+        # literal `:'pw'` and answers `syntax error at or near ":"`.
+        echo "ALTER USER :\"role\" WITH PASSWORD :'pw';" > /tmp/set-role-password.sql
+
+        for role in supabase_auth_admin authenticator supabase_storage_admin; do
+          psql -h supabase-db -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+               -v pw="$$PGPASSWORD" -v role="$$role" -f /tmp/set-role-password.sql
+        done
+
+        echo 'Scoped role passwords set successfully.'
     depends_on:
       supabase-db:
         condition: service_healthy

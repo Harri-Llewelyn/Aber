@@ -54,10 +54,37 @@ spec:
               # replaying on every upgrade re-asserts the current secret. That is the point: a
               # rotated password in values has to reach an existing database.
               echo 'Setting passwords for scoped Supabase roles...'
+
+              # PREFLIGHT. secrets.postgresPassword is applied by the postgres image AT INITDB
+              # ONLY -- on a first boot against an empty PVC. Rotate it against an existing volume
+              # and the database keeps the OLD password, so this connection is the first thing to
+              # fail and the raw psql error names neither the cause nor the fix.
+              if ! psql -h {{ include "acs-cymru.supabaseDb.host" . }} -p {{ include "acs-cymru.supabaseDb.port" . }} \
+                        -U supabase_admin -d postgres -c 'SELECT 1' >/dev/null 2>&1; then
+                echo '' >&2
+                echo 'ERROR: cannot authenticate to supabase-db as supabase_admin.' >&2
+                echo '' >&2
+                echo 'secrets.postgresPassword does not match what this PVC was initialised with.' >&2
+                echo 'The postgres image applies it at initdb only, so rotating it against an' >&2
+                echo 'existing volume never reaches the database. Either restore the previous' >&2
+                echo 'value and ALTER USER supabase_admin by hand, or delete the PVC and let the' >&2
+                echo 'stack rebuild (destroys all data -- restore from a backup afterwards).' >&2
+                echo '' >&2
+                exit 1
+              fi
+
+              # :'pw' rather than interpolating into the SQL text -- psql quotes it correctly, so a
+              # generated password containing a quote cannot break the statement.
+              #
+              # READ FROM A FILE, NOT PASSED VIA -c. psql expands :variables only in input it
+              # READS. A -c string goes to the server unexpanded, so it receives the literal
+              # `:'pw'` and answers `syntax error at or near ":"`.
+              echo "ALTER USER :\"role\" WITH PASSWORD :'pw';" > /tmp/set-role-password.sql
+
               for role in supabase_auth_admin authenticator supabase_storage_admin; do
                 psql -v ON_ERROR_STOP=1 -h {{ include "acs-cymru.supabaseDb.host" . }} -p {{ include "acs-cymru.supabaseDb.port" . }} \
                      -U supabase_admin -d postgres \
-                     -c "ALTER USER $role WITH PASSWORD '$ROLE_PASSWORD';"
+                     -v pw="$ROLE_PASSWORD" -v role="$role" -f /tmp/set-role-password.sql
               done
               echo 'Scoped role passwords set successfully.'
           resources:
