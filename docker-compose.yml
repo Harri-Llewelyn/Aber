@@ -755,11 +755,18 @@ services:
       # Factory+ Directory adapter's on this gateway. Its "Try it out" does not work, because the
       # i3X server sends no CORS headers and answers OPTIONS with 501; the spec's description says
       # so rather than leaving the button to fail mysteriously.
+      # THE POSTGREST LIVE-SCHEMA ENTRY WAS REMOVED, and deliberately not repaired. It pointed at
+      # /rest/v1/, which Kong gates with key-auth, so Swagger UI fetched it without an apikey and
+      # the definition failed to load -- presenting as an authorization error rather than as a
+      # missing key. It could have been made to load (kong.yml sets key_in_query on that route, so
+      # `?apikey=<anon>` would work), but it was duplicating docs/openapi.yaml, which is
+      # hand-maintained AND enforced: check-docs-drift.mjs asserts it covers every published
+      # relation and every edge function. A second, auto-generated view of the same surface that
+      # no check can keep honest is worth less than the one that is.
       URLS: >-
-        [{"url":"/openapi.yaml","name":"Factory+ Platform API"},
-         {"url":"/i3x-openapi.yaml","name":"i3X 1.0 Server"},
-         {"url":"${SUPABASE_URL:-http://127.0.0.1:54321}/rest/v1/","name":"PostgREST (live database schema)"}]
-      URLS_PRIMARY_NAME: Factory+ Platform API
+        [{"url":"/openapi.yaml","name":"ACS-Cymru Platform API"},
+         {"url":"/i3x-openapi.yaml","name":"i3X 1.0 Server"}]
+      URLS_PRIMARY_NAME: ACS-Cymru Platform API
       DEEP_LINKING: "true"
       DISPLAY_REQUEST_DURATION: "true"
     volumes:
@@ -1054,7 +1061,6 @@ services:
       - grafana_data:/var/lib/grafana
       - ./grafana/grafana.ini:/etc/grafana/grafana.ini:ro
       - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./grafana/provisioning/alerting:/etc/grafana/provisioning/alerting:ro
       - ./grafana/provisioning/datasources:/tmp/datasources-template:ro
       - grafana_provisioning_datasources:/etc/grafana/provisioning/datasources
     # Renders the datasource template, then hands over to Grafana's own /run.sh.

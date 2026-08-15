@@ -102,11 +102,11 @@ MALFORMED_DEVICE_ID = "dev" + "f" * 20
 
 # The Sparkplug Group ID every message in this run is published under. Named rather than inlined
 # because the alias table and the rebirth topic are both scoped by it.
-# Must match gateways.sparkplug_group, whose column default is 'FactoryPlus' (migration 0008).
+# Must match gateways.sparkplug_group, whose column default is 'ACS-Cymru' (migration 0008).
 # It was "Group1" while ingestion discarded the group entirely; now that resolution is
 # group-qualified, publishing under a group the seeded gateway is not registered under would
 # exercise the DEPRECATED fallback arm on every check rather than the current path.
-VAL_GROUP = "FactoryPlus"
+VAL_GROUP = "ACS-Cymru"
 
 # ---------------------------------------------------------------------------------------------
 # The validator's gateway UUID is PINNED, and that is what lets it hold an ordinary per-gateway
@@ -279,7 +279,7 @@ def probe_nodered_editor_login():
         anon = os.getenv("SUPABASE_ANON_KEY", "")
         token = json.loads(fetch(
             f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-            json.dumps({"email": "admin@acs-cymru.local", "password": "factoryplus123"}).encode(),
+            json.dumps({"email": "admin@acs-cymru.local", "password": "acscymru123"}).encode(),
             {"apikey": anon, "Content-Type": "application/json"},
         ).read())["access_token"]
 
@@ -776,7 +776,7 @@ def run_simulation():
     # silent-drop failure the comment above warns about, arriving from the environment rather than
     # from a typo.
     #
-    # AND THERE IS NO DEFAULT PASSWORD ANY MORE. `factoryplus123` dates from before per-gateway
+    # AND THERE IS NO DEFAULT PASSWORD ANY MORE. `acscymru123` dates from before per-gateway
     # credentials existed. Once it stopped being a real account it stopped being a convenience and
     # became a way to fail invisibly -- the broker rejects it, and every check that depends on
     # telemetry fails for reasons that have nothing to do with the credential.
@@ -1618,7 +1618,7 @@ def verify_results():
             req = urllib.request.Request(
                 f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
                 data=json.dumps({"email": "admin@acs-cymru.local",
-                                 "password": "factoryplus123"}).encode(),
+                                 "password": "acscymru123"}).encode(),
                 headers={"apikey": anon, "Content-Type": "application/json"},
             )
             with urllib.request.urlopen(req, timeout=15) as resp:

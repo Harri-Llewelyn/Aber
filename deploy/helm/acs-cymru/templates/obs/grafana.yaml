@@ -38,10 +38,6 @@ data:
   {{ base $path }}: |
 {{ $.Files.Get $path | indent 4 }}
 {{- end }}
-{{- range $path, $bytes := .Files.Glob "files/grafana-alerting/*.yml" }}
-  {{ base $path }}: |
-{{ $.Files.Get $path | indent 4 }}
-{{- end }}
 ---
 {{/*
 The dashboards, in their own ConfigMap.
@@ -261,10 +257,6 @@ spec:
             - name: config
               mountPath: /etc/grafana/provisioning/dashboards/dashboards.yml
               subPath: dashboards.yml
-              readOnly: true
-            - name: config
-              mountPath: /etc/grafana/provisioning/alerting/alerting.yml
-              subPath: alerting.yml
               readOnly: true
             - name: dashboards
               mountPath: /etc/grafana/provisioning/dashboards/json

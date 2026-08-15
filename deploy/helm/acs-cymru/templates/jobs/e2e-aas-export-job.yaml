@@ -118,7 +118,7 @@ spec:
             - name: AAS_TEST_EMAIL
               value: admin@acs-cymru.local
             - name: AAS_TEST_PASSWORD
-              value: factoryplus123
+              value: acscymru123
             - name: AAS_TEST_DEVICE
               value: Simulated_CNC_01
             - name: STORAGE_MODEL_BUCKET

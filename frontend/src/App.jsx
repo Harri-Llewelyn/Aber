@@ -70,7 +70,7 @@ function tabIsVisible(tabDef, hasPermission) {
 
 function AuthScreen({ onLoginSuccess, notice }) {
   const [email, setEmail] = useState('admin@acs-cymru.local')
-  const [password, setPassword] = useState('factoryplus123')
+  const [password, setPassword] = useState('acscymru123')
   const [isSignUp, setIsSignUp] = useState(false)
   const [authError, setAuthError] = useState(null)
   const [loading, setLoading] = useState(false)

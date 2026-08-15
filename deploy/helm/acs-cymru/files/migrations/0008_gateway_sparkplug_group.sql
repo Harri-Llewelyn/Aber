@@ -8,7 +8,7 @@
 -- addresses an edge node as (group, node), which is why its Directory keys on
 -- /v1/address/{group_id}/{node_id}, and this column is what lets that endpoint mean anything.
 --
--- DEFAULT 'FactoryPlus' matches what the simulator and validate.py publish. Existing rows adopt
+-- DEFAULT 'ACS-Cymru' matches what the simulator and validate.py publish. Existing rows adopt
 -- it, so a stack in flight keeps resolving -- and ingestion carries a group-agnostic fallback arm
 -- with a throttled deprecation warning for anything still publishing under another group.
 --
@@ -22,7 +22,7 @@
 -- 1. The column
 -- ---------------------------------------------------------------------------------------------
 ALTER TABLE public.gateways
-  ADD COLUMN IF NOT EXISTS sparkplug_group text NOT NULL DEFAULT 'FactoryPlus';
+  ADD COLUMN IF NOT EXISTS sparkplug_group text NOT NULL DEFAULT 'ACS-Cymru';
 
 COMMENT ON COLUMN public.gateways.sparkplug_group IS
   'Sparkplug B Group ID -- the second topic segment. With sparkplug_id it forms the edge node '

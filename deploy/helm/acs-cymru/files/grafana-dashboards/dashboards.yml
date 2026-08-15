@@ -1,9 +1,9 @@
 apiVersion: 1
 
 providers:
-  - name: 'FactoryPlus'
+  - name: 'ACS-Cymru'
     orgId: 1
-    folder: 'FactoryPlus'
+    folder: 'ACS-Cymru'
     type: file
     disableDeletion: false
     updateIntervalSeconds: 30

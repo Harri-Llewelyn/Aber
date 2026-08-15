@@ -420,8 +420,8 @@ class TestMirroredConstants(unittest.TestCase):
             if not m:
                 continue
             # The LAST quoted string on the line, not the first. Both files may write the constant
-            # either as a bare literal (`= "FactoryPlus"`) or as an override with a default
-            # (`= os.getenv("DEFAULT_SPARKPLUG_GROUP", "FactoryPlus")`), and in the second form the
+            # either as a bare literal (`= "ACS-Cymru"`) or as an override with a default
+            # (`= os.getenv("DEFAULT_SPARKPLUG_GROUP", "ACS-Cymru")`), and in the second form the
             # first quoted string is the environment variable's NAME -- comparing that against the
             # other file's value fails on a pair that agrees perfectly.
             quoted = re.findall(r'"([^"]*)"', m.group(1))

@@ -2429,7 +2429,7 @@ ON CONFLICT (device_id, schema_id) DO NOTHING;
 
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000001', 'Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
 ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000002', 'Factory+ Web Dashboard', 'GRAPHICAL_UI', 'http://localhost:3000', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000002', 'ACS-Cymru Web Dashboard', 'GRAPHICAL_UI', 'http://localhost:3000', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
 ON CONFLICT (service_name) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000003', 'Node-RED Edge Gateway', 'EDGE_NODE', 'http://localhost:1880', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
 ON CONFLICT (service_name) DO NOTHING;

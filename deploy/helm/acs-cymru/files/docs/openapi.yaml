@@ -28,7 +28,7 @@ info:
     because an OAuth client presents client credentials and has no way to add a Supabase
     header. Both still validate the bearer token themselves.
 
-    Sign in first with `admin@acs-cymru.local` / `factoryplus123` (local dev seed).
+    Sign in first with `admin@acs-cymru.local` / `acscymru123` (local dev seed).
 
     > ⚠️ **"Example Value" is documentation, not data.** Swagger UI synthesises samples from
     > this spec's schemas whether or not those rows exist. Press **Execute** and read the
@@ -161,7 +161,7 @@ paths:
               type: object
               properties:
                 email: { type: string, format: email, example: admin@acs-cymru.local }
-                password: { type: string, format: password, example: factoryplus123 }
+                password: { type: string, format: password, example: acscymru123 }
                 refresh_token:
                   type: string
                   description: Send this instead of email/password when `grant_type=refresh_token`.
@@ -1489,7 +1489,7 @@ paths:
       security:
         - bearerAuth: []
       parameters:
-        - { name: group_id, in: path, required: true, schema: { type: string }, description: 'e.g. `FactoryPlus`' }
+        - { name: group_id, in: path, required: true, schema: { type: string }, description: 'e.g. `ACS-Cymru`' }
         - { name: node_id, in: path, required: true, schema: { type: string }, description: 'The gateway `sparkplug_id`.' }
       responses:
         '200':
@@ -1757,7 +1757,7 @@ components:
         cell_id: { type: string, format: uuid, nullable: true }
         sparkplug_group:
           type: string
-          default: FactoryPlus
+          default: ACS-Cymru
           description: >-
             Sparkplug B Group ID -- the second topic segment. With `sparkplug_id` it forms the edge
             node address Factory+ resolves as (group, node), which is what `/v1/address/…` reads.
@@ -2184,7 +2184,7 @@ components:
       type: object
       description: A Sparkplug B address. `(group_id, node_id)` names the edge node; `device_id` is its device.
       properties:
-        group_id: { type: string, example: FactoryPlus, description: 'Empty when the device is bound to no gateway.' }
+        group_id: { type: string, example: ACS-Cymru, description: 'Empty when the device is bound to no gateway.' }
         node_id: { type: string, example: gwy100000000000400080000 }
         device_id: { type: string, example: dev200000000000400080000 }
 

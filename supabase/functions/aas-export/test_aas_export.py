@@ -41,7 +41,7 @@ ID_SHORT_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*[a-zA-Z0-9_]+$")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 DEMO_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@acs-cymru.local")
-DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "factoryplus123")
+DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "acscymru123")
 TARGET_DEVICE = os.getenv("AAS_TEST_DEVICE", "Simulated_CNC_01")
 
 try:

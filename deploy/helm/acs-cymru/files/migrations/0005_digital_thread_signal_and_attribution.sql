@@ -108,7 +108,7 @@ BEGIN
     IF v_actor IS NOT NULL THEN
         v_source := 'user';
     ELSE
-        -- A caller may declare itself with an `X-FactoryPlus-Actor` request header, which
+        -- A caller may declare itself with an `X-ACS-Cymru-Actor` request header, which
         -- PostgREST exposes as request.headers. That is how the ingestion daemon is told apart
         -- from an edge function -- both arrive on the same service-role key, so the connection
         -- alone cannot distinguish them.

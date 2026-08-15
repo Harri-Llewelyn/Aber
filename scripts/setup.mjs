@@ -172,7 +172,7 @@ console.log('   The anon and service-role JWTs were signed with the new SUPABASE
 console.log('   three are a matching set. Nothing in .env is shared with any other install.');
 console.log(`   Left empty on purpose: ${deliberatelyEmpty.join(', ')} (break-glass only).`);
 console.log('');
-console.log('⚠️  Demo LOGINS are separate and unchanged: admin@acs-cymru.local / factoryplus123');
+console.log('⚠️  Demo LOGINS are separate and unchanged: admin@acs-cymru.local / acscymru123');
 console.log('   and the other three accounts are seeded by supabase/seed.sql, not by .env.');
 console.log('   Change them before anyone else can reach this stack.');
 console.log('');

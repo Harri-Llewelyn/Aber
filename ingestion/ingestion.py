@@ -20,7 +20,7 @@ DB_HOST = os.getenv("DB_HOST", "timescaledb")
 DB_PORT = os.getenv("DB_PORT", "5433" if os.getenv("DB_HOST") is None else "5432")
 DB_NAME = os.getenv("DB_NAME", "postgres")
 DB_USER = os.getenv("DB_USER", "postgres")
-# NO DEFAULT, deliberately. A published default ("postgres" / "factoryplus123") means a
+# NO DEFAULT, deliberately. A published default ("postgres" / "acscymru123") means a
 # deployment with the variable missing connects with a known-weak credential instead of
 # failing -- the failure mode is silence, which is the worst one. These are validated in
 # main(), matching how SUPABASE_SERVICE_ROLE_KEY has always been treated: refuse to start.
@@ -105,7 +105,7 @@ try:
         # session's headers is the path that actually reaches PostgREST, verified end to end.
         supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
         try:
-            supabase_client.postgrest.session.headers["X-FactoryPlus-Actor"] = "ingestion"
+            supabase_client.postgrest.session.headers["X-ACS-Cymru-Actor"] = "ingestion"
         except Exception as header_err:
             # Losing the label is not worth losing ingestion over: without it the trigger falls
             # back to 'service', which is still attributed, just less specific.
@@ -178,7 +178,7 @@ FACTORYPLUS_PAYLOAD_UUID = "11ad7b32-1d32-4c4a-b0c9-fa049208939a"
 
 # Default Sparkplug Group ID, matching gateways.sparkplug_group's column default (migration
 # 0008). Used only to describe the fallback in a log line; resolution never assumes it.
-DEFAULT_SPARKPLUG_GROUP = "FactoryPlus"
+DEFAULT_SPARKPLUG_GROUP = "ACS-Cymru"
 
 class DirectoryUnavailable(Exception):
     """
@@ -1640,7 +1640,7 @@ def _require_credentials():
     Refuse to start without the broker and database credentials.
 
     Same posture as the Supabase check below, and for the same reason: these previously
-    carried published defaults ("factoryplus123" / "postgres"), so a deployment with the
+    carried published defaults ("acscymru123" / "postgres"), so a deployment with the
     variable missing came up connected with a known-weak credential and reported nothing.
     A missing secret must be a startup failure, not a silent downgrade.
     """

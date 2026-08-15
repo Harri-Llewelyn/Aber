@@ -117,7 +117,8 @@ immutability, `0004`, `0005`, `0006` Node-RED SSO, `0007` metric-name format, `0
 group, `0009` withdraws residual `anon` function grants, `0010` telemetry rollups and latest-value
 view, `0011` IDTA Digital Nameplate and per-device nameplate data, `0012` permitted values of a
 discrete metric, `0013` ASHRAE 223P vocabulary, `0014` repoints locally-minted semantic
-identifiers onto the `acs-cymru.local` namespace — plus demo accounts (`supabase/seed.sql`).
+identifiers onto the `acs-cymru.local` namespace, `0015` moves the default Sparkplug group to
+`ACS-Cymru` — plus demo accounts (`supabase/seed.sql`).
 
 | Interface | URL |
 | :--- | :--- |
@@ -132,7 +133,7 @@ the consent step needs your dashboard session — going straight to either shows
 prompt rather than a login form. In Node-RED, click **Sign in with ACS-Cymru**; Administrator and
 Shopfloor_Manager can deploy, Operator and Auditor get a read-only editor.
 
-**Demo accounts** — seeded by [`supabase/seed.sql`](supabase/seed.sql), password `factoryplus123`:
+**Demo accounts** — seeded by [`supabase/seed.sql`](supabase/seed.sql), password `acscymru123`:
 
 | Email | Role | Access |
 | :--- | :--- | :--- |

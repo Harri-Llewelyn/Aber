@@ -101,7 +101,7 @@ SSE_KEEPALIVE_SECONDS = float(os.getenv("I3X_SSE_KEEPALIVE_SECONDS", "15"))
 # same discipline `sparkplugToXsd.ts` has against `sparkplugDatatype.js`. ingestion.py is not
 # imported here on purpose; see the security note in the module docstring.
 MAX_ALIASES_PER_NODE = int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))
-DEFAULT_SPARKPLUG_GROUP = os.getenv("DEFAULT_SPARKPLUG_GROUP", "FactoryPlus")
+DEFAULT_SPARKPLUG_GROUP = os.getenv("DEFAULT_SPARKPLUG_GROUP", "ACS-Cymru")
 IDENTITY_METRICS = ("Asset_ID", "Asset_Name", "Instance_UUID", "Schema_UUID")
 
 _values: Dict[str, Dict[str, dict]] = {}

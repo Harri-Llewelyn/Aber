@@ -152,12 +152,6 @@ const MIRRORS = [
     match: (name) => name.endsWith('.json'),
     why: 'The dashboards themselves',
   },
-  {
-    source: join('grafana', 'provisioning', 'alerting'),
-    dest: 'grafana-alerting',
-    match: (name) => name.endsWith('.yml'),
-    why: 'Alert rules. These read val_string on Controller/EXECUTION and EMERGENCY_STOP -- a stale val_bool test compares NULL and stops alerting silently',
-  },
 ];
 
 /**

@@ -73,9 +73,14 @@ spec:
               containerPort: 8080
               protocol: TCP
           env:
-            # Three entries. The two curated specs are served from mounted files; the PostgREST
-            # entry is fetched BY THE BROWSER, so it must be the ingress address and needs its
-            # origin allowed in kong.yml's cors plugin.
+            # Two curated specs, both served from mounted files.
+            #
+            # THE POSTGREST LIVE-SCHEMA ENTRY WAS REMOVED, matching Compose. It pointed at
+            # /rest/v1/, which Kong gates with key-auth, so the browser fetched it without an
+            # apikey and the definition failed to load as an authorization error. It duplicated
+            # openapi.yaml, which is hand-maintained AND enforced by check-docs-drift.mjs against
+            # every published relation and edge function -- an auto-generated second view that no
+            # check can keep honest is worth less than the one that is.
             #
             # The i3X spec loads from this origin like the other file, but its "Try it out" cannot
             # work: the i3X server sends no CORS headers and answers OPTIONS with 501, so the
@@ -83,11 +88,10 @@ spec:
             # it is a reference, not a live console, until that server grows CORS support.
             - name: URLS
               value: >-
-                [{"url":"/openapi.yaml","name":"Factory+ Platform API"},
-                 {"url":"/i3x-openapi.yaml","name":"i3X 1.0 Server"},
-                 {"url":"{{ $supabasePublic }}/rest/v1/","name":"PostgREST (live database schema)"}]
+                [{"url":"/openapi.yaml","name":"ACS-Cymru Platform API"},
+                 {"url":"/i3x-openapi.yaml","name":"i3X 1.0 Server"}]
             - name: URLS_PRIMARY_NAME
-              value: Factory+ Platform API
+              value: ACS-Cymru Platform API
             - name: DEEP_LINKING
               value: "true"
             - name: DISPLAY_REQUEST_DURATION

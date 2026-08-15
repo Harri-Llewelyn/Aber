@@ -1478,7 +1478,7 @@ jobs:
           timeout 90s bash -c '
             until docker compose exec -T timescaledb pg_isready -U postgres >/dev/null 2>&1 && \
                   docker compose exec -T supabase-db pg_isready -U postgres >/dev/null 2>&1 && \
-                  docker compose exec -T mosquitto mosquitto_sub -u factoryplus_monitor -P factoryplus123 -t "\$SYS/broker/version" -C 1 >/dev/null 2>&1; do
+                  docker compose exec -T mosquitto mosquitto_sub -u factoryplus_monitor -P acscymru123 -t "\$SYS/broker/version" -C 1 >/dev/null 2>&1; do
               echo "Waiting for TimescaleDB, Supabase DB, and Mosquitto to become ready..."
               sleep 2
             done
@@ -1572,7 +1572,7 @@ jobs:
       #
       # MQTT_VALIDATOR_USER/MQTT_VALIDATOR_PASSWORD MUST REACH THE SCRIPT, and until 2026-08 the
       # fact that they did not was hidden by a coincidence. validate.py defaulted its password to
-      # the literal `factoryplus123`; this job runs `setup.mjs --demo`, which copies .env.example
+      # the literal `acscymru123`; this job runs `setup.mjs --demo`, which copies .env.example
       # VERBATIM, and .env.example sets MQTT_VALIDATOR_PASSWORD to exactly that string. So the
       # default matched the account and CI went green -- while a developer running a plain
       # `npm run setup`, which mints a random password per principal, got a broker rejection and
@@ -1621,7 +1621,7 @@ jobs:
           set -a && . ./.env && set +a
           TOKEN=$(curl -s -X POST "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
             -H "apikey: $SUPABASE_ANON_KEY" -H "Content-Type: application/json" \
-            -d '{"email":"admin@acs-cymru.local","password":"factoryplus123"}' \
+            -d '{"email":"admin@acs-cymru.local","password":"acscymru123"}' \
             | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
           test -n "$TOKEN"
 

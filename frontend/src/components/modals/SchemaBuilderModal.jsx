@@ -25,7 +25,7 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
   const [semanticIdType, setSemanticIdType] = useState('')
   const [deviceName, setDeviceName] = useState('')
   const [gatewayId, setGatewayId] = useState('')
-  const [groupId, setGroupId] = useState('FactoryPlus')
+  const [groupId, setGroupId] = useState('ACS-Cymru')
 
   const activeCatalog = useMemo(() => (catalog || []).filter(m => !m.deprecated), [catalog])
 
@@ -78,7 +78,7 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
   const buildDeviceDetails = () => ({
     device_name: deviceName,
     gateway_id: gatewayId || null,
-    group_id: groupId || 'FactoryPlus'
+    group_id: groupId || 'ACS-Cymru'
   })
 
   const handleSubmit = (action) => {

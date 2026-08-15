@@ -218,11 +218,11 @@ hardcode them.
 
 | Order | Type | Topic | Purpose |
 | :-- | :--- | :--- | :--- |
-| 1 | `NBIRTH` | `spBv1.0/FactoryPlus/NBIRTH/gwy1000…` | The edge node's own birth certificate, once at startup, before any device birth |
-| 2 | `DBIRTH` | `spBv1.0/FactoryPlus/DBIRTH/gwy1000…/dev2000…` | The metric names, types and config the device will report. Re-sent every 60 s |
-| 3 | `DDATA` | `spBv1.0/FactoryPlus/DDATA/gwy1000…/dev2000…` | Telemetry, **report by exception** — scanned every 5 s, published only when a metric moves |
-| 4 | `DDEATH` | `spBv1.0/FactoryPlus/DDEATH/gwy1000…/dev2000…` | Manually triggered — marks the device offline |
-| 5 | `NDATA` | `spBv1.0/FactoryPlus/NDATA/gwy1000…` | Gateway heartbeat, every 30 s |
+| 1 | `NBIRTH` | `spBv1.0/ACS-Cymru/NBIRTH/gwy1000…` | The edge node's own birth certificate, once at startup, before any device birth |
+| 2 | `DBIRTH` | `spBv1.0/ACS-Cymru/DBIRTH/gwy1000…/dev2000…` | The metric names, types and config the device will report. Re-sent every 60 s |
+| 3 | `DDATA` | `spBv1.0/ACS-Cymru/DDATA/gwy1000…/dev2000…` | Telemetry, **report by exception** — scanned every 5 s, published only when a metric moves |
+| 4 | `DDEATH` | `spBv1.0/ACS-Cymru/DDEATH/gwy1000…/dev2000…` | Manually triggered — marks the device offline |
+| 5 | `NDATA` | `spBv1.0/ACS-Cymru/NDATA/gwy1000…` | Gateway heartbeat, every 30 s |
 
 ### Report by exception
 
