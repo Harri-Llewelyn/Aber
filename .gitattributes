@@ -1,2 +1,8 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell scripts MUST keep LF in the working tree, on every platform. With core.autocrlf=true a
+# Windows checkout would otherwise get CRLF, and `sh` reads the trailing \r as part of the command
+# -- the error is `$'\r': command not found`, which names the shell rather than the line endings.
+# These scripts also run inside containers, where the same file is mounted directly.
+*.sh text eol=lf

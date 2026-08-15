@@ -205,7 +205,7 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | [`docs/openapi.yaml`](docs/openapi.yaml) · [`docs/i3x-openapi.yaml`](docs/i3x-openapi.yaml) | REST and i3X specifications, rendered by Swagger UI |
 | [`supabase/migrations/archive/`](supabase/migrations/archive) | The 38 pre-beta migrations, preserved for their reasoning. Never executed |
 | [`grafana/`](grafana) · [`timescaledb/`](timescaledb) | Provisioning; hypertable schema, retention and rollup reconciliation |
-| [`scripts/`](scripts) | Setup, seeding, vocabulary generation, chart-file sync, drift guards |
+| [`scripts/`](scripts) | Setup, seeding, vocabulary generation, chart-file sync, drift guards, database backup/restore |
 | [`tests/`](tests) | Vendored IDTA AAS schema, conformance test-runner image |
 
 ---

@@ -639,6 +639,14 @@ deliberately.)
 
 ### Backups
 
+Two tiers, answering different questions. **Tier 1 recovers data; tier 2 recovers a machine.**
+Neither substitutes for the other — a volume snapshot cannot restore one dropped table, and a
+logical dump cannot rebuild a dead node. The reasoning behind the tier 1 dumps, and the same
+strategy for the Compose target, is in
+[`../../supabase/README.md`](../../supabase/README.md#backup-and-recovery).
+
+#### Tier 1: logical dumps
+
 ```bash
 helm upgrade ... --set backup.enabled=true --set backup.persistence.size=100Gi
 kubectl -n factoryplus get cronjob factoryplus-backup
@@ -647,6 +655,19 @@ kubectl -n factoryplus create job --from=cronjob/factoryplus-backup backup-now  
 
 `pg_dump -Fc` of both databases, nightly, onto a PVC that **survives `helm uninstall`** — deleting the
 release is exactly when the backups are most wanted.
+
+Ad hoc, without waiting for the schedule:
+
+```bash
+kubectl -n factoryplus exec -i statefulset/supabase-db -- \
+  env PGPASSWORD="$PGPASSWORD" pg_dump -Fc -U postgres -d postgres > supabase-db.dump
+kubectl -n factoryplus exec -i statefulset/timescaledb -- \
+  env PGPASSWORD="$PGPASSWORD" pg_dump -Fc -U postgres -d postgres > timescaledb.dump
+```
+
+`scripts/backup-databases.sh` covers the same ground for Compose and for any reachable PostgreSQL
+(`BACKUP_MODE=direct`), and writes a manifest so a restore does not have to infer which files belong
+together. Use `BACKUP_FORMAT=custom` there when both targets must produce one artefact shape.
 
 Restore:
 
@@ -666,6 +687,48 @@ kubectl -n factoryplus exec -it statefulset/supabase-db -- \
   the Job refuses rather than producing an unsigned request.
 
 **Test a restore.** An untested backup is a belief, not a capability.
+
+> **The historian restore needs TimescaleDB's guards.** `_timescaledb_catalog.continuous_agg`
+> carries circular foreign keys, and restoring it with the extension's background workers live
+> leaves the three rollups from migration `0010` registered but never refreshing — retention and
+> compression stop with them, and nothing about the running stack looks wrong until the disk fills.
+> Wrap it:
+>
+> ```bash
+> kubectl -n factoryplus exec -it statefulset/timescaledb -- psql -U postgres -c 'SELECT timescaledb_pre_restore()'
+> # ... pg_restore ...
+> kubectl -n factoryplus exec -it statefulset/timescaledb -- psql -U postgres -c 'SELECT timescaledb_post_restore()'
+> ```
+>
+> Run `post_restore()` **even if the restore failed.** `scripts/restore-databases.sh` does this for
+> the Compose target and verifies `public.telemetry` through the wrapper afterwards.
+
+#### Tier 2: infrastructure and disaster recovery
+
+Tier 1 does not recover a dead node. Two routes, depending on what the cluster runs on:
+
+| Situation | Route |
+| :--- | :--- |
+| Cluster with a CSI snapshotter | A `VolumeSnapshotClass` plus scheduled `VolumeSnapshot` objects per PVC. Needs no chart setting |
+| Cluster with Velero | Namespace-scoped backups; annotate the storage pod (see *Storage durability*) |
+| **k3s on a Proxmox VM** — the on-prem edge appliance case | **Proxmox VE + Proxmox Backup Server**, snapshotting the whole guest |
+
+> **`qemu-guest-agent` must be running in the guest, and this is the whole invariant.** Proxmox
+> issues `fs-freeze` through the agent before snapshotting, which quiesces the filesystem so both
+> PostgreSQL data directories are captured at one consistent point. Without it the snapshot is
+> **crash-consistent, not transaction-consistent** — it restores like a machine that lost power, and
+> a snapshot of *two* independent databases taken without a freeze can land them at different points
+> in time. That is how `public.telemetry` ends up referencing assets the Supabase database has never
+> heard of, which reads as data corruption rather than as a backup fault.
+>
+> Verify rather than assume: `qm agent <vmid> ping` must answer from the Proxmox host, and
+> `Agent: Enabled` must appear in the VM's Options. **Installing the package in the guest is not
+> sufficient** — the VM option has to be ticked too, and a snapshot taken with it unticked reports
+> success.
+
+PBS gives deduplicated, incremental, verifiable snapshots with their own retention policy, which is
+the closest thing to a real RPO this stack has — but it recovers the *appliance*, not a table. Keep
+tier 1 running underneath it.
 
 ### Secrets in production
 

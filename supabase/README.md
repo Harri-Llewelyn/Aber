@@ -494,6 +494,93 @@ and binds everyone: history that can be re-opened is not history.
 
 ---
 
+## Backup and Recovery
+
+Two tiers, and they answer different questions. **Tier 1 recovers data; tier 2 recovers a machine.**
+Neither substitutes for the other: a filesystem snapshot cannot restore one dropped table, and a
+logical dump cannot boot a dead appliance.
+
+| | Tier 1 — logical dumps | Tier 2 — infrastructure snapshots |
+| :--- | :--- | :--- |
+| Granularity | One table, one row, one schema | The whole machine or volume |
+| Portable across hosts | Yes — plain SQL | No — tied to the hypervisor or CSI driver |
+| Recovers from | Bad migration, dropped table, corrupted row | Dead disk, dead node, ransomware |
+| Where it runs | `scripts/backup-databases.sh`, or the chart's CronJob | Proxmox Backup Server, CSI, Velero |
+
+### Tier 1: logical dumps
+
+```bash
+scripts/backup-databases.sh                  # both databases + the 3D model objects
+BACKUP_STAMP=<stamp> scripts/restore-databases.sh
+```
+
+Writes three timestamped artefacts plus a manifest into `./backups/` (gitignored — a dump holds
+`auth.users`, hashed OAuth client secrets and the whole `digital_thread`). Defaults target Docker
+Compose; `BACKUP_MODE=direct` with `SUPABASE_DB_HOST`/`TIMESCALE_HOST` reaches any PostgreSQL.
+
+| Variable | Default | Notes |
+| :--- | :--- | :--- |
+| `BACKUP_MODE` | `docker` | `direct` to use a local `pg_dump` against host/port |
+| `BACKUP_FORMAT` | `plain` | `.sql.gz`. Use `custom` for `.dump` — selective `pg_restore`, and what the chart's CronJob writes |
+| `BACKUP_DIR` | `./backups` | |
+| `BACKUP_RETENTION_DAYS` | `14` | `0` disables pruning |
+| `INCLUDE_STORAGE` | `true` | The `asset-3d-models` objects |
+
+Without a stack, `docker compose exec` directly:
+
+```bash
+docker compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" supabase-db \
+  pg_dump -Fp -Z6 -U postgres -d postgres > supabase-db.sql.gz
+```
+
+Four things about these dumps are not obvious and each has bitten someone:
+
+- **Ownership and privileges stay in the dump.** `supabase_auth_admin`, `authenticator` and
+  `supabase_storage_admin` own objects, and RLS policies reference roles **by name**. A dump
+  restored with `--no-owner` produces a database where every policy denies. The roles must already
+  exist — `supabase-db-roles-init` creates them, so restore into a stack that has booted once.
+- **Restore order is fixed: Supabase first, then TimescaleDB, then verify.** `public.telemetry` is
+  a `postgres_fdw` foreign table, not a table; restoring the historian first leaves the wrapper
+  pointing at nothing, and the failure surfaces as a *relation-level* PostgREST error that reads
+  like a schema fault. `restore-databases.sh` enforces the order and then queries through the
+  wrapper as `authenticated`, because a restore that loses grants queries fine as `postgres`.
+- **The historian restore is wrapped in `timescaledb_pre_restore()` / `post_restore()`.** The
+  extension's `_timescaledb_catalog.continuous_agg` carries circular foreign keys — `pg_dump` warns
+  at dump time — and restoring it with background workers live leaves the three rollups from `0010`
+  registered but never refreshing. The script runs `post_restore()` even when the restore fails,
+  because the alternative is a database whose retention, compression and refresh jobs are all
+  silently stopped.
+- **`digital_thread` is why this matters most.** Telemetry can be re-derived from a rebirth; an
+  append-only audit trail cannot.
+
+**This is not PITR.** Recovery is to the last run and no finer. A real RPO wants WAL archiving or
+pgBackRest.
+
+### Tier 2: infrastructure snapshots
+
+For the Kubernetes target — CSI `VolumeSnapshot`, Velero, and the storage-PVC gap — see
+[`../deploy/k8s/README.md`](../deploy/k8s/README.md#backups). For an on-prem edge appliance running
+Compose on a VM, the recommended pattern is **Proxmox VE + Proxmox Backup Server**:
+
+> **`qemu-guest-agent` must be running in the guest, and this is the whole invariant.** Proxmox
+> issues `fs-freeze` through the agent before it snapshots, which flushes and quiesces the
+> filesystem so both PostgreSQL data directories are captured at one consistent point. Without the
+> agent the snapshot is taken live and is **crash-consistent, not transaction-consistent** — it
+> restores like a machine that lost power. PostgreSQL will usually recover from WAL, but "usually"
+> is doing real work in that sentence, and a snapshot of *two* independent databases taken without
+> a freeze can land them at different points in time, which is how `public.telemetry` ends up
+> referencing assets the Supabase database has never heard of.
+>
+> Verify it, rather than assuming it: `qm agent <vmid> ping` from the Proxmox host must answer, and
+> `Agent: Enabled` must appear in the VM's Options. Installing the package in the guest is not
+> sufficient — the VM option has to be ticked too, and a snapshot taken with it unticked reports
+> success.
+
+**Neither tier is a backup until a restore has been rehearsed.** An untested backup is a belief,
+not a capability.
+
+---
+
 ## Adding a vocabulary
 
 A **vocabulary** is reference data describing what a standard *defines*. It is deliberately separate
