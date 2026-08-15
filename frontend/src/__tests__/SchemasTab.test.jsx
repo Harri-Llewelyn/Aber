@@ -294,7 +294,7 @@ describe('Metric Catalog — Add Metric toggle', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Multi-standard metric builder (MTConnect / ISO 22400 / OPC UA) and AAS Phase 1
+// Multi-standard metric builder (MTConnect / ISO 22400 / OPC UA) and semantic ids
 // ---------------------------------------------------------------------------
 
 const standardSelect = () => screen.getByTitle(/Which vocabulary this metric is named from/)

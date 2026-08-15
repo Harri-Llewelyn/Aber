@@ -1,30 +1,27 @@
 /**
  * AAS export: emit an Asset Administration Shell (IEC 63278) V3 JSON document for one device.
  *
- * This is Phase 3 of the Option B roadmap -- an *adapter*, not a migration. The database keeps its
- * own shape (see migration 0029's header for why a native AAS metamodel was rejected: recursive
- * RLS, a third identifier namespace, a fourth type system) and this function projects it into AAS
- * on the way out. Nothing upstream knows AAS exists.
+ * An *adapter*, not a migration: the database keeps its own shape and this function projects it
+ * into AAS on the way out. Nothing upstream knows AAS exists. Migration 0029's header records why
+ * a native AAS metamodel was rejected (recursive RLS, a third identifier namespace, a fourth type
+ * system).
  *
- * WHAT IS AND IS NOT EMITTED
+ * THREE EMISSION RULES, each of which produces an invalid or unbounded shell if broken:
  *
  *   * Telemetry VALUES are never inlined. The Time Series submodel carries a `LinkedSegment`
- *     pointing at the historian, which is what IDTA 02008 defines that element for -- bulk history
- *     belongs in TimescaleDB, and a shell that embedded it would be unbounded in size.
+ *     pointing at the historian -- what IDTA 02008 defines that element for. Embedding history
+ *     would make a shell unbounded in size.
  *   * A missing `semanticId` is OMITTED, never emitted as an empty Reference. `semantic_id` is
- *     nullable on purpose ("unmapped" is a legitimate state for a local extension), and an empty
- *     Reference is an invalid one -- worse than an absent optional field, because it asserts a
- *     mapping exists and then fails to name it. The response reports the unmapped count instead,
- *     so the gap is visible without being fabricated.
- *   * Submodels are composed from the device's single schema by provenance (`metric_catalog.standard`),
- *     because `devices.schema_id` is 1:1 today. When the `device_submodels` join table lands
- *     (Phase 5) this composition is what it replaces.
+ *     nullable on purpose ("unmapped" is legitimate for a local extension), and an empty Reference
+ *     asserts a mapping exists and then fails to name it. The response reports the unmapped count
+ *     instead, so the gap is visible without being fabricated.
+ *   * One Submodel per schema attached through `device_submodels`, keyed by provenance
+ *     (`metric_catalog.standard`). `device_schemas` unions that join with the legacy 1:1
+ *     `devices.schema_id`, so both shapes export.
  *
- * SECURITY. Same posture as approve-quarantine: the caller's own JWT resolves their role, the
- * service-role client is used only after that check passes, and anything short of an allowed role
- * is 401/403. This matters more here than for most endpoints -- a shell aggregates nameplate,
- * configuration and documentation into a single payload, so it is a broader disclosure than any of
- * the tables it reads.
+ * SECURITY. The caller's own JWT resolves their role; the service-role client is used only after
+ * that check passes. Broader disclosure than any single table it reads -- a shell aggregates
+ * nameplate, configuration and documentation into one payload.
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -117,8 +114,8 @@ function semanticReference(semanticId?: string | null) {
  * which is stricter than "letters, digits and underscore" in two ways that are easy to miss and
  * that the official schema rejects outright:
  *
- *   * it must START WITH A LETTER. Prefixing a digit-leading name with `_` -- the obvious fix, and
- *     what this function used to do -- produces an idShort that is still invalid, just differently.
+ *   * it must START WITH A LETTER. Prefixing a digit-leading name with `_` is NOT a valid fix --
+ *     the result is still invalid, just differently.
  *     Entirely reachable here: a device called "3-Axis Mill" or "3D Printer 01" is ordinary.
  *   * it is at least TWO characters, so a one-character name needs padding rather than passing
  *     through.
@@ -561,7 +558,7 @@ export default async function handler(req: Request): Promise<Response> {
       "Historical samples for this asset. Query the endpoint filtered by asset_id.",
     );
 
-    // ---- One Submodel per attached schema (Phase 5) -------------------------------------------
+    // ---- One Submodel per attached schema -------------------------------------------
     // Before device_submodels existed this was a single schema split by provenance into a fixed
     // pair of submodels. Each attachment is now its own aspect, which is what an AAS Submodel
     // means -- and a schema whose metrics are all ISO 22400 becomes a KPI submodel rather than a

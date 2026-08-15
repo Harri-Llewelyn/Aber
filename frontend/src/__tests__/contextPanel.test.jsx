@@ -718,7 +718,7 @@ describe('Gateway topic path carries the real Sparkplug group', () => {
   })
 })
 
-describe('Phase 3.8 layout invariants', () => {
+describe('Context panel layout invariants', () => {
   it('gives both cell-card tables one column grid', async () => {
     // The eye should run straight down Name / Sparkplug ID / Status across both tables rather
     // than re-finding each column when it crosses from gateways to devices.

@@ -20,36 +20,15 @@ for _stream in (sys.stdout, sys.stderr):
         except Exception:
             pass
 
-# Configuration
+# Configuration. Defaults target a HOST run against Docker Compose; an in-cluster Job overrides
+# them with Service names. Everything is env-overridable so one file serves both.
+# Running it either way: ../ingestion/README.md -> "End-to-end validation"
 #
-# THIS SCRIPT RUNS FROM TWO PLACES, and every default below is chosen for the first:
-#
-#   1. THE HOST, against a Docker Compose stack. Services are reached on their PUBLISHED ports
-#      (localhost:5433, :54322, :1883, :54321), because compose-internal names like `timescaledb`
-#      do not resolve outside the network. This is what `python ingestion/validate.py` does and
-#      what CI's e2e job does.
-#
-#   2. INSIDE THE CLUSTER, as a Kubernetes Job in the platform's namespace. There the SERVICE
-#      NAMES are correct and the STANDARD ports apply -- and because Kubernetes Service names are
-#      kept identical to the Compose service names, that is simply:
-#
-#        DB_HOST=timescaledb           DB_PORT=5432
-#        SUPABASE_DB_HOST=supabase-db  SUPABASE_DB_PORT=5432
-#        MQTT_HOST=mosquitto           MQTT_PORT=1883
-#        SUPABASE_URL=http://supabase-kong:8000
-#        NODERED_BASE_URL=http://node-red:1880
-#
-#      No host/port rewriting, no port-forwarding: in-cluster is the SIMPLER of the two, which is
-#      the opposite of the Compose case. See docs/kubernetes-migration-plan.md §2.5 and §8.1.
-#
-# Nothing here is hardcoded -- every value is env-overridable, so both callers are served by the
-# same file. The port defaults are conditional on their host being set, so that naming a service
-# does not also require restating its standard port.
+# THE PORT DEFAULTS ARE CONDITIONAL ON THEIR HOST BEING SET, and that is what makes both paths work
+# from one file: 5433/54322 are the ports Compose PUBLISHES to avoid colliding with a local
+# PostgreSQL, not the ports the servers listen on. Naming a host means the caller is addressing the
+# service directly, so 5432 is right. See docs/kubernetes-architecture.md §2.5 and §8.1.
 TIMESCALEDB_HOST = os.getenv("DB_HOST", "localhost")
-# 5433 is the port docker-compose.yml PUBLISHES TimescaleDB on, to avoid colliding with a local
-# PostgreSQL. It is not the port the server listens on. So: default to 5433 only when nobody named
-# a host (i.e. we are on the host talking to Compose); once DB_HOST is set the caller is addressing
-# the service directly and 5432 is right.
 TIMESCALEDB_PORT = os.getenv("DB_PORT", "5433" if os.getenv("DB_HOST") is None else "5432")
 TIMESCALEDB_NAME = os.getenv("DB_NAME", "postgres")
 TIMESCALEDB_USER = os.getenv("DB_USER", "postgres")
@@ -140,9 +119,8 @@ VAL_GROUP = "FactoryPlus"
 #
 #     11000000-0000-4000-8000-000000000001  ->  gwy110000000000400080000
 #
-# Letting the database allocate the UUID, as this did, made the id different on every run and so
-# unprovisionable in advance -- which is the whole reason a shared `readwrite spBv1.0/#` account
-# survived here after every other consumer had been moved off one.
+# A database-allocated UUID would differ on every run and so be unprovisionable in advance, which
+# is what would force a wildcard account back into this script.
 #
 # ONLY THE GATEWAY IS PINNED. The devices are still created at runtime with database-allocated
 # UUIDs, because they sit in the FIFTH topic segment, which the ACL's trailing `#` covers. So the
@@ -1217,7 +1195,7 @@ def verify_results():
             print(f"❌ 6. BIRTH METRIC OBSERVATION ERROR: {e}")
             passed = False
 
-        # 6e. Phase 5: the modelled set is the union across every attached submodel. Asserted by
+        # 6e. The modelled set is the union across every attached submodel. Asserted by
         # showing the same metric flips verdict depending on whether the second submodel is counted
         # -- otherwise this check would pass even if device_submodels were ignored entirely.
         try:

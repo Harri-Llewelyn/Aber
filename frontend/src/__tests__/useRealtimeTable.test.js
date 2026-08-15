@@ -53,7 +53,7 @@ describe('useRealtimeTable hook', () => {
     expect(channels).toHaveLength(0)
   })
 
-  // The security property from Phase 2: an unauthenticated socket still receives the event
+  // The security property: an unauthenticated socket still receives the event
   // envelope (redacted payload plus a 401 error), so it must never be opened pre-login.
   it('opens no channel when there is no session', async () => {
     session = null
@@ -69,7 +69,7 @@ describe('useRealtimeTable hook', () => {
     expect(channels[0].bindings.every(b => b.filter.schema === 'public')).toBe(true)
   })
 
-  // Closes the lazy-replication-slot window measured in Phase 2: the client can be SUBSCRIBED
+  // Closes the lazy-replication-slot window: the client can be SUBSCRIBED
   // while the slot does not yet exist, so changes in that gap are never delivered.
   it('reconciles once on SUBSCRIBED', async () => {
     const onChange = vi.fn()

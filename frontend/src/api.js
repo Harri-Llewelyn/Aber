@@ -1183,7 +1183,7 @@ export const api = {
     }
 
     if (path.startsWith('/api/v1/devices/aas-export')) {
-      // Phase 3 of the AAS roadmap. The whole document is composed server-side: the shell needs
+      // The whole document is composed server-side: the shell needs
       // the service role to read asset_config and the full metric_catalog, and composing it in the
       // browser would mean shipping that read surface to every client.
       //

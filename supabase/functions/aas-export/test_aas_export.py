@@ -579,7 +579,7 @@ class TestAasxPackage(unittest.TestCase):
 
 @unittest.skipUnless(LIVE, SKIP_REASON)
 class TestMultiSubmodel(unittest.TestCase):
-    """Phase 5: one AAS Submodel per schema attached through device_submodels."""
+    """One AAS Submodel per schema attached through device_submodels."""
 
     @classmethod
     def setUpClass(cls):

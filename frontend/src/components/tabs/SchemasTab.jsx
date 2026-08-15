@@ -299,7 +299,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, pendingVo
         sub_type: newMetric.subType,
         units: unitsApply ? newMetric.units : '',
         standard: effectiveStandard,
-        // Phase 1 of the AAS alignment (migration 0029). Blank is a legitimate value -- MTConnect
+        // AAS alignment (migration 0029). Blank is a legitimate value -- MTConnect
         // publishes no per-type identifier, so those metrics stay unmapped rather than carrying an
         // invented one.
         semantic_id: semanticIdValue,
@@ -968,7 +968,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, pendingVo
                 <input className="form-control" value={newMetric.description} onChange={e => setNewMetric(m => ({ ...m, description: e.target.value }))} placeholder="What this metric represents" />
               </div>
 
-              {/* AAS Phase 1. Prefilled from the vocabulary for ISO 22400 and OPC UA, and derived
+              {/* Semantic ids. Prefilled from the vocabulary for ISO 22400 and OPC UA, and derived
                   from the composed name for MTConnect; editable in every case, because a semantic
                   id is an assertion about the metric and assertions get corrected. */}
               <div className="form-group" style={{ margin: 0, flex: '2 1 260px' }}>

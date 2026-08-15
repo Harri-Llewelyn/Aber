@@ -4,8 +4,7 @@
  * Provisions /data: the repo's flow definition, a generated settings.js, and the MQTT broker
  * credentials encrypted at rest through Node-RED's own credential runtime.
  *
- * THREE WRITES, THREE DIFFERENT LIFETIMES -- and collapsing them behind one guard is what broke
- * this twice:
+ * THREE WRITES, THREE DIFFERENT LIFETIMES. They cannot share one guard:
  *
  *   - the FLOW is user content        -> seed FIRST RUN ONLY (NODE_RED_FORCE_SEED=true resets)
  *   - settings.js is stack config     -> reconcile EVERY BOOT (a volume outlives a fix to it)
@@ -712,23 +711,19 @@ function storedBrokerCredential() {
 }
 
 /**
- * A CHANGED BROKER IDENTITY FORCES A REWRITE, and this is not a refinement -- without it, changing
- * MQTT_USER breaks every existing deployment silently.
+ * A CHANGED BROKER IDENTITY FORCES A REWRITE of the otherwise seed-once credentials.
  *
- * The credentials were seed-once: an existing flows_cred.json was left alone on the reasoning that
- * it might hold something an operator typed into the editor. But the broker USERNAME is not user
- * content -- since the accounts were split per principal it is the simulator gateway's
- * `sparkplug_id`, which mosquitto.acl matches the topic's edge-node segment against. Renaming the
- * account therefore left Node-RED authenticating as a user that no longer exists, and Node-RED
- * reports exactly one thing when that happens:
+ * The broker USERNAME is not user content: it is the simulator gateway's `sparkplug_id`, which
+ * mosquitto.acl matches the topic's edge-node segment against. Leaving a stale one in place means
+ * Node-RED authenticates as an account that no longer exists, and it reports only:
  *
  *     Connection failed to broker: <clientId>@mqtt://mosquitto:1883
  *
- * -- the CLIENT ID, not the username, and no CONNACK code. The same line a wrong host produces.
- * Observed on a real upgrade of this stack, which is why it is handled here rather than documented.
+ * -- the CLIENT ID, not the username, and no CONNACK code. Identical to the line a wrong host
+ * produces, which is why this is corrected here rather than left to a runbook.
  *
- * Only a differing USER triggers this. A password an operator changed in the editor is left alone,
- * because that is a credential for the same account; a different account is a different credential
+ * ONLY A DIFFERING USER TRIGGERS THIS. A password an operator changed in the editor is left alone:
+ * that is a credential for the same account, whereas a different account is a different credential
  * and the environment is authoritative about which one this deployment uses.
  */
 const storedBroker = storedBrokerCredential();

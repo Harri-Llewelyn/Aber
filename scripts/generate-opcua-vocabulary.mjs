@@ -161,7 +161,7 @@ const SPECS = [
     // StateMachineType, not a member this NodeSet declares, so there is nothing to verify against
     // and no honest row to emit. Its VALUES -- the 17 TR88 states, which OPC 30050 does declare
     // with their canonical StateNumbers -- are a value domain, and belong in `permitted_values`
-    // (Phase 3b) rather than in a table of data points.
+    // rather than in a table of data points.
     companionSpec: 'OPC 30050 PackML',
     namespaceUri: 'http://opcfoundation.org/UA/PackML/',
     path: 'PackML/Opc.Ua.PackML.NodeSet2.xml',
