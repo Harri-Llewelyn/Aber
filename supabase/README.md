@@ -494,6 +494,34 @@ and binds everyone: history that can be re-opened is not history.
 
 ---
 
+## Adding a vocabulary
+
+A **vocabulary** is reference data describing what a standard *defines*. It is deliberately separate
+from `metric_catalog`, which records what a device actually *publishes* — that separation is the
+reason a vocabulary can be replaced wholesale without touching device configuration. The seeded
+standards and how each identity was verified are in [`../docs/vocabularies.md`](../docs/vocabularies.md).
+
+Every vocabulary must satisfy all nine, and CI checks five of them:
+
+1. Migration is **idempotent** (`ON CONFLICT … DO UPDATE`) — db-init replays it every boot.
+2. RLS enabled, SELECT policy for `authenticated`, `REVOKE ALL FROM PUBLIC, anon`, no write policy.
+3. `metric_groups` rows registered in the migration, carrying `standard` provenance.
+4. `NOTIFY pgrst, 'reload schema'`.
+5. `node scripts/sync-helm-chart-files.mjs` run and committed (CI checks it with `--check`).
+6. Migration header carries a ⚠ VERIFY block naming what was and was not confirmed against the
+   source document. **Seeds are transcriptions**; generate them from the machine-readable source
+   rather than typing them, and say which source.
+7. Frontend mirror module plus unit tests; check whether `scripts/check-docs-drift.mjs` or
+   `scripts/check-mirror-drift.mjs` needs a new pair.
+8. `docs/openapi.yaml` updated if any endpoint shape changes.
+9. **A `STANDARD_NAMESPACES` entry in [`../i3x/address_space.py`](../i3x/address_space.py).** This
+   is the one that fails silently: i3X maps `metric_catalog.standard` onto a Namespace, so a
+   standard with no entry is **omitted from `GET /namespaces`** — a 200 with a shorter list, which
+   reads as "this deployment does not use that standard". The key must be the exact `standard`
+   string the migration writes.
+
+---
+
 ## Testing
 
 ```bash

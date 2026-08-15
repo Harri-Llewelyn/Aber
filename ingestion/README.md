@@ -266,6 +266,23 @@ The first three must match between `docker-compose.yml` and the chart's `ingesti
 `validate.py`'s watchdog check reads them from its own environment to decide whether the window is
 short enough to wait for, and it runs against both targets.
 
+### MQTTS (opt-in)
+
+| Variable | Default | Notes |
+| :--- | :--- | :--- |
+| `MQTT_TLS_ENABLED` | `false` | Does **not** change how the daemon authenticates — the username and password still identify it |
+| `MQTT_TLS_CA_FILE` | empty | Required with an internal CA. Empty means verification fails outright |
+
+**Why it is off by default.** The daemon reaches the broker over the pod network (or Docker's
+bridge), which leaves neither the host nor the cluster. Requiring TLS there would make a CA bundle a
+hard dependency of a workload that gains little from it, and the certificate's SANs would have to
+cover the in-cluster name on every deployment. The exposure that matters is **gateways crossing the
+plant network**, which is what `mosquitto.tls.enabled` addresses instead.
+
+**There is deliberately no "skip verification" setting.** Encryption without verification is
+indistinguishable on the wire from a successful interception, and a daemon that accepted any
+certificate would report a healthy TLS connection while talking to anything at all.
+
 ---
 
 ## Testing
