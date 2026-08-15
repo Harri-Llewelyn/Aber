@@ -1,0 +1,180 @@
+{{- if .Values.timescaledb.enabled }}
+{{- $component := "timescaledb" -}}
+{{- $secretName := include "acs-cymru.secretName" . -}}
+---
+{{/*
+Headless Service, required by the StatefulSet for stable pod DNS. Not addressed by anything in
+the stack -- the ClusterIP Service below is what `timescaledb:5432` resolves to.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: timescaledb-headless
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+{{/*
+THE NAME IS `timescaledb`, matching the Compose service name exactly.
+
+That is what makes `timescaledb:5432` resolve identically on both targets, so the postgres_fdw
+foreign server in 0001_baseline_schema.sql, the Grafana datasource and the ingestion daemon all
+work unchanged. See the Service-name note in _helpers.tpl -- do not prefix it.
+
+M2: PORT 5432, the port the server listens on. NOT 5433, which exists only as docker-compose's
+published port so it does not collide with a developer's local PostgreSQL. There is no port
+mapping in Kubernetes and 5433 is meaningless here; a foreign server pointed at it fails as a
+relation-level error from PostgREST, which reads as a schema fault rather than a connection one.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: timescaledb
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: timescaledb
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  serviceName: timescaledb-headless
+  # ONE REPLICA, AND NOT A TUNABLE. This is a single Postgres instance with no replication --
+  # scaling it would start a second server against a second empty volume, not a replica. HA needs
+  # an operator and a custom image (the supabase/postgres extension set), which architecture §3.3 keeps
+  # deliberately out of scope. Recovery is backups, not replicas.
+  replicas: 1
+  # Recreate semantics: never run two instances against the same data directory.
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+      annotations:
+        # Roll the pod when the bootstrap scripts change. Mostly informational -- the entrypoint
+        # only runs them on an EMPTY data directory, so a change reaches an existing volume not at
+        # all. The annotation makes that visible in `kubectl rollout history` rather than silent.
+        checksum/init: {{ include (print $.Template.BasePath "/data/timescaledb-configmap.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # M5. local-path provisions a host directory owned by root; this image runs postgres as
+      # uid/gid 999 and initdb refuses a directory it cannot write. Without fsGroup the pod
+      # crash-loops on a permission error naming a path the operator never chose.
+      # OnRootMismatch skips a recursive chgrp on every restart once ownership is already correct,
+      # which matters as the historian grows.
+      securityContext:
+        {{- toYaml .Values.timescaledb.podSecurityContext | nindent 8 }}
+      containers:
+        - name: timescaledb
+          image: "{{ .Values.timescaledb.image.repository }}:{{ .Values.timescaledb.image.tag }}"
+          imagePullPolicy: {{ .Values.timescaledb.image.pullPolicy }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.timescaledb.database | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.timescaledb.username | quote }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "POSTGRES_PASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
+            # The default data directory is the volume's mount point itself, and `lost+found` on
+            # some provisioners makes initdb refuse it. A subdirectory is the standard fix and
+            # costs nothing on local-path.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          # THREE PROBES, EACH DOING A DIFFERENT JOB. Compose expresses only the middle one.
+          #
+          # startupProbe holds the other two off while initdb runs and the bootstrap scripts
+          # apply -- on a cold volume that is far longer than a steady-state check should tolerate.
+          # 30 x 10s = 5 minutes before the pod is declared failed.
+          startupProbe:
+            exec:
+              command: ["pg_isready", "-U", "{{ .Values.timescaledb.username }}", "-d", "{{ .Values.timescaledb.database }}"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "{{ .Values.timescaledb.username }}", "-d", "{{ .Values.timescaledb.database }}"]
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # DELIBERATELY SLACKER THAN READINESS. Readiness pulls a struggling database out of
+          # service; liveness KILLS it. A long-running query or a checkpoint storm can make
+          # pg_isready slow without the server being lost, and restarting Postgres for that turns
+          # a slowdown into an outage plus a crash-recovery cycle. 6 x 10s of continuous failure
+          # before the restart.
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "{{ .Values.timescaledb.username }}", "-d", "{{ .Values.timescaledb.database }}"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.timescaledb.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            # Read-only: these are repository-managed provisioning, not runtime state.
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+      volumes:
+        - name: init
+          configMap:
+            name: {{ printf "%s-timescaledb-init" (include "acs-cymru.fullname" .) }}
+      {{- with .Values.timescaledb.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.timescaledb.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.timescaledb.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if .Values.timescaledb.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 10 }}
+      spec:
+        accessModes:
+          - {{ .Values.timescaledb.persistence.accessMode }}
+        {{- include "acs-cymru.storageClass" (dict "ctx" . "component" .Values.timescaledb.persistence) | nindent 8 }}
+        resources:
+          requests:
+            storage: {{ .Values.timescaledb.persistence.size }}
+  {{- end }}
+{{- end }}

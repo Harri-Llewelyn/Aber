@@ -6,7 +6,7 @@ import App from '../App'
 const mockSession = {
   user: {
     id: 'user-admin-123',
-    email: 'admin@factoryplus.local',
+    email: 'admin@acs-cymru.local',
     app_metadata: { role: 'Administrator' }
   }
 }
@@ -56,7 +56,7 @@ describe('App Component', () => {
       expect(screen.getByText('Sign In')).toBeInTheDocument()
     })
 
-    expect(screen.getByText('Factory+ Supabase Portal')).toBeInTheDocument()
+    expect(screen.getByText('ACS-Cymru Supabase Portal')).toBeInTheDocument()
     expect(screen.getByText('Email Address')).toBeInTheDocument()
   })
 
@@ -73,7 +73,7 @@ describe('App Component', () => {
     // The address is behind the account pill now, which shows the local part and the role. It is
     // still on the pill's title, so it stays verifiable without opening anything.
     expect(screen.getByRole('button', { name: /admin/i })).toHaveAttribute(
-      'title', expect.stringContaining('admin@factoryplus.local')
+      'title', expect.stringContaining('admin@acs-cymru.local')
     )
   })
 
@@ -90,7 +90,7 @@ describe('App Component', () => {
     render(<App />)
 
     await waitFor(() => {
-      expect(screen.getByText('Factory+ Supabase Portal')).toBeInTheDocument()
+      expect(screen.getByText('ACS-Cymru Supabase Portal')).toBeInTheDocument()
     })
 
     expect(screen.getByText(/session is no longer valid/i)).toBeInTheDocument()

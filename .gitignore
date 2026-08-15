@@ -29,7 +29,7 @@ supabase/.temp/
 # Helm
 #
 # A filled-in production values file holds real credentials. The .example is committed and is the
-# starting point; the copy never is. deploy/helm/factoryplus/files/ IS committed on purpose --
+# starting point; the copy never is. deploy/helm/acs-cymru/files/ IS committed on purpose --
 # those are mirrored config files a packaged chart must carry, see scripts/sync-helm-chart-files.mjs.
 deploy/helm/**/values-prod.yaml
 deploy/helm/**/values-local.yaml

@@ -100,7 +100,7 @@ GRANT ALL ON FUNCTION public.enforce_digital_thread_append_only() TO service_rol
 -- ---------------------------------------------------------------------------------------------
 -- log_digital_thread_event() falls back to a session-local GUC when auth.uid() is NULL, which is
 -- the case for every write made with the service-role key. A SECURITY DEFINER RPC that knows who
--- asked sets `factoryplus.actor_id` with SET LOCAL, so the trigger records the operator rather
+-- asked sets `acs_cymru.actor_id` with SET LOCAL, so the trigger records the operator rather
 -- than the machine credential the operator's request happened to travel on.
 --
 -- A GUC rather than a widened trigger signature because a trigger takes no arguments; and
@@ -138,7 +138,7 @@ BEGIN
         -- session; the cast would raise on it. `true` makes a missing setting return NULL
         -- rather than error.
         BEGIN
-            v_actor := NULLIF(current_setting('factoryplus.actor_id', true), '')::UUID;
+            v_actor := NULLIF(current_setting('acs_cymru.actor_id', true), '')::UUID;
         EXCEPTION WHEN others THEN
             -- A malformed GUC must never break the write it is annotating. An unattributed
             -- audit row is bad; a lost one is worse.
@@ -206,7 +206,7 @@ BEGIN
 
   -- Attribute every trigger-written audit row in this transaction to the operator. SET LOCAL, so
   -- it is discarded at COMMIT and cannot bleed into the connection's next user.
-  PERFORM set_config('factoryplus.actor_id', p_actor_id::text, true);
+  PERFORM set_config('acs_cymru.actor_id', p_actor_id::text, true);
 
   SELECT * INTO v_quarantined FROM public.devices WHERE id = p_device_id FOR UPDATE;
   IF NOT FOUND THEN

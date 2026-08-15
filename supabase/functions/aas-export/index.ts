@@ -40,8 +40,8 @@ const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
 const ALLOWED_ROLES = ["Administrator", "Shopfloor_Manager", "Operator", "Auditor"];
 
 /** Namespace for asset and submodel ids. Configurable because an IRI must be resolvable for the
- *  organisation publishing it, and `factoryplus.local` is only right for this stack. */
-const BASE_IRI = (Deno.env.get("AAS_BASE_IRI") ?? "https://factoryplus.local/ids/asset/")
+ *  organisation publishing it, and `acs-cymru.local` is only right for this stack. */
+const BASE_IRI = (Deno.env.get("AAS_BASE_IRI") ?? "https://acs-cymru.local/ids/asset/")
   .replace(/\/+$/, "") + "/";
 
 /** Where a consumer fetches the actual samples. The shell points at this; it never embeds them. */

@@ -1,0 +1,205 @@
+{{- if .Values.ingestion.enabled }}
+{{- $component := "ingestion" -}}
+{{- $secretName := include "acs-cymru.secretName" . -}}
+{{/*
+=================================================================================================
+The Sparkplug B ingestion daemon: MQTT -> Supabase (metadata, quarantine) + TimescaleDB (telemetry).
+
+NO SERVICE. It is a pure consumer -- it subscribes to `spBv1.0/#` and writes to two databases.
+Nothing calls it, so exposing it would be surface area with no purpose.
+=================================================================================================
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingestion
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  {{/*
+    ============================================================================================
+    EXACTLY ONE REPLICA. THIS IS NOT A TUNABLE, AND SCALING IT CORRUPTS DATA.
+
+    Spelled out here because Kubernetes makes `replicas: 2` a one-word change, and the damage is
+    silent -- no error, no crash, just wrong data:
+
+      * DOUBLE-CONSUMPTION. ingestion.py does a plain paho subscribe with NO shared-subscription
+        group ($share/...), so every broker message is delivered to EVERY replica. Two replicas
+        means two INSERTs per telemetry sample. The historian insert is ON CONFLICT DO NOTHING and
+        the hypertable's key includes `time`, so duplicates land as separate rows whenever the
+        timestamps differ by a microsecond -- which they do, because each replica stamps its own.
+      * DUPLICATED QUARANTINE DECISIONS. An unknown device makes both replicas race to insert the
+        same row, and each writes a digital_thread audit row via the trigger. digital_thread is
+        APPEND-ONLY, so that noise is permanent.
+      * DOUBLED HEARTBEATS. Every replica stamps gateways.last_heartbeat, firing the pg_net
+        quarantine webhook's UPDATE trigger twice per beat.
+
+    Scaling this out means adding MQTT v5 shared subscriptions to ingestion.py first. Until then,
+    one.
+
+    `replicas` is not templated for the same reason: values should not offer the choice.
+    ============================================================================================
+  */}}
+  replicas: 1
+  strategy:
+    # Recreate, not RollingUpdate. A rolling update runs the new pod alongside the old one, which
+    # is momentarily the two-replica case above -- brief, but it lands duplicate telemetry every
+    # single deploy.
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        {{/*
+          Waits for the API gateway, which is how EVERY device lookup is made (SUPABASE_URL is
+          http://supabase-kong:8000). The Compose target declares the same dependency.
+
+          ORDERING ONLY. The property that makes an unresolvable lookup harmless lives in
+          ingestion.py: an unreachable directory raises DirectoryUnavailable instead of resolving
+          to None, because process_dbirth() answers None -- "unregistered" -- by writing a
+          quarantine row, which persists and needs an operator to clear. Relying on start order
+          for that would leave the same fault reachable any time Kong restarts.
+        */}}
+        {{- include "acs-cymru.waitFor" (dict "ctx" . "name" "wait-for-kong" "image" "curlimages/curl:8.10.1" "command" "curl -sf -o /dev/null http://supabase-kong:8000/auth/v1/health" "describe" "supabase-kong (every device lookup is routed through it)") | nindent 8 }}
+        {{/*
+          Waits for the historian's SCHEMA, not just for the server. The daemon writes to the
+          `telemetry` hypertable on its first DDATA, and TimescaleDB's bootstrap scripts run only on
+          an empty data directory -- so "server up" and "schema present" are genuinely different
+          states here. Without this the daemon starts, connects, and fails on the first sample with
+          a relation error that reads as a code fault.
+        */}}
+        - name: wait-for-telemetry-table
+          image: "{{ .Values.supabaseDb.image.repository }}:{{ .Values.supabaseDb.image.tag }}"
+          imagePullPolicy: {{ .Values.supabaseDb.image.pullPolicy }}
+          env:
+            {{- include "acs-cymru.secretEnv" (dict "name" "PGPASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              deadline=$(( $(date +%s) + {{ .Values.initJobs.waitTimeout }} ))
+              until psql -h {{ include "acs-cymru.timescale.host" . }} -p {{ include "acs-cymru.timescale.port" . }} \
+                        -U {{ .Values.timescaledb.username }} -d {{ .Values.timescaledb.database }} -tAc \
+                        "SELECT 1 FROM information_schema.tables WHERE table_name = 'telemetry'" \
+                    2>/dev/null | grep -q 1; do
+                if [ "$(date +%s)" -ge "$deadline" ]; then
+                  echo "timed out waiting for the telemetry hypertable (created by timescaledb/init on an EMPTY data directory)" >&2
+                  exit 1
+                fi
+                echo "waiting for the telemetry hypertable ..."
+                sleep 3
+              done
+              echo "telemetry hypertable exists"
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+      containers:
+        - name: ingestion
+          # BUILT FROM the repository-root Dockerfile (it compiles sparkplug_b.proto with protoc at
+          # build time), not pulled:  docker build -f Dockerfile -t <repo>:<tag> .
+          image: {{ include "acs-cymru.image" (dict "image" .Values.ingestion.image "ctx" $) | quote }}
+          imagePullPolicy: {{ .Values.ingestion.image.pullPolicy }}
+          env:
+            # TimescaleDB. M2: the in-cluster name and the STANDARD port -- 5433 is only
+            # docker-compose's published port and means nothing here.
+            - name: DB_HOST
+              value: {{ include "acs-cymru.timescale.host" . | quote }}
+            - name: DB_PORT
+              value: {{ include "acs-cymru.timescale.port" . | quote }}
+            - name: DB_NAME
+              value: {{ .Values.timescaledb.database | quote }}
+            - name: DB_USER
+              value: {{ .Values.timescaledb.username | quote }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "DB_PASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
+            {{- /* Host, port and TLS from one shared helper, so this and Node-RED cannot drift. */}}
+            {{- include "acs-cymru.brokerClientEnv" . | nindent 12 }}
+            {{- /*
+              THE INGESTION PRINCIPAL AND NOTHING WIDER. mosquitto.acl grants it `read spBv1.0/#`
+              plus `write spBv1.0/+/NCMD/+`, which is exactly what this daemon does -- it is a
+              consumer whose only publish() is the rebirth NCMD. It CANNOT publish DBIRTH or DDATA,
+              so this credential cannot forge telemetry for a device that is correctly bound to its
+              gateway: the one forgery verify_gateway_binding() cannot detect, because such a
+              message satisfies it by construction.
+            */}}
+            {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_INGESTION_USER") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_INGESTION_PASSWORD") | nindent 12 }}
+            # Through Kong, in-cluster. The daemon is a service-role client: it registers
+            # discovered devices, sets is_quarantined, and stamps gateway heartbeats.
+            - name: SUPABASE_URL
+              value: {{ include "acs-cymru.supabase.internalUrl" . | quote }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_SERVICE_ROLE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            # Enables the heartbeat the liveness probe reads. UNSET IS A NO-OP, which is why the
+            # Compose path is unaffected by any of this.
+            - name: INGESTION_HEALTH_FILE
+              value: {{ .Values.ingestion.healthFile | quote }}
+            - name: INGESTION_HEALTH_INTERVAL
+              value: {{ .Values.ingestion.healthIntervalSeconds | quote }}
+            {{/*
+              Device liveness and Sparkplug rebirth. Both targets must carry the same values --
+              validate.py runs against Compose AND in-cluster, and its watchdog check reads these
+              names from its own environment to decide whether the window is short enough to wait
+              for. A chart that quietly used a different default would make that check assert
+              against a timeout the daemon does not have.
+            */}}
+            - name: DEVICE_OFFLINE_TIMEOUT_SECONDS
+              value: {{ .Values.ingestion.deviceOfflineTimeoutSeconds | quote }}
+            - name: DEVICE_WATCHDOG_INTERVAL_SECONDS
+              value: {{ .Values.ingestion.deviceWatchdogIntervalSeconds | quote }}
+            - name: REBIRTH_REQUEST_INTERVAL_SECONDS
+              value: {{ .Values.ingestion.rebirthRequestIntervalSeconds | quote }}
+          {{/*
+            LIVENESS ON A HEARTBEAT FILE'S AGE.
+
+            This is the one failure Kubernetes can fix here for free, and Compose cannot detect at
+            all: paho's network loop dies, the process stays alive, and the daemon silently stops
+            ingesting. Nothing crashes, nothing logs, and telemetry just stops arriving.
+
+            ingestion.py's heartbeat thread writes this file every INGESTION_HEALTH_INTERVAL
+            seconds ONLY WHILE `client.is_connected()`, so a wedged or disconnected loop lets the
+            file go stale and this probe restarts the pod. The write is also deliberately forgiving
+            of IO errors -- a read-only filesystem stops the heartbeat, which correctly reports
+            unhealthy rather than crashing a daemon that is otherwise fine.
+
+            THE THRESHOLD IS DELIBERATELY SLACK: 3 x the write interval before a single failure,
+            then 3 consecutive failures. A broker restart drops the connection briefly and the
+            daemon reconnects on its own; killing the pod for that would turn a two-second blip
+            into a full restart cycle.
+          */}}
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - test -n "$(find {{ .Values.ingestion.healthFile }} -newermt '-{{ mul .Values.ingestion.healthIntervalSeconds 3 }} seconds' 2>/dev/null)"
+            # First check only after the daemon has had time to connect and write once.
+            initialDelaySeconds: {{ mul .Values.ingestion.healthIntervalSeconds 3 }}
+            periodSeconds: {{ .Values.ingestion.healthIntervalSeconds }}
+            timeoutSeconds: 5
+            failureThreshold: 3
+          {{/*
+            NO READINESS PROBE, deliberately. Readiness gates Service endpoints, and this pod backs
+            no Service -- so a readiness probe here would have no consumer and no effect, while
+            adding a second way for the pod to look broken.
+          */}}
+          resources:
+            {{- toYaml .Values.ingestion.resources | nindent 12 }}
+          {{- if and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients }}
+          volumeMounts:
+            {{- include "acs-cymru.brokerClientCaMount" . | nindent 12 }}
+          {{- end }}
+      {{- if and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients }}
+      volumes:
+        {{- include "acs-cymru.brokerClientCaVolume" . | nindent 8 }}
+      {{- end }}
+{{- end }}

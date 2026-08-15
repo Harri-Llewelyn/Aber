@@ -1,6 +1,6 @@
 -- =============================================================================================
 -- Migration: 0002_seed_data.sql
--- Factory+ Asset Tracking Platform -- consolidated baseline data (public beta)
+-- ACS-Cymru Asset Tracking Platform -- consolidated baseline data (public beta)
 -- =============================================================================================
 --
 -- WHAT THIS IS. Every row the platform needs in order to come up usable, squashed out of the 38
@@ -462,35 +462,35 @@ ON CONFLICT DO NOTHING;
 -- calls the second OEE factor Effectiveness. Both carry the SAME semantic_id -- two names for one
 -- concept -- which is why the index on semantic_id is deliberately not unique.
 
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000007', 'OEE/AVAILABILITY', 10, 'ISO 22400 availability ratio -- NOT MTConnect AVAILABILITY, which means "device connected"', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, NULL, 'PERCENT', NULL, 'ISO 22400', 'https://factoryplus.local/semantics/iso22400/AVAILABILITY', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000007', 'OEE/AVAILABILITY', 10, 'ISO 22400 availability ratio -- NOT MTConnect AVAILABILITY, which means "device connected"', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, NULL, 'PERCENT', NULL, 'ISO 22400', 'https://acs-cymru.local/semantics/iso22400/AVAILABILITY', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000009', 'OEE/QUALITY', 10, 'ISO 22400 quality ratio', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, NULL, 'PERCENT', NULL, 'ISO 22400', 'https://factoryplus.local/semantics/iso22400/QUALITY', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000009', 'OEE/QUALITY', 10, 'ISO 22400 quality ratio', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, NULL, 'PERCENT', NULL, 'ISO 22400', 'https://acs-cymru.local/semantics/iso22400/QUALITY', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000010', 'OEE/EFFECTIVENESS', 10, 'ISO 22400 effectiveness ratio (E) -- the OEE factor commonly called Performance. Supersedes OEE/PERFORMANCE.', false, NULL, '2026-08-02 05:44:46.630269+00', DEFAULT, 'SAMPLE', 'PERCENT', NULL, 'ISO 22400', 'https://factoryplus.local/semantics/iso22400/EFFECTIVENESS', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000010', 'OEE/EFFECTIVENESS', 10, 'ISO 22400 effectiveness ratio (E) -- the OEE factor commonly called Performance. Supersedes OEE/PERFORMANCE.', false, NULL, '2026-08-02 05:44:46.630269+00', DEFAULT, 'SAMPLE', 'PERCENT', NULL, 'ISO 22400', 'https://acs-cymru.local/semantics/iso22400/EFFECTIVENESS', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000008', 'OEE/PERFORMANCE', 10, 'ISO 22400 performance ratio', true, 'c0000001-0000-4000-8000-000000000010', '2026-08-02 05:44:36.861147+00', DEFAULT, NULL, 'PERCENT', NULL, 'ISO 22400', 'https://factoryplus.local/semantics/iso22400/EFFECTIVENESS', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000008', 'OEE/PERFORMANCE', 10, 'ISO 22400 performance ratio', true, 'c0000001-0000-4000-8000-000000000010', '2026-08-02 05:44:36.861147+00', DEFAULT, NULL, 'PERCENT', NULL, 'ISO 22400', 'https://acs-cymru.local/semantics/iso22400/EFFECTIVENESS', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000001', 'Systems/TEMPERATURE', 10, 'Machine system temperature', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'SAMPLE', 'CELSIUS', NULL, 'MTConnect', 'https://factoryplus.local/semantics/mtconnect/v2.0/Systems/TEMPERATURE', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000001', 'Systems/TEMPERATURE', 10, 'Machine system temperature', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'SAMPLE', 'CELSIUS', NULL, 'MTConnect', 'https://acs-cymru.local/semantics/mtconnect/v2.0/Systems/TEMPERATURE', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000002', 'Axes/DISPLACEMENT', 10, 'Axis displacement amplitude (was: vibration)', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'SAMPLE', 'MILLIMETER', NULL, 'MTConnect', 'https://factoryplus.local/semantics/mtconnect/v2.0/Axes/DISPLACEMENT', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000002', 'Axes/DISPLACEMENT', 10, 'Axis displacement amplitude (was: vibration)', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'SAMPLE', 'MILLIMETER', NULL, 'MTConnect', 'https://acs-cymru.local/semantics/mtconnect/v2.0/Axes/DISPLACEMENT', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000003', 'Controller/EXECUTION', 12, 'Controller execution state: READY / ACTIVE / INTERRUPTED / FEED_HOLD / STOPPED', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://factoryplus.local/semantics/mtconnect/v2.0/Controller/EXECUTION', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000003', 'Controller/EXECUTION', 12, 'Controller execution state: READY / ACTIVE / INTERRUPTED / FEED_HOLD / STOPPED', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://acs-cymru.local/semantics/mtconnect/v2.0/Controller/EXECUTION', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000004', 'Controller/EMERGENCY_STOP', 12, 'Emergency stop circuit: ARMED (healthy) or TRIGGERED', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://factoryplus.local/semantics/mtconnect/v2.0/Controller/EMERGENCY_STOP', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000004', 'Controller/EMERGENCY_STOP', 12, 'Emergency stop circuit: ARMED (healthy) or TRIGGERED', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://acs-cymru.local/semantics/mtconnect/v2.0/Controller/EMERGENCY_STOP', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000005', 'Controller/FIRMWARE', 12, 'Controller firmware version', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://factoryplus.local/semantics/mtconnect/v2.0/Controller/FIRMWARE', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000005', 'Controller/FIRMWARE', 12, 'Controller firmware version', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://acs-cymru.local/semantics/mtconnect/v2.0/Controller/FIRMWARE', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000006', 'SERIAL_NUMBER', 12, 'Manufacturer serial number', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://factoryplus.local/semantics/mtconnect/v2.0/SERIAL_NUMBER', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000006', 'SERIAL_NUMBER', 12, 'Manufacturer serial number', false, NULL, '2026-08-02 05:44:36.861147+00', DEFAULT, 'EVENT', NULL, NULL, 'MTConnect', 'https://acs-cymru.local/semantics/mtconnect/v2.0/SERIAL_NUMBER', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000011', 'Axes/C/ANGLE', 10, 'Angular position of the C axis (MTConnect ANGLE on the Axes component)', false, NULL, '2026-08-02 05:44:47.393993+00', DEFAULT, 'SAMPLE', 'DEGREE', NULL, 'MTConnect', 'https://factoryplus.local/semantics/mtconnect/v2.0/Axes/C/ANGLE', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000011', 'Axes/C/ANGLE', 10, 'Angular position of the C axis (MTConnect ANGLE on the Axes component)', false, NULL, '2026-08-02 05:44:47.393993+00', DEFAULT, 'SAMPLE', 'DEGREE', NULL, 'MTConnect', 'https://acs-cymru.local/semantics/mtconnect/v2.0/Axes/C/ANGLE', 'IRI')
 ON CONFLICT (name) DO NOTHING;
 INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000012', 'Machine/OperatingMode', 12, 'Machine operating mode -- Processing, Setup, Maintenance or Normal. OPC 40001 calls this browse name MachineryOperationMode; the semantic id binds this metric to that concept.', false, NULL, '2026-08-02 05:44:47.393993+00', DEFAULT, 'EVENT', NULL, NULL, 'OPC UA', 'http://opcfoundation.org/UA/Machinery/MachineryOperationMode', 'IRI')
 ON CONFLICT (name) DO NOTHING;
 INSERT INTO public.metric_catalog VALUES ('c0000001-0000-4000-8000-000000000013', 'MotionDevice/OverridePercent', 10, 'Operator speed override applied to programmed motion. OPC 40010 calls this browse name SpeedOverride; the semantic id binds this metric to that concept.', false, NULL, '2026-08-02 05:44:47.393993+00', DEFAULT, 'SAMPLE', 'PERCENT', NULL, 'OPC UA', 'http://opcfoundation.org/UA/Robotics/SpeedOverride', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('e5f5b550-25f7-4c28-9cd4-36eb9c2224af', 'safety_interlock', 11, 'Safety interlock present/enabled (local extension)', false, NULL, '2026-08-02 05:44:32.25444+00', DEFAULT, 'EVENT', NULL, NULL, NULL, 'https://factoryplus.local/semantics/local/safety_interlock', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('e5f5b550-25f7-4c28-9cd4-36eb9c2224af', 'safety_interlock', 11, 'Safety interlock present/enabled (local extension)', false, NULL, '2026-08-02 05:44:32.25444+00', DEFAULT, 'EVENT', NULL, NULL, NULL, 'https://acs-cymru.local/semantics/local/safety_interlock', 'IRI')
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO public.metric_catalog VALUES ('a469cb73-0d73-46b3-928e-7ecfd7fc43f0', 'max_temp_threshold', 10, 'Configured maximum temperature threshold (local extension)', false, NULL, '2026-08-02 05:44:32.25444+00', DEFAULT, 'SAMPLE', 'CELSIUS', NULL, NULL, 'https://factoryplus.local/semantics/local/max_temp_threshold', 'IRI')
+INSERT INTO public.metric_catalog VALUES ('a469cb73-0d73-46b3-928e-7ecfd7fc43f0', 'max_temp_threshold', 10, 'Configured maximum temperature threshold (local extension)', false, NULL, '2026-08-02 05:44:32.25444+00', DEFAULT, 'SAMPLE', 'CELSIUS', NULL, NULL, 'https://acs-cymru.local/semantics/local/max_temp_threshold', 'IRI')
 ON CONFLICT (name) DO NOTHING;
 
 
@@ -510,1201 +510,1201 @@ ON CONFLICT (name) DO NOTHING;
 -- >>> BEGIN GENERATED mtconnect_vocabulary -- MTConnect 2.8, 598 rows, sha256:5012ad00298ab9cb
 -- GENERATED. Do not edit these rows by hand: bump SCHEMA_VERSION in
 -- scripts/generate-mtconnect-vocabulary.mjs and re-run it. CI verifies the digest above.
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ACCELERATION', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ACCELERATION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ACCELERATION', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ACCELERATION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ACCUMULATED_TIME', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ACCUMULATED_TIME')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ACCUMULATED_TIME', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ACCUMULATED_TIME')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ACTIVATION_COUNT', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ACTIVATION_COUNT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ACTIVATION_COUNT', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ACTIVATION_COUNT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ACTIVE_AXES', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ACTIVE_AXES')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ACTIVE_AXES', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ACTIVE_AXES')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ACTIVE_POWER_SOURCE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ACTIVE_POWER_SOURCE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ACTIVE_POWER_SOURCE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ACTIVE_POWER_SOURCE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ACTUATOR', 'CONDITION', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ACTUATOR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ACTUATOR', 'CONDITION', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ACTUATOR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ACTUATOR_STATE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ACTUATOR_STATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ACTUATOR_STATE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ACTUATOR_STATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ADAPTER_SOFTWARE_VERSION', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ADAPTER_SOFTWARE_VERSION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ADAPTER_SOFTWARE_VERSION', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ADAPTER_SOFTWARE_VERSION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ADAPTER_URI', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ADAPTER_URI')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ADAPTER_URI', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ADAPTER_URI')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ALARM', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ALARM')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ALARM', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ALARM')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ALARM_LIMIT', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ALARM_LIMIT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ALARM_LIMIT', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ALARM_LIMIT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ALARM_LIMITS', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ALARM_LIMITS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ALARM_LIMITS', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ALARM_LIMITS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'AMPERAGE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/AMPERAGE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'AMPERAGE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/AMPERAGE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'AMPERAGE_AC', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/AMPERAGE_AC')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'AMPERAGE_AC', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/AMPERAGE_AC')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'AMPERAGE_DC', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/AMPERAGE_DC')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'AMPERAGE_DC', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/AMPERAGE_DC')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ANGLE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ANGLE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ANGLE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ANGLE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ANGULAR_ACCELERATION', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ANGULAR_ACCELERATION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ANGULAR_ACCELERATION', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ANGULAR_ACCELERATION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ANGULAR_DECELERATION', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ANGULAR_DECELERATION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ANGULAR_DECELERATION', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ANGULAR_DECELERATION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ANGULAR_VELOCITY', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ANGULAR_VELOCITY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ANGULAR_VELOCITY', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ANGULAR_VELOCITY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'APPLICATION', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/APPLICATION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'APPLICATION', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/APPLICATION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ASSET_ADDED', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ASSET_ADDED')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ASSET_ADDED', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ASSET_ADDED')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ASSET_CHANGED', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ASSET_CHANGED')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ASSET_CHANGED', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ASSET_CHANGED')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ASSET_COUNT', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ASSET_COUNT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ASSET_COUNT', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ASSET_COUNT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ASSET_REMOVED', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ASSET_REMOVED')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ASSET_REMOVED', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ASSET_REMOVED')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ASSET_UPDATE_RATE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ASSET_UPDATE_RATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ASSET_UPDATE_RATE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ASSET_UPDATE_RATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ASSOCIATED_ASSET_ID', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ASSOCIATED_ASSET_ID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ASSOCIATED_ASSET_ID', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ASSOCIATED_ASSET_ID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'AVAILABILITY', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/AVAILABILITY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'AVAILABILITY', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/AVAILABILITY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'AXIS_COUPLING', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/AXIS_COUPLING')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'AXIS_COUPLING', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/AXIS_COUPLING')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'AXIS_FEEDRATE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/AXIS_FEEDRATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'AXIS_FEEDRATE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/AXIS_FEEDRATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'AXIS_FEEDRATE_OVERRIDE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/AXIS_FEEDRATE_OVERRIDE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'AXIS_FEEDRATE_OVERRIDE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/AXIS_FEEDRATE_OVERRIDE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'AXIS_INTERLOCK', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/AXIS_INTERLOCK')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'AXIS_INTERLOCK', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/AXIS_INTERLOCK')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'AXIS_STATE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/AXIS_STATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'AXIS_STATE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/AXIS_STATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'BATTERY_CAPACITY', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/BATTERY_CAPACITY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'BATTERY_CAPACITY', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/BATTERY_CAPACITY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'BATTERY_CHARGE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/BATTERY_CHARGE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'BATTERY_CHARGE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/BATTERY_CHARGE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'BATTERY_STATE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/BATTERY_STATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'BATTERY_STATE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/BATTERY_STATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'BINDING_STATE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/BINDING_STATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'BINDING_STATE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/BINDING_STATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'BLOCK', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/BLOCK')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'BLOCK', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/BLOCK')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'BLOCK_COUNT', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/BLOCK_COUNT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'BLOCK_COUNT', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/BLOCK_COUNT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CAPACITY_FLUID', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/CAPACITY_FLUID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CAPACITY_FLUID', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/CAPACITY_FLUID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CAPACITY_SPATIAL', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/CAPACITY_SPATIAL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CAPACITY_SPATIAL', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/CAPACITY_SPATIAL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CHARACTERISTIC_PERSISTENT_ID', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/CHARACTERISTIC_PERSISTENT_ID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CHARACTERISTIC_PERSISTENT_ID', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/CHARACTERISTIC_PERSISTENT_ID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CHARACTERISTIC_STATUS', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/CHARACTERISTIC_STATUS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CHARACTERISTIC_STATUS', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/CHARACTERISTIC_STATUS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CHARGE_RATE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/CHARGE_RATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CHARGE_RATE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/CHARGE_RATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CHUCK_INTERLOCK', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/CHUCK_INTERLOCK')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CHUCK_INTERLOCK', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/CHUCK_INTERLOCK')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CHUCK_STATE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/CHUCK_STATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CHUCK_STATE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/CHUCK_STATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CLOCK_TIME', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/CLOCK_TIME')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CLOCK_TIME', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/CLOCK_TIME')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CODE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/CODE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CODE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/CODE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'COMMUNICATIONS', 'CONDITION', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/COMMUNICATIONS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'COMMUNICATIONS', 'CONDITION', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/COMMUNICATIONS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'COMPONENT_DATA', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/COMPONENT_DATA')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'COMPONENT_DATA', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/COMPONENT_DATA')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'COMPOSITION_STATE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/COMPOSITION_STATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'COMPOSITION_STATE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/COMPOSITION_STATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CONCENTRATION', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/CONCENTRATION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CONCENTRATION', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/CONCENTRATION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CONDUCTIVITY', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/CONDUCTIVITY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CONDUCTIVITY', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/CONDUCTIVITY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CONNECTION_STATUS', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/CONNECTION_STATUS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CONNECTION_STATUS', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/CONNECTION_STATUS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CONTROL_LIMIT', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/CONTROL_LIMIT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CONTROL_LIMIT', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/CONTROL_LIMIT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CONTROL_LIMITS', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/CONTROL_LIMITS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CONTROL_LIMITS', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/CONTROL_LIMITS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CONTROLLER_MODE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/CONTROLLER_MODE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CONTROLLER_MODE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/CONTROLLER_MODE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CONTROLLER_MODE_OVERRIDE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/CONTROLLER_MODE_OVERRIDE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CONTROLLER_MODE_OVERRIDE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/CONTROLLER_MODE_OVERRIDE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'COUPLED_AXES', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/COUPLED_AXES')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'COUPLED_AXES', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/COUPLED_AXES')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CUTTING_SPEED', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/CUTTING_SPEED')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CUTTING_SPEED', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/CUTTING_SPEED')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CYCLE_COUNT', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/CYCLE_COUNT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'CYCLE_COUNT', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/CYCLE_COUNT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DATA_RANGE', 'CONDITION', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DATA_RANGE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DATA_RANGE', 'CONDITION', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DATA_RANGE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DATE_CODE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DATE_CODE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DATE_CODE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DATE_CODE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEACTIVATION_COUNT', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DEACTIVATION_COUNT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEACTIVATION_COUNT', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DEACTIVATION_COUNT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DECELERATION', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DECELERATION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DECELERATION', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DECELERATION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DENSITY', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DENSITY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DENSITY', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DENSITY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEPOSITION_ACCELERATION_VOLUMETRIC', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DEPOSITION_ACCELERATION_VOLUMETRIC')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEPOSITION_ACCELERATION_VOLUMETRIC', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DEPOSITION_ACCELERATION_VOLUMETRIC')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEPOSITION_DENSITY', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DEPOSITION_DENSITY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEPOSITION_DENSITY', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DEPOSITION_DENSITY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEPOSITION_MASS', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DEPOSITION_MASS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEPOSITION_MASS', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DEPOSITION_MASS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEPOSITION_RATE_VOLUMETRIC', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DEPOSITION_RATE_VOLUMETRIC')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEPOSITION_RATE_VOLUMETRIC', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DEPOSITION_RATE_VOLUMETRIC')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEPOSITION_VOLUME', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DEPOSITION_VOLUME')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEPOSITION_VOLUME', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DEPOSITION_VOLUME')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEPTH', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DEPTH')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEPTH', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DEPTH')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEVICE_ADDED', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DEVICE_ADDED')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEVICE_ADDED', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DEVICE_ADDED')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEVICE_CHANGED', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DEVICE_CHANGED')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEVICE_CHANGED', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DEVICE_CHANGED')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEVICE_REMOVED', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DEVICE_REMOVED')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEVICE_REMOVED', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DEVICE_REMOVED')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEVICE_UUID', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DEVICE_UUID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEVICE_UUID', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DEVICE_UUID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEW_POINT', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DEW_POINT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DEW_POINT', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DEW_POINT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DIAMETER', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DIAMETER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DIAMETER', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DIAMETER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DIRECTION', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DIRECTION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DIRECTION', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DIRECTION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DISCHARGE_RATE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DISCHARGE_RATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DISCHARGE_RATE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DISCHARGE_RATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DISPLACEMENT', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DISPLACEMENT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DISPLACEMENT', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DISPLACEMENT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DISPLACEMENT_ANGULAR', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DISPLACEMENT_ANGULAR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DISPLACEMENT_ANGULAR', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DISPLACEMENT_ANGULAR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DISPLACEMENT_LINEAR', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DISPLACEMENT_LINEAR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DISPLACEMENT_LINEAR', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DISPLACEMENT_LINEAR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DOOR_STATE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/DOOR_STATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'DOOR_STATE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/DOOR_STATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ELECTRICAL_ENERGY', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ELECTRICAL_ENERGY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ELECTRICAL_ENERGY', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ELECTRICAL_ENERGY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ELEVATION', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ELEVATION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ELEVATION', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ELEVATION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'EMERGENCY_STOP', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/EMERGENCY_STOP')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'EMERGENCY_STOP', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/EMERGENCY_STOP')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'END_OF_BAR', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/END_OF_BAR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'END_OF_BAR', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/END_OF_BAR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'EQUIPMENT_MODE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/EQUIPMENT_MODE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'EQUIPMENT_MODE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/EQUIPMENT_MODE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'EQUIPMENT_TIMER', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/EQUIPMENT_TIMER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'EQUIPMENT_TIMER', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/EQUIPMENT_TIMER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'EXECUTION', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/EXECUTION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'EXECUTION', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/EXECUTION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FEATURE_MEASUREMENT', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/FEATURE_MEASUREMENT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FEATURE_MEASUREMENT', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/FEATURE_MEASUREMENT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FEATURE_PERSISTENT_ID', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/FEATURE_PERSISTENT_ID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FEATURE_PERSISTENT_ID', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/FEATURE_PERSISTENT_ID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FILL_HEIGHT', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/FILL_HEIGHT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FILL_HEIGHT', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/FILL_HEIGHT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FILL_LEVEL', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/FILL_LEVEL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FILL_LEVEL', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/FILL_LEVEL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FIRMWARE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/FIRMWARE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FIRMWARE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/FIRMWARE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FIXTURE_ASSET_ID', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/FIXTURE_ASSET_ID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FIXTURE_ASSET_ID', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/FIXTURE_ASSET_ID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FIXTURE_ID', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/FIXTURE_ID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FIXTURE_ID', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/FIXTURE_ID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FLOW', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/FLOW')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FLOW', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/FLOW')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FOLLOWING_ERROR', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/FOLLOWING_ERROR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FOLLOWING_ERROR', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/FOLLOWING_ERROR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FOLLOWING_ERROR_ANGULAR', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/FOLLOWING_ERROR_ANGULAR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FOLLOWING_ERROR_ANGULAR', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/FOLLOWING_ERROR_ANGULAR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FOLLOWING_ERROR_LINEAR', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/FOLLOWING_ERROR_LINEAR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FOLLOWING_ERROR_LINEAR', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/FOLLOWING_ERROR_LINEAR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FREQUENCY', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/FREQUENCY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FREQUENCY', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/FREQUENCY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FUNCTIONAL_MODE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/FUNCTIONAL_MODE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'FUNCTIONAL_MODE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/FUNCTIONAL_MODE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'GLOBAL_POSITION', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/GLOBAL_POSITION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'GLOBAL_POSITION', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/GLOBAL_POSITION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'GRAVITATIONAL_ACCELERATION', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/GRAVITATIONAL_ACCELERATION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'GRAVITATIONAL_ACCELERATION', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/GRAVITATIONAL_ACCELERATION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'GRAVITATIONAL_FORCE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/GRAVITATIONAL_FORCE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'GRAVITATIONAL_FORCE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/GRAVITATIONAL_FORCE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'HARDNESS', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/HARDNESS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'HARDNESS', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/HARDNESS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'HARDWARE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/HARDWARE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'HARDWARE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/HARDWARE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'HOST_NAME', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/HOST_NAME')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'HOST_NAME', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/HOST_NAME')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'HUMIDITY_ABSOLUTE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/HUMIDITY_ABSOLUTE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'HUMIDITY_ABSOLUTE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/HUMIDITY_ABSOLUTE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'HUMIDITY_RELATIVE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/HUMIDITY_RELATIVE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'HUMIDITY_RELATIVE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/HUMIDITY_RELATIVE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'HUMIDITY_SPECIFIC', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/HUMIDITY_SPECIFIC')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'HUMIDITY_SPECIFIC', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/HUMIDITY_SPECIFIC')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LEAK_DETECT', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/LEAK_DETECT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LEAK_DETECT', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/LEAK_DETECT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LENGTH', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/LENGTH')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LENGTH', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/LENGTH')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LEVEL', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/LEVEL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LEVEL', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/LEVEL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LIBRARY', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/LIBRARY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LIBRARY', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/LIBRARY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LINE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/LINE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LINE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/LINE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LINE_LABEL', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/LINE_LABEL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LINE_LABEL', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/LINE_LABEL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LINE_NUMBER', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/LINE_NUMBER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LINE_NUMBER', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/LINE_NUMBER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LINEAR_FORCE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/LINEAR_FORCE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LINEAR_FORCE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/LINEAR_FORCE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LOAD', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/LOAD')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LOAD', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/LOAD')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LOAD_COUNT', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/LOAD_COUNT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LOAD_COUNT', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/LOAD_COUNT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LOCATION_ADDRESS', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/LOCATION_ADDRESS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LOCATION_ADDRESS', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/LOCATION_ADDRESS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LOCATION_NARRATIVE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/LOCATION_NARRATIVE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LOCATION_NARRATIVE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/LOCATION_NARRATIVE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LOCATION_SPATIAL_GEOGRAPHIC', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/LOCATION_SPATIAL_GEOGRAPHIC')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LOCATION_SPATIAL_GEOGRAPHIC', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/LOCATION_SPATIAL_GEOGRAPHIC')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LOCK_STATE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/LOCK_STATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LOCK_STATE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/LOCK_STATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LOGIC_PROGRAM', 'CONDITION', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/LOGIC_PROGRAM')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'LOGIC_PROGRAM', 'CONDITION', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/LOGIC_PROGRAM')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MAINTENANCE_LIST', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/MAINTENANCE_LIST')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MAINTENANCE_LIST', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/MAINTENANCE_LIST')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MASS', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/MASS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MASS', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/MASS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MATERIAL', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/MATERIAL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MATERIAL', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/MATERIAL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MATERIAL_LAYER', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/MATERIAL_LAYER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MATERIAL_LAYER', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/MATERIAL_LAYER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MEASUREMENT_TYPE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/MEASUREMENT_TYPE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MEASUREMENT_TYPE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/MEASUREMENT_TYPE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MEASUREMENT_UNITS', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/MEASUREMENT_UNITS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MEASUREMENT_UNITS', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/MEASUREMENT_UNITS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MEASUREMENT_VALUE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/MEASUREMENT_VALUE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MEASUREMENT_VALUE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/MEASUREMENT_VALUE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MESSAGE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/MESSAGE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MESSAGE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/MESSAGE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MOTION_PROGRAM', 'CONDITION', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/MOTION_PROGRAM')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MOTION_PROGRAM', 'CONDITION', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/MOTION_PROGRAM')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MTCONNECT_VERSION', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/MTCONNECT_VERSION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'MTCONNECT_VERSION', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/MTCONNECT_VERSION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'NETWORK', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/NETWORK')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'NETWORK', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/NETWORK')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'NETWORK_PORT', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/NETWORK_PORT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'NETWORK_PORT', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/NETWORK_PORT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'OBSERVATION_UPDATE_RATE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/OBSERVATION_UPDATE_RATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'OBSERVATION_UPDATE_RATE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/OBSERVATION_UPDATE_RATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'OPENNESS', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/OPENNESS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'OPENNESS', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/OPENNESS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'OPERATING_MODE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/OPERATING_MODE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'OPERATING_MODE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/OPERATING_MODE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'OPERATING_SYSTEM', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/OPERATING_SYSTEM')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'OPERATING_SYSTEM', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/OPERATING_SYSTEM')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'OPERATOR_ID', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/OPERATOR_ID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'OPERATOR_ID', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/OPERATOR_ID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ORIENTATION', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ORIENTATION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ORIENTATION', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ORIENTATION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PALLET_ID', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PALLET_ID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PALLET_ID', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PALLET_ID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_COUNT', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PART_COUNT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_COUNT', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PART_COUNT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_COUNT_TYPE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PART_COUNT_TYPE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_COUNT_TYPE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PART_COUNT_TYPE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_DETECT', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PART_DETECT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_DETECT', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PART_DETECT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_GROUP_ID', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PART_GROUP_ID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_GROUP_ID', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PART_GROUP_ID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_ID', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PART_ID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_ID', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PART_ID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_INDEX', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PART_INDEX')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_INDEX', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PART_INDEX')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_KIND_ID', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PART_KIND_ID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_KIND_ID', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PART_KIND_ID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_NUMBER', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PART_NUMBER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_NUMBER', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PART_NUMBER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_PROCESSING_STATE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PART_PROCESSING_STATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_PROCESSING_STATE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PART_PROCESSING_STATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_STATUS', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PART_STATUS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_STATUS', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PART_STATUS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_UNIQUE_ID', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PART_UNIQUE_ID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PART_UNIQUE_ID', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PART_UNIQUE_ID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PARTICLE_COUNT', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PARTICLE_COUNT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PARTICLE_COUNT', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PARTICLE_COUNT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PARTICLE_SIZE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PARTICLE_SIZE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PARTICLE_SIZE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PARTICLE_SIZE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PATH_FEEDRATE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PATH_FEEDRATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PATH_FEEDRATE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PATH_FEEDRATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PATH_FEEDRATE_OVERRIDE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PATH_FEEDRATE_OVERRIDE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PATH_FEEDRATE_OVERRIDE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PATH_FEEDRATE_OVERRIDE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PATH_FEEDRATE_PER_REVOLUTION', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PATH_FEEDRATE_PER_REVOLUTION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PATH_FEEDRATE_PER_REVOLUTION', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PATH_FEEDRATE_PER_REVOLUTION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PATH_MODE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PATH_MODE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PATH_MODE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PATH_MODE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PATH_POSITION', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PATH_POSITION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PATH_POSITION', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PATH_POSITION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PH', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PH')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PH', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PH')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'POSITION', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/POSITION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'POSITION', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/POSITION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'POSITION_CARTESIAN', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/POSITION_CARTESIAN')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'POSITION_CARTESIAN', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/POSITION_CARTESIAN')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'POWER_FACTOR', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/POWER_FACTOR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'POWER_FACTOR', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/POWER_FACTOR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'POWER_STATE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/POWER_STATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'POWER_STATE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/POWER_STATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'POWER_STATUS', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/POWER_STATUS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'POWER_STATUS', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/POWER_STATUS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PRESSURE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PRESSURE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PRESSURE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PRESSURE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PRESSURE_ABSOLUTE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PRESSURE_ABSOLUTE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PRESSURE_ABSOLUTE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PRESSURE_ABSOLUTE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PRESSURIZATION_RATE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PRESSURIZATION_RATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PRESSURIZATION_RATE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PRESSURIZATION_RATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROCESS_AGGREGATE_ID', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PROCESS_AGGREGATE_ID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROCESS_AGGREGATE_ID', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PROCESS_AGGREGATE_ID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROCESS_KIND_ID', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PROCESS_KIND_ID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROCESS_KIND_ID', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PROCESS_KIND_ID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROCESS_OCCURRENCE_ID', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PROCESS_OCCURRENCE_ID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROCESS_OCCURRENCE_ID', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PROCESS_OCCURRENCE_ID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROCESS_STATE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PROCESS_STATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROCESS_STATE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PROCESS_STATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROCESS_TIME', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PROCESS_TIME')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROCESS_TIME', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PROCESS_TIME')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROCESS_TIMER', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PROCESS_TIMER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROCESS_TIMER', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PROCESS_TIMER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROGRAM', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PROGRAM')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROGRAM', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PROGRAM')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROGRAM_COMMENT', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PROGRAM_COMMENT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROGRAM_COMMENT', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PROGRAM_COMMENT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROGRAM_EDIT', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PROGRAM_EDIT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROGRAM_EDIT', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PROGRAM_EDIT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROGRAM_EDIT_NAME', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PROGRAM_EDIT_NAME')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROGRAM_EDIT_NAME', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PROGRAM_EDIT_NAME')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROGRAM_HEADER', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PROGRAM_HEADER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROGRAM_HEADER', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PROGRAM_HEADER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROGRAM_LOCATION', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PROGRAM_LOCATION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROGRAM_LOCATION', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PROGRAM_LOCATION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROGRAM_LOCATION_TYPE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PROGRAM_LOCATION_TYPE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROGRAM_LOCATION_TYPE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PROGRAM_LOCATION_TYPE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROGRAM_NEST_LEVEL', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/PROGRAM_NEST_LEVEL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'PROGRAM_NEST_LEVEL', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/PROGRAM_NEST_LEVEL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'RESISTANCE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/RESISTANCE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'RESISTANCE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/RESISTANCE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'RESISTIVITY', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/RESISTIVITY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'RESISTIVITY', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/RESISTIVITY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ROTARY_MODE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ROTARY_MODE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ROTARY_MODE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ROTARY_MODE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ROTARY_VELOCITY', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ROTARY_VELOCITY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ROTARY_VELOCITY', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ROTARY_VELOCITY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ROTARY_VELOCITY_OVERRIDE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ROTARY_VELOCITY_OVERRIDE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ROTARY_VELOCITY_OVERRIDE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ROTARY_VELOCITY_OVERRIDE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ROTATION', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ROTATION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'ROTATION', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ROTATION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SENSOR_ATTACHMENT', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/SENSOR_ATTACHMENT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SENSOR_ATTACHMENT', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/SENSOR_ATTACHMENT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SENSOR_STATE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/SENSOR_STATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SENSOR_STATE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/SENSOR_STATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SERIAL_NUMBER', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/SERIAL_NUMBER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SERIAL_NUMBER', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/SERIAL_NUMBER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SETTLING_ERROR', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/SETTLING_ERROR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SETTLING_ERROR', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/SETTLING_ERROR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SETTLING_ERROR_ANGULAR', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/SETTLING_ERROR_ANGULAR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SETTLING_ERROR_ANGULAR', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/SETTLING_ERROR_ANGULAR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SETTLING_ERROR_LINEAR', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/SETTLING_ERROR_LINEAR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SETTLING_ERROR_LINEAR', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/SETTLING_ERROR_LINEAR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SOUND_LEVEL', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/SOUND_LEVEL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SOUND_LEVEL', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/SOUND_LEVEL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SPECIFICATION_LIMIT', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/SPECIFICATION_LIMIT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SPECIFICATION_LIMIT', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/SPECIFICATION_LIMIT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SPECIFICATION_LIMITS', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/SPECIFICATION_LIMITS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SPECIFICATION_LIMITS', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/SPECIFICATION_LIMITS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SPINDLE_INTERLOCK', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/SPINDLE_INTERLOCK')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SPINDLE_INTERLOCK', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/SPINDLE_INTERLOCK')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SPINDLE_SPEED', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/SPINDLE_SPEED')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SPINDLE_SPEED', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/SPINDLE_SPEED')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'STRAIN', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/STRAIN')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'STRAIN', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/STRAIN')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SWING_ANGLE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/SWING_ANGLE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SWING_ANGLE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/SWING_ANGLE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SWING_DIAMETER', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/SWING_DIAMETER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SWING_DIAMETER', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/SWING_DIAMETER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SWING_RADIUS', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/SWING_RADIUS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SWING_RADIUS', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/SWING_RADIUS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SYSTEM', 'CONDITION', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/SYSTEM')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'SYSTEM', 'CONDITION', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/SYSTEM')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TASK_ASSET_ID', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/TASK_ASSET_ID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TASK_ASSET_ID', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/TASK_ASSET_ID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TEMPERATURE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/TEMPERATURE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TEMPERATURE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/TEMPERATURE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TENSION', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/TENSION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TENSION', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/TENSION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'THICKNESS', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/THICKNESS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'THICKNESS', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/THICKNESS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TILT', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/TILT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TILT', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/TILT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TOOL_ASSET_ID', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/TOOL_ASSET_ID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TOOL_ASSET_ID', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/TOOL_ASSET_ID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TOOL_CUTTING_ITEM', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/TOOL_CUTTING_ITEM')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TOOL_CUTTING_ITEM', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/TOOL_CUTTING_ITEM')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TOOL_GROUP', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/TOOL_GROUP')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TOOL_GROUP', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/TOOL_GROUP')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TOOL_ID', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/TOOL_ID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TOOL_ID', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/TOOL_ID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TOOL_NUMBER', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/TOOL_NUMBER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TOOL_NUMBER', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/TOOL_NUMBER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TOOL_OFFSET', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/TOOL_OFFSET')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TOOL_OFFSET', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/TOOL_OFFSET')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TOOL_OFFSETS', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/TOOL_OFFSETS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TOOL_OFFSETS', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/TOOL_OFFSETS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TORQUE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/TORQUE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TORQUE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/TORQUE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TRANSFER_COUNT', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/TRANSFER_COUNT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TRANSFER_COUNT', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/TRANSFER_COUNT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TRANSLATION', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/TRANSLATION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'TRANSLATION', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/TRANSLATION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'UNCERTAINTY', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/UNCERTAINTY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'UNCERTAINTY', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/UNCERTAINTY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'UNCERTAINTY_TYPE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/UNCERTAINTY_TYPE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'UNCERTAINTY_TYPE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/UNCERTAINTY_TYPE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'UNLOAD_COUNT', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/UNLOAD_COUNT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'UNLOAD_COUNT', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/UNLOAD_COUNT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'USER', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/USER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'USER', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/USER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VALVE_STATE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/VALVE_STATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VALVE_STATE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/VALVE_STATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VARIABLE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/VARIABLE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VARIABLE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/VARIABLE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VELOCITY', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/VELOCITY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VELOCITY', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/VELOCITY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VISCOSITY', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/VISCOSITY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VISCOSITY', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/VISCOSITY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VOLT_AMPERE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/VOLT_AMPERE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VOLT_AMPERE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/VOLT_AMPERE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VOLT_AMPERE_REACTIVE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/VOLT_AMPERE_REACTIVE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VOLT_AMPERE_REACTIVE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/VOLT_AMPERE_REACTIVE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VOLTAGE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/VOLTAGE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VOLTAGE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/VOLTAGE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VOLTAGE_AC', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/VOLTAGE_AC')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VOLTAGE_AC', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/VOLTAGE_AC')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VOLTAGE_DC', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/VOLTAGE_DC')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VOLTAGE_DC', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/VOLTAGE_DC')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VOLUME_FLUID', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/VOLUME_FLUID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VOLUME_FLUID', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/VOLUME_FLUID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VOLUME_SPATIAL', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/VOLUME_SPATIAL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'VOLUME_SPATIAL', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/VOLUME_SPATIAL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'WAIT_STATE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/WAIT_STATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'WAIT_STATE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/WAIT_STATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'WATER_HARDNESS', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/WATER_HARDNESS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'WATER_HARDNESS', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/WATER_HARDNESS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'WATTAGE', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/WATTAGE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'WATTAGE', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/WATTAGE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'WIRE', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/WIRE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'WIRE', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/WIRE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'WORK_OFFSET', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/WORK_OFFSET')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'WORK_OFFSET', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/WORK_OFFSET')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'WORK_OFFSETS', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/WORK_OFFSETS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'WORK_OFFSETS', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/WORK_OFFSETS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'WORKHOLDING_ID', 'EVENT', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/WORKHOLDING_ID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'WORKHOLDING_ID', 'EVENT', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/WORKHOLDING_ID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'X_DIMENSION', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/X_DIMENSION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'X_DIMENSION', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/X_DIMENSION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'Y_DIMENSION', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/Y_DIMENSION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'Y_DIMENSION', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/Y_DIMENSION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'Z_DIMENSION', 'SAMPLE', 'https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/Z_DIMENSION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('DATA_ITEM_TYPE', 'Z_DIMENSION', 'SAMPLE', 'https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/Z_DIMENSION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ABORTED', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/ABORTED')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ABORTED', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/ABORTED')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ABSOLUTE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/ABSOLUTE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ABSOLUTE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/ABSOLUTE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ACTION', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/ACTION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ACTION', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/ACTION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ACTIVE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/ACTIVE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ACTIVE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/ACTIVE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ACTIVITY', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/ACTIVITY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ACTIVITY', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/ACTIVITY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ACTUAL', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/ACTUAL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ACTUAL', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/ACTUAL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ALL', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/ALL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ALL', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/ALL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ALTERNATING', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/ALTERNATING')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ALTERNATING', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/ALTERNATING')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'AUXILIARY', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/AUXILIARY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'AUXILIARY', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/AUXILIARY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'A_SCALE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/A_SCALE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'A_SCALE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/A_SCALE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'BAD', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/BAD')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'BAD', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/BAD')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'BATCH', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/BATCH')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'BATCH', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/BATCH')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'BINARY', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/BINARY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'BINARY', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/BINARY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'BOOLEAN', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/BOOLEAN')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'BOOLEAN', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/BOOLEAN')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'BRINELL', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/BRINELL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'BRINELL', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/BRINELL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'B_SCALE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/B_SCALE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'B_SCALE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/B_SCALE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'COMMANDED', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/COMMANDED')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'COMMANDED', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/COMMANDED')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'COMPLETE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/COMPLETE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'COMPLETE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/COMPLETE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'CONSUMED', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/CONSUMED')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'CONSUMED', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/CONSUMED')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'CONTROL', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/CONTROL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'CONTROL', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/CONTROL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'CUT', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/CUT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'CUT', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/CUT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'C_SCALE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/C_SCALE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'C_SCALE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/C_SCALE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'DELAY', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/DELAY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'DELAY', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/DELAY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'DETECT', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/DETECT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'DETECT', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/DETECT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'DIRECT', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/DIRECT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'DIRECT', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/DIRECT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'DRY_RUN', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/DRY_RUN')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'DRY_RUN', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/DRY_RUN')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'D_SCALE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/D_SCALE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'D_SCALE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/D_SCALE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ELECTRODE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/ELECTRODE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ELECTRODE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/ELECTRODE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ENDED', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/ENDED')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ENDED', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/ENDED')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ENUMERATED', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/ENUMERATED')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ENUMERATED', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/ENUMERATED')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'EXPIRATION', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/EXPIRATION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'EXPIRATION', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/EXPIRATION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'FAILED', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/FAILED')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'FAILED', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/FAILED')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'FILLER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/FILLER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'FILLER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/FILLER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'FIRST_USE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/FIRST_USE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'FIRST_USE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/FIRST_USE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'GAS', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/GAS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'GAS', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/GAS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'GATEWAY', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/GATEWAY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'GATEWAY', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/GATEWAY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'GOOD', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/GOOD')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'GOOD', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/GOOD')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'GROUND_LEVEL', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/GROUND_LEVEL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'GROUND_LEVEL', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/GROUND_LEVEL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'HEAT_TREAT', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/HEAT_TREAT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'HEAT_TREAT', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/HEAT_TREAT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'INCREMENTAL', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/INCREMENTAL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'INCREMENTAL', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/INCREMENTAL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'INSTALL_DATE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/INSTALL_DATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'INSTALL_DATE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/INSTALL_DATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'IPV4_ADDRESS', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/IPV4_ADDRESS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'IPV4_ADDRESS', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/IPV4_ADDRESS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'IPV6_ADDRESS', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/IPV6_ADDRESS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'IPV6_ADDRESS', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/IPV6_ADDRESS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ISO_STEP_EXECUTABLE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/ISO_STEP_EXECUTABLE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ISO_STEP_EXECUTABLE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/ISO_STEP_EXECUTABLE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'JOG', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/JOG')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'JOG', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/JOG')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LATERAL', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/LATERAL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LATERAL', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/LATERAL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LAYER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/LAYER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LAYER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/LAYER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LEEB', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/LEEB')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LEEB', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/LEEB')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LENGTH', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/LENGTH')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LENGTH', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/LENGTH')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LICENSE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/LICENSE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LICENSE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/LICENSE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LINE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/LINE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LINE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/LINE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LINEAR', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/LINEAR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LINEAR', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/LINEAR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LIQUID', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/LIQUID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LIQUID', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/LIQUID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LOADED', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/LOADED')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LOADED', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/LOADED')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LOT', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/LOT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'LOT', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/LOT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MACHINE_AXIS_LOCK', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/MACHINE_AXIS_LOCK')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MACHINE_AXIS_LOCK', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/MACHINE_AXIS_LOCK')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MAC_ADDRESS', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/MAC_ADDRESS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MAC_ADDRESS', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/MAC_ADDRESS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MAIN', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/MAIN')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MAIN', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/MAIN')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MAINTENANCE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/MAINTENANCE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MAINTENANCE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/MAINTENANCE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MANUAL_UNCLAMP', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/MANUAL_UNCLAMP')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MANUAL_UNCLAMP', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/MANUAL_UNCLAMP')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MANUFACTURE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/MANUFACTURE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MANUFACTURE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/MANUFACTURE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MANUFACTURER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/MANUFACTURER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MANUFACTURER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/MANUFACTURER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MAXIMUM', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/MAXIMUM')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MAXIMUM', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/MAXIMUM')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MEAN_SEA_LEVEL', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/MEAN_SEA_LEVEL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MEAN_SEA_LEVEL', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/MEAN_SEA_LEVEL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MEASURED', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/MEASURED')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MEASURED', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/MEASURED')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MINIMUM', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/MINIMUM')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MINIMUM', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/MINIMUM')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MODEL', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/MODEL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MODEL', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/MODEL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MOHS', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/MOHS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MOHS', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/MOHS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MOTION', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/MOTION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'MOTION', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/MOTION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'NO_SCALE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/NO_SCALE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'NO_SCALE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/NO_SCALE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'OPERATING', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/OPERATING')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'OPERATING', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/OPERATING')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'OPERATION', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/OPERATION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'OPERATION', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/OPERATION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'OPERATOR', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/OPERATOR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'OPERATOR', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/OPERATOR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'OPTIONAL_STOP', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/OPTIONAL_STOP')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'OPTIONAL_STOP', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/OPTIONAL_STOP')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ORDER_NUMBER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/ORDER_NUMBER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ORDER_NUMBER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/ORDER_NUMBER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'OVERRIDE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/OVERRIDE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'OVERRIDE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/OVERRIDE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PART', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/PART')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PART', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/PART')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PART_FAMILY', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/PART_FAMILY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PART_FAMILY', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/PART_FAMILY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PART_NAME', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/PART_NAME')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PART_NAME', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/PART_NAME')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PART_NUMBER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/PART_NUMBER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PART_NUMBER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/PART_NUMBER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PECK', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/PECK')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PECK', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/PECK')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PLUNGE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/PLUNGE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PLUNGE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/PLUNGE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'POWERED', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/POWERED')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'POWERED', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/POWERED')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PRIMARY', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/PRIMARY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PRIMARY', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/PRIMARY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PROBE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/PROBE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PROBE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/PROBE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PROCESS', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/PROCESS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PROCESS', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/PROCESS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PROCESS_NAME', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/PROCESS_NAME')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PROCESS_NAME', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/PROCESS_NAME')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PROCESS_PLAN', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/PROCESS_PLAN')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PROCESS_PLAN', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/PROCESS_PLAN')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PROCESS_STEP', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/PROCESS_STEP')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PROCESS_STEP', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/PROCESS_STEP')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PROGRAMMED', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/PROGRAMMED')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'PROGRAMMED', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/PROGRAMMED')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'RADIAL', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/RADIAL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'RADIAL', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/RADIAL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'RAPID', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/RAPID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'RAPID', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/RAPID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'RAW_MATERIAL', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/RAW_MATERIAL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'RAW_MATERIAL', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/RAW_MATERIAL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'RECIPE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/RECIPE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'RECIPE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/RECIPE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'RELEASE_DATE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/RELEASE_DATE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'RELEASE_DATE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/RELEASE_DATE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'REMAINING', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/REMAINING')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'REMAINING', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/REMAINING')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'REQUEST', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/REQUEST')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'REQUEST', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/REQUEST')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'RESPONSE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/RESPONSE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'RESPONSE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/RESPONSE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ROCKWELL', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/ROCKWELL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ROCKWELL', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/ROCKWELL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ROTARY', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/ROTARY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'ROTARY', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/ROTARY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'SCHEDULE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/SCHEDULE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'SCHEDULE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/SCHEDULE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'SEGMENT', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/SEGMENT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'SEGMENT', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/SEGMENT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'SERIAL_NUMBER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/SERIAL_NUMBER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'SERIAL_NUMBER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/SERIAL_NUMBER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'SET_UP', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/SET_UP')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'SET_UP', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/SET_UP')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'SHORE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/SHORE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'SHORE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/SHORE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'SINGLE_BLOCK', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/SINGLE_BLOCK')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'SINGLE_BLOCK', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/SINGLE_BLOCK')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'SOLID', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/SOLID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'SOLID', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/SOLID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'STANDARD', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/STANDARD')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'STANDARD', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/STANDARD')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'START', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/START')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'START', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/START')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'SUBNET_MASK', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/SUBNET_MASK')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'SUBNET_MASK', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/SUBNET_MASK')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'SWITCHED', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/SWITCHED')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'SWITCHED', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/SWITCHED')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'TARGET', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/TARGET')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'TARGET', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/TARGET')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'TARGET_COMPLETION', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/TARGET_COMPLETION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'TARGET_COMPLETION', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/TARGET_COMPLETION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'TOOL_CHANGE_STOP', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/TOOL_CHANGE_STOP')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'TOOL_CHANGE_STOP', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/TOOL_CHANGE_STOP')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'USEABLE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/USEABLE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'USEABLE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/USEABLE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'UUID', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/UUID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'UUID', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/UUID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'VERSION', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/VERSION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'VERSION', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/VERSION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'VERTICAL', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/VERTICAL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'VERTICAL', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/VERTICAL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'VICKERS', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/VICKERS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'VICKERS', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/VICKERS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'VLAN_ID', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/VLAN_ID')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'VLAN_ID', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/VLAN_ID')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'WASTE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/WASTE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'WASTE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/WASTE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'WIRELESS', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/WIRELESS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'WIRELESS', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/WIRELESS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'WORKING', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/SubType/WORKING')
+INSERT INTO public.mtconnect_vocabulary VALUES ('SUB_TYPE', 'WORKING', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/WORKING')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'AMPERE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/AMPERE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'AMPERE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/AMPERE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'CELSIUS', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/CELSIUS')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'CELSIUS', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/CELSIUS')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'COULOMB', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/COULOMB')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'COULOMB', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/COULOMB')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'COUNT', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/COUNT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'COUNT', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/COUNT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'COUNT/SECOND', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/COUNT/SECOND')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'COUNT/SECOND', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/COUNT/SECOND')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'CUBIC_METER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/CUBIC_METER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'CUBIC_METER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/CUBIC_METER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'CUBIC_MILLIMETER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/CUBIC_MILLIMETER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'CUBIC_MILLIMETER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/CUBIC_MILLIMETER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'CUBIC_MILLIMETER/SECOND', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/CUBIC_MILLIMETER/SECOND')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'CUBIC_MILLIMETER/SECOND', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/CUBIC_MILLIMETER/SECOND')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'CUBIC_MILLIMETER/SECOND^2', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/CUBIC_MILLIMETER/SECOND^2')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'CUBIC_MILLIMETER/SECOND^2', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/CUBIC_MILLIMETER/SECOND^2')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'DECIBEL', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/DECIBEL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'DECIBEL', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/DECIBEL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'DEGREE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/DEGREE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'DEGREE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/DEGREE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'DEGREE/SECOND', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/DEGREE/SECOND')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'DEGREE/SECOND', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/DEGREE/SECOND')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'DEGREE/SECOND^2', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/DEGREE/SECOND^2')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'DEGREE/SECOND^2', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/DEGREE/SECOND^2')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'DEGREE_3D', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/DEGREE_3D')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'DEGREE_3D', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/DEGREE_3D')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'GRAM', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/GRAM')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'GRAM', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/GRAM')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'GRAM/CUBIC_METER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/GRAM/CUBIC_METER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'GRAM/CUBIC_METER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/GRAM/CUBIC_METER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'HERTZ', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/HERTZ')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'HERTZ', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/HERTZ')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'JOULE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/JOULE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'JOULE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/JOULE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'KILOGRAM', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/KILOGRAM')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'KILOGRAM', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/KILOGRAM')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'LITER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/LITER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'LITER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/LITER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'LITER/SECOND', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/LITER/SECOND')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'LITER/SECOND', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/LITER/SECOND')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'METER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/METER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'METER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/METER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'METER/SECOND^2', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/METER/SECOND^2')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'METER/SECOND^2', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/METER/SECOND^2')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MICRO_RADIAN', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/MICRO_RADIAN')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MICRO_RADIAN', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/MICRO_RADIAN')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MILLIGRAM', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/MILLIGRAM')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MILLIGRAM', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/MILLIGRAM')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MILLIGRAM/CUBIC_MILLIMETER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/MILLIGRAM/CUBIC_MILLIMETER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MILLIGRAM/CUBIC_MILLIMETER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/MILLIGRAM/CUBIC_MILLIMETER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MILLIGRAM/LITER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/MILLIGRAM/LITER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MILLIGRAM/LITER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/MILLIGRAM/LITER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MILLILITER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/MILLILITER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MILLILITER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/MILLILITER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MILLIMETER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/MILLIMETER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MILLIMETER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/MILLIMETER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MILLIMETER/REVOLUTION', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/MILLIMETER/REVOLUTION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MILLIMETER/REVOLUTION', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/MILLIMETER/REVOLUTION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MILLIMETER/SECOND', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/MILLIMETER/SECOND')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MILLIMETER/SECOND', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/MILLIMETER/SECOND')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MILLIMETER/SECOND^2', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/MILLIMETER/SECOND^2')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MILLIMETER/SECOND^2', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/MILLIMETER/SECOND^2')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MILLIMETER_3D', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/MILLIMETER_3D')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'MILLIMETER_3D', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/MILLIMETER_3D')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'NEWTON', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/NEWTON')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'NEWTON', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/NEWTON')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'NEWTON_METER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/NEWTON_METER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'NEWTON_METER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/NEWTON_METER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'OHM', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/OHM')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'OHM', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/OHM')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'OHM_METER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/OHM_METER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'OHM_METER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/OHM_METER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'PASCAL', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/PASCAL')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'PASCAL', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/PASCAL')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'PASCAL/SECOND', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/PASCAL/SECOND')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'PASCAL/SECOND', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/PASCAL/SECOND')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'PASCAL_SECOND', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/PASCAL_SECOND')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'PASCAL_SECOND', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/PASCAL_SECOND')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'PERCENT', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/PERCENT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'PERCENT', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/PERCENT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'PH', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/PH')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'PH', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/PH')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'REVOLUTION/MINUTE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/REVOLUTION/MINUTE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'REVOLUTION/MINUTE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/REVOLUTION/MINUTE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'REVOLUTION/SECOND', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/REVOLUTION/SECOND')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'REVOLUTION/SECOND', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/REVOLUTION/SECOND')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'REVOLUTION/SECOND^2', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/REVOLUTION/SECOND^2')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'REVOLUTION/SECOND^2', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/REVOLUTION/SECOND^2')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'SECOND', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/SECOND')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'SECOND', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/SECOND')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'SIEMENS/METER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/SIEMENS/METER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'SIEMENS/METER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/SIEMENS/METER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'SQUARE_MILLIMETER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/SQUARE_MILLIMETER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'SQUARE_MILLIMETER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/SQUARE_MILLIMETER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'UNIT_VECTOR_3D', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/UNIT_VECTOR_3D')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'UNIT_VECTOR_3D', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/UNIT_VECTOR_3D')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'VOLT', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/VOLT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'VOLT', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/VOLT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'VOLT_AMPERE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/VOLT_AMPERE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'VOLT_AMPERE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/VOLT_AMPERE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'VOLT_AMPERE_REACTIVE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/VOLT_AMPERE_REACTIVE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'VOLT_AMPERE_REACTIVE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/VOLT_AMPERE_REACTIVE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'WATT', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/WATT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'WATT', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/WATT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'WATT_SECOND', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Unit/WATT_SECOND')
+INSERT INTO public.mtconnect_vocabulary VALUES ('UNIT', 'WATT_SECOND', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/WATT_SECOND')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'AMPERE_HOUR', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/AMPERE_HOUR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'AMPERE_HOUR', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/AMPERE_HOUR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'BAR', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/BAR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'BAR', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/BAR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'CENTIPOISE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/CENTIPOISE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'CENTIPOISE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/CENTIPOISE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'COUNT/MILLION', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/COUNT/MILLION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'COUNT/MILLION', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/COUNT/MILLION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'COUNT/TRILLION', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/COUNT/TRILLION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'COUNT/TRILLION', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/COUNT/TRILLION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'CUBIC_FOOT', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/CUBIC_FOOT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'CUBIC_FOOT', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/CUBIC_FOOT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'CUBIC_FOOT/HOUR', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/CUBIC_FOOT/HOUR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'CUBIC_FOOT/HOUR', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/CUBIC_FOOT/HOUR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'CUBIC_FOOT/MINUTE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/CUBIC_FOOT/MINUTE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'CUBIC_FOOT/MINUTE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/CUBIC_FOOT/MINUTE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'DEGREE/MINUTE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/DEGREE/MINUTE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'DEGREE/MINUTE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/DEGREE/MINUTE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'FAHRENHEIT', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/FAHRENHEIT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'FAHRENHEIT', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/FAHRENHEIT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'FOOT', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/FOOT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'FOOT', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/FOOT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'FOOT/MINUTE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/FOOT/MINUTE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'FOOT/MINUTE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/FOOT/MINUTE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'FOOT/SECOND', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/FOOT/SECOND')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'FOOT/SECOND', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/FOOT/SECOND')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'FOOT/SECOND^2', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/FOOT/SECOND^2')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'FOOT/SECOND^2', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/FOOT/SECOND^2')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'FOOT_3D', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/FOOT_3D')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'FOOT_3D', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/FOOT_3D')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'GALLON/MINUTE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/GALLON/MINUTE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'GALLON/MINUTE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/GALLON/MINUTE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'GRAVITATIONAL_ACCELERATION', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/GRAVITATIONAL_ACCELERATION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'GRAVITATIONAL_ACCELERATION', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/GRAVITATIONAL_ACCELERATION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'GRAVITATIONAL_FORCE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/GRAVITATIONAL_FORCE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'GRAVITATIONAL_FORCE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/GRAVITATIONAL_FORCE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'HOUR', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/HOUR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'HOUR', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/HOUR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'INCH', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/INCH')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'INCH', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/INCH')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'INCH/MINUTE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/INCH/MINUTE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'INCH/MINUTE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/INCH/MINUTE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'INCH/REVOLUTION', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/INCH/REVOLUTION')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'INCH/REVOLUTION', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/INCH/REVOLUTION')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'INCH/SECOND', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/INCH/SECOND')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'INCH/SECOND', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/INCH/SECOND')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'INCH/SECOND^2', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/INCH/SECOND^2')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'INCH/SECOND^2', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/INCH/SECOND^2')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'INCH_3D', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/INCH_3D')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'INCH_3D', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/INCH_3D')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'INCH_POUND', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/INCH_POUND')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'INCH_POUND', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/INCH_POUND')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'KELVIN', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/KELVIN')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'KELVIN', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/KELVIN')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'KILOWATT', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/KILOWATT')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'KILOWATT', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/KILOWATT')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'KILOWATT_HOUR', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/KILOWATT_HOUR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'KILOWATT_HOUR', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/KILOWATT_HOUR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'LITER/MINUTE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/LITER/MINUTE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'LITER/MINUTE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/LITER/MINUTE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'MICROMETER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/MICROMETER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'MICROMETER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/MICROMETER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'MICROTORR', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/MICROTORR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'MICROTORR', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/MICROTORR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'MILLIMETER/MINUTE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/MILLIMETER/MINUTE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'MILLIMETER/MINUTE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/MILLIMETER/MINUTE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'MILLIMETER_MERCURY', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/MILLIMETER_MERCURY')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'MILLIMETER_MERCURY', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/MILLIMETER_MERCURY')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'MINUTE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/MINUTE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'MINUTE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/MINUTE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'OTHER', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/OTHER')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'OTHER', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/OTHER')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'PASCAL/MINUTE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/PASCAL/MINUTE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'PASCAL/MINUTE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/PASCAL/MINUTE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'POUND', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/POUND')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'POUND', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/POUND')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'POUND/INCH^2', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/POUND/INCH^2')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'POUND/INCH^2', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/POUND/INCH^2')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'RADIAN', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/RADIAN')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'RADIAN', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/RADIAN')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'RADIAN/MINUTE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/RADIAN/MINUTE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'RADIAN/MINUTE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/RADIAN/MINUTE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'RADIAN/SECOND', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/RADIAN/SECOND')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'RADIAN/SECOND', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/RADIAN/SECOND')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'RADIAN/SECOND^2', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/RADIAN/SECOND^2')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'RADIAN/SECOND^2', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/RADIAN/SECOND^2')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'RANKINE', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/RANKINE')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'RANKINE', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/RANKINE')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'SQUARE_INCH', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/SQUARE_INCH')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'SQUARE_INCH', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/SQUARE_INCH')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'TORR', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/TORR')
+INSERT INTO public.mtconnect_vocabulary VALUES ('NATIVE_UNIT', 'TORR', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/TORR')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Actuator', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Actuator')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Actuator', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Actuator')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Adapter', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Adapter')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Adapter', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Adapter')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Adapters', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Adapters')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Adapters', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Adapters')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Agent', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Agent')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Agent', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Agent')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'AirHandler', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/AirHandler')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'AirHandler', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/AirHandler')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Amplifier', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Amplifier')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Amplifier', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Amplifier')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'AutomaticToolChanger', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/AutomaticToolChanger')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'AutomaticToolChanger', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/AutomaticToolChanger')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Auxiliaries', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Auxiliaries')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Auxiliaries', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Auxiliaries')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Auxiliary', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Auxiliary')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Auxiliary', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Auxiliary')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Axes', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Axes')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Axes', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Axes')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Axis', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Axis')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Axis', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Axis')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Ballscrew', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Ballscrew')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Ballscrew', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Ballscrew')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'BarFeeder', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/BarFeeder')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'BarFeeder', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/BarFeeder')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'BarFeederInterface', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/BarFeederInterface')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'BarFeederInterface', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/BarFeederInterface')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Belt', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Belt')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Belt', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Belt')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Brake', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Brake')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Brake', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Brake')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Chain', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Chain')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Chain', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Chain')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Chopper', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Chopper')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Chopper', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Chopper')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Chuck', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Chuck')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Chuck', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Chuck')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ChuckInterface', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/ChuckInterface')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ChuckInterface', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/ChuckInterface')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Chute', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Chute')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Chute', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Chute')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'CircuitBreaker', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/CircuitBreaker')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'CircuitBreaker', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/CircuitBreaker')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Clamp', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Clamp')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Clamp', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Clamp')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Compressor', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Compressor')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Compressor', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Compressor')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Controller', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Controller')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Controller', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Controller')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Coolant', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Coolant')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Coolant', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Coolant')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Cooling', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Cooling')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Cooling', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Cooling')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'CoolingTower', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/CoolingTower')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'CoolingTower', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/CoolingTower')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'CuttingTorch', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/CuttingTorch')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'CuttingTorch', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/CuttingTorch')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Deposition', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Deposition')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Deposition', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Deposition')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Dielectric', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Dielectric')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Dielectric', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Dielectric')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Door', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Door')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Door', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Door')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'DoorInterface', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/DoorInterface')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'DoorInterface', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/DoorInterface')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Drain', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Drain')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Drain', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Drain')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Electric', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Electric')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Electric', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Electric')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Electrode', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Electrode')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Electrode', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Electrode')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Enclosure', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Enclosure')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Enclosure', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Enclosure')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Encoder', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Encoder')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Encoder', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Encoder')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'EndEffector', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/EndEffector')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'EndEffector', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/EndEffector')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Environmental', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Environmental')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Environmental', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Environmental')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ExpiredPot', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/ExpiredPot')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ExpiredPot', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/ExpiredPot')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ExposureUnit', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/ExposureUnit')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ExposureUnit', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/ExposureUnit')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ExtrusionUnit', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/ExtrusionUnit')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ExtrusionUnit', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/ExtrusionUnit')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Fan', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Fan')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Fan', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Fan')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'FeatureOccurrence', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/FeatureOccurrence')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'FeatureOccurrence', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/FeatureOccurrence')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Feeder', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Feeder')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Feeder', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Feeder')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Filter', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Filter')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Filter', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Filter')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Galvanomotor', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Galvanomotor')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Galvanomotor', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Galvanomotor')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'GangToolBar', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/GangToolBar')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'GangToolBar', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/GangToolBar')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Gripper', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Gripper')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Gripper', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Gripper')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Heating', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Heating')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Heating', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Heating')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Hopper', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Hopper')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Hopper', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Hopper')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Hydraulic', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Hydraulic')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Hydraulic', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Hydraulic')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Interface', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Interface')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Interface', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Interface')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Interfaces', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Interfaces')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Interfaces', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Interfaces')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Linear', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Linear')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Linear', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Linear')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'LinearPositionFeedback', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/LinearPositionFeedback')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'LinearPositionFeedback', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/LinearPositionFeedback')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Link', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Link')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Link', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Link')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Loader', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Loader')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Loader', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Loader')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Lock', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Lock')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Lock', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Lock')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Lubrication', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Lubrication')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Lubrication', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Lubrication')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Material', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Material')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Material', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Material')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'MaterialHandlerInterface', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/MaterialHandlerInterface')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'MaterialHandlerInterface', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/MaterialHandlerInterface')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Materials', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Materials')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Materials', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Materials')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Motor', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Motor')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Motor', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Motor')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Oil', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Oil')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Oil', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Oil')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Part', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Part')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Part', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Part')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'PartOccurrence', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/PartOccurrence')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'PartOccurrence', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/PartOccurrence')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Parts', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Parts')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Parts', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Parts')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Path', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Path')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Path', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Path')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Personnel', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Personnel')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Personnel', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Personnel')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'PinTool', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/PinTool')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'PinTool', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/PinTool')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Pneumatic', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Pneumatic')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Pneumatic', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Pneumatic')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Pot', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Pot')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Pot', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Pot')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Power', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Power')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Power', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Power')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'PowerSupply', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/PowerSupply')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'PowerSupply', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/PowerSupply')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Pressure', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Pressure')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Pressure', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Pressure')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Process', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Process')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Process', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Process')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Processes', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Processes')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Processes', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Processes')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ProcessOccurrence', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/ProcessOccurrence')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ProcessOccurrence', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/ProcessOccurrence')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ProcessPower', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/ProcessPower')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ProcessPower', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/ProcessPower')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Protective', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Protective')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Protective', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Protective')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Pulley', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Pulley')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Pulley', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Pulley')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Pump', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Pump')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Pump', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Pump')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Reel', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Reel')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Reel', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Reel')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'RemovalPot', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/RemovalPot')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'RemovalPot', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/RemovalPot')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Requester', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Requester')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Requester', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Requester')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Resource', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Resource')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Resource', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Resource')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Resources', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Resources')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Resources', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Resources')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Responder', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Responder')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Responder', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Responder')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ReturnPot', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/ReturnPot')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ReturnPot', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/ReturnPot')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Rotary', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Rotary')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Rotary', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Rotary')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'SensingElement', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/SensingElement')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'SensingElement', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/SensingElement')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Sensor', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Sensor')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Sensor', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Sensor')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Spindle', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Spindle')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Spindle', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Spindle')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Spreader', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Spreader')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Spreader', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Spreader')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'StagingPot', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/StagingPot')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'StagingPot', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/StagingPot')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Station', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Station')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Station', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Station')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Stock', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Stock')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Stock', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Stock')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'StorageBattery', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/StorageBattery')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'StorageBattery', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/StorageBattery')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Structure', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Structure')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Structure', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Structure')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Structures', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Structures')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Structures', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Structures')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Switch', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Switch')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Switch', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Switch')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'System', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/System')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'System', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/System')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Systems', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Systems')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Systems', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Systems')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Table', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Table')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Table', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Table')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Tank', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Tank')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Tank', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Tank')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Tensioner', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Tensioner')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Tensioner', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Tensioner')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Thermostat', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Thermostat')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Thermostat', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Thermostat')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ToolHolder', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/ToolHolder')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ToolHolder', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/ToolHolder')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ToolingDelivery', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/ToolingDelivery')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ToolingDelivery', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/ToolingDelivery')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ToolMagazine', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/ToolMagazine')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ToolMagazine', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/ToolMagazine')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ToolRack', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/ToolRack')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'ToolRack', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/ToolRack')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'TransferArm', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/TransferArm')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'TransferArm', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/TransferArm')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'TransferPot', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/TransferPot')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'TransferPot', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/TransferPot')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Transformer', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Transformer')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Transformer', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Transformer')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Turret', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Turret')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Turret', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Turret')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Vacuum', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Vacuum')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Vacuum', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Vacuum')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Valve', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Valve')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Valve', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Valve')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Vat', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Vat')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Vat', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Vat')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Vibration', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Vibration')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Vibration', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Vibration')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'WasteDisposal', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/WasteDisposal')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'WasteDisposal', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/WasteDisposal')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Water', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Water')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Water', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Water')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Wire', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Wire')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Wire', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Wire')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'WorkEnvelope', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/WorkEnvelope')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'WorkEnvelope', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/WorkEnvelope')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
-INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Workpiece', NULL, 'https://factoryplus.local/semantics/mtconnect/v2.0/Component/Workpiece')
+INSERT INTO public.mtconnect_vocabulary VALUES ('COMPONENT', 'Workpiece', NULL, 'https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Workpiece')
 ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
 -- <<< END GENERATED mtconnect_vocabulary
 
@@ -1719,7 +1719,7 @@ ON CONFLICT (kind, name) DO UPDATE SET category = EXCLUDED.category;
 -- MTConnect's `AVAILABILITY` is a trap: it is an EVENT meaning "device connected", whereas the OEE
 -- availability RATIO here is ISO 22400. Never map one onto the other.
 
-INSERT INTO public.iso22400_vocabulary VALUES ('AVAILABILITY', 'A', 'Availability ratio: the share of planned busy time the equipment was actually producing. ISO 22400-2 "Availability". NOT MTConnect AVAILABILITY, which is an EVENT meaning the device is connected.', 'OEE', 'PERCENT', 'A = APT / PBT', 'https://factoryplus.local/semantics/iso22400/AVAILABILITY')
+INSERT INTO public.iso22400_vocabulary VALUES ('AVAILABILITY', 'A', 'Availability ratio: the share of planned busy time the equipment was actually producing. ISO 22400-2 "Availability". NOT MTConnect AVAILABILITY, which is an EVENT meaning the device is connected.', 'OEE', 'PERCENT', 'A = APT / PBT', 'https://acs-cymru.local/semantics/iso22400/AVAILABILITY')
 ON CONFLICT (name) DO UPDATE SET
   kpi_id      = EXCLUDED.kpi_id,
   description = EXCLUDED.description,
@@ -1727,7 +1727,7 @@ ON CONFLICT (name) DO UPDATE SET
   unit        = EXCLUDED.unit,
   formula     = EXCLUDED.formula,
   semantic_id = EXCLUDED.semantic_id;
-INSERT INTO public.iso22400_vocabulary VALUES ('EFFECTIVENESS', 'E', 'Effectiveness ratio: actual output against what the run time should have produced. ISO 22400-2 calls this KPI "Effectiveness"; it is the factor the industry almost always calls Performance, and the catalog''s superseded OEE/PERFORMANCE metric measured exactly this.', 'OEE', 'PERCENT', 'E = (PRI x PQ) / APT', 'https://factoryplus.local/semantics/iso22400/EFFECTIVENESS')
+INSERT INTO public.iso22400_vocabulary VALUES ('EFFECTIVENESS', 'E', 'Effectiveness ratio: actual output against what the run time should have produced. ISO 22400-2 calls this KPI "Effectiveness"; it is the factor the industry almost always calls Performance, and the catalog''s superseded OEE/PERFORMANCE metric measured exactly this.', 'OEE', 'PERCENT', 'E = (PRI x PQ) / APT', 'https://acs-cymru.local/semantics/iso22400/EFFECTIVENESS')
 ON CONFLICT (name) DO UPDATE SET
   kpi_id      = EXCLUDED.kpi_id,
   description = EXCLUDED.description,
@@ -1735,7 +1735,7 @@ ON CONFLICT (name) DO UPDATE SET
   unit        = EXCLUDED.unit,
   formula     = EXCLUDED.formula,
   semantic_id = EXCLUDED.semantic_id;
-INSERT INTO public.iso22400_vocabulary VALUES ('QUALITY', 'Q', 'Quality ratio: good quantity as a share of total produced quantity. ISO 22400-2 "Quality ratio".', 'OEE', 'PERCENT', 'Q = GQ / PQ', 'https://factoryplus.local/semantics/iso22400/QUALITY')
+INSERT INTO public.iso22400_vocabulary VALUES ('QUALITY', 'Q', 'Quality ratio: good quantity as a share of total produced quantity. ISO 22400-2 "Quality ratio".', 'OEE', 'PERCENT', 'Q = GQ / PQ', 'https://acs-cymru.local/semantics/iso22400/QUALITY')
 ON CONFLICT (name) DO UPDATE SET
   kpi_id      = EXCLUDED.kpi_id,
   description = EXCLUDED.description,
@@ -1743,7 +1743,7 @@ ON CONFLICT (name) DO UPDATE SET
   unit        = EXCLUDED.unit,
   formula     = EXCLUDED.formula,
   semantic_id = EXCLUDED.semantic_id;
-INSERT INTO public.iso22400_vocabulary VALUES ('OEE', 'OEE', 'Overall equipment effectiveness: the product of the three factors above. ISO 22400-2 "OEE index". A composite -- derive it from A, E and Q rather than having a device report it independently, or the four values can disagree.', 'OEE', 'PERCENT', 'OEE = A x E x Q', 'https://factoryplus.local/semantics/iso22400/OEE')
+INSERT INTO public.iso22400_vocabulary VALUES ('OEE', 'OEE', 'Overall equipment effectiveness: the product of the three factors above. ISO 22400-2 "OEE index". A composite -- derive it from A, E and Q rather than having a device report it independently, or the four values can disagree.', 'OEE', 'PERCENT', 'OEE = A x E x Q', 'https://acs-cymru.local/semantics/iso22400/OEE')
 ON CONFLICT (name) DO UPDATE SET
   kpi_id      = EXCLUDED.kpi_id,
   description = EXCLUDED.description,
@@ -1751,7 +1751,7 @@ ON CONFLICT (name) DO UPDATE SET
   unit        = EXCLUDED.unit,
   formula     = EXCLUDED.formula,
   semantic_id = EXCLUDED.semantic_id;
-INSERT INTO public.iso22400_vocabulary VALUES ('SCRAP_RATIO', 'SR', 'Scrap ratio: scrap quantity as a share of produced quantity. ISO 22400-2 "Scrap ratio". The complement of the quality ratio only when rework is zero -- they are separate KPIs for that reason.', 'Quality', 'PERCENT', 'SR = SQ / PQ', 'https://factoryplus.local/semantics/iso22400/SCRAP_RATIO')
+INSERT INTO public.iso22400_vocabulary VALUES ('SCRAP_RATIO', 'SR', 'Scrap ratio: scrap quantity as a share of produced quantity. ISO 22400-2 "Scrap ratio". The complement of the quality ratio only when rework is zero -- they are separate KPIs for that reason.', 'Quality', 'PERCENT', 'SR = SQ / PQ', 'https://acs-cymru.local/semantics/iso22400/SCRAP_RATIO')
 ON CONFLICT (name) DO UPDATE SET
   kpi_id      = EXCLUDED.kpi_id,
   description = EXCLUDED.description,
@@ -1759,7 +1759,7 @@ ON CONFLICT (name) DO UPDATE SET
   unit        = EXCLUDED.unit,
   formula     = EXCLUDED.formula,
   semantic_id = EXCLUDED.semantic_id;
-INSERT INTO public.iso22400_vocabulary VALUES ('UTILIZATION', 'UR', 'Utilization (loading) ratio: planned busy time as a share of calendar time. The common industry ratio rather than a verbatim ISO 22400-2 KPI -- it answers "how much of the day was this asset scheduled to work?", which availability deliberately does not. Verify against the standard before citing it as ISO 22400.', 'Utilization', 'PERCENT', 'UR = PBT / CAL', 'https://factoryplus.local/semantics/iso22400/UTILIZATION')
+INSERT INTO public.iso22400_vocabulary VALUES ('UTILIZATION', 'UR', 'Utilization (loading) ratio: planned busy time as a share of calendar time. The common industry ratio rather than a verbatim ISO 22400-2 KPI -- it answers "how much of the day was this asset scheduled to work?", which availability deliberately does not. Verify against the standard before citing it as ISO 22400.', 'Utilization', 'PERCENT', 'UR = PBT / CAL', 'https://acs-cymru.local/semantics/iso22400/UTILIZATION')
 ON CONFLICT (name) DO UPDATE SET
   kpi_id      = EXCLUDED.kpi_id,
   description = EXCLUDED.description,
@@ -1767,7 +1767,7 @@ ON CONFLICT (name) DO UPDATE SET
   unit        = EXCLUDED.unit,
   formula     = EXCLUDED.formula,
   semantic_id = EXCLUDED.semantic_id;
-INSERT INTO public.iso22400_vocabulary VALUES ('MTBF', 'MTBF', 'Mean operating time between failures. ISO 22400-2 "Mean operating time between failures".', 'Maintenance', 'HOUR', 'MTBF = APT / number of failures', 'https://factoryplus.local/semantics/iso22400/MTBF')
+INSERT INTO public.iso22400_vocabulary VALUES ('MTBF', 'MTBF', 'Mean operating time between failures. ISO 22400-2 "Mean operating time between failures".', 'Maintenance', 'HOUR', 'MTBF = APT / number of failures', 'https://acs-cymru.local/semantics/iso22400/MTBF')
 ON CONFLICT (name) DO UPDATE SET
   kpi_id      = EXCLUDED.kpi_id,
   description = EXCLUDED.description,
@@ -1775,7 +1775,7 @@ ON CONFLICT (name) DO UPDATE SET
   unit        = EXCLUDED.unit,
   formula     = EXCLUDED.formula,
   semantic_id = EXCLUDED.semantic_id;
-INSERT INTO public.iso22400_vocabulary VALUES ('MTTR', 'MTTR', 'Mean time to restoration -- the average time to return the asset to service after a failure. ISO 22400-2 "Mean time to restoration"; MTTR is the common abbreviation and is often expanded as "mean time to repair".', 'Maintenance', 'HOUR', 'MTTR = total repair time / number of repairs', 'https://factoryplus.local/semantics/iso22400/MTTR')
+INSERT INTO public.iso22400_vocabulary VALUES ('MTTR', 'MTTR', 'Mean time to restoration -- the average time to return the asset to service after a failure. ISO 22400-2 "Mean time to restoration"; MTTR is the common abbreviation and is often expanded as "mean time to repair".', 'Maintenance', 'HOUR', 'MTTR = total repair time / number of repairs', 'https://acs-cymru.local/semantics/iso22400/MTTR')
 ON CONFLICT (name) DO UPDATE SET
   kpi_id      = EXCLUDED.kpi_id,
   description = EXCLUDED.description,
@@ -2355,7 +2355,7 @@ ON CONFLICT (companion_spec, name) DO UPDATE SET
 -- row is `archived` -- a DO UPDATE would rewrite history on every boot, and re-pinning it is what
 -- used to drag the demo device back onto a superseded version each time the stack came up.
 
-INSERT INTO public.schemas VALUES ('e3333333-4444-5555-6666-777777777777', 'Simulated_CNC_01_Schema', 'Default tri-standard schema for the demo CNC: MTConnect observations, ISO 22400 KPIs and OPC UA companion-specification data points.', '{"type": "object", "required": ["Systems/TEMPERATURE", "Controller/EXECUTION", "Controller/EMERGENCY_STOP"], "properties": {"OEE/QUALITY": {"type": "number"}, "Axes/C/ANGLE": {"type": "number"}, "SERIAL_NUMBER": {"type": "string"}, "OEE/AVAILABILITY": {"type": "number"}, "safety_interlock": {"type": "boolean"}, "Axes/DISPLACEMENT": {"type": "number"}, "OEE/EFFECTIVENESS": {"type": "number"}, "max_temp_threshold": {"type": "number"}, "Controller/FIRMWARE": {"type": "string"}, "Systems/TEMPERATURE": {"type": "number"}, "Controller/EXECUTION": {"type": "string"}, "Machine/OperatingMode": {"type": "string"}, "Controller/EMERGENCY_STOP": {"type": "string"}, "MotionDevice/OverridePercent": {"type": "number"}}}', '2026-08-02 05:44:47.407135+00', 'https://factoryplus.local/semantics/schema/SimulatedCNC01', 'IRI', 1, NULL, 'active', 'Initial release')
+INSERT INTO public.schemas VALUES ('e3333333-4444-5555-6666-777777777777', 'Simulated_CNC_01_Schema', 'Default tri-standard schema for the demo CNC: MTConnect observations, ISO 22400 KPIs and OPC UA companion-specification data points.', '{"type": "object", "required": ["Systems/TEMPERATURE", "Controller/EXECUTION", "Controller/EMERGENCY_STOP"], "properties": {"OEE/QUALITY": {"type": "number"}, "Axes/C/ANGLE": {"type": "number"}, "SERIAL_NUMBER": {"type": "string"}, "OEE/AVAILABILITY": {"type": "number"}, "safety_interlock": {"type": "boolean"}, "Axes/DISPLACEMENT": {"type": "number"}, "OEE/EFFECTIVENESS": {"type": "number"}, "max_temp_threshold": {"type": "number"}, "Controller/FIRMWARE": {"type": "string"}, "Systems/TEMPERATURE": {"type": "number"}, "Controller/EXECUTION": {"type": "string"}, "Machine/OperatingMode": {"type": "string"}, "Controller/EMERGENCY_STOP": {"type": "string"}, "MotionDevice/OverridePercent": {"type": "number"}}}', '2026-08-02 05:44:47.407135+00', 'https://acs-cymru.local/semantics/schema/SimulatedCNC01', 'IRI', 1, NULL, 'active', 'Initial release')
 ON CONFLICT (schema_name) DO NOTHING;
 
 
@@ -2576,11 +2576,11 @@ SELECT public.ensure_cron_job(
 -- parse. Migration 0010 gets away with :'ts_host' because those appear in plain SQL.
 -- Stash it in a session GUC out here, where substitution does happen, and read it back inside.
 -- Session-local (is_local = false but never committed to a role), so it does not persist.
-SELECT set_config('factoryplus.nodered_admin_token', :'nodered_admin_token', false);
+SELECT set_config('acs_cymru.nodered_admin_token', :'nodered_admin_token', false);
 
 DO $$
 DECLARE
-  v_token TEXT := current_setting('factoryplus.nodered_admin_token', true);
+  v_token TEXT := current_setting('acs_cymru.nodered_admin_token', true);
   v_id    UUID;
 BEGIN
   -- An absent token is the default stack's normal state: Node-RED runs without adminAuth, so
@@ -2614,7 +2614,7 @@ REVOKE ALL ON vault.decrypted_secrets FROM anon, authenticated;
 REVOKE ALL ON vault.secrets           FROM anon, authenticated;
 
 -- Do not leave the plaintext sitting in the session's settings after the migration.
-SELECT set_config('factoryplus.nodered_admin_token', '', false);
+SELECT set_config('acs_cymru.nodered_admin_token', '', false);
 
 -- ---------------------------------------------------------------------------------------------
 -- Grafana OAuth client registration
@@ -2654,8 +2654,8 @@ SELECT set_config('factoryplus.nodered_admin_token', '', false);
 
 -- psql does not substitute :variables inside dollar-quoted blocks (see migration 0026), so
 -- both values are staged through session GUCs where substitution does happen.
-SELECT set_config('factoryplus.grafana_oauth_client_secret', :'grafana_oauth_client_secret', false);
-SELECT set_config('factoryplus.grafana_public_url',          :'grafana_public_url',          false);
+SELECT set_config('acs_cymru.grafana_oauth_client_secret', :'grafana_oauth_client_secret', false);
+SELECT set_config('acs_cymru.grafana_public_url',          :'grafana_public_url',          false);
 
 DO $$
 DECLARE
@@ -2663,14 +2663,14 @@ DECLARE
   -- stack rebuild would silently break the integration. Same reasoning as the pinned gateway
   -- UUID in migration 0009.
   v_client_id CONSTANT UUID := 'c0ffee00-0000-4000-8000-000000000001';
-  v_secret    TEXT := current_setting('factoryplus.grafana_oauth_client_secret', true);
+  v_secret    TEXT := current_setting('acs_cymru.grafana_oauth_client_secret', true);
   -- The trailing slash is trimmed. GRAFANA_PUBLIC_URL is documented without one, but a value
   -- copied from a browser address bar carries it, and `http://host//login/generic_oauth` is not
   -- the string GoTrue compares against -- it fails as `invalid redirect_uri`, which reads as a
   -- Grafana fault rather than as a stray character in .env.
   v_base      TEXT := rtrim(
                         COALESCE(
-                          NULLIF(current_setting('factoryplus.grafana_public_url', true), ''),
+                          NULLIF(current_setting('acs_cymru.grafana_public_url', true), ''),
                           'http://localhost:3002'),
                         '/');
   v_hash      TEXT;
@@ -2710,6 +2710,6 @@ BEGIN
   -- so a rotated GRAFANA_OAUTH_CLIENT_SECRET in .env has to take effect on the next boot.
 END $$;
 
-SELECT set_config('factoryplus.grafana_oauth_client_secret', '', false);
+SELECT set_config('acs_cymru.grafana_oauth_client_secret', '', false);
 
 NOTIFY pgrst, 'reload schema';

@@ -13,7 +13,7 @@
  * `check-mtconnect-seed-sync.mjs` and the isUuid/metric-group checks in ci.yml.
  *
  * THE MIRRORED COPIES ARE COMMITTED, deliberately. A chart has to be installable from a packaged
- * .tgz with no build step -- `helm install ./deploy/helm/factoryplus` must work on a machine that
+ * .tgz with no build step -- `helm install ./deploy/helm/acs-cymru` must work on a machine that
  * has never run this script. Generating them at package time would make the repository and the
  * artefact disagree about what is deployable.
  *
@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve, relative } from 'node:path';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const CHART_FILES = join(REPO_ROOT, 'deploy', 'helm', 'factoryplus', 'files');
+const CHART_FILES = join(REPO_ROOT, 'deploy', 'helm', 'acs-cymru', 'files');
 
 /**
  * source: a repository directory, relative to the repo root.

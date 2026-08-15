@@ -1,5 +1,5 @@
 -- =============================================================================
--- Factory+ Asset Tracking Local Development Seed Data
+-- ACS-Cymru Asset Tracking Local Development Seed Data
 -- =============================================================================
 -- WARNING: THIS FILE CONTAINS LOCAL DEVELOPMENT SEED DATA ONLY.
 -- DO NOT RUN OR EXECUTE THIS FILE AGAINST A PRODUCTION DATABASE OR CLOUD ENVIRONMENT.
@@ -50,7 +50,7 @@ INSERT INTO auth.users (
   'a0000000-0000-0000-0000-000000000001',
   'authenticated',
   'authenticated',
-  'admin@factoryplus.local',
+  'admin@acs-cymru.local',
   extensions.crypt('factoryplus123', extensions.gen_salt('bf')),
   NOW(),
   NOW(),
@@ -75,7 +75,7 @@ INSERT INTO auth.users (
   'a0000000-0000-0000-0000-000000000002',
   'authenticated',
   'authenticated',
-  'manager@factoryplus.local',
+  'manager@acs-cymru.local',
   extensions.crypt('factoryplus123', extensions.gen_salt('bf')),
   NOW(),
   NOW(),
@@ -100,7 +100,7 @@ INSERT INTO auth.users (
   'a0000000-0000-0000-0000-000000000003',
   'authenticated',
   'authenticated',
-  'operator@factoryplus.local',
+  'operator@acs-cymru.local',
   extensions.crypt('factoryplus123', extensions.gen_salt('bf')),
   NOW(),
   NOW(),
@@ -125,7 +125,7 @@ INSERT INTO auth.users (
   'a0000000-0000-0000-0000-000000000004',
   'authenticated',
   'authenticated',
-  'auditor@factoryplus.local',
+  'auditor@acs-cymru.local',
   extensions.crypt('factoryplus123', extensions.gen_salt('bf')),
   NOW(),
   NOW(),
@@ -182,7 +182,7 @@ INSERT INTO auth.identities (
 (
   'b0000000-0000-0000-0000-000000000001',
   'a0000000-0000-0000-0000-000000000001',
-  jsonb_build_object('sub', 'a0000000-0000-0000-0000-000000000001', 'email', 'admin@factoryplus.local'),
+  jsonb_build_object('sub', 'a0000000-0000-0000-0000-000000000001', 'email', 'admin@acs-cymru.local'),
   'email',
   'a0000000-0000-0000-0000-000000000001',
   NOW(),
@@ -192,7 +192,7 @@ INSERT INTO auth.identities (
 (
   'b0000000-0000-0000-0000-000000000002',
   'a0000000-0000-0000-0000-000000000002',
-  jsonb_build_object('sub', 'a0000000-0000-0000-0000-000000000002', 'email', 'manager@factoryplus.local'),
+  jsonb_build_object('sub', 'a0000000-0000-0000-0000-000000000002', 'email', 'manager@acs-cymru.local'),
   'email',
   'a0000000-0000-0000-0000-000000000002',
   NOW(),
@@ -202,7 +202,7 @@ INSERT INTO auth.identities (
 (
   'b0000000-0000-0000-0000-000000000003',
   'a0000000-0000-0000-0000-000000000003',
-  jsonb_build_object('sub', 'a0000000-0000-0000-0000-000000000003', 'email', 'operator@factoryplus.local'),
+  jsonb_build_object('sub', 'a0000000-0000-0000-0000-000000000003', 'email', 'operator@acs-cymru.local'),
   'email',
   'a0000000-0000-0000-0000-000000000003',
   NOW(),
@@ -212,7 +212,7 @@ INSERT INTO auth.identities (
 (
   'b0000000-0000-0000-0000-000000000004',
   'a0000000-0000-0000-0000-000000000004',
-  jsonb_build_object('sub', 'a0000000-0000-0000-0000-000000000004', 'email', 'auditor@factoryplus.local'),
+  jsonb_build_object('sub', 'a0000000-0000-0000-0000-000000000004', 'email', 'auditor@acs-cymru.local'),
   'email',
   'a0000000-0000-0000-0000-000000000004',
   NOW(),

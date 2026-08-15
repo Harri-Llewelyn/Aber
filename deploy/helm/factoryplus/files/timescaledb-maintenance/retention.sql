@@ -33,8 +33,8 @@
 -- psql interpolates `:'var'` while lexing and does NOT descend into dollar-quoted strings, so a
 -- `:'compress_after'` written inside the DO block below would reach the server as those literal
 -- characters and fail as a syntax error.
-SELECT set_config('factoryplus.compress_after', :'compress_after', false);
-SELECT set_config('factoryplus.retain_after',   :'retain_after',   false);
+SELECT set_config('acs_cymru.compress_after', :'compress_after', false);
+SELECT set_config('acs_cymru.retain_after',   :'retain_after',   false);
 
 
 DO $$
@@ -44,8 +44,8 @@ DECLARE
   -- one would take the boot down over a synonym.
   disabled  CONSTANT text[] := ARRAY['never', 'off', 'disabled', 'none', 'false', '0'];
 
-  raw_compress text := btrim(coalesce(current_setting('factoryplus.compress_after', true), ''));
-  raw_retain   text := btrim(coalesce(current_setting('factoryplus.retain_after',   true), ''));
+  raw_compress text := btrim(coalesce(current_setting('acs_cymru.compress_after', true), ''));
+  raw_retain   text := btrim(coalesce(current_setting('acs_cymru.retain_after',   true), ''));
 
   v_compress interval;
   v_retain   interval;

@@ -1,0 +1,135 @@
+{{- if .Values.supabaseFunctions.enabled }}
+{{- $component := "supabase-functions" -}}
+{{- $secretName := include "acs-cymru.secretName" . -}}
+{{- $supabasePublic := include "acs-cymru.supabaseUrl" . -}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-functions
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      # kong.yml routes /functions/v1/ here on port 9000, including the two exact-path exemptions
+      # for grafana-userinfo and nodered-userinfo.
+      port: 9000
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supabase-functions
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  replicas: {{ .Values.supabaseFunctions.replicas }}
+  selector:
+    matchLabels:
+      {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: edge-runtime
+          # BUILT FROM supabase/functions/Dockerfile, not pulled. The functions and
+          # node_red_flow.json are baked in: there is no repository on a cluster node to mount, and
+          # baking is what makes "which revision of aas-export is running" a property of the
+          # deployed artefact -- so a rollback rolls the functions back too.
+          #
+          # The image also carries the entrypoint that reads the flow into NODERED_FLOW_JSON, so
+          # this Deployment needs no command override at all.
+          image: {{ include "acs-cymru.image" (dict "image" .Values.supabaseFunctions.image "ctx" $) | quote }}
+          imagePullPolicy: {{ .Values.supabaseFunctions.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 9000
+              protocol: TCP
+          # EVERY VALUE HERE MUST BE DECLARED ON THIS SERVICE, not merely present somewhere in the
+          # release. An edge-runtime user worker is sandboxed and sees NOTHING but the environment
+          # variables main/index.ts forwards to it -- a value in a ConfigMap the pod does not mount,
+          # or a file on disk, is invisible to the function that needs it.
+          env:
+            # The gateway as reached from INSIDE the cluster. Functions call back through Kong so
+            # they inherit its routing and its key-auth.
+            - name: SUPABASE_URL
+              value: {{ include "acs-cymru.supabase.internalUrl" . | quote }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_SERVICE_ROLE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
+            # false because EACH FUNCTION CHECKS ITS OWN ROLE CLAIM. approve-quarantine and
+            # deploy-nodered allow-list Administrator/Shopfloor_Manager; aas-export additionally
+            # allows the read-scoped roles. Verifying here would be a second, coarser gate that
+            # could only ever be wrong about one of them.
+            - name: VERIFY_JWT
+              value: {{ .Values.supabaseFunctions.verifyJwt | quote }}
+            - name: NODERED_URL
+              value: http://node-red:1880/flows
+            {{- include "acs-cymru.secretEnv" (dict "name" "NODERED_ADMIN_TOKEN" "secretName" $secretName "key" "NODERED_ADMIN_TOKEN") | nindent 12 }}
+            # --- AAS export ---------------------------------------------------------------
+            # Namespaces every globalAssetId and submodel id the shell carries, so it must name
+            # the organisation publishing the document. The default is only correct for a local
+            # stack.
+            - name: AAS_BASE_IRI
+              value: {{ .Values.supabaseFunctions.aas.baseIri | quote }}
+            # Where a consumer fetches the samples a Time Series LinkedSegment points at -- never
+            # the rows themselves. An OUTBOUND REFERENCE, so it must name an address the recipient
+            # can reach: the ingress, not the in-cluster gateway.
+            - name: AAS_HISTORIAN_ENDPOINT
+              value: {{ .Values.supabaseFunctions.aas.historianEndpoint | default (printf "%s/rest/v1/telemetry" $supabasePublic) | quote }}
+            # Public base for the 3D models a VisualRepresentation submodel points at. It CANNOT be
+            # derived from SUPABASE_URL above: in-cluster that is http://supabase-kong:8000, which
+            # resolves for this worker and for nothing outside the cluster, so a shell handed to a
+            # partner would carry a dead link.
+            - name: AAS_MODEL_PUBLIC_BASE
+              value: {{ .Values.supabaseFunctions.aas.modelPublicBase | default (printf "%s/storage/v1/object/public/%s" $supabasePublic .Values.supabaseStorage.bucket) | quote }}
+            - name: STORAGE_MODEL_BUCKET
+              value: {{ .Values.supabaseStorage.bucket | quote }}
+            {{- /* int64 first -- see supabase/storage.yaml. Rendered as "3.3554432e+07" this
+                   parses as 3, so every 3D model exceeded the bundling cap and the exporter fell
+                   back to a URL reference. The .aasx still validated, which is why nothing failed. */}}
+            - name: AAS_MAX_BUNDLED_MODEL_BYTES
+              value: {{ .Values.supabaseFunctions.aas.maxBundledModelBytes | int64 | quote }}
+          # tcpSocket, NOT httpGet -- THIS RUNTIME EXPOSES NO HEALTH ROUTE. Verified against
+          # supabase/edge-runtime:v1.74.2 by probing it directly:
+          #
+          #   /_internal/health  404   "rejected request for unregistered function '_internal'"
+          #   /health            404   same -- the allow-list treats it as a function name
+          #   /                  400   the main service answering an empty service name
+          #   /grafana-userinfo  401   a worker spawned and refused an unauthenticated caller
+          #
+          # Every one of those is a HEALTHY response, and httpGet scores all of them as failures
+          # (it only accepts 200-399). A pod probed that way never becomes ready, and the event
+          # says "readiness probe failed: HTTP 404" -- which reads as a missing function.
+          #
+          # There is also nothing to exec with: the image carries no curl or wget. So the honest
+          # probe is "is the listener accepting connections", which for a request router that holds
+          # no state and no upstream connection pool is a fair readiness signal. Anything stronger
+          # would mean invoking a real function on every probe -- which spawns a worker isolate and
+          # hits the database, on a 10s period, forever.
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.supabaseFunctions.resources | nindent 12 }}
+{{- end }}

@@ -42,7 +42,7 @@ const BLOCKS = [
  * The namespaces the generator builds semantic ids from, mirrored here so the check can assert the
  * form independently rather than trusting the digest to imply it. Unlike MTConnect and ISO 22400,
  * these are the REAL external namespaces: OPC publishes resolvable concept identifiers, so minting
- * under factoryplus.local would be the wrong call here -- the local namespace exists for concepts
+ * under acs-cymru.local would be the wrong call here -- the local namespace exists for concepts
  * nobody else names, not as a default.
  */
 const NAMESPACES = {

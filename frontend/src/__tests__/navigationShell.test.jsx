@@ -27,7 +27,7 @@ import App from '../App'
 const mockSession = {
   user: {
     id: 'user-admin-123',
-    email: 'admin@factoryplus.local',
+    email: 'admin@acs-cymru.local',
     app_metadata: { role: 'Administrator' }
   }
 }
@@ -143,7 +143,7 @@ describe('Merged navigation shell', () => {
     it('shows the local part and the role without being opened, and the address on hover', async () => {
       await renderShell()
 
-      expect(pill()).toHaveAttribute('title', expect.stringContaining('admin@factoryplus.local'))
+      expect(pill()).toHaveAttribute('title', expect.stringContaining('admin@acs-cymru.local'))
       expect(within(pill()).getByText('admin')).toBeTruthy()
       // usePermissions resolves the role from the database before falling back to the built-in
       // map, so the badge arrives a tick after the bar does.
@@ -159,7 +159,7 @@ describe('Merged navigation shell', () => {
       fireEvent.click(pill())
 
       const menu = screen.getByRole('menu')
-      expect(within(menu).getByText('admin@factoryplus.local')).toBeTruthy()
+      expect(within(menu).getByText('admin@acs-cymru.local')).toBeTruthy()
       expect(pill()).toHaveAttribute('aria-expanded', 'true')
 
       fireEvent.click(within(menu).getByRole('menuitem', { name: /sign out/i }))

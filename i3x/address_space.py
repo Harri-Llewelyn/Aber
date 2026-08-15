@@ -47,11 +47,11 @@ SITE_ELEMENT_ID = "i3x:site"
 UNASSIGNED_ELEMENT_ID = "i3x:unassigned"
 
 # Namespaces. One per vocabulary already in the database, plus this deployment's own. The local one
-# is the same `factoryplus.local` authority the semantic ids use -- an id under mtconnect.org or
+# is the same `acs-cymru.local` authority the semantic ids use -- an id under mtconnect.org or
 # iso.org would assert an interoperability that does not exist, and that rule does not stop being
 # true because the transport changed.
-NS_LOCAL = "https://factoryplus.local/i3x"
-NS_RELATIONSHIPS = "https://factoryplus.local/i3x/relationships"
+NS_LOCAL = "https://acs-cymru.local/i3x"
+NS_RELATIONSHIPS = "https://acs-cymru.local/i3x/relationships"
 
 # THE KEYS ARE `metric_catalog.standard` VALUES, VERBATIM, and that is the whole contract. They are
 # the strings in frontend/src/utils/standards.js `STANDARDS` -- spaces, not hyphens. `namespaces()`
@@ -62,7 +62,7 @@ NS_RELATIONSHIPS = "https://factoryplus.local/i3x/relationships"
 # test_standard_namespaces_cover_every_known_standard pins them against standards.js.
 STANDARD_NAMESPACES = {
     "MTConnect": "https://mtconnect.org/v2.0",
-    "ISO 22400": "https://factoryplus.local/semantics/iso22400",
+    "ISO 22400": "https://acs-cymru.local/semantics/iso22400",
     "OPC UA": "https://opcfoundation.org/UA",
     # Issued by ASHRAE, not minted here -- migration 0013 CHECKs that every seeded id sits under
     # this namespace.

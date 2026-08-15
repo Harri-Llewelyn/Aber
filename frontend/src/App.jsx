@@ -69,7 +69,7 @@ function tabIsVisible(tabDef, hasPermission) {
 }
 
 function AuthScreen({ onLoginSuccess, notice }) {
-  const [email, setEmail] = useState('admin@factoryplus.local')
+  const [email, setEmail] = useState('admin@acs-cymru.local')
   const [password, setPassword] = useState('factoryplus123')
   const [isSignUp, setIsSignUp] = useState(false)
   const [authError, setAuthError] = useState(null)
@@ -115,7 +115,7 @@ function AuthScreen({ onLoginSuccess, notice }) {
           <div style={{ display: 'inline-flex', padding: '12px', borderRadius: '12px', background: 'var(--accent-dim)', color: 'var(--accent)', marginBottom: '12px' }}>
             <IconFactory size={36} />
           </div>
-          <h2 style={{ fontSize: '22px', fontWeight: 700, margin: '0 0 6px 0', color: 'var(--text-primary)' }}>Factory+ Supabase Portal</h2>
+          <h2 style={{ fontSize: '22px', fontWeight: 700, margin: '0 0 6px 0', color: 'var(--text-primary)' }}>ACS-Cymru Supabase Portal</h2>
           <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>Sign in with your Supabase BaaS credentials</p>
         </div>
 

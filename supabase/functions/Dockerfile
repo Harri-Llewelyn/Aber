@@ -12,7 +12,7 @@
 # delivery differs. See docs/kubernetes-architecture.md §2.2.
 #
 # BUILD CONTEXT IS THE REPOSITORY ROOT, not this directory:
-#   docker build -f supabase/functions/Dockerfile -t factoryplus/edge-runtime:<tag> .
+#   docker build -f supabase/functions/Dockerfile -t acs-cymru/edge-runtime:<tag> .
 # node_red_flow.json lives at the root and is the canonical flow deploy-nodered pushes, so it has
 # to be reachable from the context. Building from supabase/functions/ instead fails on that COPY.
 #

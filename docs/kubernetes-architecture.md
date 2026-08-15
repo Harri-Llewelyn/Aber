@@ -1,6 +1,6 @@
 # Kubernetes Hosting — Design and Rationale
 
-This document is the **why** behind the Helm chart in `deploy/helm/factoryplus`: the decisions that
+This document is the **why** behind the Helm chart in `deploy/helm/acs-cymru`: the decisions that
 are not obvious from reading the templates, and the failures each one exists to prevent. The
 operational half — install, upgrade, teardown, and the divergence table against Compose — is
 [`deploy/k8s/README.md`](../deploy/k8s/README.md).
@@ -61,7 +61,7 @@ There is one deliberate exception, covered in §3.4 (Realtime's tenant hostname)
 
 ## 1. Tooling decision
 
-**Helm, one umbrella chart, in `deploy/helm/factoryplus/`.**
+**Helm, one umbrella chart, in `deploy/helm/acs-cymru/`.**
 
 Rationale, briefly, since the alternative is reasonable:
 
@@ -272,7 +272,7 @@ files (§3.5).
 
 ```
 deploy/
-  helm/factoryplus/
+  helm/acs-cymru/
     Chart.yaml
     values.yaml                          documented defaults; NO working credentials
     values-dev.yaml                      local k3s: local-path, demo secrets from .env.example
@@ -330,8 +330,8 @@ so the failure is a legible Helm error rather than a CrashLoopBackOff.
 Secret *management* (SOPS / Sealed Secrets / External Secrets Operator) sits outside the chart — see
 §10.4. The chart itself renders a plain Secret.
 
-`factoryplus.validateSecrets` fails the render listing every missing field by both
-its values path and its environment-variable name; `factoryplus.validateRealtime` asserts the two
+`acs-cymru.validateSecrets` fails the render listing every missing field by both
+its values path and its environment-variable name; `acs-cymru.validateRealtime` asserts the two
 Realtime lengths. All are skipped when `secrets.existingSecret` is set, because the values are then
 not the chart's to see — that switch is the seam an external secret manager plugs into with no
 template rewrite, and it is exercised in CI so it cannot rot. The Secret's **keys are the
@@ -380,7 +380,7 @@ alias and costs nothing.
 
 The Service is a separate template file from its Deployment, because the *name* is the architectural
 decision and the workload behind it is ordinary.
-`factoryplus.validateRealtimeServiceName` refuses any other name, mirroring the guard
+`acs-cymru.validateRealtimeServiceName` refuses any other name, mirroring the guard
 `supabase-kong-init` applies to `REALTIME_UPSTREAM_URL` on the Compose side — one invariant,
 enforced on both targets.
 
@@ -870,7 +870,7 @@ alongside `e2e-validation`, never instead of it.
 **Two naming traps, both of which fail late and misleadingly:**
 
 - **The `fullname` helper collapses its prefix** when the release name already contains the chart
-  name — so with release `factoryplus` the objects are `factoryplus-db-init`, the chart name appearing
+  name — so with release `acs-cymru` the objects are `acs-cymru-db-init`, the chart name appearing
   once and not twice. Written against the doubled form, the install succeeds and the *first*
   `kubectl logs` says `NotFound`. The release and namespace are job-level variables, so the rule is
   recorded where the names are used and a rename is one line.
@@ -940,7 +940,7 @@ Three things it does that a plain `grep` would not:
 - **It checks a coupling a repository-name comparison structurally cannot see.**
   `supabase/functions/Dockerfile` builds `FROM supabase/edge-runtime:<tag>`, and Compose runs that
   same base image *directly* — it bind-mounts the functions instead of baking them. The chart pins
-  `factoryplus/edge-runtime`, which is our own tag, so the shared tag appears in a Dockerfile and a
+  `acs-cymru/edge-runtime`, which is our own tag, so the shared tag appears in a Dockerfile and a
   compose file and nowhere else. Bump one and the targets run different runtimes against identical
   function code.
 - **Locally-built images are excluded by name, not by heuristic.** They have no tag in Compose at all
@@ -1149,7 +1149,7 @@ Two rules matter more than the rest:
 
 **Two knobs cannot be inferred and are the reason this is opt-in:** which namespace CoreDNS is in,
 and which namespace the ingress controller is in. A wrong value on the second means every route 502s
-while every pod reports healthy. The published-backend list comes from `factoryplus.ingressRoutes`,
+while every pod reports healthy. The published-backend list comes from `acs-cymru.ingressRoutes`,
 the same helper the Ingress uses, so the policy and the routing cannot disagree — including per-route
 opt-outs.
 
@@ -1169,7 +1169,7 @@ stops working** — discovered while trying to patch a kernel, with a message th
 than the mistake. `maxUnavailable` rather than `minAvailable`, so the budget stays correct as replicas
 change. With everything at one replica it renders nothing, which is correct rather than an error.
 
-**HPAs on four components, and the chart refuses the rest.** `factoryplus.validateAutoscaling` fails
+**HPAs on four components, and the chart refuses the rest.** `acs-cymru.validateAutoscaling` fails
 the render for any single-writer workload rather than warning, because the damage is silent — scaling
 `ingestion` duplicates every telemetry row, every quarantine decision and every append-only audit
 row, with no error and no crash, and an autoscaler does it under load. Eight workloads are refused;
@@ -1219,7 +1219,7 @@ both halves must move together or the handshake fails with `invalid_credentials`
 Four features that came after the first working chart, each with a design note worth keeping (see
 `deploy/k8s/README.md` for the operational detail):
 
-- **Internal CA** (`deploy/k8s/internal-ca.yaml`) — a self-signed root booting a `factoryplus-ca`
+- **Internal CA** (`deploy/k8s/internal-ca.yaml`) — a self-signed root booting a `acs-cymru-ca`
   `ClusterIssuer`, deliberately outside Helm so `helm uninstall` cannot take the root private key.
   The chart was already issuer-agnostic, so this needed no template change; ACME remains the option
   for a genuinely public domain, and cannot work for an internal one.

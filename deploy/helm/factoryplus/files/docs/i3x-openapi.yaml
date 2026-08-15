@@ -69,7 +69,7 @@ info:
     > server. This document is a reference, not a live console.
 
   contact:
-    name: Factory+ Asset Tracking Platform
+    name: ACS-Cymru Asset Tracking Platform
     url: https://github.com/Harri-Llewelyn/ACS-Cymru
 
 servers:
@@ -801,7 +801,7 @@ components:
       properties:
         specVersion: { type: string, example: '1.0' }
         serverVersion: { type: string, example: 0.1.0 }
-        serverName: { type: string, example: factoryplus-i3x }
+        serverName: { type: string, example: acs-cymru-i3x }
         capabilities:
           type: object
           properties:

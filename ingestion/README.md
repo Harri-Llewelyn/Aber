@@ -322,9 +322,9 @@ python ingestion/validate.py
 **In-cluster, as a Job in the namespace:**
 
 ```bash
-helm upgrade factoryplus deploy/helm/factoryplus -n factoryplus \
-  -f deploy/helm/factoryplus/values-dev.yaml --set e2e.enabled=true
-kubectl -n factoryplus logs -f job/factoryplus-e2e-validate
+helm upgrade acs-cymru deploy/helm/acs-cymru -n acs-cymru \
+  -f deploy/helm/acs-cymru/values-dev.yaml --set e2e.enabled=true
+kubectl -n acs-cymru logs -f job/acs-cymru-e2e-validate
 ```
 
 **No host or port overrides at all.** Kubernetes Service names are kept identical to the Compose

@@ -1,10 +1,10 @@
 openapi: 3.0.3
 
 info:
-  title: Factory+ Asset Tracking Platform API
+  title: ACS-Cymru Asset Tracking Platform API
   version: "2.0.0"
   description: |
-    The HTTP surface of the Factory+ Asset Tracking Platform. Every request goes through
+    The HTTP surface of the ACS-Cymru Asset Tracking Platform. Every request goes through
     the **Kong API gateway** on `http://127.0.0.1:54321`, which routes to five upstreams:
 
     | Prefix | Upstream | `apikey` required? |
@@ -28,7 +28,7 @@ info:
     because an OAuth client presents client credentials and has no way to add a Supabase
     header. Both still validate the bearer token themselves.
 
-    Sign in first with `admin@factoryplus.local` / `factoryplus123` (local dev seed).
+    Sign in first with `admin@acs-cymru.local` / `factoryplus123` (local dev seed).
 
     > ⚠️ **"Example Value" is documentation, not data.** Swagger UI synthesises samples from
     > this spec's schemas whether or not those rows exist. Press **Execute** and read the
@@ -94,7 +94,7 @@ info:
     back under A. Read `device_locations` and merge by `device_id`.
 
   contact:
-    name: Factory+ Asset Tracking Platform
+    name: ACS-Cymru Asset Tracking Platform
     url: https://github.com/Harri-Llewelyn/ACS-Cymru
 
 servers:
@@ -160,7 +160,7 @@ paths:
             schema:
               type: object
               properties:
-                email: { type: string, format: email, example: admin@factoryplus.local }
+                email: { type: string, format: email, example: admin@acs-cymru.local }
                 password: { type: string, format: password, example: factoryplus123 }
                 refresh_token:
                   type: string
@@ -2065,7 +2065,7 @@ components:
         description: { type: string, nullable: true }
         deprecated: { type: boolean, default: false }
         superseded_by: { type: string, format: uuid, nullable: true, description: 'Changing a metric is deprecate-and-supersede, never a rename.' }
-        semantic_id: { type: string, nullable: true, description: 'Locally-minted ids sit under `https://factoryplus.local/semantics/…` — the namespace is the honesty mechanism. Mutable, unlike the name.' }
+        semantic_id: { type: string, nullable: true, description: 'Locally-minted ids sit under `https://acs-cymru.local/semantics/…` — the namespace is the honesty mechanism. Mutable, unlike the name.' }
         semantic_id_type: { $ref: '#/components/schemas/SemanticIdType' }
         created_at: { type: string, format: date-time, readOnly: true }
 

@@ -96,7 +96,7 @@ BEGIN
         -- approve-quarantine path, where the request arrives on the service-role key but a
         -- specific operator authorised it. See 0003.
         BEGIN
-            v_actor := NULLIF(current_setting('factoryplus.actor_id', true), '')::UUID;
+            v_actor := NULLIF(current_setting('acs_cymru.actor_id', true), '')::UUID;
         EXCEPTION WHEN others THEN
             v_actor := NULL;
         END;
@@ -114,7 +114,7 @@ BEGIN
         -- alone cannot distinguish them.
         BEGIN
             v_declared := NULLIF(
-                current_setting('request.headers', true)::json ->> 'x-factoryplus-actor', ''
+                current_setting('request.headers', true)::json ->> 'x-acs-cymru-actor', ''
             );
         EXCEPTION WHEN others THEN
             v_declared := NULL;

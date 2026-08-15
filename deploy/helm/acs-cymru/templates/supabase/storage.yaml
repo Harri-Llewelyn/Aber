@@ -1,0 +1,184 @@
+{{- if .Values.supabaseStorage.enabled }}
+{{- $component := "supabase-storage" -}}
+{{- $secretName := include "acs-cymru.secretName" . -}}
+{{- $fullname := include "acs-cymru.fullname" . -}}
+---
+{{- if and .Values.supabaseStorage.persistence.enabled (eq .Values.supabaseStorage.backend "file") }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ printf "%s-storage" $fullname }}
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    # Survives `helm uninstall`, like the StatefulSet volumes. These are the 3D models exported
+    # shells point at by URL; losing them silently breaks every shell already handed out.
+    "helm.sh/resource-policy": keep
+    {{- with .Values.supabaseStorage.persistence.annotations }}
+    {{- /* Operator-supplied PVC annotations, for a snapshotter driven off the CLAIM. Velero's
+           file-level backup is NOT one of these -- it reads an annotation on the POD, which is
+           supabaseStorage.podAnnotations. */}}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  accessModes:
+    - {{ .Values.supabaseStorage.persistence.accessMode }}
+  {{- include "acs-cymru.storageClass" (dict "ctx" . "component" .Values.supabaseStorage.persistence) | nindent 2 }}
+  resources:
+    requests:
+      storage: {{ .Values.supabaseStorage.persistence.size }}
+---
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: supabase-storage
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      port: 5000
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supabase-storage
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  replicas: {{ .Values.supabaseStorage.replicas }}
+  strategy:
+    # On the `file` backend this is a single writer against a ReadWriteOnce PVC: a rolling update
+    # would try to schedule a second pod holding the same volume, which cannot bind.
+    type: {{ eq .Values.supabaseStorage.backend "file" | ternary "Recreate" "RollingUpdate" }}
+  selector:
+    matchLabels:
+      {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+      {{- with .Values.supabaseStorage.podAnnotations }}
+      {{- /* WHERE VELERO'S FILE-LEVEL BACKUP ANNOTATION GOES, and the reason this seam exists
+             separately from the PVC's. Velero reads `backup.velero.io/backup-volumes` from the POD
+             and resolves it against the pod's volume NAMES:
+
+               backup.velero.io/backup-volumes: data
+
+             The volume is called `data` -- see `volumes:` at the foot of this file. NOT `storage`
+             (the component), not the PVC name (`<release>-storage`), not the bucket
+             (`asset-3d-models`); all three are plausible and all three are wrong. A wrong value
+             does not error: the Velero backup completes SUCCESSFULLY having captured no files,
+             which is the same shape of quiet failure as a pg_dump written to a path that is
+             discarded with the pod. */}}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # M5. Node-based image running as uid/gid 1000; local-path hands over a root-owned directory.
+      securityContext:
+        {{- toYaml .Values.supabaseStorage.podSecurityContext | nindent 8 }}
+      initContainers:
+        {{/*
+          supabase_storage_admin HAS NO PASSWORD until db-roles-init sets one. Without it
+          storage-api crash-loops on 28P01 and NOTHING ELSE REPORTS A PROBLEM -- the database is
+          healthy and only this pod restarts. Waiting on the role turns that into a legible
+          Init: state instead.
+        */}}
+        {{- include "acs-cymru.waitForPostgres" (dict "ctx" . "name" "wait-for-storage-role" "host" (include "acs-cymru.supabaseDb.host" .) "port" (include "acs-cymru.supabaseDb.port" .) "user" "supabase_storage_admin" "db" "postgres" "passwordKey" "POSTGRES_PASSWORD") | nindent 8 }}
+      containers:
+        - name: storage
+          image: "{{ .Values.supabaseStorage.image.repository }}:{{ .Values.supabaseStorage.image.tag }}"
+          imagePullPolicy: {{ .Values.supabaseStorage.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 5000
+              protocol: TCP
+          env:
+            {{- include "acs-cymru.secretEnv" (dict "name" "ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "SERVICE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "PGRST_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              value: "postgres://supabase_storage_admin:$(POSTGRES_PASSWORD)@{{ include "acs-cymru.supabaseDb.host" . }}:{{ include "acs-cymru.supabaseDb.port" . }}/postgres"
+            # Storage evaluates RLS on storage.objects by impersonating the caller's role, so it
+            # needs the same PostgREST the rest of the stack uses to resolve the JWT's claims.
+            - name: POSTGREST_URL
+              value: http://supabase-rest:3000
+            {{- /*
+              `int64` BEFORE `quote`, AND IT IS LOAD-BEARING. Helm parses a bare 52428800 in
+              values.yaml as a FLOAT, so `quote` alone renders "5.24288e+07" -- which storage-api
+              reads with parseInt as **5**. Every upload over five bytes was then rejected as "The
+              object exceeded the maximum allowed size", on a stack where nothing else looked wrong.
+              Compose was never affected: it reads the number from .env as a string.
+            */}}
+            - name: FILE_SIZE_LIMIT
+              value: {{ .Values.supabaseStorage.fileSizeLimit | int64 | quote }}
+            - name: STORAGE_BACKEND
+              value: {{ .Values.supabaseStorage.backend | quote }}
+            - name: FILE_STORAGE_BACKEND_PATH
+              value: /var/lib/storage
+            - name: TENANT_ID
+              value: stub
+            # Required by the S3 code path even on the file backend; unused there.
+            - name: REGION
+              value: stub
+            - name: GLOBAL_S3_BUCKET
+              value: stub
+            - name: ENABLE_IMAGE_TRANSFORMATION
+              value: "false"
+          # 127.0.0.1, NEVER localhost. The image's musl resolver answers `localhost` with ::1
+          # first and storage-api binds 0.0.0.0 (IPv4 only), so a localhost probe gets
+          # ECONNREFUSED against a healthy server and the pod never leaves `starting`.
+          #
+          # An httpGet probe uses the pod IP and would be fine, but the exec form keeps this
+          # identical to the Compose healthcheck -- and keeps the reason documented where someone
+          # editing it will read it.
+          startupProbe:
+            exec:
+              command: ["wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5000/status"]
+            periodSeconds: 5
+            timeoutSeconds: 5
+            # storage-api runs its OWN migrations against the `storage` schema on boot, upgrading
+            # the stub the supabase/postgres image ships. That is not instant.
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command: ["wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5000/status"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5000/status"]
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 4
+          resources:
+            {{- toYaml .Values.supabaseStorage.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/storage
+      volumes:
+        - name: data
+          {{- if and .Values.supabaseStorage.persistence.enabled (eq .Values.supabaseStorage.backend "file") }}
+          persistentVolumeClaim:
+            claimName: {{ printf "%s-storage" $fullname }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}

@@ -34,7 +34,7 @@ online?") — exactly what to do about it. Read those first if you are skimming 
 To inspect, reset, or re-import by hand:
 
 1. Sign in to the dashboard at `http://localhost:3000`, then open `http://localhost:1880` and
-   click **Sign in with Factory+**. The editor authenticates against Supabase Auth; the dashboard
+   click **Sign in with ACS-Cymru**. The editor authenticates against Supabase Auth; the dashboard
    session is needed first because GoTrue ships no consent UI. Import and Deploy need
    Administrator or Shopfloor_Manager — Operator and Auditor get a read-only editor.
 2. **☰ menu → Import**.
@@ -77,7 +77,7 @@ A fifth, added when `settings.js` became the security boundary as well:
   The load check above evaluates a `settings.js` that now requires `passport-oauth2`, so an init
   container without that module concludes the settings are wrong and rewrites the file —
   overwriting `settings.js.bak` — on every boot. If the log says `settings.js written` on anything
-  but the first boot, that is the cause. `factoryplusSettingsVersion` is what lets a change to the
+  but the first boot, that is the cause. `acsCymruSettingsVersion` is what lets a change to the
   generated *body* reach a volume whose file already has the right keys.
 
 ---
@@ -187,7 +187,7 @@ absence proves nothing.
 Settle it from inside the Node-RED container:
 
 ```bash
-docker exec factoryplus_node_red node -e "
+docker exec acs-cymru_node_red node -e "
   const mqtt=require('/usr/src/node-red/node_modules/mqtt');
   const c=mqtt.connect('mqtt://mosquitto:1883',{reconnectPeriod:0});
   c.on('connect',()=>{console.log('CONNECTED');c.end()});

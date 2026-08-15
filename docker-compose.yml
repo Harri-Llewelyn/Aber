@@ -45,7 +45,7 @@ services:
   # Standalone TimescaleDB (Telemetry Hypertable Storage)
   # ---------------------------------------------------------------------------
   timescaledb:
-    container_name: factoryplus_timescaledb
+    container_name: acs-cymru_timescaledb
     image: timescale/timescaledb:2.29.1-pg17
     restart: always
     environment:
@@ -83,7 +83,7 @@ services:
   # Retention is a HARD DELETE with no undo, so every interval is the operator's to set. `never`
   # disables any individual policy.
   timescaledb-maintenance:
-    container_name: factoryplus_timescaledb_maintenance
+    container_name: acs-cymru_timescaledb_maintenance
     image: timescale/timescaledb:2.29.1-pg17
     environment:
       PGPASSWORD: ${DB_PASSWORD}
@@ -126,7 +126,7 @@ services:
   # Self-Hosted Supabase Stack (Postgres, GoTrue Auth, PostgREST, Kong, Studio)
   # ---------------------------------------------------------------------------
   supabase-db:
-    container_name: factoryplus_supabase_db
+    container_name: acs-cymru_supabase_db
     image: supabase/postgres:17.6.1.160
     restart: always
     ports:
@@ -139,6 +139,28 @@ services:
       SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
     volumes:
       - supabase_db_data:/var/lib/postgresql/data
+      # THE PGSODIUM ROOT KEY LIVES HERE, NOT IN PGDATA, and that asymmetry is the whole reason
+      # this mount exists. /usr/lib/postgresql/bin/pgsodium_getkey.sh hardcodes
+      # /etc/postgresql-custom/pgsodium_root.key and GENERATES A FRESH ONE when the file is absent.
+      #
+      # Without this volume the key is part of the container filesystem while the ciphertext it
+      # protects is in supabase_db_data. `docker compose down` destroys the container and keeps the
+      # volume, so `up` mints a new key and every vault.secrets row becomes undecryptable:
+      #
+      #   ERROR: pgsodium_crypto_aead_det_decrypt_by_id: invalid ciphertext
+      #
+      # which surfaces as migration 0006 failing and supabase-db-init exiting 3. `restart` and
+      # `stop`/`start` keep the container, so this only bites on down/up -- which is why it can sit
+      # unnoticed for a long time.
+      #
+      # BUMPING THE supabase/postgres TAG MEANS DELETING THIS VOLUME. Docker populates a new named
+      # volume from the image on first use, so this directory ALSO carries image-owned, version
+      # coupled config that postgresql.conf `include`s -- supautils.conf, read-replica.conf,
+      # wal-g.conf and extension-custom-scripts/. Once the volume exists it shadows the image's
+      # copies, so a stale supautils.conf would apply an old extension allow-list to a new server.
+      # After an image bump:  docker compose down && docker volume rm <project>_supabase_db_config
+      # (0006 now recovers from the resulting key loss on its own -- see its header.)
+      - supabase_db_config:/etc/postgresql-custom
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres && psql -U postgres -d postgres -c 'SELECT 1;'"]
       interval: 5s
@@ -147,7 +169,7 @@ services:
       start_period: 30s
 
   supabase-db-roles-init:
-    container_name: factoryplus_supabase_db_roles_init
+    container_name: acs-cymru_supabase_db_roles_init
     image: supabase/postgres:17.6.1.160
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -164,7 +186,7 @@ services:
         condition: service_healthy
 
   supabase-db-init:
-    container_name: factoryplus_supabase_db_init
+    container_name: acs-cymru_supabase_db_init
     image: supabase/postgres:17.6.1.160
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -234,7 +256,7 @@ services:
         condition: service_completed_successfully
 
   supabase-auth:
-    container_name: factoryplus_supabase_auth
+    container_name: acs-cymru_supabase_auth
     image: supabase/gotrue:v2.189.0
     restart: always
     environment:
@@ -289,7 +311,7 @@ services:
         condition: service_completed_successfully
 
   supabase-rest:
-    container_name: factoryplus_supabase_rest
+    container_name: acs-cymru_supabase_rest
     image: postgrest/postgrest:v12.2.0
     restart: always
     environment:
@@ -315,7 +337,7 @@ services:
   # timing of quarantine and reconfiguration events. Nothing subscribed to it. Reading it
   # through PostgREST is unaffected; see the publication block in 0001_baseline_schema.sql.
   supabase-realtime:
-    container_name: factoryplus_supabase_realtime
+    container_name: acs-cymru_supabase_realtime
     # Pinned rather than :latest -- Realtime runs its own migrations against the
     # _realtime schema on boot and is coupled to the Postgres image version.
     image: supabase/realtime:v2.34.47
@@ -390,7 +412,7 @@ services:
   # Pinned rather than :latest for the same reason as supabase-realtime -- it migrates a shared
   # schema on boot and is coupled to the Postgres image version.
   supabase-storage:
-    container_name: factoryplus_supabase_storage
+    container_name: acs-cymru_supabase_storage
     image: supabase/storage-api:v1.11.13
     restart: always
     environment:
@@ -428,7 +450,7 @@ services:
   # storage.buckets directly: the API is the supported entry point and is indifferent to which
   # columns this storage-api version's schema actually has. Idempotent -- see the script.
   supabase-storage-init:
-    container_name: factoryplus_supabase_storage_init
+    container_name: acs-cymru_supabase_storage_init
     image: node:20-alpine
     environment:
       STORAGE_URL: http://supabase-storage:5000
@@ -461,7 +483,7 @@ services:
   #
   # Uses the supabase/postgres image for its psql, the same way supabase-db-roles-init does.
   supabase-storage-policies:
-    container_name: factoryplus_supabase_storage_policies
+    container_name: acs-cymru_supabase_storage_policies
     image: supabase/postgres:17.6.1.160
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -491,7 +513,7 @@ services:
   # directly. The template is shared; only the substituter differs. Adding a placeholder means
   # adding it here AND in the chart. See docs/kubernetes-architecture.md §2.3.
   supabase-kong-init:
-    container_name: factoryplus_supabase_kong_init
+    container_name: acs-cymru_supabase_kong_init
     image: alpine:3.20
     environment:
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
@@ -543,7 +565,7 @@ services:
         echo 'Rendered Kong declarative config with API key consumers.'
 
   supabase-kong:
-    container_name: factoryplus_supabase_kong
+    container_name: acs-cymru_supabase_kong
     image: kong:2.8.1-alpine
     restart: always
     ports:
@@ -591,7 +613,7 @@ services:
         condition: service_started
 
   supabase-functions:
-    container_name: factoryplus_supabase_functions
+    container_name: acs-cymru_supabase_functions
     image: supabase/edge-runtime:v1.74.2
     restart: always
     environment:
@@ -606,7 +628,7 @@ services:
       # shell carries, so it has to name the organisation publishing the document -- the default is
       # only correct for a local stack. Declared here rather than only in .env because an edge
       # worker sees nothing but the vars main/index.ts forwards to it.
-      AAS_BASE_IRI: ${AAS_BASE_IRI:-https://factoryplus.local/ids/asset/}
+      AAS_BASE_IRI: ${AAS_BASE_IRI:-https://acs-cymru.local/ids/asset/}
       # Where a consumer fetches the samples a Time Series LinkedSegment points at. Never the rows
       # themselves -- the shell references the historian, it does not embed it.
       AAS_HISTORIAN_ENDPOINT: ${AAS_HISTORIAN_ENDPOINT:-http://localhost:54321/rest/v1/telemetry}
@@ -647,7 +669,7 @@ services:
   # error payloads without the message/code/formattedError fields Studio's Zod
   # schema requires, which surfaces as a validation error in the UI.
   supabase-meta:
-    container_name: factoryplus_supabase_meta
+    container_name: acs-cymru_supabase_meta
     # Pinned to the version the official self-hosted stack pairs with the Studio
     # tag below. v0.91.0 omitted "formattedError" from its error payloads, which
     # failed Studio's Zod schema on the Database page.
@@ -660,13 +682,13 @@ services:
       PG_META_DB_NAME: postgres
       PG_META_DB_USER: supabase_admin
       PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      CRYPTO_KEY: ${PG_META_CRYPTO_KEY:-factoryplus-pg-meta-crypto-key}
+      CRYPTO_KEY: ${PG_META_CRYPTO_KEY:-acs-cymru-pg-meta-crypto-key}
     depends_on:
       supabase-db:
         condition: service_healthy
 
   supabase-studio:
-    container_name: factoryplus_supabase_studio
+    container_name: acs-cymru_supabase_studio
     # Pinned rather than :latest -- Studio's Zod schemas are coupled to a specific
     # postgres-meta version. This is the pairing the official stack ships.
     image: supabase/studio:2026.07.07-sha-a6a04f2
@@ -678,7 +700,7 @@ services:
       # image's bundled localhost healthcheck fails with ECONNREFUSED.
       HOSTNAME: "0.0.0.0"
       STUDIO_PG_META_URL: http://supabase-meta:8080
-      PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY:-factoryplus-pg-meta-crypto-key}
+      PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY:-acs-cymru-pg-meta-crypto-key}
       POSTGRES_HOST: supabase-db
       POSTGRES_PORT: 5432
       POSTGRES_DB: postgres
@@ -691,8 +713,8 @@ services:
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
       SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
       AUTH_JWT_SECRET: ${SUPABASE_JWT_SECRET}
-      DEFAULT_ORGANIZATION_NAME: Factory+
-      DEFAULT_PROJECT_NAME: Factory+ Asset Tracking
+      DEFAULT_ORGANIZATION_NAME: ACS-Cymru
+      DEFAULT_PROJECT_NAME: ACS-Cymru Asset Tracking
       # Studio reads Edge Functions from disk, not over HTTP.
       EDGE_FUNCTIONS_MANAGEMENT_FOLDER: /app/edge-functions
       SNIPPETS_MANAGEMENT_FOLDER: /app/snippets
@@ -719,7 +741,7 @@ services:
   # PostgREST / Edge Functions). Serves the curated spec in docs/openapi.yaml
   # alongside the live spec PostgREST generates from the database schema.
   swagger-ui:
-    container_name: factoryplus_swagger_ui
+    container_name: acs-cymru_swagger_ui
     image: swaggerapi/swagger-ui:v5.17.14
     restart: always
     ports:
@@ -756,7 +778,7 @@ services:
   # means every physical gateway loses its credential at once. The first call below uses -c
   # intentionally (this is the file's initial state); every subsequent call must not.
   mosquitto-init:
-    container_name: factoryplus_mosquitto_init
+    container_name: acs-cymru_mosquitto_init
     image: eclipse-mosquitto:2.0.20
     user: "0"
     environment:
@@ -788,7 +810,7 @@ services:
       "
 
   mosquitto:
-    container_name: factoryplus_mosquitto
+    container_name: acs-cymru_mosquitto
     image: eclipse-mosquitto:2.0.20
     restart: always
     ports:
@@ -826,7 +848,7 @@ services:
   # frontend/src/config.js prefers the runtime value and falls through to these. See
   # docs/kubernetes-architecture.md §2.1.
   frontend:
-    container_name: factoryplus_frontend
+    container_name: acs-cymru_frontend
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -841,7 +863,7 @@ services:
       - "3000:3000"
 
   ingestion:
-    container_name: factoryplus_ingestion
+    container_name: acs-cymru_ingestion
     build:
       context: .
       dockerfile: Dockerfile
@@ -912,7 +934,7 @@ services:
   # streams) is in memory, so a second replica would answer `/subscriptions/sync` for a
   # subscription it has never heard of and return 404 for a live client.
   i3x-service:
-    container_name: factoryplus_i3x
+    container_name: acs-cymru_i3x
     build:
       # REPOSITORY ROOT: sparkplug_b.proto lives there and the image compiles it.
       context: .
@@ -952,7 +974,7 @@ services:
         condition: service_completed_successfully
 
   node-red-init:
-    container_name: factoryplus_node_red_init
+    container_name: acs-cymru_node_red_init
     # Built, not pulled, and from the SAME context as node-red below. settingsAreCorrect()
     # evaluates settings.js, which requires passport-oauth2 -- an init container without it
     # concludes the settings are wrong and rewrites them on every boot. See node-red/Dockerfile.
@@ -984,7 +1006,7 @@ services:
       "
 
   node-red:
-    container_name: factoryplus_node_red
+    container_name: acs-cymru_node_red
     build:
       context: ./node-red
     restart: always
@@ -1010,7 +1032,7 @@ services:
         condition: service_started
 
   grafana:
-    container_name: factoryplus_grafana
+    container_name: acs-cymru_grafana
     image: grafana/grafana:11.6.1
     restart: always
     environment:
@@ -1075,6 +1097,10 @@ volumes:
   grafana_provisioning_datasources:
   mosquitto_data:
   supabase_db_data:
+  # /etc/postgresql-custom. Holds the pgsodium root key, WITHOUT WHICH every vault.secrets row in
+  # supabase_db_data is undecryptable -- see the mount on supabase-db for the failure it prevents
+  # and for why an image bump means deleting this volume.
+  supabase_db_config:
   studio_snippets:
   deno_cache:
   storage_data:

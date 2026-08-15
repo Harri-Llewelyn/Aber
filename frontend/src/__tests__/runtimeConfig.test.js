@@ -16,7 +16,7 @@ import { dirname, resolve } from 'node:path'
  * supabaseClient.js) and would otherwise be frozen at whatever the first test set.
  */
 
-const GLOBAL_KEY = '__FACTORYPLUS_CONFIG__'
+const GLOBAL_KEY = '__ACS_CYMRU_CONFIG__'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PLACEHOLDER_FILE = resolve(HERE, '../../public/config.js')

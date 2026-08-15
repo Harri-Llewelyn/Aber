@@ -116,7 +116,8 @@ harmlessly on every later start: the schema baseline (`0001`), seed data (`0002`
 immutability, `0004`, `0005`, `0006` Node-RED SSO, `0007` metric-name format, `0008` Sparkplug
 group, `0009` withdraws residual `anon` function grants, `0010` telemetry rollups and latest-value
 view, `0011` IDTA Digital Nameplate and per-device nameplate data, `0012` permitted values of a
-discrete metric, `0013` ASHRAE 223P vocabulary — plus demo accounts (`supabase/seed.sql`).
+discrete metric, `0013` ASHRAE 223P vocabulary, `0014` repoints locally-minted semantic
+identifiers onto the `acs-cymru.local` namespace — plus demo accounts (`supabase/seed.sql`).
 
 | Interface | URL |
 | :--- | :--- |
@@ -128,17 +129,17 @@ discrete metric, `0013` ASHRAE 223P vocabulary — plus demo accounts (`supabase
 
 **Sign in to the React dashboard first.** Node-RED and Grafana both federate to Supabase Auth, and
 the consent step needs your dashboard session — going straight to either shows a "sign in required"
-prompt rather than a login form. In Node-RED, click **Sign in with Factory+**; Administrator and
+prompt rather than a login form. In Node-RED, click **Sign in with ACS-Cymru**; Administrator and
 Shopfloor_Manager can deploy, Operator and Auditor get a read-only editor.
 
 **Demo accounts** — seeded by [`supabase/seed.sql`](supabase/seed.sql), password `factoryplus123`:
 
 | Email | Role | Access |
 | :--- | :--- | :--- |
-| `admin@factoryplus.local` | `Administrator` | Full CRUD |
-| `manager@factoryplus.local` | `Shopfloor_Manager` | Full CRUD |
-| `operator@factoryplus.local` | `Operator` | Read-only + telemetry |
-| `auditor@factoryplus.local` | `Auditor` | Digital Thread read-only |
+| `admin@acs-cymru.local` | `Administrator` | Full CRUD |
+| `manager@acs-cymru.local` | `Shopfloor_Manager` | Full CRUD |
+| `operator@acs-cymru.local` | `Operator` | Read-only + telemetry |
+| `auditor@acs-cymru.local` | `Auditor` | Digital Thread read-only |
 
 Self-registered accounts get read-only `Operator` via the `handle_new_user` trigger; an
 `Administrator` must promote them.
@@ -156,25 +157,25 @@ Full runbook in [`deploy/k8s/README.md`](deploy/k8s/README.md). The short versio
 
 ```bash
 # Five images are built from this repository and are on no registry.
-docker build -f supabase/functions/Dockerfile -t factoryplus/edge-runtime:0.1.0 .   # context: repo root
-docker build -f Dockerfile                    -t factoryplus/ingestion:0.1.0 .      # context: repo root
-docker build -f node-red/Dockerfile           -t factoryplus/node-red:0.1.0 node-red
+docker build -f supabase/functions/Dockerfile -t acs-cymru/edge-runtime:0.1.0 .   # context: repo root
+docker build -f Dockerfile                    -t acs-cymru/ingestion:0.1.0 .      # context: repo root
+docker build -f node-red/Dockerfile           -t acs-cymru/node-red:0.1.0 node-red
 docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
-                                              -t factoryplus/frontend:0.1.0 frontend
-docker build -f tests/Dockerfile              -t factoryplus/test-runner:0.1.0 .    # conformance suites
+                                              -t acs-cymru/frontend:0.1.0 frontend
+docker build -f tests/Dockerfile              -t acs-cymru/test-runner:0.1.0 .    # conformance suites
 
 node scripts/sync-helm-chart-files.mjs        # mirror repo config into the chart
 
-kubectl create namespace factoryplus
-helm install factoryplus deploy/helm/factoryplus -n factoryplus \
-  -f deploy/helm/factoryplus/values-dev.yaml --timeout 15m
+kubectl create namespace acs-cymru
+helm install acs-cymru deploy/helm/acs-cymru -n acs-cymru \
+  -f deploy/helm/acs-cymru/values-dev.yaml --timeout 15m
 
 # NOT `--wait` — it deadlocks the first install. See deploy/k8s/README.md.
-for w in $(kubectl -n factoryplus get statefulset,deploy -o name); do
-  kubectl -n factoryplus rollout status "$w" --timeout=10m
+for w in $(kubectl -n acs-cymru get statefulset,deploy -o name); do
+  kubectl -n acs-cymru rollout status "$w" --timeout=10m
 done
 
-helm test factoryplus -n factoryplus          # the postgres_fdw gate
+helm test acs-cymru -n acs-cymru          # the postgres_fdw gate
 ```
 
 Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, `studio.`, `docs.`,
@@ -200,7 +201,7 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | **[`simulators/`](simulators/README.md)** | Node-RED setup, flow provisioning, broker topics, onboarding walkthrough |
 | **[`i3x/`](i3x/README.md)** | i3X 1.0 server: address-space mapping, subscriptions, connecting a client |
 | **[`deploy/k8s/README.md`](deploy/k8s/README.md)** | Kubernetes runbook: install, upgrade, teardown, hardening, divergence table, releases |
-| [`deploy/helm/factoryplus/`](deploy/helm/factoryplus) | The Helm chart; `values.yaml` documents every setting |
+| [`deploy/helm/acs-cymru/`](deploy/helm/acs-cymru) | The Helm chart; `values.yaml` documents every setting |
 | [`docs/kubernetes-architecture.md`](docs/kubernetes-architecture.md) | Why the Kubernetes target is built the way it is. Source comments cite it by section |
 | [`docs/openapi.yaml`](docs/openapi.yaml) · [`docs/i3x-openapi.yaml`](docs/i3x-openapi.yaml) | REST and i3X specifications, rendered by Swagger UI |
 | [`supabase/migrations/archive/`](supabase/migrations/archive) | The 38 pre-beta migrations, preserved for their reasoning. Never executed |
@@ -214,28 +215,28 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 
 | Service | Container | Image | Port |
 | :--- | :--- | :--- | :--- |
-| `supabase-db` | `factoryplus_supabase_db` | `supabase/postgres:17.6.1.160` | `54322:5432` |
-| `supabase-db-roles-init` | `factoryplus_supabase_db_roles_init` | `supabase/postgres:17.6.1.160` | — |
-| `supabase-db-init` | `factoryplus_supabase_db_init` | `supabase/postgres:17.6.1.160` | — |
-| `supabase-auth` | `factoryplus_supabase_auth` | `supabase/gotrue:v2.189.0` | — |
-| `supabase-rest` | `factoryplus_supabase_rest` | `postgrest/postgrest:v12.2.0` | — |
-| `supabase-kong-init` | `factoryplus_supabase_kong_init` | `alpine:3.20` | — |
-| `supabase-kong` | `factoryplus_supabase_kong` | `kong:2.8.1-alpine` | `54321:8000` |
-| `supabase-functions` | `factoryplus_supabase_functions` | `supabase/edge-runtime:v1.74.2` | — |
-| `supabase-realtime` | `factoryplus_supabase_realtime` | `supabase/realtime:v2.34.47` | — |
-| `supabase-storage` | `factoryplus_supabase_storage` | `supabase/storage-api:v1.11.13` | — |
-| `supabase-storage-init` | `factoryplus_supabase_storage_init` | `node:20-alpine` | — |
-| `supabase-meta` | `factoryplus_supabase_meta` | `supabase/postgres-meta:v0.96.6` | — |
-| `supabase-studio` | `factoryplus_supabase_studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `54323:3000` |
-| `timescaledb` | `factoryplus_timescaledb` | `timescale/timescaledb:2.29.1-pg17` | `5433:5432` |
-| `mosquitto-init` | `factoryplus_mosquitto_init` | `eclipse-mosquitto:2.0.20` | — |
-| `mosquitto` | `factoryplus_mosquitto` | `eclipse-mosquitto:2.0.20` | `1883`, `9001` |
-| `frontend` | `factoryplus_frontend` | `./frontend/Dockerfile` | `3000:3000` |
-| `ingestion` | `factoryplus_ingestion` | `./Dockerfile` | — |
-| `node-red-init` | `factoryplus_node_red_init` | `./node-red/Dockerfile` | — |
-| `node-red` | `factoryplus_node_red` | `./node-red/Dockerfile` | `1880:1880` |
-| `grafana` | `factoryplus_grafana` | `grafana/grafana:11.6.1` | `3002:3000` |
-| `swagger-ui` | `factoryplus_swagger_ui` | `swaggerapi/swagger-ui:v5.17.14` | `8088:8080` |
+| `supabase-db` | `acs-cymru_supabase_db` | `supabase/postgres:17.6.1.160` | `54322:5432` |
+| `supabase-db-roles-init` | `acs-cymru_supabase_db_roles_init` | `supabase/postgres:17.6.1.160` | — |
+| `supabase-db-init` | `acs-cymru_supabase_db_init` | `supabase/postgres:17.6.1.160` | — |
+| `supabase-auth` | `acs-cymru_supabase_auth` | `supabase/gotrue:v2.189.0` | — |
+| `supabase-rest` | `acs-cymru_supabase_rest` | `postgrest/postgrest:v12.2.0` | — |
+| `supabase-kong-init` | `acs-cymru_supabase_kong_init` | `alpine:3.20` | — |
+| `supabase-kong` | `acs-cymru_supabase_kong` | `kong:2.8.1-alpine` | `54321:8000` |
+| `supabase-functions` | `acs-cymru_supabase_functions` | `supabase/edge-runtime:v1.74.2` | — |
+| `supabase-realtime` | `acs-cymru_supabase_realtime` | `supabase/realtime:v2.34.47` | — |
+| `supabase-storage` | `acs-cymru_supabase_storage` | `supabase/storage-api:v1.11.13` | — |
+| `supabase-storage-init` | `acs-cymru_supabase_storage_init` | `node:20-alpine` | — |
+| `supabase-meta` | `acs-cymru_supabase_meta` | `supabase/postgres-meta:v0.96.6` | — |
+| `supabase-studio` | `acs-cymru_supabase_studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `54323:3000` |
+| `timescaledb` | `acs-cymru_timescaledb` | `timescale/timescaledb:2.29.1-pg17` | `5433:5432` |
+| `mosquitto-init` | `acs-cymru_mosquitto_init` | `eclipse-mosquitto:2.0.20` | — |
+| `mosquitto` | `acs-cymru_mosquitto` | `eclipse-mosquitto:2.0.20` | `1883`, `9001` |
+| `frontend` | `acs-cymru_frontend` | `./frontend/Dockerfile` | `3000:3000` |
+| `ingestion` | `acs-cymru_ingestion` | `./Dockerfile` | — |
+| `node-red-init` | `acs-cymru_node_red_init` | `./node-red/Dockerfile` | — |
+| `node-red` | `acs-cymru_node_red` | `./node-red/Dockerfile` | `1880:1880` |
+| `grafana` | `acs-cymru_grafana` | `grafana/grafana:11.6.1` | `3002:3000` |
+| `swagger-ui` | `acs-cymru_swagger_ui` | `swaggerapi/swagger-ui:v5.17.14` | `8088:8080` |
 
 ---
 
@@ -290,7 +291,7 @@ Digital Nameplate; what each one covers and how its identity was verified is in
 [`supabase/README.md`](supabase/README.md#adding-a-vocabulary).
 
 > Adopting the MTConnect vocabulary is not a compliance claim; that requires the Implementer
-> License. Locally-minted semantic ids live under `https://factoryplus.local/semantics/…` — the
+> License. Locally-minted semantic ids live under `https://acs-cymru.local/semantics/…` — the
 > namespace is the honesty mechanism, and an id under `mtconnect.org` would assert an
 > interoperability that does not exist.
 

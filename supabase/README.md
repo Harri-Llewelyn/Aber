@@ -41,7 +41,7 @@ naming and can change under a rename that looks purely cosmetic. Nothing fails, 
 ordering is simply not the one anybody chose.
 
 `scripts/check-docs-drift.mjs` asserts unique prefixes across **both** `supabase/migrations/` and
-the chart mirror at `deploy/helm/factoryplus/files/migrations/`, and that the two directories hold
+the chart mirror at `deploy/helm/acs-cymru/files/migrations/`, and that the two directories hold
 the same set. `0006_nodered_oidc_auth.sql` was renumbered from `0003` for exactly this reason.
 
 > Renaming a migration means re-running `node scripts/sync-helm-chart-files.mjs`. It removes the
@@ -318,7 +318,7 @@ on `cells`, `gateways` and `devices`.
 carries no `sub` — so **every privileged write used to be logged anonymously** (58 of 65 rows on
 the audited database had `changed_by IS NULL`).
 
-`log_digital_thread_event()` now falls back to a session-local GUC, `factoryplus.actor_id`, which
+`log_digital_thread_event()` now falls back to a session-local GUC, `acs_cymru.actor_id`, which
 `approve_quarantined_device()` sets with `SET LOCAL`. `auth.uid()` still wins when present — a
 direct PostgREST write by a signed-in user is already correctly attributed, and the GUC must not be
 able to override it.

@@ -279,7 +279,7 @@ function settingsAreCorrect() {
     return (
       loaded?.credentialSecret === credentialSecret &&
       loaded?.flowFile === FLOW_FILE &&
-      loaded?.factoryplusSettingsVersion === SETTINGS_VERSION &&
+      loaded?.acsCymruSettingsVersion === SETTINGS_VERSION &&
       loaded?.adminAuth?.type === 'strategy' &&
       typeof loaded?.adminAuth?.tokens === 'function' &&
       typeof loaded?.adminAuth?.authenticate === 'function' &&
@@ -370,7 +370,7 @@ async function userinfo(accessToken) {
       // means the apikey or the bearer was rejected at the gateway; 404 means the function is
       // not registered in supabase/functions/main/index.ts.
       console.warn(
-        '[factoryplus] userinfo ' + env.NODERED_USERINFO_URL + ' -> HTTP ' + res.status +
+        '[acs-cymru] userinfo ' + env.NODERED_USERINFO_URL + ' -> HTTP ' + res.status +
         '; refusing the sign-in.'
       );
       return null;
@@ -378,7 +378,7 @@ async function userinfo(accessToken) {
     return await res.json();
   } catch (err) {
     // A userinfo endpoint that cannot be reached is not evidence of a role. Fail closed.
-    console.warn('[factoryplus] userinfo lookup failed: ' + err.message);
+    console.warn('[acs-cymru] userinfo lookup failed: ' + err.message);
     return null;
   }
 }
@@ -417,7 +417,7 @@ try {
   // Absent on first boot, and unreadable is no worse than absent: the fallback in \`users\`
   // keeps existing sessions working, they just render read-only until the next sign-in.
   if (err.code !== 'ENOENT') {
-    console.warn('[factoryplus] could not read ' + EDITOR_USERS_FILE + ': ' + err.message);
+    console.warn('[acs-cymru] could not read ' + EDITOR_USERS_FILE + ': ' + err.message);
   }
 }
 
@@ -432,7 +432,7 @@ function rememberEditorUser(username, permissions) {
   } catch (err) {
     // Non-fatal: the sign-in itself has already succeeded and the in-memory map still serves
     // this process. Only the next restart would notice.
-    console.warn('[factoryplus] could not persist ' + EDITOR_USERS_FILE + ': ' + err.message);
+    console.warn('[acs-cymru] could not persist ' + EDITOR_USERS_FILE + ': ' + err.message);
   }
 }
 
@@ -454,7 +454,7 @@ function cachePut(token, user) {
 }
 
 module.exports = {
-  factoryplusSettingsVersion: ${SETTINGS_VERSION},
+  acsCymruSettingsVersion: ${SETTINGS_VERSION},
 
   flowFile: ${JSON.stringify(FLOW_FILE)},
   credentialSecret: ${JSON.stringify(credentialSecret)},
@@ -470,7 +470,7 @@ module.exports = {
 
     strategy: {
       name: 'oauth2',
-      label: 'Sign in with Factory+',
+      label: 'Sign in with ACS-Cymru',
       icon: 'fa-cube',
       strategy: OAuth2Strategy,
       options: {
@@ -515,7 +515,7 @@ module.exports = {
             if (!info || !info.permissions) {
               if (info) {
                 console.warn(
-                  '[factoryplus] sign-in refused for ' + (info.email || info.sub) +
+                  '[acs-cymru] sign-in refused for ' + (info.email || info.sub) +
                   ': supabase_role=' + info.supabase_role + ' maps to no Node-RED permissions. ' +
                   'Add a public.user_roles row for this user.'
                 );
@@ -523,7 +523,7 @@ module.exports = {
               return done(null, false);
             }
             console.log(
-              '[factoryplus] sign-in: ' + info.email + ' (' + info.supabase_role +
+              '[acs-cymru] sign-in: ' + info.email + ' (' + info.supabase_role +
               ') -> permissions=' + info.permissions
             );
             return done(null, {

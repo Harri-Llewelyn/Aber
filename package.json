@@ -1,7 +1,7 @@
 {
-  "name": "factoryplus-asset-tracking",
+  "name": "acs-cymru-asset-tracking",
   "version": "1.0.0",
-  "description": "Factory+ Asset Tracking Platform (Supabase BaaS + Standalone TimescaleDB)",
+  "description": "ACS-Cymru Asset Tracking Platform (Supabase BaaS + Standalone TimescaleDB)",
   "private": true,
   "type": "module",
   "scripts": {

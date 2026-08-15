@@ -36,11 +36,11 @@ import { randomBytes } from 'node:crypto';
 const GATEWAY_ID_PATTERN = /^gwy[0-9a-f]{21}$/;
 
 // --- Compose backend -------------------------------------------------------------------------
-const CONTAINER = process.env.MOSQUITTO_CONTAINER || 'factoryplus_mosquitto';
+const CONTAINER = process.env.MOSQUITTO_CONTAINER || 'acs-cymru_mosquitto';
 const PASSWORD_FILE = '/mosquitto/config/password_file';
 
 // --- Kubernetes backend ----------------------------------------------------------------------
-const NAMESPACE = process.env.FACTORYPLUS_NAMESPACE || 'factoryplus';
+const NAMESPACE = process.env.ACS_CYMRU_NAMESPACE || 'acs-cymru';
 const SECRET_NAME = process.env.MOSQUITTO_SECRET || 'mosquitto-passwords';
 const SECRET_KEY = 'password_file';
 const DEPLOYMENT = process.env.MOSQUITTO_DEPLOYMENT || 'mosquitto';

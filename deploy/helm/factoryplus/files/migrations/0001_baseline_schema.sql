@@ -1,6 +1,6 @@
 -- =============================================================================================
 -- Migration: 0001_baseline_schema.sql
--- Factory+ Asset Tracking Platform -- consolidated schema baseline (public beta)
+-- ACS-Cymru Asset Tracking Platform -- consolidated schema baseline (public beta)
 -- =============================================================================================
 --
 -- WHAT THIS IS. The squashed structural baseline for the public beta. It replaces the 38

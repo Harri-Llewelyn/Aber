@@ -29,10 +29,10 @@ export const VALID_TABS = [
 ];
 
 export const PERSONAS = [
-  { id: 'admin@factoryplus.local',    label: 'Administrator (Full Access)' },
-  { id: 'manager@factoryplus.local',  label: 'Shopfloor Manager (Ops & Approval)' },
-  { id: 'operator@factoryplus.local', label: 'Operator (Read-Only View)' },
-  { id: 'auditor@factoryplus.local',  label: 'Auditor (Digital Thread Trace)' },
+  { id: 'admin@acs-cymru.local',    label: 'Administrator (Full Access)' },
+  { id: 'manager@acs-cymru.local',  label: 'Shopfloor Manager (Ops & Approval)' },
+  { id: 'operator@acs-cymru.local', label: 'Operator (Read-Only View)' },
+  { id: 'auditor@acs-cymru.local',  label: 'Auditor (Digital Thread Trace)' },
 ];
 
 // Realtime rollout flag and the polling intervals paired with it.
@@ -55,7 +55,7 @@ export const RECONCILE_INTERVAL_MS = 60000;
  *
  * Configurable because a fork does not want its bug reports landing on the upstream tracker --
  * which is exactly what was happening: the URL was hardcoded to
- * `Harri-Llewelyn/factoryplus-asset-tracking`, a repository that is not this one, so every report
+ * `Harri-Llewelyn/acs-cymru`, a repository that is not this one, so every report
  * filed through that button went somewhere nobody working on this code was reading.
  *
  * A FALLBACK IS KEPT, unlike VITE_SUPABASE_URL which throws when missing. The distinction is what

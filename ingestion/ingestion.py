@@ -56,7 +56,7 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 # Liveness heartbeat. OPT-IN, empty by default: Docker Compose declares no healthcheck for this
 # service and nothing reads the file there, so writing one would be litter. Kubernetes sets it and
-# probes the file's age -- see deploy/helm/factoryplus/templates/apps/ingestion.yaml.
+# probes the file's age -- see deploy/helm/acs-cymru/templates/apps/ingestion.yaml.
 #
 # WHY A HEARTBEAT AND NOT A MESSAGE COUNTER. The obvious implementation touches the file in
 # on_message, which reports the daemon dead every time the shopfloor is quiet -- nights, weekends,

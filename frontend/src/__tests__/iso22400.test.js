@@ -7,13 +7,13 @@ import { composeMetricName } from '../utils/metricGroup'
 
 // A slice of what iso22400_vocabulary holds once 0002_seed_data.sql has run.
 const vocabulary = [
-  { name: 'QUALITY', kpi_id: 'Q', category: 'OEE', unit: 'PERCENT', formula: 'Q = GQ / PQ', description: 'Quality ratio', semantic_id: 'https://factoryplus.local/semantics/iso22400/QUALITY' },
+  { name: 'QUALITY', kpi_id: 'Q', category: 'OEE', unit: 'PERCENT', formula: 'Q = GQ / PQ', description: 'Quality ratio', semantic_id: 'https://acs-cymru.local/semantics/iso22400/QUALITY' },
   // ISO 22400-2's own term for the factor industry calls Performance. The catalog's
   // OEE/PERFORMANCE was superseded by OEE/EFFECTIVENESS in migration 0032.
-  { name: 'EFFECTIVENESS', kpi_id: 'E', category: 'OEE', unit: 'PERCENT', formula: 'E = (PRI x PQ) / APT', description: 'Effectiveness ratio', semantic_id: 'https://factoryplus.local/semantics/iso22400/EFFECTIVENESS' },
-  { name: 'AVAILABILITY', kpi_id: 'A', category: 'OEE', unit: 'PERCENT', formula: 'A = APT / PBT', description: 'Availability ratio', semantic_id: 'https://factoryplus.local/semantics/iso22400/AVAILABILITY' },
-  { name: 'MTBF', kpi_id: 'MTBF', category: 'Maintenance', unit: 'HOUR', formula: 'MTBF = APT / number of failures', description: 'Mean operating time between failures', semantic_id: 'https://factoryplus.local/semantics/iso22400/MTBF' },
-  { name: 'SCRAP_RATIO', kpi_id: 'SR', category: 'Quality', unit: 'PERCENT', formula: 'SR = SQ / PQ', description: 'Scrap ratio', semantic_id: 'https://factoryplus.local/semantics/iso22400/SCRAP_RATIO' }
+  { name: 'EFFECTIVENESS', kpi_id: 'E', category: 'OEE', unit: 'PERCENT', formula: 'E = (PRI x PQ) / APT', description: 'Effectiveness ratio', semantic_id: 'https://acs-cymru.local/semantics/iso22400/EFFECTIVENESS' },
+  { name: 'AVAILABILITY', kpi_id: 'A', category: 'OEE', unit: 'PERCENT', formula: 'A = APT / PBT', description: 'Availability ratio', semantic_id: 'https://acs-cymru.local/semantics/iso22400/AVAILABILITY' },
+  { name: 'MTBF', kpi_id: 'MTBF', category: 'Maintenance', unit: 'HOUR', formula: 'MTBF = APT / number of failures', description: 'Mean operating time between failures', semantic_id: 'https://acs-cymru.local/semantics/iso22400/MTBF' },
+  { name: 'SCRAP_RATIO', kpi_id: 'SR', category: 'Quality', unit: 'PERCENT', formula: 'SR = SQ / PQ', description: 'Scrap ratio', semantic_id: 'https://acs-cymru.local/semantics/iso22400/SCRAP_RATIO' }
 ]
 
 describe('kpis', () => {
@@ -58,7 +58,7 @@ describe('iso22400Prefill', () => {
   it('takes the unit and semantic id from the standard rather than asking', () => {
     const prefill = iso22400Prefill(availability)
     expect(prefill.units).toBe('PERCENT')
-    expect(prefill.semanticId).toBe('https://factoryplus.local/semantics/iso22400/AVAILABILITY')
+    expect(prefill.semanticId).toBe('https://acs-cymru.local/semantics/iso22400/AVAILABILITY')
     expect(prefill.standard).toBe(STANDARDS.ISO22400)
   })
 

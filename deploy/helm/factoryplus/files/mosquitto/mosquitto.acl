@@ -1,5 +1,5 @@
 # =============================================================================================
-# Mosquitto access control list -- Factory+ Asset Tracking Platform
+# Mosquitto access control list -- ACS-Cymru Asset Tracking Platform
 # =============================================================================================
 #
 # DEFAULT IS DENY. Mosquitto grants nothing not matched by a rule below, and `allow_anonymous

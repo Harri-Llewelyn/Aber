@@ -279,7 +279,7 @@ def probe_nodered_editor_login():
         anon = os.getenv("SUPABASE_ANON_KEY", "")
         token = json.loads(fetch(
             f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-            json.dumps({"email": "admin@factoryplus.local", "password": "factoryplus123"}).encode(),
+            json.dumps({"email": "admin@acs-cymru.local", "password": "factoryplus123"}).encode(),
             {"apikey": anon, "Content-Type": "application/json"},
         ).read())["access_token"]
 
@@ -354,7 +354,7 @@ def probe_nodered_editor_login():
         if flows_res.status != 200:
             return False, f"editor session cannot read the flows: GET /flows -> {flows_res.status}."
 
-        return True, ("admin@factoryplus.local signed in through Supabase Auth; the editor session "
+        return True, ("admin@acs-cymru.local signed in through Supabase Auth; the editor session "
                       "reads /settings and /flows and carries permissions='*' (Deploy enabled).")
     except Exception as err:
         return False, f"{type(err).__name__}: {err}"
@@ -1617,7 +1617,7 @@ def verify_results():
         try:
             req = urllib.request.Request(
                 f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-                data=json.dumps({"email": "admin@factoryplus.local",
+                data=json.dumps({"email": "admin@acs-cymru.local",
                                  "password": "factoryplus123"}).encode(),
                 headers={"apikey": anon, "Content-Type": "application/json"},
             )

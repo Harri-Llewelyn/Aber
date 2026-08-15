@@ -37,9 +37,9 @@
 
 -- Same GUC indirection retention.sql uses: psql interpolates `:'var'` while lexing and does not
 -- descend into dollar-quoted strings, so these cannot be read directly inside the DO block below.
-SELECT set_config('factoryplus.rollup_1m_retain', :'rollup_1m_retain', false);
-SELECT set_config('factoryplus.rollup_5m_retain', :'rollup_5m_retain', false);
-SELECT set_config('factoryplus.rollup_1h_retain', :'rollup_1h_retain', false);
+SELECT set_config('acs_cymru.rollup_1m_retain', :'rollup_1m_retain', false);
+SELECT set_config('acs_cymru.rollup_5m_retain', :'rollup_5m_retain', false);
+SELECT set_config('acs_cymru.rollup_1h_retain', :'rollup_1h_retain', false);
 
 
 -- ---------------------------------------------------------------------------------------------
@@ -181,12 +181,12 @@ DECLARE
 BEGIN
   FOR spec IN
     SELECT * FROM (VALUES
-      ('telemetry_1m', INTERVAL '1 minute',  INTERVAL '1 minute',  'factoryplus.rollup_1m_retain'),
-      ('telemetry_5m', INTERVAL '5 minutes', INTERVAL '5 minutes', 'factoryplus.rollup_5m_retain'),
+      ('telemetry_1m', INTERVAL '1 minute',  INTERVAL '1 minute',  'acs_cymru.rollup_1m_retain'),
+      ('telemetry_5m', INTERVAL '5 minutes', INTERVAL '5 minutes', 'acs_cymru.rollup_5m_retain'),
       -- The 1h view refreshes on a 5-minute schedule, NOT hourly. Its end_offset still holds back
       -- the incomplete bucket, so this costs little and means a dashboard on the hourly rollup is
       -- never an hour stale.
-      ('telemetry_1h', INTERVAL '1 hour',    INTERVAL '5 minutes', 'factoryplus.rollup_1h_retain')
+      ('telemetry_1h', INTERVAL '1 hour',    INTERVAL '5 minutes', 'acs_cymru.rollup_1h_retain')
     ) AS t(view_name, bucket_width, schedule, guc)
   LOOP
     raw_val := btrim(coalesce(current_setting(spec.guc, true), ''));
