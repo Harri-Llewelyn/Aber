@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { IconFileCode, IconDownload } from '../common/Icons'
+import { ActionButton } from '../common/ActionButton'
+import { usePendingKey } from '../../hooks/usePendingAction'
 import { datatypeLabel, datatypeToJsonSchemaType } from '../../utils/sparkplugDatatype'
 import { groupCatalog } from '../../utils/metricGroup'
 import {
@@ -25,7 +27,7 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
   const [semanticIdType, setSemanticIdType] = useState('')
   const [deviceName, setDeviceName] = useState('')
   const [gatewayId, setGatewayId] = useState('')
-  const [groupId, setGroupId] = useState('FactoryPlus')
+  const [groupId, setGroupId] = useState('ACS-Cymru')
 
   const activeCatalog = useMemo(() => (catalog || []).filter(m => !m.deprecated), [catalog])
 
@@ -78,11 +80,15 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
   const buildDeviceDetails = () => ({
     device_name: deviceName,
     gateway_id: gatewayId || null,
-    group_id: groupId || 'FactoryPlus'
+    group_id: groupId || 'ACS-Cymru'
   })
 
+  // Which of the two submissions is running. Keyed rather than boolean so the button that was
+  // clicked is the one that spins.
+  const [submitting, runSubmit] = usePendingKey()
+
   const handleSubmit = (action) => {
-    onSubmit(buildSchemaPayload(), buildDeviceDetails(), action)
+    return onSubmit(buildSchemaPayload(), buildDeviceDetails(), action)
   }
 
   return (
@@ -230,16 +236,35 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
         )}
 
         <div className="modal-actions" style={{ flexWrap: 'wrap' }}>
-          <button className="btn btn-ghost" onClick={onCancel} title="Discard and close">Cancel</button>
-          <button className={`btn btn-primary ${!canSave ? 'btn-disabled' : ''}`} disabled={!canSave} onClick={() => canSave && handleSubmit('save')} title="Save the schema only">
+          <button className="btn btn-ghost" onClick={onCancel} disabled={!!submitting} title="Discard and close">Cancel</button>
+          {/* Both submissions save the same schema, so one running locks the other -- but only
+              the one that was clicked reports, which is why `submitting` names the mode rather
+              than being a boolean. */}
+          <ActionButton
+            className={`btn btn-primary ${!canSave ? 'btn-disabled' : ''}`}
+            disabled={!canSave || !!submitting}
+            pending={submitting === 'save'}
+            pendingLabel="Saving…"
+            onClick={() => canSave && runSubmit('save', () => handleSubmit('save'))}
+            title="Save the schema only"
+          >
             Save Schema Only
-          </button>
+          </ActionButton>
           {/* There is no separate "Save & Provision Device" action: provisioning is now a
               prerequisite of the spec sheet, since the sheet has to quote the Sparkplug ID the
               platform issues to the device. The two buttons did the same thing. */}
-          <button className={`btn btn-primary ${!canUseDeviceActions ? 'btn-disabled' : ''}`} disabled={!canUseDeviceActions} onClick={() => canUseDeviceActions && handleSubmit('download')} title={!canUseDeviceActions ? 'Enter a device name first' : 'Save the schema, provision the device, and download a spec sheet quoting its issued Sparkplug ID'}>
-            <IconDownload size={13} /> Save, Provision & Download Spec
-          </button>
+          <ActionButton
+            className={`btn btn-primary ${!canUseDeviceActions ? 'btn-disabled' : ''}`}
+            disabled={!canUseDeviceActions || !!submitting}
+            pending={submitting === 'download'}
+            // Three round trips deep -- schema, device, spec sheet -- so this is the longest wait
+            // on the page and the one most likely to be clicked twice.
+            pendingLabel="Provisioning…"
+            onClick={() => canUseDeviceActions && runSubmit('download', () => handleSubmit('download'))}
+            title={!canUseDeviceActions ? 'Enter a device name first' : 'Save the schema, provision the device, and download a spec sheet quoting its issued Sparkplug ID'}
+          >
+            <IconDownload size={13} /> Save, Provision &amp; Download Spec
+          </ActionButton>
         </div>
       </div>
     </div>

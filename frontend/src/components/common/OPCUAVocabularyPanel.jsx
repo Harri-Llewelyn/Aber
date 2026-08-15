@@ -25,7 +25,7 @@ export function opcuaVocabularyTab({ vocabulary, catalog, onUsePoint }) {
 
   // Matched on semantic id first -- the browse name alone is ambiguous, since Machinery and
   // Robotics both define names like Manufacturer, and a catalog metric may be named anything. The
-  // name-segment fallback covers metrics created before Phase 1 recorded semantic ids.
+  // name-segment fallback covers metrics created before semantic ids were recorded.
   const semanticIds = new Set()
   const nameSegments = new Set()
   for (const metric of catalog || []) {

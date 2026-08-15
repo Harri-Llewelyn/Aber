@@ -161,7 +161,7 @@ const SPECS = [
     // StateMachineType, not a member this NodeSet declares, so there is nothing to verify against
     // and no honest row to emit. Its VALUES -- the 17 TR88 states, which OPC 30050 does declare
     // with their canonical StateNumbers -- are a value domain, and belong in `permitted_values`
-    // (Phase 3b) rather than in a table of data points.
+    // rather than in a table of data points.
     companionSpec: 'OPC 30050 PackML',
     namespaceUri: 'http://opcfoundation.org/UA/PackML/',
     path: 'PackML/Opc.Ua.PackML.NodeSet2.xml',
@@ -471,6 +471,11 @@ for (const spec of SPECS) {
  * is left exactly as it is rather than being restated with this file's description.
  */
 const groupUuid = (name) => {
+  // THE SEED STRING KEEPS ITS LEGACY `factoryplus.` PREFIX ON PURPOSE, and was deliberately left
+  // behind by the acs-cymru rename. It is not a namespace anyone reads -- it is the salt these
+  // PRIMARY KEYS are derived from. Change it and every metric_groups uuid changes, which orphans
+  // the metric_catalog rows that reference them and rewrites every seeded line. An internal
+  // derivation salt has no branding value and cannot be renamed without a data migration.
   const hex = createHash('sha256').update(`factoryplus.metric_group.${name}`).digest('hex');
   return [
     hex.slice(0, 8), hex.slice(8, 12),

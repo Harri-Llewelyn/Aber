@@ -20,36 +20,15 @@ for _stream in (sys.stdout, sys.stderr):
         except Exception:
             pass
 
-# Configuration
+# Configuration. Defaults target a HOST run against Docker Compose; an in-cluster Job overrides
+# them with Service names. Everything is env-overridable so one file serves both.
+# Running it either way: ../ingestion/README.md -> "End-to-end validation"
 #
-# THIS SCRIPT RUNS FROM TWO PLACES, and every default below is chosen for the first:
-#
-#   1. THE HOST, against a Docker Compose stack. Services are reached on their PUBLISHED ports
-#      (localhost:5433, :54322, :1883, :54321), because compose-internal names like `timescaledb`
-#      do not resolve outside the network. This is what `python ingestion/validate.py` does and
-#      what CI's e2e job does.
-#
-#   2. INSIDE THE CLUSTER, as a Kubernetes Job in the platform's namespace. There the SERVICE
-#      NAMES are correct and the STANDARD ports apply -- and because Kubernetes Service names are
-#      kept identical to the Compose service names, that is simply:
-#
-#        DB_HOST=timescaledb           DB_PORT=5432
-#        SUPABASE_DB_HOST=supabase-db  SUPABASE_DB_PORT=5432
-#        MQTT_HOST=mosquitto           MQTT_PORT=1883
-#        SUPABASE_URL=http://supabase-kong:8000
-#        NODERED_BASE_URL=http://node-red:1880
-#
-#      No host/port rewriting, no port-forwarding: in-cluster is the SIMPLER of the two, which is
-#      the opposite of the Compose case. See docs/kubernetes-migration-plan.md §2.5 and §8.1.
-#
-# Nothing here is hardcoded -- every value is env-overridable, so both callers are served by the
-# same file. The port defaults are conditional on their host being set, so that naming a service
-# does not also require restating its standard port.
+# THE PORT DEFAULTS ARE CONDITIONAL ON THEIR HOST BEING SET, and that is what makes both paths work
+# from one file: 5433/54322 are the ports Compose PUBLISHES to avoid colliding with a local
+# PostgreSQL, not the ports the servers listen on. Naming a host means the caller is addressing the
+# service directly, so 5432 is right. See docs/kubernetes-architecture.md §2.5 and §8.1.
 TIMESCALEDB_HOST = os.getenv("DB_HOST", "localhost")
-# 5433 is the port docker-compose.yml PUBLISHES TimescaleDB on, to avoid colliding with a local
-# PostgreSQL. It is not the port the server listens on. So: default to 5433 only when nobody named
-# a host (i.e. we are on the host talking to Compose); once DB_HOST is set the caller is addressing
-# the service directly and 5432 is right.
 TIMESCALEDB_PORT = os.getenv("DB_PORT", "5433" if os.getenv("DB_HOST") is None else "5432")
 TIMESCALEDB_NAME = os.getenv("DB_NAME", "postgres")
 TIMESCALEDB_USER = os.getenv("DB_USER", "postgres")
@@ -123,11 +102,11 @@ MALFORMED_DEVICE_ID = "dev" + "f" * 20
 
 # The Sparkplug Group ID every message in this run is published under. Named rather than inlined
 # because the alias table and the rebirth topic are both scoped by it.
-# Must match gateways.sparkplug_group, whose column default is 'FactoryPlus' (migration 0008).
+# Must match gateways.sparkplug_group, whose column default is 'ACS-Cymru' (migration 0008).
 # It was "Group1" while ingestion discarded the group entirely; now that resolution is
 # group-qualified, publishing under a group the seeded gateway is not registered under would
 # exercise the DEPRECATED fallback arm on every check rather than the current path.
-VAL_GROUP = "FactoryPlus"
+VAL_GROUP = "ACS-Cymru"
 
 # ---------------------------------------------------------------------------------------------
 # The validator's gateway UUID is PINNED, and that is what lets it hold an ordinary per-gateway
@@ -140,9 +119,8 @@ VAL_GROUP = "FactoryPlus"
 #
 #     11000000-0000-4000-8000-000000000001  ->  gwy110000000000400080000
 #
-# Letting the database allocate the UUID, as this did, made the id different on every run and so
-# unprovisionable in advance -- which is the whole reason a shared `readwrite spBv1.0/#` account
-# survived here after every other consumer had been moved off one.
+# A database-allocated UUID would differ on every run and so be unprovisionable in advance, which
+# is what would force a wildcard account back into this script.
 #
 # ONLY THE GATEWAY IS PINNED. The devices are still created at runtime with database-allocated
 # UUIDs, because they sit in the FIFTH topic segment, which the ACL's trailing `#` covers. So the
@@ -301,7 +279,7 @@ def probe_nodered_editor_login():
         anon = os.getenv("SUPABASE_ANON_KEY", "")
         token = json.loads(fetch(
             f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-            json.dumps({"email": "admin@factoryplus.local", "password": "factoryplus123"}).encode(),
+            json.dumps({"email": "admin@acs-cymru.local", "password": "acscymru123"}).encode(),
             {"apikey": anon, "Content-Type": "application/json"},
         ).read())["access_token"]
 
@@ -376,7 +354,7 @@ def probe_nodered_editor_login():
         if flows_res.status != 200:
             return False, f"editor session cannot read the flows: GET /flows -> {flows_res.status}."
 
-        return True, ("admin@factoryplus.local signed in through Supabase Auth; the editor session "
+        return True, ("admin@acs-cymru.local signed in through Supabase Auth; the editor session "
                       "reads /settings and /flows and carries permissions='*' (Deploy enabled).")
     except Exception as err:
         return False, f"{type(err).__name__}: {err}"
@@ -798,7 +776,7 @@ def run_simulation():
     # silent-drop failure the comment above warns about, arriving from the environment rather than
     # from a typo.
     #
-    # AND THERE IS NO DEFAULT PASSWORD ANY MORE. `factoryplus123` dates from before per-gateway
+    # AND THERE IS NO DEFAULT PASSWORD ANY MORE. `acscymru123` dates from before per-gateway
     # credentials existed. Once it stopped being a real account it stopped being a convenience and
     # became a way to fail invisibly -- the broker rejects it, and every check that depends on
     # telemetry fails for reasons that have nothing to do with the credential.
@@ -1217,7 +1195,7 @@ def verify_results():
             print(f"❌ 6. BIRTH METRIC OBSERVATION ERROR: {e}")
             passed = False
 
-        # 6e. Phase 5: the modelled set is the union across every attached submodel. Asserted by
+        # 6e. The modelled set is the union across every attached submodel. Asserted by
         # showing the same metric flips verdict depending on whether the second submodel is counted
         # -- otherwise this check would pass even if device_submodels were ignored entirely.
         try:
@@ -1639,8 +1617,8 @@ def verify_results():
         try:
             req = urllib.request.Request(
                 f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-                data=json.dumps({"email": "admin@factoryplus.local",
-                                 "password": "factoryplus123"}).encode(),
+                data=json.dumps({"email": "admin@acs-cymru.local",
+                                 "password": "acscymru123"}).encode(),
                 headers={"apikey": anon, "Content-Type": "application/json"},
             )
             with urllib.request.urlopen(req, timeout=15) as resp:

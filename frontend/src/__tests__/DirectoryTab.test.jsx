@@ -1,6 +1,6 @@
 import React from 'react'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, screen, waitFor, fireEvent, act, within } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { DirectoryTab } from '../components/tabs/DirectoryTab'
 import { PERMISSION_UUIDS } from '../constants'
 import { api } from '../api'
@@ -12,23 +12,33 @@ vi.mock('../api', () => ({
   }
 }))
 
+const HEARTBEAT = '2026-07-25T10:00:00Z'
+const svc = (name, type, url) => ({
+  service_uuid: `svc-${name}`,
+  service_name: name,
+  service_type: type,
+  endpoint_url: url,
+  status: 'ACTIVE',
+  last_heartbeat: HEARTBEAT
+})
+
+// The seeded stack, in the order /api/v1/directory actually returns it -- alphabetical by name,
+// which is the order the page has to REGROUP rather than the order it renders. Kept whole rather
+// than trimmed to two rows because the interleaving is the thing under test: Kong, Mosquitto and
+// PostgREST land alphabetically adjacent and belong to three different sections.
 const SERVICES = [
-  {
-    service_uuid: 'svc-1',
-    service_name: 'Kong Gateway',
-    service_type: 'HTTP',
-    endpoint_url: 'http://localhost:54321',
-    status: 'ONLINE',
-    last_heartbeat: '2026-07-25T10:00:00Z'
-  },
-  {
-    service_uuid: 'svc-2',
-    service_name: 'Sparkplug Ingestion Daemon',
-    service_type: 'MQTT',
-    endpoint_url: 'mqtt://localhost:1883',
-    status: 'ONLINE',
-    last_heartbeat: '2026-07-25T10:00:00Z'
-  }
+  svc('API Reference (Swagger UI)', 'DOCUMENTATION', 'http://localhost:8088'),
+  svc('Grafana Dashboards', 'MONITORING', 'http://localhost:3002'),
+  svc('Mosquitto MQTT Broker', 'MQTT_BROKER', 'mqtt://localhost:1883'),
+  svc('Node-RED (Virtual Edge Gateway Simulator)', 'EDGE_NODE', 'http://localhost:1880'),
+  svc('Sparkplug B Ingestion Engine', 'INGESTION', 'mqtt://mosquitto:1883/spBv1.0/#'),
+  svc('Supabase API Gateway (Kong)', 'API_GATEWAY', 'http://127.0.0.1:54321'),
+  svc('Supabase Auth (GoTrue)', 'AUTHENTICATION', 'http://127.0.0.1:54321/auth/v1'),
+  svc('Supabase Edge Functions', 'SERVERLESS', 'http://127.0.0.1:54321/functions/v1'),
+  svc('Supabase PostgREST API', 'REST_API', 'http://127.0.0.1:54321/rest/v1'),
+  svc('Supabase PostgreSQL', 'DATABASE', 'postgres://localhost:54322'),
+  svc('Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323'),
+  svc('TimescaleDB Telemetry Store', 'TIME_SERIES_DB', 'postgres://localhost:5433')
 ]
 
 async function renderTab(hasPermission) {
@@ -37,6 +47,8 @@ async function renderTab(hasPermission) {
   await waitFor(() => {
     expect(screen.getByRole('button', { name: /Sync Edge Flows via GitOps/i })).toBeInTheDocument()
   })
+  // The table renders a tick after the first poll resolves; every test below reads it.
+  await waitFor(() => expect(document.querySelector('tbody tr')).toBeTruthy())
   return { showToast }
 }
 
@@ -119,83 +131,159 @@ describe('DirectoryTab GitOps sync guard', () => {
 })
 
 /**
- * The page's own controls, in the `.filter-bar` every other list page uses.
+ * Categorised groups, replacing the flat table and the filter bar that made it usable.
  *
- * Refresh moved in from a `.page-actions` row that sat ABOVE the GitOps deployment panel, where
- * it read as an action on the deployment rather than on the table it actually reloads. Search
- * and the type picker are new: a stack with an ingestion daemon, a broker, Node-RED, Kong,
- * PostgREST and a handful of Edge Functions is past the point where scanning beats filtering.
+ * The search box and the service-type picker were solving the flat list's problem -- a dozen
+ * rows in registry order, with no cue as to which of them matters to the question being asked --
+ * and they solved it only for someone who knew what to type. Three named sections solve it for
+ * everyone at rest, so the controls came out with the list they were propping up.
  */
-describe('DirectoryTab filter bar', () => {
+describe('DirectoryTab service groups', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     api.get.mockResolvedValue(SERVICES)
   })
 
-  const search = () => screen.getByPlaceholderText(/Search services/)
-  const typePicker = () => screen.getByTitle(/Show only one kind of service/)
+  const APPS = 'Applications & User Interfaces'
+  const INGEST = 'Ingestion & Messaging'
+  const DATA = 'Data & Backend Infrastructure'
 
-  it('holds the search, the type picker and Refresh in one bar', async () => {
+  const card = (title) => screen.getByRole('heading', { name: new RegExp(title) }).closest('.card')
+  const namesIn = (title) =>
+    [...card(title).querySelectorAll('tbody tr td:first-child')].map(td => td.textContent)
+
+  it('renders one table per category rather than one list of everything', async () => {
     await renderTab(vi.fn().mockReturnValue(true))
 
-    const bar = document.querySelector('.filter-bar')
-    expect(bar).toBeTruthy()
-    expect(bar.contains(search())).toBe(true)
-    expect(bar.contains(typePicker())).toBe(true)
-    expect(bar.contains(screen.getByTitle(/Refresh service directory heartbeats/))).toBe(true)
-    // And no row of its own left behind.
+    for (const title of [APPS, INGEST, DATA]) {
+      expect(card(title)).toBeTruthy()
+      expect(card(title).querySelector('table')).toBeTruthy()
+    }
+    expect(document.querySelectorAll('table')).toHaveLength(3)
+  })
+
+  // The point of the change: a service is found by what it IS, not by where the alphabet put it.
+  it('files each service under its category', async () => {
+    await renderTab(vi.fn().mockReturnValue(true))
+
+    expect(namesIn(APPS)).toEqual([
+      'Grafana Dashboards',
+      'Node-RED (Virtual Edge Gateway Simulator)',
+      'Supabase Studio',
+      'API Reference (Swagger UI)'
+    ])
+    expect(namesIn(INGEST)).toEqual([
+      'Mosquitto MQTT Broker',
+      'Sparkplug B Ingestion Engine',
+      'Supabase API Gateway (Kong)'
+    ])
+    expect(namesIn(DATA)).toEqual([
+      'Supabase PostgREST API',
+      'Supabase Auth (GoTrue)',
+      'Supabase Edge Functions',
+      'Supabase PostgreSQL',
+      'TimescaleDB Telemetry Store'
+    ])
+  })
+
+  // Grouping is keyed on service_type, and directory_services is a registry anything can
+  // register into. A type nobody anticipated must still reach the page -- a service silently
+  // missing from the directory is worse than one under a vague heading.
+  it('still lists a service whose type belongs to no category', async () => {
+    api.get.mockResolvedValue([...SERVICES, svc('Some Future Broker', 'AMQP_BROKER', 'amqp://localhost:5672')])
+    await renderTab(vi.fn().mockReturnValue(true))
+
+    expect(namesIn('Other Registered Services')).toEqual(['Some Future Broker'])
+  })
+
+  // An empty section is a heading asserting a category exists with nothing in it, which reads as
+  // a stack with a missing piece rather than as a stack that never had one.
+  it('renders no card for a category nothing registered into', async () => {
+    api.get.mockResolvedValue(SERVICES.filter(s => s.service_type === 'MQTT_BROKER'))
+    await renderTab(vi.fn().mockReturnValue(true))
+
+    expect(screen.queryByRole('heading', { name: new RegExp(APPS) })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /Other Registered Services/ })).not.toBeInTheDocument()
+    expect(card(INGEST)).toBeTruthy()
+  })
+
+  it('counts each category on its own heading', async () => {
+    await renderTab(vi.fn().mockReturnValue(true))
+
+    expect(screen.getByRole('heading', { name: new RegExp(APPS) }).textContent).toContain('4')
+    expect(screen.getByRole('heading', { name: new RegExp(INGEST) }).textContent).toContain('3')
+    expect(screen.getByRole('heading', { name: new RegExp(DATA) }).textContent).toContain('5')
+  })
+
+  it('opens every endpoint in a new tab, with the opener not reachable from it', async () => {
+    await renderTab(vi.fn().mockReturnValue(true))
+
+    const links = [...document.querySelectorAll('tbody a')]
+    expect(links).toHaveLength(SERVICES.length)
+    for (const a of links) {
+      expect(a).toHaveAttribute('target', '_blank')
+      expect(a).toHaveAttribute('rel', expect.stringContaining('noreferrer'))
+      expect(a.getAttribute('href')).toBeTruthy()
+    }
+  })
+
+  // A heartbeat is only worth showing if its state is legible at a glance across three tables.
+  it('renders a live service as the standard online pill', async () => {
+    await renderTab(vi.fn().mockReturnValue(true))
+
+    const pill = within(card(INGEST)).getAllByTitle(/Operational Status: ACTIVE/)[0]
+    expect(pill).toHaveClass('badge', 'badge-online')
+  })
+
+  it('says so when nothing is registered at all', async () => {
+    api.get.mockResolvedValue([])
+    const showToast = vi.fn()
+    render(<DirectoryTab showToast={showToast} hasPermission={vi.fn().mockReturnValue(true)} />)
+
+    expect(await screen.findByText(/No services are registered/)).toBeInTheDocument()
+  })
+})
+
+/**
+ * What replaced the manual Refresh button.
+ *
+ * Removing it without a background refresh would have left the page showing whatever the
+ * heartbeats were at mount, for as long as the tab stayed open -- which is the one failure this
+ * page cannot have, since a stale heartbeat and a dead service look identical here.
+ */
+describe('DirectoryTab refresh', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    api.get.mockResolvedValue(SERVICES)
+  })
+
+  afterEach(() => { vi.useRealTimers() })
+
+  it('carries no filter bar, no search, no type picker and no Refresh button', async () => {
+    await renderTab(vi.fn().mockReturnValue(true))
+
+    expect(document.querySelector('.filter-bar')).toBeNull()
     expect(document.querySelector('.page-actions')).toBeNull()
+    expect(screen.queryByPlaceholderText(/Search services/)).not.toBeInTheDocument()
+    expect(screen.queryByTitle(/Show only one kind of service/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Refresh Directory/i })).not.toBeInTheDocument()
+    // The GitOps sync button is the only one left on the page.
+    expect(screen.getAllByRole('button')).toHaveLength(1)
   })
 
-  it('filters on name', async () => {
+  // The poll is a setTimeout chain (see usePolling), so a fresh response only reaches the
+  // component once the clock is advanced past the interval.
+  it('picks up a new heartbeat on the background poll, with nothing to press', async () => {
     await renderTab(vi.fn().mockReturnValue(true))
-    fireEvent.change(search(), { target: { value: 'ingestion' } })
+    expect(api.get).toHaveBeenCalledTimes(1)
 
-    expect(screen.getByText('Sparkplug Ingestion Daemon')).toBeInTheDocument()
-    expect(screen.queryByText('Kong Gateway')).not.toBeInTheDocument()
-  })
+    api.get.mockResolvedValue(
+      SERVICES.map(s => (s.service_type === 'MQTT_BROKER' ? { ...s, status: 'OFFLINE' } : s))
+    )
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
 
-  // An endpoint is often what an engineer has to hand -- a port from a compose file, a URL from
-  // a log line -- rather than the service's registered name.
-  it('filters on the endpoint URL too', async () => {
-    await renderTab(vi.fn().mockReturnValue(true))
-    fireEvent.change(search(), { target: { value: '1883' } })
-
-    expect(screen.getByText('Sparkplug Ingestion Daemon')).toBeInTheDocument()
-    expect(screen.queryByText('Kong Gateway')).not.toBeInTheDocument()
-  })
-
-  it('filters by service type', async () => {
-    await renderTab(vi.fn().mockReturnValue(true))
-    fireEvent.change(typePicker(), { target: { value: 'MQTT' } })
-
-    expect(screen.getByText('Sparkplug Ingestion Daemon')).toBeInTheDocument()
-    expect(screen.queryByText('Kong Gateway')).not.toBeInTheDocument()
-  })
-
-  // Derived from the rows, not hardcoded: the directory is a registry anything can register
-  // into, so a fixed <option> list would silently hide a service type nobody anticipated.
-  it('offers the service types actually present, not a fixed list', async () => {
-    await renderTab(vi.fn().mockReturnValue(true))
-
-    const options = [...typePicker().options].map(o => o.value)
-    expect(options).toEqual(['', 'HTTP', 'MQTT'])
-  })
-
-  // A heading that says 2 above a table showing 1 is worse than no count at all, because it is
-  // the number that gets quoted.
-  it('counts what is on screen, not what was fetched', async () => {
-    await renderTab(vi.fn().mockReturnValue(true))
-    expect(screen.getByRole('heading', { name: /Active Stack Microservices/ }).textContent).toContain('2')
-
-    fireEvent.change(typePicker(), { target: { value: 'MQTT' } })
-    expect(screen.getByRole('heading', { name: /Active Stack Microservices/ }).textContent).toContain('1')
-  })
-
-  it('says so when a filter matches nothing', async () => {
-    await renderTab(vi.fn().mockReturnValue(true))
-    fireEvent.change(search(), { target: { value: 'nothing-registered-under-this' } })
-
-    expect(screen.getByText(/No services match the filter/)).toBeInTheDocument()
+    expect(api.get.mock.calls.length).toBeGreaterThan(1)
+    expect(await screen.findByTitle(/Operational Status: OFFLINE/)).toBeInTheDocument()
   })
 })

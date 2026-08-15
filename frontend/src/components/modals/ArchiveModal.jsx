@@ -1,12 +1,17 @@
 import React, { useState } from 'react'
 import { IconArchive } from '../common/Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { usePendingAction } from '../../hooks/usePendingAction'
+import { ActionButton } from '../common/ActionButton'
 
 export function ArchiveModal({ entityType, entityId, displayName, onArchive, onCancel }) {
+  const [archiving, runArchive] = usePendingAction()
+
   // Escape closes. Via the shared stack rather than a listener of this component's own,
   // because a ConfirmModal can open on top of this one and a bare document listener on each
-  // would let one keypress dismiss both.
-  useEscapeKey(onCancel)
+  // would let one keypress dismiss both. Inert while the archive is in flight -- see ConfirmModal
+  // for why it stays on the stack rather than sitting out.
+  useEscapeKey(archiving ? () => {} : onCancel)
 
   const [retentionDays, setRetentionDays] = useState(30)
 
@@ -32,10 +37,17 @@ export function ArchiveModal({ entityType, entityId, displayName, onArchive, onC
         </div>
 
         <div className="modal-actions">
-          <button className="btn btn-ghost" onClick={onCancel} title="Cancel archival action">Cancel</button>
-          <button className="btn btn-primary" style={{ background: 'var(--warning)', color: 'var(--warning-contrast)' }} onClick={() => onArchive(retentionDays)} title="Archive entity and activate retention timer">
-            Archive & Set Timer
-          </button>
+          <button className="btn btn-ghost" onClick={onCancel} disabled={archiving} title="Cancel archival action">Cancel</button>
+          <ActionButton
+            className="btn btn-primary"
+            style={{ background: 'var(--warning)', color: 'var(--warning-contrast)' }}
+            pending={archiving}
+            pendingLabel="Archiving…"
+            onClick={() => runArchive(() => onArchive(retentionDays))}
+            title="Archive entity and activate retention timer"
+          >
+            Archive &amp; Set Timer
+          </ActionButton>
         </div>
       </div>
     </div>

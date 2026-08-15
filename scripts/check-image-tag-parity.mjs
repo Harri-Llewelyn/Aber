@@ -32,7 +32,7 @@ import { dirname, join, resolve } from 'node:path';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const COMPOSE = join(REPO_ROOT, 'docker-compose.yml');
-const VALUES = join(REPO_ROOT, 'deploy', 'helm', 'factoryplus', 'values.yaml');
+const VALUES = join(REPO_ROOT, 'deploy', 'helm', 'acs-cymru', 'values.yaml');
 
 const verbose = process.argv.includes('--verbose');
 
@@ -52,7 +52,7 @@ const IMAGE_NAMESPACE = 'ghcr.io/harri-llewelyn/acs-cymru';
  * They are PUBLISHED, so their tag is not compared against Compose but is nonetheless the thing
  * most worth checking here -- see the release-surface section at the bottom of this file. In
  * values.yaml their tag is deliberately EMPTY, resolved to Chart.AppVersion by the
- * `factoryplus.image` helper.
+ * `acs-cymru.image` helper.
  */
 const BUILT_IMAGES = ['edge-runtime', 'ingestion', 'node-red', 'frontend', 'test-runner', 'i3x-service'];
 const LOCALLY_BUILT = new Set(BUILT_IMAGES.map((n) => `${IMAGE_NAMESPACE}/${n}`));
@@ -139,7 +139,7 @@ function chartImages() {
  * `supabase/functions/Dockerfile` builds the Kubernetes edge-runtime image `FROM
  * supabase/edge-runtime:<tag>`, and docker-compose runs that same base image directly (it
  * bind-mounts the functions instead of baking them). So the tag appears in two places and the
- * repository-level parity check above cannot see it: the chart pins `factoryplus/edge-runtime`, which
+ * repository-level parity check above cannot see it: the chart pins `acs-cymru/edge-runtime`, which
  * is our own tag.
  *
  * Bump one and the two targets run DIFFERENT RUNTIMES against identical function code -- which is
@@ -318,7 +318,7 @@ if (onlyChart.length) {
  * ============================================================================================= */
 const RELEASE_WF = join(REPO_ROOT, '.github', 'workflows', 'release.yml');
 const CI_WF = join(REPO_ROOT, '.github', 'workflows', 'ci.yml');
-const CHART_YAML = join(REPO_ROOT, 'deploy', 'helm', 'factoryplus', 'Chart.yaml');
+const CHART_YAML = join(REPO_ROOT, 'deploy', 'helm', 'acs-cymru', 'Chart.yaml');
 const TESTS_DOCKERFILE = join(REPO_ROOT, 'tests', 'Dockerfile');
 
 const releaseIssues = [];
@@ -410,7 +410,7 @@ forLists.forEach((list, i) => {
 // 3. ci.yml: what k8s-validation builds and imports, under the same namespace and appVersion.
 const ciSrc = readFileSync(CI_WF, 'utf8');
 // IMG_NS, not NS: the k8s-validation job already uses NS for the Kubernetes namespace, and reading
-// that one instead compares the chart's registry namespace against the string "factoryplus".
+// that one instead compares the chart's registry namespace against the string "acs-cymru".
 const ciNs = ciSrc.match(/^\s*IMG_NS:\s*(\S+)/m);
 if (!ciNs) {
   releaseIssues.push('ci.yml no longer declares an IMG_NS for the local image builds.');
@@ -433,7 +433,7 @@ if (ciBuilt.join('|') !== expected.join('|')) {
 // Every image reference in those steps must interpolate IMG_NS. Checked separately from the `-t`
 // list above because it is a different SHAPE and the first version of this file got it wrong: the
 // test-runner's `--build-arg INGESTION_IMAGE=...` was left reading $NS, which in that job expands
-// to the Kubernetes namespace -- so the build would have gone looking for `factoryplus/ingestion`,
+// to the Kubernetes namespace -- so the build would have gone looking for `acs-cymru/ingestion`,
 // found nothing, and failed with a pull error naming an image nobody had ever configured.
 for (const stray of ciSrc.matchAll(/(INGESTION_IMAGE=|[-]t\s+")\$NS\//g)) {
   releaseIssues.push(

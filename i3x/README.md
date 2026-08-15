@@ -162,7 +162,7 @@ layer` — because RLS grants reads to `authenticated`, not `anon`. Get one with
 ```bash
 curl -s -X POST "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
   -H "apikey: $SUPABASE_ANON_KEY" -H "Content-Type: application/json" \
-  -d '{"email":"admin@factoryplus.local","password":"factoryplus123"}' \
+  -d '{"email":"admin@acs-cymru.local","password":"acscymru123"}' \
   | python -c "import sys,json; print(json.load(sys.stdin)['access_token'])"
 ```
 
@@ -196,7 +196,7 @@ this service:
 // claude_desktop_config.json / any MCP host
 {
   "mcpServers": {
-    "factoryplus": {
+    "acs-cymru": {
       "command": "npx",
       "args": ["-y", "@cesmii/i3x-mcp-server"],
       "env": {

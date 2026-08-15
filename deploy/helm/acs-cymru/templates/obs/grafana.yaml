@@ -1,0 +1,282 @@
+{{- if .Values.grafana.enabled }}
+{{- $component := "grafana" -}}
+{{- $secretName := include "acs-cymru.secretName" . -}}
+{{- $fullname := include "acs-cymru.fullname" . -}}
+{{- $ini := .Files.Get "files/grafana/grafana.ini" -}}
+{{- $dsTemplate := .Files.Get "files/grafana-datasources/datasources.template.yml" -}}
+{{- if or (not $ini) (not $dsTemplate) }}
+{{- fail "\n\nacs-cymru: files/grafana/grafana.ini and/or files/grafana-datasources/datasources.template.yml are missing.\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n\nWithout grafana.ini there is no [auth.generic_oauth] block, so Grafana comes up with SSO simply\nabsent -- local admin login still works, which is why this fails the render instead of being left\nto be noticed later.\n" }}
+{{- end }}
+{{- $supabasePublic := include "acs-cymru.supabaseUrl" . -}}
+{{- $grafanaPublic := include "acs-cymru.grafanaUrl" . -}}
+---
+{{/*
+grafana.ini and the file-based provisioning, all read-only.
+
+THE FILE IS SHARED WITH THE COMPOSE TARGET, unchanged. Everything in it that is deployment-specific
+is a BROWSER-FACING URL, and those are overridden by GF_* environment variables below rather than by
+forking the file -- Grafana's env override maps GF_<SECTION>_<KEY> onto any ini key, so
+`GF_AUTH_GENERIC_OAUTH_AUTH_URL` replaces `[auth.generic_oauth] auth_url` with no edit.
+
+That is what keeps ONE grafana.ini: the long, load-bearing OAuth reasoning in its comments stays in
+one place, and only the two addresses a browser follows differ between targets.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-grafana-config" $fullname }}
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+  grafana.ini: |
+{{ $ini | indent 4 }}
+  # The datasource TEMPLATE. __DB_PASSWORD__ is substituted by the initContainer below, never by
+  # Helm -- see the note there.
+  datasources.template.yml: |
+{{ $dsTemplate | indent 4 }}
+{{- range $path, $bytes := .Files.Glob "files/grafana-dashboards/*.yml" }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+---
+{{/*
+The dashboards, in their own ConfigMap.
+
+Separate from the provisioning above because they mount at a DIFFERENT PATH -- dashboards.yml points
+its provider at /etc/grafana/provisioning/dashboards/json, a subdirectory of where it itself lives.
+One ConfigMap cannot supply both a file and a subdirectory beneath it.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-grafana-dashboards" $fullname }}
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+{{- $found := 0 }}
+{{- range $path, $bytes := .Files.Glob "files/grafana-dashboards-json/*.json" }}
+{{- $found = add1 $found }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- if eq $found 0 }}
+{{- fail "\n\nacs-cymru: no dashboards found at files/grafana-dashboards-json/*.json\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n" }}
+{{- end }}
+---
+{{- if .Values.grafana.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ printf "%s-grafana" $fullname }}
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  annotations:
+    # Grafana's SQLite holds users created through SSO, their org roles, starred dashboards, and any
+    # dashboard saved in the UI rather than provisioned from a file. Provisioned content is
+    # reproducible; that is not.
+    "helm.sh/resource-policy": keep
+spec:
+  accessModes:
+    - {{ .Values.grafana.persistence.accessMode }}
+  {{- include "acs-cymru.storageClass" (dict "ctx" . "component" .Values.grafana.persistence) | nindent 2 }}
+  resources:
+    requests:
+      storage: {{ .Values.grafana.persistence.size }}
+---
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      # 3000 in the container. docker-compose publishes it on 3002 to avoid colliding with the
+      # frontend's 3000 on the host; there is no such collision inside a cluster.
+      port: 3000
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    # Single writer: the default backend is a SQLite file on a ReadWriteOnce PVC. Scaling Grafana
+    # out means moving its database to Postgres first, which is a separate concern.
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+      annotations:
+        # Grafana reloads provisioning on a schedule but reads grafana.ini once at start, so a
+        # change to the OAuth block needs a restart.
+        checksum/config: {{ printf "%s%s" $ini $dsTemplate | sha256sum }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # M5. grafana/grafana runs as uid/gid 472 -- NOT 1000, which is the mistake to make here.
+      securityContext:
+        {{- toYaml .Values.grafana.podSecurityContext | nindent 8 }}
+      initContainers:
+        {{/*
+          Renders the datasource template, exactly as Kong's config is rendered and for the same
+          reason.
+
+          NOT SUBSTITUTED BY HELM. With `secrets.existingSecret` set the chart cannot see
+          `timescalePassword`, so Helm would substitute an EMPTY STRING and provision the historian
+          datasource with no password -- every panel then fails authentication against a database
+          that is perfectly healthy, which reads as a database fault.
+
+          Reading it from the Secret at pod start works whoever owns the Secret and keeps the
+          password out of the rendered manifest entirely.
+
+          THIS REPLACES the `sed` entrypoint override and the grafana_provisioning_datasources
+          volume that the Compose service needs. Grafana here runs its stock /run.sh.
+        */}}
+        - name: render-datasource
+          image: "{{ .Values.grafana.image.repository }}:{{ .Values.grafana.image.tag }}"
+          imagePullPolicy: {{ .Values.grafana.image.pullPolicy }}
+          env:
+            {{- include "acs-cymru.secretEnv" (dict "name" "DB_PASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
+          command:
+            - /bin/sh
+            - -e
+            - -c
+            - |
+              if [ -z "$DB_PASSWORD" ]; then
+                echo 'DB_PASSWORD must be set -- Grafana would otherwise provision the TimescaleDB datasource with an empty password.' >&2
+                exit 1
+              fi
+              sed -e "s|__DB_PASSWORD__|$DB_PASSWORD|g" \
+                  /config/datasources.template.yml > /datasources/datasources.yml
+              # Comment lines excluded: the template's own header documents the placeholder
+              # convention BY NAME, so a whole-file scan flags the documentation of the rule as a
+              # violation of it. A real placeholder is always in a value position.
+              if grep -vE '^[[:space:]]*#' /datasources/datasources.yml \
+                 | grep -qE '__[A-Z0-9_]+__'; then
+                echo 'Grafana datasource config still contains unsubstituted placeholders.' >&2
+                exit 1
+              fi
+              echo 'Rendered the TimescaleDB datasource.'
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: datasources
+              mountPath: /datasources
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 64Mi }
+      containers:
+        - name: grafana
+          # STOCK IMAGE, no entrypoint override -- see the initContainer above.
+          image: "{{ .Values.grafana.image.repository }}:{{ .Values.grafana.image.tag }}"
+          imagePullPolicy: {{ .Values.grafana.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            {{- include "acs-cymru.secretEnv" (dict "name" "GF_SECURITY_ADMIN_USER" "secretName" $secretName "key" "GRAFANA_ADMIN_USER") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "GF_SECURITY_ADMIN_PASSWORD" "secretName" $secretName "key" "GRAFANA_ADMIN_PASSWORD") | nindent 12 }}
+            # Read by grafana.ini as $__env{GRAFANA_OAUTH_CLIENT_SECRET}. The plaintext here must
+            # match the base64url(sha256(...)) hash 0002_seed_data.sql wrote into auth.oauth_clients
+            # -- both come from the same value, so rotating it means restarting db-init AND this.
+            {{- include "acs-cymru.secretEnv" (dict "name" "GRAFANA_OAUTH_CLIENT_SECRET" "secretName" $secretName "key" "GRAFANA_OAUTH_CLIENT_SECRET") | nindent 12 }}
+            {{/*
+              THE TWO BROWSER-FACING URLS, overriding grafana.ini rather than editing it.
+
+              root_url is what Grafana builds its own redirect back to after the OAuth dance, and it
+              MUST equal the origin registered as the client's redirect_uris -- which db-init
+              registers from this same publicUrls.grafana value (M3). One value, two consumers, so
+              they cannot drift; a mismatch answers `invalid redirect_uri` at /oauth/authorize and
+              reads as a Grafana fault.
+
+              auth_url is FOLLOWED BY THE BROWSER, so it is the ingress address. token_url and
+              api_url stay as grafana.ini has them -- http://supabase-kong:8000 -- because those are
+              called by the CONTAINER. Using one address for both is the classic way this breaks: a
+              browser cannot resolve `supabase-kong`, and the container's 127.0.0.1 is itself.
+            */}}
+            - name: GF_SERVER_ROOT_URL
+              value: {{ printf "%s/" $grafanaPublic | quote }}
+            - name: GF_AUTH_GENERIC_OAUTH_AUTH_URL
+              value: {{ printf "%s/auth/v1/oauth/authorize" $supabasePublic | quote }}
+            - name: GF_INSTALL_PLUGINS
+              value: ""
+            # Provisioning lives in two directories rather than one; see the ConfigMap notes.
+            - name: GF_PATHS_PROVISIONING
+              value: /etc/grafana/provisioning
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 4
+          resources:
+            {{- toYaml .Values.grafana.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/grafana/grafana.ini
+              subPath: grafana.ini
+              readOnly: true
+            # The RENDERED datasource, from the initContainer's emptyDir.
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+            - name: config
+              mountPath: /etc/grafana/provisioning/dashboards/dashboards.yml
+              subPath: dashboards.yml
+              readOnly: true
+            - name: dashboards
+              mountPath: /etc/grafana/provisioning/dashboards/json
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/grafana
+      volumes:
+        - name: config
+          configMap:
+            name: {{ printf "%s-grafana-config" $fullname }}
+        - name: dashboards
+          configMap:
+            name: {{ printf "%s-grafana-dashboards" $fullname }}
+        - name: datasources
+          emptyDir: {}
+        - name: data
+          {{- if .Values.grafana.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ printf "%s-grafana" $fullname }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}

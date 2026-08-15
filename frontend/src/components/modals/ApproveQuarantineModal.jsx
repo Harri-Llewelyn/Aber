@@ -1,13 +1,21 @@
 import React, { useState } from 'react'
 import CopyableId from '../common/CopyableId'
+import { ActionButton } from '../common/ActionButton'
 import { IconShieldAlert, IconAlertTriangle } from '../common/Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { usePendingKey } from '../../hooks/usePendingAction'
 
 export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onApprove, onMerge, onCancel }) {
+  // One key space across BOTH buttons: approving as new and merging into the suggested match are
+  // two answers to the same question, and only one of them can be the answer. Running one must
+  // therefore lock the other, which two independent booleans would not do.
+  const [busy, runBusy] = usePendingKey()
+
   // Escape closes. Via the shared stack rather than a listener of this component's own,
   // because a ConfirmModal can open on top of this one and a bare document listener on each
-  // would let one keypress dismiss both.
-  useEscapeKey(onCancel)
+  // would let one keypress dismiss both. Inert while a decision is in flight -- see ConfirmModal
+  // for why the layer stays on the stack rather than sitting out.
+  useEscapeKey(busy ? () => {} : onCancel)
 
   const isGateway = item.entity_type === 'GATEWAY'
   const [assetName, setAssetName] = useState(item.asset_name)
@@ -35,19 +43,15 @@ export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onAp
   // that leaving the picker alone lands the device in the Unassigned queue.
   const willBeUnassigned = !siteWide && !cellId && !selectedGateway?.cell_id
 
-  const handleSave = () => {
-    onApprove(item.asset_id, {
-      asset_name: assetName,
-      connection_method: connMethod,
-      active_gateway_id: gatewayId,
-      cell_id: siteWide ? '' : cellId,
-      location_scope: siteWide ? 'site_wide' : 'cell'
-    })
-  }
+  const handleSave = () => runBusy('approve', () => onApprove(item.asset_id, {
+    asset_name: assetName,
+    connection_method: connMethod,
+    active_gateway_id: gatewayId,
+    cell_id: siteWide ? '' : cellId,
+    location_scope: siteWide ? 'site_wide' : 'cell'
+  }))
 
-  const handleAcceptMatch = () => {
-    onMerge(item.asset_id, suggestion.candidateId)
-  }
+  const handleAcceptMatch = () => runBusy('merge', () => onMerge(item.asset_id, suggestion.candidateId))
 
   return (
     <div className="modal-overlay">
@@ -82,9 +86,16 @@ export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onAp
               a mistyped device name, accepting the match keeps that device's existing configuration and
               discards this quarantined duplicate — rather than approving it as a brand new device.
             </div>
-            <button className="btn btn-primary btn-sm" onClick={handleAcceptMatch} title="Merge this quarantined device into the suggested provisioned device">
+            <ActionButton
+              className="btn btn-primary btn-sm"
+              pending={busy === 'merge'}
+              pendingLabel="Merging…"
+              disabled={busy === 'approve'}
+              onClick={handleAcceptMatch}
+              title="Merge this quarantined device into the suggested provisioned device"
+            >
               Accept Match
-            </button>
+            </ActionButton>
           </div>
         )}
 
@@ -162,8 +173,16 @@ export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onAp
         )}
 
         <div className="modal-actions">
-          <button className="btn btn-ghost" onClick={onCancel} title="Cancel onboarding approval">Cancel</button>
-          <button className="btn btn-primary" onClick={handleSave} title="Confirm onboarding and register">Approve & Onboard</button>
+          <button className="btn btn-ghost" onClick={onCancel} disabled={!!busy} title="Cancel onboarding approval">Cancel</button>
+          <ActionButton
+            pending={busy === 'approve'}
+            pendingLabel="Approving…"
+            disabled={busy === 'merge'}
+            onClick={handleSave}
+            title="Confirm onboarding and register"
+          >
+            Approve &amp; Onboard
+          </ActionButton>
         </div>
       </div>
     </div>

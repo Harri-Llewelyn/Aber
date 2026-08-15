@@ -10,6 +10,8 @@ import { SCOPE_CELL, SCOPE_SITE_WIDE } from '../../utils/cellResolution'
 import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
 import { StatusBadge } from '../common/StatusBadge'
+import { ActionButton } from '../common/ActionButton'
+import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
@@ -157,17 +159,23 @@ export function GatewaysTab({ showToast, onViewThread, hasPermission, initialSea
   // poll. Re-renders only; issues no requests.
   useClockTick(STALENESS_TICK_MS)
 
+  // In-flight state for the form's Save and for whichever gateway is restoring.
+  const [saving, runSave] = usePendingAction()
+  const [restoringId, runRestore] = usePendingKey()
+
   const save = async () => {
     try {
       if (editing) await api.put(`/api/v1/gateways/${editing.gateway_id}`, form)
       else         await api.post('/api/v1/gateways', form)
-      setShowForm(false); load(); showToast('Gateway saved', 'success')
+      setShowForm(false); load(); showToast(editing ? 'Gateway saved' : 'Gateway created', 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
 
   const archiveGateway = async (days) => {
     try {
       await api.post(`/api/v1/gateways/${archiveTarget.gateway_id}/archive`, { auto_delete_days: days })
+      // Closes after the request, which is what lets ArchiveModal hold its pending state for the
+      // whole round trip -- see the note on CellsTab.archiveCell.
       setArchiveTarget(null); load(); showToast(`Gateway '${archiveTarget.gateway_name}' archived (Out of Commission)`, 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
@@ -517,8 +525,15 @@ export function GatewaysTab({ showToast, onViewThread, hasPermission, initialSea
               <input className="form-control" value={form.access_url || ''} onChange={e => setForm(f => ({ ...f, access_url: e.target.value }))} placeholder="e.g. http://localhost:1880" title="Web Console / Management URL for this gateway" />
             </div>
             <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={() => setShowForm(false)} title="Cancel">Cancel</button>
-              <button className="btn btn-primary" onClick={save} title="Save gateway configuration">Save</button>
+              <button className="btn btn-ghost" onClick={() => setShowForm(false)} disabled={saving} title="Cancel">Cancel</button>
+              <ActionButton
+                pending={saving}
+                pendingLabel={editing ? 'Saving…' : 'Creating…'}
+                onClick={() => runSave(save)}
+                title="Save gateway configuration"
+              >
+                Save
+              </ActionButton>
             </div>
           </div>
         </div>
@@ -588,7 +603,9 @@ export function GatewaysTab({ showToast, onViewThread, hasPermission, initialSea
           // Restore is the only action that means anything there.
           selected.is_archived ? {
             label: 'Restore Gateway', icon: <IconRefreshCw size={13} />,
-            onClick: () => restoreGateway(selected.gateway_id, selected.gateway_name),
+            onClick: () => runRestore(selected.gateway_id, () => restoreGateway(selected.gateway_id, selected.gateway_name)),
+            pending: restoringId === selected.gateway_id,
+            pendingLabel: 'Restoring…',
             disabled: !canArchive,
             primary: !selected.access_url,
             title: !canArchive ? 'Requires Admin permissions' : 'Restore gateway back to active service'

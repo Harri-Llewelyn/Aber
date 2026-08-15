@@ -9,7 +9,7 @@
  * model that is most of the reason to run on Kubernetes at all.
  *
  * So the deployment gets a chance to speak first. `public/config.js` is a plain (non-module)
- * script that sets `window.__FACTORYPLUS_CONFIG__`; index.html loads it BEFORE the module bundle,
+ * script that sets `window.__ACS_CYMRU_CONFIG__`; index.html loads it BEFORE the module bundle,
  * and a classic script always executes before a deferred module script, so the object is populated
  * before any of this evaluates. In Kubernetes that file is replaced by a ConfigMap mount; on
  * Compose it stays the shipped no-op and the build-time values win by falling through.
@@ -23,7 +23,7 @@
  */
 
 /** The global a deployment-supplied `config.js` assigns. */
-export const RUNTIME_CONFIG_GLOBAL = '__FACTORYPLUS_CONFIG__';
+export const RUNTIME_CONFIG_GLOBAL = '__ACS_CYMRU_CONFIG__';
 
 /**
  * Every setting resolvable through this module.

@@ -34,7 +34,7 @@ export function BugReportModal({ onClose, showToast, persona, activeTab }) {
 ${desc || 'No detailed steps provided.'}
 
 ---
-*Generated via Factory+ Asset Tracking Dashboard Bug Reporter.*`
+*Generated via ACS-Cymru Asset Tracking Dashboard Bug Reporter.*`
 
     // Composed from the configured repository rather than a hardcoded one -- see
     // GITHUB_REPO_URL in constants.js for why this was wrong and why it keeps a fallback.

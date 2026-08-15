@@ -191,7 +191,7 @@ jobs:
   # BOTH must keep working. This job is the cheap half of that -- it renders and validates the
   # chart without a cluster, so a template that cannot produce valid manifests fails on the PR
   # rather than at `helm install`. The full in-cluster run (k3d + helm test + validate.py) is the
-  # k8s-validation job; see docs/kubernetes-migration-plan.md §8.1.
+  # k8s-validation job; see docs/kubernetes-architecture.md §8.1.
   helm-chart:
     name: Helm Chart Lint & Render
     runs-on: ubuntu-latest
@@ -206,7 +206,7 @@ jobs:
 
       # Helm cannot read files outside its chart directory, so the TimescaleDB bootstrap scripts
       # (and, in later phases, the Kong and Grafana templates and the Node-RED flow) are mirrored
-      # into deploy/helm/factoryplus/files/ and committed. A stale copy would provision a
+      # into deploy/helm/acs-cymru/files/ and committed. A stale copy would provision a
       # DIFFERENT database than Compose does, and would only surface as a schema error at the
       # first telemetry write.
       - name: Verify Chart Files Are In Sync With Their Sources
@@ -221,12 +221,12 @@ jobs:
       # job downstream then failed on the very defect this job exists to catch first.
       # Chart correctness first, then the couplings it has with everything else.
       - name: Lint Chart
-        run: helm lint deploy/helm/factoryplus -f deploy/helm/factoryplus/values-dev.yaml
+        run: helm lint deploy/helm/acs-cymru -f deploy/helm/acs-cymru/values-dev.yaml
 
       - name: Render Chart
         run: |
-          helm template factoryplus deploy/helm/factoryplus \
-            -f deploy/helm/factoryplus/values-dev.yaml > /tmp/rendered.yaml
+          helm template acs-cymru deploy/helm/acs-cymru \
+            -f deploy/helm/acs-cymru/values-dev.yaml > /tmp/rendered.yaml
           echo "Rendered $(grep -c '^kind:' /tmp/rendered.yaml) objects."
 
       # Renders cleanly is not the same as "the API server would accept it". A misindented probe
@@ -316,7 +316,7 @@ jobs:
                       referenced.add(p['name'])
           compose = re.search(r'KONG_PLUGINS:\s*([^\s#]+)', open('docker-compose.yml', encoding='utf-8').read())
           values  = re.search(r'^\s*plugins:\s*([a-z0-9,\-]+)\s*$',
-                              open('deploy/helm/factoryplus/values.yaml', encoding='utf-8').read(), re.M)
+                              open('deploy/helm/acs-cymru/values.yaml', encoding='utf-8').read(), re.M)
           if not compose or not values:
               print('::error::could not find KONG_PLUGINS (compose) or supabaseKong.plugins (values)')
               sys.exit(1)
@@ -344,8 +344,8 @@ jobs:
       # templates/obs/servicemonitors.yaml exists to avoid, so it is asserted rather than trusted.
       - name: Verify Every ServiceMonitor Port Resolves On Its Service
         run: |
-          helm template factoryplus deploy/helm/factoryplus \
-            -f deploy/helm/factoryplus/values-dev.yaml \
+          helm template acs-cymru deploy/helm/acs-cymru \
+            -f deploy/helm/acs-cymru/values-dev.yaml \
             --set telemetry.serviceMonitor.enabled=true \
             --set supabaseKong.metrics.enabled=true \
             --set mosquitto.metrics.enabled=true > /tmp/sm.yaml
@@ -381,7 +381,7 @@ jobs:
           fail=0
           expect_failure() {
             local desc="$1"; local pattern="$2"; shift 2
-            if out=$(helm template factoryplus deploy/helm/factoryplus "$@" 2>&1); then
+            if out=$(helm template acs-cymru deploy/helm/acs-cymru "$@" 2>&1); then
               echo "::error::chart rendered successfully but should have refused: $desc"
               fail=1
             elif ! printf '%s' "$out" | grep -q "$pattern"; then
@@ -393,7 +393,7 @@ jobs:
             fi
           }
 
-          DEV=deploy/helm/factoryplus/values-dev.yaml
+          DEV=deploy/helm/acs-cymru/values-dev.yaml
 
           # The four Supabase credentials are a SET: anonKey and serviceRoleKey are JWTs signed by
           # jwtSecret, so a partial set yields a stack that 401s at the gateway while looking fine.
@@ -465,8 +465,8 @@ jobs:
       # the destination being slow or down.
       - name: Verify NetworkPolicies Are Symmetric And Cover The Load-Bearing Flows
         run: |
-          helm template factoryplus deploy/helm/factoryplus \
-            -f deploy/helm/factoryplus/values-dev.yaml \
+          helm template acs-cymru deploy/helm/acs-cymru \
+            -f deploy/helm/acs-cymru/values-dev.yaml \
             --set networkPolicy.enabled=true --set backup.enabled=true --set e2e.enabled=true \
             > /tmp/netpol.yaml
           python3 - <<'PY'
@@ -549,8 +549,8 @@ jobs:
       # render can check both states.
       - name: Verify NetworkPolicies Follow The Broker Onto TLS
         run: |
-          helm template factoryplus deploy/helm/factoryplus \
-            -f deploy/helm/factoryplus/values-dev.yaml \
+          helm template acs-cymru deploy/helm/acs-cymru \
+            -f deploy/helm/acs-cymru/values-dev.yaml \
             --set networkPolicy.enabled=true \
             --set mosquitto.tls.enabled=true --set mosquitto.tls.internalClients=true \
             --set 'mosquitto.tls.extraIpSans={10.0.0.9}' \
@@ -1056,14 +1056,14 @@ jobs:
       # Every object below is named "<RELEASE>-<thing>" by the chart's fullname helper.
       #
       # THAT HELPER COLLAPSES the usual "<release>-<chart>" prefix when the release name already
-      # contains the chart name. Because the release here IS "factoryplus", the objects come out as
-      # "factoryplus-db-init" -- with the chart name appearing ONCE, not twice. Assuming the doubled
+      # contains the chart name. Because the release here IS "acs-cymru", the objects come out as
+      # "acs-cymru-db-init" -- with the chart name appearing ONCE, not twice. Assuming the doubled
       # form is the mistake to make, and it fails late: the install succeeds and the first
       # `kubectl logs` says NotFound.
       #
       # Declared once so a rename is one line, and so the rule is written where the names are used.
-      RELEASE: factoryplus
-      NS: factoryplus
+      RELEASE: acs-cymru
+      NS: acs-cymru
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5
@@ -1120,7 +1120,7 @@ jobs:
       # costs memory a 2-core runner would rather spend on Postgres.
       - name: Create k3d Cluster
         run: |
-          k3d cluster create factoryplus \
+          k3d cluster create acs-cymru \
             --agents 0 \
             --port "80:80@loadbalancer" \
             --k3s-arg "--disable=metrics-server@server:0" \
@@ -1145,7 +1145,7 @@ jobs:
         id: appversion
         run: |
           set -eu
-          V=$(grep -E '^appVersion:' deploy/helm/factoryplus/Chart.yaml \
+          V=$(grep -E '^appVersion:' deploy/helm/acs-cymru/Chart.yaml \
               | head -1 | sed -E 's/^appVersion:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
           test -n "$V"
           echo "version=$V" >> "$GITHUB_OUTPUT"
@@ -1181,7 +1181,7 @@ jobs:
           IMG_NS: ghcr.io/harri-llewelyn/acs-cymru
           V: ${{ steps.appversion.outputs.version }}
         run: |
-          k3d image import -c factoryplus \
+          k3d image import -c acs-cymru \
             "$IMG_NS/edge-runtime:$V" \
             "$IMG_NS/ingestion:$V" \
             "$IMG_NS/node-red:$V" \
@@ -1244,9 +1244,9 @@ jobs:
           INGRESS_IP=$(kubectl -n kube-system get svc traefik -o jsonpath='{.spec.clusterIP}')
           echo "ingress ClusterIP: $INGRESS_IP"
 
-          helm install $RELEASE deploy/helm/factoryplus \
+          helm install $RELEASE deploy/helm/acs-cymru \
             --namespace $NS \
-            --values deploy/helm/factoryplus/values-dev.yaml \
+            --values deploy/helm/acs-cymru/values-dev.yaml \
             --set e2e.enabled=true \
             --set e2e.ingressIp="$INGRESS_IP" \
             --timeout 15m
@@ -1255,10 +1255,10 @@ jobs:
         run: |
           set -eu
           for job in db-roles-init db-init storage-init; do
-            echo "--- factoryplus-$job"
+            echo "--- acs-cymru-$job"
             kubectl -n $NS wait --for=condition=complete \
-              "job/factoryplus-$job" --timeout=10m
-            kubectl -n $NS logs "job/factoryplus-$job" | tail -20
+              "job/acs-cymru-$job" --timeout=10m
+            kubectl -n $NS logs "job/acs-cymru-$job" | tail -20
           done
 
       # What `--wait` used to cover, moved to where it can actually succeed. Every workload is
@@ -1418,7 +1418,7 @@ jobs:
 
       - name: Tear Down
         if: always()
-        run: k3d cluster delete factoryplus || true
+        run: k3d cluster delete acs-cymru || true
 
   e2e-validation:
     name: End-to-End Unified Stack Ingestion Validation
@@ -1478,7 +1478,7 @@ jobs:
           timeout 90s bash -c '
             until docker compose exec -T timescaledb pg_isready -U postgres >/dev/null 2>&1 && \
                   docker compose exec -T supabase-db pg_isready -U postgres >/dev/null 2>&1 && \
-                  docker compose exec -T mosquitto mosquitto_sub -u factoryplus_monitor -P factoryplus123 -t "\$SYS/broker/version" -C 1 >/dev/null 2>&1; do
+                  docker compose exec -T mosquitto mosquitto_sub -u factoryplus_monitor -P acscymru123 -t "\$SYS/broker/version" -C 1 >/dev/null 2>&1; do
               echo "Waiting for TimescaleDB, Supabase DB, and Mosquitto to become ready..."
               sleep 2
             done
@@ -1572,7 +1572,7 @@ jobs:
       #
       # MQTT_VALIDATOR_USER/MQTT_VALIDATOR_PASSWORD MUST REACH THE SCRIPT, and until 2026-08 the
       # fact that they did not was hidden by a coincidence. validate.py defaulted its password to
-      # the literal `factoryplus123`; this job runs `setup.mjs --demo`, which copies .env.example
+      # the literal `acscymru123`; this job runs `setup.mjs --demo`, which copies .env.example
       # VERBATIM, and .env.example sets MQTT_VALIDATOR_PASSWORD to exactly that string. So the
       # default matched the account and CI went green -- while a developer running a plain
       # `npm run setup`, which mints a random password per principal, got a broker rejection and
@@ -1621,7 +1621,7 @@ jobs:
           set -a && . ./.env && set +a
           TOKEN=$(curl -s -X POST "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
             -H "apikey: $SUPABASE_ANON_KEY" -H "Content-Type: application/json" \
-            -d '{"email":"admin@factoryplus.local","password":"factoryplus123"}' \
+            -d '{"email":"admin@acs-cymru.local","password":"acscymru123"}' \
             | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
           test -n "$TOKEN"
 

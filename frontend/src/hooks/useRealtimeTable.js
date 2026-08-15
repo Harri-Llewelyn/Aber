@@ -71,7 +71,7 @@ export function useRealtimeTable(tables, onChange, { enabled = true, debounceMs 
           // Reconcile on subscribe. Realtime creates its logical replication slot LAZILY --
           // after the channel reports SUBSCRIBED, not before -- so on the first subscription
           // against a freshly started realtime service there is a window in which the client
-          // is "subscribed" and silently receiving nothing. Verified in Phase 2: an identical
+          // is "subscribed" and silently receiving nothing. Verified against a live stack: an identical
           // update 1.5s after SUBSCRIBED was missed on the first run and delivered on the
           // second. Loading here closes that window instead of waiting for the 60s poll.
           Promise.resolve(cbRef.current?.()).catch(() => {})

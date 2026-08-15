@@ -1,5 +1,5 @@
 """
-i3X 1.0 server for the Factory+ Asset Tracking Platform.
+i3X 1.0 server for the ACS-Cymru Asset Tracking Platform.
 
 WHAT THIS IS. A read-side adapter. It owns no data: metadata comes from PostgREST and current values
 come from the MQTT broker. Nothing upstream knows i3X exists, exactly as nothing upstream knows AAS
@@ -71,7 +71,7 @@ logging.basicConfig(
 logger = logging.getLogger("i3x")
 
 SPEC_VERSION = "1.0"
-SERVER_NAME = os.getenv("I3X_SERVER_NAME", "factoryplus-i3x")
+SERVER_NAME = os.getenv("I3X_SERVER_NAME", "acs-cymru-i3x")
 SERVER_VERSION = os.getenv("I3X_SERVER_VERSION", "0.1.0")
 
 LISTEN_HOST = os.getenv("I3X_HOST", "0.0.0.0")
@@ -101,7 +101,7 @@ SSE_KEEPALIVE_SECONDS = float(os.getenv("I3X_SSE_KEEPALIVE_SECONDS", "15"))
 # same discipline `sparkplugToXsd.ts` has against `sparkplugDatatype.js`. ingestion.py is not
 # imported here on purpose; see the security note in the module docstring.
 MAX_ALIASES_PER_NODE = int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))
-DEFAULT_SPARKPLUG_GROUP = os.getenv("DEFAULT_SPARKPLUG_GROUP", "FactoryPlus")
+DEFAULT_SPARKPLUG_GROUP = os.getenv("DEFAULT_SPARKPLUG_GROUP", "ACS-Cymru")
 IDENTITY_METRICS = ("Asset_ID", "Asset_Name", "Instance_UUID", "Schema_UUID")
 
 _values: Dict[str, Dict[str, dict]] = {}
@@ -506,7 +506,7 @@ def _require_client_id(body: dict) -> str:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = f"factoryplus-i3x/{SERVER_VERSION}"
+    server_version = f"acs-cymru-i3x/{SERVER_VERSION}"
     protocol_version = "HTTP/1.1"
 
     # -- plumbing ----------------------------------------------------------------------------

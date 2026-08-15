@@ -38,7 +38,7 @@ describe('standards registry', () => {
 describe('inferSemanticIdType', () => {
   it('recognises an http(s) URI as an IRI', () => {
     expect(inferSemanticIdType('http://opcfoundation.org/UA/Robotics/ActualPosition')).toBe('IRI')
-    expect(inferSemanticIdType('https://factoryplus.local/semantics/iso22400/MTBF')).toBe('IRI')
+    expect(inferSemanticIdType('https://acs-cymru.local/semantics/iso22400/MTBF')).toBe('IRI')
   })
 
   it('recognises a URN as an IRI', () => {
@@ -60,9 +60,9 @@ describe('inferSemanticIdType', () => {
 
 describe('semantic id namespaces', () => {
   it('mints everything under one visibly-local base', () => {
-    // The namespace is the honesty mechanism: `factoryplus.local` says whose identifier this is.
+    // The namespace is the honesty mechanism: `acs-cymru.local` says whose identifier this is.
     // An id under mtconnect.org or iso.org would assert an interoperability that does not exist.
-    expect(LOCAL_SEMANTIC_NAMESPACE).toBe('https://factoryplus.local/semantics')
+    expect(LOCAL_SEMANTIC_NAMESPACE).toBe('https://acs-cymru.local/semantics')
     expect(MTCONNECT_SEMANTIC_NAMESPACE.startsWith(LOCAL_SEMANTIC_NAMESPACE)).toBe(true)
     expect(ISO22400_SEMANTIC_NAMESPACE.startsWith(LOCAL_SEMANTIC_NAMESPACE)).toBe(true)
     expect(MTCONNECT_SEMANTIC_NAMESPACE).not.toContain('mtconnect.org')
@@ -79,7 +79,7 @@ describe('semantic id namespaces', () => {
 describe('mtconnectSemanticId', () => {
   it('mirrors the SQL in migration 0032 — namespace plus the whole metric name', () => {
     expect(mtconnectSemanticId('Axes/C/ANGLE'))
-      .toBe('https://factoryplus.local/semantics/mtconnect/v2.0/Axes/C/ANGLE')
+      .toBe('https://acs-cymru.local/semantics/mtconnect/v2.0/Axes/C/ANGLE')
   })
 
   it('uses the full path, not just the type — a catalog entry is a specific observation', () => {
@@ -89,7 +89,7 @@ describe('mtconnectSemanticId', () => {
 
   it('handles an ungrouped name', () => {
     expect(mtconnectSemanticId('SERIAL_NUMBER'))
-      .toBe('https://factoryplus.local/semantics/mtconnect/v2.0/SERIAL_NUMBER')
+      .toBe('https://acs-cymru.local/semantics/mtconnect/v2.0/SERIAL_NUMBER')
   })
 
   it('returns empty for an empty name rather than a dangling namespace', () => {
@@ -106,15 +106,15 @@ describe('mtconnectSemanticId', () => {
 describe('mtconnectVocabularySemanticId', () => {
   it('scopes a concept id by kind, because the vocabularies can collide on a name', () => {
     expect(mtconnectVocabularySemanticId('DATA_ITEM_TYPE', 'ANGLE'))
-      .toBe('https://factoryplus.local/semantics/mtconnect/v2.0/DataItemType/ANGLE')
+      .toBe('https://acs-cymru.local/semantics/mtconnect/v2.0/DataItemType/ANGLE')
     expect(mtconnectVocabularySemanticId('COMPONENT', 'Axes'))
-      .toBe('https://factoryplus.local/semantics/mtconnect/v2.0/Component/Axes')
+      .toBe('https://acs-cymru.local/semantics/mtconnect/v2.0/Component/Axes')
     expect(mtconnectVocabularySemanticId('SUB_TYPE', 'ACTUAL'))
-      .toBe('https://factoryplus.local/semantics/mtconnect/v2.0/SubType/ACTUAL')
+      .toBe('https://acs-cymru.local/semantics/mtconnect/v2.0/SubType/ACTUAL')
     expect(mtconnectVocabularySemanticId('UNIT', 'MILLIMETER'))
-      .toBe('https://factoryplus.local/semantics/mtconnect/v2.0/Unit/MILLIMETER')
+      .toBe('https://acs-cymru.local/semantics/mtconnect/v2.0/Unit/MILLIMETER')
     expect(mtconnectVocabularySemanticId('NATIVE_UNIT', 'HOUR'))
-      .toBe('https://factoryplus.local/semantics/mtconnect/v2.0/NativeUnit/HOUR')
+      .toBe('https://acs-cymru.local/semantics/mtconnect/v2.0/NativeUnit/HOUR')
   })
 
   it('keeps a component and a data item type of the same name apart', () => {

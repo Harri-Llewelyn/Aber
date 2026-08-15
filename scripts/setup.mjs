@@ -12,7 +12,7 @@
  * `SUPABASE_SERVICE_ROLE_KEY` are HS256 JWTs *signed by* `SUPABASE_JWT_SECRET`. Rotating the
  * secret without re-minting both yields a stack that comes up entirely healthy and rejects every
  * request at the gateway — which is why this script mints them here instead of telling the reader
- * to run three `openssl` commands and hope. It is the same warning `factoryplus.validateSecrets`
+ * to run three `openssl` commands and hope. It is the same warning `acs-cymru.validateSecrets`
  * prints for the Helm path.
  *
  * NO NEW DEPENDENCIES. Node's built-in `crypto` does HMAC-SHA256, which is the whole of HS256, so
@@ -75,7 +75,7 @@ function mintJwt(role, secret) {
   return `${header}.${payload}.${signature}`;
 }
 
-console.log('🚀 Running Factory+ Asset Tracking Environment Setup...');
+console.log('🚀 Running ACS-Cymru Asset Tracking Environment Setup...');
 
 if (fs.existsSync(envPath)) {
   console.log('ℹ️  .env already exists — left untouched. Delete it first if you want fresh credentials.');
@@ -102,7 +102,7 @@ const jwtSecret = hex(32);
  *
  * Two carry hard limits enforced by the container rather than by taste — supabase/realtime refuses
  * to boot on anything else, and the Helm chart asserts the same two numbers in
- * `factoryplus.validateRealtime`. Keep the three in step.
+ * `acs-cymru.validateRealtime`. Keep the three in step.
  */
 const generated = {
   POSTGRES_PASSWORD: hex(24),
@@ -172,7 +172,7 @@ console.log('   The anon and service-role JWTs were signed with the new SUPABASE
 console.log('   three are a matching set. Nothing in .env is shared with any other install.');
 console.log(`   Left empty on purpose: ${deliberatelyEmpty.join(', ')} (break-glass only).`);
 console.log('');
-console.log('⚠️  Demo LOGINS are separate and unchanged: admin@factoryplus.local / factoryplus123');
+console.log('⚠️  Demo LOGINS are separate and unchanged: admin@acs-cymru.local / acscymru123');
 console.log('   and the other three accounts are seeded by supabase/seed.sql, not by .env.');
 console.log('   Change them before anyone else can reach this stack.');
 console.log('');

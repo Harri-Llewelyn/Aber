@@ -223,7 +223,7 @@ try {
       const authed = docker([
         'run', '--rm', '--network', `container:${r.name}`, IMAGE,
         'mosquitto_pub', '-h', '127.0.0.1', '-p', '1883', '-u', 'probe', '-P', 'probe-secret',
-        '-t', 'spBv1.0/FactoryPlus/DDATA/probe/dev1', '-m', 'x'
+        '-t', 'spBv1.0/ACS-Cymru/DDATA/probe/dev1', '-m', 'x'
       ]);
       if (authed.status === 0) {
         ok.push('1883 accepts a client with valid credentials');
@@ -277,37 +277,37 @@ try {
 
       expect(
         'a gateway may publish under its OWN edge node',
-        (delivers(GATEWAY_A, `spBv1.0/FactoryPlus/DDATA/${GATEWAY_A}/dev1`)),
+        (delivers(GATEWAY_A, `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/dev1`)),
         true
       );
       expect(
         'a gateway may NOT publish under another edge node (the forgery gateway binding cannot catch)',
-        (delivers(GATEWAY_A, `spBv1.0/FactoryPlus/DDATA/${GATEWAY_B}/dev1`)),
+        (delivers(GATEWAY_A, `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_B}/dev1`)),
         false
       );
       expect(
         'the ingestion principal may NOT publish DDATA',
-        (delivers('factoryplus_ingestion', `spBv1.0/FactoryPlus/DDATA/${GATEWAY_A}/dev1`)),
+        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/dev1`)),
         false
       );
       expect(
         'the ingestion principal may NOT publish DBIRTH',
-        (delivers('factoryplus_ingestion', `spBv1.0/FactoryPlus/DBIRTH/${GATEWAY_A}/dev1`)),
+        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/DBIRTH/${GATEWAY_A}/dev1`)),
         false
       );
       expect(
         'the ingestion principal MAY publish a rebirth NCMD (alias recovery depends on it)',
-        (delivers('factoryplus_ingestion', `spBv1.0/FactoryPlus/NCMD/${GATEWAY_A}`)),
+        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_A}`)),
         true
       );
       expect(
         'the i3X principal may publish NOTHING (it refuses writes in code; the broker agrees)',
-        (delivers('factoryplus_i3x', `spBv1.0/FactoryPlus/NCMD/${GATEWAY_A}`)),
+        (delivers('factoryplus_i3x', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_A}`)),
         false
       );
       expect(
         'the monitoring principal may publish NOTHING',
-        (delivers('factoryplus_monitor', `spBv1.0/FactoryPlus/DDATA/${GATEWAY_A}/dev1`)),
+        (delivers('factoryplus_monitor', `spBv1.0/ACS-Cymru/DDATA/${GATEWAY_A}/dev1`)),
         false
       );
       // A gateway's own NCMD must reach it through the WILDCARD subscription both the simulator
@@ -317,13 +317,13 @@ try {
       // instead, rebirth recovery breaks silently and this is what says so.
       expect(
         'a gateway receives its own NCMD through a wildcard subscription',
-        (delivers('factoryplus_ingestion', `spBv1.0/FactoryPlus/NCMD/${GATEWAY_A}`,
+        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_A}`,
           GATEWAY_A, 'spBv1.0/+/NCMD/+')),
         true
       );
       expect(
         'a gateway does NOT receive another edge node\'s NCMD through that same subscription',
-        (delivers('factoryplus_ingestion', `spBv1.0/FactoryPlus/NCMD/${GATEWAY_B}`,
+        (delivers('factoryplus_ingestion', `spBv1.0/ACS-Cymru/NCMD/${GATEWAY_B}`,
           GATEWAY_A, 'spBv1.0/+/NCMD/+')),
         false
       );

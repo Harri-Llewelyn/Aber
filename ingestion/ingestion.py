@@ -20,7 +20,7 @@ DB_HOST = os.getenv("DB_HOST", "timescaledb")
 DB_PORT = os.getenv("DB_PORT", "5433" if os.getenv("DB_HOST") is None else "5432")
 DB_NAME = os.getenv("DB_NAME", "postgres")
 DB_USER = os.getenv("DB_USER", "postgres")
-# NO DEFAULT, deliberately. A published default ("postgres" / "factoryplus123") means a
+# NO DEFAULT, deliberately. A published default ("postgres" / "acscymru123") means a
 # deployment with the variable missing connects with a known-weak credential instead of
 # failing -- the failure mode is silence, which is the worst one. These are validated in
 # main(), matching how SUPABASE_SERVICE_ROLE_KEY has always been treated: refuse to start.
@@ -38,23 +38,15 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 MQTT_USER = os.getenv("MQTT_USER", "factoryplus_ingestion")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 
-# ---------------------------------------------------------------------------------------------------
-# MQTTS. OPT-IN, and it does NOT change how the daemon authenticates -- the username and password
-# above are still what identifies it. TLS is here so that credential does not cross a network in
-# clear text, and so the daemon can tell it is talking to the real broker.
+# MQTTS. Opt-in, and it does NOT change how the daemon authenticates -- MQTT_USER/MQTT_PASSWORD
+# above still identify it.
 #
-# WHY THIS IS OFF BY DEFAULT. The daemon reaches the broker over the pod network (or Docker's bridge),
-# which does not leave the host or the cluster. Requiring TLS there would make a CA bundle a hard
-# dependency of a workload that gains little from it, and the certificate's SANs would have to cover
-# the in-cluster name on every deployment. The exposure that matters is the gateways crossing the
-# plant network, and that is what mosquitto.tls.enabled addresses.
+# With an internal CA the system trust store knows nothing about it, so an empty MQTT_TLS_CA_FILE
+# makes verification fail outright. That is the correct failure, not a silent downgrade, and it is
+# why there is deliberately NO "skip verification" setting: encryption without verification looks
+# identical on the wire to a successful interception.
 #
-# MQTT_TLS_CA_FILE IS THE IMPORTANT ONE. With an internal CA, the system trust store knows nothing
-# about it, so leaving this empty means verification fails outright -- which is the correct failure,
-# not a silent downgrade. There is deliberately NO "skip verification" setting: encryption without
-# verification is indistinguishable on the wire from a successful interception, and a daemon that
-# accepted any certificate would report a healthy TLS connection while talking to anything at all.
-# ---------------------------------------------------------------------------------------------------
+# Why it is off by default: ../ingestion/README.md -> "Configuration"
 MQTT_TLS_ENABLED = os.getenv("MQTT_TLS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
 MQTT_TLS_CA_FILE = os.getenv("MQTT_TLS_CA_FILE", "").strip()
 
@@ -64,7 +56,7 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 # Liveness heartbeat. OPT-IN, empty by default: Docker Compose declares no healthcheck for this
 # service and nothing reads the file there, so writing one would be litter. Kubernetes sets it and
-# probes the file's age -- see deploy/helm/factoryplus/templates/apps/ingestion.yaml.
+# probes the file's age -- see deploy/helm/acs-cymru/templates/apps/ingestion.yaml.
 #
 # WHY A HEARTBEAT AND NOT A MESSAGE COUNTER. The obvious implementation touches the file in
 # on_message, which reports the daemon dead every time the shopfloor is quiet -- nights, weekends,
@@ -113,7 +105,7 @@ try:
         # session's headers is the path that actually reaches PostgREST, verified end to end.
         supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
         try:
-            supabase_client.postgrest.session.headers["X-FactoryPlus-Actor"] = "ingestion"
+            supabase_client.postgrest.session.headers["X-ACS-Cymru-Actor"] = "ingestion"
         except Exception as header_err:
             # Losing the label is not worth losing ingestion over: without it the trigger falls
             # back to 'service', which is still attributed, just less specific.
@@ -186,7 +178,7 @@ FACTORYPLUS_PAYLOAD_UUID = "11ad7b32-1d32-4c4a-b0c9-fa049208939a"
 
 # Default Sparkplug Group ID, matching gateways.sparkplug_group's column default (migration
 # 0008). Used only to describe the fallback in a log line; resolution never assumes it.
-DEFAULT_SPARKPLUG_GROUP = "FactoryPlus"
+DEFAULT_SPARKPLUG_GROUP = "ACS-Cymru"
 
 class DirectoryUnavailable(Exception):
     """
@@ -840,25 +832,15 @@ def verify_gateway_binding(device: dict, gateway_wire_id: str, group_id: str = N
     not. Never raises: a lookup failure is reported as a mismatch, which is the fail-closed
     answer.
 
-    WHY THIS EXISTS. The topic's device segment was previously the *only* thing consulted, so
-    any edge node authenticated to the broker could publish under any device's sparkplug_id
-    and have it recorded as that device. A sparkplug_id is an identifier, not a secret -- it
-    is derived from the row's UUID, shown in the dashboard and present in every topic. That
-    made three things possible: forging another machine's telemetry into the historian,
-    flipping another machine ONLINE, and -- worst -- publishing a contradictory Asset_ID for a
-    device you do not own to force it into quarantine, which silently stops its real telemetry
-    being stored. This closes all three at the application tier; `mosquitto.acl` closes them
-    at the broker tier, and neither is sufficient alone.
+    Three cases are NOT a mismatch, each guarding a branch below:
 
-    THREE CASES ARE NOT A MISMATCH, and each is load bearing:
+      * No `gateway_id` -- binding is set by an operator at approval, never on the telemetry
+        path. Unbound is not mis-bound.
+      * Resolved by legacy `name` -- the row may predate any gateway assignment.
+      * A node-level message -- no device segment; handled by process_node_message().
 
-      * A device with no `gateway_id`. Binding is established by an operator at approval, not
-        by ingestion -- `devices.gateway_id` is deliberately not written on the telemetry
-        path. An unbound device is unbound, not mis-bound.
-      * A device resolved by legacy `name`. During the migration window a device may still be
-        addressed by name, and its row may predate any gateway assignment. Enforcing binding
-        there would break exactly the deployments the fallback exists to carry.
-      * A node-level message. Those carry no device segment and are handled elsewhere.
+    Threat model and why the broker ACL does not make this redundant:
+    ../ingestion/README.md -> "Gateway Binding"
     """
     if not device:
         return None
@@ -1560,14 +1542,15 @@ def resolve_wire_identity(parts, payload):
     Returns (wire_id, quarantine_reason). wire_id is None if the message carries no usable
     identity at all.
 
-    The topic is authoritative. The Asset_ID metric used to silently override it, which meant
-    a device could publish under one id and be tracked as another -- and it is absent entirely
-    from alias-encoded DDATA, where the topic is the only identity available.
+    The topic is authoritative; the Asset_ID metric is a cross-check, and is absent entirely
+    from alias-encoded DDATA where the topic is the only identity available.
 
-    The strict contract is applied only to devices already publishing a platform-issued id.
-    A legacy device still publishing its name keeps the old "payload metric wins" behaviour so
-    that reconfiguring gateways one at a time stays non-breaking; that arm goes away with the
-    rest of the name-matching fallback.
+    THE STRICT CONTRACT APPLIES ONLY to devices already publishing a platform-issued id. A
+    legacy device still publishing its name keeps "payload metric wins", so that gateways can
+    be reconfigured one at a time. That arm is live -- it goes away with the rest of the
+    name-matching fallback, not before.
+
+    Resolution precedence: ../ingestion/README.md -> "Asset Identity on the Wire"
     """
     topic_id = parts[4] if len(parts) >= 5 else None
     claimed_id = extract_claimed_asset_id(payload)
@@ -1657,7 +1640,7 @@ def _require_credentials():
     Refuse to start without the broker and database credentials.
 
     Same posture as the Supabase check below, and for the same reason: these previously
-    carried published defaults ("factoryplus123" / "postgres"), so a deployment with the
+    carried published defaults ("acscymru123" / "postgres"), so a deployment with the
     variable missing came up connected with a known-weak credential and reported nothing.
     A missing secret must be a startup failure, not a silent downgrade.
     """

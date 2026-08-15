@@ -98,11 +98,33 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
     e.preventDefault()
   }
 
+  /**
+   * The tile a drop is currently being written to, keyed by the tile's own id -- a cell_id for a
+   * bay, or the lane key for one of the two derived lanes.
+   *
+   * Needed because a drop is the one mutation here with NO optimistic feedback of its own: the
+   * device keeps rendering in the tile it came from until the reload lands, so between the mouse
+   * release and the api.put resolving the map looks exactly as it did before the drag. On a slow
+   * link that is indistinguishable from a refused drop, and the reliable response is to drag it
+   * again -- which is how one move became two writes.
+   */
+  const [pendingZone, setPendingZone] = useState(null)
+
   const handleDrop = async (e, targetCellId) => {
     e.preventDefault()
     if (!canRearrange) return
+    // Read BEFORE the first await: the drag event's dataTransfer is cleared once the handler
+    // yields, so parsing after setting the pending state would read an empty payload.
+    let assetData
     try {
-      const assetData = JSON.parse(e.dataTransfer.getData('application/json'))
+      assetData = JSON.parse(e.dataTransfer.getData('application/json'))
+    } catch (err) {
+      showToast(err.message, 'error')
+      return
+    }
+
+    setPendingZone(targetCellId)
+    try {
       // Where it currently resolves to, not its explicit override -- a device inheriting the
       // target cell is already there and dropping it again should stay a no-op.
       if (assetData.effective_cell_id === targetCellId) return
@@ -135,6 +157,8 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
       )
     } catch (err) {
       showToast(err.message, 'error')
+    } finally {
+      setPendingZone(null)
     }
   }
 
@@ -168,8 +192,17 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   const handleLaneDrop = async (e, lane) => {
     e.preventDefault()
     if (!canRearrange) return
+    // Parsed before the first await, for the reason given in handleDrop.
+    let assetData
     try {
-      const assetData = JSON.parse(e.dataTransfer.getData('application/json'))
+      assetData = JSON.parse(e.dataTransfer.getData('application/json'))
+    } catch (err) {
+      showToast(err.message, 'error')
+      return
+    }
+
+    setPendingZone(lane)
+    try {
       if (assetData.location_source === lane) return
 
       const siteWide = lane === SOURCE_SITE_WIDE
@@ -198,6 +231,8 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
       )
     } catch (err) {
       showToast(err.message, 'error')
+    } finally {
+      setPendingZone(null)
     }
   }
 
@@ -334,13 +369,21 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
    * lane has to read as the same kind of object in a different place -- that is the whole premise
    * of dragging a device from one into the other -- so they now differ only in the props below.
    */
-  const floorTile = ({ key, className, name, nameTitle, Icon, status, gateways, devices, counts, hint, onDrop, onNameClick, headerRight, empty, badge }) => (
+  const floorTile = ({ key, className, name, nameTitle, Icon, status, gateways, devices, counts, hint, onDrop, onNameClick, headerRight, empty, badge }) => {
+    // Every tile is a drop target, so `key` doubles as the identity a pending drop is tracked
+    // under -- there is no second id to invent.
+    const pending = pendingZone !== null && pendingZone === key
+    return (
     <div
       key={key}
-      className={`shopfloor-zone${className ? ' ' + className : ''}`}
+      className={`shopfloor-zone${className ? ' ' + className : ''}${pending ? ' shopfloor-zone-pending' : ''}`}
       onDragOver={handleDragOver}
       onDrop={onDrop}
-      title={hint}
+      // Replaces the hint outright while the write is outstanding: the resting hint invites a
+      // drag ("Drag device node here to reassign"), which is the one thing this tile will not
+      // accept right now.
+      title={pending ? 'Saving this move…' : hint}
+      aria-busy={pending || undefined}
     >
       <div className="zone-header">
         <span className={`tile-dot tile-dot-${status}`} title={STATUS_LABEL[status]} />
@@ -370,7 +413,8 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
           )}
       </div>
     </div>
-  )
+    )
+  }
 
   // Site-Wide first: it is infrastructure and its contents are stable, so it reads as context for
   // the queue beside it. Unassigned comes second because it is the thing to act on, and it sits

@@ -50,7 +50,7 @@ _stub("paho.mqtt.client", Client=object)
 
 import ingestion  # noqa: E402  (must follow the stubs above)
 
-GROUP = "FactoryPlus"
+GROUP = "ACS-Cymru"
 NODE = "gwy100000000000400080000"
 DEVICE = "dev200000000000400080000"
 

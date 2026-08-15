@@ -36,7 +36,7 @@ means changing pins and recreating volumes.
   publishes no PG18 image — the only lines are `15.x`, `17.6.x`, and `17.9.x-orioledb`, and orioledb
   is a different storage engine rather than a version bump. The backup CronJob reuses the
   `supabase/postgres` image's `pg_dump` against **both** databases
-  ([backup-cronjob.yaml:134](../deploy/helm/factoryplus/templates/jobs/backup-cronjob.yaml#L134)),
+  ([backup-cronjob.yaml:134](../deploy/helm/acs-cymru/templates/jobs/backup-cronjob.yaml#L134)),
   and `pg_dump` refuses a server newer than itself, so the historian's major version is capped by
   Supabase's. And keeping both ends on one major keeps the `postgres_fdw` link uninteresting.
 - **Do not split the two databases across majors** to reach PG18 on the historian. It breaks backups
@@ -49,7 +49,7 @@ means changing pins and recreating volumes.
   profile and does not belong inside a version bump.
 - **Not a Postgres HA project.** PG17's failover-safe logical replication slots remove one argument
   against the HA work deferred in
-  [kubernetes-migration-plan.md §3.3](kubernetes-migration-plan.md), because `supabase-realtime`
+  [kubernetes-architecture.md §3.3](kubernetes-architecture.md), because `supabase-realtime`
   holds a logical slot. That is a note for whoever picks HA up, not scope here.
 
 ### Decisions settled 2026-08-10
@@ -60,7 +60,7 @@ means changing pins and recreating volumes.
 | Historian tag | **Pinned** — `2.29.1-pg17`, not `latest-pg17` |
 | Signer migration number | **`0011`** — see below |
 
-`0011` is also wanted by [vocabulary-expansion-plan.md](vocabulary-expansion-plan.md), which is
+`0011` is also wanted by [vocabularies.md](vocabularies.md), which is
 Phase-0-gated on paid standards documents and has not started. This work is unblocked and lands
 first, so it takes `0011` and the vocabulary work starts at `0012`.
 
@@ -87,7 +87,7 @@ first, so it takes `0011` and the vocabulary work starts at `0012`.
   two targets and exits non-zero on any mismatch — verified by running it. Bumping one first is not
   a smaller step, it is a red CI run. This is why Phase 2 is one phase and not two.
 - **Migrations are mirrored automatically.** `scripts/sync-helm-chart-files.mjs` copies
-  `supabase/migrations/*.sql` into `deploy/helm/factoryplus/files/migrations/`, and CI runs it with
+  `supabase/migrations/*.sql` into `deploy/helm/acs-cymru/files/migrations/`, and CI runs it with
   `--check`. Migrations are edited once and synced, never edited twice. The same holds for the
   Grafana dashboard JSON and the `timescaledb/` scripts.
 - **The backup Job follows the pin on its own.** It renders
@@ -117,7 +117,7 @@ probe containers, using the command documented at [ci.yml:715](../.github/workfl
 | Grants on `storage.*` | assumed present | PG15 stub granted ALL to anon/authenticated/service_role; **17.6 grants nothing** | ❌ **changed** |
 | `pg_cron`, `pg_net`, `pgcrypto`, `postgres_fdw`, `supabase_vault` | required by [0001:66-69](../supabase/migrations/0001_baseline_schema.sql#L66) | all present; `pg_cron`/`pg_net` in `shared_preload_libraries` | ✅ |
 | `vault.create_secret` / `update_secret` / `decrypted_secrets` | used by [0002:2205](../supabase/migrations/0002_seed_data.sql#L2205), [0006:134](../supabase/migrations/0006_nodered_oidc_auth.sql#L134) | signatures unchanged, view present | ✅ |
-| `/etc/postgresql/postgresql.conf` ships | [supabase-db-statefulset.yaml:100](../deploy/helm/factoryplus/templates/data/supabase-db-statefulset.yaml#L100) | present, plus a `postgresql.conf.d/` | ✅ |
+| `/etc/postgresql/postgresql.conf` ships | [supabase-db-statefulset.yaml:100](../deploy/helm/acs-cymru/templates/data/supabase-db-statefulset.yaml#L100) | present, plus a `postgresql.conf.d/` | ✅ |
 | No `aws` CLI in the image | [k8s README:665](../deploy/k8s/README.md#L665) | still absent; `pg_dump` is 17.6 | ✅ |
 | Locale provider | unstated | PG15 **libc** → PG17 **ICU**, both `en_US.UTF-8` | ⚠ note |
 | TimescaleDB 2.29.1 runs this repo's SQL | — | `init/001_schema.sql`, `retention.sql`, `aggregates.sql` all apply, **and are idempotent on a second run** | ✅ |
@@ -132,15 +132,15 @@ probe containers, using the command documented at [ci.yml:715](../.github/workfl
    changelog and the image disagree, and only the image is authoritative.
 2. **`supabase/postgres` changed base OS, and that is the larger change.** Ubuntu 20.04 → Alpine
    3.23, Nix-built, `postgres` moving from 105:106 to **100:101**. `fsGroup` must become `101` in
-   [values.yaml:229](../deploy/helm/factoryplus/values.yaml#L229),
+   [values.yaml:229](../deploy/helm/acs-cymru/values.yaml#L229),
    [ci.yml:734](../.github/workflows/ci.yml#L734) and
-   [backup-cronjob.yaml:129](../deploy/helm/factoryplus/templates/jobs/backup-cronjob.yaml#L129),
+   [backup-cronjob.yaml:129](../deploy/helm/acs-cymru/templates/jobs/backup-cronjob.yaml#L129),
    and every comment describing this image as Debian is now false —
-   [values.yaml:224](../deploy/helm/factoryplus/values.yaml#L224),
+   [values.yaml:224](../deploy/helm/acs-cymru/values.yaml#L224),
    [ci.yml:720](../.github/workflows/ci.yml#L720),
-   [backup-cronjob.yaml:126](../deploy/helm/factoryplus/templates/jobs/backup-cronjob.yaml#L126).
+   [backup-cronjob.yaml:126](../deploy/helm/acs-cymru/templates/jobs/backup-cronjob.yaml#L126).
    The two databases are now **both** Alpine, which retires the "different lineage" note at
-   [values.yaml:224](../deploy/helm/factoryplus/values.yaml#L224).
+   [values.yaml:224](../deploy/helm/acs-cymru/values.yaml#L224).
 3. **The locale provider changes from libc to ICU.** Harmless here because volumes are recreated
    empty — collation changes only corrupt *existing* indexes — and `asset_id` is ASCII
    (`dev` + hex). It can reorder `ORDER BY` on free-text device and cell names in edge cases. Worth
@@ -266,27 +266,27 @@ plus `docker compose down -v` — the entire upgrade, in one step, exactly as in
   `timescale/timescaledb:2.29.1-pg17`
 - [docker-compose.yml:130](../docker-compose.yml#L130), [:151](../docker-compose.yml#L151),
   [:168](../docker-compose.yml#L168) → `supabase/postgres:17.6.1.160`
-- [values.yaml:147](../deploy/helm/factoryplus/values.yaml#L147) and
-  [:217](../deploy/helm/factoryplus/values.yaml#L217) → the same two
+- [values.yaml:147](../deploy/helm/acs-cymru/values.yaml#L147) and
+  [:217](../deploy/helm/acs-cymru/values.yaml#L217) → the same two
 - [ci.yml:854](../.github/workflows/ci.yml#L854) service pin
 
 **Facts that move with them:**
 
 - **`fsGroup` for `supabase-db`: 106 → `101`**, per Phase 0, in three places —
-  [values.yaml:229](../deploy/helm/factoryplus/values.yaml#L229),
+  [values.yaml:229](../deploy/helm/acs-cymru/values.yaml#L229),
   [ci.yml:734](../.github/workflows/ci.yml#L734) and
-  [backup-cronjob.yaml:129](../deploy/helm/factoryplus/templates/jobs/backup-cronjob.yaml#L129).
+  [backup-cronjob.yaml:129](../deploy/helm/acs-cymru/templates/jobs/backup-cronjob.yaml#L129).
   TimescaleDB stays at 70. Miss the CronJob one and a restore Job cannot read what the backup wrote.
 - **Every comment calling `supabase/postgres` Debian is now false** — it is Alpine 3.23. Correct
-  [values.yaml:224](../deploy/helm/factoryplus/values.yaml#L224),
+  [values.yaml:224](../deploy/helm/acs-cymru/values.yaml#L224),
   [ci.yml:720](../.github/workflows/ci.yml#L720) and
-  [backup-cronjob.yaml:126](../deploy/helm/factoryplus/templates/jobs/backup-cronjob.yaml#L126). The
+  [backup-cronjob.yaml:126](../deploy/helm/acs-cymru/templates/jobs/backup-cronjob.yaml#L126). The
   "not the same lineage as TimescaleDB" note at values.yaml:224 is now backwards: both are Alpine.
-- The comment at [values.yaml:145](../deploy/helm/factoryplus/values.yaml#L145) currently says the
+- The comment at [values.yaml:145](../deploy/helm/acs-cymru/values.yaml#L145) currently says the
   tag is "pinned to match docker-compose.yml". Replace it with the reason it is now pinned rather
   than floating: **2.28.x was the end of the PG15 line, `latest-pg15` is frozen, and a floating tag
   hid that for a month.** That is the sentence worth leaving behind.
-- [backup-cronjob.yaml:134](../deploy/helm/factoryplus/templates/jobs/backup-cronjob.yaml#L134)
+- [backup-cronjob.yaml:134](../deploy/helm/acs-cymru/templates/jobs/backup-cronjob.yaml#L134)
   should state the constraint these pins create: the historian's major version is capped by
   Supabase's, and that is why the historian is on pg17 and not pg18.
 - Version prose: [README.md:248-261](../README.md#L248),
@@ -345,7 +345,7 @@ plus `docker compose down -v` — the entire upgrade, in one step, exactly as in
   stays in memory. The 4.8 MB spill here is a floor, not a typical case.
 - **`pg_stat_io` (PG16) and `pg_stat_checkpointer` (PG17) — DONE.** A
   *Historian I/O & Checkpoints* row in
-  [factoryplus-overview.json](../grafana/provisioning/dashboards/json/factoryplus-overview.json):
+  [acs-cymru-overview.json](../grafana/provisioning/dashboards/json/acs-cymru-overview.json):
   shared buffer hit ratio, blocks read from disk, **requested checkpoints**, average checkpoint
   write time, and a `pg_stat_io` breakdown by backend type and context.
 
@@ -403,7 +403,7 @@ the upgrade path every existing deployment takes on its next boot.
 
 ### The read-only claim was FALSE, and was already false before this upgrade
 
-[values.yaml](../deploy/helm/factoryplus/values.yaml) claimed *"compressed chunks are effectively
+[values.yaml](../deploy/helm/acs-cymru/values.yaml) claimed *"compressed chunks are effectively
 read-only, so telemetry timestamped older than this is rejected rather than inserted."* Measured on
 2.29.1, against a row placed provably inside a compressed chunk:
 

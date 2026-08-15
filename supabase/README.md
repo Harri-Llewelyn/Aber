@@ -41,7 +41,7 @@ naming and can change under a rename that looks purely cosmetic. Nothing fails, 
 ordering is simply not the one anybody chose.
 
 `scripts/check-docs-drift.mjs` asserts unique prefixes across **both** `supabase/migrations/` and
-the chart mirror at `deploy/helm/factoryplus/files/migrations/`, and that the two directories hold
+the chart mirror at `deploy/helm/acs-cymru/files/migrations/`, and that the two directories hold
 the same set. `0006_nodered_oidc_auth.sql` was renumbered from `0003` for exactly this reason.
 
 > Renaming a migration means re-running `node scripts/sync-helm-chart-files.mjs`. It removes the
@@ -318,7 +318,7 @@ on `cells`, `gateways` and `devices`.
 carries no `sub` — so **every privileged write used to be logged anonymously** (58 of 65 rows on
 the audited database had `changed_by IS NULL`).
 
-`log_digital_thread_event()` now falls back to a session-local GUC, `factoryplus.actor_id`, which
+`log_digital_thread_event()` now falls back to a session-local GUC, `acs_cymru.actor_id`, which
 `approve_quarantined_device()` sets with `SET LOCAL`. `auth.uid()` still wins when present — a
 direct PostgREST write by a signed-in user is already correctly attributed, and the GUC must not be
 able to override it.
@@ -491,6 +491,149 @@ It binds app-facing roles only (`authenticated`/`anon`/`service_role`), and that
 migrations rewrite seeded schemas by name on every boot, so a guard binding `postgres` would break
 db-init the first time anyone published a v2. The **status-transition check sits above that bypass**
 and binds everyone: history that can be re-opened is not history.
+
+---
+
+## Backup and Recovery
+
+Two tiers, and they answer different questions. **Tier 1 recovers data; tier 2 recovers a machine.**
+Neither substitutes for the other: a filesystem snapshot cannot restore one dropped table, and a
+logical dump cannot boot a dead appliance.
+
+| | Tier 1 — logical dumps | Tier 2 — infrastructure snapshots |
+| :--- | :--- | :--- |
+| Granularity | One table, one row, one schema | The whole machine or volume |
+| Portable across hosts | Yes — plain SQL | No — tied to the hypervisor or CSI driver |
+| Recovers from | Bad migration, dropped table, corrupted row | Dead disk, dead node, ransomware |
+| Where it runs | `scripts/backup-databases.sh`, or the chart's CronJob | Proxmox Backup Server, CSI, Velero |
+
+### Tier 1: logical dumps
+
+```bash
+scripts/backup-databases.sh                  # both databases + the 3D model objects
+BACKUP_STAMP=<stamp> scripts/restore-databases.sh
+```
+
+Writes three timestamped artefacts plus a manifest into `./backups/` (gitignored — a dump holds
+`auth.users`, hashed OAuth client secrets and the whole `digital_thread`). Defaults target Docker
+Compose; `BACKUP_MODE=direct` with `SUPABASE_DB_HOST`/`TIMESCALE_HOST` reaches any PostgreSQL.
+
+| Variable | Default | Notes |
+| :--- | :--- | :--- |
+| `BACKUP_MODE` | `docker` | `direct` to use a local `pg_dump` against host/port |
+| `BACKUP_FORMAT` | `plain` | `.sql.gz`. Use `custom` for `.dump` — selective `pg_restore`, and what the chart's CronJob writes |
+| `BACKUP_DIR` | `./backups` | |
+| `BACKUP_RETENTION_DAYS` | `14` | `0` disables pruning |
+| `INCLUDE_STORAGE` | `true` | The `asset-3d-models` objects |
+
+Without a stack, `docker compose exec` directly:
+
+```bash
+docker compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" supabase-db \
+  pg_dump -Fp -Z6 -U postgres -d postgres > supabase-db.sql.gz
+```
+
+Four things about these dumps are not obvious and each has bitten someone:
+
+- **Ownership and privileges stay in the dump, and nine roles must already exist.** A dump contains
+  **no `CREATE ROLE`** at all, yet objects are owned by roles and RLS policies reference them **by
+  name** — so a dump restored with `--no-owner` produces a database where every policy denies.
+  `restore-databases.sh` refuses up front, naming what is missing, because the alternative is
+  failing several hundred statements in. Two of the nine are traps:
+
+  | Role | Created by |
+  | :--- | :--- |
+  | `anon`, `authenticated`, `authenticator`, `service_role`, `supabase_admin`, `supabase_auth_admin`, `supabase_storage_admin` | the `supabase/postgres` image |
+  | **`supabase_realtime_admin`** | the **supabase-realtime container**, on its first start — nothing in this repository creates it |
+  | **`supabase_functions_admin`** | pg_net's setup. The dump *appears* to create it, but that `CREATE USER` sits inside an event-trigger function **body**, which a restore only defines and never executes — while a plain `GRANT USAGE ON SCHEMA net TO supabase_functions_admin` thousands of lines later *is* executed, and fails |
+
+  Between them, this is why "restore into a stack that has booted once" means the **whole stack**,
+  not just the database.
+
+- **Connect as `supabase_admin`, not `postgres`.** `postgres` is not a superuser in the
+  `supabase/postgres` image, and the six event triggers (`pgrst_ddl_watch`, `pgrst_drop_watch`,
+  `issue_pg_cron_access`, …) are owned by `supabase_admin`. A restore as `postgres` dies on the
+  first of them with `must be owner of event trigger pgrst_drop_watch`. Both scripts default to
+  `supabase_admin` for this reason.
+
+- **Restore into a freshly initialised database, not over a previously restored one.** The plain
+  format carries `--clean --if-exists`, which is what lets it replace the `auth` and `storage`
+  schemas the image ships. It cannot, however, drop an *inherited* constraint on Realtime's
+  daily `realtime.messages_*` partitions — a second restore over the first fails with
+  `cannot drop inherited constraint`. Drop the volume, or the database, first.
+
+- **The historian's password travels inside the dump.** `public.telemetry`'s user mapping carries
+  the credential `0001` registered. Restore into a historian whose password differs and the
+  wrapper authenticates as nobody — `could not connect to server "timescaledb_server"` — with both
+  databases otherwise perfectly restored. The verification step at the end exists to catch exactly
+  this.
+- **Restore order is fixed: Supabase first, then TimescaleDB, then verify.** `public.telemetry` is
+  a `postgres_fdw` foreign table, not a table; restoring the historian first leaves the wrapper
+  pointing at nothing, and the failure surfaces as a *relation-level* PostgREST error that reads
+  like a schema fault. `restore-databases.sh` enforces the order and then queries through the
+  wrapper as `authenticated`, because a restore that loses grants queries fine as `postgres`.
+- **The historian restore is wrapped in `timescaledb_pre_restore()` / `post_restore()`.** The
+  extension's `_timescaledb_catalog.continuous_agg` carries circular foreign keys — `pg_dump` warns
+  at dump time — and restoring it with background workers live leaves the three rollups from `0010`
+  registered but never refreshing. The script runs `post_restore()` even when the restore fails,
+  because the alternative is a database whose retention, compression and refresh jobs are all
+  silently stopped.
+- **`digital_thread` is why this matters most.** Telemetry can be re-derived from a rebirth; an
+  append-only audit trail cannot.
+
+**This is not PITR.** Recovery is to the last run and no finer. A real RPO wants WAL archiving or
+pgBackRest.
+
+### Tier 2: infrastructure snapshots
+
+For the Kubernetes target — CSI `VolumeSnapshot`, Velero, and the storage-PVC gap — see
+[`../deploy/k8s/README.md`](../deploy/k8s/README.md#backups). For an on-prem edge appliance running
+Compose on a VM, the recommended pattern is **Proxmox VE + Proxmox Backup Server**:
+
+> **`qemu-guest-agent` must be running in the guest, and this is the whole invariant.** Proxmox
+> issues `fs-freeze` through the agent before it snapshots, which flushes and quiesces the
+> filesystem so both PostgreSQL data directories are captured at one consistent point. Without the
+> agent the snapshot is taken live and is **crash-consistent, not transaction-consistent** — it
+> restores like a machine that lost power. PostgreSQL will usually recover from WAL, but "usually"
+> is doing real work in that sentence, and a snapshot of *two* independent databases taken without
+> a freeze can land them at different points in time, which is how `public.telemetry` ends up
+> referencing assets the Supabase database has never heard of.
+>
+> Verify it, rather than assuming it: `qm agent <vmid> ping` from the Proxmox host must answer, and
+> `Agent: Enabled` must appear in the VM's Options. Installing the package in the guest is not
+> sufficient — the VM option has to be ticked too, and a snapshot taken with it unticked reports
+> success.
+
+**Neither tier is a backup until a restore has been rehearsed.** An untested backup is a belief,
+not a capability.
+
+---
+
+## Adding a vocabulary
+
+A **vocabulary** is reference data describing what a standard *defines*. It is deliberately separate
+from `metric_catalog`, which records what a device actually *publishes* — that separation is the
+reason a vocabulary can be replaced wholesale without touching device configuration. The seeded
+standards and how each identity was verified are in [`../docs/vocabularies.md`](../docs/vocabularies.md).
+
+Every vocabulary must satisfy all nine, and CI checks five of them:
+
+1. Migration is **idempotent** (`ON CONFLICT … DO UPDATE`) — db-init replays it every boot.
+2. RLS enabled, SELECT policy for `authenticated`, `REVOKE ALL FROM PUBLIC, anon`, no write policy.
+3. `metric_groups` rows registered in the migration, carrying `standard` provenance.
+4. `NOTIFY pgrst, 'reload schema'`.
+5. `node scripts/sync-helm-chart-files.mjs` run and committed (CI checks it with `--check`).
+6. Migration header carries a ⚠ VERIFY block naming what was and was not confirmed against the
+   source document. **Seeds are transcriptions**; generate them from the machine-readable source
+   rather than typing them, and say which source.
+7. Frontend mirror module plus unit tests; check whether `scripts/check-docs-drift.mjs` or
+   `scripts/check-mirror-drift.mjs` needs a new pair.
+8. `docs/openapi.yaml` updated if any endpoint shape changes.
+9. **A `STANDARD_NAMESPACES` entry in [`../i3x/address_space.py`](../i3x/address_space.py).** This
+   is the one that fails silently: i3X maps `metric_catalog.standard` onto a Namespace, so a
+   standard with no entry is **omitted from `GET /namespaces`** — a 200 with a shorter list, which
+   reads as "this deployment does not use that standard". The key must be the exact `standard`
+   string the migration writes.
 
 ---
 

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import { api } from '../../api'
+import { trackRequest } from '../../lib/apiActivity'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
@@ -12,6 +13,8 @@ import { describeAuthFailure } from '../../utils/sessionError'
 import CopyableId from '../common/CopyableId'
 import { effectiveSparkplugId } from '../../utils/sparkplugId'
 import { ActionMenu } from '../common/ActionMenu'
+import { ActionButton } from '../common/ActionButton'
+import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { TagList } from '../common/TagList'
 import { Model3DUploader } from '../common/Model3DUploader'
 import { QuarantinePayloadCell } from '../common/QuarantinePayloadCell'
@@ -288,9 +291,15 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
         // No asset_id: the devices table generates the UUID (gen_random_uuid()).
         await api.post('/api/v1/devices', payload)
       }
-      setShowForm(false); loadAll(); showToast('Device saved successfully', 'success')
+      setShowForm(false); loadAll(); showToast(editing ? 'Device saved successfully' : 'Device created successfully', 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
+
+  // In-flight state for the device form, and for whichever row is restoring or being rejected.
+  // Restore and Reject share one key space on purpose: they are both row mutations that reload the
+  // list, and two of them overlapping is two reloads racing.
+  const [saving, runSave] = usePendingAction()
+  const [rowBusyId, runRowAction] = usePendingKey()
 
   // Tracks the device currently exporting, so the row's own button can show progress rather than
   // a page-wide spinner -- composing a shell is a few round trips and the table stays usable.
@@ -355,7 +364,11 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
     const targetGateway = body?.active_gateway_id || body?.gateway_id || null
 
     try {
-      const { data, error } = await supabase.functions.invoke('approve-quarantine', {
+      // trackRequest, because this goes to the Edge Function on the supabase client directly and
+      // so never passes the `api` wrapper that feeds the top bar's activity line. Approving a
+      // quarantined device is among the slowest mutations here -- it is the last one that should
+      // leave the indicator dark.
+      const { data, error } = await trackRequest(() => supabase.functions.invoke('approve-quarantine', {
         // asset_name carries the operator's correction to the label the device announced
         // itself under. It was collected by the modal and then dropped on the floor here.
         //
@@ -369,7 +382,7 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
           cell_id: body?.cell_id ?? '',
           location_scope: body?.location_scope || 'cell'
         }
-      })
+      }))
 
       if (error) {
         // error.message is always generic on a non-2xx; the real reason (e.g.
@@ -396,9 +409,10 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
 
   const mergeQuarantine = async (assetId, candidateId) => {
     try {
-      const { data, error } = await supabase.functions.invoke('approve-quarantine', {
+      // Tracked for the same reason as approveQuarantine above.
+      const { data, error } = await trackRequest(() => supabase.functions.invoke('approve-quarantine', {
         body: { device_id: assetId, merge_into_device_id: candidateId }
-      })
+      }))
 
       if (error) {
         const detail = await edgeFunctionErrorMessage(error, 'Quarantine match acceptance denied or failed')
@@ -702,14 +716,19 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
                         >
                           Approve & Assign
                         </button>
-                        <button
+                        {/* Keyed on the row, not on the table: the quarantine list is often a
+                            dozen rows deep after a bad birth, and one boolean would spin every
+                            Reject button for a click on one of them. */}
+                        <ActionButton
                           className={`btn btn-danger btn-sm ${!canReject ? 'btn-disabled' : ''}`}
                           disabled={!canReject}
-                          onClick={() => canReject && rejectQuarantine(q)}
+                          pending={rowBusyId === q.asset_id}
+                          pendingLabel="Rejecting…"
+                          onClick={() => canReject && runRowAction(q.asset_id, () => rejectQuarantine(q))}
                           title={!canReject ? 'Requires Admin permissions' : 'Reject quarantine payload'}
                         >
                           Reject
-                        </button>
+                        </ActionButton>
                       </div>
                     </td>
                   </tr>
@@ -1055,8 +1074,15 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
             </div>
 
             <div className="modal-actions">
-              <button className="btn btn-ghost" onClick={() => setShowForm(false)} title="Cancel edits">Cancel</button>
-              <button className="btn btn-primary" onClick={save} title="Save device configuration and gateway assignment">Save Configuration</button>
+              <button className="btn btn-ghost" onClick={() => setShowForm(false)} disabled={saving} title="Cancel edits">Cancel</button>
+              <ActionButton
+                pending={saving}
+                pendingLabel={editing ? 'Saving…' : 'Creating…'}
+                onClick={() => runSave(save)}
+                title="Save device configuration and gateway assignment"
+              >
+                Save Configuration
+              </ActionButton>
             </div>
           </div>
         </div>
@@ -1204,7 +1230,9 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
           // device you have already picked, which is exactly what this drawer is.
           selectedDevice.is_archived ? {
             label: 'Restore Device', icon: <IconRefreshCw size={13} />,
-            onClick: () => restoreDevice(selectedDevice.asset_id, selectedDevice.asset_name),
+            onClick: () => runRowAction(selectedDevice.asset_id, () => restoreDevice(selectedDevice.asset_id, selectedDevice.asset_name)),
+            pending: rowBusyId === selectedDevice.asset_id,
+            pendingLabel: 'Restoring…',
             disabled: !canArchive,
             primary: true,
             title: !canArchive ? 'Requires Admin permissions' : 'Restore device back to active service'

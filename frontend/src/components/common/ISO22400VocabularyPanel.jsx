@@ -12,7 +12,7 @@ import { STANDARDS } from '../../utils/standards'
  * EVENT meaning "the device is connected", which is not the ISO 22400 availability ratio.
  *
  * "In use" is decided by semantic id where the catalog has one, falling back to the name token.
- * That is AAS Phase 1 earning its keep: a metric named anything at all is recognised as this KPI
+ * That is `semantic_id` earning its keep: a metric named anything at all is recognised as this KPI
  * once it carries the KPI's semanticId, which is the whole point of recording one.
  */
 export function iso22400VocabularyTab({ vocabulary, catalog, onUseKpi }) {

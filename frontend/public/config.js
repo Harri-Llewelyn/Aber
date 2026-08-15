@@ -17,7 +17,7 @@
  * The key set must match RUNTIME_SETTING_NAMES in src/config.js; runtimeConfig.test.js fails if
  * the two drift.
  */
-window.__FACTORYPLUS_CONFIG__ = window.__FACTORYPLUS_CONFIG__ || {
+window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   // Supabase API gateway (Kong) as the BROWSER reaches it -- never the in-cluster address.
   VITE_SUPABASE_URL: '',
   // Public by design: this key is the `anon` role and is readable in any built bundle.

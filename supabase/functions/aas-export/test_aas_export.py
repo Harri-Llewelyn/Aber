@@ -40,8 +40,8 @@ ID_SHORT_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*[a-zA-Z0-9_]+$")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
-DEMO_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@factoryplus.local")
-DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "factoryplus123")
+DEMO_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@acs-cymru.local")
+DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "acscymru123")
 TARGET_DEVICE = os.getenv("AAS_TEST_DEVICE", "Simulated_CNC_01")
 
 try:
@@ -369,7 +369,7 @@ class TestAasExportLive(unittest.TestCase):
             "the Nameplate submodel must not claim an IDTA template it cannot fully populate",
         )
 
-    def test_factoryplus_nameplate_properties_are_not_given_invented_identifiers(self):
+    def test_acs_cymru_nameplate_properties_are_not_given_invented_identifiers(self):
         """AssetSparkplugId and friends are ours; IDTA defines nothing for them, so they carry
         nothing. An id minted under admin-shell.io for a local concept would be a forgery."""
         elements = {e["idShort"]: e for e in self.submodels["DigitalNameplate"]["submodelElements"]}
@@ -579,7 +579,7 @@ class TestAasxPackage(unittest.TestCase):
 
 @unittest.skipUnless(LIVE, SKIP_REASON)
 class TestMultiSubmodel(unittest.TestCase):
-    """Phase 5: one AAS Submodel per schema attached through device_submodels."""
+    """One AAS Submodel per schema attached through device_submodels."""
 
     @classmethod
     def setUpClass(cls):

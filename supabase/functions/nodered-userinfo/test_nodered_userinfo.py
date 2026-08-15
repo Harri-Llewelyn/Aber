@@ -69,7 +69,7 @@ def evaluate_nodered_userinfo(
     return 200, body
 
 
-ADMIN = {"id": "usr-admin-000", "email": "admin@factoryplus.local", "email_confirmed_at": "now"}
+ADMIN = {"id": "usr-admin-000", "email": "admin@acs-cymru.local", "email_confirmed_at": "now"}
 
 
 class TestNoderedUserinfoAuthentication(unittest.TestCase):

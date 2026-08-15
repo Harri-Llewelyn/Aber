@@ -127,7 +127,7 @@ jobs:
           node-version: '20'
 
       # Helm cannot read files outside its chart directory, so repository-owned configuration is
-      # mirrored into deploy/helm/factoryplus/files/ and committed. Publishing a chart whose mirror
+      # mirrored into deploy/helm/acs-cymru/files/ and committed. Publishing a chart whose mirror
       # is stale is the one failure here that survives the release and reaches a user's cluster.
       - name: Verify Chart Files Are In Sync With Their Sources
         run: node scripts/sync-helm-chart-files.mjs --check
@@ -343,16 +343,16 @@ jobs:
           version: v3.16.3
 
       # A chart that does not render must not be packaged, let alone published. values-dev.yaml is
-      # used because values.yaml alone has no credentials and factoryplus.validateSecrets FAILS THE
+      # used because values.yaml alone has no credentials and acs-cymru.validateSecrets FAILS THE
       # RENDER without them -- deliberately, so the refusal is legible rather than a stack that
       # comes up and rejects every request.
       - name: Lint
-        run: helm lint deploy/helm/factoryplus -f deploy/helm/factoryplus/values-dev.yaml
+        run: helm lint deploy/helm/acs-cymru -f deploy/helm/acs-cymru/values-dev.yaml
 
       - name: Render
         run: |
-          helm template factoryplus deploy/helm/factoryplus \
-            -f deploy/helm/factoryplus/values-dev.yaml > /tmp/rendered.yaml
+          helm template acs-cymru deploy/helm/acs-cymru \
+            -f deploy/helm/acs-cymru/values-dev.yaml > /tmp/rendered.yaml
           wc -l /tmp/rendered.yaml
 
       # --version and --app-version stamp the package WITHOUT editing Chart.yaml, so the released
@@ -364,9 +364,9 @@ jobs:
         run: |
           set -eu
           V='${{ needs.prepare-release.outputs.version }}'
-          helm package deploy/helm/factoryplus \
+          helm package deploy/helm/acs-cymru \
             --version "$V" --app-version "$V" --destination /tmp/chart
-          PKG="/tmp/chart/factoryplus-$V.tgz"
+          PKG="/tmp/chart/acs-cymru-$V.tgz"
           test -f "$PKG"
           echo "package=$PKG" >> "$GITHUB_OUTPUT"
           ls -la /tmp/chart
@@ -380,8 +380,8 @@ jobs:
         run: |
           set -eu
           V='${{ needs.prepare-release.outputs.version }}'
-          helm template factoryplus '${{ steps.package.outputs.package }}' \
-            -f deploy/helm/factoryplus/values-dev.yaml \
+          helm template acs-cymru '${{ steps.package.outputs.package }}' \
+            -f deploy/helm/acs-cymru/values-dev.yaml \
             --set e2e.enabled=true > /tmp/from-package.yaml
 
           MISSING=0
@@ -421,8 +421,8 @@ jobs:
           # successfully, prints the digest, and then fails writing the file -- so the error names
           # a temporary path and looks like a pull failure rather than a missing directory.
           mkdir -p /tmp/pulled
-          helm pull "$CHART_REPO/factoryplus" --version "$V" --destination /tmp/pulled
-          helm show chart "/tmp/pulled/factoryplus-$V.tgz"
+          helm pull "$CHART_REPO/acs-cymru" --version "$V" --destination /tmp/pulled
+          helm show chart "/tmp/pulled/acs-cymru-$V.tgz"
 
       - name: Summary
         run: |
@@ -432,11 +432,11 @@ jobs:
               echo "### Dry run — nothing was published"
               echo
             fi
-            echo "### factoryplus $V"
+            echo "### acs-cymru $V"
             echo
             echo '```bash'
-            echo "helm install factoryplus $CHART_REPO/factoryplus --version $V \\"
-            echo "  --namespace factoryplus --create-namespace \\"
+            echo "helm install acs-cymru $CHART_REPO/acs-cymru --version $V \\"
+            echo "  --namespace acs-cymru --create-namespace \\"
             echo "  --values my-values.yaml"
             echo '```'
             echo

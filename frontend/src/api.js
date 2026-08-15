@@ -1,4 +1,5 @@
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './lib/supabaseClient';
+import { withActivityTracking } from './lib/apiActivity';
 import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId } from './utils/sparkplugId';
 import { resolveDeviceLocation, SCOPE_SITE_WIDE } from './utils/cellResolution';
@@ -353,7 +354,13 @@ export function model3dPublicUrl(path) {
   return supabase.storage.from(MODEL_3D_BUCKET).getPublicUrl(path).data.publicUrl;
 }
 
-export const api = {
+/**
+ * The API surface itself. Exported below as `api`, wrapped so that every call through it is
+ * counted by lib/apiActivity -- which is what lights the top bar's activity line. Declared
+ * separately only because the wrapper has to be applied to the finished object; nothing should
+ * import `apiMethods` directly, or its calls will not be counted.
+ */
+const apiMethods = {
   /**
    * Upload a 3D model for a device and record its path on the row.
    *
@@ -1183,7 +1190,7 @@ export const api = {
     }
 
     if (path.startsWith('/api/v1/devices/aas-export')) {
-      // Phase 3 of the AAS roadmap. The whole document is composed server-side: the shell needs
+      // The whole document is composed server-side: the shell needs
       // the service role to read asset_config and the full metric_catalog, and composing it in the
       // browser would mean shipping that read surface to every client.
       //
@@ -1427,3 +1434,5 @@ export const api = {
     throw new Error('Unhandled API path: ' + path);
   }
 };
+
+export const api = withActivityTracking(apiMethods);

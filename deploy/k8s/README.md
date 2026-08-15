@@ -1,7 +1,7 @@
 # Kubernetes deployment — runbook
 
-The chart is `deploy/helm/factoryplus`. The design and its reasoning are in
-[`docs/kubernetes-migration-plan.md`](../../docs/kubernetes-migration-plan.md); this file is the
+The chart is `deploy/helm/acs-cymru`. The design and its reasoning are in
+[`docs/kubernetes-architecture.md`](../../docs/kubernetes-architecture.md); this file is the
 operational half.
 
 > **The whole stack is in the chart.** It renders, is reachable on
@@ -23,7 +23,7 @@ operational half.
 ### Local cluster with k3d
 
 ```bash
-k3d cluster create factoryplus \
+k3d cluster create acs-cymru \
   --agents 0 \
   --port "80:80@loadbalancer" \
   --k3s-arg "--disable=metrics-server@server:0" \
@@ -33,7 +33,7 @@ k3d cluster create factoryplus \
 `--port 80:80@loadbalancer` is what makes Traefik reachable from the host, so the ingress can be
 exercised through its real path rather than by port-forwarding straight to a Service.
 
-Teardown is `k3d cluster delete factoryplus` — it takes the PVCs with it, which is exactly what you
+Teardown is `k3d cluster delete acs-cymru` — it takes the PVCs with it, which is exactly what you
 want for a throwaway cluster and never what you want on k3s.
 
 ## Install
@@ -48,17 +48,17 @@ speaks OCI natively — there is no `helm repo add`, and no index to go stale.
 
 ```bash
 # What versions exist?
-helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/factoryplus --version 0.1.0
+helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/acs-cymru --version 0.1.0
 
-helm install factoryplus oci://ghcr.io/harri-llewelyn/acs-cymru/factoryplus \
+helm install acs-cymru oci://ghcr.io/harri-llewelyn/acs-cymru/acs-cymru \
   --version 0.1.0 \
-  --namespace factoryplus --create-namespace \
+  --namespace acs-cymru --create-namespace \
   --values my-values.yaml \
   --timeout 15m
 
 # `helm install` returns once the init hooks have finished. Readiness is a separate question:
-for w in $(kubectl -n factoryplus get statefulset,deploy -o name); do
-  kubectl -n factoryplus rollout status "$w" --timeout=10m
+for w in $(kubectl -n acs-cymru get statefulset,deploy -o name); do
+  kubectl -n acs-cymru rollout status "$w" --timeout=10m
 done
 ```
 
@@ -83,9 +83,9 @@ install. Pin it, in the command and in whatever runs the command.
 
 **There is no `-f values-dev.yaml` on this path** — that file is in the repository, not in your
 hands. But the chart *refuses to render* without credentials rather than generating them (see
-`factoryplus.validateSecrets`), so an install with no values fails with a message naming the four
+`acs-cymru.validateSecrets`), so an install with no values fails with a message naming the four
 it needs. Either write a `my-values.yaml` from
-[`values-prod.yaml.example`](../helm/factoryplus/values-prod.yaml.example) — which travels **inside
+[`values-prod.yaml.example`](../helm/acs-cymru/values-prod.yaml.example) — which travels **inside
 the package**, so `helm pull --untar` gives you a copy — or, for a throwaway cluster, pull the
 demo credentials out of `.env.example`.
 
@@ -103,15 +103,15 @@ hand and no `latest` tag to drift onto.
 # Mirror repository-owned config files into the chart (see "Chart files" below).
 node scripts/sync-helm-chart-files.mjs
 
-kubectl create namespace factoryplus
+kubectl create namespace acs-cymru
 
-helm install factoryplus deploy/helm/factoryplus \
-  --namespace factoryplus \
-  --values deploy/helm/factoryplus/values-dev.yaml \
+helm install acs-cymru deploy/helm/acs-cymru \
+  --namespace acs-cymru \
+  --values deploy/helm/acs-cymru/values-dev.yaml \
   --timeout 10m
 
-for w in $(kubectl -n factoryplus get statefulset,deploy -o name); do
-  kubectl -n factoryplus rollout status "$w" --timeout=10m
+for w in $(kubectl -n acs-cymru get statefulset,deploy -o name); do
+  kubectl -n acs-cymru rollout status "$w" --timeout=10m
 done
 ```
 
@@ -135,7 +135,7 @@ the `appVersion` default:
 ```yaml
 ingestion:
   image:
-    repository: registry.internal/factoryplus/ingestion
+    repository: registry.internal/acs-cymru/ingestion
     tag: "0.1.0-hotfix.2"
 ```
 
@@ -146,28 +146,28 @@ them are the asymmetric kind that surface days later on whichever component was 
 ## Verify
 
 ```bash
-kubectl -n factoryplus get pods
-kubectl -n factoryplus rollout status statefulset/timescaledb
-kubectl -n factoryplus rollout status statefulset/supabase-db
+kubectl -n acs-cymru get pods
+kubectl -n acs-cymru rollout status statefulset/timescaledb
+kubectl -n acs-cymru rollout status statefulset/supabase-db
 ```
 
 **The init hooks run *after* the workloads are created**, so `helm install` can return before the
 migrations have finished. Check them explicitly:
 
 ```bash
-kubectl -n factoryplus logs job/factoryplus-db-roles-init   # scoped role passwords
-kubectl -n factoryplus logs job/factoryplus-db-init         # migrations + seed
-kubectl -n factoryplus logs job/factoryplus-storage-init    # the asset-3d-models bucket
+kubectl -n acs-cymru logs job/acs-cymru-db-roles-init   # scoped role passwords
+kubectl -n acs-cymru logs job/acs-cymru-db-init         # migrations + seed
+kubectl -n acs-cymru logs job/acs-cymru-storage-init    # the asset-3d-models bucket
 
 # Schema actually applied?
-kubectl -n factoryplus exec -it statefulset/supabase-db -- \
+kubectl -n acs-cymru exec -it statefulset/supabase-db -- \
   psql -U postgres -d postgres -c '\dt public.*'
 ```
 
 The historian's bootstrap must also have run — this should list `assets` and `telemetry`:
 
 ```bash
-kubectl -n factoryplus exec -it statefulset/timescaledb -- \
+kubectl -n acs-cymru exec -it statefulset/timescaledb -- \
   psql -U postgres -d postgres -c '\dt'
 ```
 
@@ -176,8 +176,8 @@ repairable in place**. The postgres entrypoint runs `/docker-entrypoint-initdb.d
 an *empty* data directory, so:
 
 ```bash
-helm uninstall factoryplus -n factoryplus
-kubectl -n factoryplus delete pvc data-timescaledb-0
+helm uninstall acs-cymru -n acs-cymru
+kubectl -n acs-cymru delete pvc data-timescaledb-0
 # then reinstall
 ```
 
@@ -204,7 +204,7 @@ editing. Traefik listens on the node's :80.
 
 ```bash
 curl -H 'Host: app.127.0.0.1.nip.io' http://127.0.0.1/
-kubectl -n factoryplus get ingress
+kubectl -n acs-cymru get ingress
 ```
 
 Remove a route without disabling the service — `studio` and `docs` are the usual candidates, since
@@ -239,11 +239,11 @@ as a broken manifest rather than a race.
 
 ```bash
 kubectl apply -f deploy/k8s/internal-ca.yaml
-kubectl -n cert-manager wait --for=condition=Ready certificate/factoryplus-ca --timeout=120s
-kubectl get clusterissuer factoryplus-ca     # must reach Ready=True, "Signing CA verified"
+kubectl -n cert-manager wait --for=condition=Ready certificate/acs-cymru-ca --timeout=120s
+kubectl get clusterissuer acs-cymru-ca     # must reach Ready=True, "Signing CA verified"
 ```
 
-The `ClusterIssuer` reports `Ready=False, secret "factoryplus-ca-key-pair" not found` for a few
+The `ClusterIssuer` reports `Ready=False, secret "acs-cymru-ca-key-pair" not found` for a few
 seconds while the root is being signed. That is normal; if it *persists*, the root Certificate is in
 the wrong namespace — a `ClusterIssuer` resolves its keypair in cert-manager's own namespace
 (`--cluster-resource-namespace`, default `cert-manager`), never in the application's.
@@ -265,9 +265,9 @@ It is also cluster-scoped and shared, and a 10-year artefact against a chart upg
 helm upgrade ... \
   --set global.scheme=https \
   --set ingress.tls.enabled=true \
-  --set ingress.tls.certManager.clusterIssuer=factoryplus-ca \
+  --set ingress.tls.certManager.clusterIssuer=acs-cymru-ca \
   --set mosquitto.tls.enabled=true \
-  --set mosquitto.tls.clusterIssuer=factoryplus-ca \
+  --set mosquitto.tls.clusterIssuer=acs-cymru-ca \
   --set 'mosquitto.tls.extraIpSans={10.20.0.50}'      # the broker's external address
 ```
 
@@ -283,8 +283,8 @@ means seven certificates renewing independently.
 This is the real cost of an internal CA, and skipping it is worse than it looks.
 
 ```bash
-kubectl -n cert-manager get secret factoryplus-ca-key-pair \
-  -o jsonpath='{.data.tls\.crt}' | base64 -d > factoryplus-ca.crt
+kubectl -n cert-manager get secret acs-cymru-ca-key-pair \
+  -o jsonpath='{.data.tls\.crt}' | base64 -d > acs-cymru-ca.crt
 ```
 
 Install it in the trust store of every browser, operator laptop and gateway — GPO on Windows, MDM
@@ -326,7 +326,7 @@ The chart refuses to render a LoadBalancer deployment whose certificate has no e
 all. Get the address and put it in the SANs:
 
 ```bash
-kubectl -n factoryplus get svc mosquitto-external \
+kubectl -n acs-cymru get svc mosquitto-external \
   -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 ```
 
@@ -359,8 +359,8 @@ Two levels, and the distinction matters: one is safe to run against anything, th
 ### `helm test` — the cheap gate, mutates nothing
 
 ```bash
-helm test factoryplus -n factoryplus
-kubectl -n factoryplus logs factoryplus-test-fdw
+helm test acs-cymru -n acs-cymru
+kubectl -n acs-cymru logs acs-cymru-test-fdw
 ```
 
 Takes about a second and proves the **`postgres_fdw` link** end to end: the foreign server exists and
@@ -379,12 +379,12 @@ layers away from the cause.
 Off by default, because they seed and delete fixtures, drive real MQTT traffic and take minutes:
 
 ```bash
-helm upgrade factoryplus deploy/helm/factoryplus -n factoryplus \
-  -f deploy/helm/factoryplus/values-dev.yaml --set e2e.enabled=true
+helm upgrade acs-cymru deploy/helm/acs-cymru -n acs-cymru \
+  -f deploy/helm/acs-cymru/values-dev.yaml --set e2e.enabled=true
 
-kubectl -n factoryplus wait --for=condition=complete \
-  job/factoryplus-e2e-validate --timeout=20m
-kubectl -n factoryplus logs job/factoryplus-e2e-validate
+kubectl -n acs-cymru wait --for=condition=complete \
+  job/acs-cymru-e2e-validate --timeout=20m
+kubectl -n acs-cymru logs job/acs-cymru-e2e-validate
 ```
 
 - **`validate.py`** — the same 20 checks CI runs against Compose. In-cluster it needs **no host or
@@ -396,14 +396,14 @@ kubectl -n factoryplus logs job/factoryplus-e2e-validate
   parameters, which is what gives the Nameplate submodel anything to carry. Run first, its live
   checks skip themselves and report success — silently.
 
-Both need the **`factoryplus/test-runner`** image (`tests/Dockerfile`). It extends the ingestion image
+Both need the **`acs-cymru/test-runner`** image (`tests/Dockerfile`). It extends the ingestion image
 with `jsonschema` and the AAS suite; jsonschema is deliberately *not* in the production ingestion
 image, and without it the schema-conformance tests — the ones that caught three real IDTA metamodel
 violations — skip themselves while the suite still reports success.
 
 Object names come from the chart's `fullname` helper, which **collapses the usual
 `<release>-<chart>` prefix when the release name already contains the chart name**. With release
-`factoryplus` the Jobs are `factoryplus-e2e-validate`, with the chart name appearing once.
+`acs-cymru` the Jobs are `acs-cymru-e2e-validate`, with the chart name appearing once.
 
 ### Running `validate.py` from the host instead
 
@@ -413,11 +413,11 @@ and `SUPABASE_URL` all need overriding to point at port-forwards. Prefer the Job
 ## Upgrade / uninstall
 
 ```bash
-helm upgrade factoryplus deploy/helm/factoryplus -n factoryplus -f <values> --wait
+helm upgrade acs-cymru deploy/helm/acs-cymru -n acs-cymru -f <values> --wait
 
-helm uninstall factoryplus -n factoryplus
+helm uninstall acs-cymru -n acs-cymru
 # PVCs SURVIVE uninstall, by design — volumeClaimTemplates are not garbage collected.
-kubectl -n factoryplus get pvc          # delete deliberately, never as cleanup habit
+kubectl -n acs-cymru get pvc          # delete deliberately, never as cleanup habit
 ```
 
 ---
@@ -456,7 +456,7 @@ exist to make that hard to get wrong.
 
 ```bash
 NS=ghcr.io/harri-llewelyn/acs-cymru
-V=$(grep -E '^appVersion:' deploy/helm/factoryplus/Chart.yaml | head -1 \
+V=$(grep -E '^appVersion:' deploy/helm/acs-cymru/Chart.yaml | head -1 \
     | sed -E 's/^appVersion:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
 
 # Edge functions — context is the REPOSITORY ROOT, because node_red_flow.json lives there
@@ -526,7 +526,7 @@ consumer's machine is an authentication error on a repository that is public.
 After the first successful release, once per package:
 
 ```bash
-for p in factoryplus edge-runtime ingestion node-red frontend test-runner; do
+for p in acs-cymru edge-runtime ingestion node-red frontend test-runner; do
   gh api --method PATCH -H "Accept: application/vnd.github+json" \
     "/user/packages/container/acs-cymru%2F$p" -f visibility=public
 done
@@ -540,7 +540,7 @@ clicks per package under *Profile → Packages → <package> → Package setting
 Verify from somewhere with no credentials at all:
 
 ```bash
-helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/factoryplus --version 0.2.0
+helm show chart oci://ghcr.io/harri-llewelyn/acs-cymru/acs-cymru --version 0.2.0
 ```
 
 ### What the release does not do
@@ -602,11 +602,11 @@ editing.
 Debugging a suspected policy drop:
 
 ```bash
-kubectl -n factoryplus get networkpolicy
-kubectl -n factoryplus describe networkpolicy factoryplus-egress-supabase-db
+kubectl -n acs-cymru get networkpolicy
+kubectl -n acs-cymru describe networkpolicy acs-cymru-egress-supabase-db
 # Prove it from inside the source pod, which distinguishes DNS from connectivity:
-kubectl -n factoryplus exec deploy/ingestion -- getent hosts mosquitto
-kubectl -n factoryplus exec deploy/ingestion -- timeout 5 sh -c 'echo > /dev/tcp/mosquitto/1883' && echo reachable
+kubectl -n acs-cymru exec deploy/ingestion -- getent hosts mosquitto
+kubectl -n acs-cymru exec deploy/ingestion -- timeout 5 sh -c 'echo > /dev/tcp/mosquitto/1883' && echo reachable
 ```
 
 **If everything goes unready the moment you enable it**, your CNI does not exempt kubelet probes from
@@ -639,25 +639,56 @@ deliberately.)
 
 ### Backups
 
+Two tiers, answering different questions. **Tier 1 recovers data; tier 2 recovers a machine.**
+Neither substitutes for the other — a volume snapshot cannot restore one dropped table, and a
+logical dump cannot rebuild a dead node. The reasoning behind the tier 1 dumps, and the same
+strategy for the Compose target, is in
+[`../../supabase/README.md`](../../supabase/README.md#backup-and-recovery).
+
+#### Tier 1: logical dumps
+
 ```bash
 helm upgrade ... --set backup.enabled=true --set backup.persistence.size=100Gi
-kubectl -n factoryplus get cronjob factoryplus-backup
-kubectl -n factoryplus create job --from=cronjob/factoryplus-backup backup-now   # run one now
+kubectl -n acs-cymru get cronjob acs-cymru-backup
+kubectl -n acs-cymru create job --from=cronjob/acs-cymru-backup backup-now   # run one now
 ```
 
 `pg_dump -Fc` of both databases, nightly, onto a PVC that **survives `helm uninstall`** — deleting the
 release is exactly when the backups are most wanted.
 
+Ad hoc, without waiting for the schedule:
+
+```bash
+kubectl -n acs-cymru exec -i statefulset/supabase-db -- \
+  env PGPASSWORD="$PGPASSWORD" pg_dump -Fc -U postgres -d postgres > supabase-db.dump
+kubectl -n acs-cymru exec -i statefulset/timescaledb -- \
+  env PGPASSWORD="$PGPASSWORD" pg_dump -Fc -U postgres -d postgres > timescaledb.dump
+```
+
+`scripts/backup-databases.sh` covers the same ground for Compose and for any reachable PostgreSQL
+(`BACKUP_MODE=direct`), and writes a manifest so a restore does not have to infer which files belong
+together. Use `BACKUP_FORMAT=custom` there when both targets must produce one artefact shape.
+
 Restore:
 
 ```bash
-kubectl -n factoryplus exec -it statefulset/supabase-db -- \
-  pg_restore -U postgres -d postgres --clean --if-exists /backups/supabase-db-<stamp>.dump
+kubectl -n acs-cymru exec -it statefulset/supabase-db -- \
+  pg_restore -U supabase_admin -d postgres --clean --if-exists /backups/supabase-db-<stamp>.dump
 ```
 
-- **Ownership and privileges are kept in the dump on purpose.** `supabase_auth_admin`,
-  `authenticator` and `supabase_storage_admin` own objects and RLS policies reference roles by name; a
-  dump stripped of ownership restores into a database where every policy denies.
+- **`-U supabase_admin`, not `-U postgres`.** `postgres` is not a superuser in the
+  `supabase/postgres` image, and the six event triggers (`pgrst_drop_watch`, `issue_pg_cron_access`,
+  …) are owned by `supabase_admin`. A `--clean` restore as `postgres` dies on the first of them with
+  `must be owner of event trigger pgrst_drop_watch`. Found by rehearsing the restore, not by reading
+  it.
+- **Nine roles must exist before the restore**, and a dump contains no `CREATE ROLE`. Seven ship in
+  the image; `supabase_realtime_admin` is created by the **supabase-realtime container** and
+  `supabase_functions_admin` by pg_net's setup — so restore into a namespace where the whole stack
+  has booted, not just the database. Full table in
+  [`../../supabase/README.md`](../../supabase/README.md#backup-and-recovery).
+- **Ownership and privileges are kept in the dump on purpose.** Objects are owned by those roles and
+  RLS policies reference them by name; a dump stripped of ownership restores into a database where
+  every policy denies.
 - **`digital_thread` is the reason this matters most** — telemetry can be re-derived from a rebirth, an
   append-only audit trail cannot.
 - **This is a logical dump, not PITR.** It recovers to the last nightly run and no finer. A real RPO
@@ -666,6 +697,48 @@ kubectl -n factoryplus exec -it statefulset/supabase-db -- \
   the Job refuses rather than producing an unsigned request.
 
 **Test a restore.** An untested backup is a belief, not a capability.
+
+> **The historian restore needs TimescaleDB's guards.** `_timescaledb_catalog.continuous_agg`
+> carries circular foreign keys, and restoring it with the extension's background workers live
+> leaves the three rollups from migration `0010` registered but never refreshing — retention and
+> compression stop with them, and nothing about the running stack looks wrong until the disk fills.
+> Wrap it:
+>
+> ```bash
+> kubectl -n acs-cymru exec -it statefulset/timescaledb -- psql -U postgres -c 'SELECT timescaledb_pre_restore()'
+> # ... pg_restore ...
+> kubectl -n acs-cymru exec -it statefulset/timescaledb -- psql -U postgres -c 'SELECT timescaledb_post_restore()'
+> ```
+>
+> Run `post_restore()` **even if the restore failed.** `scripts/restore-databases.sh` does this for
+> the Compose target and verifies `public.telemetry` through the wrapper afterwards.
+
+#### Tier 2: infrastructure and disaster recovery
+
+Tier 1 does not recover a dead node. Two routes, depending on what the cluster runs on:
+
+| Situation | Route |
+| :--- | :--- |
+| Cluster with a CSI snapshotter | A `VolumeSnapshotClass` plus scheduled `VolumeSnapshot` objects per PVC. Needs no chart setting |
+| Cluster with Velero | Namespace-scoped backups; annotate the storage pod (see *Storage durability*) |
+| **k3s on a Proxmox VM** — the on-prem edge appliance case | **Proxmox VE + Proxmox Backup Server**, snapshotting the whole guest |
+
+> **`qemu-guest-agent` must be running in the guest, and this is the whole invariant.** Proxmox
+> issues `fs-freeze` through the agent before snapshotting, which quiesces the filesystem so both
+> PostgreSQL data directories are captured at one consistent point. Without it the snapshot is
+> **crash-consistent, not transaction-consistent** — it restores like a machine that lost power, and
+> a snapshot of *two* independent databases taken without a freeze can land them at different points
+> in time. That is how `public.telemetry` ends up referencing assets the Supabase database has never
+> heard of, which reads as data corruption rather than as a backup fault.
+>
+> Verify rather than assume: `qm agent <vmid> ping` must answer from the Proxmox host, and
+> `Agent: Enabled` must appear in the VM's Options. **Installing the package in the guest is not
+> sufficient** — the VM option has to be ticked too, and a snapshot taken with it unticked reports
+> success.
+
+PBS gives deduplicated, incremental, verifiable snapshots with their own retention policy, which is
+the closest thing to a real RPO this stack has — but it recovers the *appliance*, not a table. Keep
+tier 1 running underneath it.
 
 ### Secrets in production
 
@@ -678,7 +751,7 @@ Two need more:
 
 ```bash
 # Kong's API keys are substituted by an initContainer:
-kubectl -n factoryplus rollout restart deployment/supabase-kong
+kubectl -n acs-cymru rollout restart deployment/supabase-kong
 # The OAuth client secrets are HASHED INTO auth.oauth_clients by db-init:
 helm upgrade ...   # re-runs the post-upgrade hook
 ```
@@ -844,7 +917,7 @@ not even be able to see (`existingSecret`). After rotating `SUPABASE_ANON_KEY` o
 `SUPABASE_SERVICE_ROLE_KEY`:
 
 ```bash
-kubectl -n factoryplus rollout restart deployment/supabase-kong
+kubectl -n acs-cymru rollout restart deployment/supabase-kong
 ```
 
 ### The init hooks are safe to re-run, and that is load-bearing
@@ -869,7 +942,7 @@ running on the same machine holds 1883**, and `mosquitto-external` then sits `<p
 obvious cause. Most likely first-boot surprise for anyone running both targets on one laptop.
 
 ```bash
-kubectl -n factoryplus get svc mosquitto-external
+kubectl -n acs-cymru get svc mosquitto-external
 ```
 
 With `mosquitto.tls.enabled` the same applies to **8883**, and to `tlsNodePort` if you are on
@@ -932,7 +1005,7 @@ The five **platform** principals are not in that Secret. They come from the `sec
 and are re-applied on every pod start, so rotating one in values reaches the broker on the next
 restart.
 
-> **There is no shared broker account.** `factoryplus`, which held `readwrite spBv1.0/#` and was
+> **There is no shared broker account.** `acs-cymru`, which held `readwrite spBv1.0/#` and was
 > used by ingestion, i3X, Node-RED and the validator alike, has been deleted — it could forge
 > `DBIRTH`/`DDATA` for any machine on the site, which `verify_gateway_binding()` cannot detect for
 > a correctly bound device. `mosquitto.acl` now confines `factoryplus_ingestion` (read plus NCMD
@@ -997,7 +1070,7 @@ forever.
 
 Helm cannot read outside its own chart directory, but several files the chart needs are the same
 ones `docker-compose.yml` bind-mounts. `scripts/sync-helm-chart-files.mjs` mirrors them into
-`deploy/helm/factoryplus/files/`, the copies are committed (a packaged chart must install with no
+`deploy/helm/acs-cymru/files/`, the copies are committed (a packaged chart must install with no
 build step), and CI runs the script with `--check` to prove they are current.
 
 ```bash

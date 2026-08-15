@@ -31,7 +31,12 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
  * @param {node}     subtitle  Optional line under the title -- status badges, lifecycle flags.
  * @param {Array}    fields    [{ label, value, mono?, copyable?, title?, full? }] rendered as the
  *                             metadata list. `copyable` renders the value as a CopyableId button.
- * @param {Array}    actions   [{ label, icon, onClick, href?, disabled?, title?, primary? }]
+ * @param {Array}    actions   [{ label, icon, onClick, href?, disabled?, title?, primary?,
+ *                             pending?, pendingLabel? }]. `pending` puts that one action into the
+ *                             in-flight state -- spinner, swapped label, and unclickable until it
+ *                             settles. Per action rather than per panel: these lists mix a
+ *                             mutation with four navigations, and spinning all five for one click
+ *                             would claim work nothing is doing.
  * @param {Function} onCopy    Toast callback handed to CopyableId, so a copy is reported the same
  *                             way it is everywhere else in the app.
  * @param {node}     beforeActions  Sections that are FACTS about the entity -- a gateway's device
@@ -149,15 +154,21 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
                     {a.icon} {a.label}
                   </a>
                 ) : (
+                  // `pending` and `disabled` are separate states and are NOT merged into one
+                  // class: btn-disabled greys the control out to mean "not permitted", which is
+                  // the wrong thing to say about an action that is currently running.
                   <button
                     key={i}
-                    className={`${cls}${a.disabled ? ' btn-disabled' : ''}`}
+                    className={`${cls}${a.disabled ? ' btn-disabled' : ''}${a.pending ? ' btn-loading' : ''}`}
                     onClick={a.onClick}
-                    disabled={a.disabled}
+                    disabled={a.disabled || a.pending}
+                    aria-busy={a.pending || undefined}
                     title={a.title}
                     tabIndex={open ? 0 : -1}
                   >
-                    {a.icon} {a.label}
+                    {a.pending
+                      ? <><span className="spinner spinner-sm" />{a.pendingLabel || a.label}</>
+                      : <>{a.icon} {a.label}</>}
                   </button>
                 )
               })}

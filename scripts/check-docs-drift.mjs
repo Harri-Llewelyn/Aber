@@ -284,7 +284,7 @@ function edgeFunctionNames() {
 // non-empty and agrees with scripts/check-image-tag-parity.mjs.
 // -------------------------------------------------------------------------------------------------
 {
-  const values = read('deploy/helm/factoryplus/values.yaml');
+  const values = read('deploy/helm/acs-cymru/values.yaml');
   const built = [
     ...values.matchAll(/repository:\s*(\S+)[\s\S]{0,400}?^\s{4}tag:\s*""\s*$/gm),
   ].map((m) => m[1]);
@@ -327,7 +327,7 @@ function edgeFunctionNames() {
 // leave the old file in the chart and replay one migration twice under two names.
 // -------------------------------------------------------------------------------------------------
 {
-  const DIRS = ['supabase/migrations', 'deploy/helm/factoryplus/files/migrations'];
+  const DIRS = ['supabase/migrations', 'deploy/helm/acs-cymru/files/migrations'];
   const sets = [];
 
   for (const dir of DIRS) {

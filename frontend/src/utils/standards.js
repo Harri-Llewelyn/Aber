@@ -73,12 +73,12 @@ export const DEFAULT_SEMANTIC_ID_TYPE = 'IRI'
  *
  * Local by design and visibly so. Neither MTConnect nor ISO publishes resolvable per-concept IRIs,
  * and no maintained ECLASS/IEC CDD crosswalk to either is known, so an id minted in *their*
- * namespace would assert an interoperability that does not exist. `factoryplus.local` says plainly
+ * namespace would assert an interoperability that does not exist. `acs-cymru.local` says plainly
  * whose identifier it is: stable, deterministic and resolvable within this deployment, which is
  * enough for an AAS export to emit today and cheap to replace by a single UPDATE if a published
  * crosswalk appears. What it does not do is make two organisations agree.
  */
-export const LOCAL_SEMANTIC_NAMESPACE = 'https://factoryplus.local/semantics'
+export const LOCAL_SEMANTIC_NAMESPACE = 'https://acs-cymru.local/semantics'
 
 /**
  * MTConnect concept namespace, pinned to the *major* version.
@@ -97,7 +97,7 @@ export const ISO22400_SEMANTIC_NAMESPACE = `${LOCAL_SEMANTIC_NAMESPACE}/iso22400
  * The semantic id for an MTConnect metric, derived from its full name.
  *
  * Mirror of the SQL in archive/20260101000032 (folded into 0002_seed_data.sql):
- *   'https://factoryplus.local/semantics/mtconnect/v2.0/' || name
+ *   'https://acs-cymru.local/semantics/mtconnect/v2.0/' || name
  * Keep the two in step -- same obligation as utils/metricGroup.js and utils/sparkplugId.js carry.
  *
  * The *whole* name, not just the data item type: a catalog entry is a specific data item on a

@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
+import { ActionButton } from '../common/ActionButton'
+import { usePendingAction } from '../../hooks/usePendingAction'
 import { ConfirmModal } from './ConfirmModal'
 import {
   IconBookOpen,
@@ -123,6 +125,10 @@ export function EntityDocumentsModal({ entityType, entityId, entityName, onClose
     }
   }
 
+  // The link form's Save. The validation guards above return early WITHOUT a request, so the
+  // pending state clears on the same tick -- a rejected form must not leave a button spinning.
+  const [savingLink, runSaveLink] = usePendingAction()
+
   return (
     <div className="modal-overlay">
       <div className="modal modal-lg">
@@ -168,8 +174,15 @@ export function EntityDocumentsModal({ entityType, entityId, entityName, onClose
               </select>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
-              <button className="btn btn-ghost btn-sm" onClick={() => setShowForm(false)}>Cancel</button>
-              <button className="btn btn-primary btn-sm" onClick={save}>Save Link</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowForm(false)} disabled={savingLink}>Cancel</button>
+              <ActionButton
+                className="btn btn-primary btn-sm"
+                pending={savingLink}
+                pendingLabel="Saving…"
+                onClick={() => runSaveLink(save)}
+              >
+                Save Link
+              </ActionButton>
             </div>
           </div>
         )}
@@ -224,6 +237,7 @@ export function EntityDocumentsModal({ entityType, entityId, entityName, onClose
         {confirmDelete && (
           <ConfirmModal
             message={`Are you sure you want to remove the document link '${confirmDelete.display_name}'?`}
+            pendingLabel="Removing…"
             onConfirm={() => removeDoc(confirmDelete.id, confirmDelete.display_name)}
             onCancel={() => setConfirmDelete(null)}
           />

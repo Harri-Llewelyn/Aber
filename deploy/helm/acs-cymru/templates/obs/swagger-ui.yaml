@@ -1,0 +1,121 @@
+{{- if .Values.swaggerUi.enabled }}
+{{- $component := "swagger-ui" -}}
+{{- $fullname := include "acs-cymru.fullname" . -}}
+{{- $supabasePublic := include "acs-cymru.supabaseUrl" . -}}
+---
+{{/*
+The curated API specs. Mirrored from docs/ by scripts/sync-helm-chart-files.mjs, same as the
+migrations -- Helm cannot read outside its chart.
+
+TWO of them, keyed by filename: openapi.yaml is the Kong-fronted platform surface, and
+i3x-openapi.yaml is the i3X server, which is a different origin with a different auth model and
+cannot honestly share a `servers:` block with it.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-openapi" $fullname }}
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+{{- $found := 0 }}
+{{- range $path, $bytes := .Files.Glob "files/docs/*.yaml" }}
+{{- $found = add1 $found }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- if lt $found 2 }}
+{{- fail "\n\nacs-cymru: files/docs/ is missing a spec -- both openapi.yaml and i3x-openapi.yaml are expected.\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n" }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: swagger-ui
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: swagger-ui
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  replicas: {{ .Values.swaggerUi.replicas }}
+  selector:
+    matchLabels:
+      {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: swagger-ui
+          image: "{{ .Values.swaggerUi.image.repository }}:{{ .Values.swaggerUi.image.tag }}"
+          imagePullPolicy: {{ .Values.swaggerUi.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # Two curated specs, both served from mounted files.
+            #
+            # THE POSTGREST LIVE-SCHEMA ENTRY WAS REMOVED, matching Compose. It pointed at
+            # /rest/v1/, which Kong gates with key-auth, so the browser fetched it without an
+            # apikey and the definition failed to load as an authorization error. It duplicated
+            # openapi.yaml, which is hand-maintained AND enforced by check-docs-drift.mjs against
+            # every published relation and edge function -- an auto-generated second view that no
+            # check can keep honest is worth less than the one that is.
+            #
+            # The i3X spec loads from this origin like the other file, but its "Try it out" cannot
+            # work: the i3X server sends no CORS headers and answers OPTIONS with 501, so the
+            # browser cannot reach :8090 cross-origin. The document says so in its description --
+            # it is a reference, not a live console, until that server grows CORS support.
+            - name: URLS
+              value: >-
+                [{"url":"/openapi.yaml","name":"ACS-Cymru Platform API"},
+                 {"url":"/i3x-openapi.yaml","name":"i3X 1.0 Server"}]
+            - name: URLS_PRIMARY_NAME
+              value: ACS-Cymru Platform API
+            - name: DEEP_LINKING
+              value: "true"
+            - name: DISPLAY_REQUEST_DURATION
+              value: "true"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.swaggerUi.resources | nindent 12 }}
+          volumeMounts:
+            - name: openapi
+              mountPath: /usr/share/nginx/html/openapi.yaml
+              subPath: openapi.yaml
+              readOnly: true
+            - name: openapi
+              mountPath: /usr/share/nginx/html/i3x-openapi.yaml
+              subPath: i3x-openapi.yaml
+              readOnly: true
+      volumes:
+        - name: openapi
+          configMap:
+            name: {{ printf "%s-openapi" $fullname }}
+{{- end }}

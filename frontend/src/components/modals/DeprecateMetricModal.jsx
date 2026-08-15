@@ -1,12 +1,16 @@
 import React, { useState } from 'react'
 import { IconAlertTriangle } from '../common/Icons'
+import { ActionButton } from '../common/ActionButton'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { usePendingAction } from '../../hooks/usePendingAction'
 
 export function DeprecateMetricModal({ metric, usageCount, catalog, onConfirm, onCancel }) {
+  const [deprecating, runDeprecate] = usePendingAction()
+
   // Escape closes. Via the shared stack rather than a listener of this component's own,
   // because a ConfirmModal can open on top of this one and a bare document listener on each
-  // would let one keypress dismiss both.
-  useEscapeKey(onCancel)
+  // would let one keypress dismiss both. Inert mid-flight -- see ConfirmModal.
+  useEscapeKey(deprecating ? () => {} : onCancel)
 
   const [supersededBy, setSupersededBy] = useState('')
 
@@ -41,10 +45,17 @@ export function DeprecateMetricModal({ metric, usageCount, catalog, onConfirm, o
         </div>
 
         <div className="modal-actions">
-          <button className="btn btn-ghost" onClick={onCancel} title="Cancel">Cancel</button>
-          <button className="btn btn-primary" style={{ background: 'var(--warning)', color: 'var(--warning-contrast)' }} onClick={() => onConfirm(supersededBy || null)} title="Confirm deprecation">
+          <button className="btn btn-ghost" onClick={onCancel} disabled={deprecating} title="Cancel">Cancel</button>
+          <ActionButton
+            className="btn btn-primary"
+            style={{ background: 'var(--warning)', color: 'var(--warning-contrast)' }}
+            pending={deprecating}
+            pendingLabel="Deprecating…"
+            onClick={() => runDeprecate(() => onConfirm(supersededBy || null))}
+            title="Confirm deprecation"
+          >
             Deprecate Metric
-          </button>
+          </ActionButton>
         </div>
       </div>
     </div>

@@ -29,7 +29,7 @@ supabase/.temp/
 # Helm
 #
 # A filled-in production values file holds real credentials. The .example is committed and is the
-# starting point; the copy never is. deploy/helm/factoryplus/files/ IS committed on purpose --
+# starting point; the copy never is. deploy/helm/acs-cymru/files/ IS committed on purpose --
 # those are mirrored config files a packaged chart must carry, see scripts/sync-helm-chart-files.mjs.
 deploy/helm/**/values-prod.yaml
 deploy/helm/**/values-local.yaml
@@ -39,6 +39,12 @@ deploy/helm/**/*.tgz
 # Generated Protobuf files
 *_pb2.py
 ingestion/*_pb2.py
+
+# Logical backups written by scripts/backup-databases.sh. These are FULL DATABASE DUMPS -- they
+# contain auth.users, hashed OAuth client secrets and the whole digital_thread. Never commit one.
+backups/
+*.sql.gz
+*.dump
 
 # OS / IDE
 .DS_Store

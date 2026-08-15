@@ -2,7 +2,7 @@
  * Report Bug -> GitHub issue.
  *
  * THE BUG THIS PINS. The target repository was hardcoded to
- * `Harri-Llewelyn/factoryplus-asset-tracking`, which is not this repository -- so every issue
+ * `Harri-Llewelyn/acs-cymru`, which is not this repository -- so every issue
  * filed through this button went to a tracker nobody working on this code reads. It failed
  * silently and looked like it worked: the tab opened, the toast said "Redirected to GitHub Issue
  * creation", and the report went nowhere useful.
@@ -53,12 +53,12 @@ describe('BugReportModal target repository', () => {
 
   // The specific regression. Asserted by name so reinstating the literal fails loudly rather
   // than quietly resuming misrouted reports.
-  it('never files against the stale factoryplus-asset-tracking repository', () => {
+  it('never files against the stale acs-cymru-asset-tracking repository', () => {
     renderModal()
     setTitle('anything')
     submit()
 
-    expect(open.mock.calls[0][0]).not.toMatch(/factoryplus-asset-tracking/)
+    expect(open.mock.calls[0][0]).not.toMatch(/acs-cymru-asset-tracking/)
   })
 
   it('defaults to this repository when VITE_GITHUB_REPO_URL is unset', async () => {
