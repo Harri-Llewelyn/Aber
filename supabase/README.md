@@ -535,10 +535,38 @@ docker compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" supabase-db \
 
 Four things about these dumps are not obvious and each has bitten someone:
 
-- **Ownership and privileges stay in the dump.** `supabase_auth_admin`, `authenticator` and
-  `supabase_storage_admin` own objects, and RLS policies reference roles **by name**. A dump
-  restored with `--no-owner` produces a database where every policy denies. The roles must already
-  exist — `supabase-db-roles-init` creates them, so restore into a stack that has booted once.
+- **Ownership and privileges stay in the dump, and nine roles must already exist.** A dump contains
+  **no `CREATE ROLE`** at all, yet objects are owned by roles and RLS policies reference them **by
+  name** — so a dump restored with `--no-owner` produces a database where every policy denies.
+  `restore-databases.sh` refuses up front, naming what is missing, because the alternative is
+  failing several hundred statements in. Two of the nine are traps:
+
+  | Role | Created by |
+  | :--- | :--- |
+  | `anon`, `authenticated`, `authenticator`, `service_role`, `supabase_admin`, `supabase_auth_admin`, `supabase_storage_admin` | the `supabase/postgres` image |
+  | **`supabase_realtime_admin`** | the **supabase-realtime container**, on its first start — nothing in this repository creates it |
+  | **`supabase_functions_admin`** | pg_net's setup. The dump *appears* to create it, but that `CREATE USER` sits inside an event-trigger function **body**, which a restore only defines and never executes — while a plain `GRANT USAGE ON SCHEMA net TO supabase_functions_admin` thousands of lines later *is* executed, and fails |
+
+  Between them, this is why "restore into a stack that has booted once" means the **whole stack**,
+  not just the database.
+
+- **Connect as `supabase_admin`, not `postgres`.** `postgres` is not a superuser in the
+  `supabase/postgres` image, and the six event triggers (`pgrst_ddl_watch`, `pgrst_drop_watch`,
+  `issue_pg_cron_access`, …) are owned by `supabase_admin`. A restore as `postgres` dies on the
+  first of them with `must be owner of event trigger pgrst_drop_watch`. Both scripts default to
+  `supabase_admin` for this reason.
+
+- **Restore into a freshly initialised database, not over a previously restored one.** The plain
+  format carries `--clean --if-exists`, which is what lets it replace the `auth` and `storage`
+  schemas the image ships. It cannot, however, drop an *inherited* constraint on Realtime's
+  daily `realtime.messages_*` partitions — a second restore over the first fails with
+  `cannot drop inherited constraint`. Drop the volume, or the database, first.
+
+- **The historian's password travels inside the dump.** `public.telemetry`'s user mapping carries
+  the credential `0001` registered. Restore into a historian whose password differs and the
+  wrapper authenticates as nobody — `could not connect to server "timescaledb_server"` — with both
+  databases otherwise perfectly restored. The verification step at the end exists to catch exactly
+  this.
 - **Restore order is fixed: Supabase first, then TimescaleDB, then verify.** `public.telemetry` is
   a `postgres_fdw` foreign table, not a table; restoring the historian first leaves the wrapper
   pointing at nothing, and the failure surfaces as a *relation-level* PostgREST error that reads

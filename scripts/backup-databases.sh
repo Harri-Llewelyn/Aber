@@ -35,7 +35,12 @@ BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
 BACKUP_FORMAT="${BACKUP_FORMAT:-plain}"
 
 SUPABASE_SERVICE="${SUPABASE_SERVICE:-supabase-db}"
-SUPABASE_DB_USER="${SUPABASE_DB_USER:-postgres}"
+# supabase_admin, NOT postgres. `postgres` is not a superuser in the supabase/postgres image, and
+# the six event triggers (pgrst_ddl_watch, pgrst_drop_watch, issue_pg_cron_access, ...) are owned by
+# supabase_admin. A restore connected as postgres dies on the first of them with
+# `must be owner of event trigger pgrst_drop_watch`, so the dump is taken as the role that can
+# also replay it.
+SUPABASE_DB_USER="${SUPABASE_DB_USER:-supabase_admin}"
 SUPABASE_DB_NAME="${SUPABASE_DB_NAME:-postgres}"
 SUPABASE_DB_HOST="${SUPABASE_DB_HOST:-localhost}"
 SUPABASE_DB_PORT="${SUPABASE_DB_PORT:-54322}"
@@ -70,8 +75,17 @@ case "$BACKUP_MODE" in
   docker|direct) ;;
   *) die "BACKUP_MODE must be 'docker' or 'direct', got '$BACKUP_MODE'" ;;
 esac
+# --clean --if-exists ON THE PLAIN FORMAT IS NOT OPTIONAL, and a restore rehearsal is the only way
+# to find that out. A plain dump is replayed by psql, which simply executes what it is given -- so
+# without DROP guards the very first statement to touch an object the target already has fails:
+#
+#     ERROR:  schema "auth" already exists
+#
+# and the real target ALWAYS has that object, because `auth`, `storage` and the Supabase roles ship
+# in the supabase/postgres image. The custom format never showed this because its restore path is
+# `pg_restore --clean --if-exists`, which carries the same behaviour as a flag at restore time.
 case "$BACKUP_FORMAT" in
-  plain)  DUMP_EXT="sql.gz"; DUMP_ARGS="-Fp -Z6" ;;
+  plain)  DUMP_EXT="sql.gz"; DUMP_ARGS="-Fp -Z6 --clean --if-exists" ;;
   custom) DUMP_EXT="dump";   DUMP_ARGS="-Fc" ;;
   *) die "BACKUP_FORMAT must be 'plain' or 'custom', got '$BACKUP_FORMAT'" ;;
 esac

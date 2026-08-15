@@ -673,12 +673,22 @@ Restore:
 
 ```bash
 kubectl -n factoryplus exec -it statefulset/supabase-db -- \
-  pg_restore -U postgres -d postgres --clean --if-exists /backups/supabase-db-<stamp>.dump
+  pg_restore -U supabase_admin -d postgres --clean --if-exists /backups/supabase-db-<stamp>.dump
 ```
 
-- **Ownership and privileges are kept in the dump on purpose.** `supabase_auth_admin`,
-  `authenticator` and `supabase_storage_admin` own objects and RLS policies reference roles by name; a
-  dump stripped of ownership restores into a database where every policy denies.
+- **`-U supabase_admin`, not `-U postgres`.** `postgres` is not a superuser in the
+  `supabase/postgres` image, and the six event triggers (`pgrst_drop_watch`, `issue_pg_cron_access`,
+  …) are owned by `supabase_admin`. A `--clean` restore as `postgres` dies on the first of them with
+  `must be owner of event trigger pgrst_drop_watch`. Found by rehearsing the restore, not by reading
+  it.
+- **Nine roles must exist before the restore**, and a dump contains no `CREATE ROLE`. Seven ship in
+  the image; `supabase_realtime_admin` is created by the **supabase-realtime container** and
+  `supabase_functions_admin` by pg_net's setup — so restore into a namespace where the whole stack
+  has booted, not just the database. Full table in
+  [`../../supabase/README.md`](../../supabase/README.md#backup-and-recovery).
+- **Ownership and privileges are kept in the dump on purpose.** Objects are owned by those roles and
+  RLS policies reference them by name; a dump stripped of ownership restores into a database where
+  every policy denies.
 - **`digital_thread` is the reason this matters most** — telemetry can be re-derived from a rebirth, an
   append-only audit trail cannot.
 - **This is a logical dump, not PITR.** It recovers to the last nightly run and no finer. A real RPO

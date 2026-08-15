@@ -11,10 +11,14 @@
 #                       join works, and a broken wrapper surfaces as a relation-level PostgREST
 #                       error that reads as a schema fault.
 #
-# ROLES MUST EXIST FIRST. A dump keeps ownership and its RLS policies reference roles BY NAME, so
-# restoring into a database without `supabase_auth_admin`, `authenticator` and
-# `supabase_storage_admin` produces a database where every policy denies. On a stack that has
-# booted once, db-roles-init has already created them. Do not "fix" a restore with --no-owner.
+# ROLES MUST EXIST FIRST -- all nine. A dump keeps ownership, its RLS policies reference roles BY
+# NAME, and it contains no CREATE ROLE. The preflight below refuses rather than failing several
+# hundred statements in; see it for which roles come from where. Do not "fix" this with --no-owner.
+#
+# RESTORE INTO A FRESHLY INITIALISED DATABASE. --clean lets the dump replace the auth and storage
+# schemas the image ships, but it cannot drop an INHERITED constraint on Realtime's daily
+# realtime.messages_* partitions, so a second restore over the first fails with `cannot drop
+# inherited constraint`. Drop the volume first.
 #
 # Full runbook:  supabase/README.md -> "Backup and Recovery"
 #
@@ -30,7 +34,10 @@ BACKUP_DIR="${BACKUP_DIR:-./backups}"
 BACKUP_STAMP="${BACKUP_STAMP:-}"
 
 SUPABASE_SERVICE="${SUPABASE_SERVICE:-supabase-db}"
-SUPABASE_DB_USER="${SUPABASE_DB_USER:-postgres}"
+# supabase_admin, NOT postgres -- see the note in backup-databases.sh. `postgres` is not a superuser
+# in the supabase/postgres image and cannot drop the supabase_admin-owned event triggers that a
+# --clean restore replaces.
+SUPABASE_DB_USER="${SUPABASE_DB_USER:-supabase_admin}"
 SUPABASE_DB_NAME="${SUPABASE_DB_NAME:-postgres}"
 SUPABASE_DB_HOST="${SUPABASE_DB_HOST:-localhost}"
 SUPABASE_DB_PORT="${SUPABASE_DB_PORT:-54322}"
@@ -140,6 +147,49 @@ ts_query() {
       -U "$TIMESCALE_DB_USER" -d "$TIMESCALE_DB_NAME" -tAc "$1"
   fi
 }
+
+# --- 0. Preflight: the roles the dump grants to must already exist -----------------------------
+#
+# A dump carries ownership and GRANTs but NO `CREATE ROLE` -- `grep -c '^CREATE ROLE'` on a dump of
+# this stack is 0. Every role it references has to be there first, and they arrive from three
+# different places:
+#
+#   * the supabase/postgres image     anon, authenticated, authenticator, service_role,
+#                                     supabase_admin, supabase_auth_admin, supabase_storage_admin
+#   * THE REALTIME CONTAINER, at boot supabase_realtime_admin
+#   * the pg_net extension's setup    supabase_functions_admin
+#
+# THE LAST TWO ARE BOTH TRAPS, and together they are why "restore into a stack that has booted
+# once" means the WHOLE stack, not just the database:
+#
+#   * Nothing in this repository creates supabase_realtime_admin -- supabase-realtime does, on its
+#     first start.
+#   * supabase_functions_admin LOOKS like it is created by the dump: there is a guarded
+#     `CREATE USER supabase_functions_admin` in it. That statement is inside an event-trigger
+#     function BODY, which a restore only defines and never executes, so the role is not created --
+#     but a plain `GRANT USAGE ON SCHEMA net TO supabase_functions_admin` several thousand lines
+#     later is executed, and fails.
+#
+# Either one kills a restore several hundred statements in. Checking first turns that into a
+# refusal that names them.
+#
+# MUST RUN AFTER sb_query IS DEFINED. Shell resolves functions at call time, so a preflight placed
+# above the definitions silently reports every role as missing.
+REQUIRED_ROLES="${REQUIRED_ROLES:-anon authenticated authenticator service_role supabase_admin supabase_auth_admin supabase_storage_admin supabase_realtime_admin supabase_functions_admin}"
+
+log "preflight: required roles"
+missing=""
+for role in $REQUIRED_ROLES; do
+  have=$(sb_query "SELECT count(*) FROM pg_roles WHERE rolname = '$role'" | tr -d '\r\n ')
+  [ "$have" = "1" ] || missing="$missing $role"
+done
+[ -z "$missing" ] || die "these roles do not exist in the target database:$missing
+
+A dump contains no CREATE ROLE, so they must pre-exist. Restore into a stack that has FULLY booted
+at least once -- supabase_realtime_admin is created by the supabase-realtime container, not by any
+migration. Do NOT work around this with --no-owner: RLS policies reference roles by name, and a
+dump stripped of ownership restores into a database where every policy denies."
+log "  ok -- all $(echo "$REQUIRED_ROLES" | wc -w | tr -d ' ') present"
 
 # --- 1. Supabase first -----------------------------------------------------------------------
 restore_db "supabase-db" "$SUPABASE_SERVICE" "$SUPABASE_DB_USER" "$SUPABASE_DB_NAME" \

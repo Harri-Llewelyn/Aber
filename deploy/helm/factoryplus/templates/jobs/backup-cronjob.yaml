@@ -201,7 +201,15 @@ spec:
                     echo "    $(du -h "$f" | cut -f1)  $f"
                   }
 
-                  {{ if .Values.supabaseDb.enabled }}dump supabase-db {{ include "factoryplus.supabaseDb.host" . }} {{ include "factoryplus.supabaseDb.port" . }} postgres postgres "$SUPABASE_PGPASSWORD"{{ end }}
+                  {{- /*
+                    supabase_admin, NOT postgres. `postgres` is not a superuser in the
+                    supabase/postgres image, and the six event triggers (pgrst_drop_watch,
+                    issue_pg_cron_access, ...) are owned by supabase_admin. Dumping as postgres
+                    succeeds, so this looks fine -- the cost lands at RESTORE time, where
+                    `pg_restore --clean` dies on the first of them with `must be owner of event
+                    trigger pgrst_drop_watch`. Both roles authenticate with postgresPassword.
+                  */}}
+                  {{ if .Values.supabaseDb.enabled }}dump supabase-db {{ include "factoryplus.supabaseDb.host" . }} {{ include "factoryplus.supabaseDb.port" . }} supabase_admin postgres "$SUPABASE_PGPASSWORD"{{ end }}
                   {{ if .Values.timescaledb.enabled }}dump timescaledb {{ include "factoryplus.timescale.host" . }} {{ include "factoryplus.timescale.port" . }} {{ .Values.timescaledb.username }} {{ .Values.timescaledb.database }} "$TS_PGPASSWORD"{{ end }}
                   {{- if $includeStorage }}
 
