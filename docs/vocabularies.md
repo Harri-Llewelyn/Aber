@@ -1,17 +1,20 @@
-# Vocabulary Expansion and Submodel Templates — Implementation Plan
+# Standard Vocabularies and Submodel Templates
 
-**Status:** direction agreed 2026-08-08; **nothing built**. Phase 0 is a gate and has not started.
-**Date:** plan drafted 2026-08-08, written up 2026-08-09.
+**All vocabularies described here are built and seeded.** This document is the reference for what
+each one is, where its identity was verified, and the constraints that govern adding another.
+Adding a vocabulary is a checklist in
+[`supabase/README.md`](../supabase/README.md#adding-a-vocabulary).
 
-## Goal
+## What the vocabulary layer covers
 
-Extend the standard vocabulary layer to cover the five asset classes on the target pilot shopfloor —
-machining tools, robots, AGVs, 3D printers, and a BMS — and adopt IDTA Submodel templates so exported
-AAS shells carry published semantic identifiers rather than locally minted ones.
+The standard vocabulary layer covers the five asset classes on the target pilot shopfloor —
+machining tools, robots, AGVs, 3D printers, and a BMS — and adopts IDTA Submodel templates so
+exported AAS shells carry published semantic identifiers rather than locally minted ones.
 
-The five additions are **OPC 40501-1** (Machine Tools), **OPC 40540** (Additive Manufacturing),
-**OPC 40001-4** (Machinery Energy Management), **PackML**, and **ASHRAE 223P** — see Phase 0 for how
-those identities were confirmed, and for the one that was wrong.
+Five standards were added to the original MTConnect and ISO 22400 pair: **OPC 40501-1** (Machine
+Tools), **OPC 40540** (Additive Manufacturing), **OPC 40001-4** (Machinery Energy Management),
+**PackML** (OPC 30050), and **ASHRAE 223P** — see *Verified identities and namespaces* below for
+how each was confirmed, and for the one that was wrong.
 
 Every addition follows the existing **"vocabulary, not catalog"** stance of `mtconnect_vocabulary`,
 `iso22400_vocabulary` and `opcua_vocabulary`: reference data describing what a standard *defines*,
@@ -33,15 +36,16 @@ kept separate from `metric_catalog`, which records what a device actually publis
   verdict applies to BACnet for the BMS. AGV *position* is telemetry, never `devices.cell_id` —
   writing it there fires `log_digital_thread_event()` on every update.
 
-## What the reconnaissance found
+## Extension points
 
-The extension points already exist, so most of this is additive rather than structural.
+Adding a standard is additive rather than structural, because of four properties worth knowing
+before proposing a change:
 
 - `VocabularyPanel` takes a `tabs` array of descriptors
-  ([VocabularyPanel.jsx:21](../frontend/src/components/common/VocabularyPanel.jsx#L21)) — adding a
+  ([VocabularyPanel.jsx:21](../frontend/src/components/common/VocabularyPanel.jsx#L21)) — a
   standard is one descriptor, not a refactor.
 - `opcua_vocabulary` is keyed `(companion_spec, name)`
-  ([0001:1415](../supabase/migrations/0001_baseline_schema.sql#L1415)), so three more OPC specs are
+  ([0001:1415](../supabase/migrations/0001_baseline_schema.sql#L1415)), so further OPC specs are
   **seed rows in the existing table**, not new tables.
 - `scripts/sync-helm-chart-files.mjs` mirrors `supabase/migrations/*.sql` into the chart
   automatically, and CI runs it with `--check`.
@@ -50,18 +54,13 @@ The extension points already exist, so most of this is additive rather than stru
   means IRDIs export with no code change. `semantic_id_type` is validation metadata here, not export
   input.
 
-Current migration head is `0010_telemetry_aggregates.sql`, so the first new migration is **`0011`**.
-
 ---
 
-## Phase 0 — Source acquisition and citation verification (gate)
+## Source acquisition and citation verification
 
-Every seed is a **transcription**, which is why the existing vocabulary migration headers carry
-⚠ VERIFY blocks. This phase is not optional, and it reorders everything else.
-
-**Status: complete, 2026-08-10. Nothing is blocked and nothing needs buying.** Every identity,
-namespace URI and version below was read out of the authoritative machine-readable source, not from
-prose.
+Every seed is a **transcription**, which is why the vocabulary migration headers carry ⚠ VERIFY
+blocks. Every identity, namespace URI and version below was read out of the authoritative
+machine-readable source, not from prose. Nothing here required a paid document.
 
 ### Verified identities and namespaces
 
@@ -90,11 +89,11 @@ PackML/Opc.Ua.PackML.NodeSet2.xml
 ```
 
 **PackML is no longer a paid dependency.** The plan originally treated ISA-TR88.00.02-2022 as a hard
-gate on Phase 3, because ISA and OMAC publish no concept IRIs and the document is paywalled. It is
+gate, because ISA and OMAC publish no concept IRIs and the document is paywalled. It is
 published as an OPC UA companion specification — **OPC 30050** — whose NodeSet carries the full
-state model *and* per-state descriptions under the MIT licence. Phase 3 is therefore unblocked, and
-gets **better** ids than the plan assumed: external IRIs rather than locally minted ones. See
-Phase 3a for what this collapses.
+state model *and* per-state descriptions under the MIT licence. PackML is therefore unblocked, and
+gets **better** ids than first assumed: external IRIs rather than locally minted ones. See
+*PackML states and value domains* for what this collapses.
 
 **The correction that matters: OPC 40450 is not Additive Manufacturing.** OPC 40450-1 is *OPC UA for
 Joining Systems — Part 1: Base* (tightening, riveting, flow drill fastening, gluing). Additive is
@@ -102,7 +101,7 @@ Joining Systems — Part 1: Base* (tightening, riveting, flow drill fastening, g
 wrong domain — exactly the failure the ⚠ VERIFY discipline exists to prevent, and one that would
 have been very hard to spot later because both numbers resolve to genuine OPC documents.
 
-**The clarification: "OPC UA energy" resolves to two documents, and the plan means the Machinery
+**The clarification: "OPC UA energy" resolves to two documents, and the Machinery
 one.** `OPC 40001-4` is the Machinery-series part and is the right fit, because this codebase
 already carries OPC 40001 Machinery and OPC 40010 Robotics. It is built on **OPC 34100** *OPC UA for
 Energy Consumption Management* v1.0.1, a joint ODVA / OPC Foundation / PI / VDMA specification —
@@ -123,7 +122,7 @@ worth reading, but 40001-4 is what gets seeded.
   ```
 
   That is the same footing as MTConnect's Apache-2.0, asserted by the rights holder rather than
-  inferred. **Decision taken: seed it** (see Phase 4 for the pre-publication caveat).
+  inferred. **Decision taken: seed it** (see *ASHRAE 223P* for the pre-publication caveat).
 
   The artefact to pin is
   `open223/defs.open223.info` → `ontologies/223p.ttl` (536 KB), version `v1.0.0-2026`.
@@ -136,11 +135,11 @@ worth reading, but 40001-4 is what gets seeded.
 - **PackML turned out not to be gated at all.** ISA-TR88.00.02-2022 is paid, and the 17 state names
   being widely quoted in vendor documentation is not the same as verifying them against a source.
   But the state model is *also* published as OPC 30050 under the MIT licence, which is a real source
-  that can be read — so the paid document is not needed. See the note above and Phase 3a.
+  that can be read — so the paid document is not needed. See the note above and *PackML states and value domains*.
 
 ### Generate the OPC seeds; do not transcribe them
 
-**This is the finding that most changes Phase 1.** The transcription risk that made Phase 0 a gate
+**This is the finding that most changes the OPC work.** The transcription risk that made verification a gate
 does not apply to the three OPC specs at all, because their vocabularies are published as
 machine-readable NodeSet2 XML. The repository already has the pattern and the precedent:
 [`scripts/generate-mtconnect-vocabulary.mjs`](../scripts/generate-mtconnect-vocabulary.mjs) exists
@@ -174,7 +173,7 @@ Two things the generator must handle that the MTConnect one does not:
   `OPC 40001-4 Machinery Energy`. `enforce_metric_group_spelling()` makes the first spelling of the
   matching `metric_groups` rows permanent.
 
-### Phase 0 is closed
+### What verification changed
 
 **Nothing outstanding, nothing to buy, no decisions left open.** All six vocabularies come from an
 open, machine-readable source whose licence permits redistribution in a derived work, and every one
@@ -188,12 +187,12 @@ of those licences was read rather than assumed:
 
 Everything below is implementable without a further acquisition step.
 
-## Phase 1 — OPC UA companion extensions (40501-1, 40540, 40001-4) — **BUILT**
+## OPC UA companion extensions (40501-1, 40540, 40001-4)
 
 **Delivered 2026-08-10**: 35 `opcua_vocabulary` rows and 8 `metric_groups` rows, generated by
 `scripts/generate-opcua-vocabulary.mjs` and guarded by `scripts/check-opcua-seed-sync.mjs` in CI.
 
-Two departures from the plan below, both deliberate:
+Two deliberate departures from the original design:
 
 - **The seed is curated, not dumped.** The NodeSets carry almost no descriptions — MachineTool
   declares 356 variables of which 18 have one, Machinery/Energy has 87 and none — so a bulk
@@ -212,14 +211,14 @@ Original plan follows.
 Cheapest possible change, and it proves the pipeline end to end. No new table, no new `STANDARDS`
 entry, no new panel.
 
-1. `scripts/generate-opcua-vocabulary.mjs` (see Phase 0) emits migration
+1. `scripts/generate-opcua-vocabulary.mjs` emits migration
    `0011_opcua_companion_extensions.sql` — `INSERT … ON CONFLICT (companion_spec, name) DO UPDATE`,
    idempotent because db-init replays every migration on boot. Commit generator and output together,
    and add a seed-sync check mirroring `check-mtconnect-seed-sync.mjs`.
 2. New `metric_groups` rows with `standard = 'OPC UA'`. Register them **in the migration**, not on
    first use — `enforce_metric_group_spelling()` makes the first spelling permanent.
 3. `semantic_id` = namespace URI + browse name, exactly as archived migration 0031 does — using the
-   three URIs confirmed in Phase 0.
+   three URIs confirmed above.
 4. Check `OPCUAVocabularyPanel` sections by `companion_spec`; with five specs it needs to, and that
    may be a small change.
 5. Run `node scripts/sync-helm-chart-files.mjs` and commit the result.
@@ -227,15 +226,15 @@ entry, no new panel.
 
 **Ship as one PR.** If this lands clean, Phases 3 and 4 are the same shape plus a table and a panel.
 
-## Phase 2 — IDTA Digital Nameplate — **BUILT**
+## IDTA Digital Nameplate
 
 **Delivered 2026-08-10**: migration `0011_device_nameplate.sql` (the `idta_submodel_templates`
 vocabulary seeded with all 20 IDTA 02006 v3.0 top-level elements, and a `device_nameplate` table),
 plus the AAS exporter retrofit and its tests.
 
-Three corrections to the plan below, all found by inspection:
+Three corrections to the original design, all found by inspection:
 
-- **`asset_config` was the wrong home**, and the plan recommended it. That table is ingestion-owned
+- **`asset_config` was the wrong home**, though it was the obvious one. That table is ingestion-owned
   — `ingestion.py` upserts it from every DBIRTH keyed `(asset_id, metric_name)` — so operator-typed
   values would be indistinguishable from device-asserted ones and churned on every rebirth. A
   dedicated `device_nameplate` table keeps the provenance distinction that a nameplate needs.
@@ -264,7 +263,7 @@ explaining why.
 **The Standard Vocabulary Reference now has a page of its own** (`/vocabulary`), split out of
 Schemas. The seam is between things you *do* — the schema registry and the metric catalog, which
 are this deployment's state — and things you *look up*, which is the half that grows whenever a
-standard is adopted rather than when anyone here decides it should. Phases 3a and 4 both add to it.
+standard is adopted rather than when anyone here decides it should. PackML and 223P both add to it.
 
 **Use still works across the split.** The Vocabulary page hands the Schemas page an *identifier*
 (`{ standard, name }`, or `{ standard, companionSpec, name }` for OPC UA, whose vocabulary is keyed
@@ -284,7 +283,7 @@ can be named.
 2. `idta_submodel_templates` table, with the same RLS shape as the other vocabularies: RLS enabled,
    SELECT policy for `authenticated`, everything revoked from `PUBLIC`/`anon`, no write policy.
 3. Seed Digital Nameplate's elements with their **published semanticIds**, typed `IRDI` where they
-   are IRDIs. **Phase 0 confirmed the 3.0 element list**, and it is a genuine mix — most elements
+   are IRDIs. **Verification confirmed the 3.0 element list**, and it is a genuine mix — most elements
    carry IEC CDD / ECLASS IRDIs (`ManufacturerName` → `0112/2///61987#ABA565#009`, `SerialNumber` →
    `0112/2///61987#ABA951#009`, `AssetSpecificProperties` → `0173-1#02-ABI218#003/0173-1#01-AGZ672#004`),
    while a few are admin-shell.io IRIs (`UniqueFacilityIdentifier`, and `AddressInformation`, which
@@ -303,9 +302,9 @@ can be named.
 One latent bug worth noting but not necessarily fixing now: a `semantic_id_type = 'ModelReference'`
 would also be emitted as `ExternalReference`, which would be wrong. Nothing sets it today.
 
-## Phase 3 — PackML states and value domains — **3a BUILT**
+## PackML states and value domains (OPC 30050)
 
-**3a delivered 2026-08-10**: 16 rows under `companion_spec = 'OPC 30050 PackML'`, a `PackML`
+**The vocabulary half**: 16 rows under `companion_spec = 'OPC 30050 PackML'`, a `PackML`
 metric group, and a fourth entry in `scripts/generate-opcua-vocabulary.mjs`. It collapsed exactly as
 predicted — no new table, no `STANDARDS.PACKML`, no panel, no mirror module, no i3X entry.
 
@@ -320,12 +319,12 @@ Two things the fourth NodeSet forced that the first three had not:
 - **The current PackML state is not in this vocabulary, deliberately.** `CurrentState` belongs to
   the inherited `StateMachineType` rather than to anything OPC 30050 declares, so there is nothing
   to verify against. Its *values* — the 17 TR88 states, which OPC 30050 does declare with their
-  canonical `StateNumber`s — are a value domain and belong in 3b.
+  canonical `StateNumber`s — are a value domain, covered below.
 
-**3b delivered 2026-08-10**: migration `0012_metric_permitted_values.sql`, the derived finding in
+**The value-domain half**: migration `0012_metric_permitted_values.sql`, the derived finding in
 `utils/deviceTags.js`, and its wiring into the Devices tab.
 
-**The immutability decision came out the other way, and the plan's lean below is wrong.**
+**The immutability decision came out the other way from the obvious one.**
 `permitted_values` is **not** frozen. The argument for freezing — a device is configured against
 its value set the way it is configured against its name — does not survive asking what the column
 is. `name` and `datatype` are a wire contract: a device is physically configured against them and
@@ -342,7 +341,7 @@ column fails the migration instead of shipping it.
 
 Two separable deliverables; do them in this order.
 
-**3a — the vocabulary, which is now a fourth NodeSet rather than a new subsystem.** Phase 0 found
+**The vocabulary is a fourth NodeSet rather than a new subsystem.** Verification found
 that PackML is published as an OPC UA companion specification — **OPC 30050**, *OPC UA for PackML —
 Common Object Model: PackML*, namespace `http://opcfoundation.org/UA/PackML/`, v1.01 (2020-10-08),
 under the same OPC Foundation MIT License 1.00 as the other three NodeSets. That collapses almost
@@ -351,7 +350,7 @@ all of this deliverable:
 - **No `packml_vocabulary` table, no `STANDARDS.PACKML`, no `PackMLVocabularyPanel`, no
   `utils/packml.js`, no i3X namespace entry.** These are `opcua_vocabulary` rows with
   `companion_spec = 'OPC 30050 PackML'`, exactly as OPC 40001 and OPC 40010 already are — add the
-  fourth NodeSet to the Phase 1 generator and the panel sections it by `companion_spec` for free.
+  fourth NodeSet to the OPC generator, and the panel sections it by `companion_spec` for free.
 - **Semantic ids are real IRIs**, not locally minted. The earlier position — mint under
   `LOCAL_SEMANTIC_NAMESPACE` because ISA and OMAC publish no concept IRIs — is superseded: the OPC
   UA representation does publish them, and the rule against minting an id that impersonates a
@@ -377,7 +376,7 @@ PackTags are also modelled (`PackMLCountDataType`, `PackMLDescriptorDataType`, `
 `PackMLProductDataType`, `ProductionMaintenanceModeEnum`), so the "states only first" decision is now
 a scoping choice rather than a consequence of what could be obtained.
 
-**3b — permitted values.** The schema decision worth settling explicitly:
+**Permitted values.** The schema decision worth stating explicitly:
 
 - Add `permitted_values` to `metric_catalog` (JSONB or `TEXT[]`).
 - **Does `enforce_metric_catalog_immutability()` widen to cover it?** It currently freezes only
@@ -392,7 +391,7 @@ a scoping choice rather than a consequence of what could be obtained.
   *out-of-vocabulary value*, computed at read time from last telemetry and stored nowhere — the same
   pattern as Unmodelled.
 
-## Phase 4 — ASHRAE 223P — **BUILT**
+## ASHRAE 223P
 
 **Delivered 2026-08-10**: migration `0013_ashrae223_vocabulary.sql` with **640 concepts** (576
 Class, 60 Relation, 3 AbstractClass, 1 Concept) generated by
@@ -456,6 +455,9 @@ Five things that matter, three of them specific to this source:
 
 ## Definition of done — applies to every vocabulary
 
+> Kept here as the authoritative list. The same checklist is reachable from
+> [`supabase/README.md`](../supabase/README.md#adding-a-vocabulary).
+
 1. Migration is **idempotent** (`ON CONFLICT … DO UPDATE`); db-init replays it every boot.
 2. RLS enabled, SELECT policy for `authenticated`, `REVOKE ALL FROM PUBLIC, anon`, no write policy.
 3. `metric_groups` rows registered in the migration, carrying `standard` provenance.
@@ -467,51 +469,26 @@ Five things that matter, three of them specific to this source:
    `scripts/check-mirror-drift.mjs` needs a new pair.
 8. `docs/openapi.yaml` updated if any endpoint shape changes.
 9. **A `STANDARD_NAMESPACES` entry in [`i3x/address_space.py`](../i3x/address_space.py).** This
-   obligation did not exist when the plan was first drafted — the i3X server has landed since, and
+   obligation post-dates the original vocabulary work — the i3X server landed after it, and
    it maps `metric_catalog.standard` onto an i3X Namespace. A new standard with no entry there is
    **silently omitted from `GET /namespaces`**: the endpoint answers 200 with a shorter list, which
    reads as "this deployment does not use that standard". The key must be the exact `standard`
    string the migration writes. `TestStandardNamespaces` in `i3x/test_i3x_service.py` pins the key
    set against `STANDARDS` in `standards.js`, so adding a standard there without a namespace fails
-   the suite — but only if the new standard is added to `standards.js`, which step 3a requires
+   the suite — but only if the new standard is added to `standards.js`, which the panel wiring requires
    anyway.
 
-## Decisions to settle before code
 
-| Decision | Options | Lean |
-|---|---|---|
-| One `opcua_vocabulary` for 5 specs? | Keep / split per spec | **Keep** — PK is already `(companion_spec, name)` |
-| `permitted_values` frozen? | Freeze / mutable | **Freeze** — it is a wire contract; widening is a version event |
-| Nameplate storage | `asset_config` / new `devices` columns | **`asset_config`** — it is config, and the table exists |
-| IDTA templates | Own table / rows in `schemas` | **Own table** — `schemas` is deployment state, templates are reference data |
-| PackML: full PackTags or states only? | Both / states only | **States only first** — the value-domain half is the higher-value half on this fleet |
-| PackML as its own standard, or OPC UA? | New `STANDARDS.PACKML` / `companion_spec` under OPC UA | **OPC UA** — it is what OPC 30050 was read from, and it deletes a table, a panel and a mirror module |
-| Digital Nameplate version | IDTA 02006 **3.0** / 2.0 | **Settled: 3.0** (Phase 0) |
-| Seed 223P before publication? | Wait / seed from open223 | **Settled: seed** from `223p.ttl` `v1.0.0-2026`, header stating it is pre-publication |
-| 223P: follow the QUDT import? | Only `s223:` / import QUDT too | **Only `s223:`** — QUDT is a separate vocabulary under a separate licence, and units are already covered |
-| 223P generator language | `.mjs` + RDF dep / Python + `rdflib` | Open — it is the one source that is not XML |
-| OPC seeds: generated or hand-written? | **Settled: generated** from NodeSet2 XML (Phase 0) | |
-| Does OPC 34100 (ECM) get seeded too? | Only `Machinery/Energy` / both | **Only Machinery/Energy**, ECM recorded as a dependency |
+## Settled decisions worth not relitigating
 
-## Sequencing
-
-**Phase 0 is complete and nothing is blocked.** No purchase is required for any of the six
-vocabularies.
-
-Phases **1, 2 and 3a can all run in parallel**, and 3a is now nearly free once 1 exists — it is a
-fourth entry in the same generator. Phase 3b is independent of all of them. Phase 4's vocabulary
-half is unblocked and can be built at any point; only its per-point tagging half waits on the BMS
-adapter.
-
-Note that Phase 4 is now the **largest** of the vocabulary phases rather than the most blocked: it
-is the only one that still needs a new table, a new `STANDARDS` entry, a mirror module, a panel and
-an i3X namespace entry, and its generator cannot reuse the NodeSet parser.
-
-Rough shape of the effort: Phase 1 measured in days, and less than first estimated now that the seed
-is generated rather than transcribed — the generator is the work, and there is a close model to copy.
-Phase 2 in a week or two, dominated by the exporter and the nameplate storage decision. Phase 3a
-folds into Phase 1; 3b is the careful one, because of the immutability-trigger decision. Phase 4
-dominated entirely by tagging effort rather than by code.
-
-**Natural first PR: Phase 1.** Small enough to review properly, and it will flush out anything this
-plan has wrong about the panel wiring.
+| Question | Settled answer |
+|---|---|
+| One `opcua_vocabulary` for five specs, or one table each? | **One** — the PK is already `(companion_spec, name)` |
+| Is `permitted_values` frozen like `metric_catalog.name`? | **No.** A value set widens as a device gains modes; freezing it forces a version event for a non-breaking change. `name` stays immutable |
+| Where does nameplate data live? | `asset_config` — it is config, and the table exists |
+| IDTA templates: own table or rows in `schemas`? | **Own table.** `schemas` is deployment state; templates are reference data |
+| PackML as its own standard, or under OPC UA? | **Under OPC UA** (`companion_spec = OPC 30050 PackML`) — it is what the NodeSet was read from, and it avoids a table, a panel and a mirror module |
+| Digital Nameplate version | IDTA 02006 **3.0** |
+| Seed 223P before the standard is published? | **Yes**, from `223p.ttl` `v1.0.0-2026`, with the migration header stating it is pre-publication |
+| Does 223P follow the QUDT import? | **No** — separate vocabulary, separate licence, and units are already covered |
+| Is OPC 34100 (ECM) seeded too? | **No** — only Machinery/Energy; ECM is recorded as a dependency |

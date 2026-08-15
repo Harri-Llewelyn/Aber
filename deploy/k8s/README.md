@@ -1,7 +1,7 @@
 # Kubernetes deployment — runbook
 
 The chart is `deploy/helm/factoryplus`. The design and its reasoning are in
-[`docs/kubernetes-migration-plan.md`](../../docs/kubernetes-migration-plan.md); this file is the
+[`docs/kubernetes-architecture.md`](../../docs/kubernetes-architecture.md); this file is the
 operational half.
 
 > **The whole stack is in the chart.** It renders, is reachable on

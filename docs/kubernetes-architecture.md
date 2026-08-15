@@ -193,11 +193,17 @@ Three changes made it usable from both:
 
 **The service and the `kong_config` volume both disappear on Kubernetes.** They stay on Compose.
 
-Related, and worth deciding now rather than later: the stack is on `kong:2.8.1-alpine`, which is
-unmaintained. Kong 3.x interpolates env vars in declarative config natively and would delete
-`supabase-kong-init` on the Compose side too, plus it makes the bundled `rate-limiting` plugin
-available (the stack currently has no rate limiting anywhere). See §11 — this is a **separate**
-piece of work and deliberately not bundled into a hosting change.
+Related, and worth deciding separately: the stack is on `kong:2.8.1-alpine`, which is unmaintained.
+Kong 3.x interpolates env vars in declarative config natively and would delete `supabase-kong-init`
+on the Compose side too. See §11 — a **separate** piece of work, deliberately not bundled into a
+hosting change.
+
+**Rate limiting does not depend on that bump.** The stack has none anywhere, but `rate-limiting` is
+bundled in Kong 2.8 already; it is unavailable only because naming plugins in `KONG_PLUGINS`
+*replaces* the bundled set rather than extending it. Adding it means a plugin block in `kong.yml`
+and the name added to both plugin lists, which CI already asserts agree. `policy: local` is the
+correct choice — `cluster` is unsupported in DB-less mode, and local counters are exact at one
+replica.
 
 ### 2.4 Grafana datasource: render, don't `sed`
 
@@ -1263,7 +1269,7 @@ oversights.
 - **Object storage stays on the `file` backend by default.** `supabaseStorage.backend: s3` is a
   supported switch (§4.4). With the durability gap closed (§10.5), what remains is a *scaling*
   question — the `file` backend is what pins that Deployment to one replica — not a data-loss one.
-- **The gateway is still Kong 2.8, which is unmaintained.** §2.3 covers the interim 3.x bump, which
-  would delete `supabase-kong-init` on the Compose side and make the bundled `rate-limiting` plugin
-  available; §7.1 covers the longer-term Gateway API question. Neither belongs in a hosting change.
+- **The gateway is still Kong 2.8, which is unmaintained**, and nothing rate-limits anything. §2.3
+  covers the interim 3.x bump and why rate limiting does not depend on it; §7.1 covers the
+  longer-term Gateway API question. Neither belongs in a hosting change.
 - **Backups are logical dumps, not PITR** (§10.3). The recovery floor is the last nightly run.

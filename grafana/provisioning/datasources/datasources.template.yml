@@ -5,7 +5,7 @@
 #     writes the result into the grafana_provisioning_datasources volume.
 #   * Kubernetes: Helm renders the same placeholder into a Secret mounted directly at
 #     /etc/grafana/provisioning/datasources/datasources.yml, and Grafana runs its stock /run.sh
-#     with no entrypoint override at all. See docs/kubernetes-migration-plan.md §2.4.
+#     with no entrypoint override at all. See docs/kubernetes-architecture.md §2.4.
 #
 # THE PLACEHOLDER IS `__DB_PASSWORD__`, not `${DB_PASSWORD}`. The shell form had to survive
 # Compose's own variable substitution AND sed's, which is what produced the barely-readable

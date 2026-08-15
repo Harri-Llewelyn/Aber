@@ -191,7 +191,7 @@ jobs:
   # BOTH must keep working. This job is the cheap half of that -- it renders and validates the
   # chart without a cluster, so a template that cannot produce valid manifests fails on the PR
   # rather than at `helm install`. The full in-cluster run (k3d + helm test + validate.py) is the
-  # k8s-validation job; see docs/kubernetes-migration-plan.md §8.1.
+  # k8s-validation job; see docs/kubernetes-architecture.md §8.1.
   helm-chart:
     name: Helm Chart Lint & Render
     runs-on: ubuntu-latest

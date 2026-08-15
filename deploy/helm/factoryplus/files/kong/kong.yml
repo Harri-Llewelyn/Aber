@@ -9,7 +9,7 @@
 #     would create a second source of truth that silently disagrees with .env the first time
 #     anyone rotates a key.
 #   * Kubernetes: Helm renders the same placeholders into a Secret mounted at the same path, and
-#     `supabase-kong-init` does not exist at all. See docs/kubernetes-migration-plan.md §2.3.
+#     `supabase-kong-init` does not exist at all. See docs/kubernetes-architecture.md §2.3.
 #
 # EVERY PLACEHOLDER IS `__UPPER_SNAKE__`, and both substituters assert that none survive. Adding
 # one means adding it to `supabase-kong-init` in docker-compose.yml AND to the chart.
@@ -93,7 +93,7 @@ services:
   #                 The Service is simply NAMED `realtime-dev`, so the leading label falls out of
   #                 ordinary in-cluster DNS and no alias mechanism is needed. This is why Realtime
   #                 is the single exception to keeping Service names identical to Compose service
-  #                 names -- see docs/kubernetes-migration-plan.md §3.4.
+  #                 names -- see docs/kubernetes-architecture.md §3.4.
   - name: realtime-v1
     url: __REALTIME_UPSTREAM_URL__
     routes:

@@ -49,7 +49,7 @@ means changing pins and recreating volumes.
   profile and does not belong inside a version bump.
 - **Not a Postgres HA project.** PG17's failover-safe logical replication slots remove one argument
   against the HA work deferred in
-  [kubernetes-migration-plan.md §3.3](kubernetes-migration-plan.md), because `supabase-realtime`
+  [kubernetes-architecture.md §3.3](kubernetes-architecture.md), because `supabase-realtime`
   holds a logical slot. That is a note for whoever picks HA up, not scope here.
 
 ### Decisions settled 2026-08-10
@@ -60,7 +60,7 @@ means changing pins and recreating volumes.
 | Historian tag | **Pinned** — `2.29.1-pg17`, not `latest-pg17` |
 | Signer migration number | **`0011`** — see below |
 
-`0011` is also wanted by [vocabulary-expansion-plan.md](vocabulary-expansion-plan.md), which is
+`0011` is also wanted by [vocabularies.md](vocabularies.md), which is
 Phase-0-gated on paid standards documents and has not started. This work is unblocked and lands
 first, so it takes `0011` and the vocabulary work starts at `0012`.
 

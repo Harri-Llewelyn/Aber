@@ -489,7 +489,7 @@ services:
   #
   # THIS SERVICE HAS NO KUBERNETES COUNTERPART -- Helm renders the same template into a Secret
   # directly. The template is shared; only the substituter differs. Adding a placeholder means
-  # adding it here AND in the chart. See docs/kubernetes-migration-plan.md §2.3.
+  # adding it here AND in the chart. See docs/kubernetes-architecture.md §2.3.
   supabase-kong-init:
     container_name: factoryplus_supabase_kong_init
     image: alpine:3.20
@@ -824,7 +824,7 @@ services:
   # inlining is simpler and there is nothing to mount. The Kubernetes path builds the same
   # Dockerfile with VITE_RUNTIME_CONFIG=true and mounts a ConfigMap over /config.js instead --
   # frontend/src/config.js prefers the runtime value and falls through to these. See
-  # docs/kubernetes-migration-plan.md §2.1.
+  # docs/kubernetes-architecture.md §2.1.
   frontend:
     container_name: factoryplus_frontend
     build:
@@ -1043,7 +1043,7 @@ services:
     # "password authentication failed", which points at the database rather than at this line.
     #
     # THIS OVERRIDE HAS NO KUBERNETES COUNTERPART -- Helm renders the same template into a Secret
-    # and Grafana runs its stock entrypoint. See docs/kubernetes-migration-plan.md §2.4.
+    # and Grafana runs its stock entrypoint. See docs/kubernetes-architecture.md §2.4.
     entrypoint:
       - /bin/sh
       - -e

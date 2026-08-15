@@ -9,7 +9,7 @@
 # which is what lets a rollback actually roll the functions back.
 #
 # THE COMPOSE PATH IS UNCHANGED and keeps bind-mounting. Both run identical code; only the
-# delivery differs. See docs/kubernetes-migration-plan.md §2.2.
+# delivery differs. See docs/kubernetes-architecture.md §2.2.
 #
 # BUILD CONTEXT IS THE REPOSITORY ROOT, not this directory:
 #   docker build -f supabase/functions/Dockerfile -t factoryplus/edge-runtime:<tag> .
