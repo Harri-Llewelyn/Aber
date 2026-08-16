@@ -157,6 +157,34 @@ asserting a human author for its own writes is exactly the claim it must not be 
 Once machine writes say so explicitly, `actor_source IS NULL` stops meaning "probably a heartbeat"
 and starts meaning **"we lost track of this"** — a reportable defect rather than the normal case.
 
+#### Verified after the fact
+
+Re-measured on the same topology (one simulated gateway, one device) against the shipped stack:
+
+| Window | `digital_thread` rows added | Traffic in the window |
+| :--- | ---: | :--- |
+| 7 min 6 s steady state | **0** | 14 heartbeats, 8 rebirths, 60 telemetry samples |
+
+175 rows/hour → **0**. The suppression is not sensitive to fleet size — it is evaluated per row, so
+the same measurement holds at 50 gateways.
+
+**The guard now has a test, which it did not before.**
+[`test_digital_thread_guard.py`](migrations/test_digital_thread_guard.py) pins both directions: the
+two non-events stay unlogged, and — the case a careless per-column implementation drops — a
+heartbeat that *also* carries a status change is still logged. `log_digital_thread_event()` is
+re-declared by three migrations (`0001`, `0003`, `0005`), all replayed on every boot with no ledger,
+so a fourth one omitting the suppression block would silently revert it and the only symptom would
+be the table quietly growing again.
+
+**One write the trigger cannot suppress, and the daemon now does.** Suppressing the *audit row* for
+an unchanged UPDATE does not suppress the *UPDATE*: it still costs a PostgREST round trip, a WAL
+record, and — because `devices` is `REPLICA IDENTITY FULL` and published to `supabase_realtime` — a
+full-row change event broadcast to every connected dashboard, once per device per rebirth.
+`process_dbirth()` therefore compares before writing, the same shape `record_declared_metrics()`
+already used. `gateways.last_heartbeat` is deliberately **not** deduplicated for the reason above:
+`public.gateway_status` derives staleness from it, so a suppressed heartbeat would report a live
+gateway as `STALE`.
+
 ### Metric name format (0007)
 
 Factory+ requires a metric name to be `/`-delimited folders whose segments use only alphanumerics

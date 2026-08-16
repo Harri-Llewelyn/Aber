@@ -313,6 +313,7 @@ python ingestion/test_device_location.py
 python ingestion/test_health_heartbeat.py
 python ingestion/test_rbe_telemetry.py
 python ingestion/test_mqtt_tls.py
+python ingestion/test_audit_write_dedup.py
 python i3x/test_i3x_service.py
 python supabase/functions/approve-quarantine/test_approve_quarantine.py
 python supabase/functions/deploy-nodered/test_deploy_nodered.py
@@ -322,6 +323,7 @@ python supabase/functions/aas-export/test_aas_export.py
 # Database suites — need Postgres
 python supabase/migrations/test_user_roles_rls.py
 python supabase/migrations/test_schema_versioning.py
+python supabase/migrations/test_digital_thread_guard.py
 
 # End-to-end — needs the running stack
 set -a && . ./.env && set +a && unset MQTT_HOST DB_HOST DB_PORT
