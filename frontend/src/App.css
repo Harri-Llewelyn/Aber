@@ -1780,6 +1780,54 @@ tbody tr:hover { background: var(--bg-glass); }
   padding: 5px 8px;
 }
 
+/* The 3D model preview in the device drawer.
+
+   ONE CLASS ON ALL THREE STATES -- the <model-viewer> element, the loading line and the error line
+   -- so the panel does not resize as the viewer module loads or fails. A frame that collapsed to
+   nothing and then sprang to 200px would push the uploader, the size and the Remove button down
+   under the cursor at the exact moment someone is reaching for them.
+
+   The background is `--bg-base` rather than the card surface: a glTF is lit against whatever is
+   behind it, and the recessed ground is what stops a pale model from disappearing into the panel. */
+.model-viewer-frame {
+  display: block;
+  width: 100%;
+  height: 200px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-base);
+  overflow: hidden;
+}
+
+/* The custom element fills the frame rather than carrying it -- see the note in Model3DViewer.jsx
+   for why the class cannot go on the element itself.
+
+   `touch-action: none` is what makes drag-to-orbit work on a touchscreen: without it the browser
+   claims the drag for scrolling and the model never moves. Scoped to the element, so the drawer
+   around it still scrolls normally. */
+.model-viewer-frame > model-viewer {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  --poster-color: transparent;
+}
+
+/* The loading and failure states, sharing the frame's box so neither changes the layout. Centred
+   rather than top-aligned: these replace a picture, and a sentence pinned to the top-left of an
+   otherwise empty 200px box reads as a broken render rather than a message. */
+.model-viewer-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
 /* The cell icon picker: a grid of labelled buttons, not a <select>.
    The operator is choosing what the card will LOOK like on the map, and a dropdown of eight words
    asks them to imagine the result instead of showing it.

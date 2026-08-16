@@ -27,7 +27,7 @@
  *
  * ---------------------------------------------------------------------------------------------
  * Usage:
- *   node scripts/aas-push-basyx.mjs --device=Simulated_CNC_01
+ *   node scripts/aas-push-basyx.mjs --device=Sim_CNC_Mill_01
  *   node scripts/aas-push-basyx.mjs --file=shell.json --basyx=http://localhost:8081
  *   node scripts/aas-push-basyx.mjs --device=... --dry-run
  *

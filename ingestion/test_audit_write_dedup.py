@@ -88,7 +88,7 @@ def registered_device(**overrides):
     """
     row = {
         "id": "device-uuid",
-        "name": "Simulated_CNC_01",
+        "name": "Sim_CNC_Mill_01",
         "sparkplug_id": DEVICE_ID,
         "reported_identity": None,
         "gateway_id": "gateway-uuid",
@@ -332,7 +332,7 @@ class TestHeartbeatStillWritesEveryTime(unittest.TestCase):
 
         self.gateway = {
             "id": "gateway-uuid",
-            "name": "Virtual_Gateway_NodeRED",
+            "name": "Sim_Gateway_Cell1_Machining",
             "sparkplug_id": GATEWAY_ID,
             "sparkplug_group": GROUP,
             "status": "ONLINE",

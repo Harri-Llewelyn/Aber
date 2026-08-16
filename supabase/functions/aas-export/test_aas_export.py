@@ -7,7 +7,7 @@ Two layers, deliberately in one file:
     Deno and the frontend bundle and would otherwise drift silently) and the authorization ladder.
     These need no stack, so they run in the edge-function CI job alongside the other auth tests.
 
-  * Live checks invoke the deployed function against `Simulated_CNC_01` and validate the emitted
+  * Live checks invoke the deployed function against `Sim_CNC_Mill_01` and validate the emitted
     document. They skip when no stack is reachable, so the same file is safe in both CI jobs; the
     e2e job is the one that actually exercises them.
 
@@ -42,7 +42,10 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 DEMO_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@acs-cymru.local")
 DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "acscymru123")
-TARGET_DEVICE = os.getenv("AAS_TEST_DEVICE", "Simulated_CNC_01")
+# The machining cell's first CNC on the `Simulated Shopfloor` flow, seeded by 0002 and given its
+# schema and nameplate by 0020 -- so it exists wherever the migrations run, not only where
+# provision-gateways.mjs has been run. It replaced `Simulated_CNC_01`, which 0020 deletes.
+TARGET_DEVICE = os.getenv("AAS_TEST_DEVICE", "Sim_CNC_Mill_01")
 
 try:
     from jsonschema import Draft201909Validator
@@ -293,9 +296,11 @@ class TestAasExportLive(unittest.TestCase):
         self.assertIn(status, (401, 403), "export must not be reachable without a user token")
 
     def test_rejects_a_non_uuid_device_id(self):
+        # The device's NAME, which is a real identifier for it and still not a uuid -- the
+        # plausible mistake, rather than an arbitrary bad string.
         status, _, _ = post_json(
             f"{SUPABASE_URL}/functions/v1/aas-export",
-            {"device_id": "Simulated_CNC_01"},
+            {"device_id": TARGET_DEVICE},
             {"apikey": ANON_KEY, "Authorization": f"Bearer {TOKEN}"},
         )
         self.assertEqual(status, 400)

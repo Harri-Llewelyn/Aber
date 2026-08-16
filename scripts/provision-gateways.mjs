@@ -369,6 +369,46 @@ async function ensureGateway(spec) {
       const cells = await rest(`/cells?id=eq.${row.cell_id}&select=id,name`);
       if (cells.length > 0) await renameIfNeeded('cells', cells[0], spec.cellName);
     }
+
+    // ---------------------------------------------------------------------------------------
+    // AN EXISTING GATEWAY WITH NO CELL STILL GETS ONE, and that arm is not hypothetical: it is
+    // now the ORDINARY case for the first gateway. `0002_seed_data.sql` seeds
+    // Sim_Gateway_Cell1_Machining so the machining CNC exists wherever the migrations run, and it
+    // seeds no cells at all (Unassigned and Site-Wide are derived lanes, not rows). So this
+    // function finds the gateway already present, took the early return above, and never called
+    // ensureCell -- leaving Cell 1 uncreated, the gateway Unassigned, and, because the caller
+    // reads `cellId` off THIS row, all three of its devices Unassigned too.
+    //
+    // It failed exactly that way once. The whole machining lane was missing from the shopfloor
+    // map while every row was otherwise correct, which is the kind of failure that looks like a
+    // rendering bug.
+    //
+    // Only when the row has NO cell. An operator who has deliberately moved a gateway to another
+    // cell owns that decision; re-running provisioning must not drag it back.
+    if (spec.cellName && !row.cell_id && row.location_scope !== 'site_wide' && !dryRun) {
+      const cellId = await ensureCell(spec.cellName);
+      if (cellId) {
+        await rest(`/gateways?id=eq.${row.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ cell_id: cellId }),
+        });
+        console.log(`    placed ${row.name} in '${spec.cellName}'`);
+        row.cell_id = cellId;
+      }
+    }
+
+    // Likewise for a site-wide gateway that was seeded without the assertion. The CHECK constraint
+    // forbids pairing `site_wide` with a cell_id, so this only applies to a row that has neither.
+    if (spec.locationScope === 'site_wide' && row.location_scope !== 'site_wide'
+        && !row.cell_id && !dryRun) {
+      await rest(`/gateways?id=eq.${row.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ location_scope: 'site_wide' }),
+      });
+      console.log(`    marked ${row.name} site-wide`);
+      row.location_scope = 'site_wide';
+    }
+
     return { row, created: false };
   }
 
@@ -417,8 +457,33 @@ async function ensureDevice(spec, gatewayId, cellId) {
     `/devices?id=eq.${spec.id}&select=id,name,sparkplug_id,gateway_id,cell_id,location_scope`
   );
   if (found.length > 0) {
-    await renameIfNeeded('devices', found[0], spec.name);
-    return { row: found[0], created: false };
+    const row = found[0];
+    await renameIfNeeded('devices', row, spec.name);
+
+    // SAME RECONCILIATION AS THE GATEWAY, and here for the same reason: `Sim_CNC_Mill_01` is
+    // seeded by 0002 with no cell, so on every stack this function finds it already present. A
+    // location written only on INSERT would leave the one device the AAS suite exports sitting in
+    // the Unassigned lane forever, no matter how many times provisioning was re-run.
+    //
+    // Guarded on the row having no location of its own, so an operator's deliberate placement
+    // survives -- location is a fact about where the machine IS, and this script does not know
+    // better than the person who moved it.
+    if (!dryRun && !row.cell_id && row.location_scope !== 'site_wide') {
+      const patch = spec.locationScope === 'site_wide'
+        // The CHECK constraint forbids site_wide with a cell_id, so these two are exclusive.
+        ? { location_scope: 'site_wide' }
+        : cellId ? { cell_id: cellId } : null;
+
+      if (patch) {
+        await rest(`/devices?id=eq.${row.id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+        Object.assign(row, patch);
+        console.log(
+          `    placed ${row.name} ${patch.location_scope === 'site_wide' ? 'site-wide' : 'in its cell'}`
+        );
+      }
+    }
+
+    return { row, created: false };
   }
 
   if (dryRun) {
@@ -455,6 +520,46 @@ async function ensureDevice(spec, gatewayId, cellId) {
  * parsing it back out of its stdout. Same value, and this script needs it to write the .env block;
  * scraping it from human-readable output would break the first time that wording changed.
  */
+/**
+ * Whether the BROKER already holds an account for this gateway.
+ *
+ * THE ROW EXISTING AND THE ACCOUNT EXISTING ARE DIFFERENT FACTS, and this function exists because
+ * they were being treated as one. `provisionCredential` used to issue a password only when it had
+ * just created the gateway row -- which is right for the case it was written for (do not silently
+ * rotate a working credential) and wrong for every case where the row arrives by another route.
+ * `0002_seed_data.sql` now seeds the machining gateway, so on a clean stack this script finds that
+ * row already present, skips its credential, and reports success. The broker has no account for it,
+ * .env gets no password, and one of the four cells never connects -- while the other three do, so
+ * the shopfloor map looks nearly right.
+ *
+ * Returns `null` when it cannot tell, which is treated as "exists" -- the safe direction, since
+ * guessing wrong the other way rotates a credential nobody asked to rotate.
+ */
+function credentialExists(sparkplugId) {
+  try {
+    if (target === 'k8s') {
+      const encoded = execFileSync('kubectl', [
+        '-n', process.env.ACS_CYMRU_NAMESPACE || 'acs-cymru',
+        'get', 'secret', process.env.MOSQUITTO_SECRET || 'mosquitto-passwords',
+        '-o', 'jsonpath={.data.password_file}',
+      ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      if (!encoded) return null;
+      return Buffer.from(encoded, 'base64').toString('utf8')
+        .split('\n').some((line) => line.startsWith(`${sparkplugId}:`));
+    }
+
+    const file = execFileSync('docker', [
+      'exec', process.env.MOSQUITTO_CONTAINER || 'acs-cymru_mosquitto',
+      'cat', '/mosquitto/config/password_file',
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    return file.split('\n').some((line) => line.startsWith(`${sparkplugId}:`));
+  } catch {
+    // The broker may not be up yet, or kubectl may not be configured. Not knowing is not a reason
+    // to reissue.
+    return null;
+  }
+}
+
 function provisionCredential(sparkplugId, gatewayIsNew) {
   // ---------------------------------------------------------------------------------------------
   // AN EXISTING GATEWAY KEEPS ITS PASSWORD UNLESS --rotate IS ASKED FOR.
@@ -472,11 +577,18 @@ function provisionCredential(sparkplugId, gatewayIsNew) {
   // Rotation is still available and is still what you want after a leak; it is just no longer what
   // you get by asking for something else.
   // ---------------------------------------------------------------------------------------------
-  if (!gatewayIsNew && !rotate) {
+  // ...BUT AN EXISTING GATEWAY WITH NO ACCOUNT STILL GETS ONE. Keeping a password the broker does
+  // not have is not "keeping" anything; it is the same silent failure this guard was written to
+  // prevent, reached from the other side. Only a credential that actually exists is protected.
+  if (!gatewayIsNew && !rotate && credentialExists(sparkplugId) !== false) {
     console.log(
       `  credential kept (gateway already existed; pass --rotate to reissue it)`
     );
     return null;
+  }
+
+  if (!gatewayIsNew && !rotate) {
+    console.log(`  the broker has no account for ${sparkplugId} -- issuing one`);
   }
 
   const password = randomBytes(24).toString('base64url');

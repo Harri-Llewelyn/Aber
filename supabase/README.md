@@ -473,7 +473,7 @@ Two routes to the same destination, and it is worth having both before you need 
 in as a supplementary part. This is the handover artefact — it needs nothing from this stack once
 it has been produced.
 
-**The REST push.** `npm run aas:push-basyx -- --device=Simulated_CNC_01` exports the JSON
+**The REST push.** `npm run aas:push-basyx -- --device=Sim_CNC_Mill_01` exports the JSON
 environment and POSTs it into a running server's `/submodels` and `/shells`.
 
 The second exists because the AASX carries its Environment as JSON at `aasx/aasenv-root.json` —

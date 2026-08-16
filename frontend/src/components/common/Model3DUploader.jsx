@@ -8,6 +8,7 @@ import {
 } from '../../utils/model3d'
 import { IconCube, IconUpload, IconTrash, IconExternalLink, IconAlertTriangle } from './Icons'
 import { ActionButton } from './ActionButton'
+import { Model3DViewer } from './Model3DViewer'
 
 /**
  * Attach one 3D visual model to a device.
@@ -134,10 +135,18 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
        The AAS fact has not been lost: it is on the dropzone's own title, and the public-read
        banner below still states the consequence that actually affects a decision. */
     <div>
+      {/* THE MODEL ITSELF, ABOVE THE CONTROLS THAT MANAGE IT. A filename and a byte count identify
+          a file; they do not tell an operator whether the right machine is attached to the right
+          device, which is the one question this panel is opened to answer and the one a wrong
+          upload gets wrong silently. Only rendered when something is attached -- the dropzone
+          below is what the empty state looks like, and a placeholder canvas above it would be a
+          second empty state saying the same thing. */}
+      {path && <Model3DViewer path={path} name={device?.asset_name || device?.name} />}
+
       {path ? (
         <div
           className="card"
-          style={{ padding: '12px 14px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}
+          style={{ marginTop: '10px', padding: '12px 14px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}
         >
           <IconCube size={22} />
           <div style={{ flex: '1 1 220px', minWidth: 0 }}>

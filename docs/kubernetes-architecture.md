@@ -896,9 +896,10 @@ Both targets must stay green.
 4. **`helm test` first (§9-M6)** — the `postgres_fdw` cross-database check. It is seconds long and
    turns a whole class of deep, misattributed `validate.py` failures into one legible one.
 5. Run `ingestion/validate.py` **as a Job in the namespace** (§2.5), then
-   `supabase/functions/aas-export/test_aas_export.py` the same way — ordered after `validate.py`,
-   which is what approves `Simulated_CNC_01` out of quarantine and gives the Nameplate submodel
-   anything to carry.
+   `supabase/functions/aas-export/test_aas_export.py` the same way — ordered after `validate.py` so
+   that a failed conformance run stops the export suite rather than being reported twice. Its
+   subject, `Sim_CNC_Mill_01`, is seeded by the migrations (`0002`, then `0020` for its schema and
+   IDTA nameplate), so it carries no data dependency on the first Job.
 6. Assert the Realtime WebSocket upgrade through the ingress — the same 101-status assertion the
    Compose job already makes, for the same reason (a healthy container behind a misconfigured
    gateway passes every other check). Make this one go through the **ingress**, not a

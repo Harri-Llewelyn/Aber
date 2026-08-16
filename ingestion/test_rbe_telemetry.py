@@ -52,8 +52,8 @@ _stub("paho.mqtt.client", Client=object)
 import ingestion  # noqa: E402  (must follow the stubs above)
 
 GROUP = "ACS-Cymru"
-NODE = "gwy100000000000400080000"
-DEVICE = "dev200000000000400080000"
+NODE = "gwy120000000000400080000"
+DEVICE = "dev220000000000400080000"
 
 
 class SeqPayload:
@@ -288,7 +288,7 @@ class TestSparseDdataIngestion(unittest.TestCase):
         reset_module_state()
         self.device = {
             "id": "20000000-0000-4000-8000-000000000002",
-            "name": "Simulated_CNC_01",
+            "name": "Sim_CNC_Mill_01",
             "sparkplug_id": DEVICE,
             "is_quarantined": False,
         }
@@ -392,7 +392,7 @@ class TestSparseDdataIngestion(unittest.TestCase):
         """
         self.ingest(DataPayload([
             DataMetric("Asset_ID", string=DEVICE),
-            DataMetric("Asset_Name", string="Simulated_CNC_01"),
+            DataMetric("Asset_Name", string="Sim_CNC_Mill_01"),
             DataMetric("Systems/TEMPERATURE", double=42.0),
         ]))
         self.assertEqual([name for name, *_ in self.telemetry_writes()], ["Systems/TEMPERATURE"])

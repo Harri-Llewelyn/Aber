@@ -1310,9 +1310,16 @@ jobs:
           [ "$STATUS" = succeeded ]
 
       # Ordered after validate.py by an initContainer inside the Job itself, not by this step's
-      # position: validate.py is what approves Simulated_CNC_01 out of quarantine and records its
-      # birth parameters, which is what gives the Nameplate submodel anything to carry. Run first,
-      # this suite's live checks skip themselves and report success -- silently.
+      # position -- so the ordering holds however the Jobs are triggered.
+      #
+      # THE REASON FOR THE ORDERING CHANGED, and the old one was never true. It used to read that
+      # validate.py "approves Simulated_CNC_01 out of quarantine and records its birth parameters".
+      # It does not and never did: validate.py seeds its own gateway at a pinned UUID and creates
+      # its own VALIDATE_* devices at runtime, and touches the demo device nowhere. The AAS
+      # suite's subject is now seeded outright -- 0002 registers Sim_CNC_Mill_01 unquarantined,
+      # 0020 attaches its schema and its nameplate -- so this suite has no data dependency on
+      # validate.py at all. What remains is the reason the initContainer itself gives: do not run
+      # a conformance suite against a stack whose conformance run did not pass.
       - name: In-Cluster Conformance — AAS V3 Export
         run: |
           set -eu
@@ -1342,7 +1349,8 @@ jobs:
           # The suite announces the skip on stderr, so assert its ABSENCE.
           if grep -q 'live checks skipped' /tmp/aas.log; then
             echo "::error::the AAS suite SKIPPED its live checks -- it verified the offline parity checks only."
-            echo "::error::Simulated_CNC_01 is not registered, which means validate.py did not approve it."
+            echo "::error::Sim_CNC_Mill_01 is not registered. It is seeded by migration 0002, so this means"
+            echo "::error::the migrations did not complete, or the stack was not reachable from the Job."
             exit 1
           fi
           echo "AAS live checks ran (not skipped)."
@@ -1648,8 +1656,11 @@ jobs:
       # running stack and validates the emitted document. The same file runs in
       # edge-function-auth-test, where these checks skip themselves for want of a stack.
       #
-      # Ordered after validate.py deliberately -- it approves Simulated_CNC_01 out of quarantine and
-      # records its birth parameters, which is what gives the Nameplate submodel anything to carry.
+      # Its subject is `Sim_CNC_Mill_01`, which migration 0002 seeds and 0020 gives its schema and
+      # its IDTA nameplate -- so it needs no simulator to have published and no operator to have
+      # approved anything. This step used to be ordered after validate.py on the stated grounds
+      # that validate.py approved the demo device and recorded its birth parameters; it does
+      # neither, and never did (it works entirely through its own VALIDATE_* fixtures).
       - name: Validate AAS V3 Export
         run: |
           set -a && . ./.env && set +a

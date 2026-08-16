@@ -389,7 +389,7 @@ paths:
         - name: sparkplug_id
           in: query
           schema: { type: string }
-          description: 'e.g. `eq.dev200000000000400080000`'
+          description: 'e.g. `eq.dev220000000000400080000`'
       responses:
         '200':
           description: Matching devices.
@@ -478,13 +478,13 @@ paths:
         `postgres_fdw` pushes `WHERE` clauses to TimescaleDB but **not** `LIMIT`, so always
         constrain the time window on large ranges:
 
-        `?asset_id=eq.dev200000000000400080000&time=gte.2026-01-01T00:00:00Z&order=time.desc&limit=500`
+        `?asset_id=eq.dev220000000000400080000&time=gte.2026-01-01T00:00:00Z&order=time.desc&limit=500`
 
         > **This table cannot be subscribed to over Realtime.** Its rows enter TimescaleDB's
         > WAL, never Supabase's, so adding it to the publication emits nothing — silently.
         > Poll it instead.
       parameters:
-        - { name: asset_id, in: query, schema: { type: string }, description: 'Device Sparkplug ID, e.g. `eq.dev200000000000400080000`.' }
+        - { name: asset_id, in: query, schema: { type: string }, description: 'Device Sparkplug ID, e.g. `eq.dev220000000000400080000`.' }
         - { name: metric_name, in: query, schema: { type: string }, description: 'e.g. `eq.Systems/TEMPERATURE`.' }
         - { name: time, in: query, schema: { type: string }, description: 'e.g. `gte.2026-01-01T00:00:00Z`.' }
         - $ref: '#/components/parameters/Select'
@@ -516,7 +516,7 @@ paths:
         There is no time parameter, deliberately: "latest" is not a window. Filter on `time` if
         you need to exclude series that have gone stale.
       parameters:
-        - { name: asset_id, in: query, schema: { type: string }, description: 'Device Sparkplug ID, e.g. `eq.dev200000000000400080000`.' }
+        - { name: asset_id, in: query, schema: { type: string }, description: 'Device Sparkplug ID, e.g. `eq.dev220000000000400080000`.' }
         - { name: metric_name, in: query, schema: { type: string }, description: 'e.g. `eq.Systems/TEMPERATURE`.' }
         - { name: time, in: query, schema: { type: string }, description: 'Staleness filter, e.g. `gte.2026-01-01T00:00:00Z`.' }
         - $ref: '#/components/parameters/Select'
@@ -550,7 +550,7 @@ paths:
         Buckets still being written are visible immediately — real-time aggregation unions the
         materialised part with the raw tail, so this does not lag behind `/rest/v1/telemetry`.
       parameters:
-        - { name: asset_id, in: query, schema: { type: string }, description: 'e.g. `eq.dev200000000000400080000`.' }
+        - { name: asset_id, in: query, schema: { type: string }, description: 'e.g. `eq.dev220000000000400080000`.' }
         - { name: metric_name, in: query, schema: { type: string }, description: 'e.g. `eq.Systems/TEMPERATURE`.' }
         - { name: bucket, in: query, schema: { type: string }, description: 'Bucket start, e.g. `gte.2026-01-01T00:00:00Z`.' }
         - $ref: '#/components/parameters/Select'
@@ -664,7 +664,7 @@ paths:
         Recorded for quarantined devices too, so an administrator can inspect what a newly
         discovered device claims before approving it.
       parameters:
-        - { name: asset_id, in: query, schema: { type: string }, description: 'Device Sparkplug ID, e.g. `eq.dev200000000000400080000`.' }
+        - { name: asset_id, in: query, schema: { type: string }, description: 'Device Sparkplug ID, e.g. `eq.dev220000000000400080000`.' }
         - $ref: '#/components/parameters/Select'
         - $ref: '#/components/parameters/Order'
       responses:
@@ -1744,12 +1744,12 @@ components:
         id: { type: string, format: uuid, readOnly: true }
         name:
           type: string
-          example: Virtual_Gateway_NodeRED
+          example: Sim_Gateway_Cell1_Machining
           description: Display label only. Freely editable and NOT unique; edge nodes are matched on `sparkplug_id`.
         sparkplug_id:
           type: string
           readOnly: true
-          example: gwy100000000000400080000
+          example: gwy120000000000400080000
           description: >-
             Immutable Sparkplug B edge node id, generated from the primary key ('gwy' plus 21 hex
             characters, 24 total). This is the edge node segment of the MQTT topic, and the MQTT
@@ -1784,7 +1784,7 @@ components:
     GatewayWrite:
       type: object
       properties:
-        name: { type: string, example: Virtual_Gateway_NodeRED }
+        name: { type: string, example: Sim_Gateway_Cell1_Machining }
         cell_id: { type: string, format: uuid, nullable: true }
         location_scope: { $ref: '#/components/schemas/LocationScope' }
         access_url: { type: string, nullable: true }
@@ -1813,12 +1813,12 @@ components:
         id: { type: string, format: uuid, readOnly: true }
         name:
           type: string
-          example: Simulated_CNC_01
+          example: Sim_CNC_Mill_01
           description: Display label only. Freely editable and NOT unique; renaming does not affect ingestion or telemetry history.
         sparkplug_id:
           type: string
           readOnly: true
-          example: dev200000000000400080000
+          example: dev220000000000400080000
           description: >-
             Immutable Sparkplug B device id, generated from the primary key ('dev' plus 21 hex
             characters, 24 total). Appears in the MQTT topic and keys telemetry and birth
@@ -1900,7 +1900,7 @@ components:
     DeviceWrite:
       type: object
       properties:
-        name: { type: string, example: Simulated_CNC_01 }
+        name: { type: string, example: Sim_CNC_Mill_01 }
         gateway_id: { type: string, format: uuid, nullable: true }
         cell_id: { type: string, format: uuid, nullable: true, description: 'Send NULL to clear an override and return the device to inheriting.' }
         location_scope: { $ref: '#/components/schemas/LocationScope' }
@@ -1951,7 +1951,7 @@ components:
       description: 'One metric sample. Exactly one of val_double / val_string / val_bool is populated.'
       properties:
         time: { type: string, format: date-time }
-        asset_id: { type: string, example: dev200000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
+        asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
         metric_name: { type: string, example: Systems/TEMPERATURE }
         val_double: { type: number, nullable: true }
         val_string: { type: string, nullable: true, description: '`Controller/EXECUTION` and `Controller/EMERGENCY_STOP` are STRINGS. A stale `val_bool` test compares NULL, evaluates false, and stops alerting silently.' }
@@ -1967,7 +1967,7 @@ components:
         be weighted equally.
       properties:
         bucket: { type: string, format: date-time, description: 'Start of the bucket.' }
-        asset_id: { type: string, example: dev200000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
+        asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
         metric_name: { type: string, example: Systems/TEMPERATURE }
         avg_double: { type: number, nullable: true, description: 'Weighted mean of the numeric samples; NULL when the bucket held none.' }
         min_double: { type: number, nullable: true, description: 'Kept deliberately — an average alone hides the excursion.' }
@@ -1983,7 +1983,7 @@ components:
       description: One DBIRTH birth-certificate parameter.
       properties:
         id: { type: string, format: uuid, readOnly: true }
-        asset_id: { type: string, example: dev200000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id) — not the name." }
+        asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id) — not the name." }
         metric_name: { type: string, example: Controller/FIRMWARE }
         val_double: { type: number, nullable: true }
         val_string: { type: string, nullable: true }
@@ -2185,8 +2185,8 @@ components:
       description: A Sparkplug B address. `(group_id, node_id)` names the edge node; `device_id` is its device.
       properties:
         group_id: { type: string, example: ACS-Cymru, description: 'Empty when the device is bound to no gateway.' }
-        node_id: { type: string, example: gwy100000000000400080000 }
-        device_id: { type: string, example: dev200000000000400080000 }
+        node_id: { type: string, example: gwy120000000000400080000 }
+        device_id: { type: string, example: dev220000000000400080000 }
 
     DirectoryDevice:
       type: object

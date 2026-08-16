@@ -33,11 +33,16 @@ const RUNTIME_DIR =
   process.env.NODE_RED_RUNTIME_DIR || '/usr/src/node-red/node_modules';
 
 const credentialSecret = process.env.NODERED_CREDENTIAL_SECRET;
-// The SIMULATOR'S OWN GATEWAY CREDENTIAL, not a shared platform account. mosquitto.acl confines
-// each client to `spBv1.0/+/+/%u/#`, so this username must be the `sparkplug_id` of the gateway
-// the flow publishes under -- Virtual_Gateway_NodeRED, whose UUID is pinned in 0002_seed_data.sql
-// precisely so that id is knowable in advance. A friendly name here would authenticate fine and
-// then have every publish silently dropped by the broker.
+// A GATEWAY CREDENTIAL, not a shared platform account. mosquitto.acl confines each client to
+// `spBv1.0/+/+/%u/#`, so this username must be the `sparkplug_id` of the gateway the node publishes
+// under, or every publish is silently dropped by the broker despite a successful connection.
+//
+// THIS PAIR IS THE LEGACY FALLBACK, applied only to a `mqtt-broker-config` node -- see
+// brokerCredentialFor(). No node in the current flow is called that: the consolidated
+// `Simulated Shopfloor` tab has one broker per cell gateway, each naming its own pair through
+// `acsCredentialsEnv`. gwy100000000000400080000 was the retired single-device simulator, whose
+// gateway row migration 0020 deletes, so this default now resolves to nothing on the wire. It stays
+// for volumes seeded before the consolidation, whose flow still carries that node.
 const mqttUser = process.env.MQTT_USER || 'gwy100000000000400080000';
 const mqttPassword = process.env.MQTT_PASSWORD;
 const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');

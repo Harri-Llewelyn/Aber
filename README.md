@@ -121,8 +121,9 @@ identifiers onto the `acs-cymru.local` namespace, `0015` moves the default Spark
 `ACS-Cymru`, `0016` drops the dashboard's own service-directory entry and renames the Node-RED
 one to say it is the simulator, `0018` pre-registers the demonstrator's metric set with each
 row's standard and published semantic id, `0019` adds the 223P supply-air-flow metric the
-shopfloor simulator needed, `0021` gives each shopfloor cell an icon from a closed set
-— plus demo accounts (`supabase/seed.sql`).
+shopfloor simulator needed, `0020` retires the introductory single-device simulator and moves its
+schema and IDTA nameplate onto `Sim_CNC_Mill_01`, `0021` gives each shopfloor cell an icon from a
+closed set — plus demo accounts (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because `0005` already implements one; a second declaration of `log_digital_thread_event()`
@@ -409,8 +410,11 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
   with it `auth.sessions`. The dashboard clears the stale tokens and returns to the login screen.
 - **Swagger UI's "Example Value" is documentation, not data.** Press **Execute** and read the
   **Response body** panel.
-- **Simulated devices appear quarantined on first start.** `Simulated_CNC_01` is auto-registered
-  with `is_quarantined = true` by design; an `Administrator` must approve it.
+- **An unrecognised device appears in the quarantine queue, not on the shopfloor map.** That is the
+  zero-touch onboarding path working: a device that announces itself under an id nobody registered
+  is held and its telemetry dropped until an `Administrator` approves it. The demonstrator's own
+  `Sim_` devices are pre-registered and so bypass it — publish under any other well-formed
+  `dev`-prefixed id to see it.
 
 ---
 

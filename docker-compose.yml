@@ -828,10 +828,24 @@ services:
   # wildcard-write account any more -- see the header of mosquitto.acl for what that account could
   # do and why verify_gateway_binding() could not catch it.
   #
-  # NEVER `mosquitto_passwd -b -c` ON THE MERGED FILE except for the first account: `-c` CREATES
-  # the file and discards everything already in it, which on a stack with provisioned gateways
-  # means every physical gateway loses its credential at once. The first call below uses -c
-  # intentionally (this is the file's initial state); every subsequent call must not.
+  # NEVER `mosquitto_passwd -b -c` ON THE MERGED FILE: `-c` CREATES the file and discards
+  # everything already in it, which on a stack with provisioned gateways means every physical
+  # gateway loses its credential at once.
+  #
+  # THAT USED TO SAY "except for the first account", AND THE EXCEPTION WAS THE BUG. This is a
+  # one-shot, but Compose re-runs a completed one-shot whenever something that depends on it is
+  # brought up -- `docker compose up -d node-red`, say, or `scripts/stack-reset.sh` recreating
+  # Node-RED after provisioning. Each of those re-entered this entrypoint, and the `-c` on the
+  # first of the five accounts truncated the file, deleting every gateway credential issued since
+  # boot. It is invisible until the broker next reloads: Mosquitto keeps the authenticated
+  # accounts in memory, so the stack keeps working and then comes up with four gateways it has
+  # never heard of. `stack-reset.sh` hit exactly this -- it provisioned four credentials and then
+  # deleted three of them one step later, in a script whose whole purpose is to leave a working
+  # stack.
+  #
+  # So `-c` is now conditional on the file not existing. The five platform principals are still
+  # rewritten on every run (they come from .env and must follow it); anything else in the file is
+  # left alone.
   mosquitto-init:
     container_name: acs-cymru_mosquitto_init
     image: eclipse-mosquitto:2.0.20
@@ -855,7 +869,11 @@ services:
         echo 'One or more MQTT_*_PASSWORD values are empty. The broker runs allow_anonymous false, so an empty credential fails as CONNACK 5 with no useful log line at either end. Run: node scripts/setup.mjs' >&2;
         exit 1;
       fi;
-      mosquitto_passwd -b -c /mosquitto/config/password_file \"$$MQTT_INGESTION_USER\" \"$$MQTT_INGESTION_PASSWORD\";
+      if [ ! -f /mosquitto/config/password_file ]; then
+        mosquitto_passwd -b -c /mosquitto/config/password_file \"$$MQTT_INGESTION_USER\" \"$$MQTT_INGESTION_PASSWORD\";
+      else
+        mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_INGESTION_USER\" \"$$MQTT_INGESTION_PASSWORD\";
+      fi;
       mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_I3X_USER\" \"$$MQTT_I3X_PASSWORD\";
       mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_SIMULATOR_USER\" \"$$MQTT_SIMULATOR_PASSWORD\";
       mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_VALIDATOR_USER\" \"$$MQTT_VALIDATOR_PASSWORD\";
@@ -1038,11 +1056,11 @@ services:
     user: "0"
     environment:
       <<: *nodered-auth-env
-      # THE SIMULATOR IS A GATEWAY, so its credential is an ordinary per-gateway one: the username
-      # IS the `sparkplug_id` of the seeded Virtual_Gateway_NodeRED row, and mosquitto.acl's
-      # `pattern readwrite spBv1.0/+/+/%u/#` therefore confines the flow to its own edge node. It
-      # is only pre-provisionable because that row's UUID is pinned in 0002_seed_data.sql, which
-      # is what makes the generated sparkplug_id knowable before the row exists.
+      # LEGACY FALLBACK ONLY. This was the credential of the single-device simulator, whose gateway
+      # row migration 0020 deletes -- so nothing the shipped flow publishes uses it any more. It is
+      # still passed because node-red-init applies it to a `mqtt-broker-config` node, which exists
+      # only on a Node-RED volume created before the flow was consolidated. Every broker node in
+      # the current flow names its own pair through `acsCredentialsEnv`; see below.
       MQTT_USER: ${MQTT_SIMULATOR_USER:-gwy100000000000400080000}
       MQTT_PASSWORD: ${MQTT_SIMULATOR_PASSWORD}
       # ---------------------------------------------------------------------------------------

@@ -97,7 +97,7 @@ secrets:
   # `%u`, and that segment must be the gateway row's GENERATED `sparkplug_id` ('gwy' + the first
   # 21 hex characters of its UUID) or ingestion rejects the message. Both rows therefore have
   # pinned UUIDs, which is the only reason a credential can be issued before the row exists:
-  #   10000000-0000-4000-8000-000000000001 -> gwy100000000000400080000  (Virtual_Gateway_NodeRED)
+  #   10000000-0000-4000-8000-000000000001 -> gwy100000000000400080000  (retired simulator; see below)
   #   11000000-0000-4000-8000-000000000001 -> gwy110000000000400080000  (validate.py's gateway)
   # `acs-cymru.validateMqttPrincipals` fails the render rather than letting a friendly name
   # authenticate successfully and then have every publish silently dropped by the broker.
@@ -111,7 +111,12 @@ secrets:
   # enforce it, which is the control that cannot be argued with.
   mqttI3xUser: factoryplus_i3x
   mqttI3xPassword: ""
-  # The Node-RED demo gateway. An ordinary per-gateway credential.
+  # The RETIRED single-device simulator gateway. Migration 0020 deletes its gateway row, so a
+  # message published under this username is now refused by verify_gateway_binding(); the shipped
+  # flow connects as four per-cell gateways whose credentials `scripts/provision-gateways.mjs`
+  # issues. Kept because node-red-init applies it to the legacy `mqtt-broker-config` node, which
+  # survives on a Node-RED PVC created before the flow was consolidated -- dropping the account
+  # would turn a stale flow into a broker that refuses the connection outright.
   mqttSimulatorUser: gwy100000000000400080000
   mqttSimulatorPassword: ""
   # ingestion/validate.py's gateway. A FIXTURE -- a production install can leave this empty and

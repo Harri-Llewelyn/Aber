@@ -109,7 +109,7 @@ class BatchingTestCase(unittest.TestCase):
 
         self.device = {
             "id": "20000000-0000-4000-8000-000000000002",
-            "name": "Simulated_CNC_01",
+            "name": "Sim_CNC_Mill_01",
             "sparkplug_id": DEVICE,
             "is_quarantined": False,
         }
@@ -318,7 +318,7 @@ class TestEmptyAndFilteredBatches(BatchingTestCase):
     def test_a_payload_of_only_identity_metrics_issues_no_statement(self):
         self.ingest(Payload([
             Metric("Asset_ID", string=DEVICE),
-            Metric("Asset_Name", string="Simulated_CNC_01"),
+            Metric("Asset_Name", string="Sim_CNC_Mill_01"),
         ]))
         self.assertEqual(self.batch_calls(), [])
 
@@ -354,7 +354,7 @@ class TestFilteringStillApplies(BatchingTestCase):
     def test_identity_metrics_are_excluded_from_the_batch(self):
         self.ingest(Payload([
             Metric("Asset_ID", string=DEVICE),
-            Metric("Asset_Name", string="Simulated_CNC_01"),
+            Metric("Asset_Name", string="Sim_CNC_Mill_01"),
             Metric("Systems/TEMPERATURE", double=42.0),
         ]))
         self.assertEqual([r[2] for r in self.rows()], ["Systems/TEMPERATURE"])

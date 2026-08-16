@@ -139,12 +139,16 @@ spec:
             # node-red-init also writes the broker credentials into flows_cred.json, so it needs
             # these two on top of the auth block.
             {{- /*
-              THE SIMULATOR IS A GATEWAY, so it takes an ordinary per-gateway credential: the
-              username IS the `sparkplug_id` of the seeded Virtual_Gateway_NodeRED row, and
-              mosquitto.acl's `pattern readwrite spBv1.0/+/+/%u/#` therefore confines the flow to
-              its own edge node. It is pre-provisionable only because that row's UUID is pinned in
-              0002_seed_data.sql. A friendly name here authenticates fine and then has every
-              publish silently dropped by the broker.
+              A GATEWAY CREDENTIAL, not a shared platform account: mosquitto.acl's
+              `pattern readwrite spBv1.0/+/+/%u/#` pins the topic's edge-node segment to the
+              username, so it must be a gateway's generated `sparkplug_id`. A friendly name here
+              authenticates fine and then has every publish silently dropped by the broker.
+
+              THIS PAIR IS THE LEGACY FALLBACK. node-red-init applies it only to a
+              `mqtt-broker-config` node, which no longer exists in the shipped flow -- the
+              consolidated `Simulated Shopfloor` tab carries one broker per cell gateway, each
+              naming its own credential pair. It is still passed because a Node-RED PVC created
+              before that consolidation still holds the old flow.
             */}}
             {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_SIMULATOR_USER") | nindent 12 }}
             {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_SIMULATOR_PASSWORD") | nindent 12 }}

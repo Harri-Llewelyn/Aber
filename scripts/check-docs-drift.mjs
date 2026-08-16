@@ -520,6 +520,95 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 12. The seeded demonstrator asset agrees with provision-gateways.mjs.
+//
+// `0002_seed_data.sql` and `scripts/provision-gateways.mjs` both register the machining cell's
+// gateway and its first CNC, and they have to, for reasons that pull in opposite directions:
+//
+//   * PROVISIONING owns the topology. It creates all four gateways, their cells and -- the part
+//     nothing else can do -- a Mosquitto account per gateway, without which a gateway row is a
+//     device that can never connect.
+//   * THE SEED owns existence. Provisioning is a Compose-side script; the Kubernetes path never
+//     runs it, so a row that lives only there does not exist in CI. The AAS conformance suite
+//     targets `Sim_CNC_Mill_01` and asserts against the document it composes, so it needs that
+//     device to be present wherever the migrations have run.
+//
+// The duplication is therefore deliberate and narrow -- one gateway and one device, not the whole
+// floor -- and this is what keeps it honest. The failure it exists to prevent is quiet: rename the
+// device in provisioning alone and CI still passes (the seeded row is what the suite finds), while
+// every stack that has ever run provisioning carries TWO devices, one of them a duplicate nobody
+// publishes to. `sparkplug_id` is generated from the UUID, so a diverged id is a diverged wire
+// identity as well as a diverged row.
+// -------------------------------------------------------------------------------------------------
+{
+  const prov = read('scripts/provision-gateways.mjs');
+  const seed = read('supabase/migrations/0002_seed_data.sql');
+
+  // The FIRST gateway entry and its FIRST device -- the pair the seed mirrors. Matched
+  // structurally rather than by name so a rename shows up as a mismatch here instead of making
+  // the pattern silently match nothing and pass.
+  const gw = /id:\s*'([0-9a-f-]{36})',\s*\n\s*envKey:[^\n]*\n\s*name:\s*'([^']+)'/.exec(prov);
+  const dev = /devices:\s*\[\s*\n\s*\{\s*id:\s*'([0-9a-f-]{36})',\s*name:\s*'([^']+)'/.exec(prov);
+
+  if (!gw || !dev) {
+    fail(
+      'could not read the first gateway/device out of scripts/provision-gateways.mjs. Its GATEWAYS\n' +
+        '      literal changed shape, so the seed-vs-provisioning agreement is no longer checked.'
+    );
+  } else {
+    const expected = [
+      ['gateway id', gw[1]],
+      ['gateway name', gw[2]],
+      ['device id', dev[1]],
+      ['device name', dev[2]],
+    ];
+    const absent = expected.filter(([, value]) => !seed.includes(value));
+    if (absent.length) {
+      fail(
+        `0002_seed_data.sql does not carry provision-gateways.mjs's ` +
+          `${absent.map(([label, value]) => `${label} (${value})`).join(', ')}.\n` +
+          '      The seed and the provisioning script must register the SAME row: they both write\n' +
+          '      it, and a divergence yields two gateways or two devices where the demonstrator\n' +
+          '      expects one -- with the wrong one holding the broker credential.'
+      );
+    } else {
+      pass(`0002 seeds provision-gateways.mjs's ${gw[2]} / ${dev[2]} at the same pinned ids`);
+    }
+  }
+
+  // The AAS suite's default target must be the device that is actually seeded. Its `LIVE` guard
+  // resolves the device BY NAME and skips the whole live half when it finds nothing -- silently,
+  // and reporting success. CI greps for that skip line precisely because it cannot be trusted to
+  // fail on its own; this catches the same drift one layer earlier.
+  const aas = read('supabase/functions/aas-export/test_aas_export.py');
+  const target = /AAS_TEST_DEVICE",\s*"([^"]+)"/.exec(aas);
+  if (!target) {
+    fail('test_aas_export.py no longer declares an AAS_TEST_DEVICE default');
+  } else if (dev && target[1] !== dev[2]) {
+    fail(
+      `test_aas_export.py targets '${target[1]}' but the seeded device is '${dev[2]}'.\n` +
+        '      The live checks resolve the device by name and SKIP THEMSELVES when it is absent,\n' +
+        '      so this drift does not fail the suite -- it empties it.'
+    );
+  } else if (dev) {
+    pass(`test_aas_export.py targets the seeded device (${target[1]})`);
+  }
+
+  // The chart's e2e Job passes the same name explicitly, so it can drift independently of the
+  // default above.
+  const job = read('deploy/helm/acs-cymru/templates/jobs/e2e-aas-export-job.yaml');
+  const jobTarget = /name:\s*AAS_TEST_DEVICE\s*\n\s*value:\s*(\S+)/.exec(job);
+  if (jobTarget && dev && jobTarget[1] !== dev[2]) {
+    fail(
+      `e2e-aas-export-job.yaml sets AAS_TEST_DEVICE=${jobTarget[1]}, but the seeded device is ` +
+        `'${dev[2]}'.`
+    );
+  } else if (jobTarget) {
+    pass(`the chart's AAS e2e Job targets the seeded device (${jobTarget[1]})`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 for (const line of ok) console.log(`  ok   ${line}`);
 if (problems.length) {
   console.error('\nDocumentation drift:\n');

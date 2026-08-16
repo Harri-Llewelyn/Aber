@@ -211,18 +211,24 @@ for gateways, `dev` for devices) followed by 21 hex characters, 24 in total. The
 one to every gateway and device, derived from its database id, and shows it on that asset's page —
 click it to copy. It never changes, so an asset can be renamed freely without breaking anything.
 
-The two ids used by the shipped flow (`gwy100000000000400080000` and `dev200000000000400080000`)
-belong to the pre-seeded `Virtual_Gateway_NodeRED` row and this simulator's device. They are pinned
-in [`0002_seed_data.sql`](../supabase/migrations/0002_seed_data.sql) precisely so the flow can
-hardcode them.
+The ids the shipped flow publishes under are pinned in
+[`scripts/provision-gateways.mjs`](../scripts/provision-gateways.mjs), which owns the demonstrator's
+topology — four cell gateways and six devices. The machining cell's pair
+(`gwy120000000000400080000` and `dev220000000000400080000`, `Sim_Gateway_Cell1_Machining` and
+`Sim_CNC_Mill_01`) is **also** seeded by
+[`0002_seed_data.sql`](../supabase/migrations/0002_seed_data.sql), because provisioning is a
+Compose-side script the Kubernetes path never runs and the AAS conformance suite needs that device
+to exist wherever the migrations do.
+
+The examples below use that pair.
 
 | Order | Type | Topic | Purpose |
 | :-- | :--- | :--- | :--- |
-| 1 | `NBIRTH` | `spBv1.0/ACS-Cymru/NBIRTH/gwy1000…` | The edge node's own birth certificate, once at startup, before any device birth |
-| 2 | `DBIRTH` | `spBv1.0/ACS-Cymru/DBIRTH/gwy1000…/dev2000…` | The metric names, types and config the device will report. Re-sent every 60 s |
-| 3 | `DDATA` | `spBv1.0/ACS-Cymru/DDATA/gwy1000…/dev2000…` | Telemetry, **report by exception** — scanned every 5 s, published only when a metric moves |
-| 4 | `DDEATH` | `spBv1.0/ACS-Cymru/DDEATH/gwy1000…/dev2000…` | Manually triggered — marks the device offline |
-| 5 | `NDATA` | `spBv1.0/ACS-Cymru/NDATA/gwy1000…` | Gateway heartbeat, every 30 s |
+| 1 | `NBIRTH` | `spBv1.0/ACS-Cymru/NBIRTH/gwy1200…` | The edge node's own birth certificate, once at startup, before any device birth |
+| 2 | `DBIRTH` | `spBv1.0/ACS-Cymru/DBIRTH/gwy1200…/dev2200…` | The metric names, types and config the device will report. Re-sent every 60 s |
+| 3 | `DDATA` | `spBv1.0/ACS-Cymru/DDATA/gwy1200…/dev2200…` | Telemetry, **report by exception** — scanned every 5 s, published only when a metric moves |
+| 4 | `DDEATH` | `spBv1.0/ACS-Cymru/DDEATH/gwy1200…/dev2200…` | Manually triggered — marks the device offline |
+| 5 | `NDATA` | `spBv1.0/ACS-Cymru/NDATA/gwy1200…` | Gateway heartbeat, every 30 s |
 
 ### Report by exception
 
@@ -297,10 +303,10 @@ subtree is dropped by the broker.
 Issue a credential with:
 
 ```bash
-node scripts/mosquitto-provision-gateway.mjs gwy100000000000400080000
+node scripts/mosquitto-provision-gateway.mjs gwy120000000000400080000
 
 # On Kubernetes — same script, different backend:
-node scripts/mosquitto-provision-gateway.mjs --target=k8s gwy100000000000400080000
+node scripts/mosquitto-provision-gateway.mjs --target=k8s gwy120000000000400080000
 ```
 
 The password is printed **once** — `mosquitto_passwd` stores only a hash.
@@ -337,7 +343,7 @@ Five principals replace it, each confined by `mosquitto.acl`:
 | :--- | :--- |
 | `factoryplus_ingestion` | read `spBv1.0/#`; publish **only** `spBv1.0/+/NCMD/+` (rebirth) |
 | `factoryplus_i3x` | read `spBv1.0/#`. Publish nothing — it refuses writes in code (405), and this is that stance where the broker can enforce it |
-| `gwy100000000000400080000` | this simulator, confined to its own edge node by the ordinary `%u` pattern |
+| `gwy120000000000400080000` … `gwy150000000000400080000` | the four simulated cell gateways, each confined to its own edge node by the ordinary `%u` pattern. Issued by `npm run provision:gateways` |
 | `gwy110000000000400080000` | `validate.py`, likewise |
 | `factoryplus_monitor` | read `$SYS/#` only — the health probes and the metrics exporter. Publishes nothing |
 
@@ -414,8 +420,9 @@ This matters more than it used to: a **registered device bound to a gateway** no
 rejected when they arrive via a different (or unregistered) edge node. Registering the gateway is
 what makes that binding resolvable.
 
-The pre-seeded `Virtual_Gateway_NodeRED` row already exists with the pinned id
-`gwy100000000000400080000`, so the shipped flow works with no setup.
+`Sim_Gateway_Cell1_Machining` already exists at the pinned id `gwy120000000000400080000` — seeded by
+`0002_seed_data.sql` — and `npm run provision:gateways` creates the other three along with a broker
+credential for each, so the shipped flow works with no manual setup.
 
 ---
 
