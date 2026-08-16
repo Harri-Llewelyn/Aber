@@ -4,6 +4,7 @@ import ssl
 import threading
 import time
 import psycopg2
+from psycopg2.extras import execute_values
 import paho.mqtt.client as mqtt
 import sparkplug_b_pb2
 from datetime import datetime, timezone
@@ -95,6 +96,25 @@ MAX_ALIASES_PER_NODE = int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))
 # re-instrumentation.
 INGESTION_STATS_INTERVAL = int(os.getenv("INGESTION_STATS_INTERVAL", "60"))
 
+# How many telemetry rows go into one INSERT statement. A DDATA message is written as a single
+# batched statement; this caps how large that statement may get, so a pathological payload cannot
+# build an unbounded query string. 500 is far above any real Sparkplug payload -- under
+# report-by-exception a DDATA usually carries one metric -- so in practice every message is
+# exactly one statement.
+TELEMETRY_INSERT_PAGE_SIZE = int(os.getenv("TELEMETRY_INSERT_PAGE_SIZE", "500"))
+
+# Bounded retry on a failed TimescaleDB connection.
+#
+# WHY THIS EXISTS. get_timescaledb_connection() previously returned None on the first failure, and
+# every caller answers None by dropping the message with a warning -- so a database blip during a
+# burst lost telemetry silently, visible only in a log line. A short backoff covers the common
+# case (a restart, a brief network fault) without blocking the MQTT callback thread for long: the
+# thread is shared by every device, so a long retry here stalls the whole fleet, which is why the
+# ceiling is deliberately low rather than generous.
+DB_CONNECT_MAX_ATTEMPTS = int(os.getenv("DB_CONNECT_MAX_ATTEMPTS", "3"))
+DB_CONNECT_BACKOFF_SECONDS = float(os.getenv("DB_CONNECT_BACKOFF_SECONDS", "0.25"))
+DB_CONNECT_BACKOFF_MAX_SECONDS = float(os.getenv("DB_CONNECT_BACKOFF_MAX_SECONDS", "2.0"))
+
 # -----------------------------------------------------------------------------
 # Supabase Client Initialization
 # -----------------------------------------------------------------------------
@@ -137,25 +157,82 @@ except Exception as e:
 # -----------------------------------------------------------------------------
 _ts_conn = None
 
+
+def _open_timescaledb_connection():
+    """One connection attempt. Split out so the retry loop below stays readable."""
+    if TIMESCALEDB_URL:
+        return psycopg2.connect(TIMESCALEDB_URL)
+    return psycopg2.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        database=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD
+    )
+
+
 def get_timescaledb_connection():
+    """
+    The daemon's single TimescaleDB connection, reconnecting when it has gone away.
+
+    ONE CONNECTION, NOT A POOL. Every write happens on the paho callback thread, so there is
+    exactly one writer and a pool would be complexity with no consumer. That property is also
+    what makes the module-level global safe -- and it is the thing to revisit first if a worker
+    thread is ever introduced, because psycopg2 connections are not safe for concurrent use.
+
+    `closed` IS CHECKED BUT IS NOT SUFFICIENT. psycopg2 sets it only when the connection was
+    closed on this side; a connection dropped by the server, a restart, or an idle timeout still
+    reports `closed == 0` and fails on first use. The caller's exception handler is what covers
+    that, and the next call through here re-opens.
+
+    RETRIES ARE BOUNDED AND SHORT. Returning None on the first failure meant a momentary blip
+    dropped telemetry silently, since every caller answers None by dropping the message. But this
+    runs on the callback thread shared by the whole fleet, so a generous retry would stall every
+    other device's messages behind one unreachable database. Three attempts over well under a
+    second is the compromise: it absorbs a restart without becoming a stall.
+    """
     global _ts_conn
-    if _ts_conn is None or _ts_conn.closed != 0:
+
+    if _ts_conn is not None and _ts_conn.closed == 0:
+        return _ts_conn
+
+    if _ts_conn is not None:
+        # Closed on this side. Say so rather than reconnecting silently -- a connection that keeps
+        # having to be re-opened is a symptom worth seeing in the log.
+        logger.info("TimescaleDB connection was closed; re-opening.")
+        count("db_reconnects")
+        _ts_conn = None
+
+    delay = DB_CONNECT_BACKOFF_SECONDS
+    for attempt in range(1, DB_CONNECT_MAX_ATTEMPTS + 1):
         try:
-            if TIMESCALEDB_URL:
-                _ts_conn = psycopg2.connect(TIMESCALEDB_URL)
+            _ts_conn = _open_timescaledb_connection()
+            if attempt > 1:
+                logger.info("Connected to TimescaleDB on attempt %d.", attempt)
             else:
-                _ts_conn = psycopg2.connect(
-                    host=DB_HOST,
-                    port=DB_PORT,
-                    database=DB_NAME,
-                    user=DB_USER,
-                    password=DB_PASSWORD
-                )
-            logger.info("Connected to TimescaleDB successfully.")
+                logger.info("Connected to TimescaleDB successfully.")
+            return _ts_conn
         except Exception as e:
-            logger.warning("TimescaleDB connection failed: %s. Retrying...", e)
-            _ts_conn = None
-    return _ts_conn
+            count("db_connect_failures")
+            if attempt == DB_CONNECT_MAX_ATTEMPTS:
+                # Final failure. The caller drops the message; the counter is what makes that
+                # loss visible without reading the log.
+                logger.warning(
+                    "TimescaleDB connection failed after %d attempt(s): %s. Telemetry for this "
+                    "message is dropped; the next message retries.",
+                    DB_CONNECT_MAX_ATTEMPTS, e
+                )
+                _ts_conn = None
+                return None
+
+            logger.warning(
+                "TimescaleDB connection attempt %d/%d failed: %s. Retrying in %.2fs.",
+                attempt, DB_CONNECT_MAX_ATTEMPTS, e, delay
+            )
+            time.sleep(delay)
+            delay = min(delay * 2, DB_CONNECT_BACKOFF_MAX_SECONDS)
+
+    return None
 
 # -----------------------------------------------------------------------------
 # Sparkplug B Wire Identity
@@ -1485,7 +1562,15 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                     (asset_id, asset_name)
                 )
 
-                metric_count = 0
+                # Rows are ACCUMULATED and written in ONE statement below rather than executed
+                # per metric. The loop's decisions are unchanged; only the write is moved.
+                #
+                # THIS DOES NOT CHANGE FAILURE GRANULARITY, which is the usual objection. The loop
+                # already ran inside `with db_conn:` -- a transaction block that rolls back
+                # wholesale on any exception -- so a bad row aborted the whole message before this
+                # change and aborts the whole message after it. What changes is the number of
+                # round trips: one per metric becomes one per message.
+                rows = []
                 rejected_timestamps = 0
                 unresolved_aliases = 0
                 for metric in payload.metrics:
@@ -1534,20 +1619,38 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                     else:
                         continue
 
-                    # DO NOTHING, not DO UPDATE. The historian is an append-only record of what
-                    # was observed; an upsert let any publisher rewrite history at a timestamp
-                    # of its choosing, which is not a capability a time-series store should
-                    # offer to the devices feeding it. A genuine duplicate is a redelivered
-                    # MQTT message and the first write already recorded it.
-                    cur.execute(
-                        """
-                        INSERT INTO telemetry (time, asset_id, metric_name, val_double, val_string, val_bool)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (time, asset_id, metric_name) DO NOTHING
-                        """,
+                    rows.append(
                         (metric_dt, asset_id, metric_name, val_double, val_string, val_bool)
                     )
-                    metric_count += 1
+
+                metric_count = len(rows)
+
+                # DO NOTHING, not DO UPDATE. The historian is an append-only record of what was
+                # observed; an upsert let any publisher rewrite history at a timestamp of its
+                # choosing, which is not a capability a time-series store should offer to the
+                # devices feeding it. A genuine duplicate is a redelivered MQTT message and the
+                # first write already recorded it.
+                #
+                # GUARDED ON A NON-EMPTY LIST: execute_values with no rows emits a syntactically
+                # invalid statement (`VALUES` with nothing after it). A message whose every metric
+                # was filtered -- all identity metrics, or every timestamp rejected -- is entirely
+                # ordinary and must not raise.
+                #
+                # page_size caps how many tuples go into one statement; beyond it psycopg2 sends
+                # several. 500 is far above any real Sparkplug payload, so in practice every
+                # message is one statement, while a pathological payload still cannot build an
+                # unbounded query string.
+                if rows:
+                    execute_values(
+                        cur,
+                        """
+                        INSERT INTO telemetry (time, asset_id, metric_name, val_double, val_string, val_bool)
+                        VALUES %s
+                        ON CONFLICT (time, asset_id, metric_name) DO NOTHING
+                        """,
+                        rows,
+                        page_size=TELEMETRY_INSERT_PAGE_SIZE,
+                    )
 
                 # Counted inside the transaction block but after the loop, so this reflects rows
                 # the commit is about to make durable. An exception below unwinds the write and
@@ -1581,6 +1684,10 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
 
                 logger.info("INGESTED DDATA: Ingested %d metrics for asset '%s' into TimescaleDB", metric_count, asset_id)
     except Exception as e:
+        # The whole message is lost: `with db_conn` rolled the transaction back, so none of the
+        # batch landed. Counted so the loss is visible in STATS rather than only in the log --
+        # a write that fails once a minute is invisible in a log nobody is tailing.
+        count("write_failures")
         logger.error("Error writing DDATA telemetry to TimescaleDB: %s", e, exc_info=True)
 
 

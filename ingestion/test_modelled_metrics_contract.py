@@ -26,12 +26,17 @@ from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-for name in ("psycopg2", "paho", "paho.mqtt", "paho.mqtt.client", "supabase", "sparkplug_b_pb2"):
+for name in ("psycopg2", "psycopg2.extras", "paho", "paho.mqtt", "paho.mqtt.client", "supabase",
+             "sparkplug_b_pb2"):
     if name not in sys.modules:
         module = types.ModuleType(name)
         module.__getattr__ = lambda _attr: MagicMock()  # noqa: E731
         sys.modules[name] = module
 sys.modules["psycopg2"].connect = MagicMock()
+# `from psycopg2.extras import execute_values` resolves through the parent's attribute, not just
+# sys.modules, so the submodule has to be bound onto the package object as well.
+sys.modules["psycopg2"].extras = sys.modules["psycopg2.extras"]
+sys.modules["psycopg2.extras"].execute_values = MagicMock()
 sys.modules["supabase"].create_client = MagicMock()
 sys.modules["paho.mqtt"].client = sys.modules["paho.mqtt.client"]
 

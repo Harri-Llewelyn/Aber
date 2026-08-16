@@ -314,6 +314,7 @@ python ingestion/test_health_heartbeat.py
 python ingestion/test_rbe_telemetry.py
 python ingestion/test_mqtt_tls.py
 python ingestion/test_audit_write_dedup.py
+python ingestion/test_telemetry_batching.py
 python i3x/test_i3x_service.py
 python supabase/functions/approve-quarantine/test_approve_quarantine.py
 python supabase/functions/deploy-nodered/test_deploy_nodered.py

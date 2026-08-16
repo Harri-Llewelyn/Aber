@@ -145,6 +145,56 @@ Rows are keyed by **`sparkplug_id`**, never by name, so a rename never breaks a 
   reading as having happened at a time it did not, and would pile every sample from a broken clock
   onto one timestamp where the primary key collapses them anyway.
 
+### One statement per message
+
+A DDATA message is written as a **single batched `INSERT`** (`psycopg2.extras.execute_values`,
+`TELEMETRY_INSERT_PAGE_SIZE` = 500), not one statement per metric.
+
+**Atomicity is unchanged, which is the first thing people ask.** The metric loop already ran inside
+`with db_conn:` — a transaction block that rolls back wholesale on any exception — so a bad row
+aborted the whole message before this change and aborts the whole message after it. What changed is
+the number of round trips.
+
+**The empty batch is guarded.** `execute_values` on an empty list emits `VALUES` with nothing after
+it, which is a syntax error. A message whose every metric was filtered — all identity metrics, or
+every timestamp rejected — is entirely ordinary and must not raise.
+
+**The `assets` upsert stays a separate statement before the batch.** It satisfies the foreign key
+the telemetry rows depend on.
+
+Measured against the shipped TimescaleDB, 200 messages per size, same host, mean per message:
+
+| metrics per message | before | after | metrics/s before → after |
+| ---: | ---: | ---: | :--- |
+| 1 | 2.45 ms | 2.46 ms | 409 → 407 |
+| 10 | 7.59 ms | 2.92 ms | 1,317 → 3,429 |
+| 40 | 24.48 ms | 4.07 ms | 1,634 → 9,835 |
+
+**Read the first row before the last one.** Under report-by-exception a DDATA usually carries *one*
+metric, and there the change is worth nothing — the difference is inside run-to-run variance
+(±12% across repeats). The win is real but it is a win for **multi-metric payloads**: a birth
+certificate, a gateway flushing a buffered backlog after an outage, or any fleet not using RBE.
+That is also the honest answer to whether the daemon needed an asynchronous worker queue at this
+scale: at ~2.5 ms per single-metric message, twelve devices on a 5-second scan spend roughly
+6 ms per second writing. The callback thread is not the bottleneck, and the queue is not justified
+by these numbers.
+
+### Connection handling
+
+One connection, not a pool: every write happens on the paho callback thread, so there is exactly
+one writer. That is also what makes the module-level global safe, and it is the first thing to
+revisit if a worker thread is ever added — psycopg2 connections are not safe for concurrent use.
+
+`get_timescaledb_connection()` retries a failed connect `DB_CONNECT_MAX_ATTEMPTS` (3) times with
+exponential backoff, capped at `DB_CONNECT_BACKOFF_MAX_SECONDS`. **Bounded and short on purpose:**
+returning `None` on the first failure meant a momentary blip dropped telemetry silently, because
+every caller answers `None` by dropping the message — but this runs on the callback thread shared
+by the whole fleet, so a generous retry stalls every other device behind one unreachable database.
+
+`conn.closed` is checked but is **not sufficient**: psycopg2 sets it only for a close on this side.
+A connection dropped by the server still reports `closed == 0` and fails on first use, which is what
+the caller's exception handler and the next call through here cover.
+
 ---
 
 ## Metric Aliases
