@@ -62,24 +62,47 @@ const rootDir = path.resolve(__dirname, '..');
  * which genuinely has no single cell -- writing it into a cell would be a lie the Overview map
  * then renders as fact. See docs: location_scope does not inherit.
  */
+/**
+ * DEVICES ARE PRE-REGISTERED, AND THAT IS A CHOICE WITH A COST.
+ *
+ * An unregistered device announcing itself is auto-quarantined and its DDATA dropped until an
+ * operator approves it -- the zero-touch onboarding path, and one of the better things to
+ * demonstrate. Pre-registering these skips it.
+ *
+ * They are pre-registered anyway because the two are demonstrated separately: a floor whose every
+ * device sits in the quarantine queue shows an empty shopfloor map and no telemetry, which is the
+ * opposite of the steady state everything else is meant to be seen against. Onboarding is shown by
+ * introducing ONE unregistered device on purpose -- the flow's "ADD YOUR OWN DEVICE" path, or any
+ * well-formed id that is not in this list.
+ */
 const GATEWAYS = [
   {
     id: '12000000-0000-4000-8000-000000000001',
     name: 'GW_CNC_Machining',
     cellName: 'CNC Machining Cell',
     description: 'Machine tools publishing MTConnect 2.x semantics',
+    devices: [
+      { id: '22000000-0000-4000-8000-000000000001', name: 'CNC_Mill_01' },
+      { id: '23000000-0000-4000-8000-000000000001', name: 'CNC_Mill_02' },
+    ],
   },
   {
     id: '13000000-0000-4000-8000-000000000001',
     name: 'GW_Robotic_Assembly',
     cellName: 'Robotic Assembly Cell',
     description: 'Articulated robots publishing OPC 40010 Robotics semantics',
+    devices: [
+      { id: '24000000-0000-4000-8000-000000000001', name: 'Robot_Arm_01' },
+    ],
   },
   {
     id: '14000000-0000-4000-8000-000000000001',
     name: 'GW_AGV_Fleet',
     cellName: 'AGV Marshalling Area',
     description: 'AGV fleet controller republishing flattened state fields',
+    devices: [
+      { id: '25000000-0000-4000-8000-000000000001', name: 'AGV_01' },
+    ],
   },
   {
     id: '15000000-0000-4000-8000-000000000001',
@@ -89,6 +112,12 @@ const GATEWAYS = [
     cellName: null,
     locationScope: 'site_wide',
     description: 'Facility BMS publishing ASHRAE 223P semantics',
+    devices: [
+      // Site-wide like its gateway, and stated EXPLICITLY rather than inherited: location_scope
+      // does not inherit through the data path, so a device behind a site-wide gateway resolves to
+      // Unassigned unless it makes the same assertion itself.
+      { id: '26000000-0000-4000-8000-000000000001', name: 'BMS_Zone_01', locationScope: 'site_wide' },
+    ],
   },
 ];
 
@@ -108,8 +137,14 @@ const GATEWAYS = [
  */
 function assertDistinctIds() {
   const seen = new Map();
-  for (const spec of GATEWAYS) {
-    const derived = `gwy${spec.id.replace(/-/g, '').slice(0, 21)}`;
+  // Devices share the check because they share the derivation -- only the prefix differs, and a
+  // device set numbered the obvious way collides exactly as the gateways first did.
+  const all = [
+    ...GATEWAYS.map((g) => ({ id: g.id, name: g.name, prefix: 'gwy' })),
+    ...GATEWAYS.flatMap((g) => (g.devices || []).map((d) => ({ ...d, prefix: 'dev' }))),
+  ];
+  for (const spec of all) {
+    const derived = `${spec.prefix}${spec.id.replace(/-/g, '').slice(0, 21)}`;
     if (seen.has(derived)) {
       console.error(
         `Pinned UUIDs for '${seen.get(derived)}' and '${spec.name}' both derive sparkplug_id ` +
@@ -128,14 +163,25 @@ function assertDistinctIds() {
 const args = process.argv.slice(2);
 let target = 'compose';
 let dryRun = false;
-let envOut = null;
+// DEFAULTS TO WRITING THE FILE. The passwords are not recoverable from the broker, so a run whose
+// stdout scrolled away used to mean re-provisioning just to find out what it had set.
+let envOut = '.env.gateways';
+let rotate = false;
 
 for (const arg of args) {
   if (arg.startsWith('--target=')) target = arg.slice('--target='.length);
   else if (arg === '--dry-run') dryRun = true;
+  else if (arg === '--rotate') rotate = true;
+  else if (arg === '--no-env-out') envOut = null;
   else if (arg.startsWith('--env-out=')) envOut = arg.slice('--env-out='.length);
   else if (arg === '-h' || arg === '--help') {
-    console.log('Usage: node scripts/provision-gateways.mjs [--target=compose|k8s] [--dry-run] [--env-out=FILE]');
+    console.log(
+      'Usage: node scripts/provision-gateways.mjs [--target=compose|k8s] [--dry-run]\n' +
+      '                                          [--rotate] [--env-out=FILE|--no-env-out]\n\n' +
+      '  --rotate   reissue broker credentials for gateways that already exist.\n' +
+      '             Without it an existing gateway keeps the password Node-RED is holding.\n' +
+      '  --env-out  where to write the credentials (default .env.gateways, mode 0600).\n'
+    );
     process.exit(0);
   } else {
     console.error(`Unknown argument '${arg}'.`);
@@ -262,6 +308,47 @@ async function ensureGateway(spec) {
   return { row: created[0], created: true };
 }
 
+// --- devices ----------------------------------------------------------------------------------
+/**
+ * Register a device bound to its gateway, and return the row with its generated sparkplug_id.
+ *
+ * BOUND AT CREATION, not left for the first DBIRTH to imply. `verify_gateway_binding()` rejects a
+ * device's telemetry when it arrives via an edge node it is not bound to, so a device row with a
+ * null `gateway_id` publishing through a real gateway is refused -- correctly, and confusingly, at
+ * the point where telemetry silently stops rather than where the row was created.
+ */
+async function ensureDevice(spec, gatewayId, cellId) {
+  const found = await rest(
+    `/devices?id=eq.${spec.id}&select=id,name,sparkplug_id,gateway_id,cell_id,location_scope`
+  );
+  if (found.length > 0) return { row: found[0], created: false };
+
+  if (dryRun) {
+    console.log(`    [dry-run] would create device '${spec.name}' with pinned id ${spec.id}`);
+    return { row: null, created: false };
+  }
+
+  const payload = {
+    id: spec.id,
+    name: spec.name,
+    gateway_id: gatewayId,
+    status: 'OFFLINE',
+    // NOT quarantined: these are known assets being commissioned, and the quarantine queue is for
+    // things that announced themselves unrecognised.
+    is_quarantined: false,
+    ...(spec.locationScope === 'site_wide'
+      ? { location_scope: 'site_wide' }
+      : cellId ? { cell_id: cellId } : {}),
+  };
+
+  const created = await rest('/devices', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify(payload),
+  });
+  return { row: created[0], created: true };
+}
+
 // --- broker credential ------------------------------------------------------------------------
 /**
  * Issue the Mosquitto account by DELEGATING to the existing script.
@@ -270,7 +357,30 @@ async function ensureGateway(spec) {
  * parsing it back out of its stdout. Same value, and this script needs it to write the .env block;
  * scraping it from human-readable output would break the first time that wording changed.
  */
-function provisionCredential(sparkplugId) {
+function provisionCredential(sparkplugId, gatewayIsNew) {
+  // ---------------------------------------------------------------------------------------------
+  // AN EXISTING GATEWAY KEEPS ITS PASSWORD UNLESS --rotate IS ASKED FOR.
+  //
+  // This defaulted the other way and it was wrong. Re-running the script -- to add a device, say --
+  // silently reissued every gateway's credential, which invalidates the one Node-RED is holding.
+  // Nothing fails at that moment: the rows are all correct, the script reports success, and the
+  // breakage surfaces later as four brokers logging
+  //
+  //     Connection failed to broker: node-red-cnc@mqtt://mosquitto:1883
+  //
+  // with no CONNACK code and no mention of a password. The only way back is to re-provision and
+  // update .env, by which point the cause is several steps behind you.
+  //
+  // Rotation is still available and is still what you want after a leak; it is just no longer what
+  // you get by asking for something else.
+  // ---------------------------------------------------------------------------------------------
+  if (!gatewayIsNew && !rotate) {
+    console.log(
+      `  credential kept (gateway already existed; pass --rotate to reissue it)`
+    );
+    return null;
+  }
+
   const password = randomBytes(24).toString('base64url');
   if (dryRun) {
     console.log(`  [dry-run] would provision broker credential for ${sparkplugId}`);
@@ -296,17 +406,49 @@ async function main() {
   if (dryRun) console.log('DRY RUN -- nothing will be created or changed.\n');
 
   const results = [];
+  const devices = [];
   for (const spec of GATEWAYS) {
     console.log(`\n${spec.name} -- ${spec.description}`);
     const { row, created } = await ensureGateway(spec);
-    if (!row) continue;
+
+    if (!row) {
+      // Dry run: still walk the devices so the plan is complete rather than gateway-only.
+      for (const device of spec.devices || []) await ensureDevice(device, null, null);
+      continue;
+    }
 
     console.log(`  ${created ? 'created' : 'exists'}: ${row.name} -> ${row.sparkplug_id}`);
-    const password = provisionCredential(row.sparkplug_id);
-    results.push({ name: spec.name, sparkplugId: row.sparkplug_id, password });
+
+    // The cell is resolved from the GATEWAY ROW rather than re-created, so a device joins the cell
+    // its gateway actually landed in -- including when the gateway already existed and the cell
+    // name in this file has since been edited.
+    const cellId = row.cell_id ?? null;
+
+    for (const device of spec.devices || []) {
+      const { row: deviceRow, created: deviceCreated } =
+        await ensureDevice(device, row.id, cellId);
+      if (!deviceRow) continue;
+      console.log(
+        `    ${deviceCreated ? 'created' : 'exists'}: ${deviceRow.name} -> ${deviceRow.sparkplug_id}`
+      );
+      devices.push({ name: deviceRow.name, sparkplugId: deviceRow.sparkplug_id });
+    }
+
+    const password = provisionCredential(row.sparkplug_id, created);
+    // Only gateways whose credential was actually issued go into the .env block. Emitting a line
+    // with a null password would overwrite a working entry with an empty one.
+    if (password) results.push({ name: spec.name, sparkplugId: row.sparkplug_id, password });
   }
 
-  if (dryRun || results.length === 0) return;
+  if (dryRun) return;
+
+  if (results.length === 0) {
+    console.log(
+      '\nNo credentials were issued -- every gateway already existed and kept the password it has.\n' +
+      'Pass --rotate to reissue them (and then update .env, or Node-RED keeps using the old one).'
+    );
+    return;
+  }
 
   // ---------------------------------------------------------------------------------------------
   // The .env block. Printed to stdout AND optionally written, because the passwords are not
@@ -336,6 +478,16 @@ async function main() {
     const outPath = path.isAbsolute(envOut) ? envOut : path.join(rootDir, envOut);
     fs.writeFileSync(outPath, `${block}\n`, { mode: 0o600 });
     console.log(`Written to ${outPath} (mode 0600).`);
+  }
+
+  if (devices.length > 0) {
+    // The simulator's subflow instances are configured against these ids, so they are printed
+    // rather than left to be looked up one device page at a time.
+    console.log('Devices (Sparkplug ids the simulator publishes under):\n');
+    for (const d of devices) {
+      console.log(`  ${d.name.padEnd(16)} ${d.sparkplugId}`);
+    }
+    console.log();
   }
 
   console.log(

@@ -46,7 +46,7 @@ datasources:
     # both targets -- which is the point of keeping Kubernetes Service names the same as the
     # Compose service names.
     url: timescaledb:5432
-    user: powerbi_reader
+    user: grafana_reader
     database: postgres
     isDefault: true
     version: 2

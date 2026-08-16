@@ -104,6 +104,66 @@ END $$;
 
 
 -- ---------------------------------------------------------------------------------------------
+-- grafana_reader -- the INTERNAL engineering read surface
+-- ---------------------------------------------------------------------------------------------
+-- WHY A SECOND ROLE RATHER THAN WIDENING THE FIRST. Grafana and Power BI are not the same kind of
+-- consumer and conflating them was a mistake worth naming: Power BI is an EXTERNAL business tool
+-- that should see aggregated buckets and nothing else, while Grafana is an INTERNAL engineering
+-- console whose whole job is the raw signal -- the excursion, the state transition, the individual
+-- observation. Granting `powerbi_reader` what Grafana needs would have quietly handed an external
+-- tool every reading in the historian, which is exactly what the narrow grant existed to prevent.
+--
+-- FOUND BY REPOINTING GRAFANA AND THEN READING ITS PANELS. The datasource health check passes on
+-- CONNECT, so "Database Connection OK" said nothing about whether any panel could run -- four of
+-- them could not. A connection test is not a permission test.
+--
+-- Still strictly read-only, and still no writes anywhere: this is a wider READ, not a wider role.
+DO $$
+DECLARE
+  v_password text := btrim(coalesce(current_setting('acs_cymru.bi_reader_password', true), ''));
+  v_role     CONSTANT text := 'grafana_reader';
+  v_dbname   CONSTANT text := current_database();
+BEGIN
+  IF v_password = '' THEN
+    RAISE NOTICE 'roles: % not configured (no password); skipping.', v_role;
+    RETURN;
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_role) THEN
+    EXECUTE format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT', v_role);
+    RAISE NOTICE 'roles: created %', v_role;
+  END IF;
+
+  EXECUTE format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT '
+                 'PASSWORD %L', v_role, v_password);
+
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', v_dbname, v_role);
+  EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', v_role);
+
+  -- The rollups, plus what an engineering dashboard genuinely reads.
+  EXECUTE format('GRANT SELECT ON public.telemetry_1m, public.telemetry_5m, public.telemetry_1h '
+                 'TO %I', v_role);
+  EXECUTE format('GRANT SELECT ON public.telemetry TO %I', v_role);
+  EXECUTE format('GRANT SELECT ON public.telemetry_latest TO %I', v_role);
+  EXECUTE format('GRANT SELECT ON public.assets TO %I', v_role);
+
+  -- telemetry_gapfill() is how a report-by-exception series MUST be read -- a missing bucket means
+  -- unchanged, not unknown, so charting a rollup directly renders steady operation as a hole.
+  EXECUTE format(
+    'GRANT EXECUTE ON FUNCTION public.telemetry_gapfill(timestamptz, timestamptz, interval, '
+    'text[], text[]) TO %I', v_role);
+
+  -- pg_monitor for the historian I/O panels. A read-only membership: it grants visibility into
+  -- pg_stat_* and nothing else.
+  EXECUTE format('GRANT pg_monitor TO %I', v_role);
+
+  RAISE NOTICE
+    'roles: % may read the rollups, raw telemetry, telemetry_latest, assets, telemetry_gapfill() '
+    'and pg_stat_* -- read-only throughout.', v_role;
+END $$;
+
+
+-- ---------------------------------------------------------------------------------------------
 -- Self-check
 -- ---------------------------------------------------------------------------------------------
 -- A grant that silently did not apply is indistinguishable from one that did until a BI tool
@@ -132,4 +192,19 @@ BEGIN
 
   RAISE NOTICE 'roles self-check passed: % reads the rollups and cannot reach raw telemetry.',
     v_role;
+
+  -- The other direction, for the internal role: it must be able to read what the shipped dashboard
+  -- queries. Asserted because "Database Connection OK" is a CONNECT test and says nothing about
+  -- whether a panel can run -- which is how four broken panels went unnoticed.
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'grafana_reader') THEN
+    IF NOT (has_table_privilege('grafana_reader', 'public.telemetry', 'SELECT')
+        AND has_table_privilege('grafana_reader', 'public.telemetry_latest', 'SELECT')
+        AND has_table_privilege('grafana_reader', 'public.assets', 'SELECT')
+        AND has_table_privilege('grafana_reader', 'public.telemetry_1h', 'SELECT')) THEN
+      RAISE EXCEPTION
+        'roles self-check: grafana_reader cannot read one of telemetry / telemetry_latest / '
+        'assets / telemetry_1h, so the provisioned dashboard has panels that will fail';
+    END IF;
+    RAISE NOTICE 'roles self-check passed: grafana_reader can read every object the dashboard queries.';
+  END IF;
 END $$;

@@ -1045,6 +1045,26 @@ services:
       # is what makes the generated sparkplug_id knowable before the row exists.
       MQTT_USER: ${MQTT_SIMULATOR_USER:-gwy100000000000400080000}
       MQTT_PASSWORD: ${MQTT_SIMULATOR_PASSWORD}
+      # ---------------------------------------------------------------------------------------
+      # ONE CREDENTIAL PAIR PER CELL GATEWAY, because mosquitto.acl pins the topic's edge-node
+      # segment to the connecting username -- four cells cannot share a connection.
+      #
+      # Each broker node in node_red_flow.json names its pair in `acsCredentialsEnv`, and
+      # node-red-init fails closed when a declared pair is absent rather than seeding an empty
+      # username (which the broker refuses with CONNACK 5 while Node-RED reports only
+      # "Connection failed to broker").
+      #
+      # Written by: npm run provision:gateways -- --env-out=.env.gateways
+      # Then append that file to .env. They are NOT recoverable from the broker.
+      # ---------------------------------------------------------------------------------------
+      MQTT_GW_CNC_MACHINING_USER: ${MQTT_GW_CNC_MACHINING_USER:-}
+      MQTT_GW_CNC_MACHINING_PASSWORD: ${MQTT_GW_CNC_MACHINING_PASSWORD:-}
+      MQTT_GW_ROBOTIC_ASSEMBLY_USER: ${MQTT_GW_ROBOTIC_ASSEMBLY_USER:-}
+      MQTT_GW_ROBOTIC_ASSEMBLY_PASSWORD: ${MQTT_GW_ROBOTIC_ASSEMBLY_PASSWORD:-}
+      MQTT_GW_AGV_FLEET_USER: ${MQTT_GW_AGV_FLEET_USER:-}
+      MQTT_GW_AGV_FLEET_PASSWORD: ${MQTT_GW_AGV_FLEET_PASSWORD:-}
+      MQTT_GW_FACILITY_BMS_USER: ${MQTT_GW_FACILITY_BMS_USER:-}
+      MQTT_GW_FACILITY_BMS_PASSWORD: ${MQTT_GW_FACILITY_BMS_PASSWORD:-}
       # Seeding is first-run only, so editor changes survive `docker compose up`.
       # Set to true for a deliberate reset back to the repo's flow.
       NODE_RED_FORCE_SEED: ${NODE_RED_FORCE_SEED:-false}

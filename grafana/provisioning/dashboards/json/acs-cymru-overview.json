@@ -499,6 +499,352 @@
         "defaults": {},
         "overrides": []
       }
+    },
+    {
+      "type": "row",
+      "title": "Multi-Standard Shopfloor",
+      "id": 104,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 45
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Shopfloor Thermal & Sensor Trends",
+      "id": 105,
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "description": "MTConnect machine-tool temperature beside ASHRAE 223P zone temperature. Read from telemetry_1m -- the 1-minute rollup -- rather than raw, which is what the aggregates exist for.",
+      "gridPos": {
+        "h": 9,
+        "w": 16,
+        "x": 0,
+        "y": 46
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT bucket AS \"time\", a.asset_name || ' / ' || t.metric_name AS metric, sum(sum_double) / NULLIF(sum(n_double), 0) AS value\n  FROM telemetry_1m t LEFT JOIN assets a ON a.asset_id = t.asset_id\n WHERE $__timeFilter(bucket)\n   AND t.metric_name IN ('Systems/TEMPERATURE','BMS/ZONE_TEMPERATURE')\n GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "type": "gauge",
+      "title": "Overall Equipment Effectiveness",
+      "id": 106,
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "description": "ISO 22400 OEE, computed at the edge from PackML-style state-time accumulation and published on a fixed 60s heartbeat. The platform does not derive this -- it has no schedule or scrap data and deliberately stores none.",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 46
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 50
+              },
+              {
+                "color": "yellow",
+                "value": 65
+              },
+              {
+                "color": "green",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT bucket AS \"time\", a.asset_name AS metric, last_double AS value\n  FROM telemetry_1m t LEFT JOIN assets a ON a.asset_id = t.asset_id\n WHERE $__timeFilter(bucket) AND t.metric_name = 'OEE/OEE' ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Availability",
+      "id": 107,
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "description": "ISO 22400 availability: productive time over observed time. Falls when the machine stops accumulating ACTIVE state -- e.g. after an emergency stop.",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 51
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 60
+              },
+              {
+                "color": "green",
+                "value": 85
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT bucket AS \"time\", a.asset_name AS metric, last_double AS value\n  FROM telemetry_1m t LEFT JOIN assets a ON a.asset_id = t.asset_id\n WHERE $__timeFilter(bucket) AND t.metric_name = 'OEE/AVAILABILITY' ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "type": "state-timeline",
+      "title": "Machine Execution & Robotics Status",
+      "id": 108,
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "description": "MTConnect Controller/EXECUTION beside OPC 40010 Machine/OperationalMode. State metrics are carried through the rollups as last(value) -- a rollup covering only val_double would force every state panel back onto raw.",
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 55
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 0,
+            "fillOpacity": 80
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "ACTIVE": {
+                  "color": "green",
+                  "index": 0
+                },
+                "READY": {
+                  "color": "blue",
+                  "index": 1
+                },
+                "INTERRUPTED": {
+                  "color": "red",
+                  "index": 2
+                },
+                "AUTOMATIC": {
+                  "color": "green",
+                  "index": 3
+                },
+                "STOPPED": {
+                  "color": "red",
+                  "index": 4
+                },
+                "MANUAL": {
+                  "color": "orange",
+                  "index": 5
+                },
+                "ARMED": {
+                  "color": "green",
+                  "index": 6
+                },
+                "TRIGGERED": {
+                  "color": "red",
+                  "index": 7
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "mergeValues": true,
+        "showValue": "auto",
+        "alignValue": "center",
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT bucket_ts AS \"time\", asset_id || ' / ' || metric_name AS metric, val_string AS value\n  FROM telemetry_gapfill($__timeFrom()::timestamptz, $__timeTo()::timestamptz, '1 minute',\n                         NULL, ARRAY['Controller/EXECUTION','Machine/OperationalMode'])\n WHERE val_string IS NOT NULL ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "type": "bargauge",
+      "title": "Energy Consumption by Cell",
+      "id": 109,
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "description": "OPC 40001-4 Machinery Energy. Compressed-air flow rather than electrical power: the seeded 40001-4 subset models energy MEDIA (pressure, volume, flow) and carries no active-power concept, so this is the energy metric with a published semantic id behind it.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 55
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "l/s",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 5
+              },
+              {
+                "color": "orange",
+                "value": 18
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT bucket AS \"time\", a.asset_name AS metric, sum(sum_double) / NULLIF(sum(n_double), 0) AS value\n  FROM telemetry_1m t LEFT JOIN assets a ON a.asset_id = t.asset_id\n WHERE $__timeFilter(bucket) AND t.metric_name = 'Energy/VolumeFlowRate'\n GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
     }
   ]
 }

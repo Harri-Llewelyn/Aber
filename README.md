@@ -120,7 +120,8 @@ discrete metric, `0013` ASHRAE 223P vocabulary, `0014` repoints locally-minted s
 identifiers onto the `acs-cymru.local` namespace, `0015` moves the default Sparkplug group to
 `ACS-Cymru`, `0016` drops the dashboard's own service-directory entry and renames the Node-RED
 one to say it is the simulator, `0018` pre-registers the demonstrator's metric set with each
-row's standard and published semantic id — plus demo accounts (`supabase/seed.sql`).
+row's standard and published semantic id, `0019` adds the 223P supply-air-flow metric the
+shopfloor simulator needed — plus demo accounts (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because `0005` already implements one; a second declaration of `log_digital_thread_event()`
