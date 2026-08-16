@@ -49,18 +49,41 @@ One ConfigMap cannot supply both a file and a subdirectory beneath it.
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ printf "%s-grafana-dashboards" $fullname }}
+  name: {{ printf "%s-grafana-dashboards-platform" $fullname }}
   labels:
     {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
 data:
-{{- $found := 0 }}
-{{- range $path, $bytes := .Files.Glob "files/grafana-dashboards-json/*.json" }}
-{{- $found = add1 $found }}
+{{- $foundPlatform := 0 }}
+{{- range $path, $bytes := .Files.Glob "files/grafana-dashboards-platform/*.json" }}
+{{- $foundPlatform = add1 $foundPlatform }}
   {{ base $path }}: |
 {{ $.Files.Get $path | indent 4 }}
 {{- end }}
-{{- if eq $found 0 }}
-{{- fail "\n\nacs-cymru: no dashboards found at files/grafana-dashboards-json/*.json\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n" }}
+{{- if eq $foundPlatform 0 }}
+{{- fail "\n\nacs-cymru: no dashboards found at files/grafana-dashboards-platform/*.json\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n\nFailing the render is deliberate. An empty ConfigMap mounts cleanly and Grafana comes up with an\nempty folder, which reads as a Grafana fault rather than a missing mirror.\n" }}
+{{- end }}
+---
+{{/*
+A SECOND ConfigMap for the second folder, mounted at a second path.
+dashboards.yml declares one provider per folder and each provider points at its own directory --
+so one ConfigMap cannot serve both without nesting the paths, which would file every shopfloor
+dashboard under both folders.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-grafana-dashboards-shopfloor" $fullname }}
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+{{- $foundShopfloor := 0 }}
+{{- range $path, $bytes := .Files.Glob "files/grafana-dashboards-shopfloor/*.json" }}
+{{- $foundShopfloor = add1 $foundShopfloor }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- if eq $foundShopfloor 0 }}
+{{- fail "\n\nacs-cymru: no dashboards found at files/grafana-dashboards-shopfloor/*.json\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n" }}
 {{- end }}
 ---
 {{- if .Values.grafana.persistence.enabled }}
@@ -258,8 +281,11 @@ spec:
               mountPath: /etc/grafana/provisioning/dashboards/dashboards.yml
               subPath: dashboards.yml
               readOnly: true
-            - name: dashboards
-              mountPath: /etc/grafana/provisioning/dashboards/json
+            - name: dashboards-platform
+              mountPath: /etc/grafana/provisioning/dashboards/platform
+              readOnly: true
+            - name: dashboards-shopfloor
+              mountPath: /etc/grafana/provisioning/dashboards/shopfloor
               readOnly: true
             - name: data
               mountPath: /var/lib/grafana
@@ -267,9 +293,12 @@ spec:
         - name: config
           configMap:
             name: {{ printf "%s-grafana-config" $fullname }}
-        - name: dashboards
+        - name: dashboards-platform
           configMap:
-            name: {{ printf "%s-grafana-dashboards" $fullname }}
+            name: {{ printf "%s-grafana-dashboards-platform" $fullname }}
+        - name: dashboards-shopfloor
+          configMap:
+            name: {{ printf "%s-grafana-dashboards-shopfloor" $fullname }}
         - name: datasources
           emptyDir: {}
         - name: data

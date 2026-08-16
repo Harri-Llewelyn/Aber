@@ -11,6 +11,7 @@ import { StatusBadge } from '../common/StatusBadge'
 import { ActionButton } from '../common/ActionButton'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
+import { CellIcon, CELL_ICONS, DEFAULT_CELL_ICON } from '../../utils/cellIcon'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
 import {
@@ -51,7 +52,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   // See GatewaysTab: an inline modal is still a modal, and Escape has to close it.
   useEscapeKey(() => setShowForm(false), showForm)
   const [editing, setEditing]   = useState(null)
-  const blank = { cell_name: '', access_url: '' }
+  // DEFAULT_CELL_ICON rather than the literal 'Factory': the column's default, the CHECK
+  // constraint and this form all have to agree, and one imported constant is one place they can.
+  const blank = { cell_name: '', access_url: '', icon: DEFAULT_CELL_ICON }
   const [formVal, setFormVal]   = useState(blank)
   const [archiveTarget, setArchiveTarget] = useState(null)
   const [docsForCell, setDocsForCell] = useState(null)
@@ -338,7 +341,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
                   onClick={() => setSelectedId(id => id === c.cell_id ? null : c.cell_id)}
                   title="Click to inspect this cell in the details panel"
                 >
-                  <IconFactory size={18} />
+                  <CellIcon cell={c} size={18} />
                   <span>{c.cell_name}</span>
                   <span className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>ID: {c.cell_id}</span>
                   <span className="badge badge-neutral" title="Count of edge gateways assigned to this cell">{cellGateways.length} Gateway/s</span>
@@ -483,6 +486,28 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
             <div className="form-group">
               <label className="form-label">Cell Name</label>
               <input className="form-control" value={formVal.cell_name} onChange={e => setFormVal(f => ({ ...f, cell_name: e.target.value }))} placeholder="e.g. Assembly Line 1" title="Enter descriptive cell zone name" />
+            </div>
+            <div className="form-group">
+              {/* A GRID OF BUTTONS, NOT A <select>. The choice is visual -- the whole point is
+                  what the card will look like on the map -- and a dropdown of eight words asks
+                  the operator to imagine the result instead of showing it. */}
+              <label className="form-label">Cell Icon</label>
+              <div className="icon-picker" role="radiogroup" aria-label="Cell icon">
+                {CELL_ICONS.map(({ key, label, Icon }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="radio"
+                    aria-checked={(formVal.icon || DEFAULT_CELL_ICON) === key}
+                    className={`icon-picker-option ${(formVal.icon || DEFAULT_CELL_ICON) === key ? 'is-selected' : ''}`}
+                    onClick={() => setFormVal(f => ({ ...f, icon: key }))}
+                    title={label}
+                  >
+                    <Icon size={20} />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="form-group">
               <label className="form-label">Dashboard / UI URL (Optional)</label>

@@ -345,7 +345,7 @@ plus `docker compose down -v` — the entire upgrade, in one step, exactly as in
   stays in memory. The 4.8 MB spill here is a floor, not a typical case.
 - **`pg_stat_io` (PG16) and `pg_stat_checkpointer` (PG17) — DONE.** A
   *Historian I/O & Checkpoints* row in
-  [acs-cymru-overview.json](../grafana/provisioning/dashboards/json/acs-cymru-overview.json):
+  [acs-cymru-overview.json](../grafana/provisioning/dashboards/platform/stack-ingestion-health.json):
   shared buffer hit ratio, blocks read from disk, **requested checkpoints**, average checkpoint
   write time, and a `pg_stat_io` breakdown by backend type and context.
 

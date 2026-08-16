@@ -191,6 +191,44 @@ else
   # afterwards -- mosquitto_passwd stores only a hash -- so a run whose output scrolled away
   # would mean re-provisioning to find out what it had set.
   npm run --silent provision:gateways -- --env-out=.env.gateways
+
+  # ---------------------------------------------------------------------------------------------
+  # FOLD THEM INTO .env, WHICH IS THE STEP THAT WAS MISSING AND THE ONE THAT BITES.
+  #
+  # `down -v` destroys the Mosquitto password volume, so provisioning issues NEW credentials --
+  # while .env still holds the previous set. Compose passes .env to node-red-init, which seeds
+  # Node-RED with passwords the broker no longer knows. Nothing fails during the reset: it reports
+  # success, and four gateways then log
+  #
+  #     Connection failed to broker: node-red-cnc@mqtt://mosquitto:1883
+  #
+  # with no CONNACK code. Leaving this to be done by hand made a clean-slate script that does not
+  # actually leave you with a working stack, which is the one thing it exists for.
+  # ---------------------------------------------------------------------------------------------
+  if [ -f .env.gateways ]; then
+    step "Folding gateway credentials into .env"
+    # Rewrites the MQTT_GW_* lines in place and appends any that are new, leaving every other line
+    # untouched. Done with awk rather than `sed -i` so it is one pass and needs no temp-file dance.
+    awk '
+      NR == FNR {
+        if ($0 ~ /^MQTT_GW_[A-Z0-9_]+=/) { split($0, kv, "="); new[kv[1]] = $0 }
+        next
+      }
+      {
+        if ($0 ~ /^MQTT_GW_[A-Z0-9_]+=/) {
+          split($0, kv, "=")
+          if (kv[1] in new) { print new[kv[1]]; seen[kv[1]] = 1; next }
+        }
+        print
+      }
+      END { for (k in new) if (!(k in seen)) print new[k] }
+    ' .env.gateways .env > .env.reset.tmp && mv .env.reset.tmp .env
+    echo "    .env updated from .env.gateways"
+
+    # Node-RED was started before those credentials existed, so it is holding the old ones.
+    step "Reseeding Node-RED with the new credentials"
+    NODE_RED_FORCE_SEED=true docker compose up -d --force-recreate node-red-init node-red
+  fi
 fi
 
 # --- 6. summary ----------------------------------------------------------------------------------

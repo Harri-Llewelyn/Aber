@@ -75,38 +75,73 @@ const rootDir = path.resolve(__dirname, '..');
  * introducing ONE unregistered device on purpose -- the flow's "ADD YOUR OWN DEVICE" path, or any
  * well-formed id that is not in this list.
  */
+/**
+ * EVERY NAME BEGINS `Sim_`, AND THAT IS THE POINT OF THE NAMING.
+ *
+ * A demonstrator floor sits in the same tables, the same shopfloor map and the same audit trail as
+ * real plant. Anyone opening the dashboard should be able to tell in one glance which is which,
+ * without knowing that `gwy12…` happens to be a simulator. The prefix is the cheapest possible way
+ * to make that unambiguous, and it costs nothing: `name` is a display label, and `sparkplug_id` --
+ * which the ACL, the topic and the historian all key on -- is generated from the pinned UUID and
+ * does not move when a row is renamed. That is precisely the property the identity scheme exists
+ * to provide, so exercising it here is using the design rather than working around it.
+ */
+/*
+ * `envKey` IS DECLARED, NOT DERIVED FROM `name`, AND THAT DISTINCTION COST A DEBUGGING SESSION.
+ *
+ * It used to be computed as `MQTT_` + the name uppercased. Renaming `GW_CNC_Machining` to
+ * `Sim_Gateway_Cell1_Machining` therefore silently renamed its credential variable to
+ * `MQTT_SIM_GATEWAY_CELL1_MACHINING_*` -- while docker-compose.yml still passed
+ * `MQTT_GW_CNC_MACHINING_*` and the flow's broker node still declared that name. Provisioning
+ * reported success, .env was folded in correctly, and all four gateways then failed to
+ * authenticate with no CONNACK code.
+ *
+ * A display label is the field most likely to change and the least suitable as an identifier.
+ * Same lesson as `sparkplug_id` vs `name` one layer up: the stable key and the human-readable one
+ * are different fields, and deriving either from the other couples a rename to a reconfiguration.
+ * These keys are therefore FROZEN -- they no longer describe the gateway's current name and are
+ * not meant to.
+ */
 const GATEWAYS = [
   {
     id: '12000000-0000-4000-8000-000000000001',
-    name: 'GW_CNC_Machining',
-    cellName: 'CNC Machining Cell',
+    envKey: 'MQTT_GW_CNC_MACHINING',
+    name: 'Sim_Gateway_Cell1_Machining',
+    cellName: 'Cell 1 — Precision Machining',
     description: 'Machine tools publishing MTConnect 2.x semantics',
     devices: [
-      { id: '22000000-0000-4000-8000-000000000001', name: 'CNC_Mill_01' },
-      { id: '23000000-0000-4000-8000-000000000001', name: 'CNC_Mill_02' },
+      { id: '22000000-0000-4000-8000-000000000001', name: 'Sim_CNC_Mill_01' },
+      { id: '23000000-0000-4000-8000-000000000001', name: 'Sim_CNC_Mill_02' },
+      { id: '27000000-0000-4000-8000-000000000001', name: 'Sim_Tool_Changer_01' },
     ],
   },
   {
     id: '13000000-0000-4000-8000-000000000001',
-    name: 'GW_Robotic_Assembly',
-    cellName: 'Robotic Assembly Cell',
-    description: 'Articulated robots publishing OPC 40010 Robotics semantics',
+    envKey: 'MQTT_GW_ROBOTIC_ASSEMBLY',
+    name: 'Sim_Gateway_Cell2_Robotics',
+    cellName: 'Cell 2 — Robotic Assembly',
+    description: 'Articulated robots publishing OPC 40010 Robotics and 40001-4 Energy semantics',
     devices: [
-      { id: '24000000-0000-4000-8000-000000000001', name: 'Robot_Arm_01' },
+      { id: '24000000-0000-4000-8000-000000000001', name: 'Sim_Robot_Arm_01' },
     ],
   },
   {
     id: '14000000-0000-4000-8000-000000000001',
-    name: 'GW_AGV_Fleet',
-    cellName: 'AGV Marshalling Area',
-    description: 'AGV fleet controller republishing flattened state fields',
+    // Was the AGV fleet gateway. RENAMED IN PLACE rather than replaced: the row keeps its
+    // sparkplug_id, so the Mosquitto account, the ACL rule and every historical telemetry row
+    // keyed on that id all remain valid. Creating a new gateway would have orphaned all three.
+    envKey: 'MQTT_GW_AGV_FLEET',
+    name: 'Sim_Gateway_Cell3_OEE',
+    cellName: 'Cell 3 — Production KPIs',
+    description: 'ISO 22400 KPI aggregation for the machining cell',
     devices: [
-      { id: '25000000-0000-4000-8000-000000000001', name: 'AGV_01' },
+      { id: '25000000-0000-4000-8000-000000000001', name: 'Sim_Cell3_Aggregator' },
     ],
   },
   {
     id: '15000000-0000-4000-8000-000000000001',
-    name: 'GW_Facility_BMS',
+    envKey: 'MQTT_GW_FACILITY_BMS',
+    name: 'Sim_Gateway_Site_BMS',
     // No cell: a building management system spans the site. `location_scope = 'site_wide'` is an
     // assertion an operator makes, and the CHECK constraint forbids pairing it with a cell_id.
     cellName: null,
@@ -116,7 +151,7 @@ const GATEWAYS = [
       // Site-wide like its gateway, and stated EXPLICITLY rather than inherited: location_scope
       // does not inherit through the data path, so a device behind a site-wide gateway resolves to
       // Unassigned unless it makes the same assertion itself.
-      { id: '26000000-0000-4000-8000-000000000001', name: 'BMS_Zone_01', locationScope: 'site_wide' },
+      { id: '26000000-0000-4000-8000-000000000001', name: 'Sim_BMS_Zone_HVAC', locationScope: 'site_wide' },
     ],
   },
 ];
@@ -280,9 +315,62 @@ async function ensureCell(name) {
  * locally-derived id that disagreed by one character would produce a gateway that authenticates
  * and whose every message is then rejected by the daemon.
  */
+/**
+ * Bring a row's display name into line with this file, renaming rather than replacing.
+ *
+ * SAFE BY DESIGN, and worth saying why rather than leaving it to look risky. `sparkplug_id` is a
+ * GENERATED column derived from the primary key; the broker account, the ACL rule, the topic and
+ * every telemetry row are all keyed on it. `name` is a label and nothing resolves through it -- the
+ * one exception, ingestion's legacy name-matching arm, is deprecation-warned and applies only to
+ * devices that publish under a name instead of an id. So a rename moves what an operator reads and
+ * nothing else, which is exactly the property the identity scheme was built for.
+ *
+ * The write is guarded on an actual difference so a re-run is silent -- an unconditional UPDATE
+ * would append a digital_thread row on every provisioning run.
+ */
+async function renameIfNeeded(table, row, desiredName) {
+  if (row.name === desiredName) return false;
+  if (dryRun) {
+    console.log(`    [dry-run] would rename ${table} '${row.name}' -> '${desiredName}'`);
+    return false;
+  }
+  await rest(`/${table}?id=eq.${row.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name: desiredName }),
+  });
+  console.log(`    renamed ${table}: '${row.name}' -> '${desiredName}' (sparkplug_id unchanged)`);
+  row.name = desiredName;
+  return true;
+}
+
 async function ensureGateway(spec) {
-  const found = await rest(`/gateways?id=eq.${spec.id}&select=id,name,sparkplug_id,cell_id,location_scope`);
-  if (found.length > 0) return { row: found[0], created: false };
+  const found = await rest(
+    `/gateways?id=eq.${spec.id}&select=id,name,sparkplug_id,cell_id,location_scope,is_virtual`
+  );
+  if (found.length > 0) {
+    const row = found[0];
+    await renameIfNeeded('gateways', row, spec.name);
+
+    // Reconciled on an existing row too, not only set at creation: the first four gateways were
+    // provisioned with is_virtual false, and a flag that is only ever written on INSERT would
+    // leave every stack provisioned before this change permanently mislabelled.
+    if (row.is_virtual !== true && !dryRun) {
+      await rest(`/gateways?id=eq.${row.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_virtual: true }),
+      });
+      console.log(`    marked ${row.name} virtual (⚡ badge)`);
+      row.is_virtual = true;
+    }
+
+    // The cell is renamed through the gateway's own cell_id, so an existing deployment follows this
+    // file without a second lookup by the OLD cell name -- which would fail once it had changed.
+    if (spec.cellName && row.cell_id) {
+      const cells = await rest(`/cells?id=eq.${row.cell_id}&select=id,name`);
+      if (cells.length > 0) await renameIfNeeded('cells', cells[0], spec.cellName);
+    }
+    return { row, created: false };
+  }
 
   if (dryRun) {
     console.log(`  [dry-run] would create gateway '${spec.name}' with pinned id ${spec.id}`);
@@ -293,7 +381,14 @@ async function ensureGateway(spec) {
   const payload = {
     id: spec.id,
     name: spec.name,
-    is_virtual: false,
+    // TRUE, AND IT IS A STATEMENT ABOUT THE ASSET RATHER THAN A DISPLAY FLAG. `is_virtual` means
+    // "no physical edge appliance behind this row" -- a host-run connector, or in this case a
+    // simulator. The dashboard renders it as the ⚡ badge, which is the one place an operator can
+    // tell a simulated gateway from a real one at a glance without reading its name.
+    //
+    // It was `false`, which asserted the opposite: four simulated gateways claiming to be physical
+    // hardware, sitting on the same shopfloor map as real plant with nothing distinguishing them.
+    is_virtual: true,
     ...(spec.locationScope === 'site_wide'
       // The CHECK constraint forbids site_wide with a populated cell_id, so this must not send one.
       ? { location_scope: 'site_wide' }
@@ -321,7 +416,10 @@ async function ensureDevice(spec, gatewayId, cellId) {
   const found = await rest(
     `/devices?id=eq.${spec.id}&select=id,name,sparkplug_id,gateway_id,cell_id,location_scope`
   );
-  if (found.length > 0) return { row: found[0], created: false };
+  if (found.length > 0) {
+    await renameIfNeeded('devices', found[0], spec.name);
+    return { row: found[0], created: false };
+  }
 
   if (dryRun) {
     console.log(`    [dry-run] would create device '${spec.name}' with pinned id ${spec.id}`);
@@ -437,7 +535,11 @@ async function main() {
     const password = provisionCredential(row.sparkplug_id, created);
     // Only gateways whose credential was actually issued go into the .env block. Emitting a line
     // with a null password would overwrite a working entry with an empty one.
-    if (password) results.push({ name: spec.name, sparkplugId: row.sparkplug_id, password });
+    if (password) {
+      results.push({
+        name: spec.name, envKey: spec.envKey, sparkplugId: row.sparkplug_id, password,
+      });
+    }
   }
 
   if (dryRun) return;
@@ -462,14 +564,11 @@ async function main() {
     '# Each account may publish ONLY beneath spBv1.0/+/+/<its own id>/# -- mosquitto.acl pins the',
     '# topic\'s edge-node segment to the connecting username. These are not interchangeable.',
     '# ---------------------------------------------------------------------------',
-    ...results.flatMap((r) => {
-      const key = r.name.toUpperCase().replace(/[^A-Z0-9]+/g, '_');
-      return [
-        `# ${r.name}`,
-        `MQTT_${key}_USER=${r.sparkplugId}`,
-        `MQTT_${key}_PASSWORD=${r.password}`,
-      ];
-    }),
+    ...results.flatMap((r) => [
+      `# ${r.name}`,
+      `${r.envKey}_USER=${r.sparkplugId}`,
+      `${r.envKey}_PASSWORD=${r.password}`,
+    ]),
   ].join('\n');
 
   console.log(`\n${block}\n`);

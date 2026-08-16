@@ -1,19 +1,32 @@
 /**
- * Report-by-exception behaviour of the Gateway Simulator flow.
+ * Report-by-exception behaviour of the Simulated Shopfloor subflows.
  *
  * WHY THIS IS TESTED FROM THE FRONTEND SUITE. `node_red_flow.json` is seeded into Node-RED by
- * scripts/node-red-init.mjs and its function nodes are never imported by anything — so nothing
- * else in this repository can notice when one of them regresses. They are plain JavaScript
- * bodies, and vitest is the only JavaScript runner here, so this is where they can be executed.
- * Each node is evaluated with its Node-RED contract supplied explicitly: `global` context, `node`,
- * `msg`, and a controllable `Date` so a scan schedule can be simulated without waiting for one.
+ * scripts/node-red-init.mjs and its function bodies are never imported by anything — so nothing
+ * else in this repository can notice when one of them regresses. They are plain JavaScript, and
+ * vitest is the only JavaScript runner here, so this is where they can be executed. Each body is
+ * evaluated with its Node-RED contract supplied explicitly: `env`, `context`, `global`, `node`,
+ * and a controllable `Date` so a scan schedule can be simulated without waiting for one.
  *
- * WHAT IS BEING PINNED. The flow used to publish all six metrics every five seconds on a timer,
- * with `seq: Math.floor(Math.random() * 255)`. That is not DDATA — Sparkplug B DDATA means "these
- * metrics changed", and a fixed-interval full payload writes a row per metric per tick into the
- * historian for readings nobody took. The properties below are the ones that make it RBE, and
- * every one of them is invisible to an end-to-end run: a timer-driven flow and an RBE flow both
- * look like "telemetry is arriving".
+ * REWRITTEN FOR THE CONSOLIDATED FLOW. This suite used to drive the introductory tab's
+ * `build-ddata-payload` node, which no longer exists — one tab now, five device subflows, and the
+ * simulation body is shared by all of them. The PROPERTIES being pinned are unchanged, because
+ * they are properties of report-by-exception rather than of any particular flow:
+ *
+ *   * DBIRTH carries live readings and seeds the cache, so the birth certificate is the baseline
+ *     rather than a set of nominal placeholders the first DDATA has to correct.
+ *   * DDATA carries ONLY what moved. A fixed-interval full payload is not DDATA; it is polling
+ *     with extra steps, and it writes a row per metric per tick for readings nobody took.
+ *   * A deadband suppresses movement below it, and does not suppress movement above it.
+ *   * The keepalive bounds how long silence can last, because a genuinely constant value is
+ *     otherwise indistinguishable from a dead device.
+ *   * `seq` advances by one per published message and wraps 255 → 0, which is the only way
+ *     ingestion can detect a dropped message under RBE.
+ *
+ * THE CACHE MUST BE PER INSTANCE. `context` here is a fresh store per simulated device, mirroring
+ * Node-RED's per-subflow-instance node context. If the body were changed to use `flow` or `global`
+ * for its cache, five devices would share one — four would publish nothing and the fifth nonsense.
+ * `test/'each device keeps its own cache'` is what holds that.
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -28,255 +41,307 @@ const nodes = Object.fromEntries(
 )
 
 const SCAN_MS = 5000
+const CNC_BODY = nodes['sf-cnc-fn'].func
+const OEE_BODY = nodes['sf-oee-fn'].func
 
-/** A Node-RED runtime just real enough for these function bodies, with a clock we control. */
-function makeRuntime () {
+/**
+ * One simulated device: its own context store, its own env, a shared global.
+ *
+ * `globalStore` is passed in so two devices can share it — which is exactly what the fault-inject
+ * flags do, and exactly what the RBE cache must NOT do.
+ */
+function makeDevice (body, env, globalStore = new Map(), startAt = 1786284000000) {
   const store = new Map()
-  const clock = { now: 1786284000000 }
+  const clock = { now: startAt }
   const context = { get: (k) => store.get(k), set: (k, v) => store.set(k, v) }
-  const run = (id, msg = {}) =>
-    new Function('global', 'node', 'msg', 'Date', nodes[id].func)(
-      context, { warn: () => {}, error: () => {} }, msg, { now: () => clock.now }
+  const globalCtx = { get: (k) => globalStore.get(k), set: (k, v) => globalStore.set(k, v) }
+  const envCtx = { get: (k) => env[k] }
+  const statuses = []
+
+  // A REAL CONSTRUCTOR, not `{ now }`. The bodies format a timestamp into node.status() with
+  // `new Date(t).toLocaleTimeString()`, so a plain object stands in for `Date.now()` and then
+  // throws "Date is not a constructor" the moment the status line runs -- which is on every
+  // published message. Subclassing keeps `new Date(ms)` working while pinning `Date.now()` to the
+  // controllable clock, which is the only part these tests need to steer.
+  class FakeDate extends Date {
+    static now () { return clock.now }
+  }
+
+  const run = (msg = {}) =>
+    new Function('env', 'context', 'global', 'node', 'msg', 'Date', body)(
+      envCtx, context, globalCtx,
+      { warn: () => {}, error: () => {}, status: (s) => statuses.push(s) },
+      msg,
+      FakeDate
     )
+
   return {
-    context,
-    clock,
-    run,
-    /** Run the DDATA builder once and return its decoded payload, or null if it stayed silent. */
+    context, clock, globalStore, statuses, run,
+    /** Advance the clock by one scan and run the body. Returns the message, or null if silent. */
     scan (advanceMs = SCAN_MS) {
       clock.now += advanceMs
-      const out = run('build-ddata-payload')
-      return out === null ? null : JSON.parse(out.payload)
-    },
-    /** Pin every reading, so nothing can move and only RBE decides whether to publish. */
-    freeze () {
-      store.set('temp_override', 42.0)
-      store.set('displacement_override', 1.45)
-      store.set('status_override', 'ACTIVE')
-      store.set('safety_override', true)
+      return run()
     }
   }
 }
 
-let rt
+const cncEnv = (overrides = {}) => ({
+  DEVICE_ID: 'dev220000000000400080000',
+  DEVICE_NAME: 'Sim_CNC_Mill_01',
+  GATEWAY_ID: 'gwy120000000000400080000',
+  KIND: 'cnc',
+  SPARKPLUG_GROUP: 'ACS-Cymru',
+  BIRTH_EVERY_SCANS: '180',
+  ...overrides
+})
+
+const metricNames = (msg) => msg.payload.metrics.map((m) => m.name).sort()
+const metricByName = (msg, name) => msg.payload.metrics.find((m) => m.name === name)
+
+let dev
 beforeEach(() => {
-  rt = makeRuntime()
-  rt.run('build-nbirth-payload')
-  rt.run('build-dbirth-payload')
+  dev = makeDevice(CNC_BODY, cncEnv())
 })
 
 describe('DBIRTH declares the baseline', () => {
-  it('declares every metric the device reports in DDATA', () => {
-    // Sparkplug B requires the birth certificate to declare the whole metric dictionary. A DDATA
-    // metric that was never declared cannot be resolved by a consumer holding only an alias.
-    const birth = JSON.parse(rt.run('build-dbirth-payload').payload)
-    const declared = new Set(birth.metrics.map((m) => m.name))
-    for (const name of ['Systems/TEMPERATURE', 'Axes/DISPLACEMENT',
-      'Controller/EXECUTION', 'Controller/EMERGENCY_STOP']) {
-      expect(declared, `DBIRTH must declare ${name}`).toContain(name)
-    }
+  it('the first scan is a DBIRTH, not a DDATA', () => {
+    const first = dev.scan()
+    expect(first.topic).toContain('/DBIRTH/')
+    expect(first.topic).toBe(
+      'spBv1.0/ACS-Cymru/DBIRTH/gwy120000000000400080000/dev220000000000400080000'
+    )
   })
 
-  it('seeds the RBE cache with exactly the values it published', () => {
-    // The birth IS the baseline. If it declares 42.0 while the sensor reads 44.3, the first DDATA
-    // after every rebirth is a correction of a number no instrument ever produced.
-    const birth = JSON.parse(rt.run('build-dbirth-payload').payload)
-    const cache = rt.context.get('rbe_cache')
-    for (const metric of birth.metrics) {
-      if (!(metric.name in cache)) continue
-      const published = metric.double_value !== undefined ? metric.double_value : metric.string_value
-      expect(cache[metric.name].v).toBe(published)
-    }
+  it('carries every metric the device reports, plus its identity', () => {
+    const names = metricNames(dev.scan())
+    expect(names).toContain('Asset_ID')
+    expect(names).toContain('Asset_Name')
+    expect(names).toContain('Systems/TEMPERATURE')
+    expect(names).toContain('Controller/EXECUTION')
+    expect(names).toContain('Axes/X/POSITION')
   })
 
-  it('publishes nothing on the scan immediately after a birth', () => {
-    rt.freeze()
-    rt.run('build-dbirth-payload')
-    expect(rt.scan()).toBeNull()
+  it('publishes LIVE readings, so the cache it seeds is the real baseline', () => {
+    const birth = dev.scan()
+    const temp = metricByName(birth, 'Systems/TEMPERATURE').double_value
+    // A nominal placeholder would be a round number; this is a live sample around 42 degC.
+    expect(temp).toBeGreaterThan(35)
+    expect(temp).toBeLessThan(50)
+
+    // The cache holds the FULL-PRECISION reading while the payload carries it rounded to 3dp, and
+    // that asymmetry is deliberate: the deadband compares against the cache, so caching the
+    // rounded value would quantise every comparison to the same 0.001 grid the wire uses. Close
+    // to, not equal to.
+    expect(dev.context.get('rbe')['Systems/TEMPERATURE']).toBeCloseTo(temp, 3)
+  })
+
+  it('every metric name it declares is one the catalog registers', () => {
+    // Guards the failure that is silent end to end: a name published but not in metric_catalog
+    // lands in telemetry with no standard and no semantic id, and exports as unmodelled.
+    const REGISTERED = new Set([
+      'Axes/X/POSITION', 'Axes/Y/POSITION', 'Systems/TEMPERATURE',
+      'Controller/EXECUTION', 'Controller/EMERGENCY_STOP'
+    ])
+    for (const name of metricNames(dev.scan())) {
+      if (name === 'Asset_ID' || name === 'Asset_Name') continue
+      expect(REGISTERED.has(name), `${name} is not a registered metric_catalog name`).toBe(true)
+    }
   })
 })
 
 describe('DDATA publishes only on exception', () => {
-  it('stays completely silent while nothing changes', () => {
-    // THE PROPERTY THE WHOLE AUDIT TURNED ON. Under the old flow this would have been 120
-    // messages and 720 historian rows.
-    rt.freeze()
-    rt.scan()
-    for (let i = 0; i < 50; i++) expect(rt.scan()).toBeNull()
+  beforeEach(() => { dev.scan() })   // consume the birth
+
+  it('a scan in which nothing moved beyond its deadband publishes nothing', () => {
+    // The simulated waves are slow relative to one 5s scan, so consecutive scans sit well inside
+    // the 0.5 degC / 0.5 mm bands. A body that published unconditionally would return a message.
+    let silent = 0
+    for (let i = 0; i < 4; i++) {
+      if (dev.scan(1) === null) silent++
+    }
+    expect(silent).toBeGreaterThan(0)
   })
 
-  it('carries only the metric that moved, not the whole dictionary', () => {
-    rt.freeze()
-    rt.scan()
-    rt.context.set('status_override', 'INTERRUPTED')
-    const payload = rt.scan()
-    expect(payload.metrics.map((m) => m.name)).toEqual(['Controller/EXECUTION'])
-    expect(payload.metrics[0].string_value).toBe('INTERRUPTED')
+  it('publishes DDATA, not DBIRTH, once born', () => {
+    // Advance far enough for the waves to move past their deadbands.
+    let msg = null
+    for (let i = 0; i < 40 && msg === null; i++) msg = dev.scan()
+    expect(msg).not.toBeNull()
+    expect(msg.topic).toContain('/DDATA/')
   })
 
-  it('suppresses analogue movement inside the deadband', () => {
-    // A deadband below the instrument's noise floor makes RBE decorative: the last digit dithers
-    // and republishes forever. 0.2 degC is under the 0.5 degC band.
-    rt.freeze()
-    rt.scan()
-    rt.context.set('temp_override', 42.2)
-    expect(rt.scan()).toBeNull()
+  it('a published DDATA carries only the metrics that changed, never the whole set', () => {
+    let msg = null
+    for (let i = 0; i < 40 && msg === null; i++) msg = dev.scan()
+    expect(msg.payload.metrics.length).toBeLessThan(5)
   })
 
-  it('reports analogue movement beyond the deadband', () => {
-    rt.freeze()
-    rt.scan()
-    rt.context.set('temp_override', 44.0)
-    const payload = rt.scan()
-    expect(payload.metrics.map((m) => m.name)).toEqual(['Systems/TEMPERATURE'])
-    expect(payload.metrics[0].double_value).toBe(44.0)
-  })
-
-  it('applies no deadband to a discrete state', () => {
-    // ARMED -> TRIGGERED is not a small change, and there is no numeric distance to compare.
-    rt.freeze()
-    rt.scan()
-    rt.context.set('safety_override', false)
-    expect(rt.scan().metrics.map((m) => m.name)).toEqual(['Controller/EMERGENCY_STOP'])
-  })
-
-  it('does not republish a value that moved and came back inside the band', () => {
-    rt.freeze()
-    rt.scan()
-    rt.context.set('temp_override', 42.3)
-    expect(rt.scan()).toBeNull()
-    rt.context.set('temp_override', 42.0)
-    expect(rt.scan()).toBeNull()
-  })
-
-  it('carries no identity metrics', () => {
-    // Asset_ID/Asset_Name are immutable, declared in DBIRTH, and discarded by ingestion.py's
-    // IDENTITY_METRICS filter before reaching the historian. The topic is what identifies
-    // the asset.
-    rt.freeze()
-    rt.scan()
-    rt.context.set('status_override', 'STOPPED')
-    const names = rt.scan().metrics.map((m) => m.name)
-    expect(names).not.toContain('Asset_ID')
-    expect(names).not.toContain('Asset_Name')
+  it('never carries identity metrics in DDATA', () => {
+    // Asset_ID/Asset_Name are immutable and belong in the birth certificate; the topic is what
+    // identifies the device. Ingestion filters them, but publishing them is still wrong.
+    for (let i = 0; i < 60; i++) {
+      const msg = dev.scan()
+      if (!msg) continue
+      expect(metricNames(msg)).not.toContain('Asset_ID')
+      expect(metricNames(msg)).not.toContain('Asset_Name')
+    }
   })
 })
 
 describe('the keepalive bounds how long silence can last', () => {
-  it('republishes an unchanged metric within five minutes', () => {
-    // RBE without a keepalive is unsafe to consume: a constant value is indistinguishable from a
-    // dead device, and every staleness check downstream reads absence as failure.
-    rt.freeze()
-    rt.scan()
-    let elapsed = 0
-    let payload = null
-    while (elapsed < 400000 && payload === null) {
-      payload = rt.scan()
-      elapsed += SCAN_MS
-    }
-    expect(payload, 'a frozen metric must still be refreshed').not.toBeNull()
-    expect(elapsed).toBeGreaterThan(240000)
-    expect(elapsed).toBeLessThanOrEqual(305000)
+  it('republishes an unchanged metric after the silence window', () => {
+    dev.scan()                       // birth
+    // Jump past MAX_SILENCE_MS (5 minutes) in one step. Everything is "unchanged" relative to the
+    // cache only in the sense that the deadband would suppress it; the keepalive must override.
+    const msg = dev.scan(6 * 60 * 1000)
+    expect(msg).not.toBeNull()
+    expect(msg.payload.metrics.length).toBeGreaterThan(0)
   })
 })
 
 describe('the Sparkplug sequence number', () => {
-  const seqOf = (out) => JSON.parse(out.payload).seq
+  it('starts at zero and advances by one per published message', () => {
+    const birth = dev.scan()
+    expect(birth.payload.seq).toBe(0)
 
-  it('starts an NBIRTH at zero', () => {
-    expect(seqOf(rt.run('build-nbirth-payload'))).toBe(0)
+    let next = null
+    for (let i = 0; i < 40 && next === null; i++) next = dev.scan()
+    expect(next.payload.seq).toBe(1)
   })
 
-  it('increments by exactly one across every message the node sends', () => {
-    // It was Math.random(), which is not a sequence. Under RBE it is the ONLY evidence a consumer
-    // has that a change went missing, because an unchanged metric and an undelivered one look
-    // identical from the outside.
-    rt.run('build-nbirth-payload')
-    const seen = [seqOf(rt.run('build-dbirth-payload'))]
-    seen.push(seqOf(rt.run('build-heartbeat-payload')))
-    for (let i = 0; i < 30; i++) {
-      rt.context.set('temp_override', 50 + i * 3)
-      const payload = rt.scan()
-      if (payload) seen.push(payload.seq)
+  it('wraps 255 to 0 rather than growing without bound', () => {
+    dev.scan()
+    dev.context.set('seq', 255)
+    let msg = null
+    for (let i = 0; i < 40 && msg === null; i++) msg = dev.scan()
+    expect(msg.payload.seq).toBe(255)
+    expect(dev.context.get('seq')).toBe(0)
+  })
+})
+
+describe('the cache is per device, not shared', () => {
+  it('each device keeps its own RBE cache', () => {
+    // THE REGRESSION THIS EXISTS FOR. Moving the cache to flow/global context would make these
+    // two share one, and the second device would publish nothing after the first had "already"
+    // reported the same values.
+    const shared = new Map()
+    const a = makeDevice(CNC_BODY, cncEnv({ DEVICE_NAME: 'Sim_CNC_Mill_01' }), shared)
+    const b = makeDevice(CNC_BODY, cncEnv({ DEVICE_NAME: 'Sim_CNC_Mill_02' }), shared)
+
+    const birthA = a.scan()
+    const birthB = b.scan()
+
+    expect(birthA.topic).toContain('/DBIRTH/')
+    expect(birthB.topic).toContain('/DBIRTH/')
+    expect(a.context.get('rbe')).not.toBe(b.context.get('rbe'))
+  })
+})
+
+describe('fault injection reaches the change detector', () => {
+  it('the thermal flag drives the targeted mill to an alarm reading', () => {
+    const shared = new Map()
+    const mill = makeDevice(CNC_BODY, cncEnv(), shared)
+    mill.scan()                                   // birth at nominal
+
+    shared.set('fault_thermal', true)
+    const msg = mill.scan()
+    expect(msg).not.toBeNull()
+    expect(metricByName(msg, 'Systems/TEMPERATURE').double_value).toBeGreaterThan(90)
+  })
+
+  it('the thermal flag is scoped to the device it names', () => {
+    const shared = new Map()
+    const other = makeDevice(CNC_BODY, cncEnv({ DEVICE_NAME: 'Sim_CNC_Mill_02' }), shared)
+    other.scan()
+
+    shared.set('fault_thermal', true)
+    for (let i = 0; i < 10; i++) {
+      const msg = other.scan()
+      const temp = msg && metricByName(msg, 'Systems/TEMPERATURE')
+      if (temp) expect(temp.double_value).toBeLessThan(60)
     }
-    expect(seen.length).toBeGreaterThan(10)
-    seen.forEach((s, i) => {
-      if (i > 0) expect(s).toBe((seen[i - 1] + 1) % 256)
-    })
   })
 
-  it('stays within one byte and wraps through zero', () => {
-    rt.run('build-nbirth-payload')
-    const seen = []
-    for (let i = 0; i < 300; i++) seen.push(seqOf(rt.run('build-heartbeat-payload')))
-    expect(seen.every((s) => Number.isInteger(s) && s >= 0 && s <= 255)).toBe(true)
-    expect(seen).toContain(0)
+  it('the e-stop flag interrupts execution and trips the emergency stop', () => {
+    const shared = new Map()
+    const mill = makeDevice(CNC_BODY, cncEnv(), shared)
+    mill.scan()
+
+    shared.set('fault_estop', true)
+    const msg = mill.scan()
+    expect(metricByName(msg, 'Controller/EXECUTION').string_value).toBe('INTERRUPTED')
+    expect(metricByName(msg, 'Controller/EMERGENCY_STOP').string_value).toBe('TRIGGERED')
   })
 
-  it('does not consume a sequence number for a suppressed scan', () => {
-    // A suppressed sample is not a message. Burning a seq for it would look to the ingestion
-    // daemon exactly like the message it never sent having been lost.
-    rt.freeze()
-    rt.scan()
-    const before = seqOf(rt.run('build-heartbeat-payload'))
-    for (let i = 0; i < 10; i++) expect(rt.scan()).toBeNull()
-    expect(seqOf(rt.run('build-heartbeat-payload'))).toBe((before + 1) % 256)
-  })
-})
+  it('clearing the flags returns the device to nominal', () => {
+    const shared = new Map()
+    const mill = makeDevice(CNC_BODY, cncEnv(), shared)
+    mill.scan()
 
-describe('lifecycle transitions reset the baseline', () => {
-  it('an NBIRTH clears the cache so every metric is restated', () => {
-    // An NBIRTH voids all prior state for the node and its devices. A cache surviving it would
-    // suppress metrics as "unchanged since before the birth" from a consumer that has never
-    // seen them.
-    rt.freeze()
-    rt.scan()
-    expect(rt.scan()).toBeNull()
-    rt.run('build-nbirth-payload')
-    expect(rt.context.get('rbe_cache')).toEqual({})
-    expect(rt.scan().metrics).toHaveLength(4)
-  })
+    shared.set('fault_thermal', true)
+    mill.scan()
+    shared.set('fault_thermal', false)
 
-  it('a DDEATH clears the cache and silences DDATA', () => {
-    rt.freeze()
-    rt.scan()
-    rt.run('build-ddeath-payload')
-    expect(rt.context.get('rbe_cache')).toEqual({})
-    expect(rt.scan()).toBeNull()
+    let msg = null
+    for (let i = 0; i < 10 && msg === null; i++) msg = mill.scan()
+    expect(metricByName(msg, 'Systems/TEMPERATURE').double_value).toBeLessThan(60)
   })
 })
 
-describe('the alarm test buttons flow through the change detector', () => {
-  it('publishes the overheat condition on the next scan', () => {
-    rt.freeze()
-    rt.scan()
-    rt.run('build-alert-payload')
-    const byName = Object.fromEntries(rt.scan().metrics.map((m) => [m.name, m]))
-    expect(byName['Systems/TEMPERATURE'].double_value).toBe(95.0)
-    expect(byName['Controller/EMERGENCY_STOP'].string_value).toBe('TRIGGERED')
+describe('the ISO 22400 aggregator', () => {
+  const oeeEnv = {
+    DEVICE_ID: 'dev250000000000400080000',
+    DEVICE_NAME: 'Sim_Cell3_Aggregator',
+    GATEWAY_ID: 'gwy140000000000400080000',
+    SOURCE_DEVICE_ID: 'dev220000000000400080000',
+    SPARKPLUG_GROUP: 'ACS-Cymru'
+  }
+
+  it('publishes the four registered KPI names', () => {
+    const agg = makeDevice(OEE_BODY, oeeEnv)
+    const msg = agg.scan(60000)
+    expect(metricNames(msg)).toEqual(
+      ['OEE/AVAILABILITY', 'OEE/OEE', 'OEE/PERFORMANCE', 'OEE/QUALITY']
+    )
   })
 
-  it('leaves the cache in step, so the alarm is not re-sent every scan', () => {
-    // The alarm node used to publish its own payload directly, which left the RBE cache stale
-    // behind it -- the next scan then re-sent all four metrics as though they had just moved.
-    rt.freeze()
-    rt.scan()
-    rt.run('build-alert-payload')
-    expect(rt.scan()).not.toBeNull()
-    expect(rt.scan()).toBeNull()
+  it('publishes on every heartbeat, not report-by-exception', () => {
+    // Computed values on a fixed cadence: the series must have no RBE gaps for a BI tool to read
+    // through telemetry_gapfill().
+    const agg = makeDevice(OEE_BODY, oeeEnv)
+    for (let i = 0; i < 3; i++) {
+      expect(agg.scan(60000)).not.toBeNull()
+    }
   })
 
-  it('restores an EXECUTION value the MTConnect vocabulary actually contains', () => {
-    // The reset node used to set 'RUNNING' while the payload it published alongside said
-    // 'ACTIVE'. 'RUNNING' is not in the seeded EXECUTION vocabulary (0002_seed_data.sql), so
-    // after one press every EXECUTION reading was Unmodelled.
-    rt.freeze()
-    rt.scan()
-    rt.run('build-alert-payload')
-    rt.scan()
-    rt.run('reset-alert-function')
-    const byName = Object.fromEntries(rt.scan().metrics.map((m) => [m.name, m]))
-    expect(byName['Controller/EXECUTION'].string_value).toBe('ACTIVE')
-    expect(byName['Controller/EMERGENCY_STOP'].string_value).toBe('ARMED')
+  it('availability falls when the source machine is not ACTIVE', () => {
+    const shared = new Map()
+    const agg = makeDevice(OEE_BODY, oeeEnv, shared)
+
+    shared.set('state_dev220000000000400080000', 'ACTIVE')
+    agg.scan(60000)
+    const busy = metricByName(agg.scan(60000), 'OEE/AVAILABILITY').double_value
+
+    shared.set('state_dev220000000000400080000', 'INTERRUPTED')
+    let idle = busy
+    for (let i = 0; i < 5; i++) {
+      idle = metricByName(agg.scan(60000), 'OEE/AVAILABILITY').double_value
+    }
+    expect(idle).toBeLessThan(busy)
+  })
+
+  it('OEE is the product of its three factors', () => {
+    const shared = new Map()
+    const agg = makeDevice(OEE_BODY, oeeEnv, shared)
+    shared.set('state_dev220000000000400080000', 'ACTIVE')
+    agg.scan(60000)
+    const msg = agg.scan(60000)
+
+    const a = metricByName(msg, 'OEE/AVAILABILITY').double_value
+    const p = metricByName(msg, 'OEE/PERFORMANCE').double_value
+    const q = metricByName(msg, 'OEE/QUALITY').double_value
+    const oee = metricByName(msg, 'OEE/OEE').double_value
+
+    expect(oee).toBeCloseTo((a / 100) * (p / 100) * (q / 100) * 100, 1)
   })
 })

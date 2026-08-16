@@ -9,10 +9,15 @@
  * arrangement `generate-opcua-vocabulary.mjs` has with its migration: the generator is the source
  * of truth, the JSON is committed, and the JSON is what runs.
  *
- * THE EXISTING "Gateway Simulator" TAB IS PRESERVED, NOT REPLACED. It is what
- * `simulators/README.md` documents, what the onboarding walkthrough uses, and it publishes as the
- * pre-seeded `Virtual_Gateway_NodeRED`. This script rebuilds only the tab it owns and leaves every
- * other node in the file alone.
+ * ONE TAB. The introductory single-device "Gateway Simulator" tab has been folded in: two tabs
+ * both publishing simulated Sparkplug meant two places to look and two conventions for what a
+ * simulated asset is called. Every simulated gateway and device is now prefixed `Sim_`, which is
+ * what makes them distinguishable from real plant in the same tables.
+ *
+ * FOUR NODES FROM THAT TAB SURVIVE, because they are not simulation: the `POST /hooks/quarantine`
+ * receiver (three nodes) that migration 0006 posts to and `validate.py` check 7 asserts, and the
+ * NCMD listener that makes a rebirth request visible. They are relocated, not re-authored -- see
+ * RELOCATE at the bottom of this file.
  *
  * Usage:
  *   node scripts/generate-simulator-flow.mjs           # rewrite node_red_flow.json
@@ -31,6 +36,11 @@ const checkOnly = process.argv.includes('--check');
 const TAB_ID = 'tab-shopfloor';
 const GROUP_ID_PREFIX = 'grp-';
 
+// The introductory single-device tab this consolidation replaces, and its broker node. Both are
+// dropped from the merged flow; four non-simulation nodes are lifted off it first -- see RELOCATE.
+const LEGACY_TAB_ID = 'tab-gateway-sim';
+const LEGACY_BROKER_ID = 'mqtt-broker-config';
+
 /** Sparkplug group. Matches `gateways.sparkplug_group`'s default (migration 0015). */
 const SPARKPLUG_GROUP = 'ACS-Cymru';
 
@@ -48,43 +58,53 @@ const SPARKPLUG_GROUP = 'ACS-Cymru';
 const GATEWAYS = [
   {
     key: 'cnc',
-    name: 'GW_CNC_Machining',
+    name: 'Sim_Gateway_Cell1_Machining',
     sparkplugId: 'gwy120000000000400080000',
     credentialsEnv: 'MQTT_GW_CNC_MACHINING',
-    cell: 'CNC Machining Cell',
+    cell: 'Cell 1 — Precision Machining',
     devices: [
-      { key: 'mill01', name: 'CNC_Mill_01', sparkplugId: 'dev220000000000400080000', kind: 'cnc', oee: true },
-      { key: 'mill02', name: 'CNC_Mill_02', sparkplugId: 'dev230000000000400080000', kind: 'cnc' },
+      { key: 'mill01', name: 'Sim_CNC_Mill_01', sparkplugId: 'dev220000000000400080000', kind: 'cnc' },
+      { key: 'mill02', name: 'Sim_CNC_Mill_02', sparkplugId: 'dev230000000000400080000', kind: 'cnc' },
+      { key: 'tool01', name: 'Sim_Tool_Changer_01', sparkplugId: 'dev270000000000400080000', kind: 'toolchanger' },
     ],
   },
   {
     key: 'robot',
-    name: 'GW_Robotic_Assembly',
+    name: 'Sim_Gateway_Cell2_Robotics',
     sparkplugId: 'gwy130000000000400080000',
     credentialsEnv: 'MQTT_GW_ROBOTIC_ASSEMBLY',
-    cell: 'Robotic Assembly Cell',
+    cell: 'Cell 2 — Robotic Assembly',
     devices: [
-      { key: 'arm01', name: 'Robot_Arm_01', sparkplugId: 'dev240000000000400080000', kind: 'robot' },
+      { key: 'arm01', name: 'Sim_Robot_Arm_01', sparkplugId: 'dev240000000000400080000', kind: 'robot' },
     ],
   },
   {
-    key: 'agv',
-    name: 'GW_AGV_Fleet',
+    // The KPI aggregator gets its own gateway and cell, which is a modelling choice rather than a
+    // cosmetic one: ISO 22400 KPIs are computed, not measured, so they do not belong on the same
+    // edge node as the instruments. Keeping them separate makes "this number was derived" visible
+    // on the shopfloor map instead of implied.
+    key: 'oee',
+    name: 'Sim_Gateway_Cell3_OEE',
     sparkplugId: 'gwy140000000000400080000',
     credentialsEnv: 'MQTT_GW_AGV_FLEET',
-    cell: 'AGV Marshalling Area',
+    cell: 'Cell 3 — Production KPIs',
     devices: [
-      { key: 'agv01', name: 'AGV_01', sparkplugId: 'dev250000000000400080000', kind: 'agv' },
+      {
+        key: 'agg01', name: 'Sim_Cell3_Aggregator', sparkplugId: 'dev250000000000400080000',
+        kind: 'oee',
+        // The machine whose state time it accumulates.
+        sourceSparkplugId: 'dev220000000000400080000',
+      },
     ],
   },
   {
     key: 'bms',
-    name: 'GW_Facility_BMS',
+    name: 'Sim_Gateway_Site_BMS',
     sparkplugId: 'gwy150000000000400080000',
     credentialsEnv: 'MQTT_GW_FACILITY_BMS',
     cell: 'Site-Wide',
     devices: [
-      { key: 'zone01', name: 'BMS_Zone_01', sparkplugId: 'dev260000000000400080000', kind: 'bms' },
+      { key: 'zone01', name: 'Sim_BMS_Zone_HVAC', sparkplugId: 'dev260000000000400080000', kind: 'bms' },
     ],
   },
 ];
@@ -146,7 +166,7 @@ let metrics = [];
 
 if (KIND === 'cnc') {
   const running = !estopFault && wave(90000) > -0.6;
-  const temp = thermalFault && DEVICE_NAME === 'CNC_Mill_01'
+  const temp = thermalFault && DEVICE_NAME === 'Sim_CNC_Mill_01'
     ? 95 + noise(0.4)
     : 42 + wave(120000) * 3 + noise(0.15);
 
@@ -177,16 +197,22 @@ if (KIND === 'robot') {
   ];
 }
 
-if (KIND === 'agv') {
-  // Flattened state fields only. VDA 5050 is a complete bidirectional protocol with its own
-  // identity scheme keyed on manufacturer + serialNumber; adopting it would introduce a second
-  // identity path competing with sparkplug_id. docs/vocabularies.md settles this: take the scalar
-  // state fields as a vocabulary and leave the protocol in an edge adapter.
-  const moving = wave(45000) > -0.3;
+if (KIND === 'toolchanger') {
+  // An automatic tool changer serving the machining cell. MTConnect names throughout, because it
+  // is a machine-tool component and that is the vocabulary the cell already speaks.
+  //
+  // PART_COUNT IS MONOTONIC, which makes it the one metric here a deadband must not smooth: a
+  // counter that only publishes every Nth increment is a counter nobody can difference. Its band
+  // is 1, i.e. every change.
+  const changes = context.get('toolChanges') || 0;
+  const cycling = !estopFault && wave(75000) > 0.2;
+  if (cycling) context.set('toolChanges', changes + 1);
+
   metrics = [
-    { name: 'MotionDevice/ActualSpeed',  type: 'double', value: moving ? 900 + wave(45000) * 300 : 0, band: 10 },
-    { name: 'MotionDevice/OnPath',       type: 'boolean', value: moving },
-    { name: 'Machine/OperationalMode',   type: 'string', value: moving ? 'AUTOMATIC' : 'MANUAL' },
+    { name: 'Controller/PART_COUNT',      type: 'double', value: changes, band: 1 },
+    { name: 'Controller/CONTROLLER_MODE', type: 'string', value: estopFault ? 'MANUAL' : 'AUTOMATIC' },
+    { name: 'Systems/AVAILABILITY',       type: 'string', value: estopFault ? 'UNAVAILABLE' : 'AVAILABLE' },
+    { name: 'Axes/S/LOAD',                type: 'double', value: cycling ? 34 + wave(20000) * 12 + noise(0.2) : 2 + noise(0.2), band: 2.0 },
   ];
 }
 
@@ -401,21 +427,21 @@ const push = (n) => { nodes.push(n); return n; };
 push({
   id: TAB_ID,
   type: 'tab',
-  label: 'Multi-Standard Shopfloor',
+  label: 'Simulated Shopfloor',
   disabled: false,
   info: [
-    '# Multi-Standard Shopfloor Simulator',
+    '# Simulated Shopfloor',
     '',
     'Five devices across four cell gateways, each publishing a different companion standard over',
     'Sparkplug B.',
     '',
     '| Cell | Device | Standard |',
     '| --- | --- | --- |',
-    '| CNC Machining | CNC_Mill_01, CNC_Mill_02 | MTConnect 2.x |',
-    '| CNC Machining | CNC_Mill_01 (KPIs) | ISO 22400 |',
-    '| Robotic Assembly | Robot_Arm_01 | OPC 40010 Robotics + 40001-4 Energy |',
-    '| AGV Marshalling | AGV_01 | OPC 40010 (flattened state) |',
-    '| Site-Wide | BMS_Zone_01 | ASHRAE 223P |',
+    '| Cell 1 — Precision Machining | Sim_CNC_Mill_01, Sim_CNC_Mill_02 | MTConnect 2.x |',
+    '| Cell 1 — Precision Machining | Sim_Tool_Changer_01 | MTConnect 2.x |',
+    '| Cell 2 — Robotic Assembly | Sim_Robot_Arm_01 | OPC 40010 Robotics + 40001-4 Energy |',
+    '| Cell 3 — Production KPIs | Sim_Cell3_Aggregator | ISO 22400 (60s heartbeat) |',
+    '| Site-Wide | Sim_BMS_Zone_HVAC | ASHRAE 223P |',
     '',
     '**One MQTT connection per gateway.** `mosquitto.acl` pins the topic\'s edge-node segment to the',
     'connecting username, so devices cannot share a broker node across cells.',
@@ -456,7 +482,7 @@ for (const gw of GATEWAYS) {
 const DEVICE_SUBFLOWS = [
   { id: 'sf-cnc',   name: 'CNC_Machining_Subflow',  colour: '#3FADB5', body: SIMULATE },
   { id: 'sf-robot', name: 'Robotics_Subflow',       colour: '#87A980', body: SIMULATE },
-  { id: 'sf-agv',   name: 'AGV_Subflow',            colour: '#DEBD5C', body: SIMULATE },
+  { id: 'sf-toolchanger', name: 'Tool_Changer_Subflow', colour: '#DEBD5C', body: SIMULATE },
   { id: 'sf-bms',   name: 'BMS_Facility_Subflow',   colour: '#E2D96E', body: SIMULATE },
   { id: 'sf-oee',   name: 'OEE_Aggregator_Subflow', colour: '#C0DEED', body: OEE_BODY },
 ];
@@ -572,10 +598,18 @@ for (const gw of GATEWAYS) {
   y += 60;
 
   for (const dev of gw.devices) {
-    const phaseMs = deviceIndex * 350;
+    const isOee = dev.kind === 'oee';
+    // The KPI aggregator runs on a FIXED 60-SECOND HEARTBEAT, not the 5-second RBE scan. These are
+    // computed values, so a steady cadence is honest -- and it leaves the series free of the
+    // report-by-exception gaps a BI tool would otherwise have to read through telemetry_gapfill().
+    const phaseMs = isOee ? 0 : deviceIndex * 350;
     const injectId = `inject-${dev.key}`;
     const instId = `inst-${dev.key}`;
-    const kindSubflow = { cnc: 'sf-cnc', robot: 'sf-robot', agv: 'sf-agv', bms: 'sf-bms' }[dev.kind];
+    const kindSubflow = {
+      cnc: 'sf-cnc', robot: 'sf-robot', toolchanger: 'sf-toolchanger',
+      bms: 'sf-bms', oee: 'sf-oee',
+    }[dev.kind];
+    if (!kindSubflow) throw new Error(`no subflow for device kind '${dev.kind}' (${dev.name})`);
 
     // PHASE STAGGER. `onceDelay` starts this device's 5-second cycle `index * 350ms` after the
     // previous one, so five devices do not evaluate and publish on the same tick. Done with the
@@ -585,12 +619,12 @@ for (const gw of GATEWAYS) {
       id: injectId,
       type: 'inject',
       z: TAB_ID,
-      name: `${dev.name} scan (5s, +${phaseMs}ms)`,
+      name: isOee ? `${dev.name} KPI heartbeat (60s)` : `${dev.name} scan (5s, +${phaseMs}ms)`,
       props: [{ p: 'payload' }],
-      repeat: '5',
+      repeat: isOee ? '60' : '5',
       crontab: '',
       once: true,
-      onceDelay: String((phaseMs / 1000).toFixed(2)),
+      onceDelay: isOee ? '10' : String((phaseMs / 1000).toFixed(2)),
       topic: '',
       payload: '',
       payloadType: 'date',
@@ -610,7 +644,9 @@ for (const gw of GATEWAYS) {
         { name: 'GATEWAY_ID', value: gw.sparkplugId, type: 'str' },
         { name: 'KIND', value: dev.kind, type: 'str' },
         { name: 'SPARKPLUG_GROUP', value: SPARKPLUG_GROUP, type: 'str' },
-        { name: 'BIRTH_EVERY_SCANS', value: '180', type: 'num' },
+        ...(isOee
+          ? [{ name: 'SOURCE_DEVICE_ID', value: dev.sourceSparkplugId, type: 'str' }]
+          : [{ name: 'BIRTH_EVERY_SCANS', value: '180', type: 'num' }]),
       ],
       x: 560,
       y,
@@ -619,50 +655,8 @@ for (const gw of GATEWAYS) {
 
     groupNodes.push(injectId, instId);
     y += 60;
-    deviceIndex += 1;
+    if (!isOee) deviceIndex += 1;
 
-    // The OEE aggregator is a SECOND publisher on the SAME device. ISO 22400 KPIs describe a work
-    // unit, so they belong on the machine they describe rather than on a synthetic "KPI device"
-    // that would appear on the shopfloor map as a machine nobody can point at.
-    if (dev.oee) {
-      const oeeInject = `inject-oee-${dev.key}`;
-      const oeeInst = `inst-oee-${dev.key}`;
-      push({
-        id: oeeInject,
-        type: 'inject',
-        z: TAB_ID,
-        name: `${dev.name} OEE (60s)`,
-        props: [{ p: 'payload' }],
-        repeat: '60',
-        crontab: '',
-        once: true,
-        onceDelay: '10',
-        topic: '',
-        payload: '',
-        payloadType: 'date',
-        x: 220,
-        y,
-        wires: [[oeeInst]],
-      });
-      push({
-        id: oeeInst,
-        type: 'subflow:sf-oee',
-        z: TAB_ID,
-        name: `${dev.name} OEE`,
-        env: [
-          { name: 'DEVICE_ID', value: dev.sparkplugId, type: 'str' },
-          { name: 'DEVICE_NAME', value: dev.name, type: 'str' },
-          { name: 'GATEWAY_ID', value: gw.sparkplugId, type: 'str' },
-          { name: 'SOURCE_DEVICE_ID', value: dev.sparkplugId, type: 'str' },
-          { name: 'SPARKPLUG_GROUP', value: SPARKPLUG_GROUP, type: 'str' },
-        ],
-        x: 560,
-        y,
-        wires: [[outId]],
-      });
-      groupNodes.push(oeeInject, oeeInst);
-      y += 60;
-    }
   }
 
   push({
@@ -685,17 +679,17 @@ for (const gw of GATEWAYS) {
 const faults = [
   {
     id: 'inject-fault-thermal',
-    name: '🔥 Trigger Thermal Excursion (95°C)',
-    body: "global.set('fault_thermal', true); node.warn('THERMAL EXCURSION injected on CNC_Mill_01 -- Systems/TEMPERATURE will read ~95 degC and OEE quality will fall.'); return null;",
+    name: '🔥 Thermal Fault',
+    body: "global.set('fault_thermal', true); node.warn('THERMAL EXCURSION injected on Sim_CNC_Mill_01 -- Systems/TEMPERATURE will read ~95 degC and OEE quality will fall.'); return null;",
   },
   {
     id: 'inject-fault-estop',
-    name: '🛑 Trigger Emergency Stop',
-    body: "global.set('fault_estop', true); node.warn('EMERGENCY STOP injected -- Robot_Arm_01 goes STOPPED, CNC controllers report INTERRUPTED/TRIGGERED.'); return null;",
+    name: '🛑 E-Stop',
+    body: "global.set('fault_estop', true); node.warn('EMERGENCY STOP injected -- Sim_Robot_Arm_01 goes STOPPED, CNC controllers report INTERRUPTED/TRIGGERED.'); return null;",
   },
   {
     id: 'inject-fault-reset',
-    name: '✅ Reset Normal Operation',
+    name: '✅ Reset',
     body: "global.set('fault_thermal', false); global.set('fault_estop', false); node.warn('Faults cleared -- devices return to nominal on their next scan.'); return null;",
   },
 ];
@@ -745,12 +739,12 @@ push({
   info: [
     'These set a GLOBAL flag that every device subflow reads on its next scan. They are global',
     'rather than wired because a fault is a property of the scenario, not of one node -- and the',
-    'thermal excursion has to be visible to both CNC_Mill_01 and the OEE aggregator, which are',
+    'thermal excursion has to be visible to both Sim_CNC_Mill_01 and the KPI aggregator, which are',
     'different subflow instances and cannot see one another\'s context.',
     '',
     'Effects, all within one 5-second scan:',
     '',
-    '- Thermal: `Systems/TEMPERATURE` on CNC_Mill_01 -> ~95 degC. OEE quality falls because scrap',
+    '- Thermal: `Systems/TEMPERATURE` on Sim_CNC_Mill_01 -> ~95 degC. OEE quality falls because scrap',
     '  rises, so `OEE/OEE` follows on the next 60-second KPI publish.',
     '- E-stop: `MotionDevice/EmergencyStop` true, `Machine/OperationalMode` STOPPED,',
     '  `Controller/EXECUTION` INTERRUPTED, `Controller/EMERGENCY_STOP` TRIGGERED. Availability',
@@ -769,14 +763,65 @@ const existing = JSON.parse(fs.readFileSync(FLOW_PATH, 'utf8'));
 const ownedIds = new Set(nodes.map((n) => n.id));
 const ownedSubflows = new Set(DEVICE_SUBFLOWS.map((s) => s.id));
 
+/**
+ * THE LEGACY TAB IS REMOVED, BUT FOUR OF ITS NODES ARE NOT SIMULATION AND MUST SURVIVE.
+ *
+ * `POST /hooks/quarantine` is the receiver migration 0006's `dispatch_device_quarantine_webhook()`
+ * posts to, and `validate.py` check 7 asserts it answers 401 to an unauthenticated caller. The
+ * NCMD listener is how a rebirth request from the ingestion daemon becomes visible on the canvas.
+ * Neither is a simulated device, and deleting the tab wholesale would have taken both -- turning a
+ * consolidation into a silent regression of the webhook path and a failing E2E check.
+ *
+ * They are RELOCATED, not re-authored: their `z` moves to the unified tab and their position is
+ * reset, but their bodies and their comments come across untouched. Rewriting them here would fork
+ * logic that already works and is already covered.
+ */
+const RELOCATE = ['quarantine-hook-in', 'quarantine-hook-log', 'quarantine-hook-response',
+                  'ncmd-listener'];
+const RELOCATE_POSITIONS = {
+  'quarantine-hook-in': { x: 220, y: faultY + 40 },
+  'quarantine-hook-log': { x: 560, y: faultY + 40 },
+  'quarantine-hook-response': { x: 860, y: faultY + 40 },
+  'ncmd-listener': { x: 220, y: faultY + 100 },
+};
+
+const relocated = [];
+for (const id of RELOCATE) {
+  const node = existing.find((n) => n.id === id);
+  if (!node) continue;
+  node.z = TAB_ID;
+  Object.assign(node, RELOCATE_POSITIONS[id]);
+  // The NCMD listener subscribed through the legacy broker node, which this consolidation removes.
+  // Cell 1's gateway is the correct home: mosquitto.acl grants a gateway read on its OWN edge-node
+  // subtree, so it receives the rebirth requests addressed to it and no other node's.
+  if (id === 'ncmd-listener') node.broker = `mqtt-broker-${GATEWAYS[0].key}`;
+  relocated.push(node);
+}
+
+/**
+ * OWNERSHIP IS BY NAMESPACE, NOT BY THE CURRENT ID LIST, and the difference is what this run
+ * exposed. Renaming a gateway key (`agv` -> `oee`) changed its node ids, so the previous run's
+ * `mqtt-broker-agv` and `sf-agv` matched nothing in the new set and were "preserved" -- leaving an
+ * orphaned broker config and a dead subflow in the file. Both would have loaded, and the broker
+ * would have sat there failing to authenticate against an account nothing publishes through.
+ *
+ * Anything under these prefixes belongs to this generator and is rebuilt from scratch every run.
+ */
+const isGeneratorOwned = (id) =>
+  typeof id === 'string' && (id.startsWith('mqtt-broker-') || id.startsWith('sf-'));
+
 const preserved = existing.filter((n) => {
   if (n.id === TAB_ID || n.z === TAB_ID) return false;          // the tab this script owns
   if (ownedSubflows.has(n.id) || ownedSubflows.has(n.z)) return false;  // its subflows
   if (ownedIds.has(n.id)) return false;                        // its config nodes
+  if (n.id === LEGACY_TAB_ID || n.z === LEGACY_TAB_ID) return false;    // the tab it replaces
+  if (n.id === LEGACY_BROKER_ID) return false;                 // and that tab's broker node
+  if (isGeneratorOwned(n.id) || isGeneratorOwned(n.z)) return false;    // anything left from a
+                                                                       // previous shape of this file
   return true;
 });
 
-const merged = [...preserved, ...nodes];
+const merged = [...preserved, ...nodes, ...relocated];
 const serialised = `${JSON.stringify(merged, null, 4)}\n`;
 
 if (checkOnly) {
@@ -795,8 +840,9 @@ if (checkOnly) {
 fs.writeFileSync(FLOW_PATH, serialised);
 console.log(
   `Wrote ${FLOW_PATH}\n` +
-  `  ${preserved.length} preserved node(s) (the existing Gateway Simulator tab)\n` +
   `  ${nodes.length} generated node(s): ${GATEWAYS.length} gateways, ` +
   `${GATEWAYS.reduce((n, g) => n + g.devices.length, 0)} devices, ` +
-  `${DEVICE_SUBFLOWS.length} subflows`
+  `${DEVICE_SUBFLOWS.length} subflows\n` +
+  `  ${relocated.length} relocated node(s) (quarantine webhook + NCMD listener)\n` +
+  `  ${preserved.length} untouched node(s)`
 );

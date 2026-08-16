@@ -855,7 +855,7 @@ grafana:
     # Pinned, unlike Compose's `:latest`. grafana.ini depends on behaviour that has moved between
     # releases -- `use_pkce`, `auth_style`, and the env-override mapping this chart relies on to
     # replace auth_url without editing the file.
-    tag: "11.6.1"
+    tag: "13.1.3"
     pullPolicy: IfNotPresent
   persistence:
     enabled: true

@@ -121,7 +121,8 @@ identifiers onto the `acs-cymru.local` namespace, `0015` moves the default Spark
 `ACS-Cymru`, `0016` drops the dashboard's own service-directory entry and renames the Node-RED
 one to say it is the simulator, `0018` pre-registers the demonstrator's metric set with each
 row's standard and published semantic id, `0019` adds the 223P supply-air-flow metric the
-shopfloor simulator needed — plus demo accounts (`supabase/seed.sql`).
+shopfloor simulator needed, `0021` gives each shopfloor cell an icon from a closed set
+— plus demo accounts (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because `0005` already implements one; a second declaration of `log_digital_thread_event()`
@@ -264,7 +265,7 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | `ingestion` | `acs-cymru_ingestion` | `./Dockerfile` | — |
 | `node-red-init` | `acs-cymru_node_red_init` | `./node-red/Dockerfile` | — |
 | `node-red` | `acs-cymru_node_red` | `./node-red/Dockerfile` | `1880:1880` |
-| `grafana` | `acs-cymru_grafana` | `grafana/grafana:11.6.1` | `3002:3000` |
+| `grafana` | `acs-cymru_grafana` | `grafana/grafana:13.1.3` | `3002:3000` |
 | `swagger-ui` | `acs-cymru_swagger_ui` | `swaggerapi/swagger-ui:v5.17.14` | `8088:8080` |
 
 ---

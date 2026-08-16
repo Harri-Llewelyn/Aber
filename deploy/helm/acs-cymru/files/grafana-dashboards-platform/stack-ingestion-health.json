@@ -1,0 +1,399 @@
+{
+  "uid": "acs-cymru-platform",
+  "title": "Stack & Ingestion Health",
+  "tags": [
+    "acs-cymru",
+    "platform"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "description": "Platform-side health: what the ingestion daemon is landing in the historian, and how the hypertable and its rollups are growing. Reads only objects that exist on the HISTORIAN -- `gateways` and `asset_config` live in Supabase and were queried here by mistake, which is why those panels are gone rather than fixed.",
+  "panels": [
+    {
+      "type": "row",
+      "title": "Ingestion",
+      "id": 1,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Telemetry Rows Ingested (per second)",
+      "description": "Rows landing in the `telemetry` hypertable, bucketed at one minute. This is the historian-side view of ingestion throughput. The daemon's own STATS counters (messages consumed, drops by reason) are LOG LINES and are not queryable from here -- exposing them needs the Prometheus endpoint tracked as issue #22.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT time_bucket('1 minute', time) AS \"time\",\n       'rows/sec' AS metric,\n       count(*) / 60.0 AS value\n  FROM telemetry\n WHERE $__timeFilter(time)\n GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "rps",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Ingestion Rate by Device",
+      "description": "Per-device write rate. Under report-by-exception a flat line at zero is a device whose values are not moving, NOT a device that has stopped -- absence and steadiness are the same signal here, which is what the 5-minute keepalive bounds.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT time_bucket('1 minute', t.time) AS \"time\",\n       coalesce(a.asset_name, t.asset_id) AS metric,\n       count(*) AS value\n  FROM telemetry t LEFT JOIN assets a ON a.asset_id = t.asset_id\n WHERE $__timeFilter(t.time)\n GROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Active Series",
+      "description": "Distinct (device, metric) pairs with a sample in the window. Bounded by series count rather than by history, which is the property `telemetry_latest` exists for.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT now() AS \"time\", 'series' AS metric,\n       count(*)::float AS value\n  FROM (SELECT DISTINCT asset_id, metric_name FROM telemetry\n         WHERE $__timeFilter(time)) s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Devices Reporting",
+      "description": "Distinct devices with a sample in the window.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT now() AS \"time\", 'devices' AS metric,\n       count(DISTINCT asset_id)::float AS value\n  FROM telemetry WHERE $__timeFilter(time)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Rows in Hypertable",
+      "description": "Total raw observations retained. Raw is dropped on the retention policy while the rollups outlive it -- that split is deliberate and is what lets a question about last spring be answered at all.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT now() AS \"time\", 'rows' AS metric, count(*)::float AS value\n  FROM telemetry"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Continuous Aggregates",
+      "id": 7,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Rollup Bucket Coverage",
+      "description": "Buckets materialised in each rollup. The hierarchy is 1m -> 5m -> 1h, each built from the one before, so a gap that appears only in the coarser views is a refresh policy problem rather than an ingestion one.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT bucket AS \"time\", '1 minute' AS metric, count(*) AS value\n  FROM telemetry_1m WHERE $__timeFilter(bucket) GROUP BY 1\n UNION ALL\nSELECT bucket, '5 minute', count(*) FROM telemetry_5m\n WHERE $__timeFilter(bucket) GROUP BY 1\n UNION ALL\nSELECT bucket, '1 hour', count(*) FROM telemetry_1h\n WHERE $__timeFilter(bucket) GROUP BY 1\n ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Historian I/O by Backend",
+      "description": "From pg_stat_io. `grafana_reader` holds pg_monitor, which grants visibility into the statistics views and nothing else.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT backend_type AS \"Backend\", object AS \"Object\",\n       context AS \"Context\", hits AS \"Cache hits\", reads AS \"Disk reads\"\n  FROM pg_stat_io\n WHERE hits > 0 OR reads > 0\n ORDER BY reads DESC NULLS LAST LIMIT 20"
+        }
+      ]
+    }
+  ]
+}

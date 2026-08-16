@@ -1,11 +1,38 @@
+# TWO PROVIDERS, TWO FOLDERS, and the split is by AUDIENCE rather than by topic.
+#
+# A platform engineer asking "is ingestion keeping up" and a production engineer asking "what is
+# cell 1 doing" were sharing one dashboard, which meant neither could scan it. Grafana's file
+# provisioner creates a folder per provider, so separating them is a provisioning concern rather
+# than a dashboard one.
+#
+# EACH PROVIDER NEEDS ITS OWN `path`, AND THE PATHS MUST NOT NEST. A provider scans its directory
+# recursively, so pointing one at `dashboards/` and another at `dashboards/shopfloor/` would file
+# every shopfloor dashboard under BOTH folders -- Grafana would create duplicates and the second
+# provider's copy would win on a race. Siblings, always.
+#
+# `foldersFromFilesStructure` is deliberately NOT used. It derives folder names from directory
+# names, which would give "platform" and "shopfloor" rather than the names below, and it cannot
+# express two differently-named folders from one provider anyway.
 apiVersion: 1
 
 providers:
-  - name: 'ACS-Cymru'
+  - name: 'acs-cymru-platform'
     orgId: 1
-    folder: 'ACS-Cymru'
+    folder: 'ACS-Cymru - Platform Infrastructure'
+    type: file
+    disableDeletion: false
+    # 30s, matching the previous single provider. Provisioned dashboards are reconciled from disk,
+    # so an edit made in the UI is overwritten on the next sweep -- which is the intended
+    # behaviour: the file is the source of truth and the UI is a viewer.
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards/platform
+
+  - name: 'acs-cymru-shopfloor'
+    orgId: 1
+    folder: 'ACS-Cymru - Shopfloor Operations'
     type: file
     disableDeletion: false
     updateIntervalSeconds: 30
     options:
-      path: /etc/grafana/provisioning/dashboards/json
+      path: /etc/grafana/provisioning/dashboards/shopfloor

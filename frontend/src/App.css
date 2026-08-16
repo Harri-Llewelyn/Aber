@@ -1720,10 +1720,118 @@ tbody tr:hover { background: var(--bg-glass); }
   line-height: 1.35;
 }
 
+/* BOUNDED HEIGHT, SO ONE BUSY CELL DOES NOT SET THE ROW HEIGHT FOR ALL OF THEM.
+   `.shopfloor-grid` uses `align-items: start`, so tiles are only as tall as their content -- which
+   is right until one cell holds three devices and its neighbours hold one, at which point the row
+   is ragged and the map stops reading as a grid. Capping the scrollable list keeps every tile
+   within one card-height of its neighbours however many assets a cell accumulates.
+
+   240px is chosen against the chip height below (~26px + 4px gap = ~30px a row): it shows seven
+   whole and clips the eighth, so a list that scrolls always LOOKS like it scrolls. A cap that
+   happened to land flush on a chip boundary is the one mistaken for the end of the list.
+
+   `overscroll-behavior: contain` stops a flick inside a full cell from scrolling the page once the
+   list bottoms out -- on a map of tiles that reads as the whole view lurching. */
 .zone-chips {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The scrollbar is drawn in the card's own hairline colour rather than the platform default, which
+   on Windows is a light-grey trough that glows against the dark tile. Firefox takes the two-value
+   `scrollbar-color`; WebKit needs the pseudo-elements, so both are given.
+
+   TRANSPARENT TROUGH, not `--surface`: the lanes tint their background (see .shopfloor-lane-site),
+   so a solid trough would show as a pale stripe over the tint on exactly those two tiles. */
+.zone-chips {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule) transparent;
+}
+
+.zone-chips::-webkit-scrollbar {
+  width: 6px;
+}
+
+.zone-chips::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.zone-chips::-webkit-scrollbar-thumb {
+  background: var(--rule);
+  border-radius: 3px;
+}
+
+.zone-chips::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
+
+/* Slightly roomier chips INSIDE A ZONE ONLY. `.chip` is shared with the filter bar and the context
+   panel, where 3px is right against their smaller type; a global bump would have quietly reflowed
+   both. Scoping it costs one selector and keeps the change where it was asked for.
+
+   NO `margin-bottom` -- `.zone-chips` already spaces these with `gap: 4px`, and adding a margin as
+   well would double the spacing AND leave a trailing gap under the last chip, which inside a
+   scroll container reads as a stray blank row at the bottom of the list. */
+.zone-chips .chip {
+  padding: 5px 8px;
+}
+
+/* The cell icon picker: a grid of labelled buttons, not a <select>.
+   The operator is choosing what the card will LOOK like on the map, and a dropdown of eight words
+   asks them to imagine the result instead of showing it.
+
+   `auto-fit` rather than a fixed column count so the grid reflows in the modal at any width; each
+   option carries its label because the glyphs alone do not distinguish "metrology" from "energy"
+   to someone who has not seen the set before. */
+.icon-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: 6px;
+}
+
+.icon-picker-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 9px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-base);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.25;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+/* 11px, not 10 -- themeContrast.test.js enforces a type-scale floor across App.css and 10px
+   failed it. The floor is not a style preference: below 11px this UI's muted text stops clearing
+   contrast at ordinary viewing distance, which is the thing that test measures. */
+
+.icon-picker-option:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+/* Selection is carried by BORDER AND TEXT COLOUR TOGETHER, not colour alone -- the same reason the
+   status dots pair a hue with a shape. A single accent tint is invisible to anyone who cannot
+   separate it from the resting border. */
+.icon-picker-option.is-selected {
+  border-color: var(--accent);
+  color: var(--text-primary);
+  background: rgba(0, 212, 255, 0.08);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.icon-picker-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* Chips STACK now rather than wrapping in rows. In a ~296px track a wrapped row fits one chip

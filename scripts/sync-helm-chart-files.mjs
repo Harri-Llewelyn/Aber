@@ -150,11 +150,21 @@ const MIRRORS = [
     match: (name) => name.endsWith('.yml'),
     why: 'Dashboard provider definition',
   },
+  // ONE MIRROR PER FOLDER, because this script does NOT recurse -- readdirSync is top-level only,
+  // which is the same property that keeps supabase/migrations/archive/ out. A single entry
+  // pointing at `dashboards/` would copy dashboards.yml and silently skip both subdirectories,
+  // producing a chart that renders, installs, and serves a Grafana with no dashboards at all.
   {
-    source: join('grafana', 'provisioning', 'dashboards', 'json'),
-    dest: 'grafana-dashboards-json',
+    source: join('grafana', 'provisioning', 'dashboards', 'platform'),
+    dest: 'grafana-dashboards-platform',
     match: (name) => name.endsWith('.json'),
-    why: 'The dashboards themselves',
+    why: 'Platform Infrastructure folder -- stack and ingestion health',
+  },
+  {
+    source: join('grafana', 'provisioning', 'dashboards', 'shopfloor'),
+    dest: 'grafana-dashboards-shopfloor',
+    match: (name) => name.endsWith('.json'),
+    why: 'Shopfloor Operations folder -- manufacturing cells and telemetry',
   },
 ];
 

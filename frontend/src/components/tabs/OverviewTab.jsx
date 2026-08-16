@@ -9,6 +9,7 @@ import { effectiveSparkplugId } from '../../utils/sparkplugId'
 import {
   SCOPE_CELL, SCOPE_SITE_WIDE, SOURCE_UNASSIGNED, SOURCE_SITE_WIDE, groupDevicesByCell
 } from '../../utils/cellResolution'
+import { cellIconComponent } from '../../utils/cellIcon'
 import {
   IconMap,
   IconFactory,
@@ -643,7 +644,11 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
                 className: `shopfloor-cell${c.is_archived ? ' shopfloor-zone-archived' : ''}`,
                 name: c.cell_name,
                 nameTitle: `Cell '${c.cell_name}' (Zone #${c.cell_id}) — Click to view on Cells page`,
-                Icon: IconFactory,
+                // Per-cell now rather than one glyph for every zone: a floor of six identical
+                // rectangles is read name-by-name, which is the thing a map is meant to avoid.
+                // Falls back to the default for an icon this build does not know -- see
+                // utils/cellIcon.jsx.
+                Icon: cellIconComponent(c.icon),
                 status: rollupStatus(cellAssets),
                 gateways: cellGateways,
                 devices: cellAssets,

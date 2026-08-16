@@ -1009,7 +1009,11 @@ const apiMethods = {
     if (path === '/api/v1/cells') {
       const { data, error } = await supabase.from('cells').insert({
         name: body.cell_name,
-        grafana_url: body.access_url
+        grafana_url: body.access_url,
+        // Omitted rather than defaulted here when the caller sends nothing: the column's own
+        // NOT NULL DEFAULT 'Factory' is the single place that value lives, and repeating it in
+        // the client is how the two eventually disagree.
+        ...(body.icon ? { icon: body.icon } : {})
       }).select();
       if (error) throw error;
       return data?.[0] || {};
@@ -1322,7 +1326,8 @@ const apiMethods = {
     if (path.startsWith('/api/v1/cells/')) {
       const { data, error } = await supabase.from('cells').update({
         name: body.cell_name,
-        grafana_url: body.access_url
+        grafana_url: body.access_url,
+        ...(body.icon ? { icon: body.icon } : {})
       }).eq('id', id).select();
       if (error) throw error;
       return data[0];

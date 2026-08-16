@@ -899,7 +899,16 @@ if (!Object.prototype.hasOwnProperty.call(exported, '$')) {
   );
 }
 
-// 6. Prove Node-RED will be able to read it back before we commit it to disk.
+// 6. Prove Node-RED will be able to read EVERY credential back before we commit it to disk.
+//
+// CHECKED PER BROKER NODE, not against one hardcoded id. This verified only `mqtt-broker-config`,
+// which stopped existing when the introductory tab was folded into the unified one -- so the
+// lookup returned undefined, the comparison failed, and the script correctly refused to write a
+// file it could not prove readable. The guard was right; its scope was stale.
+//
+// A partial check would have been worse than none: with four gateways it would have passed on the
+// one node it knew about and said nothing about the other three, which is exactly the silent
+// half-configured state this guard exists to prevent.
 try {
   const key = crypto.createHash('sha256').update(credentialSecret).digest();
   const blob = exported.$;
@@ -907,9 +916,17 @@ try {
   const decipher = crypto.createDecipheriv('aes-256-ctr', key, iv);
   const plain =
     decipher.update(blob.substring(32), 'base64', 'utf8') + decipher.final('utf8');
-  const roundTripped = JSON.parse(plain)['mqtt-broker-config'];
-  if (roundTripped?.user !== mqttUser || roundTripped?.password !== mqttPassword) {
-    fail('credential round-trip mismatch; refusing to write.');
+  const decoded = JSON.parse(plain);
+
+  for (const [nodeId, expected] of brokerCredentials) {
+    const roundTripped = decoded[nodeId];
+    if (roundTripped?.user !== expected.user || roundTripped?.password !== expected.password) {
+      fail(
+        `credential round-trip mismatch for broker node '${nodeId}'; refusing to write. ` +
+          'Node-RED would not have been able to decrypt it, and the gateway would report only ' +
+          '"Connection failed to broker".'
+      );
+    }
   }
 } catch (err) {
   fail(`credential round-trip failed: ${err.message}`);
@@ -919,5 +936,5 @@ fs.writeFileSync(credentialsPath, JSON.stringify(exported));
 
 console.log(
   `[node-red-init] broker credentials written encrypted (aes-256-ctr) to ${credentialsPath} ` +
-    `for user '${mqttUser}'.`
+    `for ${brokerCredentials.size} gateway account(s).`
 );
