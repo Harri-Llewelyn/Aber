@@ -1,6 +1,9 @@
 # Environment variables
 .env
 !.env.example
+# Written by `npm run provision:gateways -- --env-out=…`. Holds per-gateway broker passwords that
+# mosquitto_passwd cannot read back, so it is a real secret and never a committed artefact.
+.env.gateways
 
 # Python
 __pycache__/

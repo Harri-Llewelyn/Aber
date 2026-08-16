@@ -51,8 +51,12 @@ const MIRRORS = [
     // what makes the compression, retention and rollup definitions settings rather than constants
     // fixed before the first row was written. Mounting them into the initdb ConfigMap would
     // silently restore the old behaviour.
-    match: (name) => name === 'retention.sql' || name === 'aggregates.sql',
-    why: 'Telemetry lifecycle: compression/retention policies and the rollup views, reconciled on every boot',
+    // An explicit allow-list rather than `endsWith('.sql')`, so a new file in timescaledb/ has to
+    // be added here deliberately -- and, more to the point, has to be wired into BOTH the Compose
+    // service and the Helm Job that run these. A file that mirrored automatically but was never
+    // invoked would sit in the ConfigMap looking applied.
+    match: (name) => name === 'retention.sql' || name === 'aggregates.sql' || name === 'roles.sql',
+    why: 'Telemetry lifecycle: compression/retention policies, the rollup views and the read-only BI role, reconciled on every boot',
   },
   {
     source: join('supabase', 'migrations'),

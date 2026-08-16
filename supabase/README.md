@@ -185,6 +185,51 @@ already used. `gateways.last_heartbeat` is deliberately **not** deduplicated for
 `public.gateway_status` derives staleness from it, so a suppressed heartbeat would report a live
 gateway as `STALE`.
 
+### Metric catalog standards seed (0018)
+
+`metric_catalog` is **curated, not accreted**: `ingestion.py` contains no reference to it at all,
+and the only insert path is the operator-facing form behind `POST /api/v1/metric-catalog`. Good
+property — but it means a mixed-standard fleet is registered by hand, one form at a time, and
+`name` is UNIQUE and IMMUTABLE, so the first row to claim a name owns it permanently along with
+whichever `standard` and `semantic_id` it was created with. Both flow into the AAS export and the
+i3X `sourceTypeId`.
+
+`0018` front-runs that for the demonstrator's metric set. Three properties worth knowing:
+
+- **Semantic ids are `SELECT`ed from the vocabulary tables, never typed.** Every row joins the
+  vocabulary for its standard, so a metric whose concept is not in the vocabulary is **not
+  inserted at all** rather than inserted with a guessed id — the inner join is the check. Retyping
+  would create a second, unverified copy of an identity `docs/vocabularies.md` confirmed against
+  machine-readable sources, and a typo would assert an interoperability that does not exist while
+  looking exactly like one that does.
+- **The taxonomy extends what `0002` seeded; it does not replace it.** One top-level segment per
+  standard, so a name cannot collide across standards by construction:
+
+  | Segment | Standard |
+  | :--- | :--- |
+  | `Axes/` `Controller/` `Systems/` | MTConnect 2.x |
+  | `MotionDevice/` `Machine/` | OPC 40010 Robotics |
+  | `Energy/` | OPC 40001-4 Machinery Energy |
+  | `BMS/` | ASHRAE 223P |
+  | `OEE/` | ISO 22400 |
+
+  The plan behind this migration proposed `KPI/` and `Robotics/`. Both were rejected on contact
+  with the existing catalog, which already uses `OEE/` and `MotionDevice/` — a parallel prefix
+  would mean two permanent names for one concept, which is the collision the naming plan exists to
+  prevent, arriving from the direction of the plan itself.
+- **Transliteration happens at authoring time, because it cannot happen later.** `0007` forbids
+  dots and hyphens, so the ASHRAE concept `Constituent-CO2` is registered as
+  `BMS/CO2_CONCENTRATION`. The join still uses the vocabulary's own unmodified key.
+
+**One inconsistency this surfaced and deliberately did not fix.** `0002`'s rows mint semantic ids
+*path-shaped* (`…/mtconnect/v2.0/Axes/C/ANGLE`) where `mtconnect_vocabulary` mints them
+*type-shaped* (`…/mtconnect/v2.0/DataItemType/ANGLE`). Both are under the locally-minted
+`acs-cymru.local` namespace, so neither asserts a false interoperability and neither is wrong —
+they are two conventions for the same thing, and `0002`'s predates the vocabulary tables.
+Reconciling them is deprecate-and-supersede with its own reasoning to write.
+`test_metric_catalog_seed.py` scopes its provenance assertions to the rows `0018` owns for exactly
+this reason.
+
 ### Metric name format (0007)
 
 Factory+ requires a metric name to be `/`-delimited folders whose segments use only alphanumerics

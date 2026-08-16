@@ -119,7 +119,14 @@ view, `0011` IDTA Digital Nameplate and per-device nameplate data, `0012` permit
 discrete metric, `0013` ASHRAE 223P vocabulary, `0014` repoints locally-minted semantic
 identifiers onto the `acs-cymru.local` namespace, `0015` moves the default Sparkplug group to
 `ACS-Cymru`, `0016` drops the dashboard's own service-directory entry and renames the Node-RED
-one to say it is the simulator — plus demo accounts (`supabase/seed.sql`).
+one to say it is the simulator, `0018` pre-registers the demonstrator's metric set with each
+row's standard and published semantic id — plus demo accounts (`supabase/seed.sql`).
+
+> **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
+> because `0005` already implements one; a second declaration of `log_digital_thread_event()`
+> would win by filename order on every boot and would have regressed the `actor_source`
+> attribution `0005` adds. The gap in the numbering is deliberate and the reasoning is in
+> [`supabase/README.md`](supabase/README.md#audit-signal-and-attribution-0005).
 
 | Interface | URL |
 | :--- | :--- |
@@ -325,6 +332,9 @@ python supabase/functions/aas-export/test_aas_export.py
 python supabase/migrations/test_user_roles_rls.py
 python supabase/migrations/test_schema_versioning.py
 python supabase/migrations/test_digital_thread_guard.py
+python supabase/migrations/test_metric_catalog_seed.py
+# Needs the TimescaleDB historian (port 5433), not Supabase — the rollups live there
+python timescaledb/test_bi_reader_grants.py
 
 # End-to-end — needs the running stack
 set -a && . ./.env && set +a && unset MQTT_HOST DB_HOST DB_PORT

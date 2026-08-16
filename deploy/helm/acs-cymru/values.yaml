@@ -128,6 +128,18 @@ secrets:
   grafanaAdminPassword: ""
   grafanaOAuthClientSecret: ""
 
+  # The read-only historian role external BI tools connect as -- and the role GRAFANA connects as,
+  # replacing the `postgres` superuser it used to hold. Created on the TimescaleDB instance by
+  # timescaledb/roles.sql, which the maintenance Job applies after the rollups it grants on.
+  #
+  # EMPTY MEANS NO ROLE, not a role with a blank password: roles.sql skips it entirely. With
+  # Grafana enabled the render fails instead, because a Grafana that cannot authenticate reports
+  # a database fault rather than a missing setting -- see acs-cymru.validateSecrets.
+  #
+  # It may SELECT telemetry_1m / 5m / 1h and is explicitly revoked on raw `telemetry`, `assets`
+  # and `telemetry_latest`. Setting it here rotates the password on the next install or upgrade.
+  biReaderPassword: ""
+
   noderedCredentialSecret: ""
   noderedOAuthClientSecret: ""
   noderedWebhookJwtSecret: ""
@@ -221,6 +233,10 @@ timescaledb:
     oneMinuteRetainFor: "180 days"
     fiveMinuteRetainFor: "1 year"
     oneHourRetainFor: "5 years"
+  # The read-only BI role's password is a CREDENTIAL and lives under `secrets.biReaderPassword`
+  # with the others, not here -- anything under `secrets` is covered by `secrets.existingSecret`,
+  # and a password declared in this block would quietly bypass that whole mechanism in production.
+  # What the role may read is described in timescaledb/roles.sql.
   resources:
     requests:
       cpu: 100m

@@ -4,6 +4,7 @@ import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId } from './utils/sparkplugId';
 import { resolveDeviceLocation, SCOPE_SITE_WIDE } from './utils/cellResolution';
 import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
+import { metricNameError } from './utils/metricGroup';
 import {
   MODEL_3D_EXTENSIONS,
   isAcceptedModelFile,
@@ -1078,8 +1079,20 @@ const apiMethods = {
     }
 
     if (path === '/api/v1/metric-catalog') {
+      // THE LAST CHECK BEFORE SOMETHING PERMANENT. `metric_catalog.name` is immutable, so a
+      // non-conforming name cannot be corrected -- only deprecated and superseded. The Add Metric
+      // form already refuses one (SchemasTab gates its submit on isValidMetricName), and
+      // `metric_catalog_name_format` in migration 0007 refuses it at the database. This closes the
+      // gap between them: any OTHER caller of this route would otherwise reach the constraint and
+      // get a raw PostgREST 400 quoting a regex, where metricNameError() states the problem in a
+      // sentence naming the offending character.
+      //
+      // Deliberately the same mirrored expression, not a second one -- see utils/metricGroup.js.
+      const nameError = metricNameError(body.name)
+      if (nameError) throw new Error(nameError)
+
       const { data, error } = await supabase.from('metric_catalog').insert({
-        name: body.name,
+        name: (body.name || '').trim(),
         datatype: body.datatype,
         category: emptyToNull(body.category),
         units: emptyToNull(body.units),

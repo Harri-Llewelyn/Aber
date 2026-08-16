@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "setup": "node scripts/setup.mjs",
-    "proto": "node scripts/generate-proto.mjs"
+    "proto": "node scripts/generate-proto.mjs",
+    "provision:gateways": "node scripts/provision-gateways.mjs"
   }
 }

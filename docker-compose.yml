@@ -97,9 +97,13 @@ services:
       TIMESCALE_ROLLUP_1M_RETAIN_FOR: ${TIMESCALE_ROLLUP_1M_RETAIN_FOR:-180 days}
       TIMESCALE_ROLLUP_5M_RETAIN_FOR: ${TIMESCALE_ROLLUP_5M_RETAIN_FOR:-1 year}
       TIMESCALE_ROLLUP_1H_RETAIN_FOR: ${TIMESCALE_ROLLUP_1H_RETAIN_FOR:-5 years}
+      # Read-only role for external BI tools. EMPTY MEANS NO ROLE -- roles.sql skips it rather
+      # than creating one with a blank password. See timescaledb/roles.sql.
+      BI_READER_PASSWORD: ${BI_READER_PASSWORD:-}
     volumes:
       - ./timescaledb/retention.sql:/retention.sql:ro
       - ./timescaledb/aggregates.sql:/aggregates.sql:ro
+      - ./timescaledb/roles.sql:/roles.sql:ro
     # The healthcheck cannot be trusted to mean "init has finished": the postgres entrypoint runs
     # initdb scripts against a temporary server that already answers on the unix socket, which is
     # what `pg_isready` inside the container asks. So wait for the hypertable itself -- the object
@@ -117,6 +121,8 @@ services:
       psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -v compress_after=\"$$TIMESCALE_COMPRESS_AFTER\" -v retain_after=\"$$TIMESCALE_RETAIN_FOR\" -f /retention.sql;
       echo 'Reconciling telemetry rollups...';
       psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -v rollup_1m_retain=\"$$TIMESCALE_ROLLUP_1M_RETAIN_FOR\" -v rollup_5m_retain=\"$$TIMESCALE_ROLLUP_5M_RETAIN_FOR\" -v rollup_1h_retain=\"$$TIMESCALE_ROLLUP_1H_RETAIN_FOR\" -f /aggregates.sql;
+      echo 'Reconciling read-only BI role...';
+      psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -f /roles.sql;
       "
     depends_on:
       timescaledb:
@@ -1093,7 +1099,10 @@ services:
       # [server] root_url, which keeps the localhost default for a standalone read of that file.
       GF_SERVER_ROOT_URL: ${GRAFANA_PUBLIC_URL:-http://localhost:3002}/
       GF_INSTALL_PLUGINS: ""
-      DB_PASSWORD: ${DB_PASSWORD}
+      # The READ-ONLY historian role, not DB_PASSWORD. Grafana previously connected as the
+      # `postgres` superuser -- a service fronted by browser SSO holding the credential that owns
+      # the database. See grafana/provisioning/datasources/datasources.template.yml.
+      BI_READER_PASSWORD: ${BI_READER_PASSWORD}
       # Read by grafana.ini through $__env{GRAFANA_OAUTH_CLIENT_SECRET}, so the secret is not
       # committed. Must match what 0002_seed_data.sql hashed into auth.oauth_clients.
       GRAFANA_OAUTH_CLIENT_SECRET: ${GRAFANA_OAUTH_CLIENT_SECRET:-}
@@ -1119,11 +1128,11 @@ services:
       - -e
       - -c
       - |
-        if [ -z "$$DB_PASSWORD" ]; then
-          echo 'DB_PASSWORD must be set -- Grafana would otherwise provision the TimescaleDB datasource with an empty password.' >&2
+        if [ -z "$$BI_READER_PASSWORD" ]; then
+          echo 'BI_READER_PASSWORD must be set -- Grafana would otherwise provision the TimescaleDB datasource with an empty password. It is the password of the read-only powerbi_reader role created by timescaledb/roles.sql.' >&2
           exit 1
         fi
-        sed -e "s|__DB_PASSWORD__|$$DB_PASSWORD|g" \
+        sed -e "s|__BI_READER_PASSWORD__|$$BI_READER_PASSWORD|g" \
             /tmp/datasources-template/datasources.template.yml \
             > /etc/grafana/provisioning/datasources/datasources.yml
         # Comment lines excluded for the same reason as in supabase-kong-init: the template's own

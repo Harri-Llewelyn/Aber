@@ -50,6 +50,9 @@ secrets:
   grafanaAdminUser: admin
   grafanaAdminPassword: admin
   grafanaOAuthClientSecret: change-me-grafana-oauth-client-secret
+  # Matches .env.example, so the Compose and k3d stacks come up on the same credential set.
+  # Grafana connects to the historian as `powerbi_reader`, never as `postgres`.
+  biReaderPassword: acscymru123
 
   noderedCredentialSecret: acscymrusecret
   noderedOAuthClientSecret: change-me-nodered-oauth-client-secret

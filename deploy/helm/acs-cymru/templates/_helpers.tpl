@@ -147,6 +147,17 @@ Skipped entirely when `existingSecret` is set, because the values are then not t
 {{- $missing = append $missing (printf "secrets.%s (%s)" $field $envName) -}}
 {{- end -}}
 {{- end -}}
+{{/*
+GRAFANA NEEDS THE BI READER PASSWORD, and only Grafana does -- the maintenance Job treats an empty
+value as "do not create the role", which is the right behaviour for a stack with no reporting tool
+attached. With Grafana enabled it is not optional: its render-datasource initContainer refuses to
+start without one, and the fallback it used to have -- the `postgres` superuser credential -- is
+exactly what this replaced. Caught here so the failure is one Helm error rather than a Grafana pod
+in CrashLoopBackOff reporting a database it cannot authenticate against.
+*/}}
+{{- if and .Values.grafana.enabled (not .Values.secrets.biReaderPassword) -}}
+{{- $missing = append $missing "secrets.biReaderPassword (BI_READER_PASSWORD, required when grafana.enabled)" -}}
+{{- end -}}
 {{- if $missing -}}
 {{- fail (printf "\n\nacs-cymru: required credentials are not set:\n  - %s\n\nThese are a SET, not independent values: anonKey and serviceRoleKey are JWTs signed by\njwtSecret, so supplying some and not others yields a stack that reports healthy and rejects\nevery request at the gateway. The chart deliberately does not generate them.\n\nFor a local k3s stack:   helm install ... -f values-dev.yaml\nFor anything else:       copy values-prod.yaml.example and supply a matching set.\n" (join "\n  - " $missing)) -}}
 {{- end -}}
