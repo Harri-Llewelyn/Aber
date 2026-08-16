@@ -89,6 +89,43 @@ const MAX_BUNDLED_MODEL_BYTES = Number.parseInt(
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * Whether a base URL points at the loopback interface.
+ *
+ * WHY THIS MATTERS AT ALL. `AAS_MODEL_PUBLIC_BASE` defaults to `http://localhost:54321/...`, which
+ * is correct for a developer clicking Export on their own machine and wrong for every other
+ * consumer of the resulting shell. Inside an Eclipse BaSyx container, `localhost` is BaSyx; on a
+ * partner's laptop it is their laptop. The reference resolves to nothing and the failure reads as
+ * a broken export rather than as an unset variable.
+ *
+ * `0.0.0.0` is included because it is a bind address that people paste into a base URL by mistake;
+ * it is never routable as a destination.
+ */
+function isLoopbackBase(base: string): boolean {
+  try {
+    const host = new URL(base).hostname.toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "::1" ||
+      host === "[::1]" || host === "0.0.0.0" || host.endsWith(".localhost");
+  } catch {
+    // An unparseable base is a different misconfiguration and is not this function's to report.
+    return false;
+  }
+}
+
+const MODEL_BASE_IS_LOOPBACK = isLoopbackBase(MODEL_PUBLIC_BASE);
+
+/**
+ * What to tell an operator whose model URL will not resolve anywhere but this host.
+ *
+ * Names the variable AND what to set it to, because "configure the public base" is advice nobody
+ * can action without knowing it means the address other machines use to reach this host.
+ */
+const MODEL_BASE_ADVICE =
+  `AAS_MODEL_PUBLIC_BASE is '${MODEL_PUBLIC_BASE}', which resolves only on this host. ` +
+  "Set it to the address other machines use to reach this stack's Storage endpoint -- the LAN IP " +
+  "or DNS name, e.g. http://10.20.0.50:54321/storage/v1/object/public/asset-3d-models -- and " +
+  "verify it resolves from inside the container that will consume the shell.";
+
 const json = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), { status, headers: jsonHeaders });
 
@@ -679,6 +716,14 @@ export default async function handler(req: Request): Promise<Response> {
       kpi_metrics: kpiTotal,
       unmapped_semantic_ids: unmappedCount,
       has_3d_model: Boolean(modelPath),
+      // Surfaced rather than left to be discovered by a consumer who cannot fetch the model.
+      // A WARNING here and not a refusal: in the JSON export the URL is visible to the caller,
+      // and a developer exporting on their own machine is the case the localhost default exists
+      // to serve. The AASX path below treats the same condition as fatal, because there the
+      // package claims to be self-contained and is not.
+      ...(modelPath && MODEL_BASE_IS_LOOPBACK
+        ? { model_url_resolves_only_on_this_host: true }
+        : {}),
     };
 
     // ---- AASX packaging (Open Packaging Conventions / ISO 29500) ------------------------------
@@ -731,6 +776,36 @@ export default async function handler(req: Request): Promise<Response> {
             }`,
           );
         }
+      }
+
+      // REFUSE TO SHIP A PACKAGE WHOSE ONLY MODEL REFERENCE IS UNREACHABLE.
+      //
+      // This is the degraded path and nothing else: the device has a model, bundling did not
+      // happen (over the size cap, Storage unavailable, object deleted), so the package falls back
+      // to the URL form -- and that URL points at loopback. The result is an AASX that opens
+      // cleanly, validates, claims a VisualRepresentation, and whose one File element resolves to
+      // nothing on any machine but this one. Nobody downstream can tell that from a working
+      // package until they try to render it.
+      //
+      // Failing loudly is the right trade HERE and not in the JSON path, because self-containment
+      // is the entire reason to produce an AASX rather than a JSON environment. A package that
+      // silently is not self-contained is worse than no package.
+      //
+      // It cannot fire on the ordinary local path: a model small enough to bundle IS bundled, and
+      // a device with no model never reaches this branch. Reaching it means something is already
+      // wrong and this says which thing.
+      if (modelPath && !bundled3dModel && MODEL_BASE_IS_LOOPBACK) {
+        console.error(`[aas-export] refusing to package an unreachable model URL. ${MODEL_BASE_ADVICE}`);
+        return json({
+          error:
+            "The 3D model could not be bundled into the package, and the URL it would fall back " +
+            "to is not reachable from anywhere but this host -- the resulting AASX would claim a " +
+            "visual representation it cannot deliver. " + MODEL_BASE_ADVICE,
+          hint:
+            "Alternatively reduce the model below AAS_MAX_BUNDLED_MODEL_BYTES (currently " +
+            `${MAX_BUNDLED_MODEL_BYTES} bytes) so it is bundled into the package and no URL is ` +
+            "needed at all, which is the self-contained form AASX exists for.",
+        }, 500);
       }
 
       return new Response(buildAasxPackage(environment, supplements), {

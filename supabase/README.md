@@ -465,6 +465,40 @@ Two identity mappings need no new columns, which is why this is an adapter and n
 `Instance_UUID` is `devices.id` (already RFC4122), and the Sparkplug address is
 `(gateways.sparkplug_group, gateways.sparkplug_id)`.
 
+### Getting a shell into a third-party AAS server
+
+Two routes to the same destination, and it is worth having both before you need either.
+
+**The package.** `?format=aasx` downloads a self-contained OPC container with the 3D model bundled
+in as a supplementary part. This is the handover artefact — it needs nothing from this stack once
+it has been produced.
+
+**The REST push.** `npm run aas:push-basyx -- --device=Simulated_CNC_01` exports the JSON
+environment and POSTs it into a running server's `/submodels` and `/shells`.
+
+The second exists because the AASX carries its Environment as JSON at `aasx/aasenv-root.json` —
+valid AAS Part 5, but some BaSyx builds' upload path expects an XML environment part and will
+reject or half-load a JSON one. That is a property of the consumer, not of the package, and not
+something to discover on the morning of a demonstration.
+
+Three things the script gets right that a hand-rolled client usually does not, verified against
+`eclipsebasyx/aas-environment:2.0.0-milestone-15`:
+
+- **Identifiers are base64url-encoded in the path, without padding.** AAS ids are IRIs; AAS Part 2
+  specifies base64url for an id appearing in a URL. Sending the raw IRI yields a 404 naming a
+  resource that plainly exists, or a 400 from a proxy that split the path on the IRI's own slashes.
+- **Submodels are posted before shells.** A shell carries its submodels as references and BaSyx
+  accepts one whose references dangle — so shell-first appears to work and leaves an AAS whose
+  submodels 404 when a viewer follows them.
+- **Re-running skips rather than duplicating**, and `--replace` is the explicit opt-in to `PUT`
+  over what is there.
+
+**`AAS_MODEL_PUBLIC_BASE` matters more here than anywhere else.** If BaSyx is in a container,
+`localhost` in an exported model URL is BaSyx, not this stack. The exporter now refuses to package
+an `.aasx` whose model could not be bundled *and* whose fallback URL is loopback; the JSON export
+warns instead, via `model_url_resolves_only_on_this_host` in `stats`, and the push script relays
+that warning.
+
 ### The worker router
 
 `supabase/functions/main/index.ts` spawns each function as an isolated Deno worker. Two controls:

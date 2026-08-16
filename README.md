@@ -158,6 +158,25 @@ Self-registered accounts get read-only `Operator` via the `handle_new_user` trig
 
 Teardown: `docker compose down -v` (also drops volumes, invalidating every logged-in browser).
 
+### Resetting to a clean slate
+
+```bash
+npm run stack:reset -- --yes
+```
+
+Tears the stack down **with its volumes**, brings it back, waits for the schema to exist rather
+than for ports to answer, and re-provisions the four cell gateways — printing their credentials
+and writing them to `.env.gateways`, because `mosquitto_passwd` stores only a hash and they cannot
+be read back afterwards.
+
+**`--yes` is required and there is no interactive prompt.** A prompt is something people learn to
+dismiss without reading, and this is most dangerous once it is familiar. It also refuses outright
+when `NODE_ENV=production`, and when `COMPOSE_PROJECT_NAME` names a stack this repository does not
+own — so a shell in the wrong directory cannot take down someone else's.
+
+The one thing it exists for that nothing else can do: **`digital_thread` is append-only to every
+application role**, so dropping the volume is the only way back to an empty audit trail.
+
 ---
 
 ## Quick start — Kubernetes
@@ -214,8 +233,8 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | [`docs/kubernetes-architecture.md`](docs/kubernetes-architecture.md) | Why the Kubernetes target is built the way it is. Source comments cite it by section |
 | [`docs/openapi.yaml`](docs/openapi.yaml) · [`docs/i3x-openapi.yaml`](docs/i3x-openapi.yaml) | REST and i3X specifications, rendered by Swagger UI |
 | [`supabase/migrations/archive/`](supabase/migrations/archive) | The 38 pre-beta migrations, preserved for their reasoning. Never executed |
-| [`grafana/`](grafana) · [`timescaledb/`](timescaledb) | Provisioning; hypertable schema, retention and rollup reconciliation |
-| [`scripts/`](scripts) | Setup, seeding, vocabulary generation, chart-file sync, drift guards, database backup/restore |
+| [`grafana/`](grafana) · [`timescaledb/`](timescaledb) | Provisioning; hypertable schema, retention and rollup reconciliation, the read-only BI role |
+| [`scripts/`](scripts) | Setup, seeding, vocabulary generation, chart-file sync, drift guards, database backup/restore, gateway provisioning, stack reset, AAS push |
 | [`tests/`](tests) | Vendored IDTA AAS schema, conformance test-runner image |
 
 ---
