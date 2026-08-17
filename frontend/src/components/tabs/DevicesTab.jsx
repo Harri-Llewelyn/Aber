@@ -28,6 +28,12 @@ import { TelemetryExportModal } from '../modals/TelemetryExportModal'
 import { TelemetryModal } from '../modals/TelemetryModal'
 import { isProvisioningOverdue, isNeverSeen } from '../../utils/deviceProvisioning'
 import {
+  deviceLifecycleStatus,
+  deviceStatusBadgeClass,
+  deviceStatusDotColor,
+  deviceStatusTitle
+} from '../../utils/deviceStatus'
+import {
   SCOPE_CELL, SCOPE_SITE_WIDE, SOURCE_EXPLICIT, SOURCE_SITE_WIDE,
   resolveDeviceLocation, needsCellAssignment, unassignedHint
 } from '../../utils/cellResolution'
@@ -753,7 +759,6 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
               <thead><tr><th title="Human-readable device name">Name</th><th title="Sparkplug B id this device publishes under">Sparkplug ID</th><th title="Device status">Status</th><th style={{ width: 'auto' }} title="Device classification">Type</th><th title="Assigned cell zone">Cell</th></tr></thead>
               <tbody>
                 {filteredAssets.map(a => {
-                  const isOff = a.status === 'OFFLINE'
                   return (
                     <React.Fragment key={a.asset_id}>
                       {/* Clicks originating on a button, link or input inside the row are ignored
@@ -790,10 +795,22 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
                               <IconAlertTriangle size={11} /> AWAITING FIRST BIRTH
                             </span>
                           ) : (
-                            <span className={`badge ${isOff ? 'badge-neutral' : 'badge-online'}`} title={isOff ? 'Sparkplug B DDEATH Received — Device Offline' : 'Device Active'}>
-                              <span className="badge-dot" style={{ background: isOff ? 'var(--text-muted)' : 'var(--success)' }} />
-                              {isOff ? 'Offline / DDEATH' : 'Online'}
-                            </span>
+                            // The lifecycle badge, resolved by utils/deviceStatus.js so this cell,
+                            // the drawer's subtitle and the shopfloor chip cannot disagree about
+                            // the same row. Three states and no fourth: ONLINE, OFFLINE,
+                            // QUARANTINED.
+                            (() => {
+                              const status = deviceLifecycleStatus(a)
+                              return (
+                                <span
+                                  className={`badge ${deviceStatusBadgeClass(status)}`}
+                                  title={deviceStatusTitle(status)}
+                                >
+                                  <span className="badge-dot" style={{ background: deviceStatusDotColor(status) }} />
+                                  {status.charAt(0) + status.slice(1).toLowerCase()}
+                                </span>
+                              )
+                            })()
                           )}
                         </td>
                         <td>
@@ -1146,10 +1163,22 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
         title={selectedDevice?.asset_name || ''}
         subtitle={selectedDevice && (
           <>
-            <span className={`badge ${selectedDevice.status === 'OFFLINE' ? 'badge-neutral' : 'badge-online'}`} style={{ fontSize: '11px' }}>
-              {selectedDevice.status || 'ONLINE'}
-            </span>
-            {selectedDevice.is_quarantined && <span className="badge badge-warning" style={{ fontSize: '11px' }}>QUARANTINED</span>}
+            {/* ONE badge for the lifecycle state, not a status badge plus a QUARANTINED badge
+                beside it -- a quarantined device used to be labelled OFFLINE and QUARANTINED at
+                once, which reads as two facts and is one. ARCHIVED stays separate because it is a
+                separate axis: a decommissioned device still has a last known lifecycle state. */}
+            {(() => {
+              const status = deviceLifecycleStatus(selectedDevice)
+              return (
+                <span
+                  className={`badge ${deviceStatusBadgeClass(status)}`}
+                  style={{ fontSize: '11px' }}
+                  title={deviceStatusTitle(status)}
+                >
+                  {status}
+                </span>
+              )
+            })()}
             {selectedDevice.is_archived && <span className="badge badge-warning" style={{ fontSize: '11px' }}>ARCHIVED</span>}
           </>
         )}

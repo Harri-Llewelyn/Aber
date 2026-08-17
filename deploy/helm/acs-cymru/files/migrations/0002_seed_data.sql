@@ -2376,26 +2376,27 @@ ON CONFLICT (schema_name) DO NOTHING;
 
 
 -- -------------------------------------------------------------------------------------------
--- Edge gateways  (1 row)
+-- Edge gateways  (4 rows)
 -- -------------------------------------------------------------------------------------------
--- The first cell gateway of the simulated shopfloor. Its UUID is PINNED: `sparkplug_id` is
--- generated from the primary key, so an auto-discovered gateway would get a different wire
--- identity on every rebuild, silently detaching previously recorded telemetry from the asset that
--- produced it.
+-- The simulated shopfloor's cell gateways. Every UUID is PINNED: `sparkplug_id` is generated from
+-- the primary key, so an auto-discovered gateway would get a different wire identity on every
+-- rebuild, silently detaching previously recorded telemetry from the asset that produced it.
 --
--- ONE GATEWAY, NOT ALL FOUR, AND THAT ASYMMETRY IS DELIBERATE. `scripts/provision-gateways.mjs`
--- owns the demonstrator's topology -- four gateways, six devices, their cells and their broker
--- credentials -- and it is the only thing that can, because a gateway is useless without a
--- Mosquitto account and this file cannot create one. But provisioning is a Compose-side script
--- that the Kubernetes path never runs, so a row that exists only there does not exist in CI.
--- Seeding THIS pair is what makes `Sim_CNC_Mill_01` present wherever the migrations run, which is
--- what the AAS conformance suite needs to have a subject at all. The two must agree; the id, the
--- name and `is_virtual` below are duplicated from that script's GATEWAYS list and
--- `scripts/check-docs-drift.mjs` fails the build if they drift.
+-- THE WHOLE FLOOR IS SEEDED, AND IT IS DUPLICATED FROM `scripts/provision-gateways.mjs` ON
+-- PURPOSE. That script owns the topology and is the only thing that CAN own it, because a gateway
+-- row is useless without a Mosquitto account and this file cannot create one. But provisioning is
+-- a Compose-side script the Kubernetes path never runs, so a row that lives only there does not
+-- exist in CI -- and the schemas 0022 binds have to attach to something. Seeding the rows here and
+-- issuing the credentials there splits the job along the line of what each can actually do.
 --
--- `cell_id` IS NULL HERE and provisioning fills it in: cells are created by name, this file
--- seeds none (see above), and inventing one would give the shopfloor map a cell whose only
--- member is a row this file wrote.
+-- The two must agree. `scripts/check-docs-drift.mjs` compares every id, name and gateway binding
+-- in this block against that script's GATEWAYS list and fails the build on any divergence -- a
+-- diverged id is a diverged `sparkplug_id`, so it is a diverged wire identity and not merely an
+-- untidy row.
+--
+-- `cell_id` IS NULL ON ALL FOUR and provisioning fills it in: cells are created by name, this file
+-- seeds none (see above), and inventing them here would put cells on the shopfloor map whose only
+-- members are rows this file wrote.
 
 -- NAMED COLUMNS, not positional. pg_dump emits `INSERT INTO t VALUES (...)`, which binds to the
 -- column ORDER of the table as it stood when the dump was taken -- so dropping a column (0004
@@ -2407,31 +2408,51 @@ ON CONFLICT (schema_name) DO NOTHING;
 INSERT INTO public.gateways (
   id, name, cell_id, access_url, status, created_at,
   is_archived, archived_at, auto_delete_at, last_heartbeat, is_virtual, location_scope
-) VALUES (
-  '12000000-0000-4000-8000-000000000001', 'Sim_Gateway_Cell1_Machining', NULL,
-  'http://localhost:1880',
-  'OFFLINE', '2026-08-02 05:44:29.274898+00', false, NULL, NULL, NULL, true, 'cell'
-)
+) VALUES
+  ('12000000-0000-4000-8000-000000000001', 'Sim_Gateway_Cell1_Machining', NULL,
+   'http://localhost:1880', 'OFFLINE', '2026-08-02 05:44:29.274898+00',
+   false, NULL, NULL, NULL, true, 'cell'),
+  ('13000000-0000-4000-8000-000000000001', 'Sim_Gateway_Cell2_Robotics', NULL,
+   'http://localhost:1880', 'OFFLINE', '2026-08-02 05:44:29.274898+00',
+   false, NULL, NULL, NULL, true, 'cell'),
+  ('14000000-0000-4000-8000-000000000001', 'Sim_Gateway_Cell3_OEE', NULL,
+   'http://localhost:1880', 'OFFLINE', '2026-08-02 05:44:29.274898+00',
+   false, NULL, NULL, NULL, true, 'cell'),
+  -- SITE-WIDE, and stated rather than left to default. A building management system spans the
+  -- site, and the CHECK constraint forbids pairing `site_wide` with a cell_id -- so this row is
+  -- also the one provisioning must NOT later place in a cell.
+  ('15000000-0000-4000-8000-000000000001', 'Sim_Gateway_Site_BMS', NULL,
+   'http://localhost:1880', 'OFFLINE', '2026-08-02 05:44:29.274898+00',
+   false, NULL, NULL, NULL, true, 'site_wide')
 ON CONFLICT (id) DO NOTHING;
 
 
 -- -------------------------------------------------------------------------------------------
--- Demo device  (1 row)
+-- Simulated devices  (6 rows)
 -- -------------------------------------------------------------------------------------------
 -- Pre-registered rather than left to be auto-discovered, for the same pinned-UUID reason as the
--- gateway above. `22000000-0000-4000-8000-000000000001` is the UUID behind `dev220000000000400080000`,
--- the id the `Simulated Shopfloor` flow's CNC subflow publishes under.
+-- gateways above. Each UUID is the one behind the `dev…` id its subflow publishes under --
+-- `22000000-0000-4000-8000-000000000001` is `dev220000000000400080000`, and so on.
 --
--- NOT QUARANTINED, and that is a REVERSAL of what this row used to say. It was seeded quarantined
--- to preserve the zero-touch onboarding demo -- but that demo is now shown the way a real one
--- would be, by introducing ONE unregistered device on purpose (the flow's "ADD YOUR OWN DEVICE"
--- path, or any well-formed id absent from provision-gateways' list). Leaving this device
--- quarantined instead means its DDATA is dropped: the shopfloor map, the Grafana dashboards and
--- the AAS telemetry aspect are all empty until somebody clicks approve, which is the opposite of
--- the steady state everything else is meant to be read against. It also matches what
--- provision-gateways.mjs writes, so the two cannot disagree about the same row.
+-- NOT QUARANTINED, and that is a REVERSAL of what the one seeded device used to say. It was
+-- seeded quarantined to preserve the zero-touch onboarding demo -- but that demo is now shown the
+-- way a real one would be, by introducing ONE unregistered device on purpose (the flow's "ADD
+-- YOUR OWN DEVICE" path, or any well-formed id absent from provision-gateways' list). Leaving
+-- these quarantined instead means their DDATA is dropped: the shopfloor map, the Grafana
+-- dashboards and the AAS telemetry aspect are all empty until somebody clicks approve, which is
+-- the opposite of the steady state everything else is meant to be read against.
 --
--- NAMED COLUMNS here too, for the reason argued above the gateway. This statement was positional
+-- EACH IS BOUND TO ITS GATEWAY AT CREATION, not left for the first DBIRTH to imply.
+-- `verify_gateway_binding()` rejects a device's telemetry when it arrives via an edge node it is
+-- not bound to, so a null `gateway_id` here would surface as telemetry silently stopping rather
+-- than as a row that is wrong.
+--
+-- `schema_id` IS NULL ON FIVE OF THE SIX. Schemas are attached through `device_submodels` by
+-- migration 0022, which is the modern path and the one that lets a device carry several. The
+-- exception is Sim_CNC_Mill_01, which keeps the tri-standard demo schema as its 1:1 fallback --
+-- see 0022's header for why that one device carries two.
+--
+-- NAMED COLUMNS here too, for the reason argued above the gateways. This statement was positional
 -- and carried a bare `DEFAULT` in the fourteenth slot to skip the generated `sparkplug_id` --
 -- which is precisely the fragility named there, one column insertion away from silently shifting
 -- every value left.
@@ -2445,13 +2466,38 @@ INSERT INTO public.devices (
   is_archived, archived_at, auto_delete_at, asset_type, connection_method, first_dbirth_at,
   schema_id, reported_identity, quarantine_reason, identity_source,
   last_birth_metrics, last_birth_metrics_at, model_3d_path, cell_id, location_scope
-) VALUES (
-  '22000000-0000-4000-8000-000000000001', 'Sim_CNC_Mill_01',
-  '12000000-0000-4000-8000-000000000001', 'OFFLINE', false, '2026-08-02 05:44:38.321627+00',
-  false, NULL, NULL, NULL, 'Sparkplug B', NULL,
-  'e3333333-4444-5555-6666-777777777777', NULL, NULL, NULL,
-  NULL, NULL, NULL, NULL, 'cell'
-)
+) VALUES
+  -- Cell 1 -- Precision Machining
+  ('22000000-0000-4000-8000-000000000001', 'Sim_CNC_Mill_01',
+   '12000000-0000-4000-8000-000000000001', 'OFFLINE', false, '2026-08-02 05:44:38.321627+00',
+   false, NULL, NULL, NULL, 'Sparkplug B', NULL,
+   'e3333333-4444-5555-6666-777777777777', NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'cell'),
+  ('23000000-0000-4000-8000-000000000001', 'Sim_CNC_Mill_02',
+   '12000000-0000-4000-8000-000000000001', 'OFFLINE', false, '2026-08-02 05:44:38.321627+00',
+   false, NULL, NULL, NULL, 'Sparkplug B', NULL,
+   NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'cell'),
+  ('27000000-0000-4000-8000-000000000001', 'Sim_Tool_Changer_01',
+   '12000000-0000-4000-8000-000000000001', 'OFFLINE', false, '2026-08-02 05:44:38.321627+00',
+   false, NULL, NULL, NULL, 'Sparkplug B', NULL,
+   NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'cell'),
+  -- Cell 2 -- Robotic Assembly
+  ('24000000-0000-4000-8000-000000000001', 'Sim_Robot_Arm_01',
+   '13000000-0000-4000-8000-000000000001', 'OFFLINE', false, '2026-08-02 05:44:38.321627+00',
+   false, NULL, NULL, NULL, 'Sparkplug B', NULL,
+   NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'cell'),
+  -- Cell 3 -- Production KPIs. A COMPUTED asset: it measures nothing itself, it accumulates
+  -- time-in-state from the machining cell and publishes ISO 22400 factors on a fixed heartbeat.
+  ('25000000-0000-4000-8000-000000000001', 'Sim_Cell3_Aggregator',
+   '14000000-0000-4000-8000-000000000001', 'OFFLINE', false, '2026-08-02 05:44:38.321627+00',
+   false, NULL, NULL, NULL, 'Sparkplug B', NULL,
+   NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'cell'),
+  -- Site-wide, and stated EXPLICITLY rather than inherited from its gateway: `location_scope`
+  -- does not inherit through the data path, so a device behind a site-wide gateway resolves to
+  -- Unassigned unless it makes the same assertion itself.
+  ('26000000-0000-4000-8000-000000000001', 'Sim_BMS_Zone_HVAC',
+   '15000000-0000-4000-8000-000000000001', 'OFFLINE', false, '2026-08-02 05:44:38.321627+00',
+   false, NULL, NULL, NULL, 'Sparkplug B', NULL,
+   NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'site_wide')
 ON CONFLICT (id) DO NOTHING;
 
 

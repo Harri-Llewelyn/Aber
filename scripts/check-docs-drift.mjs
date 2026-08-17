@@ -544,67 +544,102 @@ function edgeFunctionNames() {
   const prov = read('scripts/provision-gateways.mjs');
   const seed = read('supabase/migrations/0002_seed_data.sql');
 
-  // The FIRST gateway entry and its FIRST device -- the pair the seed mirrors. Matched
-  // structurally rather than by name so a rename shows up as a mismatch here instead of making
-  // the pattern silently match nothing and pass.
-  const gw = /id:\s*'([0-9a-f-]{36})',\s*\n\s*envKey:[^\n]*\n\s*name:\s*'([^']+)'/.exec(prov);
-  const dev = /devices:\s*\[\s*\n\s*\{\s*id:\s*'([0-9a-f-]{36})',\s*name:\s*'([^']+)'/.exec(prov);
+  // EVERY gateway and EVERY device, not just the first pair. Matched structurally rather than by
+  // name, so a rename shows up as a mismatch here instead of making the pattern silently match
+  // nothing and pass -- the failure mode a checker is most likely to have.
+  const gateways = [...prov.matchAll(
+    /id:\s*'([0-9a-f-]{36})',\s*\n\s*(?:\/\/[^\n]*\n\s*)*envKey:[^\n]*\n\s*name:\s*'([^']+)'/g
+  )];
+  const devices = [...prov.matchAll(
+    /\{\s*id:\s*'([0-9a-f-]{36})',\s*name:\s*'(Sim_[^']+)'/g
+  )];
 
-  if (!gw || !dev) {
+  if (gateways.length < 2 || devices.length < 2) {
     fail(
-      'could not read the first gateway/device out of scripts/provision-gateways.mjs. Its GATEWAYS\n' +
-        '      literal changed shape, so the seed-vs-provisioning agreement is no longer checked.'
+      'could not read the gateway/device list out of scripts/provision-gateways.mjs (found ' +
+        `${gateways.length} gateway(s), ${devices.length} device(s)). Its GATEWAYS literal changed\n` +
+        '      shape, so the seed-vs-provisioning agreement is no longer being checked at all.'
     );
   } else {
-    const expected = [
-      ['gateway id', gw[1]],
-      ['gateway name', gw[2]],
-      ['device id', dev[1]],
-      ['device name', dev[2]],
-    ];
-    const absent = expected.filter(([, value]) => !seed.includes(value));
+    const absent = [];
+    for (const [, id, name] of gateways) {
+      if (!seed.includes(id)) absent.push(`gateway id ${id} (${name})`);
+      if (!seed.includes(name)) absent.push(`gateway name ${name}`);
+    }
+    for (const [, id, name] of devices) {
+      if (!seed.includes(id)) absent.push(`device id ${id} (${name})`);
+      if (!seed.includes(name)) absent.push(`device name ${name}`);
+    }
+
     if (absent.length) {
       fail(
-        `0002_seed_data.sql does not carry provision-gateways.mjs's ` +
-          `${absent.map(([label, value]) => `${label} (${value})`).join(', ')}.\n` +
-          '      The seed and the provisioning script must register the SAME row: they both write\n' +
-          '      it, and a divergence yields two gateways or two devices where the demonstrator\n' +
-          '      expects one -- with the wrong one holding the broker credential.'
+        `0002_seed_data.sql does not carry provision-gateways.mjs's ${absent.join(', ')}.\n` +
+          '      The seed and the provisioning script must register the SAME rows: they both write\n' +
+          '      them, and a divergence yields two gateways or two devices where the demonstrator\n' +
+          '      expects one -- with the wrong one holding the broker credential. A diverged id is\n' +
+          '      a diverged sparkplug_id, so it is a diverged wire identity too.'
       );
     } else {
-      pass(`0002 seeds provision-gateways.mjs's ${gw[2]} / ${dev[2]} at the same pinned ids`);
+      pass(
+        `0002 seeds all ${gateways.length} gateways and ${devices.length} devices from ` +
+          'provision-gateways.mjs at the same pinned ids'
+      );
+    }
+
+    // And every seeded device carries a schema. 0022 binds one per machine class; a device added
+    // to the topology without one would export an AAS shell with no telemetry aspect and would
+    // never be checked for unmodelled metrics -- both of which fail silently.
+    const classSchemas = read('supabase/migrations/0022_complete_device_schemas.sql');
+    const unbound = devices
+      .map(([, id, name]) => ({ id, name }))
+      .filter(({ id }) => !classSchemas.includes(id));
+
+    if (unbound.length) {
+      fail(
+        `0022_complete_device_schemas.sql attaches no schema to: ` +
+          `${unbound.map((d) => `${d.name} (${d.id})`).join(', ')}.\n` +
+          '      A device with no schema is never flagged for unmodelled metrics and exports a\n' +
+          '      shell carrying its nameplate and nothing else. Both are silent.'
+      );
+    } else {
+      pass(`0022 attaches a class schema to all ${devices.length} simulated devices`);
     }
   }
 
-  // The AAS suite's default target must be the device that is actually seeded. Its `LIVE` guard
+  // The AAS suite's default target must be a device that is actually seeded. Its `LIVE` guard
   // resolves the device BY NAME and skips the whole live half when it finds nothing -- silently,
   // and reporting success. CI greps for that skip line precisely because it cannot be trusted to
   // fail on its own; this catches the same drift one layer earlier.
+  //
+  // Checked against the WHOLE device list rather than the first entry, so re-ordering the topology
+  // is not a failure. What matters is that the name resolves to something the migrations create.
+  const seededNames = devices.map(([, , name]) => name);
   const aas = read('supabase/functions/aas-export/test_aas_export.py');
   const target = /AAS_TEST_DEVICE",\s*"([^"]+)"/.exec(aas);
   if (!target) {
     fail('test_aas_export.py no longer declares an AAS_TEST_DEVICE default');
-  } else if (dev && target[1] !== dev[2]) {
+  } else if (seededNames.length && !seededNames.includes(target[1])) {
     fail(
-      `test_aas_export.py targets '${target[1]}' but the seeded device is '${dev[2]}'.\n` +
+      `test_aas_export.py targets '${target[1]}', which is not one of the seeded devices ` +
+        `(${seededNames.join(', ')}).\n` +
         '      The live checks resolve the device by name and SKIP THEMSELVES when it is absent,\n' +
         '      so this drift does not fail the suite -- it empties it.'
     );
-  } else if (dev) {
-    pass(`test_aas_export.py targets the seeded device (${target[1]})`);
+  } else if (seededNames.length) {
+    pass(`test_aas_export.py targets a seeded device (${target[1]})`);
   }
 
   // The chart's e2e Job passes the same name explicitly, so it can drift independently of the
   // default above.
   const job = read('deploy/helm/acs-cymru/templates/jobs/e2e-aas-export-job.yaml');
   const jobTarget = /name:\s*AAS_TEST_DEVICE\s*\n\s*value:\s*(\S+)/.exec(job);
-  if (jobTarget && dev && jobTarget[1] !== dev[2]) {
+  if (jobTarget && seededNames.length && !seededNames.includes(jobTarget[1])) {
     fail(
-      `e2e-aas-export-job.yaml sets AAS_TEST_DEVICE=${jobTarget[1]}, but the seeded device is ` +
-        `'${dev[2]}'.`
+      `e2e-aas-export-job.yaml sets AAS_TEST_DEVICE=${jobTarget[1]}, which is not one of the ` +
+        `seeded devices (${seededNames.join(', ')}).`
     );
   } else if (jobTarget) {
-    pass(`the chart's AAS e2e Job targets the seeded device (${jobTarget[1]})`);
+    pass(`the chart's AAS e2e Job targets a seeded device (${jobTarget[1]})`);
   }
 }
 

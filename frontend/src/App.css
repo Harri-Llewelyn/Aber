@@ -1694,11 +1694,17 @@ tbody tr:hover { background: var(--bg-glass); }
   flex-shrink: 0;
 }
 
-.tile-dot-normal  { background: var(--success); box-shadow: 0 0 6px var(--success); }
-.tile-dot-warning { background: var(--warning); box-shadow: 0 0 6px var(--warning); }
-.tile-dot-alarm   { background: var(--danger);  box-shadow: 0 0 6px var(--danger); }
-/* No glow: "nothing live in here" should not draw the eye the way a fault does. */
-.tile-dot-idle    { background: var(--text-dim); }
+.tile-dot-normal    { background: var(--success); box-shadow: 0 0 6px var(--success); }
+/* Quarantined -- something here is waiting to be admitted. Amber, because it is a decision
+   somebody has to make rather than a fault.
+
+   THERE IS NO LONGER A RED `tile-dot-alarm`. The map used to derive one from telemetry values
+   against hardcoded thresholds; see utils/deviceStatus.js for why that was withdrawn. A red dot on
+   this page would now be asserting a process condition the dashboard has no authority over --
+   metric alerting is Grafana's, which has evaluation intervals, state history and silences. */
+.tile-dot-attention { background: var(--warning); box-shadow: 0 0 6px var(--warning); }
+/* No glow: "nothing live in here" should not draw the eye the way something actionable does. */
+.tile-dot-idle      { background: var(--text-dim); }
 
 .zone-body {
   padding: 8px 10px;

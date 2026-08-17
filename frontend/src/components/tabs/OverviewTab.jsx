@@ -5,11 +5,17 @@ import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
 import { gatewayLiveStatus, isGatewayOnline, formatHeartbeat } from '../../utils/gatewayStatus'
-import { effectiveSparkplugId } from '../../utils/sparkplugId'
 import {
   SCOPE_CELL, SCOPE_SITE_WIDE, SOURCE_UNASSIGNED, SOURCE_SITE_WIDE, groupDevicesByCell
 } from '../../utils/cellResolution'
 import { cellIconComponent } from '../../utils/cellIcon'
+import {
+  DEVICE_STATUS,
+  deviceLifecycleStatus,
+  deviceStatusChipClass,
+  deviceStatusTitle,
+  rollupDeviceStatus
+} from '../../utils/deviceStatus'
 import {
   IconMap,
   IconFactory,
@@ -237,72 +243,28 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
     }
   }
 
-  // Pre-build Map for O(1) telemetry lookups per asset instead of O(N) array filter on
-  // every render. Telemetry is keyed by the device's immutable `sparkplug_id` (what the
-  // hypertable stores in asset_id), not by the device UUID or its editable name.
-  const telemetryBySparkplugId = useMemo(() => {
-    const map = new Map()
-    for (let i = 0; i < telemetry.length; i++) {
-      const t = telemetry[i]
-      if (!map.has(t.asset_id)) {
-        map.set(t.asset_id, [])
-      }
-      map.get(t.asset_id).push(t)
-    }
-    return map
-  }, [telemetry])
-
-  const getDeviceStatusColor = useCallback((asset) => {
-    if (asset.is_archived) return 'chip-warning'
-    if (asset.status === 'OFFLINE') return 'chip-offline'
-    const latest = telemetryBySparkplugId.get(effectiveSparkplugId(asset)) || []
-    // MTConnect vocabularies (archive/20260101000019, now in 0002_seed_data.sql): EXECUTION is
-    // READY/ACTIVE/INTERRUPTED/FEED_HOLD/STOPPED/…, EMERGENCY_STOP is ARMED/TRIGGERED. The latter
-    // is a string, not the boolean safety_ok it replaced -- reading val_bool here would compare
-    // undefined and silently never show the danger state.
-    const executionMetric = latest.find(t => t.metric_name === 'Controller/EXECUTION')
-    if (executionMetric && executionMetric.val_string === 'STOPPED') return 'chip-offline'
-
-    const tempMetric = latest.find(t => t.metric_name === 'Systems/TEMPERATURE')
-    const estopMetric = latest.find(t => t.metric_name === 'Controller/EMERGENCY_STOP')
-
-    if (estopMetric && estopMetric.val_string === 'TRIGGERED') return 'chip-danger'
-    if (executionMetric && executionMetric.val_string === 'INTERRUPTED') return 'chip-danger'
-    if (tempMetric && tempMetric.val_double > 80.0) return 'chip-danger'
-    if (executionMetric && (executionMetric.val_string === 'FEED_HOLD' || executionMetric.val_string === 'READY')) return 'chip-warning'
-    return 'chip-success'
-  }, [telemetryBySparkplugId])
+  // The per-asset telemetry index that used to live here is GONE, along with the only thing that
+  // read it. Nothing on this page inspects metric VALUES any more -- `telemetry` is still fetched,
+  // but only for the row count on the stats card. Keeping the Map would have been a per-render
+  // rebuild of an index with no consumer.
 
   /**
-   * The tile's health dot: the WORST state of the devices resolving to it.
+   * The tile's health dot: the state of the devices resolving to it.
    *
    * This is what makes an eight-column grid scannable at all. Without it you have to read the
-   * chips inside every tile to find the one that needs attention, which is the job the old
-   * five-column layout could just about get away with and this one cannot.
+   * chips inside every tile to find the one that needs attention.
    *
-   * Archived devices are skipped rather than counted as a warning. getDeviceStatusColor() returns
-   * chip-warning for them because an archived chip should look inert, but a decommissioned machine
-   * is not a fault and must not raise its whole cell to amber. Offline devices contribute nothing
-   * either way: a tile of nothing but offline devices is idle, not normal and not broken.
+   * IT REPORTS CONNECTIVITY, NOT PROCESS CONDITION. This used to evaluate the latest telemetry
+   * against hardcoded rules -- `Systems/TEMPERATURE > 80.0` among them -- and paint an Alarm
+   * state. See utils/deviceStatus.js for the four reasons that was wrong; the short version is
+   * that the threshold was a literal while every device publishes its own, and a React render
+   * pass is not an alerting engine. Metric thresholds are Grafana's job.
    */
-  const rollupStatus = useCallback((devices) => {
-    let sawWarning = false
-    let sawNormal = false
-    for (const d of devices) {
-      if (d.is_archived) continue
-      const cls = getDeviceStatusColor(d)
-      if (cls === 'chip-danger') return 'alarm'   // worst state wins outright
-      if (cls === 'chip-warning') sawWarning = true
-      else if (cls === 'chip-success') sawNormal = true
-    }
-    if (sawWarning) return 'warning'
-    return sawNormal ? 'normal' : 'idle'
-  }, [getDeviceStatusColor])
+  const rollupStatus = useCallback((devices) => rollupDeviceStatus(devices), [])
 
   const STATUS_LABEL = {
-    alarm: 'Alarm — a device here is in emergency stop, interrupted, or over temperature',
-    warning: 'Warning — a device here is in feed hold or waiting to run',
-    normal: 'Normal — every live device here is running',
+    attention: 'Needs attention — a device here is quarantined, waiting to be admitted',
+    normal: 'Normal — at least one device here is online',
     idle: 'Nothing live — no device here is currently reporting'
   }
 
@@ -310,9 +272,12 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   // and behave exactly like one already in a cell, or the lanes read as a different kind of thing
   // rather than as somewhere the same asset currently sits.
   const deviceChip = (a) => {
-    const colorCls = getDeviceStatusColor(a)
-    const isOff = a.status === 'OFFLINE'
+    const status = deviceLifecycleStatus(a)
     const isArch = a.is_archived
+    // Archived reads as inert regardless of the last lifecycle state it held -- a decommissioned
+    // machine that happens to still be publishing must not look like a running one.
+    const colorCls = isArch ? 'chip-offline' : deviceStatusChipClass(status)
+    const isOff = status !== DEVICE_STATUS.ONLINE
     const isInactive = isOff || isArch
     return (
       <span
@@ -322,16 +287,24 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
         onDragStart={(e) => handleDragStart(e, a)}
         onClick={() => onSelectDevice(a.asset_id)}
         style={{ cursor: isInactive ? 'pointer' : canRearrange ? 'grab' : 'pointer', userSelect: 'none', opacity: isArch ? 0.7 : 1 }}
-        title={`${a.asset_name} [${a.asset_id}] — ${isArch ? 'Device Archived (Out of Commission)' : isOff ? 'Device Offline (DDEATH Received)' : 'Operating'} — ${canRearrange && !isInactive ? 'Drag to reassign Cell, or click' : 'Click'} to view on Devices page`}
+        title={`${a.asset_name} [${a.asset_id}] — ${isArch ? 'Device Archived (Out of Commission)' : deviceStatusTitle(status)} — ${canRearrange && !isInactive ? 'Drag to reassign Cell, or click' : 'Click'} to view on Devices page`}
       >
         {isArch ? <IconArchive size={11} /> : <IconCog size={11} />}
         {/* NAME ONLY. The UUID used to sit inline beside it, capped at ~72px, and it was buying
             almost nothing: six characters of an opaque identifier are not enough to recognise a
-            device by, and they were the reason a name as ordinary as "Simulated_CNC_01" clipped.
+            device by, and they were the reason a name as ordinary as "Sim_CNC_Mill_01" clipped.
             The full id is on the `title` above, where it is actually readable. */}
         <span className="chip-name">{a.asset_name}</span>
         {isArch && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>ARCH</span>}
-        {isOff && !isArch && <span className="chip-flag" style={{ color: 'var(--text-muted)' }}>OFF</span>}
+        {/* QUARANTINED AND OFFLINE GET DIFFERENT FLAGS. Both are "not running", but only one of
+            them is waiting on a decision somebody has to make, and labelling a pending device OFF
+            says it went away rather than that it was never let in. */}
+        {!isArch && status === DEVICE_STATUS.QUARANTINED && (
+          <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>QUAR</span>
+        )}
+        {!isArch && status === DEVICE_STATUS.OFFLINE && (
+          <span className="chip-flag" style={{ color: 'var(--text-muted)' }}>OFF</span>
+        )}
       </span>
     )
   }
@@ -553,9 +526,12 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
                 meaning is on each chip's own `title` and in its icon -- and one of its four
                 entries ("Amber: Archived") did not match what amber meant on a chip anyway. */}
             <div className="shopfloor-legend">
-              <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.normal}><span className="tile-dot tile-dot-normal" /> Normal</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.warning}><span className="tile-dot tile-dot-warning" /> Warning</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.alarm}><span className="tile-dot tile-dot-alarm" /> Alarm</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.normal}><span className="tile-dot tile-dot-normal" /> Online</span>
+              {/* "Needs attention", not "Quarantined". This is a TILE state, and the tile is
+                  reporting that something inside it wants a decision -- which today is only ever a
+                  quarantined device, but the label should describe the dot rather than enumerate
+                  today's one cause. The title says which. */}
+              <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.attention}><span className="tile-dot tile-dot-attention" /> Needs attention</span>
               <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.idle}><span className="tile-dot tile-dot-idle" /> Nothing live</span>
               {canManageDevice ? (
                 <button

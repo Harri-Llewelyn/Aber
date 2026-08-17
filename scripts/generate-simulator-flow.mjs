@@ -327,21 +327,36 @@ const OEE_BODY = `
 // The names are the REGISTERED ones: OEE/AVAILABILITY, OEE/PERFORMANCE, OEE/QUALITY, OEE/OEE.
 // Not OEE/Availability or OEE/Overall -- metric_catalog.name is unique and immutable, and a second
 // spelling would be a second permanent series for the same concept.
+//
+// IT BIRTHS BEFORE IT REPORTS, and that is a FIX rather than a refinement. This node used to emit
+// DDATA and nothing else -- no DBIRTH, ever. Sparkplug's whole contract is that a device announces
+// its metric set before it sends values, and the ingestion daemon keys three things off that
+// announcement: the device's ONLINE status, its asset_config birth parameters, and the declared
+// metric set that unmodelled detection compares against. With no birth, this device sat OFFLINE on
+// the shopfloor map forever while its telemetry landed in the historian -- reporting values from a
+// machine the platform believed was not running, which is the one inconsistency an operator cannot
+// explain and cannot act on.
 // ---------------------------------------------------------------------------------------------
 const DEVICE_ID    = env.get('DEVICE_ID');
 const DEVICE_NAME  = env.get('DEVICE_NAME');
 const GATEWAY_ID   = env.get('GATEWAY_ID');
 const SOURCE_ID    = env.get('SOURCE_DEVICE_ID');
 const GROUP        = env.get('SPARKPLUG_GROUP') || 'ACS-Cymru';
+const BIRTH_EVERY  = Number(env.get('BIRTH_EVERY_SCANS') || 15);
 
 const acc = context.get('acc') || { productive: 0, total: 0, good: 0, made: 0 };
 let seq = Number(context.get('seq') || 0);
+const scan = Number(context.get('scan') || 0) + 1;
 
 const state = global.get('state_' + SOURCE_ID) || 'READY';
 const INTERVAL_S = 60;
 
-acc.total += INTERVAL_S;
-if (state === 'ACTIVE') {
+// NOT ON THE FIRST TICK. The inject fires 0.1s after start and every 60s after that, so crediting
+// a full interval to the first one would book 60 seconds of observation that had not happened --
+// and since availability is productive/total, that lands as a denominator this node can never
+// work off. Time is accumulated for the interval that has ELAPSED, which is none of it yet.
+if (scan > 1) acc.total += INTERVAL_S;
+if (scan > 1 && state === 'ACTIVE') {
   acc.productive += INTERVAL_S;
   // Parts are only made while running. Scrap rises sharply when the machine is in trouble, which
   // is what makes the quality factor move during the thermal excursion rather than staying flat.
@@ -367,18 +382,45 @@ const quality = acc.made > 0 ? (acc.good / acc.made) * 100 : 100;
 const oee = (availability / 100) * (performance / 100) * (quality / 100) * 100;
 
 context.set('acc', acc);
+context.set('scan', scan);
 
 const round = (v) => Number(v.toFixed(2));
-const payload = {
-  timestamp: Date.now(),
-  seq: seq,
-  metrics: [
-    { name: 'OEE/AVAILABILITY', datatype: 10, double_value: round(availability) },
-    { name: 'OEE/PERFORMANCE',  datatype: 10, double_value: round(performance) },
-    { name: 'OEE/QUALITY',      datatype: 10, double_value: round(quality) },
-    { name: 'OEE/OEE',          datatype: 10, double_value: round(oee) },
-  ],
-};
+const factors = [
+  { name: 'OEE/AVAILABILITY', datatype: 10, double_value: round(availability) },
+  { name: 'OEE/PERFORMANCE',  datatype: 10, double_value: round(performance) },
+  { name: 'OEE/QUALITY',      datatype: 10, double_value: round(quality) },
+  { name: 'OEE/OEE',          datatype: 10, double_value: round(oee) },
+];
+
+// ---------------------------------------------------------------------------------------------
+// DBIRTH on the first tick, and every BIRTH_EVERY ticks after it.
+//
+// Asset_ID and Asset_Name ride along exactly as they do on the instrument subflows: the daemon
+// resolves the device by the topic's id and uses Asset_ID to detect a device publishing under an
+// identity that is not its own, which is what quarantines an IDENTITY_MISMATCH rather than
+// silently accepting it.
+//
+// NO SEPARATE DDATA ON A BIRTH TICK. The birth carries current values for every metric, so
+// following it with a DDATA repeating them would write each series twice at the same timestamp.
+// ---------------------------------------------------------------------------------------------
+if (scan === 1 || scan % BIRTH_EVERY === 0) {
+  const birth = {
+    timestamp: Date.now(),
+    seq: seq,
+    metrics: [
+      { name: 'Asset_ID',   datatype: 12, string_value: DEVICE_ID },
+      { name: 'Asset_Name', datatype: 12, string_value: DEVICE_NAME },
+      ...factors,
+    ],
+  };
+  seq = (seq + 1) % 256;
+  context.set('seq', seq);
+
+  node.status({ fill: 'blue', shape: 'dot', text: 'DBIRTH ' + new Date().toLocaleTimeString() });
+  return { topic: 'spBv1.0/' + GROUP + '/DBIRTH/' + GATEWAY_ID + '/' + DEVICE_ID, payload: birth };
+}
+
+const payload = { timestamp: Date.now(), seq: seq, metrics: factors };
 seq = (seq + 1) % 256;
 context.set('seq', seq);
 
@@ -503,8 +545,14 @@ for (const sf of DEVICE_SUBFLOWS) {
       { name: 'GATEWAY_ID', type: 'str', value: '' },
       { name: 'KIND', type: 'str', value: '' },
       { name: 'SPARKPLUG_GROUP', type: 'str', value: SPARKPLUG_GROUP },
+      // The subflow's own declaration -- the default an instance inherits when it overrides
+      // nothing. Both kinds take BIRTH_EVERY_SCANS; the counts differ because the tick rates do
+      // (5s vs 60s), and both work out to a rebirth every 15 minutes.
       ...(sf.id === 'sf-oee'
-        ? [{ name: 'SOURCE_DEVICE_ID', type: 'str', value: '' }]
+        ? [
+            { name: 'SOURCE_DEVICE_ID', type: 'str', value: '' },
+            { name: 'BIRTH_EVERY_SCANS', type: 'num', value: '15' },
+          ]
         : [{ name: 'BIRTH_EVERY_SCANS', type: 'num', value: '180' }]),
     ],
     color: sf.colour,
@@ -624,7 +672,13 @@ for (const gw of GATEWAYS) {
       repeat: isOee ? '60' : '5',
       crontab: '',
       once: true,
-      onceDelay: isOee ? '10' : String((phaseMs / 1000).toFixed(2)),
+      // THE AGGREGATOR FIRES ALMOST IMMEDIATELY (0.1s), the instruments stagger by 350ms each.
+      //
+      // It used to wait 10 seconds, which combined with the missing DBIRTH to make this device the
+      // slowest thing on the floor to appear and then never appear at all. Its first tick is now
+      // its birth certificate, and there is nothing to wait for: the KPI accumulator starts empty
+      // whenever it starts, and delaying only delays the moment the device is registered.
+      onceDelay: isOee ? '0.1' : String((phaseMs / 1000).toFixed(2)),
       topic: '',
       payload: '',
       payloadType: 'date',
@@ -644,8 +698,15 @@ for (const gw of GATEWAYS) {
         { name: 'GATEWAY_ID', value: gw.sparkplugId, type: 'str' },
         { name: 'KIND', value: dev.kind, type: 'str' },
         { name: 'SPARKPLUG_GROUP', value: SPARKPLUG_GROUP, type: 'str' },
+        // BIRTH_EVERY_SCANS on both, but counted in that subflow's OWN ticks: the instruments
+        // scan every 5s so 180 is a rebirth every 15 minutes, and the aggregator ticks every 60s
+        // so 15 is the same 15 minutes. A shared number would have meant three hours for one of
+        // them.
         ...(isOee
-          ? [{ name: 'SOURCE_DEVICE_ID', value: dev.sourceSparkplugId, type: 'str' }]
+          ? [
+              { name: 'SOURCE_DEVICE_ID', value: dev.sourceSparkplugId, type: 'str' },
+              { name: 'BIRTH_EVERY_SCANS', value: '15', type: 'num' },
+            ]
           : [{ name: 'BIRTH_EVERY_SCANS', value: '180', type: 'num' }]),
       ],
       x: 560,

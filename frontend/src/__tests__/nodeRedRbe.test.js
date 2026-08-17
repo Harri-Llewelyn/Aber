@@ -297,12 +297,60 @@ describe('the ISO 22400 aggregator', () => {
     SPARKPLUG_GROUP: 'ACS-Cymru'
   }
 
-  it('publishes the four registered KPI names', () => {
+  it('BIRTHS FIRST, so the device is registered before it reports', () => {
+    // THE BUG THIS PINS. This node used to emit DDATA and nothing else -- no DBIRTH, ever. Its
+    // telemetry landed in the historian while the device sat OFFLINE on the shopfloor map with no
+    // asset_config rows and no declared metric set, because ONLINE, the birth parameters and
+    // unmodelled detection are all keyed off an announcement it never made.
     const agg = makeDevice(OEE_BODY, oeeEnv)
+    const first = agg.scan(60000)
+
+    expect(first.topic).toBe('spBv1.0/ACS-Cymru/DBIRTH/gwy140000000000400080000/dev250000000000400080000')
+    // Identity metrics ride along exactly as they do on the instrument subflows -- Asset_ID is
+    // what lets the daemon catch a device publishing under an identity that is not its own.
+    expect(metricNames(first)).toEqual(
+      ['Asset_ID', 'Asset_Name', 'OEE/AVAILABILITY', 'OEE/OEE', 'OEE/PERFORMANCE', 'OEE/QUALITY']
+    )
+    expect(metricByName(first, 'Asset_ID').string_value).toBe('dev250000000000400080000')
+    expect(metricByName(first, 'Asset_Name').string_value).toBe('Sim_Cell3_Aggregator')
+  })
+
+  it('publishes the four registered KPI names on the DDATA that follows', () => {
+    const agg = makeDevice(OEE_BODY, oeeEnv)
+    agg.scan(60000)                      // the birth
     const msg = agg.scan(60000)
+
+    expect(msg.topic).toContain('/DDATA/')
     expect(metricNames(msg)).toEqual(
       ['OEE/AVAILABILITY', 'OEE/OEE', 'OEE/PERFORMANCE', 'OEE/QUALITY']
     )
+  })
+
+  it('does not bill the first tick as a whole elapsed interval', () => {
+    // The inject fires 0.1s after start, then every 60s. Crediting the first tick with a full
+    // minute books observation time that has not happened -- and since availability is
+    // productive/total, it lands in a denominator this node can never work off.
+    const shared = new Map()
+    const agg = makeDevice(OEE_BODY, oeeEnv, shared)
+    shared.set('state_dev220000000000400080000', 'ACTIVE')
+
+    agg.scan(60000)                      // birth: accumulates nothing
+    const first = metricByName(agg.scan(60000), 'OEE/AVAILABILITY').double_value
+
+    // One elapsed interval, all of it productive, so availability is a clean 100 -- not 50, which
+    // is what a phantom first interval in the denominator would produce.
+    expect(first).toBeCloseTo(100, 5)
+  })
+
+  it('re-births periodically so a restarted ingestion service recovers the metric set', () => {
+    const agg = makeDevice(OEE_BODY, { ...oeeEnv, BIRTH_EVERY_SCANS: 15 })
+    const topics = []
+    for (let i = 0; i < 31; i++) topics.push(agg.scan(60000).topic)
+
+    const births = topics.filter(t => t.includes('/DBIRTH/'))
+    // Ticks 1, 15 and 30 -- a birth every 15 minutes at a 60s cadence, matching the instrument
+    // subflows' own 15-minute rebirth.
+    expect(births).toHaveLength(3)
   })
 
   it('publishes on every heartbeat, not report-by-exception', () => {

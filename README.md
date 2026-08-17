@@ -123,7 +123,8 @@ one to say it is the simulator, `0018` pre-registers the demonstrator's metric s
 row's standard and published semantic id, `0019` adds the 223P supply-air-flow metric the
 shopfloor simulator needed, `0020` retires the introductory single-device simulator and moves its
 schema and IDTA nameplate onto `Sim_CNC_Mill_01`, `0021` gives each shopfloor cell an icon from a
-closed set — plus demo accounts (`supabase/seed.sql`).
+closed set, `0022` adds one schema per machine class and attaches it to every simulated device
+— plus demo accounts (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because `0005` already implements one; a second declaration of `log_digital_thread_event()`
