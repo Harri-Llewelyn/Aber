@@ -78,22 +78,43 @@ describe('context drawer alert banner', () => {
       expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'))
     })
 
-    it('filters the alert list by rule AND device, not merely by rule', () => {
+    it('filters the alert list by rule name', () => {
       panel({ alert })
       const href = screen.getByRole('link', { name: /View in Grafana/i }).getAttribute('href')
       expect(href).toContain('/alerting/list?search=')
       const query = decodeURIComponent(new URL(href).searchParams.get('search'))
       // Landing on every rule in the instance would be the same as not filtering at all.
-      expect(query).toContain('rule:"Thermal Excursion"')
-      expect(query).toContain('label:sparkplug_id=dev220000000000400080000')
+      expect(query).toBe('rule:"Thermal Excursion"')
+    })
+
+    /**
+     * THE DEVICE FILTER IS THE BUG THIS GUARDS AGAINST, not an omission.
+     *
+     * The link also carried `label:sparkplug_id=<id>`, to land on one device's instance rather than
+     * on the rule covering all six. It returned an EMPTY LIST every time: /alerting/list searches
+     * rule DEFINITIONS, so `label:` matches the static labels declared in alert-rules.yaml -- which
+     * is `severity` and nothing else -- while `sparkplug_id` is a column in the rule's SQL that
+     * becomes a label on each evaluated SERIES. The two filters ANDed and the empty conjunct took
+     * the result with it.
+     *
+     * It is worth a test rather than a comment because the failure was silent AND plausible: an
+     * empty alert list reads as "the alert has cleared", which is the one wrong conclusion somebody
+     * following this link would act on. Adding the device back looks like an obvious improvement.
+     */
+    it('does NOT filter on sparkplug_id, which matches no rule definition', () => {
+      panel({ alert })
+      const href = screen.getByRole('link', { name: /View in Grafana/i }).getAttribute('href')
+      expect(href).not.toContain('sparkplug_id')
+      expect(href).not.toContain('label%3A')
+      expect(href).not.toContain(alert.sparkplug_id)
     })
 
     it('still links somewhere useful when the alert carries no device id', () => {
-      // The webhook records an unattributable alert rather than dropping it, so this row occurs.
+      // The webhook records an unattributable alert rather than dropping it, so this row occurs --
+      // and the link is unaffected by it, now that the device plays no part in the query.
       panel({ alert: { ...alert, sparkplug_id: null } })
       const href = screen.getByRole('link', { name: /View in Grafana/i }).getAttribute('href')
       expect(href).toContain('rule%3A%22Thermal%20Excursion%22')
-      expect(href).not.toContain('sparkplug_id')
     })
 
     it('is out of the tab order while the drawer is closed', () => {
@@ -119,15 +140,35 @@ describe('grafanaAlertUrl', () => {
   })
 
   it('falls back to the bare alert list when it has nothing to filter on', () => {
-    expect(grafanaAlertUrl(null, null)).toBe('http://localhost:3002/alerting/list')
+    expect(grafanaAlertUrl(null)).toBe('http://localhost:3002/alerting/list')
   })
 
   it('escapes the rule name, so a quote or a space cannot break the query string', () => {
-    const href = grafanaAlertUrl('Low OEE Availability', null)
+    const href = grafanaAlertUrl('Low OEE Availability')
     expect(href).not.toMatch(/ /)
     expect(decodeURIComponent(new URL(href).searchParams.get('search')))
       .toBe('rule:"Low OEE Availability"')
   })
+
+  /**
+   * The three rule names it can be handed, taken from the provisioning file rather than invented.
+   *
+   * `alert_name` is Grafana's own `alertname` label, which IS the rule's `title:` -- so this is not a
+   * hardcoded list that can drift from the YAML, it is a check that the YAML's titles survive a
+   * round trip through the query string intact. A rule renamed to carry a character that needs
+   * escaping would otherwise produce a link that silently matched nothing.
+   */
+  it.each(['Thermal Excursion', 'Emergency Stop Engaged', 'Low OEE Availability'])(
+    'round-trips %s from alert-rules.yaml',
+    (title) => {
+      const rules = fs.readFileSync(
+        path.resolve(__dirname, '../../../grafana/provisioning/alerting/alert-rules.yaml'), 'utf8'
+      )
+      expect(rules, `${title} is not a rule title in alert-rules.yaml`).toContain(`title: ${title}`)
+      const href = grafanaAlertUrl(title)
+      expect(decodeURIComponent(new URL(href).searchParams.get('search'))).toBe(`rule:"${title}"`)
+    }
+  )
 })
 
 /**

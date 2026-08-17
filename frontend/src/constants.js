@@ -86,25 +86,29 @@ export const GRAFANA_URL = readSetting('VITE_GRAFANA_URL', 'http://localhost:300
   .replace(/\/+$/, '');
 
 /**
- * The Grafana alert page for one rule, filtered to one device where possible.
+ * The Grafana alert page for one rule.
  *
- * NOT A RULE-UID DEEP LINK, and it cannot be one: `device_alerts` stores Grafana's `fingerprint` --
- * a hash of the instance's labels -- and never its rule UID, because the Alertmanager payload the
- * webhook receives does not reliably carry one. So this targets the alert LIST with Grafana's own
- * search grammar instead, which needs no identifier the webhook did not capture.
+ * BY RULE NAME ONLY. It also carried `label:sparkplug_id=<id>`, to land on the one device's instance
+ * rather than on the rule covering all six, and that filter returned an EMPTY LIST every time.
  *
- * `rule:` and `label:` are Grafana's supported filter prefixes (11+, and 13.1 here). A version that
- * did not understand them would treat the string as free text and still match on the rule name, so
- * the failure mode is a slightly wider list rather than an error page.
+ * `/alerting/list` searches RULE DEFINITIONS, so its `label:` prefix matches the static labels a rule
+ * declares in alert-rules.yaml -- which is `severity` and nothing else. `sparkplug_id` is a column in
+ * the rule's SQL: it becomes a label on each evaluated SERIES, so it exists on instances and never on
+ * the definition being searched. The two filters ANDed, and the conjunct that matched nothing took
+ * the whole result with it. Worse, it failed silently and plausibly: an empty alert list reads as
+ * "the alert has cleared", which is the one wrong answer somebody following this link would act on.
+ *
+ * NOT A RULE-UID DEEP LINK EITHER, though the UIDs are stable and pinned (`acs-thermal-excursion` and
+ * friends). They live in the provisioning YAML and nowhere in `device_alerts` -- the Alertmanager
+ * payload the webhook receives does not carry one -- so using them would mean a name-to-UID map in
+ * the frontend that drifts from the YAML the first time a rule is renamed, with nothing to catch it.
+ * The rule NAME is what Grafana itself put in the row, so this cannot disagree with the rule it
+ * points at.
  */
-export const grafanaAlertUrl = (alertName, sparkplugId) => {
-  const terms = [];
-  if (alertName) terms.push(`rule:"${alertName}"`);
-  if (sparkplugId) terms.push(`label:sparkplug_id=${sparkplugId}`);
-  return terms.length
-    ? `${GRAFANA_URL}/alerting/list?search=${encodeURIComponent(terms.join(' '))}`
-    : `${GRAFANA_URL}/alerting/list`;
-};
+export const grafanaAlertUrl = (alertName) =>
+  (alertName
+    ? `${GRAFANA_URL}/alerting/list?search=${encodeURIComponent(`rule:"${alertName}"`)}`
+    : `${GRAFANA_URL}/alerting/list`);
 
 // How often tabs that render wall-clock-derived state re-render (see hooks/useClockTick.js).
 // Gateway heartbeat staleness is the case: a gateway going quiet writes nothing, so it emits

@@ -144,17 +144,17 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
                   the likeliest use of this link is pasting it into a message to whoever owns the
                   rule. That is also why it is not a button with a window.open handler.
 
-                  Filtered by rule AND device where the id is known -- landing on 200 unrelated rules
-                  would be the same as not filtering. See grafanaAlertUrl for why this targets the
-                  list rather than a rule UID (the webhook never receives one).
+                  BY RULE, NOT BY DEVICE. It also filtered on `label:sparkplug_id`, which returned an
+                  empty list -- /alerting/list searches rule DEFINITIONS and that label exists only on
+                  evaluated instances. See grafanaAlertUrl for the full reasoning, and for why this
+                  targets the list by name rather than the rule's UID.
                 */}
                 <a
                   className="context-alert-link"
-                  href={grafanaAlertUrl(alert.alert_name, alert.sparkplug_id)}
+                  href={grafanaAlertUrl(alert.alert_name)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  title={`Open this rule in Grafana Alerting — thresholds, state history and silences live there${
-                    alert.sparkplug_id ? ', filtered to this device' : ''}`}
+                  title="Open this rule in Grafana Alerting — thresholds, state history and silences live there"
                   tabIndex={open ? 0 : -1}
                 >
                   View in Grafana <IconExternalLink size={11} />
