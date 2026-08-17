@@ -49,6 +49,23 @@ backups/
 *.sql.gz
 *.dump
 
+# THE ONE EXCEPTION, and it is narrow on purpose.
+#
+# The chart carries the migration chain gzipped, one archive per file, because uncompressed it is 85%
+# of the 1 MiB ConfigMap limit -- see the header of deploy/helm/acs-cymru/templates/jobs/db-init.yaml.
+# Those files share the `.sql.gz` extension with the backups above and are the opposite kind of
+# thing: schema and seed data, already public in supabase/migrations/, and a packaged chart is
+# unusable without them.
+#
+# SCOPED TO THAT ONE DIRECTORY rather than relaxing the rule. `*.sql.gz` exists to stop a dump full
+# of password hashes being committed by someone who ran the backup script in the repo root, and a
+# broad `!*.sql.gz` anywhere would quietly retire that guard.
+#
+# Without this negation the archives are silently absent from a commit, and a fresh clone renders a
+# chart with no migrations at all. That fails loudly -- db-init.yaml's `fail` guard refuses to
+# install an empty ConfigMap -- but it fails a long way from the cause.
+!deploy/helm/acs-cymru/files/migrations/*.sql.gz
+
 # OS / IDE
 .DS_Store
 Thumbs.db

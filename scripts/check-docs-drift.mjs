@@ -325,6 +325,12 @@ function edgeFunctionNames() {
 // The mirror is checked as well because Helm mounts THAT copy. sync-helm-chart-files.mjs removes
 // orphans, but only for mirrors it still knows about -- a rename that slipped past a sync would
 // leave the old file in the chart and replay one migration twice under two names.
+//
+// THE CHART MIRROR IS GZIPPED, one archive per migration, so its names carry a `.sql.gz` suffix --
+// stripped below before the two sets are compared. The ORDER still comes from the filename: db-init
+// decompresses into a scratch directory and applies `*.sql` from there, so the numeric prefix is
+// doing exactly the same job on both targets. Comparing the suffixed names directly would report
+// every migration as missing from both sides.
 // -------------------------------------------------------------------------------------------------
 {
   const DIRS = ['supabase/migrations', 'deploy/helm/acs-cymru/files/migrations'];
@@ -332,8 +338,8 @@ function edgeFunctionNames() {
 
   for (const dir of DIRS) {
     const files = readdirSync(join(REPO, dir), { withFileTypes: true })
-      .filter((e) => e.isFile() && e.name.endsWith('.sql'))
-      .map((e) => e.name)
+      .filter((e) => e.isFile() && (e.name.endsWith('.sql') || e.name.endsWith('.sql.gz')))
+      .map((e) => e.name.replace(/\.gz$/, ''))
       .sort();
 
     const byPrefix = new Map();

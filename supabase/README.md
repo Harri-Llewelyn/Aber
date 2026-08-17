@@ -48,6 +48,29 @@ the same set. `0006_nodered_oidc_auth.sql` was renumbered from `0003` for exactl
 > orphaned mirror copy; leaving it behind would replay one migration **twice, under two names**,
 > on the Kubernetes target only.
 
+**The chart mirror is gzipped**, one `.sql.gz` per migration, carried in the ConfigMap's
+`binaryData`. The chain is 878 KiB of which 57% is generated reference vocabulary, which put it at
+85% of the 1 MiB ConfigMap limit — an etcd object limit that fails at *apply* time with "Request
+entity too large", naming the ConfigMap rather than the file that grew. Compressed it is 149 KiB
+(~199 KiB base64-encoded), 20% of the limit.
+
+Three things follow, and all three are load-bearing:
+
+- **Compose is unaffected.** It bind-mounts `supabase/migrations/` and applies the plain files. The
+  two targets differ in *transport*, never in content.
+- **`db-init` decompresses into an `emptyDir` first**, then applies `*.sql` from there in the same
+  lexical order — so the numeric prefix still decides execution order on both targets.
+- **The sync check compares decompressed bytes, not archives.** zlib writes the gzip OS byte from a
+  compile-time constant (`0x0a` on Windows, `0x03` on Linux), so byte-comparing would report every
+  file stale in CI purely because it was generated on a laptop. `.gitattributes` marks `*.gz` as
+  `binary` for the same class of reason: `* text=auto` would otherwise leave git *guessing*, and a
+  CRLF-normalised archive stops decompressing.
+
+Squashing the chain into `0001`/`0002` was considered and rejected: 81% of the bytes are generated
+vocabulary and SQL statements that must survive verbatim, so the floor is ~703 KiB — still 69% of the
+limit. The only thing a squash removes at scale is the migration headers, and in this repository
+those are the reasoning for every schema guard.
+
 ### Idempotency is not optional
 
 `supabase-db-init` replays **every** `/migrations/*.sql` on every boot — there is no

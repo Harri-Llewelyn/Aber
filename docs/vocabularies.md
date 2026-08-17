@@ -413,10 +413,20 @@ Three things worth recording:
   permanent, so registering a group per concept — for a standard that is not yet published — would
   permanently fix a naming the standard may still change. BMS points are `Building/<concept>`.
 
-**A consequence to watch:** the chart's `migrations` ConfigMap is now **802 KiB, 78% of the 1 MiB
-limit**, and `sync-helm-chart-files.mjs` warns about it. 0013 alone is 334 KiB. The next large
-vocabulary will not fit, and the fix at that point is to stop shipping reference data as a
-ConfigMap rather than to trim it.
+**A consequence that was watched, and has now been dealt with.** The chain reached **878 KiB, 85% of
+the 1 MiB ConfigMap limit** — `0013` alone is 339 KiB, and 57% of the whole chain is generated
+vocabulary. The next large vocabulary would not have fitted.
+
+The chart now carries the migrations **gzipped, one archive per file, in `binaryData`**: **149 KiB,
+~199 KiB once base64-encoded, 20% of the limit**, with room for several more vocabularies of that
+size. SQL is close to ideal compression input — thousands of near-identical `INSERT`s over a handful
+of tables — and `db-init` decompresses into a scratch volume before applying. Compose is untouched;
+it bind-mounts the plain files.
+
+Squashing the chain was the alternative and could not have worked: the generated vocabulary and the
+SQL statements are 81% of the bytes and have to survive verbatim, so the floor was ~703 KiB — still
+69% of the limit, and one more ASHRAE-sized vocabulary over it either way. The only thing a squash
+removed at scale was the 163 KiB of migration headers, which is where the reasoning lives.
 
 **Decided: seed from the open223 ontology**, `ontologies/223p.ttl` at version `v1.0.0-2026`, pinned
 in the generator the way `SCHEMA_VERSION` is pinned in the MTConnect one.

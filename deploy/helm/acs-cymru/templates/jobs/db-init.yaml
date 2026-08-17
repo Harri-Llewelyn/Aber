@@ -7,9 +7,34 @@
 The migrations and the seed, as ConfigMaps.
 
 MIRRORED from supabase/migrations/ and supabase/seed.sql by scripts/sync-helm-chart-files.mjs --
-Helm cannot read outside its chart. CI runs that script with --check, and it also warns as the
-migrations approach the 1 MiB ConfigMap limit (they are ~396 KiB and only grow; 0002 alone is over
-200 KiB because it carries three generated reference vocabularies).
+Helm cannot read outside its chart. CI runs that script with --check.
+
+THE MIGRATIONS ARE GZIPPED, ONE ARCHIVE PER FILE, IN `binaryData`.
+
+A ConfigMap cannot exceed 1 MiB. That is an etcd object limit rather than a Kubernetes preference,
+and breaching it fails at APPLY time with "Request entity too large" -- naming the ConfigMap and not
+the file that grew, on an upgrade that was working yesterday. The chain reached 878 KiB, 85% of it,
+and only grows: 57% of those bytes are generated reference vocabulary (ASHRAE 223P alone is 339 KiB,
+MTConnect 2.8 is 598 rows) and it is the kind of content that arrives in one commit.
+
+Compressed it is ~150 KiB, ~200 KiB once base64-encoded into this manifest -- 20% of the limit, with
+room for several more vocabularies of that size. SQL is close to ideal input for it: thousands of
+near-identical INSERTs over a handful of tables.
+
+SQUASHING THE CHAIN WAS THE OTHER CANDIDATE AND CANNOT REACH THE GOAL. The generated vocabulary and
+the SQL statements -- 81% of the bytes between them -- have to survive verbatim into whatever
+replaces them, so the floor is ~703 KiB, still 69% of the limit, and one more ASHRAE-sized
+vocabulary exceeds it either way. The only thing a squash removes at scale is the 163 KiB of
+migration headers, which is where this repository keeps the reasoning for every schema guard.
+
+ONE KEY PER MIGRATION, not a single tarball, at a cost of ~12 KiB against compressing the
+concatenation. It keeps the apply loop below ordering on filenames, keeps the sync script's orphan
+sweep working, and keeps a single migration individually retrievable.
+
+COMPOSE APPLIES THE PLAIN FILES and is untouched -- it bind-mounts supabase/migrations/ directly. So
+the two targets differ in transport and not in content, and the sync check proves it by comparing
+DECOMPRESSED bytes rather than archives (the gzip OS byte differs between a Windows and a Linux
+build, which would otherwise report drift on every CI run).
 
 supabase/migrations/archive/ is NOT included, and that is load-bearing rather than an oversight:
 those are the 38 pre-beta migrations, preserved as reasoning and deliberately never executed. The
@@ -28,15 +53,14 @@ metadata:
     # does not.
     "helm.sh/hook-weight": "-5"
     "helm.sh/hook-delete-policy": before-hook-creation
-data:
+binaryData:
 {{- $found := 0 }}
-{{- range $path, $bytes := .Files.Glob "files/migrations/*.sql" }}
+{{- range $path, $bytes := .Files.Glob "files/migrations/*.sql.gz" }}
 {{- $found = add1 $found }}
-  {{ base $path }}: |
-{{ $.Files.Get $path | indent 4 }}
+  {{ base $path }}: {{ $.Files.Get $path | b64enc | quote }}
 {{- end }}
 {{- if eq $found 0 }}
-{{- fail "\n\nacs-cymru: no migrations found at files/migrations/*.sql\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n\nFailing the render rather than installing an empty ConfigMap is deliberate: db-init would run,\nfind nothing to apply, exit 0, and every downstream service would then fail against a database\nwith no schema -- which reads as a dozen unrelated faults rather than as one missing step.\n" }}
+{{- fail "\n\nacs-cymru: no migrations found at files/migrations/*.sql.gz\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n\nThese are GZIPPED now -- a chart still carrying plain .sql mirrors predates that change and needs\na re-sync. Failing the render rather than installing an empty ConfigMap is deliberate: db-init would\nrun, find nothing to apply, exit 0, and every downstream service would then fail against a database\nwith no schema -- which reads as a dozen unrelated faults rather than as one missing step.\n" }}
 {{- end }}
 ---
 apiVersion: v1
@@ -140,11 +164,38 @@ spec:
               echo 'Configuring PostgreSQL search_path...'
               $PSQL -c 'ALTER ROLE postgres SET search_path TO auth, public, extensions;'
 
+              # -------------------------------------------------------------------------------
+              # DECOMPRESS FIRST. The ConfigMap carries one gzip archive per migration -- see the
+              # header above for why. Expanded into an emptyDir rather than piped straight into
+              # psql, for two reasons: `psql -f` wants a path (a pipe would mean `psql -c` with the
+              # whole file as one argument, and 262 KiB of SQL through argv is a different failure),
+              # and a file on disk is what makes a failed migration inspectable in the pod.
+              #
+              # FAILS CLOSED. `set -e` is on, so a corrupt archive aborts here rather than leaving
+              # the loop below with a short file list to apply successfully and exit 0 -- which
+              # would report a healthy init against a partially built schema.
+              # -------------------------------------------------------------------------------
+              echo 'Decompressing migrations...'
+              mkdir -p /tmp/migrations
+              for gz in /migrations/*.sql.gz; do
+                [ -f "$gz" ] || continue
+                base=$(basename "$gz" .gz)
+                gunzip -c "$gz" > "/tmp/migrations/$base"
+              done
+
+              COUNT=$(ls -1 /tmp/migrations/*.sql 2>/dev/null | wc -l)
+              if [ "$COUNT" -eq 0 ]; then
+                echo 'No migrations were decompressed from the ConfigMap.' >&2
+                echo 'The chart mounts files/migrations/*.sql.gz; re-run: node scripts/sync-helm-chart-files.mjs' >&2
+                exit 1
+              fi
+              echo "Decompressed $COUNT migration(s)."
+
               # ORDERING IS LEXICAL, matching docker-compose's `for f in /migrations/*.sql`. The
               # numeric prefixes are what make that correct; a migration added without one would
               # sort unpredictably against the rest.
               echo 'Applying Supabase database migrations...'
-              for f in /migrations/*.sql; do
+              for f in /tmp/migrations/*.sql; do
                 [ -f "$f" ] || continue
                 echo "Executing migration $f..."
                 $PSQL \
@@ -174,6 +225,12 @@ spec:
             - name: migrations
               mountPath: /migrations
               readOnly: true
+            # Scratch space for the decompressed SQL. An explicit emptyDir rather than relying on
+            # the image's writable /tmp: a ConfigMap mount is read-only, so the archives cannot be
+            # expanded in place, and declaring the scratch volume means this Job keeps working if
+            # the pod is ever hardened with readOnlyRootFilesystem.
+            - name: migrations-expanded
+              mountPath: /tmp/migrations
             - name: seed
               mountPath: /seed
               readOnly: true
@@ -184,6 +241,8 @@ spec:
         - name: migrations
           configMap:
             name: {{ printf "%s-migrations" $fullname }}
+        - name: migrations-expanded
+          emptyDir: {}
         - name: seed
           configMap:
             name: {{ printf "%s-seed" $fullname }}

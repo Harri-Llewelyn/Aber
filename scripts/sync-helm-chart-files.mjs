@@ -24,6 +24,7 @@
  * Cross-platform via node:fs, no POSIX shell required -- same constraint scripts/setup.mjs has.
  */
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, rmSync } from 'node:fs';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve, relative } from 'node:path';
 
@@ -65,6 +66,31 @@ const MIRRORS = [
     // supabase/migrations/archive/ out. Those are the pre-beta chain, preserved as reasoning and
     // deliberately never executed; mounting them would replay 38 superseded migrations.
     match: (name) => name.endsWith('.sql'),
+    // ---------------------------------------------------------------------------------------
+    // GZIPPED, and this is the one mirror that is. The chain is 878 KiB of which 57% is
+    // generated reference vocabulary -- 85% of the 1 MiB ConfigMap limit, which is an etcd
+    // object limit rather than a Kubernetes preference and fails at APPLY time with "Request
+    // entity too large", naming the ConfigMap and not the file that grew.
+    //
+    // WHY NOT SQUASH THE CHAIN INSTEAD, which was the other candidate: it cannot reach the
+    // goal. 57% generated vocabulary plus 24% SQL statements have to survive verbatim into
+    // whatever replaces them, so the floor a squash can reach is ~703 KiB -- still 69% of the
+    // limit, and one more vocabulary the size of ASHRAE 223P (339 KiB alone) exceeds it either
+    // way. The only thing a squash removes at scale is the 163 KiB of migration headers, which
+    // in this repository is the documented reasoning for every schema guard. Compression gets
+    // 878 KiB to ~150 KiB and costs none of it.
+    //
+    // SQL is close to ideal input: thousands of near-identical INSERT statements over a handful
+    // of tables. Per-file rather than one archive, at a cost of ~12 KiB against gzipping the
+    // concatenation, because it keeps one ConfigMap key per migration -- so the Job's ordering
+    // loop, the orphan sweep below and check-docs-drift's prefix check all keep working on
+    // filenames, and a single migration can still be pulled out and read on its own.
+    //
+    // COMPOSE IS UNAFFECTED. It bind-mounts supabase/migrations/ directly and applies the plain
+    // files; only the chart carries the compressed copies. The two targets therefore differ in
+    // transport and not in content, which is what the check below actually proves.
+    // ---------------------------------------------------------------------------------------
+    gzip: true,
     why: 'Applied in order by the db-init Job on every boot, exactly as supabase-db-init does',
   },
   {
@@ -173,10 +199,13 @@ const MIRRORS = [
  * exceeding it fails at APPLY time with "Request entity too large", naming the object rather than
  * the file that grew.
  *
- * The migrations are the group that matters: `0002_seed_data.sql` alone is over 200 KB because it
- * carries three generated reference vocabularies, and it only ever grows. Warn well before the
- * cliff so the choice of what to do about it (split the ConfigMap, gzip, or bake an image) is made
- * deliberately rather than under a failing deploy.
+ * The migrations were the group that mattered: they reached 878 KiB, 85% of the limit, because 57%
+ * of the chain is generated reference vocabulary. THAT ONE IS NOW GZIPPED (see the mirror's own
+ * note), which takes it to ~199 KiB base64-encoded and buys room for several more vocabularies.
+ *
+ * The warning stays, and applies to every mirror including the compressed one -- compression moved
+ * the cliff, it did not remove it. The remaining options at that point are to split the ConfigMap
+ * across several objects or to bake the reference data into an image; gzip is spent.
  */
 const CONFIGMAP_LIMIT = 1024 * 1024;
 const CONFIGMAP_WARN_AT = 0.75;
@@ -210,44 +239,109 @@ for (const mirror of MIRRORS) {
     // Normalise line endings. Git may check the source out as CRLF on Windows; a byte comparison
     // would then report drift on every developer machine and report nothing useful in CI.
     const content = readFileSync(join(sourceDir, name), 'utf8').replace(/\r\n/g, '\n');
-    groupBytes += Buffer.byteLength(content, 'utf8');
-    const destPath = join(destDir, name);
-    const current = existsSync(destPath)
-      ? readFileSync(destPath, 'utf8').replace(/\r\n/g, '\n')
-      : null;
+    const destName = mirror.gzip ? `${name}.gz` : name;
+    const destPath = join(destDir, destName);
+    const rel = relative(REPO_ROOT, destPath).replace(/\\/g, '/');
 
-    if (current === content) continue;
+    if (!mirror.gzip) {
+      groupBytes += Buffer.byteLength(content, 'utf8');
+      const current = existsSync(destPath)
+        ? readFileSync(destPath, 'utf8').replace(/\r\n/g, '\n')
+        : null;
+
+      if (current === content) continue;
+
+      stale += 1;
+      if (checkOnly) {
+        console.error(`STALE: ${rel} differs from ${mirror.source}/${name}`);
+      } else {
+        writeFileSync(destPath, content, 'utf8');
+        console.log(`updated ${rel}`);
+      }
+      continue;
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // THE COMPARISON IS ON DECOMPRESSED CONTENT, NEVER ON THE COMPRESSED BYTES.
+    //
+    // A .gz carries a 10-byte header, and two of those bytes are environment-dependent: MTIME
+    // (which Node writes as 0, so that one is safe) and the OS byte, which zlib sets from a
+    // COMPILE-TIME constant -- 0x0a on a Windows build, 0x03 on Linux. Byte-comparing the archive
+    // would therefore report every file as stale in CI purely because it was generated on a
+    // developer's laptop, and would keep doing so after any re-sync. Exactly the failure the CRLF
+    // normalisation above exists to prevent, one layer down.
+    //
+    // Decompressing also makes the check STRONGER rather than weaker: it proves the chart carries
+    // the same SQL, which is the claim that matters, instead of proving both sides happened to run
+    // the same compressor at the same level.
+    // -------------------------------------------------------------------------------------------
+    const compressed = gzipSync(Buffer.from(content, 'utf8'), { level: 9 });
+    groupBytes += compressed.length;
+
+    let currentContent = null;
+    if (existsSync(destPath)) {
+      try {
+        currentContent = gunzipSync(readFileSync(destPath)).toString('utf8');
+      } catch {
+        // A truncated or hand-edited archive reads as absent, so it is rewritten rather than
+        // trusted. Silently keeping an unreadable file would mount a ConfigMap the Job cannot
+        // gunzip, which surfaces as a database with no schema.
+        currentContent = null;
+      }
+    }
+
+    if (currentContent === content) continue;
 
     stale += 1;
-    const rel = relative(REPO_ROOT, destPath).replace(/\\/g, '/');
     if (checkOnly) {
-      console.error(`STALE: ${rel} differs from ${mirror.source}/${name}`);
+      console.error(`STALE: ${rel} does not decompress to ${mirror.source}/${name}`);
     } else {
-      writeFileSync(destPath, content, 'utf8');
-      console.log(`updated ${rel}`);
+      writeFileSync(destPath, compressed);
+      console.log(`updated ${rel} (${(compressed.length / 1024).toFixed(0)} KiB gzipped)`);
     }
   }
 
   // Each mirror becomes ONE ConfigMap, so the group total is what has to stay under the limit.
-  const pct = groupBytes / CONFIGMAP_LIMIT;
+  //
+  // A gzipped mirror is carried in `binaryData`, which is base64 in the manifest the API server
+  // receives -- so the budgeted figure is the compressed size inflated by a third. That is the
+  // PESSIMISTIC reading (etcd stores the decoded bytes), and being pessimistic about a limit whose
+  // breach only surfaces at apply time is the right direction to be wrong in.
+  const budgeted = mirror.gzip ? Math.ceil(groupBytes * 4 / 3) : groupBytes;
+  const pct = budgeted / CONFIGMAP_LIMIT;
+  const describe = mirror.gzip
+    ? `${(groupBytes / 1024).toFixed(0)} KiB gzipped, ~${(budgeted / 1024).toFixed(0)} KiB base64-encoded`
+    : `${(budgeted / 1024).toFixed(0)} KiB`;
+
   if (pct >= 1) {
     oversize += 1;
     console.error(
-      `OVERSIZE: ${mirror.dest} is ${(groupBytes / 1024).toFixed(0)} KiB, over the 1 MiB ConfigMap ` +
-        `limit. This fails at apply time with "Request entity too large", naming the ConfigMap and ` +
-        `not the file that grew. Split the ConfigMap, gzip the contents, or bake an image.`
+      `OVERSIZE: ${mirror.dest} is ${describe}, over the 1 MiB ConfigMap limit. This fails at ` +
+        `apply time with "Request entity too large", naming the ConfigMap and not the file that ` +
+        `grew. Split the ConfigMap across several objects, or bake an image.`
     );
   } else if (pct >= CONFIGMAP_WARN_AT) {
     console.warn(
-      `WARNING: ${mirror.dest} is ${(groupBytes / 1024).toFixed(0)} KiB — ` +
-        `${(pct * 100).toFixed(0)}% of the 1 MiB ConfigMap limit.`
+      `WARNING: ${mirror.dest} is ${describe} — ${(pct * 100).toFixed(0)}% of the 1 MiB ` +
+        `ConfigMap limit.`
+    );
+  } else if (mirror.gzip) {
+    // Reported on every run, not only near the cliff: the whole point of compressing was to make
+    // the headroom visible, and a number nobody prints is a number nobody notices moving.
+    console.log(
+      `  ${mirror.dest}: ${describe} — ${(pct * 100).toFixed(0)}% of the 1 MiB ConfigMap limit.`
     );
   }
 
   // Remove copies whose source no longer exists.
+  //
+  // Matched against the DEST names this run produced, not the source names -- with a gzipped
+  // mirror those differ by a suffix, and comparing against the source list would delete every
+  // archive it had just written and then report each one as an orphan.
+  const expectedDestNames = sourceNames.map((n) => (mirror.gzip ? `${n}.gz` : n));
   if (existsSync(destDir)) {
     for (const name of readdirSync(destDir)) {
-      if (sourceNames.includes(name)) continue;
+      if (expectedDestNames.includes(name)) continue;
       stale += 1;
       const rel = relative(REPO_ROOT, join(destDir, name)).replace(/\\/g, '/');
       if (checkOnly) {
