@@ -125,7 +125,8 @@ shopfloor simulator needed, `0020` retires the introductory single-device simula
 schema and IDTA nameplate onto `Sim_CNC_Mill_01`, `0021` gives each shopfloor cell an icon from a
 closed set, `0022` adds one schema per machine class and attaches it to every simulated device,
 `0023` adds the `device_alerts` occurrence log Grafana alerting writes into and publishes it for
-Realtime — plus demo accounts (`supabase/seed.sql`).
+Realtime, `0024` adds an optional free-text `description` to devices and gateways — plus demo
+accounts (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because `0005` already implements one; a second declaration of `log_digital_thread_event()`

@@ -1786,6 +1786,82 @@ tbody tr:hover { background: var(--bg-glass); }
   padding: 5px 8px;
 }
 
+/* A chip that navigates. Used in the context drawers for Serving Gateway, Cell Zone and Schema.
+
+   A <button> rather than an <a>, because these are in-app tab switches with filter state, not URLs --
+   an anchor would promise middle-click and "copy link address", neither of which this app can honour.
+   It inherits `.chip` so it sits at the same weight as the read-only chips beside it, and adds only
+   the affordance: a pointer, an accent on hover, and the accent border that says this one does
+   something. `text-align: left` because a button centres its text by default and every other value in
+   the field list is left-aligned. */
+.chip-link {
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  max-width: 100%;
+}
+
+.chip-link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chip-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The active-alert banner at the top of a context drawer.
+   Above the metadata because it is the only item in that panel with a deadline on it -- see the note
+   in ContextPanel.jsx. */
+.context-alert {
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  border: 1px solid var(--warning);
+  background: rgba(255, 179, 0, 0.12);
+}
+
+.context-alert-critical {
+  border-color: var(--danger);
+  background: rgba(255, 77, 109, 0.13);
+}
+
+.context-alert-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warning-text);
+}
+
+.context-alert-critical .context-alert-head { color: var(--danger); }
+
+.context-alert-name { flex: 1; min-width: 0; }
+
+/* The severity spelled out beside the colour, for the same reason the Topbar pill carries its count
+   as a number: colour alone is not a signal every operator can rely on. */
+.context-alert-sev {
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+.context-alert-summary {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  margin-top: 5px;
+}
+
+.context-alert-foot {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
 /* The Topbar's firing-alert pill and the list behind it.
    Rendered only while something is firing -- see AlertPill.jsx for why absence is the steady state.
 

@@ -33,8 +33,24 @@ groups:
   - orgId: 1
     name: Shopfloor Conditions
     folder: ACS-Cymru - Alerts
-    # One minute, matching the finest rollup. Faster would evaluate the same bucket repeatedly.
-    interval: 1m
+    # TEN SECONDS, AND THAT IS A DEMONSTRATOR SETTING RATHER THAN A PRODUCTION ONE.
+    #
+    # It was 1m, matching the finest rollup, on the reasoning that evaluating faster than the data
+    # arrives just re-reads the same bucket. That reasoning is still correct about the DATA -- but it
+    # was wrong about the LATENCY. At a 1-minute interval with `for: 2m`, a thermal excursion took
+    # up to three minutes to reach the dashboard, which is unusable when someone is standing in front
+    # of it pressing the fault-injection button.
+    #
+    # Ten seconds does re-evaluate the same 1-minute bucket up to six times. That costs six cheap
+    # indexed queries a minute against three rules, which is nothing next to the ingestion the same
+    # database is absorbing, and `telemetry_1m` is `materialized_only = false` so the current bucket
+    # is real-time aggregated and genuinely does move between evaluations.
+    #
+    # ON A REAL FLOOR, RAISE BOTH THIS AND THE `for:` VALUES BELOW. A ten-second evaluation with a
+    # ten-second `for` will alert on a single noisy sample, and the deadband on a simulated
+    # temperature is 0.5 degC. The debounce is what separates an excursion from a spike; here it is
+    # deliberately short enough to demonstrate, not long enough to be trusted.
+    interval: 10s
     rules:
       # -----------------------------------------------------------------------------------------
       # 1. THERMAL EXCURSION -- against the machine's OWN declared limit.
@@ -59,9 +75,9 @@ groups:
       - uid: acs-thermal-excursion
         title: Thermal Excursion
         condition: C
-        # 2 minutes above the limit before notifying -- one bucket of sensor noise is not an
-        # excursion, and the deadband on the simulated metric is 0.5 degC.
-        for: 2m
+        # One evaluation above the limit. See the group's `interval` note: this was 2m, which is the
+        # right debounce for a real machine and three minutes too slow to demonstrate.
+        for: 10s
         # A device that has published no temperature at all is not hot. NoData here would alert on
         # every device that does not carry the metric, which is four of the six on this floor.
         noDataState: OK
@@ -230,14 +246,19 @@ groups:
       # aggregator publishes on a fixed 60s cadence into 1-minute buckets, so a restart makes those
       # counts differ.
       #
-      # 5 minutes: availability is a ratio over accumulated time and moves slowly by construction.
-      # Alerting on one bucket would fire on the aggregator's first interval after every restart,
-      # when its denominator is a single minute.
+      # `for: 10s` LIKE THE OTHERS, AND THIS IS THE ONE WHERE THAT COSTS SOMETHING. Availability is a
+      # ratio over accumulated time, so the aggregator's first interval after any restart has a
+      # denominator of one minute and reads far below 60 -- which now alerts within ten seconds of a
+      # stack coming up, and then resolves itself a few minutes later as the denominator grows.
+      #
+      # Accepted for the demonstrator, where a KPI alert appearing on boot is a talking point rather
+      # than a nuisance. It was 5m for exactly this reason and should go back on a real floor; see the
+      # group's `interval` note.
       # -----------------------------------------------------------------------------------------
       - uid: acs-low-availability
         title: Low OEE Availability
         condition: C
-        for: 5m
+        for: 10s
         noDataState: OK
         execErrState: Error
         labels:

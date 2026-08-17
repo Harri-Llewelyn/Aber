@@ -26,11 +26,12 @@ import {
   IconExternalLink,
   IconZap,
   IconShieldAlert,
+  IconMap,
   IconX
 } from '../common/Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 
-export function GatewaysTab({ showToast, onViewThread, hasPermission, initialSearchFilter, onClearFilter, onBugReport }) {
+export function GatewaysTab({ showToast, onViewThread, onSelectCell, hasPermission, initialSearchFilter, onClearFilter, onBugReport }) {
   const [gateways, setGateways] = useState([])
   const [assets, setAssets]     = useState([])
   const [cells, setCells]       = useState([])
@@ -434,43 +435,31 @@ export function GatewaysTab({ showToast, onViewThread, hasPermission, initialSea
         <div className="modal-overlay">
           <div className="modal">
             <div className="modal-title">{editing ? 'Edit Gateway' : 'Register Gateway'}</div>
-            {/* Name first: it is the human handle. The identifiers below are machine-issued
-                and read-only, and only matter when configuring the physical edge node. */}
+            {/* THE READ-ONLY IDENTIFIER BLOCKS ARE GONE, same as in the device form. Sparkplug ID,
+                the publish-topic helper and the internal UUID were three of this dialog's rows and
+                none of them could be edited; all three are on the context drawer, copyable, where
+                somebody hunting an identifier actually looks. A form whose majority is read-only
+                teaches the reader that its controls are decorative. */}
             <div className="form-group">
               <label className="form-label">Gateway Name</label>
-              <input className="form-control" value={form.gateway_name} onChange={e => setForm(f => ({ ...f, gateway_name: e.target.value }))} title="Friendly label for this gateway" placeholder="e.g. Virtual_Gateway_NodeRED" />
+              <input className="form-control" value={form.gateway_name} onChange={e => setForm(f => ({ ...f, gateway_name: e.target.value }))} title="Friendly label for this gateway" placeholder="e.g. Sim_Gateway_Cell1_Machining" />
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                A display label only — rename it freely. Heartbeats are matched on the Sparkplug ID below.
+                A display label only — rename it freely. Heartbeats are matched on the Sparkplug ID, which is generated from the database key and never moves.
               </div>
             </div>
             <div className="form-group">
-              <label className="form-label">Sparkplug ID</label>
-              {editing ? (
-                <>
-                  <CopyableId value={editing.sparkplug_id || gatewaySparkplugId(editing.gateway_id)} label="Sparkplug edge node id" onNotify={showToast} />
-                  {/* Copyable in its own right -- see the matching comment in DevicesTab. */}
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', marginBottom: '4px' }}>
-                    Configure this edge node to publish on:
-                  </div>
-                  <CopyableId
-                    value={`spBv1.0/<group>/NDATA/${editing.sparkplug_id || gatewaySparkplugId(editing.gateway_id)}`}
-                    label="Sparkplug topic"
-                    onNotify={showToast}
-                    className="copyable-id-wrap"
-                  />
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    Replace <span className="mono">&lt;group&gt;</span> with the Sparkplug group id configured on the edge node.
-                  </div>
-                </>
-              ) : (
-                <input className="form-control" value="— issued on save —" disabled readOnly title="Derived from the gateway's database id once the record exists" />
-              )}
-            </div>
-            <div className="form-group">
-              <label className="form-label">Internal UUID</label>
-              {editing
-                ? <CopyableId value={form.gateway_id} label="gateway UUID" onNotify={showToast} />
-                : <input className="form-control" value="— assigned on save —" disabled readOnly title="Database-generated UUID; not editable" />}
+              <label className="form-label">Description</label>
+              <textarea
+                className="form-control"
+                rows={2}
+                value={form.description || ''}
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                title="Optional free-text note about this gateway"
+                placeholder="e.g. Panel-mounted IPC in the machining cell, north wall"
+              />
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                Optional, and read by nothing — a note for whoever comes to this next.
+              </div>
             </div>
             <div className="form-group">
               <label className="form-label">Shopfloor Cell Zone</label>
@@ -585,14 +574,34 @@ export function GatewaysTab({ showToast, onViewThread, hasPermission, initialSea
           },
           {
             label: 'Cell Zone',
+            // A LINK when there is a cell to open. Site-Wide is deliberately left as plain text --
+            // it is the assertion that this gateway belongs to no cell, so a chip styled like the
+            // others but leading nowhere would promise an affordance that cannot exist.
             value: selected.location_scope === SCOPE_SITE_WIDE
               ? 'Site-Wide'
-              : selectedCell?.cell_name || (selected.cell_id ? selected.cell_id : null),
+              : selectedCell
+                ? (
+                    <button
+                      className="chip chip-link"
+                      onClick={() => onSelectCell?.(selectedCell.cell_id)}
+                      title="Open this cell on the Cells page"
+                    >
+                      <IconMap size={11} />
+                      <span className="chip-name">{selectedCell.cell_name}</span>
+                    </button>
+                  )
+                : (selected.cell_id || null),
             title: selected.location_scope === SCOPE_SITE_WIDE
               ? 'A host-run or central connector serving the whole facility. Its devices inherit no cell from it.'
               : 'Devices served by this gateway resolve to this cell unless they carry one of their own.'
           },
           { label: 'Last Heartbeat', value: formatHeartbeat(selected.last_heartbeat), title: 'Age of the last NBIRTH/NDATA/NDEATH. STALE after 90 seconds of silence.' },
+          {
+            label: 'Description',
+            value: selected.description || null,
+            full: true,
+            title: 'Operator note. Free text, read by nothing.'
+          },
         ] : []}
         actions={selected ? [
           selected.access_url && {

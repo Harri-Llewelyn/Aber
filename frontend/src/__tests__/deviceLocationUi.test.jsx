@@ -242,35 +242,44 @@ describe('the edit form', () => {
   })
 })
 
-describe('the Sparkplug topic in the edit form', () => {
+describe('the Sparkplug topic in the context panel', () => {
   // The help text used to read "Click to copy" beneath a plain <span>. Nothing there was
-  // clickable -- only the id above it was -- so the dialog promised an affordance it did not
-  // have. A rendered string cannot be asserted to be copyable by eye, hence these.
-  // Scoped to the dialog. The context panel behind it now shows a copyable "Sparkplug Topic Path"
-  // of its own, so an unscoped query matches two buttons -- which is correct behaviour, not a
-  // clash: the panel answers "what does this device publish on" without opening the editor.
+  // clickable -- only the id above it was -- so the dialog promised an affordance it did not have.
+  // A rendered string cannot be asserted to be copyable by eye, hence these.
+  //
+  // THESE MOVED FROM THE EDIT DIALOG TO THE PANEL, and the coverage is unchanged in substance.
+  // The dialog carried a duplicate of this topic alongside read-only Sparkplug ID and UUID blocks;
+  // all three were removed, because an edit form whose majority cannot be edited teaches the reader
+  // that its controls are decorative. The panel's copy is the one that was always the better answer
+  // to "what does this device publish on" -- it needs no dialog opened, and its group comes from the
+  // serving gateway rather than being left as a `<group>` hole to fill in by hand.
   const topicButton = () =>
-    within(document.querySelector('.modal')).getByRole('button', { name: /Copy Sparkplug topic/i })
+    within(document.querySelector('.context-panel')).getByRole('button', { name: /Copy sparkplug topic path/i })
+
+  const openPanel = (name = 'CNC_01') => fireEvent.click(
+    within(document.querySelector('.page-main')).getByText(name)
+  )
 
   it('renders the topic as a copy button, not as prose', async () => {
     await show([device()])
-    openEdit()
+    openPanel()
     expect(topicButton()).toBeInTheDocument()
     expect(screen.queryByText(/Click to copy/i)).not.toBeInTheDocument()
   })
 
-  it('fills the edge node segment in from the assigned gateway', async () => {
-    // Copying a template with two holes in it is barely worth the click; one of them is known.
+  it('fills the edge node segment in from the serving gateway', async () => {
+    // Copying a template with holes in it is barely worth the click, and both are known here.
     await show([device()])
-    openEdit()
+    openPanel()
     expect(topicButton().getAttribute('aria-label'))
-      .toMatch(/spBv1\.0\/<group>\/DDATA\/gwy-1-sparkplug\/devaaaaaaaa000040008000/)
+      .toMatch(/DDATA\/gwy-1-sparkplug\/devaaaaaaaa000040008000/)
   })
 
-  it('falls back to a placeholder when no gateway is assigned', async () => {
+  it('falls back to a wildcard segment when no gateway is assigned', async () => {
     await show([device({ active_gateway_id: '', effective_cell_id: null, location_source: 'unassigned' })])
-    openEdit()
-    expect(topicButton().getAttribute('aria-label')).toMatch(/<edge node>/)
+    openPanel()
+    // `+` rather than a `<placeholder>`: it is a valid MQTT wildcard, so the topic stays paste-able.
+    expect(topicButton().getAttribute('aria-label')).toMatch(/DDATA\/\+\//)
   })
 
   it('copies the topic when clicked', async () => {
@@ -278,13 +287,28 @@ describe('the Sparkplug topic in the edit form', () => {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
 
     await show([device()])
-    openEdit()
+    openPanel()
     fireEvent.click(topicButton())
 
     await waitFor(() => expect(writeText).toHaveBeenCalled())
-    expect(writeText.mock.calls[0][0]).toBe(
-      'spBv1.0/<group>/DDATA/gwy-1-sparkplug/devaaaaaaaa000040008000'
+    expect(writeText.mock.calls[0][0]).toMatch(
+      /^spBv1\.0\/.+\/DDATA\/gwy-1-sparkplug\/devaaaaaaaa000040008000$/
     )
+  })
+
+  it('no longer duplicates the identifiers inside the edit dialog', async () => {
+    // The removal itself, asserted -- otherwise the three blocks could drift back in and only the
+    // absence of a test would notice.
+    await show([device()])
+    openEdit()
+    const modal = document.querySelector('.modal')
+    expect(within(modal).queryByRole('button', { name: /Copy Sparkplug topic/i })).toBeNull()
+    expect(within(modal).queryByText('Internal UUID')).toBeNull()
+    expect(within(modal).queryByText('Sparkplug ID')).toBeNull()
+    // And the transport picker, which offered protocols ingestion cannot read.
+    expect(within(modal).queryByText('Connection Method')).toBeNull()
+    // What replaced them.
+    expect(within(modal).getByText('Description')).toBeInTheDocument()
   })
 })
 

@@ -89,10 +89,10 @@ const mapGatewayRow = (g, locations) => {
 // cell_id and location_scope are selected so that local resolution still works when the
 // device_locations read fails -- see loadDeviceLocations().
 const DEVICE_EMBED =
-  'id, name, sparkplug_id, reported_identity, identity_source, status, is_quarantined, ' +
+  'id, name, description, sparkplug_id, reported_identity, identity_source, status, is_quarantined, ' +
   'is_archived, gateway_id, cell_id, location_scope, created_at, model_3d_path';
 const GATEWAY_EMBED =
-  `id, name, sparkplug_id, cell_id, location_scope, access_url, status, last_heartbeat, ` +
+  `id, name, description, sparkplug_id, cell_id, location_scope, access_url, status, last_heartbeat, ` +
   `is_virtual, is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
 
 /**
@@ -1022,6 +1022,7 @@ const apiMethods = {
     if (path === '/api/v1/gateways') {
       const { data, error } = await supabase.from('gateways').insert({
         name: body.gateway_name,
+        description: emptyToNull(body.description),
         access_url: body.access_url,
         is_virtual: !!body.is_virtual,
         status: body.status || 'OFFLINE',
@@ -1034,6 +1035,7 @@ const apiMethods = {
     if (path === '/api/v1/devices') {
       const { data, error } = await supabase.from('devices').insert({
         name: body.asset_name,
+        description: emptyToNull(body.description),
         gateway_id: gatewayIdFrom(body),
         asset_type: emptyToNull(body.asset_type),
         connection_method: emptyToNull(body.connection_method),
@@ -1341,6 +1343,8 @@ const apiMethods = {
         access_url: body.access_url
       };
       if ('is_virtual' in body)  patch.is_virtual = !!body.is_virtual;
+      // See the devices patch: emptyToNull so clearing the field stores NULL, not ''.
+      if ('description' in body) patch.description = emptyToNull(body.description);
       // Same pairing rule as devices: marking a gateway Site-Wide clears its cell rather than
       // letting the CHECK reject the write. is_virtual is NOT what decides this -- a virtual
       // gateway is a deployment fact, site-wide is an operator's assertion about location, and
@@ -1403,6 +1407,10 @@ const apiMethods = {
         is_quarantined: body.is_quarantined
       };
       if ('asset_type' in body) patch.asset_type = emptyToNull(body.asset_type);
+      // emptyToNull, so clearing the field in the form stores NULL rather than ''. Absent and empty
+      // are the same thing to every reader of a description, and two representations of one state is
+      // how a `WHERE description IS NULL` starts missing rows.
+      if ('description' in body) patch.description = emptyToNull(body.description);
       if ('connection_method' in body) patch.connection_method = emptyToNull(body.connection_method);
       if ('schema_id' in body) patch.schema_id = emptyToNull(body.schema_id);
       if ('active_gateway_id' in body || 'gateway_id' in body) {

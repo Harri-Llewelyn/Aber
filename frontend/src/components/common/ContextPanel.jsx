@@ -1,5 +1,5 @@
 import React, { useRef } from 'react'
-import { IconX } from './Icons'
+import { IconX, IconAlertTriangle } from './Icons'
 import CopyableId from './CopyableId'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 
@@ -48,7 +48,7 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
  *                             action list off the bottom of the drawer.
  * @param {Function} onClose   Called by the X, by Escape, and by anything else that clears selection.
  */
-export function ContextPanel({ open, type, title, subtitle, fields = [], actions = [], onCopy, onClose, beforeActions, children }) {
+export function ContextPanel({ open, type, title, subtitle, fields = [], actions = [], onCopy, onClose, beforeActions, children, alert = null }) {
   const closeRef = useRef(null)
 
   // Escape closes, from anywhere on the page.
@@ -106,6 +106,31 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
         </div>
 
         <div className="context-panel-body">
+          {/* THE ALERT GOES ABOVE THE METADATA, and it is the only thing in this panel that does.
+              Everything below is a stable fact about the entity and is read in its own time; an
+              active alert is the one item with a deadline on it. Putting it under the fields would
+              mean an overheating machine's most important line arrived after its creation date.
+
+              Rendered from a prop rather than derived here: this panel is presentational and knows
+              nothing about cells, gateways or devices -- see the header -- and teaching it to
+              cross-reference alerts would be the first of four pages' worth of entity knowledge. */}
+          {alert && (
+            <div
+              className={`context-alert context-alert-${alert.severity || 'warning'}`}
+              role="status"
+            >
+              <div className="context-alert-head">
+                <IconAlertTriangle size={13} />
+                <span className="context-alert-name">{alert.alert_name}</span>
+                <span className="context-alert-sev">{(alert.severity || 'warning').toUpperCase()}</span>
+              </div>
+              {alert.summary && <div className="context-alert-summary">{alert.summary}</div>}
+              <div className="context-alert-foot">
+                Raised by Grafana{alert.starts_at ? ` · since ${new Date(alert.starts_at).toLocaleTimeString()}` : ''}
+              </div>
+            </div>
+          )}
+
           {fields.length > 0 && (
             <dl className="context-panel-fields">
               {fields.map((f, i) => (
