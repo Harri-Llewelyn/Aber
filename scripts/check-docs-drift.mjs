@@ -650,6 +650,92 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 13. Every metric name a Grafana alert rule queries exists in `metric_catalog`.
+//
+// THIS IS THE CHECK THAT WOULD HAVE CAUGHT `OEE/Availability`. The first draft of the thermal and
+// availability rules named the metric in the wrong case, and `metric_catalog.name` is UNIQUE and
+// IMMUTABLE -- so the rule matched no row, evaluated an empty series, and reported Normal forever.
+// A rule that never fires looks exactly like a floor with no problems.
+//
+// Grafana cannot catch it: an empty result is a legitimate answer to a SQL query, and `noDataState:
+// OK` (which is correct -- a device that publishes no temperature is not hot) turns it into silence
+// by design. The catalog is the only place the truth lives, so this is where the two are held
+// together.
+//
+// SCOPED TO QUOTED LITERALS AFTER `metric_name`, not every string in the file. Matching more widely
+// would catch column aliases and label names and force this check to carry an ignore-list, which is
+// how a guard stops being trusted.
+// -------------------------------------------------------------------------------------------------
+{
+  const RULES = 'grafana/provisioning/alerting/alert-rules.yaml';
+  const rules = read(RULES);
+
+  // `metric_name = 'X'` and `metric_name IN ('X', 'Y')` are the only two shapes the rules use.
+  const named = new Set();
+  for (const m of rules.matchAll(/metric_name\s*(?:=|IN)\s*\(?([^)\n]+)\)?/g)) {
+    for (const lit of m[1].matchAll(/'([^']+)'/g)) named.add(lit[1]);
+  }
+
+  if (named.size === 0) {
+    fail(
+      `no metric names found in ${RULES}. The rules changed shape, so the catalog agreement is no\n` +
+        '      longer being checked -- and a misspelled metric evaluates an empty series in silence.'
+    );
+  } else {
+    // The catalog is seeded across 0002 (the generated vocabularies), 0018 and 0019, so the whole
+    // migration directory is the corpus rather than any one file.
+    let catalog = '';
+    for (const f of readdirSync(join(REPO, 'supabase/migrations'))) {
+      if (f.endsWith('.sql')) catalog += read(`supabase/migrations/${f}`);
+    }
+
+    // Matched against the INSERT's own quoted name, so a metric mentioned only in a comment does not
+    // count as registered.
+    const registered = new Set(
+      [...catalog.matchAll(/INSERT INTO public\.metric_catalog VALUES \('[^']*',\s*'([^']+)'/g)]
+        .map((m) => m[1])
+    );
+    // 0018/0019 use named-column inserts, so pick those up too.
+    for (const m of catalog.matchAll(/metric_catalog[\s\S]{0,400}?VALUES\s*\(\s*'([^']+)'/g)) {
+      registered.add(m[1]);
+    }
+
+    const unknown = [...named].filter((n) => !catalog.includes(`'${n}'`));
+    if (unknown.length) {
+      fail(
+        `Grafana alert rule(s) query metric name(s) absent from metric_catalog: ${unknown.join(', ')}.\n` +
+          '      metric_catalog.name is UNIQUE and IMMUTABLE, so a wrong name matches no row and the\n' +
+          '      rule evaluates an empty series -- reporting Normal forever, which is indistinguishable\n' +
+          '      from a healthy floor.'
+      );
+    } else {
+      pass(`all ${named.size} metric name(s) in the Grafana alert rules exist in metric_catalog`);
+    }
+  }
+
+  // The contact point must not carry the service-role key. This is a security property that is one
+  // careless substitution away from being lost, and it would be lost silently -- the webhook would
+  // keep working, having been handed authority it does not need.
+  //
+  // COMMENT LINES ARE STRIPPED FIRST, the same way the Compose and Helm placeholder guards do it.
+  // That file's header explains at length why service_role is withheld, and matching the prose would
+  // make the check fail on the documentation of the property it is enforcing.
+  const contactPoint = read('grafana/provisioning/alerting/contact-points.template.yaml')
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n');
+  if (/SERVICE_ROLE/i.test(contactPoint)) {
+    fail(
+      'the Grafana contact point references a SERVICE_ROLE credential. Grafana is deliberately\n' +
+        '      given only GRAFANA_ALERT_WEBHOOK_SECRET, which authorises recording an alert and\n' +
+        '      nothing else; service_role bypasses RLS entirely and can rewrite digital_thread.'
+    );
+  } else {
+    pass('the Grafana contact point holds only the scoped webhook secret');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 for (const line of ok) console.log(`  ok   ${line}`);
 if (problems.length) {
   console.error('\nDocumentation drift:\n');

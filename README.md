@@ -11,7 +11,7 @@ management.
 
 > **Design ethos —** *use pre-existing components and standards; minimise custom code.*
 > Where upstream ACS ships bespoke microservices, this fork uses Supabase, TimescaleDB, Grafana and
-> Node-RED. The custom surface is one Python ingestion daemon, six edge functions, an i3X server and
+> Node-RED. The custom surface is one Python ingestion daemon, seven edge functions, an i3X server and
 > a React dashboard.
 
 ---
@@ -123,8 +123,9 @@ one to say it is the simulator, `0018` pre-registers the demonstrator's metric s
 row's standard and published semantic id, `0019` adds the 223P supply-air-flow metric the
 shopfloor simulator needed, `0020` retires the introductory single-device simulator and moves its
 schema and IDTA nameplate onto `Sim_CNC_Mill_01`, `0021` gives each shopfloor cell an icon from a
-closed set, `0022` adds one schema per machine class and attaches it to every simulated device
-— plus demo accounts (`supabase/seed.sql`).
+closed set, `0022` adds one schema per machine class and attaches it to every simulated device,
+`0023` adds the `device_alerts` occurrence log Grafana alerting writes into and publishes it for
+Realtime — plus demo accounts (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because `0005` already implements one; a second declaration of `log_digital_thread_event()`
@@ -350,6 +351,7 @@ python supabase/functions/approve-quarantine/test_approve_quarantine.py
 python supabase/functions/deploy-nodered/test_deploy_nodered.py
 python supabase/functions/nodered-userinfo/test_nodered_userinfo.py
 python supabase/functions/aas-export/test_aas_export.py
+python supabase/functions/grafana-alert-webhook/test_grafana_alert_webhook.py
 
 # Database suites — need Postgres
 python supabase/migrations/test_user_roles_rls.py

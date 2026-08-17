@@ -140,7 +140,11 @@ describe('DBIRTH declares the baseline', () => {
     // lands in telemetry with no standard and no semantic id, and exports as unmodelled.
     const REGISTERED = new Set([
       'Axes/X/POSITION', 'Axes/Y/POSITION', 'Systems/TEMPERATURE',
-      'Controller/EXECUTION', 'Controller/EMERGENCY_STOP'
+      'Controller/EXECUTION', 'Controller/EMERGENCY_STOP',
+      // Catalogued since 0002 as a local extension, and modelled by Machining_Cell_Schema from
+      // 0022/0023. The mill declares its OWN thermal limit and the Grafana rule compares against it
+      // per device -- which is what replaced the hardcoded 80.0 the dashboard used to carry.
+      'max_temp_threshold'
     ])
     for (const name of metricNames(dev.scan())) {
       if (name === 'Asset_ID' || name === 'Asset_Name') continue

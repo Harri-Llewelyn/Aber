@@ -1786,6 +1786,138 @@ tbody tr:hover { background: var(--bg-glass); }
   padding: 5px 8px;
 }
 
+/* The Topbar's firing-alert pill and the list behind it.
+   Rendered only while something is firing -- see AlertPill.jsx for why absence is the steady state.
+
+   `position: relative` on the wrapper anchors the panel, so the panel is positioned against the pill
+   rather than against the topbar. Anchoring to the topbar would put it under the theme toggle at one
+   window width and off-screen at another. */
+.alert-pill-wrap { position: relative; display: flex; }
+
+.alert-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  /* The one animated thing in the header. An alert is the only state worth spending motion on, and
+     a slow pulse reads as "live and still true" rather than as decoration. */
+  animation: alert-pill-pulse 2.4s ease-in-out infinite;
+}
+
+.alert-pill-critical {
+  border-color: var(--danger);
+  background: rgba(255, 77, 109, 0.16);
+  color: var(--danger);
+}
+
+.alert-pill-warning {
+  border-color: var(--warning);
+  background: rgba(255, 179, 0, 0.16);
+  color: var(--warning-text);
+}
+
+.alert-pill-count { font-variant-numeric: tabular-nums; }
+
+@keyframes alert-pill-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 currentColor; }
+  50%      { box-shadow: 0 0 7px 0 currentColor; }
+}
+
+/* Motion is a preference, and a pulsing element is exactly what someone who set it is asking not to
+   see. The colour and the count carry the whole signal without it. */
+@media (prefers-reduced-motion: reduce) {
+  .alert-pill { animation: none; }
+}
+
+.alert-pill-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  width: 340px;
+  max-height: 420px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+.alert-pill-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.alert-pill-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  padding: 2px;
+}
+
+.alert-pill-list { list-style: none; margin: 0; padding: 0; }
+
+.alert-pill-item {
+  display: flex;
+  gap: 9px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.alert-pill-item:last-child { border-bottom: none; }
+
+.alert-pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+
+.alert-pill-dot-critical { background: var(--danger); }
+.alert-pill-dot-warning  { background: var(--warning); }
+.alert-pill-dot-info     { background: var(--accent); }
+
+.alert-pill-item-body { min-width: 0; }
+.alert-pill-item-name { font-size: 12px; font-weight: 600; }
+
+.alert-pill-item-summary {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  line-height: 1.35;
+}
+
+.alert-pill-item-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 3px;
+  /* A sparkplug id is 24 characters in a 340px panel; wrapping beats an ellipsis because the id is
+     the thing someone copies into a query. */
+  word-break: break-all;
+}
+
+.alert-pill-foot {
+  padding: 9px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 /* The 3D model preview in the device drawer.
 
    ONE CLASS ON ALL THREE STATES -- the <model-viewer> element, the loading line and the error line

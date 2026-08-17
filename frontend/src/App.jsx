@@ -35,6 +35,8 @@ import {
 } from './components/common/Icons'
 
 import { Toast } from './components/common/Toast'
+import { AlertPill } from './components/common/AlertPill'
+import { useDeviceAlerts } from './hooks/useDeviceAlerts'
 import { BugReportModal } from './components/modals/BugReportModal'
 
 // Lazy-load Tab components
@@ -294,6 +296,12 @@ function Dashboard({ session, onSignOut }) {
   const { userRole, hasPermission } = usePermissions(session)
   useQuarantineAlerts(showToast)
 
+  // Grafana's firing alerts, delivered through device_alerts. Lifted to App rather than owned by a
+  // tab because an excursion on the machining cell must be visible while somebody is reading the
+  // Vocabulary page -- an alert scoped to the tab that happens to be open is an alert that arrives
+  // only when it is not needed.
+  const firingAlerts = useDeviceAlerts(showToast)
+
   // Fed by the counter every call through `api` increments, so it covers a save on a modal and a
   // tab's reconciliation poll alike without either having to report anything.
   const apiBusy = useApiActivity()
@@ -349,6 +357,11 @@ function Dashboard({ session, onSignOut }) {
         </nav>
 
         <div className="topbar-right">
+          {/* Before the Live/Polling indicator, so it reads left-to-right as "something is wrong"
+              ahead of "the feed is healthy" -- and so it does not move the controls to its right
+              when it appears and disappears, which a chip after them would. */}
+          <AlertPill alerts={firingAlerts} />
+
           <div
             className="topbar-status"
             title={REALTIME_ENABLED

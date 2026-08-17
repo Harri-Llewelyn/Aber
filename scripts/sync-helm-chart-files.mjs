@@ -181,6 +181,17 @@ const MIRRORS = [
   // pointing at `dashboards/` would copy dashboards.yml and silently skip both subdirectories,
   // producing a chart that renders, installs, and serves a Grafana with no dashboards at all.
   {
+    // Grafana unified-alerting provisioning: the rules, the notification policy tree, and the
+    // contact-point TEMPLATE. All three go in one mirror because they are one Grafana provisioning
+    // directory -- but only the template carries a placeholder, and the chart renders that one
+    // through an initContainer into a Secret-backed emptyDir rather than mounting it from a
+    // ConfigMap. A contact point holds a bearer token; the rules and the policy do not.
+    source: join('grafana', 'provisioning', 'alerting'),
+    dest: 'grafana-alerting',
+    match: (name) => name.endsWith('.yaml'),
+    why: 'Alert rules, notification policy and the webhook contact point Grafana provisions at start',
+  },
+  {
     source: join('grafana', 'provisioning', 'dashboards', 'platform'),
     dest: 'grafana-dashboards-platform',
     match: (name) => name.endsWith('.json'),

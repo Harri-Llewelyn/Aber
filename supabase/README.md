@@ -1,6 +1,6 @@
 # Supabase Backend
 
-Schema, row-level security, triggers, and the four edge functions. Supabase is the authoritative
+Schema, row-level security, triggers, and the seven edge functions. Supabase is the authoritative
 store for **asset metadata**; time-series telemetry lives in TimescaleDB and is reached through a
 foreign-data-wrapper view.
 
@@ -452,6 +452,28 @@ All fail closed: missing or unrecognised role ⇒ `403`.
 | [`grafana-userinfo`](functions/grafana-userinfo) | any mapped role | OIDC userinfo for Grafana SSO |
 | [`nodered-userinfo`](functions/nodered-userinfo) | any mapped role | The same lookup in Node-RED's permission vocabulary |
 | [`fplus-directory`](functions/fplus-directory) | any authenticated user | Factory+ Directory adapter — see below |
+| [`grafana-alert-webhook`](functions/grafana-alert-webhook) | **no Supabase role at all** | Records a Grafana alert in `device_alerts` — see below |
+
+### `grafana-alert-webhook` — the one that authorises on a shared secret
+
+Every other function above authenticates a *user* and resolves their role. This one has no user:
+Grafana is notifying, not somebody clicking. It authorises on `GRAFANA_ALERT_WEBHOOK_SECRET` and then
+writes with its own service-role client.
+
+**Grafana is deliberately not given the service-role key.** That key bypasses RLS entirely and can
+rewrite `digital_thread`, and this stack has already corrected the same shape once — Grafana used to
+reach the historian as the `postgres` superuser, and the fix was the read-only `grafana_reader` role.
+A service fronted by browser SSO gets the narrowest credential that does its job, which here is
+"record an alert". Same arrangement as `nodered_webhook_jwt_secret` for the quarantine webhook, in the
+opposite direction.
+
+**The check fails closed.** An unset secret answers `503`, never `200` — otherwise a missing
+environment variable would turn `Bearer ` into a match and the endpoint into an unauthenticated write
+path. The edge runtime boots with `VERIFY_JWT="false"` because each function authorises itself, so
+this is the only thing standing in front of the table.
+
+**Alerts with no `sparkplug_id` label are counted and skipped.** A `DatasourceError` notification
+carries no device label; inventing one would attribute a broken query to a machine.
 
 ### The Factory+ Directory adapter
 

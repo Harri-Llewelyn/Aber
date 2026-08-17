@@ -170,12 +170,40 @@ if (KIND === 'cnc') {
     ? 95 + noise(0.4)
     : 42 + wave(120000) * 3 + noise(0.15);
 
+  // THE MACHINE DECLARES ITS OWN THERMAL LIMIT, and the Grafana alert rule reads it rather than
+  // comparing against a constant. max_temp_threshold has been in metric_catalog since 0002
+  // ('Configured maximum temperature threshold -- local extension') and nothing had ever published
+  // or read it, which is how the dashboard ended up with a hardcoded 80.0 for every machine on the
+  // floor regardless of what it was rated for.
+  //
+  // THE TWO MILLS DIFFER, AND NEITHER VALUE IS THE FALLBACK. 90 and 75 rather than 85, so the join
+  // is provably in use: if the rule were silently comparing against COALESCE's default both mills
+  // would behave identically. The thermal fault drives Mill_01 to ~95, which breaches 90; Mill_02
+  // runs at ~42 and never approaches 75. The devices that publish no limit at all -- the robot, the
+  // tool changer, the BMS zone -- are what exercise the fallback arm.
+  //
+  // CONFIGURATION, NOT MEASUREMENT, so the deadband is effectively infinite -- it moves only when
+  // somebody reconfigures the machine -- but it carries its OWN SHORT KEEPALIVE, and that pairing is
+  // the point.
+  //
+  // On the default 5-minute keepalive this metric does not reach the historian until five minutes
+  // after a birth, and telemetry_latest is where the alert rule joins it from. So for the first five
+  // minutes of every stack life the rule found nothing and fell back to the fleet default: a machine
+  // rated to 75 was judged against 85, silently, in exactly the window after a restart when someone
+  // is most likely to be watching. Measured on a clean boot -- asset_config had 90 and 75 while
+  // telemetry_latest had neither.
+  //
+  // 45s costs two rows a minute across both mills, against position metrics publishing on a 0.5 mm
+  // deadband several times a scan. A threshold the alerting cannot see is worth more than that.
+  const tempLimit = DEVICE_NAME === 'Sim_CNC_Mill_02' ? 75 : 90;
+
   metrics = [
     { name: 'Axes/X/POSITION',        type: 'double', value: 150 + wave(30000) * 120 + noise(0.02), band: 0.5 },
     { name: 'Axes/Y/POSITION',        type: 'double', value: 100 + wave(41000, 1.1) * 80 + noise(0.02), band: 0.5 },
     { name: 'Systems/TEMPERATURE',    type: 'double', value: temp, band: 0.5 },
     { name: 'Controller/EXECUTION',   type: 'string', value: estopFault ? 'INTERRUPTED' : (running ? 'ACTIVE' : 'READY') },
     { name: 'Controller/EMERGENCY_STOP', type: 'string', value: estopFault ? 'TRIGGERED' : 'ARMED' },
+    { name: 'max_temp_threshold',     type: 'double', value: tempLimit, band: 1000, keepalive: 45000 },
   ];
 
   // Published for the OEE aggregator, which is a different device and cannot read this instance's
@@ -280,7 +308,10 @@ for (const m of metrics) {
   else if (m.type === 'double') publish = Math.abs(m.value - previous) >= m.band;
   else publish = m.value !== previous;
 
-  if (!publish && silentFor >= MAX_SILENCE_MS) publish = true;
+  // PER-METRIC KEEPALIVE, defaulting to the global one. A measurement wants a long keepalive -- it
+  // is only there to distinguish "unchanged" from "dead". A CONFIGURATION metric is different: it is
+  // read as a join key by things that cannot wait for it, so it declares a shorter one.
+  if (!publish && silentFor >= (m.keepalive || MAX_SILENCE_MS)) publish = true;
 
   if (publish) {
     changed.push(Object.assign({ name: m.name }, valueField(m)));

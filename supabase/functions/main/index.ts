@@ -67,6 +67,22 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "STORAGE_MODEL_BUCKET",
   ],
 
+  // Records a Grafana alert notification in public.device_alerts.
+  //
+  // TWO KEYS, AND THE ASYMMETRY IS THE WHOLE DESIGN. It holds the service-role key because it
+  // writes to a table whose only write policy is service_role -- but the CALLER never sees that
+  // key. Grafana presents GRAFANA_ALERT_WEBHOOK_SECRET, this function verifies it, and only then
+  // does it use its own privileged client. Giving Grafana the service-role key directly would hand
+  // a browser-SSO-fronted service the credential that bypasses RLS and can rewrite
+  // digital_thread -- the same shape as the `postgres` datasource credential that was removed.
+  //
+  // The secret must be listed here or the worker starts without it, and the function then answers
+  // 503 to every notification: envForFunction() forwards ONLY what this registry names.
+  "grafana-alert-webhook": [
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "GRAFANA_ALERT_WEBHOOK_SECRET",
+  ],
+
   // Resolves a role from public.user_roles for Grafana's OIDC `api_url`.
   "grafana-userinfo": ["SUPABASE_SERVICE_ROLE_KEY"],
 

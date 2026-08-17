@@ -127,6 +127,10 @@ const generated = {
   NODERED_CREDENTIAL_SECRET: hex(32),
   NODERED_OAUTH_CLIENT_SECRET: hex(32),
   NODERED_WEBHOOK_JWT_SECRET: hex(32),  // at least 32 chars
+  // The bearer secret Grafana presents to grafana-alert-webhook. Its own value, not shared with any
+  // other credential: it is the whole reason Grafana is not given the service-role key, and a secret
+  // reused elsewhere would mean one leak reopens the authority this one exists to withhold.
+  GRAFANA_ALERT_WEBHOOK_SECRET: hex(32),
   // The read-only historian role external BI tools connect as, and the one Grafana uses. Generated
   // like the rest so a local stack never runs a reporting tool as the `postgres` superuser, which
   // is what the Grafana datasource did before this existed.

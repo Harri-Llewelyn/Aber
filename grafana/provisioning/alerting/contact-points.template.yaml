@@ -1,0 +1,64 @@
+# Alert delivery -- A TEMPLATE, rendered before Grafana reads it.
+#
+# Same arrangement as datasources.template.yml and supabase/kong.yml:
+#   * Docker Compose: the grafana service's entrypoint substitutes the __PLACEHOLDER__ forms with
+#     `sed` and writes the result into the grafana_provisioning_alerting volume.
+#   * Kubernetes: Helm renders the same placeholders through an initContainer into an emptyDir
+#     mounted at /etc/grafana/provisioning/alerting, and Grafana runs its stock /run.sh.
+#
+# Both substituters assert that no `__UPPER_SNAKE__` marker survives. An unsubstituted placeholder
+# reaching Grafana would be a contact point that authenticates with the literal string, which the
+# webhook rejects with 401 -- reported by Grafana as a delivery failure buried in its own logs,
+# several steps from the cause.
+#
+# =============================================================================================
+# GRAFANA IS NOT GIVEN `service_role`, AND THAT IS THE WHOLE POINT OF THIS FILE.
+#
+# The obvious way to let Grafana write to Supabase is to hand it the service-role key. That key
+# bypasses RLS entirely and can rewrite `digital_thread`, and this stack has already corrected
+# exactly this shape once: Grafana used to connect to the historian as the `postgres` superuser --
+# a service fronted by browser SSO holding the credential that owns the database -- and the fix was
+# the read-only `grafana_reader` role. Handing it service_role would be strictly worse than the
+# credential that was removed, and on Kubernetes the provisioning file is mounted from a Secret
+# precisely so this one is not readable by anything with namespace read.
+#
+# So Grafana holds a NARROW BEARER SECRET that authorises one thing: recording an alert. The edge
+# function checks it and then uses its own service-role client internally, which is the same shape
+# `nodered_webhook_jwt_secret` gives the quarantine webhook.
+#
+# TWO CREDENTIALS ARE IN PLAY HERE AND THEY DO DIFFERENT JOBS:
+#
+#   * `apikey` IN THE QUERY STRING gets past Kong. `/functions/v1/` carries the `key-auth` plugin
+#     (only four routes are exempt and this is not one of them), so without it the request is
+#     refused at the gateway and never reaches the function. It is in the QUERY STRING rather than a
+#     header because Grafana's webhook integration exposes exactly one header pair
+#     (`authorization_scheme` + `authorization_credentials`) and that pair is spent on the line
+#     below -- and because kong.yml sets `key_in_query: true` for the Realtime client's sake, which
+#     makes this a documented path rather than a trick. The anon key is public by construction: it
+#     is shipped to every browser, and Kong is configured with `hide_credentials: true` so it is not
+#     forwarded upstream.
+#   * `Authorization: Bearer` is the secret the FUNCTION checks. This is the one that matters.
+# =============================================================================================
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: ACS-Cymru Webhook
+    receivers:
+      - uid: acs-cymru-webhook
+        type: webhook
+        settings:
+          # The in-network gateway name and port, identical on both targets -- which is the point of
+          # keeping Kubernetes Service names the same as the Compose service names.
+          url: http://supabase-kong:8000/functions/v1/grafana-alert-webhook?apikey=__SUPABASE_ANON_KEY__
+          httpMethod: POST
+          authorization_scheme: Bearer
+          authorization_credentials: __GRAFANA_ALERT_WEBHOOK_SECRET__
+          # 0 means "no cap". A cap silently truncates the alert array, and a multi-dimensional rule
+          # over six devices can legitimately deliver six instances in one notification -- dropping
+          # some of them would leave the dashboard showing a subset with nothing indicating that.
+          maxAlerts: 0
+        # Resolved notifications are the entire mechanism by which the dashboard's toast clears and
+        # the Topbar pill decrements. Grafana defaults this to true; it is stated because switching
+        # it off would leave every alert latched on in the UI forever, with the rule showing Normal.
+        disableResolveMessage: false

@@ -132,6 +132,10 @@ secrets:
   grafanaAdminUser: admin
   grafanaAdminPassword: ""
   grafanaOAuthClientSecret: ""
+  # Grafana -> grafana-alert-webhook. Its own value, shared with nothing: this exists precisely so
+  # Grafana is not handed the service-role key, and reusing another secret here would mean one leak
+  # reopens the authority it was created to withhold.
+  grafanaAlertWebhookSecret: ""
 
   # The read-only historian role external BI tools connect as -- and the role GRAFANA connects as,
   # replacing the `postgres` superuser it used to hold. Created on the TimescaleDB instance by

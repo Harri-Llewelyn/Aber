@@ -79,7 +79,12 @@ INSERT INTO public.schemas (
   (
     'aa000000-0000-4000-8000-000000000001',
     'Machining_Cell_Schema',
-    'MTConnect 2.x contract for a 3-axis machining centre: axis positions, spindle-side thermal state and controller/E-stop condition.',
+    'MTConnect 2.x contract for a 3-axis machining centre: axis positions, spindle-side thermal state, controller/E-stop condition and the machine''s own configured thermal limit.',
+    -- `max_temp_threshold` is the one property here that is CONFIGURATION rather than measurement:
+    -- the machine declares the limit it should be held to, and the Grafana thermal rule compares
+    -- against it per device instead of against a constant. It is a local extension, catalogued in
+    -- 0002 and modelled here so a mill declaring it is not flagged as publishing outside its
+    -- schema. 0023 adds it to databases seeded before this line existed.
     '{
        "type": "object",
        "required": ["Controller/EXECUTION", "Controller/EMERGENCY_STOP"],
@@ -88,7 +93,8 @@ INSERT INTO public.schemas (
          "Axes/Y/POSITION":            {"type": "number"},
          "Systems/TEMPERATURE":        {"type": "number"},
          "Controller/EXECUTION":       {"type": "string"},
-         "Controller/EMERGENCY_STOP":  {"type": "string"}
+         "Controller/EMERGENCY_STOP":  {"type": "string"},
+         "max_temp_threshold":         {"type": "number"}
        }
      }'::jsonb,
     '2026-08-02 05:44:47.407135+00',

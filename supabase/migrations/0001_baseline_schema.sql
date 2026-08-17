@@ -2386,10 +2386,44 @@ END $$;
 -- every boot replays this file, and the next replay drops `digital_thread` from the set. A
 -- separate 0010 doing the removal would instead fight this statement forever, re-adding and
 -- re-dropping the table on each boot (the 0030/0032 lesson).
-ALTER PUBLICATION supabase_realtime SET TABLE
-  public.cells,
-  public.gateways,
-  public.devices;
+--
+-- ---------------------------------------------------------------------------------------------
+-- THE MEMBERSHIP IS NOW COMPUTED, AND THE ABSOLUTENESS ABOVE IS EXACTLY WHY IT HAD TO BE.
+--
+-- `device_alerts` is created by 0023, which runs AFTER this file on every boot. A literal
+-- `SET TABLE ..., public.device_alerts` therefore fails on a fresh database -- the table does not
+-- exist yet -- and ON_ERROR_STOP=1 makes that a failed boot. But listing it nowhere is worse: this
+-- statement is absolute, so the next replay of 0001 would silently DROP it from the publication
+-- again, and the frontend's alert subscription would go dead on the second boot with nothing
+-- logged. That is the 0030/0032 lesson arriving from the other direction.
+--
+-- So: the INTENDED set is declared here, and the statement publishes the intersection of that set
+-- with the tables that actually exist. On a fresh database's first boot `device_alerts` is absent
+-- and the publication comes up with three tables; 0023 then creates it and adds it itself, so
+-- realtime works on that same boot. Every later boot finds it present and keeps it.
+--
+-- Adding a table to realtime means adding its name HERE as well as publishing it where it is
+-- created. A table added only at its own migration lasts exactly until the next restart.
+-- ---------------------------------------------------------------------------------------------
+DO $$
+DECLARE
+  -- Every table this platform intends to publish, in one place. Order is not significant.
+  intended CONSTANT text[] := ARRAY['cells', 'gateways', 'devices', 'device_alerts'];
+  members  text;
+BEGIN
+  SELECT string_agg(format('public.%I', t), ', ' ORDER BY t)
+    INTO members
+    FROM unnest(intended) AS t
+   WHERE to_regclass('public.' || quote_ident(t)) IS NOT NULL;
+
+  IF members IS NULL THEN
+    RAISE EXCEPTION
+      'realtime publication: none of the intended tables (%) exist', array_to_string(intended, ', ');
+  END IF;
+
+  EXECUTE 'ALTER PUBLICATION supabase_realtime SET TABLE ' || members;
+  RAISE NOTICE 'realtime publication membership: %', members;
+END $$;
 
 ALTER TABLE public.cells          REPLICA IDENTITY FULL;
 ALTER TABLE public.gateways       REPLICA IDENTITY FULL;

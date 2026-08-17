@@ -1033,6 +1033,65 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/IDTASubmodelTemplateElement' } }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
+  /rest/v1/device_alerts:
+    get:
+      tags: [Registry]
+      summary: Read the Grafana alert occurrence log
+      description: |
+        One row per alert **occurrence**, written by the `grafana-alert-webhook` edge function when
+        Grafana notifies. Append-only on `(fingerprint, starts_at)`: a Grafana fingerprint is a hash
+        of the alert instance's labels and is stable across every fire → resolve → fire cycle, so
+        pairing it with `starts_at` is what makes this a history rather than a latest-state table.
+        An occurrence transitions `firing` → `resolved` in place.
+
+        **Nothing in this platform evaluates alert conditions.** Grafana owns the rules, the
+        evaluation interval, the state history and the silences — see
+        `grafana/provisioning/alerting/`. This table is the landing record, and it is what the
+        dashboard subscribes to over Realtime.
+
+        `sparkplug_id` is the immutable wire identity, never the device name. `device_id` is resolved
+        at write time and is nullable: an alert that fired is a thing that happened, and it is kept
+        even when no device row matches.
+
+        `anon` is revoked. An alert summary names a device and the condition it breached.
+      parameters:
+        - { name: sparkplug_id, in: query, schema: { type: string }, description: 'e.g. `eq.dev220000000000400080000`' }
+        - { name: status, in: query, schema: { type: string, enum: [firing, resolved] }, description: 'e.g. `eq.firing`' }
+        - { name: severity, in: query, schema: { type: string, enum: [critical, warning, info] } }
+        - { name: starts_at, in: query, schema: { type: string, format: date-time }, description: 'e.g. `gte.2026-08-17T00:00:00Z`' }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Matching alert occurrences.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DeviceAlert' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
+  /rest/v1/device_alerts_active:
+    get:
+      tags: [Registry]
+      summary: Read only the alerts currently firing
+      description: |
+        One row per Grafana fingerprint — the newest occurrence — and only while it is still firing.
+        This is what the dashboard's Topbar pill counts.
+
+        **`DISTINCT ON` rather than `WHERE status = 'firing'`**, and the difference matters: if a
+        resolve notification is ever lost (a dropped webhook, a Grafana restart mid-delivery) the
+        series can hold an old firing row *and* a newer resolved one. A plain filter would surface the
+        stale one indefinitely; taking the newest occurrence first and discarding it unless it is
+        still firing means a later resolve always wins.
+      parameters:
+        - { name: severity, in: query, schema: { type: string, enum: [critical, warning, info] } }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Currently firing alerts.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DeviceAlert' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
   /rest/v1/device_nameplate:
     get:
       tags: [Registry]
@@ -1570,6 +1629,80 @@ paths:
                         online: { type: boolean }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /functions/v1/grafana-alert-webhook:
+    post:
+      tags: [Edge Functions]
+      summary: Receive a Grafana alert notification
+      description: |
+        The delivery target of Grafana's `ACS-Cymru Webhook` contact point. Accepts an
+        Alertmanager-shaped payload and records each instance as an occurrence in
+        `public.device_alerts`, which the dashboard then receives over Realtime.
+
+        **Authenticated by a scoped bearer secret, not by a Supabase key.** Grafana presents
+        `GRAFANA_ALERT_WEBHOOK_SECRET`; this function verifies it and then uses its own service-role
+        client internally. Grafana is deliberately *not* given the service-role key — that key
+        bypasses RLS entirely and can rewrite `digital_thread`, and a service fronted by browser SSO
+        gets the narrowest credential that does its job. Same shape as `nodered_webhook_jwt_secret`
+        for the quarantine webhook.
+
+        **An unset secret answers 503, never 200.** The check fails closed, so a missing environment
+        variable is a broken integration rather than an unauthenticated write endpoint.
+
+        **Not exempt from Kong's `key-auth`.** The contact point carries the anon key in the query
+        string (`?apikey=…`) because Grafana's webhook integration exposes only one header pair and
+        it is spent on `Authorization`. `hide_credentials` keeps the key from being forwarded on.
+
+        **Alerts with no `sparkplug_id` label are counted and skipped, not stored.** A
+        `DatasourceError` notification — what `execErrState: Error` produces when a rule's query
+        breaks — carries no device label, and inventing one would attribute a broken query to a
+        machine. The response reports the skipped count so it is visible in Grafana's delivery log.
+      security:
+        - AlertWebhookBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                alerts:
+                  type: array
+                  description: 'Grafana sends an empty array for a contact-point "Test", which answers 200.'
+                  items:
+                    type: object
+                    properties:
+                      status: { type: string, enum: [firing, resolved] }
+                      fingerprint: { type: string }
+                      startsAt: { type: string, format: date-time }
+                      endsAt: { type: string, description: 'Alertmanager sends 0001-01-01T00:00:00Z while still firing.' }
+                      labels:
+                        type: object
+                        properties:
+                          alertname: { type: string }
+                          severity: { type: string, enum: [critical, warning, info] }
+                          sparkplug_id: { type: string }
+                          device: { type: string }
+                      annotations:
+                        type: object
+                        properties:
+                          summary: { type: string }
+      responses:
+        '200':
+          description: Recorded. `written` excludes anything skipped for want of a device label.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  received: { type: integer }
+                  written: { type: integer }
+                  skipped: { type: integer }
+        '400': { description: 'Body is not valid JSON.' }
+        '401': { description: 'Missing, malformed or incorrect bearer secret.' }
+        '405': { description: 'Method other than POST.' }
+        '503': { description: 'GRAFANA_ALERT_WEBHOOK_SECRET is not configured; refusing to accept alerts.' }
+
   /functions/v1/grafana-userinfo:
     get:
       tags: [Edge Functions]
@@ -1654,6 +1787,13 @@ components:
       in: header
       name: apikey
       description: The Supabase anon key. Required on every request except the public-storage and userinfo endpoints.
+    AlertWebhookBearer:
+      type: http
+      scheme: bearer
+      description: |
+        `GRAFANA_ALERT_WEBHOOK_SECRET` — a shared secret, NOT a JWT and not a Supabase key. Held only
+        by Grafana's contact point and verified by `grafana-alert-webhook`, which authorises exactly
+        one action: recording an alert. It exists so Grafana is never given the service-role key.
 
   parameters:
     Select:
@@ -2158,6 +2298,36 @@ components:
         description: { type: string, nullable: true }
         is_mandatory: { type: boolean, description: 'What the template requires. Descriptive only — the exporter does not claim the template.' }
         ordinal: { type: integer, description: 'Order in the published template.' }
+
+    DeviceAlert:
+      type: object
+      description: |
+        One Grafana alert occurrence. Written by `grafana-alert-webhook`; never by a user.
+      properties:
+        id: { type: string, format: uuid }
+        fingerprint:
+          type: string
+          description: |
+            Grafana's hash of the alert instance's label set. STABLE across fire/resolve cycles, so it
+            identifies the series and not the occurrence — which is why the unique constraint pairs it
+            with `starts_at`.
+          example: abc123def4567890
+        sparkplug_id:
+          type: string
+          description: 'The immutable wire identity the alert was raised for. Never the device name.'
+          example: dev220000000000400080000
+        device_id: { type: string, format: uuid, nullable: true, description: 'Resolved at write time; null when no device row matched.' }
+        alert_name: { type: string, example: Thermal Excursion }
+        severity: { type: string, enum: [critical, warning, info] }
+        status: { type: string, enum: [firing, resolved] }
+        summary:
+          type: string
+          nullable: true
+          description: "Grafana's own templated annotation, already carrying the device and the values that tripped the rule."
+          example: Sim_CNC_Mill_01 is above its configured thermal limit of 90.0 degC (5.2 degC over).
+        starts_at: { type: string, format: date-time, description: 'When Grafana began firing this occurrence. Part of the occurrence key.' }
+        ends_at: { type: string, format: date-time, nullable: true, description: 'Null while firing. A resolved row always carries one — enforced by CHECK.' }
+        recorded_at: { type: string, format: date-time, description: 'When this platform wrote the row, as distinct from when Grafana observed it.' }
 
     DeviceNameplate:
       type: object

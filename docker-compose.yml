@@ -688,6 +688,11 @@ services:
       AAS_MODEL_PUBLIC_BASE: ${AAS_MODEL_PUBLIC_BASE:-http://localhost:54321/storage/v1/object/public/asset-3d-models}
       STORAGE_MODEL_BUCKET: ${STORAGE_MODEL_BUCKET:-asset-3d-models}
       AAS_MAX_BUNDLED_MODEL_BYTES: ${AAS_MAX_BUNDLED_MODEL_BYTES:-33554432}
+      # The bearer secret grafana-alert-webhook verifies. Grafana holds the same value, substituted
+      # into its contact point -- it is NOT given the service-role key, which is what this narrow
+      # credential exists to avoid. No `:-` default: an empty value makes the function answer 503
+      # rather than accept unauthenticated writes, and a silent default here would hide that.
+      GRAFANA_ALERT_WEBHOOK_SECRET: ${GRAFANA_ALERT_WEBHOOK_SECRET}
     volumes:
       - ./supabase/functions:/home/deno/functions:ro
       # The canonical Node-RED flow - the "git" side of the GitOps sync that
@@ -1144,6 +1149,11 @@ services:
       # Read by grafana.ini through $__env{GRAFANA_OAUTH_CLIENT_SECRET}, so the secret is not
       # committed. Must match what 0002_seed_data.sql hashed into auth.oauth_clients.
       GRAFANA_OAUTH_CLIENT_SECRET: ${GRAFANA_OAUTH_CLIENT_SECRET:-}
+      # The alert webhook's bearer secret, and the anon key that gets the request past Kong's
+      # key-auth. Both are substituted into contact-points.template.yaml below. Grafana is NOT given
+      # the service-role key -- see that file's header for why that distinction is load-bearing.
+      GRAFANA_ALERT_WEBHOOK_SECRET: ${GRAFANA_ALERT_WEBHOOK_SECRET:-}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
     ports:
       - "3002:3000"
     volumes:
@@ -1152,6 +1162,11 @@ services:
       - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./grafana/provisioning/datasources:/tmp/datasources-template:ro
       - grafana_provisioning_datasources:/etc/grafana/provisioning/datasources
+      # Alerting: the rules and the policy tree are plain files; the contact point is a template
+      # because it carries a secret. Same split, and the same rendered-into-a-volume arrangement,
+      # as the datasource above.
+      - ./grafana/provisioning/alerting:/tmp/alerting-template:ro
+      - grafana_provisioning_alerting:/etc/grafana/provisioning/alerting
     # Renders the datasource template, then hands over to Grafana's own /run.sh.
     #
     # The placeholder is __DB_PASSWORD__ rather than ${DB_PASSWORD}, so this expression no longer
@@ -1180,6 +1195,33 @@ services:
           echo 'Grafana datasource config still contains unsubstituted placeholders.' >&2
           exit 1
         fi
+        # -----------------------------------------------------------------------------------
+        # Alerting. The plain files are COPIED and the contact point is RENDERED, so the volume
+        # ends up holding a complete provisioning directory either way.
+        #
+        # COPIED, NOT SYMLINKED OR MOUNTED OVER: the whole directory is one Grafana provisioning
+        # path, and mounting the repo copy read-only at that path would leave nowhere to write the
+        # rendered contact point. Rendering into the same volume keeps it one directory.
+        # -----------------------------------------------------------------------------------
+        if [ -z "$$GRAFANA_ALERT_WEBHOOK_SECRET" ]; then
+          echo 'GRAFANA_ALERT_WEBHOOK_SECRET must be set -- Grafana would otherwise provision the alert contact point with an empty bearer token, and grafana-alert-webhook would refuse every notification with 401 while the rules themselves looked healthy. Run: node scripts/setup.mjs' >&2
+          exit 1
+        fi
+        if [ -z "$$SUPABASE_ANON_KEY" ]; then
+          echo 'SUPABASE_ANON_KEY must be set -- it is what gets the alert webhook past Kong key-auth. Run: node scripts/setup.mjs' >&2
+          exit 1
+        fi
+        cp /tmp/alerting-template/policies.yaml /tmp/alerting-template/alert-rules.yaml \
+           /etc/grafana/provisioning/alerting/
+        sed -e "s|__GRAFANA_ALERT_WEBHOOK_SECRET__|$$GRAFANA_ALERT_WEBHOOK_SECRET|g" \
+            -e "s|__SUPABASE_ANON_KEY__|$$SUPABASE_ANON_KEY|g" \
+            /tmp/alerting-template/contact-points.template.yaml \
+            > /etc/grafana/provisioning/alerting/contact-points.yaml
+        if grep -vE '^[[:space:]]*#' /etc/grafana/provisioning/alerting/contact-points.yaml \
+           | grep -qE '__[A-Z0-9_]+__'; then
+          echo 'Grafana alert contact point still contains unsubstituted placeholders.' >&2
+          exit 1
+        fi
         exec /run.sh
     depends_on:
       timescaledb:
@@ -1189,6 +1231,11 @@ volumes:
   pgdata:
   nodered_data:
   grafana_data:
+  # Holds the RENDERED alerting provisioning -- the copied rules and policy plus the contact point
+  # with its bearer secret substituted in. A volume rather than a bind mount for the same reason as
+  # grafana_provisioning_datasources: the rendered file carries a credential and must not be written
+  # back into the repository.
+  grafana_provisioning_alerting:
   grafana_provisioning_datasources:
   mosquitto_data:
   supabase_db_data:

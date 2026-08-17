@@ -86,6 +86,32 @@ data:
 {{- fail "\n\nacs-cymru: no dashboards found at files/grafana-dashboards-shopfloor/*.json\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n" }}
 {{- end }}
 ---
+{{/*
+Unified alerting: the rules, the notification policy and the contact-point TEMPLATE.
+
+A ConfigMap and not a Secret, because NONE of these three files contains a credential -- the
+contact point is a template whose bearer token is still a `__PLACEHOLDER__` here. The
+render-alerting initContainer reads the secret from the Secret at pod start and writes the
+substituted file into an emptyDir, which is what Grafana actually mounts. That keeps the token out
+of the rendered manifest entirely, the same arrangement the datasource uses.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "%s-grafana-alerting" $fullname }}
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+data:
+{{- $foundAlerting := 0 }}
+{{- range $path, $bytes := .Files.Glob "files/grafana-alerting/*.yaml" }}
+{{- $foundAlerting = add1 $foundAlerting }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- if eq $foundAlerting 0 }}
+{{- fail "\n\nacs-cymru: no alerting provisioning found at files/grafana-alerting/*.yaml\n\nMirror it with:  node scripts/sync-helm-chart-files.mjs\n\nFailing the render is deliberate. An empty ConfigMap mounts cleanly and Grafana comes up with no\nalert rules and no contact point -- a stack that looks healthy and will never tell anyone that a\nmachine is overheating.\n" }}
+{{- end }}
+---
 {{- if .Values.grafana.persistence.enabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -206,6 +232,62 @@ spec:
           resources:
             requests: { cpu: 10m, memory: 32Mi }
             limits: { memory: 64Mi }
+        {{/*
+          Alerting provisioning, rendered the same way and for the same reason.
+
+          THE RULES AND THE POLICY ARE COPIED; ONLY THE CONTACT POINT IS RENDERED. A contact point
+          carries a bearer token, so it cannot be mounted straight from a ConfigMap -- the whole
+          reason this initContainer exists. The rules and the policy carry no secret at all and are
+          copied from the same ConfigMap unchanged.
+
+          ONE DIRECTORY, so all three land in the emptyDir together: Grafana reads
+          /etc/grafana/provisioning/alerting as a single provisioning path, and mounting the
+          ConfigMap over part of it would leave nowhere to write the rendered file.
+
+          GRAFANA IS NOT GIVEN THE SERVICE-ROLE KEY. It holds GRAFANA_ALERT_WEBHOOK_SECRET, which
+          authorises recording an alert and nothing else -- see the template's header. The anon key
+          is here only to get past Kong's key-auth and is public by construction.
+        */}}
+        - name: render-alerting
+          image: "{{ .Values.grafana.image.repository }}:{{ .Values.grafana.image.tag }}"
+          imagePullPolicy: {{ .Values.grafana.image.pullPolicy }}
+          env:
+            {{- include "acs-cymru.secretEnv" (dict "name" "GRAFANA_ALERT_WEBHOOK_SECRET" "secretName" $secretName "key" "GRAFANA_ALERT_WEBHOOK_SECRET") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
+          command:
+            - /bin/sh
+            - -e
+            - -c
+            - |
+              if [ -z "$GRAFANA_ALERT_WEBHOOK_SECRET" ]; then
+                echo 'GRAFANA_ALERT_WEBHOOK_SECRET must be set -- Grafana would otherwise provision the alert contact point with an empty bearer token, and grafana-alert-webhook would refuse every notification with 401 while the rules themselves looked healthy.' >&2
+                exit 1
+              fi
+              if [ -z "$SUPABASE_ANON_KEY" ]; then
+                echo 'SUPABASE_ANON_KEY must be set -- it is what gets the alert webhook past Kong key-auth.' >&2
+                exit 1
+              fi
+              cp /alerting-config/policies.yaml /alerting-config/alert-rules.yaml /alerting/
+              sed -e "s|__GRAFANA_ALERT_WEBHOOK_SECRET__|$GRAFANA_ALERT_WEBHOOK_SECRET|g" \
+                  -e "s|__SUPABASE_ANON_KEY__|$SUPABASE_ANON_KEY|g" \
+                  /alerting-config/contact-points.template.yaml > /alerting/contact-points.yaml
+              # Comment lines excluded, same as above: the template documents the placeholder
+              # convention by name in its own header.
+              if grep -vE '^[[:space:]]*#' /alerting/contact-points.yaml \
+                 | grep -qE '__[A-Z0-9_]+__'; then
+                echo 'Grafana alert contact point still contains unsubstituted placeholders.' >&2
+                exit 1
+              fi
+              echo 'Rendered the alert contact point and copied the rules and policy.'
+          volumeMounts:
+            - name: alerting-config
+              mountPath: /alerting-config
+              readOnly: true
+            - name: alerting
+              mountPath: /alerting
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 64Mi }
       containers:
         - name: grafana
           # STOCK IMAGE, no entrypoint override -- see the initContainer above.
@@ -287,6 +369,11 @@ spec:
             - name: dashboards-shopfloor
               mountPath: /etc/grafana/provisioning/dashboards/shopfloor
               readOnly: true
+            # The RENDERED alerting directory -- rules, policy and the contact point with its bearer
+            # secret substituted in. From the initContainer's emptyDir, never from the ConfigMap.
+            - name: alerting
+              mountPath: /etc/grafana/provisioning/alerting
+              readOnly: true
             - name: data
               mountPath: /var/lib/grafana
       volumes:
@@ -299,7 +386,12 @@ spec:
         - name: dashboards-shopfloor
           configMap:
             name: {{ printf "%s-grafana-dashboards-shopfloor" $fullname }}
+        - name: alerting-config
+          configMap:
+            name: {{ printf "%s-grafana-alerting" $fullname }}
         - name: datasources
+          emptyDir: {}
+        - name: alerting
           emptyDir: {}
         - name: data
           {{- if .Values.grafana.persistence.enabled }}
