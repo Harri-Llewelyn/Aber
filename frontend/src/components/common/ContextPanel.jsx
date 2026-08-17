@@ -1,7 +1,8 @@
 import React, { useRef } from 'react'
-import { IconX, IconAlertTriangle } from './Icons'
+import { IconX, IconAlertTriangle, IconAlertCircle, IconExternalLink } from './Icons'
 import CopyableId from './CopyableId'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { grafanaAlertUrl } from '../../constants'
 
 /**
  * The right-hand context drawer.
@@ -120,13 +121,44 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
               role="status"
             >
               <div className="context-alert-head">
-                <IconAlertTriangle size={13} />
+                {/* Circle for critical, triangle for warning -- the same two glyphs the Devices
+                    table and the Topbar pill use, so severity has a shape here too and not only a
+                    border colour. */}
+                {alert.severity === 'critical' ? <IconAlertCircle size={13} /> : <IconAlertTriangle size={13} />}
                 <span className="context-alert-name">{alert.alert_name}</span>
                 <span className="context-alert-sev">{(alert.severity || 'warning').toUpperCase()}</span>
               </div>
               {alert.summary && <div className="context-alert-summary">{alert.summary}</div>}
               <div className="context-alert-foot">
-                Raised by Grafana{alert.starts_at ? ` · since ${new Date(alert.starts_at).toLocaleTimeString()}` : ''}
+                <span>
+                  Raised by Grafana{alert.starts_at ? ` · since ${new Date(alert.starts_at).toLocaleTimeString()}` : ''}
+                </span>
+                {/*
+                  THE ONE PLACE THIS PANEL LINKS SOMEWHERE ON ITS OWN INITIATIVE, and it is warranted
+                  by what the banner already says: "raised by Grafana. Thresholds and silences live
+                  there, not here." That sentence tells an operator their next step is in another
+                  application and then leaves them to find it -- which means reading a port number
+                  off the Directory page. This closes that gap.
+
+                  A REAL ANCHOR, target=_blank. Middle-click and "copy link address" have to work:
+                  the likeliest use of this link is pasting it into a message to whoever owns the
+                  rule. That is also why it is not a button with a window.open handler.
+
+                  Filtered by rule AND device where the id is known -- landing on 200 unrelated rules
+                  would be the same as not filtering. See grafanaAlertUrl for why this targets the
+                  list rather than a rule UID (the webhook never receives one).
+                */}
+                <a
+                  className="context-alert-link"
+                  href={grafanaAlertUrl(alert.alert_name, alert.sparkplug_id)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={`Open this rule in Grafana Alerting — thresholds, state history and silences live there${
+                    alert.sparkplug_id ? ', filtered to this device' : ''}`}
+                  tabIndex={open ? 0 : -1}
+                >
+                  View in Grafana <IconExternalLink size={11} />
+                </a>
               </div>
             </div>
           )}

@@ -312,37 +312,37 @@ html, body, #root {
   flex-shrink: 0;
 }
 
-/* ===== Account pill and menu =====
-   Replaces the icon + email + role badge + Sign Out button that used to sit side by side in the
-   bar, about 330px of it. See the UserMenu comment in App.jsx for why the role badge stays on the
-   pill while the address and the sign-out action move behind it. */
+/* ===== Account avatar and menu =====
+   Replaces the icon + email + role badge + Sign Out button that used to sit side by side in the bar,
+   about 330px of it -- and, since the topbar declutter, the theme toggle and Report Bug as well. See
+   the UserMenu comment in App.jsx for what the collapse gave up and why.
+
+   FIXED SQUARE, NOT PADDING. A round button sized by its padding goes oval the moment the glyph
+   inside it changes metrics, and this one is 28px at every viewport -- there is no responsive band
+   for it to shrink in, because there is no text left to drop. */
 .user-menu { position: relative; }
 
-.user-pill {
+.user-avatar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 7px;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  flex-shrink: 0;
   background: var(--bg-glass);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-family: 'Outfit', sans-serif;
-  font-size: 13px;
-  font-weight: 600;
+  border-radius: 50%;
+  color: var(--text-muted);
   cursor: pointer;
   transition: var(--transition);
-  white-space: nowrap;
 }
 
-.user-pill:hover { border-color: var(--accent); }
-.user-pill-open { border-color: var(--accent); background: var(--accent-dim); }
-.user-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-
-.user-pill-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
-.user-pill-role { font-size: 11px; }
-.user-pill-caret { color: var(--text-muted); transition: transform 0.2s ease; flex-shrink: 0; }
-.user-pill-caret-open { transform: rotate(180deg); }
+/* The icon takes the accent on hover rather than the border alone: a 1px ring on a 28px circle is a
+   very small change to notice, and this is the only way into four actions. */
+.user-avatar:hover { border-color: var(--accent); color: var(--accent); }
+.user-avatar-open { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+.user-avatar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Escapes the bar downward. `.app-shell` clips at the viewport, not here, and `.topbar` carries
    z-index 100, so the popover paints above the page without needing a portal. */
@@ -399,30 +399,32 @@ html, body, #root {
   transition: var(--transition);
 }
 
-.user-popover-action:hover { background: var(--bg-glass); color: var(--danger-text); }
+/* The item's own label grows to fill, so the hint below is pushed to the right edge of the menu
+   rather than sitting against the label it belongs to. */
+.user-popover-action > span:not(.user-popover-hint) { flex: 1; min-width: 0; }
+
+/* The theme item's destination -- "Dark" / "Light" as a quiet right-aligned tail, so the row's
+   left-hand half stays a statement of the CURRENT value. */
+.user-popover-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+.user-popover-action:hover { background: var(--bg-glass); }
 .user-popover-action:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-.topbar-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--text-muted);
+/* THE DESTRUCTIVE ITEM IS THE ONLY ONE THAT GOES RED ON HOVER. Every item in this menu used to,
+   back when Sign Out was the only item in it -- which made "Theme: Dark" light up in the danger
+   colour for changing a colour scheme. Separated by a rule as well as by colour, because the two
+   items above it are now one keystroke away from it. */
+.user-popover-action-danger {
+  border-top: 1px solid var(--border);
+  color: var(--text-primary);
 }
 
-.pulse-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--success);
-  box-shadow: 0 0 8px var(--success);
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(0.85); }
-}
+.user-popover-action-danger:hover { background: var(--bg-glass); color: var(--danger-text); }
 
 /* ===== Nav Tabs ===== */
 .nav-tab {
@@ -475,13 +477,15 @@ html, body, #root {
 
    Three bands, each shedding the least useful thing left:
      >= 1600px  everything
-     >= 1400px  brand tagline and the user's email drop out (both are context, not controls)
-      < 1400px  tab labels drop out; the nav becomes icons only */
+     >= 1400px  the brand tagline drops out (it is context, not a control)
+      < 1400px  tab labels drop out; the nav becomes icons only
+
+   THE ACCOUNT CONTROL NO LONGER APPEARS IN ANY BAND, and its absence is the point rather than an
+   omission. It used to shed the user's own name at 1600px and keep its role badge below that. It is
+   now a 28px circle at every width, so there is nothing left in it to drop -- the declutter did at
+   every viewport what this block used to do only at narrow ones. */
 @media (max-width: 1599px) {
   .brand-sub { display: none; }
-  /* The role badge stays -- it is the standing answer to "why is that button disabled". The name
-     is recoverable from the pill's title and, in full, from the menu behind it. */
-  .user-pill-name { display: none; }
 }
 
 @media (max-width: 1399px) {
@@ -491,6 +495,10 @@ html, body, #root {
   /* Below this the right-hand controls are what would overflow next. The icons stay, so nothing
      becomes unreachable -- each keeps the `title` it already had. */
   .btn-label { display: none; }
+  /* The alert count keeps its NUMBER and loses only the word. Dropping the label costs ~40px and
+     leaves "⚠ 3", which is still both a shape and a figure -- whereas dropping the pill would hide
+     the only changing thing in the bar at exactly the widths a kiosk display uses. */
+  .alert-pill-label { display: none; }
 }
 
 /* ===== Main Content ===== */
@@ -1856,18 +1864,44 @@ tbody tr:hover { background: var(--bg-glass); }
   margin-top: 5px;
 }
 
+/* Provenance on the left, the way out on the right. `wrap` rather than `nowrap`: the drawer is 360px
+   and "Raised by Grafana · since 14:22:07" plus the link is close enough to that to wrap on a narrow
+   band, and a clipped link is worse than a two-line footer. */
 .context-alert-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
   font-size: 11px;
   color: var(--text-muted);
   margin-top: 6px;
 }
 
-/* The Topbar's firing-alert pill and the list behind it.
-   Rendered only while something is firing -- see AlertPill.jsx for why absence is the steady state.
+/* Underlined, not just coloured. This sits inside a tinted amber or red panel where the accent has
+   less contrast to work with than it does against the card, so the affordance cannot rest on hue
+   alone -- and it is the only interactive thing in the banner. */
+.context-alert-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  flex-shrink: 0;
+}
+
+.context-alert-link:hover { color: var(--text-primary); }
+.context-alert-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The Topbar's alert counter and the list behind it.
+   PERMANENT in all three states -- see AlertPill.jsx for why a pill that vanished when healthy was
+   indistinguishable from a pill that had broken.
 
    `position: relative` on the wrapper anchors the panel, so the panel is positioned against the pill
-   rather than against the topbar. Anchoring to the topbar would put it under the theme toggle at one
-   window width and off-screen at another. */
+   rather than against the topbar. Anchoring to the topbar would put it under the account button at
+   one window width and off-screen at another. */
 .alert-pill-wrap { position: relative; display: flex; }
 
 .alert-pill {
@@ -1881,8 +1915,19 @@ tbody tr:hover { background: var(--bg-glass); }
   letter-spacing: 0.3px;
   cursor: pointer;
   border: 1px solid transparent;
-  /* The one animated thing in the header. An alert is the only state worth spending motion on, and
-     a slow pulse reads as "live and still true" rather than as decoration. */
+  background: none;
+  font-family: 'Outfit', sans-serif;
+  /* A FIXED FLOOR, so the pill does not resize the bar as the count crosses 9 or clears to 0. The
+     three states carry three different words and glyphs; without this the account button beside it
+     would step sideways every time an alarm arrived. */
+  min-width: 78px;
+  justify-content: center;
+}
+
+/* --- Firing. The only animated thing in the header, which is the point: with four static controls
+       gone from the bar, motion here is unambiguous rather than one of several things moving. */
+.alert-pill-critical,
+.alert-pill-warning {
   animation: alert-pill-pulse 2.4s ease-in-out infinite;
 }
 
@@ -1898,6 +1943,26 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--warning-text);
 }
 
+/* --- Healthy. DELIBERATELY THE QUIETEST THING IN THE BAR: muted text, the plain border, no tint and
+       no motion. It is a permanent element, so anything louder would be a permanent claim on
+       attention -- and the whole reason the firing states read as urgent is that this one does not.
+
+       NOT GREEN. Green on a fixed element is the Live dot's mistake repeated: a colour that never
+       changes stops being read, and it also spends the success colour on "nothing is happening",
+       which leaves nothing left over for a state that IS good news. The tick inside the shield
+       carries the reassurance; the colour stays out of it. */
+.alert-pill-healthy {
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+.alert-pill-healthy:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.alert-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .alert-pill-count { font-variant-numeric: tabular-nums; }
 
 @keyframes alert-pill-pulse {
@@ -1906,9 +1971,10 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 /* Motion is a preference, and a pulsing element is exactly what someone who set it is asking not to
-   see. The colour and the count carry the whole signal without it. */
+   see. The colour, the glyph and the count carry the whole signal without it. */
 @media (prefers-reduced-motion: reduce) {
-  .alert-pill { animation: none; }
+  .alert-pill-critical,
+  .alert-pill-warning { animation: none; }
 }
 
 .alert-pill-panel {
@@ -1945,16 +2011,63 @@ tbody tr:hover { background: var(--bg-glass); }
   padding: 2px;
 }
 
+/* The healthy panel. Centred and roomy rather than a one-line "None": this is the state an operator
+   sees ninety-nine times out of a hundred, and it has to look like a finished answer instead of an
+   empty container. */
+.alert-pill-empty {
+  padding: 22px 18px 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.alert-pill-empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-top: 8px;
+}
+
+.alert-pill-empty-sub {
+  font-size: 11px;
+  line-height: 1.45;
+  margin-top: 5px;
+}
+
 .alert-pill-list { list-style: none; margin: 0; padding: 0; }
 
 .alert-pill-item {
   display: flex;
   gap: 9px;
-  padding: 10px 12px;
+  padding: 0;
   border-bottom: 1px solid var(--border);
 }
 
 .alert-pill-item:last-child { border-bottom: none; }
+
+/* The whole row is the hit target, not a "view" affordance at one end of it. The padding moved off
+   .alert-pill-item and onto this so the hover state covers the full row -- a button inset inside a
+   padded li leaves a dead 12px margin that looks clickable and is not. */
+.alert-pill-item-link {
+  display: flex;
+  gap: 9px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: none;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.alert-pill-item-link:hover { background: var(--bg-glass); }
+.alert-pill-item-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* A row with nowhere to navigate keeps the same geometry, so the list does not shift when one
+   alert's sparkplug_id happens not to resolve to a device. */
+.alert-pill-item > .alert-pill-dot { margin-left: 12px; margin-top: 15px; }
+.alert-pill-item > .alert-pill-item-body { padding: 10px 12px 10px 0; }
 
 .alert-pill-dot {
   width: 7px;

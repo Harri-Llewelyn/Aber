@@ -70,9 +70,10 @@ describe('App Component', () => {
     })
 
     expect(screen.getByText('Shopfloor to Digital Twin Pipeline')).toBeInTheDocument()
-    // The address is behind the account pill now, which shows the local part and the role. It is
-    // still on the pill's title, so it stays verifiable without opening anything.
-    expect(screen.getByRole('button', { name: /admin/i })).toHaveAttribute(
+    // The account control prints nothing at all now -- it is a 28px icon button -- so its `title` is
+    // both the hover text AND its accessible name. That is why the address stays verifiable without
+    // opening anything, and why this asserts the attribute rather than rendered text.
+    expect(screen.getByRole('button', { name: /account menu/i })).toHaveAttribute(
       'title', expect.stringContaining('admin@acs-cymru.local')
     )
   })

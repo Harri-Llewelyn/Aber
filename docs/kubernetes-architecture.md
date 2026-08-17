@@ -94,8 +94,9 @@ application code rather than in the chart.
 
 ### 2.1 Frontend: runtime configuration instead of build-time baking
 
-`frontend/Dockerfile` bakes `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_ENABLE_REALTIME`
-and `VITE_GITHUB_REPO_URL` into the bundle, because Vite inlines `import.meta.env` at build. On
+`frontend/Dockerfile` bakes `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_ENABLE_REALTIME`,
+`VITE_GITHUB_REPO_URL` and `VITE_GRAFANA_URL` into the bundle, because Vite inlines
+`import.meta.env` at build. On
 Compose that is fine — the image is built locally per stack. On Kubernetes it means **one image
 cannot serve two environments**, which breaks the build-once-promote-the-artifact model that is the
 main reason to move to Kubernetes in the first place.

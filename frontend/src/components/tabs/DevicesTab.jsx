@@ -57,6 +57,7 @@ import {
   IconCube,
   IconShieldAlert,
   IconAlertTriangle,
+  IconAlertCircle,
   IconLock,
   IconDownload,
   IconX
@@ -850,12 +851,24 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                                       the two into one badge is what the withdrawn client-side alarm
                                       did, and it made a hot device indistinguishable from a
                                       disconnected one. */}
+                                  {/* A LUCIDE GLYPH, NOT AN EMOJI. 🚨 and ⚠️ rendered at whatever
+                                      size, weight and hue the operating system's emoji font chose:
+                                      a full-colour raster on Windows, a flat outline on Linux, and
+                                      neither inherits `currentColor`, so the badge's text went red
+                                      or amber and the icon beside it did not follow. These are
+                                      stroked SVGs at 11px that take their colour from the badge --
+                                      the same treatment as the ARCHIVED and AWAITING FIRST BIRTH
+                                      badges above, which is the other half of the reason: three
+                                      badges in one column drawn from two different icon systems. */}
                                   {alert && (
                                     <span
                                       className={`badge ${alert.severity === 'critical' ? 'badge-offline' : 'badge-warning'}`}
+                                      style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                                       title={`${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''} (raised by Grafana)`}
                                     >
-                                      {alert.severity === 'critical' ? '🚨 ALARM' : '⚠️ WARNING'}
+                                      {alert.severity === 'critical'
+                                        ? <><IconAlertCircle size={11} /> ALARM</>
+                                        : <><IconAlertTriangle size={11} /> WARNING</>}
                                     </span>
                                   )}
                                 </div>

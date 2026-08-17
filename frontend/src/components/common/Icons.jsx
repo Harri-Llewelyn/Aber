@@ -119,6 +119,21 @@ export const IconAlertTriangle = ({ size = 16, className = "" }) => (
   </svg>
 )
 
+/**
+ * The CRITICAL counterpart to IconAlertTriangle.
+ *
+ * Two glyphs rather than one recoloured triangle, because a colour difference is the whole signal
+ * otherwise -- and these render at 11px in a table cell beside a status badge, which is exactly the
+ * size and the context where red-versus-amber stops being reliable. A circle reads as a distinct
+ * mark at a glance; the same triangle in a different fill does not.
+ */
+export const IconAlertCircle = ({ size = 16, className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <circle cx="12" cy="12" r="10" />
+    <line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+  </svg>
+)
+
 export const IconPlus = ({ size = 14, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />

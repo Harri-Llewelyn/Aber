@@ -60,6 +60,9 @@ ARG VITE_ENABLE_REALTIME
 # Where the Report Bug button files issues. Unset is survivable -- constants.js falls back to
 # this repository -- but a fork that leaves it unset sends its reports to the wrong tracker.
 ARG VITE_GITHUB_REPO_URL
+# Where "View in Grafana" points from an active alert. Unset is survivable -- constants.js falls back
+# to localhost:3002 -- but a deployment that has moved Grafana gets a dead link.
+ARG VITE_GRAFANA_URL
 # Offers the sign-up form on the auth screen.
 ARG VITE_ALLOW_SIGNUP
 

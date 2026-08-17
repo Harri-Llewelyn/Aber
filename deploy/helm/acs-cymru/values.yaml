@@ -850,6 +850,11 @@ frontend:
   # and edge function then refuses them -- an account that signs in and can do nothing reads as a
   # broken deployment rather than a closed one.
   allowSignup: false
+  #
+  # THERE IS DELIBERATELY NO `grafanaUrl` HERE. The dashboard's "View in Grafana" links on an active
+  # alert are built from `publicUrls.grafana` (falling back to grafana.<publicBaseDomain>) -- the same
+  # helper Grafana's own root_url and its OAuth redirect_uris come from. A second value would let the
+  # link and the login point at different origins, and only one of those two failures is visible.
   resources:
     requests: { cpu: 10m, memory: 32Mi }
     limits: { memory: 128Mi }

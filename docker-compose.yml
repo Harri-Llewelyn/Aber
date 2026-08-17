@@ -935,6 +935,11 @@ services:
         VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
         VITE_ENABLE_REALTIME: ${VITE_ENABLE_REALTIME:-true}
         VITE_GITHUB_REPO_URL: ${VITE_GITHUB_REPO_URL:-https://github.com/Harri-Llewelyn/ACS-Cymru}
+        # Defaults to GRAFANA_PUBLIC_URL, so a stack that moves Grafana gets the dashboard's
+        # "View in Grafana" links right without a second variable. VITE_GRAFANA_URL still overrides
+        # it, for the case where the browser reaches Grafana on a different origin from the one
+        # registered as the OAuth redirect.
+        VITE_GRAFANA_URL: ${VITE_GRAFANA_URL:-${GRAFANA_PUBLIC_URL:-http://localhost:3002}}
         VITE_ALLOW_SIGNUP: ${VITE_ALLOW_SIGNUP:-false}
     restart: always
     ports:

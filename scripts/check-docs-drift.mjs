@@ -487,6 +487,7 @@ function edgeFunctionNames() {
     'VITE_SUPABASE_ANON_KEY', // public anon JWT -- the reason for the skip; see the Dockerfile
     'VITE_ENABLE_REALTIME',  // feature flag
     'VITE_GITHUB_REPO_URL',  // issue tracker URL
+    'VITE_GRAFANA_URL',      // an endpoint, public
     'VITE_ALLOW_SIGNUP',     // feature flag
   ]);
 

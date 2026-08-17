@@ -61,8 +61,13 @@ export function useDeviceAlerts(showToast) {
     if (primedRef.current) {
       for (const [fingerprint, row] of next) {
         if (!knownRef.current.has(fingerprint)) {
+          // NO EMOJI PREFIX. Toast already draws its own stroked SVG from `type`, so `🚨` and `✅`
+          // put a second icon beside the first -- and in the resolve case that second icon was a
+          // green tick next to a green tick. An emoji also renders in whatever font, weight and
+          // colour the operating system picked, which is the one thing in the app that cannot be
+          // made to match the palette.
           showToastRef.current?.(
-            `🚨 ${row.alert_name}${row.summary ? ` — ${row.summary}` : ''}`,
+            `${row.alert_name}${row.summary ? ` — ${row.summary}` : ''}`,
             row.severity === 'critical' ? 'error' : 'warning'
           )
         }
@@ -71,7 +76,7 @@ export function useDeviceAlerts(showToast) {
       // learns to ignore, and "it recovered" is the half that tells them they can stop looking.
       for (const [fingerprint, row] of knownRef.current) {
         if (!next.has(fingerprint)) {
-          showToastRef.current?.(`✅ Resolved — ${row.alert_name}`, 'success')
+          showToastRef.current?.(`Resolved — ${row.alert_name}`, 'success')
         }
       }
     }

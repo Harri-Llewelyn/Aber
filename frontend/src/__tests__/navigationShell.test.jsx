@@ -120,56 +120,124 @@ describe('Merged navigation shell', () => {
     expect(current[0].querySelector('.nav-tab-label').textContent).toBe('Overview')
   })
 
-  it('keeps the session controls in the bar', async () => {
+  /**
+   * The decluttered bar.
+   *
+   * TWO CONTROLS ON THE RIGHT, and the count is the assertion. The bar held five: the alert pill, a
+   * Live/Polling chip, a theme toggle, Report Bug and the account pill. Four of them never changed
+   * value -- the Live chip was read off a build flag, so it was a lit green dot that could not go out
+   * -- and a row of controls that never change teaches the eye to stop reading it. Which is a problem
+   * when one of them is the alarm.
+   *
+   * Asserted as an upper bound rather than by naming what is present, because the failure this guards
+   * against is ACCRETION: the next standing indicator added here is added by somebody who has not
+   * read the reasoning, and naming the survivors would not catch it.
+   */
+  it('keeps only the changing control and the account door in the bar', async () => {
     await renderShell()
 
-    const bar = within(topbar())
-    expect(bar.getByRole('button', { name: /report bug/i })).toBeTruthy()
-    expect(bar.getByRole('button', { name: /theme/i })).toBeTruthy()
-    // The account control is one pill now, not four items laid out side by side.
-    expect(bar.getByRole('button', { name: /admin/i })).toBeTruthy()
+    const right = topbar().querySelector('.topbar-right')
+    expect(right).toBeTruthy()
+    const controls = [...right.querySelectorAll('button')]
+    expect(controls).toHaveLength(2)
+
+    // The one whose VALUE moves, and the door to everything else.
+    expect(right.querySelector('.alert-pill')).toBeTruthy()
+    expect(right.querySelector('.user-avatar')).toBeTruthy()
+
+    // The Live/Polling chip is gone. It reported a build flag, not the socket's health.
+    expect(document.querySelector('.topbar-status')).toBeNull()
+    expect(document.querySelector('.pulse-dot')).toBeNull()
+  })
+
+  it('moves the theme toggle and Report Bug behind the account button, not out of the app', async () => {
+    await renderShell()
+
+    // Neither is in the bar any more...
+    const right = topbar().querySelector('.topbar-right')
+    expect(within(right).queryByRole('button', { name: /report bug/i })).toBeNull()
+    expect(within(right).queryByRole('button', { name: /theme/i })).toBeNull()
+
+    // ...and both are one click away. This is the whole of the trade.
+    fireEvent.click(screen.getByRole('button', { name: /account menu/i }))
+    const menu = screen.getByRole('menu')
+    expect(within(menu).getByRole('menuitem', { name: /report bug/i })).toBeTruthy()
+    expect(within(menu).getByRole('menuitem', { name: /theme/i })).toBeTruthy()
   })
 
   /**
-   * The account pill.
+   * The account menu.
    *
-   * It traded ~150px of bar for a click, and the trade is only sound if nothing became
-   * unreachable: the address must still be verifiable, and Sign Out must still be one gesture
-   * away and must actually sign out. Those are what these pin -- not the popover's markup.
+   * It has collapsed twice: to a pill carrying the local part and the role, and now to a 28px circle
+   * with the theme toggle and Report Bug moved in alongside Sign Out. Each step traded bar width for
+   * a click, and each is only sound if nothing became UNREACHABLE -- so what these pin is reachability
+   * and the two facts the button no longer displays, not the popover's markup.
    */
   describe('Account menu', () => {
-    const pill = () => screen.getByRole('button', { name: /admin/i })
+    const trigger = () => screen.getByRole('button', { name: /account menu/i })
 
-    it('shows the local part and the role without being opened, and the address on hover', async () => {
+    it('carries the address and the role on the button, now that neither is printed on it', async () => {
       await renderShell()
 
-      expect(pill()).toHaveAttribute('title', expect.stringContaining('admin@acs-cymru.local'))
-      expect(within(pill()).getByText('admin')).toBeTruthy()
-      // usePermissions resolves the role from the database before falling back to the built-in
-      // map, so the badge arrives a tick after the bar does.
-      await waitFor(() => expect(within(pill()).getByText('Administrator')).toBeTruthy())
+      // THE TITLE IS LOAD-BEARING, not decorative. The button has no visible text, so this string is
+      // also its accessible name -- which is why it leads with the address rather than with
+      // "Account". Losing it would leave a circle that says nothing to anybody.
+      const title = trigger().getAttribute('title')
+      expect(title).toContain('admin@acs-cymru.local')
+      // usePermissions resolves the role from the database before falling back to the built-in map,
+      // so it arrives a tick after the bar does.
+      await waitFor(() => expect(trigger().getAttribute('title')).toContain('Administrator'))
+
+      // Nothing is printed on the button itself.
+      expect(trigger()).toHaveTextContent('')
       // Closed by default: the popover holds Sign Out, which must not be reachable by accident.
-      expect(pill()).toHaveAttribute('aria-expanded', 'false')
+      expect(trigger()).toHaveAttribute('aria-expanded', 'false')
       expect(screen.queryByRole('menu')).toBeNull()
     })
 
-    it('reveals the full address and a working Sign Out when opened', async () => {
+    it('reveals the full address, the role and a working Sign Out when opened', async () => {
       await renderShell()
 
-      fireEvent.click(pill())
+      fireEvent.click(trigger())
 
       const menu = screen.getByRole('menu')
       expect(within(menu).getByText('admin@acs-cymru.local')).toBeTruthy()
-      expect(pill()).toHaveAttribute('aria-expanded', 'true')
+      // The role moved IN here from the pill. It used to be kept out on the argument that it is the
+      // standing answer to "why is that button disabled"; the trade was made anyway and this is
+      // where it landed, so it must actually be present.
+      await waitFor(() => expect(within(menu).getByText('Administrator')).toBeTruthy())
+      expect(trigger()).toHaveAttribute('aria-expanded', 'true')
 
       fireEvent.click(within(menu).getByRole('menuitem', { name: /sign out/i }))
       expect(supabase.auth.signOut).toHaveBeenCalled()
     })
 
+    it('states the CURRENT theme rather than the destination, and stays open on toggle', async () => {
+      await renderShell()
+      fireEvent.click(trigger())
+
+      const item = () => screen.getByRole('menuitem', { name: /theme/i })
+      expect(item()).toHaveTextContent(/Theme:\s*Dark/)
+
+      fireEvent.click(item())
+      // STILL OPEN. Toggling is the one action here whose result is visible behind the menu, so
+      // closing would mean reopening to change your mind about a two-state choice.
+      expect(screen.getByRole('menu')).toBeTruthy()
+      expect(item()).toHaveTextContent(/Theme:\s*Light/)
+    })
+
+    it('closes on the two items whose result is NOT visible behind it', async () => {
+      await renderShell()
+
+      fireEvent.click(trigger())
+      fireEvent.click(screen.getByRole('menuitem', { name: /report bug/i }))
+      expect(screen.queryByRole('menu')).toBeNull()
+    })
+
     it('closes on Escape, so the menu is not a trap', async () => {
       await renderShell()
 
-      fireEvent.click(pill())
+      fireEvent.click(trigger())
       expect(screen.getByRole('menu')).toBeTruthy()
 
       fireEvent.keyDown(document, { key: 'Escape' })
@@ -179,7 +247,7 @@ describe('Merged navigation shell', () => {
     it('closes on a click outside it', async () => {
       await renderShell()
 
-      fireEvent.click(pill())
+      fireEvent.click(trigger())
       expect(screen.getByRole('menu')).toBeTruthy()
 
       // mousedown, not click: closing on click would fire after a button inside the popover had
@@ -224,10 +292,14 @@ describe('Merged navigation shell', () => {
    * The three bands, as a set rather than one at a time.
    *
    * Each band drops the next-least-load-bearing thing, and the ORDER is the design: the brand
-   * subtitle and the user's own name go first because both are recoverable (from a title, and
-   * from the menu behind the pill); the nav labels go last because they are the only thing
-   * saying which page an icon leads to. A band that dropped them in the other order would still
-   * fit on screen and would be much worse to use.
+   * subtitle goes first because it is recoverable from a title; the nav labels go last because they
+   * are the only thing saying which page an icon leads to. A band that dropped them in the other
+   * order would still fit on screen and would be much worse to use.
+   *
+   * THE ACCOUNT CONTROL NO LONGER APPEARS IN ANY BAND. It used to shed the user's name at 1600px and
+   * keep its role badge below that; the declutter made it a 28px circle at every width, so there is
+   * nothing left in it to drop. Asserted as an absence, because a reinstated `.user-pill-name` rule
+   * would be a rule for a class nothing renders -- dead CSS that reads as intentional.
    */
   it('drops the recoverable text first and the nav labels last', () => {
     const band = (px) => APP_CSS.match(new RegExp(`@media \\(max-width: ${px}px\\) \\{([\\s\\S]*?)\\n\\}`))?.[1]
@@ -237,19 +309,60 @@ describe('Merged navigation shell', () => {
     expect(wide, 'the 1400-1599px band is missing').toBeTruthy()
     expect(narrow, 'the <1400px band is missing').toBeTruthy()
 
-    // 1400-1599: the two recoverable labels, and NOT the nav.
+    // 1400-1599: the recoverable label, and NOT the nav.
     expect(wide).toMatch(/\.brand-sub\s*\{\s*display:\s*none/)
-    expect(wide).toMatch(/\.user-pill-name\s*\{\s*display:\s*none/)
     expect(wide).not.toMatch(/\.nav-tab-label/)
 
     // <1400: the nav labels, and the button labels that would overflow next.
     expect(narrow).toMatch(/\.nav-tab-label\s*\{\s*display:\s*none/)
     expect(narrow).toMatch(/\.btn-label\s*\{\s*display:\s*none/)
 
-    // The role badge survives every band: it is the standing answer to "why is that button
-    // disabled", which nothing else on screen gives.
-    expect(wide).not.toMatch(/\.user-pill-role/)
-    expect(narrow).not.toMatch(/\.user-pill-role/)
+    // The account control has no responsive treatment at all now, in either band.
+    for (const b of [wide, narrow]) {
+      expect(b).not.toMatch(/\.user-pill/)
+      expect(b).not.toMatch(/\.user-avatar/)
+    }
+    // And the classes it shed are gone from the whole stylesheet, not merely from the bands.
+    expect(APP_CSS).not.toMatch(/\.user-pill/)
+  })
+
+  /**
+   * The alert counter is the one thing in the bar that must survive every band.
+   *
+   * It sheds its WORD below 1400px and keeps its number, which costs ~40px and leaves a glyph plus a
+   * figure. Hiding the pill instead would remove the only changing element in the header at exactly
+   * the widths a shopfloor kiosk runs at.
+   */
+  it('narrows the alert counter without hiding it', () => {
+    const narrow = APP_CSS.match(/@media \(max-width: 1399px\) \{([\s\S]*?)\n\}/)[1]
+    expect(narrow).toMatch(/\.alert-pill-label\s*\{\s*display:\s*none/)
+    expect(narrow).not.toMatch(/\.alert-pill\s*\{\s*display:\s*none/)
+    expect(narrow).not.toMatch(/\.alert-pill-count\s*\{\s*display:\s*none/)
+  })
+
+  /**
+   * The healthy pill must be the QUIETEST thing in the bar, and must not pulse.
+   *
+   * This is the cost of making it permanent, and the mitigation for it. A standing element that
+   * animates is decoration, and it also destroys the firing states' urgency -- if the resting state
+   * glows, a glow means nothing. Read from the stylesheet because jsdom computes no animation.
+   */
+  it('animates only the firing states, never the healthy one', () => {
+    const rule = (selector) =>
+      APP_CSS.match(new RegExp(`\\n${selector.replace(/[.\\-]/g, '\\$&')} \\{([\\s\\S]*?)\\n\\}`))?.[1]
+
+    expect(rule('.alert-pill-healthy')).toBeTruthy()
+    expect(rule('.alert-pill-healthy')).not.toMatch(/animation:/)
+    // The base rule must not carry it either -- that is where it used to live, when the pill only
+    // ever existed while firing.
+    expect(rule('.alert-pill')).not.toMatch(/animation:/)
+    // The two firing states share one rule that does.
+    expect(APP_CSS).toMatch(
+      /\.alert-pill-critical,\s*\n\.alert-pill-warning \{[\s\S]*?animation:\s*alert-pill-pulse/
+    )
+    // Reduced motion still turns it off.
+    const reduced = APP_CSS.slice(APP_CSS.indexOf('@media (prefers-reduced-motion: reduce)'))
+    expect(reduced).toMatch(/\.alert-pill-warning \{ animation: none/)
   })
 
   // Nothing may scroll sideways at any band. Asserted on the ancestors as well as the bar,

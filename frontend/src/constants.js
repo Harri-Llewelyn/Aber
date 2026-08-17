@@ -68,6 +68,44 @@ export const GITHUB_REPO_URL = readSetting(
   'https://github.com/Harri-Llewelyn/ACS-Cymru'
 ).replace(/\/+$/, '');
 
+/**
+ * Grafana, as the BROWSER reaches it -- for the "View in Grafana" link on an active alert.
+ *
+ * THE DEFAULT IS 3002, NOT GRAFANA'S OWN 3000. The container listens on 3000 and docker-compose.yml
+ * publishes it on 3002, because the frontend already has 3000. A link to the wrong port is worse
+ * than no link: it lands on this dashboard, which is where the operator already was, and reads as
+ * "Grafana is broken" rather than as a misconfiguration. Same value as GRAFANA_PUBLIC_URL, which
+ * 0002_seed_data.sql registers as the OAuth redirect origin and grafana.ini builds root_url from --
+ * so a deployment that moves Grafana has to set both, and setting only this one produces a dead link
+ * rather than a broken login.
+ *
+ * A FALLBACK IS KEPT for the same reason GITHUB_REPO_URL keeps one: a wrong-but-present default is
+ * recoverable, whereas throwing would take the whole dashboard down over a hyperlink.
+ */
+export const GRAFANA_URL = readSetting('VITE_GRAFANA_URL', 'http://localhost:3002')
+  .replace(/\/+$/, '');
+
+/**
+ * The Grafana alert page for one rule, filtered to one device where possible.
+ *
+ * NOT A RULE-UID DEEP LINK, and it cannot be one: `device_alerts` stores Grafana's `fingerprint` --
+ * a hash of the instance's labels -- and never its rule UID, because the Alertmanager payload the
+ * webhook receives does not reliably carry one. So this targets the alert LIST with Grafana's own
+ * search grammar instead, which needs no identifier the webhook did not capture.
+ *
+ * `rule:` and `label:` are Grafana's supported filter prefixes (11+, and 13.1 here). A version that
+ * did not understand them would treat the string as free text and still match on the rule name, so
+ * the failure mode is a slightly wider list rather than an error page.
+ */
+export const grafanaAlertUrl = (alertName, sparkplugId) => {
+  const terms = [];
+  if (alertName) terms.push(`rule:"${alertName}"`);
+  if (sparkplugId) terms.push(`label:sparkplug_id=${sparkplugId}`);
+  return terms.length
+    ? `${GRAFANA_URL}/alerting/list?search=${encodeURIComponent(terms.join(' '))}`
+    : `${GRAFANA_URL}/alerting/list`;
+};
+
 // How often tabs that render wall-clock-derived state re-render (see hooks/useClockTick.js).
 // Gateway heartbeat staleness is the case: a gateway going quiet writes nothing, so it emits
 // no Realtime event, and at a 60s reconciliation it would otherwise show STALE up to ~120s

@@ -7,7 +7,7 @@ import { useToast } from './hooks/useToast'
 import { useApiActivity } from './hooks/useApiActivity'
 import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
 import { clearInvalidSession, isSessionRejected } from './utils/sessionError'
-import { PERMISSION_UUIDS, REALTIME_ENABLED } from './constants'
+import { PERMISSION_UUIDS } from './constants'
 import { readFlag } from './config'
 
 const allowSignUp = readFlag('VITE_ALLOW_SIGNUP')
@@ -30,8 +30,7 @@ import {
   IconMoon,
   IconUser,
   IconBug,
-  IconLogOut,
-  IconChevronDown
+  IconLogOut
 } from './components/common/Icons'
 
 import { Toast } from './components/common/Toast'
@@ -191,23 +190,31 @@ function AuthScreen({ onLoginSuccess, notice }) {
 }
 
 /**
- * The session control, collapsed into one pill with a popover behind it.
+ * The account control: a round icon button with everything that is not navigation behind it.
  *
- * It used to be four things laid out side by side in the bar: an icon, the full email, a role
- * badge and a Sign Out button, together about 330px. That was the widest block on the right-hand
- * side and it was spending it on two pieces of standing text -- the address you are signed in as,
- * and a button you press when you leave -- neither of which is read more than once a session. The
- * pill is ~150px narrower, and the space goes to the nav, which is the thing that runs out first.
+ * IT HAS COLLAPSED TWICE, and the second step is the one worth explaining. It began as four things
+ * laid out side by side -- icon, full email, role badge, Sign Out -- about 330px of bar. That became
+ * a pill carrying the local part and the role, with the address and Sign Out behind it. It is now a
+ * 28px circle, and the theme toggle and Report Bug have moved in with them.
  *
- * The email survives in full inside the popover AND on the pill's `title`, so it is still
- * verifiable at a glance. The role badge does NOT collapse into the menu: it is the standing
- * answer to "why is that button disabled", which is a question asked while looking at the button
- * rather than at this control.
+ * WHAT THE SECOND STEP GAVE UP. The role badge was previously kept OUT of the menu on the argument
+ * that it is the standing answer to "why is that button disabled" -- a question asked while looking
+ * at a disabled button, not while looking at this control. That argument was correct and the trade
+ * has been made anyway, because the bar was carrying five separate controls on the right and the
+ * role is the least often needed of the things it said. It is the first line inside the menu, one
+ * click away, and it is still on the button's `title` alongside the address -- so both survive a
+ * hover without opening anything.
+ *
+ * WHY THESE THREE AND NOT OTHERS. The menu is not a junk drawer: what went in is everything that is
+ * a SESSION-LEVEL PREFERENCE OR ESCAPE HATCH rather than a piece of live state. A theme is set once
+ * and never again; Report Bug is pressed when something has already gone wrong; Sign Out ends the
+ * session. None of the three is read, and none reports anything. The alert counter stayed in the bar
+ * for precisely the inverse reason -- it is the one control there whose VALUE changes.
  *
  * Click, not hover. A hover-triggered menu holding the sign-out button puts an irreversible action
  * one stray mouse movement from the cursor's resting corner.
  */
-function UserMenu({ persona, userRole, onSignOut }) {
+function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReportBug }) {
   const [open, setOpen] = useState(false)
   const wrapRef = useRef(null)
 
@@ -225,23 +232,21 @@ function UserMenu({ persona, userRole, onSignOut }) {
     }
   }, [open])
 
-  // The local part only. Addresses on one deployment share a domain, so it is the half that
-  // identifies anybody -- and the full address is a hover or a click away.
-  const shortName = persona.includes('@') ? persona.split('@')[0] : persona
+  const nextTheme = theme === 'dark' ? 'Light' : 'Dark'
 
   return (
     <div className="user-menu" ref={wrapRef}>
+      {/* NO VISIBLE TEXT, so the accessible name comes from `title` -- which is why that string
+          leads with the address and the role rather than with "Account". A screen reader announcing
+          "open account menu" would have lost the one thing this control used to say for free. */}
       <button
-        className={`user-pill${open ? ' user-pill-open' : ''}`}
+        className={`user-avatar${open ? ' user-avatar-open' : ''}`}
         onClick={() => setOpen(v => !v)}
         aria-expanded={open}
         aria-haspopup="menu"
         title={`Signed in as ${persona} (${userRole}) — open account menu`}
       >
-        <IconUser size={13} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-        <span className="user-pill-name">{shortName}</span>
-        <span className="badge badge-neutral user-pill-role">{userRole}</span>
-        <IconChevronDown size={11} className={open ? 'user-pill-caret user-pill-caret-open' : 'user-pill-caret'} />
+        <IconUser size={14} />
       </button>
 
       {open && (
@@ -250,13 +255,41 @@ function UserMenu({ persona, userRole, onSignOut }) {
             <div className="user-popover-email">{persona}</div>
             <div className="user-popover-role">{userRole}</div>
           </div>
+
+          {/* A TOGGLE STATES WHERE IT IS, NOT WHERE IT GOES. "Theme: Dark" with a sun icon reads as
+              "press for Light" once you know the convention and as a broken label until then. The
+              current value is the fact; the icon shows the destination. */}
           <button
             className="user-popover-action"
+            role="menuitem"
+            onClick={onToggleTheme}
+            title={`Switch to the ${nextTheme.toLowerCase()} theme`}
+          >
+            {theme === 'dark' ? <IconSun size={14} /> : <IconMoon size={14} />}
+            <span>Theme: <strong>{theme === 'dark' ? 'Dark' : 'Light'}</strong></span>
+            <span className="user-popover-hint">{nextTheme}</span>
+          </button>
+
+          {/* The menu does NOT close on the theme toggle -- and does on the other two. Toggling is
+              the one action here whose result is visible behind the menu, and closing would mean
+              reopening to change your mind about a two-state choice. */}
+          <button
+            className="user-popover-action"
+            role="menuitem"
+            onClick={() => { setOpen(false); onReportBug() }}
+            title="Report an application bug"
+          >
+            <IconBug size={14} /> <span>Report Bug</span>
+          </button>
+
+          {/* Last, behind a separator, and the only destructive item. */}
+          <button
+            className="user-popover-action user-popover-action-danger"
             role="menuitem"
             onClick={() => { setOpen(false); onSignOut() }}
             title="Sign out of the Supabase session"
           >
-            <IconLogOut size={14} /> Sign Out
+            <IconLogOut size={14} /> <span>Sign Out</span>
           </button>
         </div>
       )}
@@ -356,28 +389,33 @@ function Dashboard({ session, onSignOut }) {
           ))}
         </nav>
 
+        {/*
+          TWO CONTROLS, and that is the whole of the right-hand side now.
+
+          It held five: the alert pill, a Live/Polling chip, a theme toggle, Report Bug and the
+          account pill. Four of those five never changed -- the theme is set once a career, Report
+          Bug is a door you use when something else has already broken, the account is who you are,
+          and the Live chip was read off a BUILD FLAG rather than off the socket, so it was a lit
+          green dot that could not go out. A bar of controls that never change teaches the eye to
+          stop reading it, which is a problem when one of them is the alarm.
+
+          So the standing state and the standing preferences were separated. What is left in the bar
+          is the one thing whose value moves, plus the door to everything else.
+        */}
         <div className="topbar-right">
-          {/* Before the Live/Polling indicator, so it reads left-to-right as "something is wrong"
-              ahead of "the feed is healthy" -- and so it does not move the controls to its right
-              when it appears and disappears, which a chip after them would. */}
-          <AlertPill alerts={firingAlerts} />
+          <AlertPill
+            alerts={firingAlerts}
+            onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }}
+          />
 
-          <div
-            className="topbar-status"
-            title={REALTIME_ENABLED
-              ? 'Live: tabs update on Realtime change events, with a 60s reconciliation refresh'
-              : 'Polling: tabs refresh every 3s (Realtime disabled)'}
-          ><div className="pulse-dot" /> {REALTIME_ENABLED ? 'Live' : 'Polling'}</div>
-
-          <button className="btn btn-ghost btn-sm" onClick={toggleTheme} title="Toggle Light / Dark UI Theme">
-            {theme === 'dark' ? <IconSun size={14} /> : <IconMoon size={14} />}
-          </button>
-
-          <button className="btn btn-ghost btn-sm" onClick={() => setShowBugReport(true)} title="Report an application bug" style={{ gap: '6px' }}>
-            <IconBug size={14} style={{ color: 'var(--danger)' }} /> <span className="btn-label">Report Bug</span>
-          </button>
-
-          <UserMenu persona={persona} userRole={userRole} onSignOut={onSignOut} />
+          <UserMenu
+            persona={persona}
+            userRole={userRole}
+            onSignOut={onSignOut}
+            theme={theme}
+            onToggleTheme={toggleTheme}
+            onReportBug={() => setShowBugReport(true)}
+          />
         </div>
 
         {/* The one piece of chrome that reports work rather than state. Rendered only while busy
