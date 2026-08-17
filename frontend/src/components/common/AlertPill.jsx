@@ -98,10 +98,6 @@ export function AlertPill({ alerts = [], onSelectDevice, realtime = REALTIME_ENA
             <div className="alert-pill-empty">
               <IconShieldCheck size={20} />
               <div className="alert-pill-empty-title">No active alerts</div>
-              <div className="alert-pill-empty-sub">
-                Grafana is evaluating the thermal, emergency-stop and OEE rules and has nothing to
-                report.
-              </div>
             </div>
           ) : (
             <ul className="alert-pill-list">

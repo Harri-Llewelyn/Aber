@@ -590,7 +590,10 @@ describe('Documents accordion no longer duplicates the panel action', () => {
     fireEvent.click(list().getByText('Assembly Line 1'))
     await waitFor(() => expect(isOpen()).toBe(true))
 
-    expect(within(panel()).getByText('Located Devices')).toBeTruthy()
+    // The label now carries the online/total figure ("Located Devices (1/1 online)") because the
+    // value beneath it became a list of chips. That is still ONE count -- which is what this guards
+    // -- so the match is anchored rather than exact.
+    expect(within(panel()).getByText(/^Located Devices\b/)).toBeTruthy()
     expect(within(panel()).queryByText(/Directly Assigned Devices/i)).toBeNull()
     expect(within(panel()).queryByText(/Explicitly Filed Here/i)).toBeNull()
   })

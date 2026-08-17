@@ -23,10 +23,13 @@ import {
   IconBookOpen,
   IconHistory,
   IconExternalLink,
+  IconRadio,
   IconShieldAlert,
   IconX
 } from '../common/Icons'
+import { deviceLifecycleStatus, deviceStatusDotColor, deviceStatusTitle } from '../../utils/deviceStatus'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
 export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThread, hasPermission, initialSearchFilter, onClearFilter }) {
   /**
@@ -223,6 +226,16 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   const emptyCount = cells.filter(c => !c.is_archived && cellIsEmpty(c)).length
   const activeFilterCount =
     (searchQuery ? 1 : 0) + (attentionOnly ? 1 : 0) + (emptyOnly ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
+
+  // Arriving from a device's or gateway's Cell Zone chip, or the shopfloor map: the caller named ONE
+  // cell, so open it rather than leaving a one-card list to be clicked. Identifier equality only --
+  // this page's own search predicate also matches cell_name, and typing a name must open nothing.
+  useArrivalSelection(
+    searchQuery,
+    cells,
+    (c, term) => c.cell_id === term,
+    (c) => setSelectedId(c.cell_id)
+  )
 
   // Resolved fresh every render -- see the note on selectedId. A cell that is archived out of the
   // current filter, or deleted, resolves to null and the drawer closes itself.
@@ -559,18 +572,60 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
         fields={selectedCell ? [
           { label: 'Cell UUID', value: selectedCell.cell_id, mono: true, copyable: true },
           {
+            // A COMMA-JOINED STRING BECOMES CHIPS, and the reason is the same one that took the
+            // gateway's device list: this drawer named the neighbours and then stranded you. A cell
+            // is a junction -- it exists to relate gateways and devices -- so a cell panel that
+            // cannot reach either of them is the one panel where dead-ending costs most.
             label: 'Assigned Gateways',
             value: selectedCellGateways.length
-              ? selectedCellGateways.map(g => g.gateway_name).join(', ')
+              ? (
+                <div className="context-device-list">
+                  {selectedCellGateways.map(g => (
+                    <button
+                      key={g.gateway_id}
+                      className="chip chip-link chip-gw"
+                      onClick={() => onSelectGateway?.(g.gateway_id)}
+                      title={`Open ${g.gateway_name} on the Gateways page`}
+                    >
+                      <IconRadio size={11} />
+                      <span className="chip-name">{g.gateway_name}</span>
+                    </button>
+                  ))}
+                </div>
+              )
               : null,
             full: true,
             title: 'Edge nodes serving this zone. Their devices resolve here unless a device carries a cell of its own.'
           },
           {
-            label: 'Located Devices',
+            // THE COUNT IS KEPT, on the label rather than in place of the list. "12 (9 online)" was
+            // the whole value before, and it answers a real question -- how big is this zone, and is
+            // it healthy -- that twelve chips answer much more slowly. So both: the summary reads at
+            // a glance, the chips carry the navigation.
+            label: selectedCellDevices.length
+              ? `Located Devices (${selectedCellDevices.filter(a => a.status !== 'OFFLINE' && !a.is_archived).length}/${selectedCellDevices.length} online)`
+              : 'Located Devices',
             value: selectedCellDevices.length
-              ? `${selectedCellDevices.length} (${selectedCellDevices.filter(a => a.status !== 'OFFLINE' && !a.is_archived).length} online)`
+              ? (
+                <div className="context-device-list">
+                  {selectedCellDevices.map(d => {
+                    const status = deviceLifecycleStatus(d)
+                    return (
+                      <button
+                        key={d.asset_id}
+                        className="chip chip-link"
+                        onClick={() => onSelectDevice?.(d.asset_id)}
+                        title={`Open ${d.asset_name} on the Devices page — ${deviceStatusTitle(status)}`}
+                      >
+                        <span className="badge-dot" style={{ background: deviceStatusDotColor(status) }} />
+                        <span className="chip-name">{d.asset_name}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )
               : null,
+            full: true,
             title: "This zone's gateways' devices, plus any device filed here explicitly."
           },
           { label: 'Dashboard URL', value: selectedCell.access_url || null, mono: true, copyable: true, full: true },

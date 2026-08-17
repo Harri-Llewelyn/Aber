@@ -6,6 +6,7 @@ import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
 import { gatewayLiveStatus, formatHeartbeat } from '../../utils/gatewayStatus'
 import { gatewaySparkplugId } from '../../utils/sparkplugId'
+import { deviceLifecycleStatus, deviceStatusDotColor, deviceStatusTitle } from '../../utils/deviceStatus'
 import { SCOPE_CELL, SCOPE_SITE_WIDE } from '../../utils/cellResolution'
 import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
@@ -30,8 +31,9 @@ import {
   IconX
 } from '../common/Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
-export function GatewaysTab({ showToast, onViewThread, onSelectCell, hasPermission, initialSearchFilter, onClearFilter, onBugReport }) {
+export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDevice, hasPermission, initialSearchFilter, onClearFilter, onBugReport }) {
   const [gateways, setGateways] = useState([])
   const [assets, setAssets]     = useState([])
   const [cells, setCells]       = useState([])
@@ -220,6 +222,15 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, hasPermissi
   const activeFilterCount =
     [searchQuery, liveStatusFilter, kindFilter].filter(Boolean).length +
     (quarantineOnly ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
+
+  // Arriving from a cell's gateway chip, a device's Serving Gateway chip or the shopfloor map: the
+  // caller named ONE gateway, so open it. Identifier equality only -- see the hook.
+  useArrivalSelection(
+    searchQuery,
+    gateways,
+    (g, term) => g.gateway_id === term || gatewaySparkplugId(g) === term,
+    (g) => setSelectedId(g.gateway_id)
+  )
 
   // Resolved fresh every render -- see the note on selectedId. A gateway that has been archived
   // out of the current filter, or deleted, resolves to null and the drawer simply closes.
@@ -652,17 +663,30 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, hasPermissi
             {selectedDevices.length === 0
               ? <div className="context-field-empty" style={{ fontSize: '11px' }}>No devices assigned</div>
               : (
+                /* CHIPS THAT GO SOMEWHERE, not status badges. This list answers "which devices" and
+                   then stranded you: the next question is always "what is wrong with that one", and
+                   the only way through was to read a name off here, switch tab and search for it.
+                   Now it is a click, matching the Cell Zone and Schema chips elsewhere in this
+                   drawer -- one navigation idiom across all four pages rather than three.
+
+                   THE LIFECYCLE STATE SURVIVES THE CHANGE, as a dot rather than as the chip's own
+                   colour. A chip coloured by status would collide with `chip-link`'s hover, and the
+                   two facts are independent: where this goes, and how the device is doing. */
                 <div className="context-device-list">
-                  {selectedDevices.map(d => (
-                    <span
-                      key={d.asset_id}
-                      className={`badge ${d.status === 'OFFLINE' ? 'badge-neutral' : 'badge-online'}`}
-                      style={{ fontSize: '11px' }}
-                      title={`${d.asset_name} — ${d.is_quarantined ? 'QUARANTINED' : d.status || 'ONLINE'}`}
-                    >
-                      {d.asset_name}{d.is_quarantined ? ' (quarantined)' : ''}
-                    </span>
-                  ))}
+                  {selectedDevices.map(d => {
+                    const status = deviceLifecycleStatus(d)
+                    return (
+                      <button
+                        key={d.asset_id}
+                        className="chip chip-link"
+                        onClick={() => onSelectDevice?.(d.asset_id)}
+                        title={`Open ${d.asset_name} on the Devices page — ${deviceStatusTitle(status)}`}
+                      >
+                        <span className="badge-dot" style={{ background: deviceStatusDotColor(status) }} />
+                        <span className="chip-name">{d.asset_name}</span>
+                      </button>
+                    )
+                  })}
                 </div>
               )}
           </div>

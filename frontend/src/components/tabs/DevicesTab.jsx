@@ -63,6 +63,7 @@ import {
   IconX
 } from '../common/Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
 // Sentinel values for the cell filter's two derived lanes. Prefixed so they can never collide
 // with a cell UUID, and kept out of `cells` because neither lane is a row in that table.
@@ -200,6 +201,34 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   /** This device's last reported values, keyed the way telemetry keys them. */
   const latestFor = (device) =>
     latestBySparkplugId.get(effectiveSparkplugId(device)) || null
+
+  /**
+   * A device row, shaped for the edit form.
+   *
+   * The only transformation is `schema_id`, and it is here rather than inline because the drawer and
+   * the row's Edit action both open the same form and both used to seed it from the raw row.
+   *
+   * THE DROPDOWN MANAGES `devices.schema_id`, WHICH IS ONE OF THE TWO ROUTES A SCHEMA ARRIVES BY.
+   * Seeding it with the resolved schema makes the control show what is actually attached, so saving
+   * an unrelated field no longer silently clears the picker's apparent value. It also means saving
+   * WRITES that id into `devices.schema_id` for a device that previously carried it only through
+   * `device_submodels` -- which is harmless: schemasForDevice prefers the submodels either way, so
+   * the two agreeing changes nothing about what is displayed or evaluated.
+   *
+   * AN EXPLICIT `schema_id` WINS OVER A SUBMODEL, which is the conservative precedence and not the
+   * obvious one. This control edits that column, so a device that already carries a value there has
+   * already answered the question the dropdown asks -- seeding from a submodel instead would show a
+   * different schema and then WRITE it on the next save, silently reassigning a device because
+   * somebody edited its description. The fallback only fills a hole; it never overrules an answer.
+   *
+   * A device with several submodels is the case this cannot represent, so it does not pretend to:
+   * the form renders a note naming them. Silently dropping them would turn a save into a data loss
+   * the operator had no way to see coming. Not hypothetical -- Sim_CNC_Mill_01 carries two.
+   */
+  const editFormFor = (device) => {
+    const attached = schemasForDevice(device, schemas)
+    return { ...device, schema_id: device.schema_id || attached[0]?.schema_uuid || '' }
+  }
 
   const getInitialSearch = () => {
     const params = new URLSearchParams(window.location.search)
@@ -584,6 +613,16 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     [schemaFilter, statusFilter, tagFilter, gatewayFilter, cellFilter, searchQuery].filter(Boolean).length +
     (attentionOnly ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
   const schemaName = schemas.find(s => s.schema_uuid === schemaFilter)?.schema_name
+
+  // Arriving from a gateway's device chip, a schema's device chip, an alert row or the shopfloor
+  // map: the caller named ONE device, so open it rather than leaving a one-row table to be clicked.
+  // Identifier equality only -- typing a name into the search box opens nothing. See the hook.
+  useArrivalSelection(
+    searchQuery,
+    assets,
+    (a, term) => a.asset_id === term || effectiveSparkplugId(a) === term,
+    (a) => setSelectedId(a.asset_id)
+  )
 
   // Resolved fresh every render -- see the note on selectedId. A device that is archived out of
   // the current filter, or deleted, resolves to null and the drawer closes itself.
@@ -1123,6 +1162,22 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
                 Used to suggest a match if a differently-named device shows up in quarantine reporting metrics that overlap this schema's required fields.
               </div>
+              {/* THE ONE CASE A SINGLE-SELECT CANNOT STATE. A device may carry several submodels
+                  (device_submodels, migration 0034) and this control writes the 1:1 devices.schema_id.
+                  Selecting the first and saying nothing would let somebody press Save believing they
+                  had seen the whole picture and quietly disagree with the drawer beside them, which
+                  lists all of them. Naming the others is the smallest honest version of that. */}
+              {editing && (() => {
+                const attached = schemasForDevice(editing, schemas)
+                if (attached.length < 2) return null
+                return (
+                  <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '6px' }}>
+                    This device has {attached.length} schemas attached
+                    ({attached.map(s => s.schema_name).join(', ')}). This picker sets only the primary
+                    one; the rest are managed as AAS submodels and are unaffected by saving here.
+                  </div>
+                )
+              })()}
             </div>
 
             {/* THE CONNECTION METHOD PICKER IS GONE, and it was the field most likely to be believed.
@@ -1309,24 +1364,47 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             title: 'explicit = set on the device; inherited = from its gateway; site_wide = no single cell; unassigned = nothing to inherit.'
           },
           {
+            // RESOLVED THROUGH schemasForDevice, NOT OFF selectedDevice.schema_id, and that was a
+            // real bug rather than a tidy-up. A schema reaches a device by either of two routes: the
+            // 1:1 `devices.schema_id`, or a row in `device_submodels` (migration 0034, surfaced by
+            // api.js as `submodel_schema_ids`). This field read only the first, so every device
+            // migration 0022 attached a class schema to -- which is all six on the demo floor --
+            // showed "Not set" in the drawer while the table beside it, which has always used
+            // schemasForDevice, listed the schema's tags. Two views of one row disagreeing.
+            //
+            // ALL OF THEM, not the first. A device may carry several submodels; rendering one chip
+            // would restate the same bug one submodel later.
             label: 'Schema',
             value: (() => {
-              const schema = schemas.find(s => s.schema_uuid === selectedDevice.schema_id)
-              if (!schema) return null
+              const attached = schemasForDevice(selectedDevice, schemas)
+              if (attached.length === 0) return null
               return (
-                <button
-                  className="chip chip-link"
-                  onClick={() => onSelectSchema?.(schema.schema_uuid)}
-                  title="Open this schema on the Schemas page"
-                >
-                  <IconFileText size={11} />
-                  <span className="chip-name">{schema.schema_name}</span>
-                </button>
+                <div className="context-device-list">
+                  {attached.map(schema => (
+                    <button
+                      key={schema.schema_uuid}
+                      className="chip chip-link"
+                      onClick={() => onSelectSchema?.(schema.schema_uuid)}
+                      title={`Open ${schema.schema_name} on the Schemas page`}
+                    >
+                      <IconFileText size={11} />
+                      <span className="chip-name">{schema.schema_name}</span>
+                    </button>
+                  ))}
+                </div>
               )
             })(),
-            title: 'The metric contract this device is judged against. Opens on the Schemas page.'
+            full: true,
+            title: 'The metric contract(s) this device is judged against. Opens on the Schemas page.'
           },
-          { label: 'Connection Method', value: selectedDevice.connection_method || null },
+          /* CONNECTION METHOD IS GONE FROM HERE TOO, which finishes what removing the picker
+             started. Dropping the form control but keeping the read-only field left the drawer
+             stating a transport as though it were a fact about the device -- and it is not one.
+             Ingestion is a Sparkplug B MQTT subscriber with no other transport, so a device row
+             reading "Modbus TCP" describes nothing that happens: the column is a leftover claim
+             that the platform contradicts on every message it receives. A field nothing writes and
+             nothing acts on is not documentation, it is a second answer to a question that already
+             has one. The column itself is left in place; this is a UI removal, not a migration. */
           {
             label: 'Description',
             value: selectedDevice.description || null,
@@ -1354,7 +1432,12 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             title: !canArchive ? 'Requires Admin permissions' : 'Restore device back to active service'
           } : {
             label: 'Edit Details', icon: <IconPencil size={13} />,
-            onClick: () => { setEditing(selectedDevice); setForm(selectedDevice); setShowForm(true) },
+            // THE FORM IS SEEDED WITH THE RESOLVED SCHEMA, not with the raw row. `setForm(device)`
+            // copied `schema_id` straight across, which is null for every device whose schema
+            // arrives through `device_submodels` -- so the dropdown read "No schema assigned" for a
+            // device the rest of the page correctly showed as schema'd, and saving that form
+            // silently confirmed the wrong answer.
+            onClick: () => { setEditing(selectedDevice); setForm(editFormFor(selectedDevice)); setShowForm(true) },
             disabled: !canManage || selectedDevice.status === 'OFFLINE',
             // NOT `primary`, which is the change. It was the one filled button in a drawer whose
             // other five actions are ghosts, which read as a recommendation -- and "edit this" is not

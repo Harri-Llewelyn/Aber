@@ -59,13 +59,14 @@ describe('AlertPill', () => {
       expect(screen.getByRole('button', { name: /no firing alerts/i })).toBeInTheDocument()
     })
 
-    it('names the evaluator in the empty panel, so silence is not mistaken for absence', () => {
+    it('answers the panel with a state rather than an empty list', () => {
       render(<AlertPill alerts={[]} />)
       fireEvent.click(pill())
       expect(screen.getByText('No active alerts')).toBeInTheDocument()
-      // The whole reason the pill is permanent: "no alerts" alone leaves the ambiguity between
-      // nothing being wrong and nothing arriving.
-      expect(screen.getByText(/Grafana is evaluating/i)).toBeInTheDocument()
+      // Not an empty <ul>: this is the view an operator sees ninety-nine times in a hundred, and it
+      // has to read as a finished answer rather than as a container that failed to fill.
+      expect(document.querySelector('.alert-pill-empty')).toBeTruthy()
+      expect(document.querySelector('.alert-pill-list')).toBeNull()
     })
   })
 

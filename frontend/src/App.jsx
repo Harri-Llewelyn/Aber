@@ -302,6 +302,11 @@ function Dashboard({ session, onSignOut }) {
   const [selectedGatewayFilter, setSelectedGatewayFilter] = useState('')
   // Set when a schema's device count is clicked on the Schemas page; consumed by DevicesTab.
   const [selectedSchemaFilter, setSelectedSchemaFilter] = useState('')
+  // The opposite direction, and a SEPARATE state rather than a reuse of the one above. Set by a
+  // device drawer's Schema chip and consumed by SchemasTab, which opens that schema's drawer.
+  // Sharing one value would mean opening a schema also re-filtered the Devices page behind you --
+  // the two hand-overs travel in opposite directions and mean different things.
+  const [selectedSchemaId, setSelectedSchemaId] = useState('')
   // Set when a cell zone is clicked on the Overview shopfloor map; consumed by CellsTab.
   const [selectedCellFilter, setSelectedCellFilter] = useState('')
   // Set by a "Digital Thread" action on an asset row; consumed by DigitalThreadTab as { id, type }.
@@ -322,6 +327,31 @@ function Dashboard({ session, onSignOut }) {
   const viewThreadFor = (id, type) => {
     setSelectedThreadEntity({ id, type })
     setTab('digital-thread', { entity: id })
+  }
+
+  /**
+   * The cross-page hand-overs, named once instead of spelled out at every call site.
+   *
+   * There are five of them and they were inline arrows repeated across seven props -- `showDevice`
+   * alone appeared four times, once per page that can point at a device. With the relationship chips
+   * added to the gateway, cell and schema drawers that would have become eleven copies of three
+   * lines, and the failure mode of a copied hand-over is the quiet one: a page that sets the filter
+   * but forgets the tab, or pushes a query key the target does not read.
+   *
+   * EACH SETS STATE *AND* PUSHES A QUERY PARAMETER, and both halves are load-bearing. The state
+   * covers the tab that is already mounted (every tab stays mounted across navigation, so its
+   * initial-state reader has long since run); the query string survives a reload and makes the
+   * destination linkable. The target pages read both -- URL first.
+   */
+  const showDevice  = (id) => { setSelectedDeviceFilter(id);  setTab('devices',  { search: id }) }
+  const showGateway = (id) => { setSelectedGatewayFilter(id); setTab('gateways', { search: id }) }
+  const showCell    = (id) => { setSelectedCellFilter(id);    setTab('cells',    { search: id }) }
+  /** Open ONE schema's drawer on the Schemas page -- a device drawer's Schema chip. */
+  const showSchema  = (uuid) => { setSelectedSchemaId(uuid);  setTab('schemas',  { search: uuid }) }
+  /** The opposite direction: every device provisioned with a schema. Note the `schema` key. */
+  const showDevicesForSchema = (uuid) => {
+    setSelectedSchemaFilter(uuid)
+    setTab('devices', { schema: uuid })
   }
   const { theme, toggleTheme } = useTheme()
   const { toast, showToast, clearToast } = useToast()
@@ -436,17 +466,17 @@ function Dashboard({ session, onSignOut }) {
       {/* Main Content */}
       <main className="content">
         <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
-          {tab === 'overview'       && <OverviewTab onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }} onSelectGateway={id => { setSelectedGatewayFilter(id); setTab('gateways', { search: id }) }} onSelectCell={id => { setSelectedCellFilter(id); setTab('cells', { search: id }) }} showToast={showToast} hasPermission={hasPermission} onNavigateTab={t => setTab(t)} />}
-          {tab === 'cells'          && <CellsTab showToast={showToast} onViewThread={c => viewThreadFor(c.cell_id, 'CELL')} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }} onSelectGateway={id => { setSelectedGatewayFilter(id); setTab('gateways', { search: id }) }} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
-          {tab === 'gateways'       && <GatewaysTab showToast={showToast} onViewThread={g => viewThreadFor(g.gateway_id, 'GATEWAY')} onSelectCell={id => { setSelectedCellFilter(id); setTab('cells', { search: id }) }} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
-          {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }} onSelectGateway={id => { setSelectedGatewayFilter(id); setTab('gateways', { search: id }) }} onSelectCell={id => { setSelectedCellFilter(id); setTab('cells', { search: id }) }} onSelectSchema={uuid => { setSelectedSchemaFilter(uuid); setTab('schemas', { search: uuid }) }} onViewThread={a => viewThreadFor(a.asset_id, 'DEVICE')} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} activeAlerts={firingAlerts} />}
+          {tab === 'overview'       && <OverviewTab onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} showToast={showToast} hasPermission={hasPermission} onNavigateTab={t => setTab(t)} />}
+          {tab === 'cells'          && <CellsTab showToast={showToast} onViewThread={c => viewThreadFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
+          {tab === 'gateways'       && <GatewaysTab showToast={showToast} onViewThread={g => viewThreadFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
+          {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectSchema={showSchema} onViewThread={a => viewThreadFor(a.asset_id, 'DEVICE')} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} activeAlerts={firingAlerts} />}
           {tab === 'digital-thread' && (
             <DigitalThreadTab
               initialEntity={selectedThreadEntity}
               onClearEntity={() => setSelectedThreadEntity(null)}
             />
           )}
-          {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={uuid => { setSelectedSchemaFilter(uuid); setTab('devices', { schema: uuid }) }} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} />}
+          {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={showDevicesForSchema} onSelectDevice={showDevice} initialSchemaId={selectedSchemaId} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} />}
           {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('schemas') }} />}
           {tab === 'directory'      && <DirectoryTab showToast={showToast} hasPermission={hasPermission} />}
           {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} />}
