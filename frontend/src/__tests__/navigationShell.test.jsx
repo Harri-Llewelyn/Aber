@@ -270,7 +270,8 @@ describe('Merged navigation shell', () => {
     expect(navRule).not.toMatch(/overflow-x:\s*(auto|scroll)/)
 
     // The nav must not be the flex item that gives up space -- if it shrinks, the icons clip.
-    expect(navRule).toMatch(/flex-shrink:\s*0/)
+    // Carried by the `flex` shorthand's shrink term now that the nav also declares its basis.
+    expect(navRule).toMatch(/flex:\s*0 0 auto/)
   })
 
   it('keeps the bar at 52px, which is what the merge was for', () => {
@@ -278,14 +279,42 @@ describe('Merged navigation shell', () => {
     expect(topbarRule).toMatch(/height:\s*52px/)
   })
 
-  it('lets the nav centre itself, which needs the brand not to grow', () => {
-    // Auto margins absorb a flex row's LEFTOVER space. A brand with flex-grow: 1 swallows it all
-    // first, so `margin: 0 auto` on the nav silently does nothing -- the two rules only work as a
-    // pair, and the failure mode is a nav that looks left-aligned for no visible reason.
+  /*
+    Centring the nav IN THE BAR, which is not what it used to do.
+
+    `margin: 0 auto` absorbs a flex row's LEFTOVER space, so it centred the nav between the brand's
+    right edge and the session controls' left edge. Those two are nowhere near the same width -- a
+    two-line brand against an alert pill and a 28px avatar -- so the nav sat left of the bar's true
+    centre by half their difference, which is the miss this replaced.
+
+    Equal-weight sides is the mechanism now: both flanks claim the same share of free space
+    whatever their content measures, which puts the nav's midpoint on the bar's. Asserted as a
+    SET, because no one rule here does anything on its own -- an auto margin left behind on the
+    nav would compete with the sides for the same space and un-centre it again.
+  */
+  it('centres the nav on the bar by giving its two flanks equal weight', () => {
     const brandRule = APP_CSS.match(/\.topbar-brand \{([\s\S]*?)\n\}/)[1]
     const navRule = APP_CSS.match(/\.topbar-nav \{([\s\S]*?)\n\}/)[1]
-    expect(navRule).toMatch(/margin:\s*0 auto/)
-    expect(brandRule).toMatch(/flex:\s*0 1 auto/)
+    const rightRule = APP_CSS.match(/\.topbar-right \{([\s\S]*?)\n\}/)[1]
+
+    expect(brandRule).toMatch(/flex:\s*1 1 0/)
+    expect(rightRule).toMatch(/flex:\s*1 1 0/)
+    expect(navRule).toMatch(/flex:\s*0 0 auto/)
+    expect(navRule).not.toMatch(/margin:\s*0 auto/)
+    // The right-hand group is as wide as its half of the bar now, so its contents need pinning to
+    // the far edge or they float in the middle of it.
+    expect(rightRule).toMatch(/justify-content:\s*flex-end/)
+  })
+
+  it('keeps the brand the only flank that yields when the bar runs out of room', () => {
+    // `min-width: 0` is what lets a flex item shrink below its content width. Only the brand has
+    // it, so `.brand-name` truncates while the nav keeps its width and the session controls hold
+    // at content size. Past that point the nav is no longer exactly centred, which is correct --
+    // nothing should become unreachable to preserve a symmetry.
+    const brandRule = APP_CSS.match(/\.topbar-brand \{([\s\S]*?)\n\}/)[1]
+    const rightRule = APP_CSS.match(/\.topbar-right \{([\s\S]*?)\n\}/)[1]
+    expect(brandRule).toMatch(/min-width:\s*0/)
+    expect(rightRule).not.toMatch(/min-width:\s*0/)
   })
 
   /**

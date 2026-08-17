@@ -675,6 +675,14 @@ const apiMethods = {
       // and then show whatever fraction of them happened to be deletions.
       const action = (url.searchParams.get('action') || '').trim().toUpperCase();
       const limit = Number.parseInt(url.searchParams.get('limit') || '', 10);
+      // The timeline's range control, for the same reason the action filter is a SQL predicate
+      // and for one more besides. `limit` is applied by the database to rows ordered NEWEST
+      // FIRST, so a window filtered client-side would first take the newest 200 rows overall and
+      // only then discard everything outside the range -- which means "Last 30 Days" could
+      // legitimately show FEWER events than "Last 24 Hours", having spent its whole budget on
+      // rows it went on to throw away. Pushed down, the limit is spent inside the window.
+      const since = (url.searchParams.get('since') || '').trim();
+      const until = (url.searchParams.get('until') || '').trim();
 
       // A tag that matches no device must return nothing rather than everything.
       if (entityIds && entityIds.length === 0) return [];
@@ -690,6 +698,11 @@ const apiMethods = {
       }
       if (entityIds) query = query.in('entity_id', entityIds);
       if (['INSERT', 'UPDATE', 'DELETE'].includes(action)) query = query.eq('action', action);
+      // Bounds before the limit. PostgREST serialises the whole builder at await-time so the JS
+      // call order does not itself decide anything -- but these are `where` and that is `limit`,
+      // and writing them in that order is the point being made.
+      if (since) query = query.gte('recorded_at', since);
+      if (until) query = query.lte('recorded_at', until);
       if (Number.isFinite(limit) && limit > 0) query = query.limit(limit);
 
       const { data, error } = await query.order('recorded_at', { ascending: false });

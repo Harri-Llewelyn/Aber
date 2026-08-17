@@ -54,6 +54,11 @@
      error toast is the message a user most needs to read. One step lighter clears it at 5.3:1
      while staying the same signal hue. */
   --danger-text:  #ff6b85;
+  /* The monospace stack, as a token. Every rule in this file spelled it out literally, which was
+     fine until a call site wanted `var(--font-mono, monospace)` -- with no token defined that
+     silently falls back to the bare generic and drops JetBrains Mono. Structural, not colour, so
+     the light theme does not restate it. */
+  --font-mono:    'JetBrains Mono', monospace;
   --radius:       12px;
   --radius-sm:    8px;
   --shadow:       0 4px 24px rgba(0, 0, 0, 0.5);
@@ -227,17 +232,26 @@ html, body, #root {
   }
 }
 
+/* THE BRAND AND THE RIGHT-HAND GROUP ARE EQUAL-WEIGHT SIDES, and that is what centres the nav.
+
+   This was `flex: 0 1 auto` here and `margin: 0 auto` on the nav, which centres the nav in the
+   space LEFT OVER between the two -- not in the bar. The two sides are nowhere near the same
+   width (a two-line brand against an alert pill and a 28px avatar), so the nav sat left of the
+   true centre by half their difference. Giving both sides `flex: 1 1 0` makes them claim equal
+   shares of the free space whatever their content measures, which puts the nav's midpoint on the
+   bar's midpoint.
+
+   THE ASYMMETRY THAT REMAINS IS DELIBERATE: only the brand carries `min-width: 0`. That is what
+   lets a flex item shrink below its content, so when the bar runs out of room the brand is the
+   one region that yields -- `.brand-name` truncates and the nav keeps its width. The right-hand
+   group keeps the default `min-width: auto` and so holds at its content size. Past that point the
+   nav is no longer exactly centred, which is correct: nothing here should become unreachable to
+   keep a symmetry. */
 .topbar-brand {
   display: flex;
   align-items: center;
   gap: 10px;
-  /* SHRINK-ONLY (`0 1 auto`), not grow-and-shrink.
-     It is still the only region allowed to give up space -- `min-width: 0` is what actually lets a
-     flex item shrink below its content width, and without it the default `min-width: auto` makes
-     the brand rigid and the overflow lands on the nav instead.
-     But it must not GROW either: a growing brand swallows the bar's free space, and the nav's auto
-     margins then have nothing left to centre it with. */
-  flex: 0 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
 }
@@ -288,28 +302,31 @@ html, body, #root {
 }
 
 /* ===== Primary Navigation (in the top bar) =====
-   Centre region. Fixed-size and never clipped -- see the .topbar comment for why this wins the
-   space fight against the brand.
+   Centre region. Fixed-size and never clipped -- see the .topbar-brand comment for how the two
+   flanks centre it, and for why this one wins the space fight against the brand.
 
-   `margin: 0 auto` is what centres it: auto margins on a flex item absorb the row's leftover space
-   equally on both sides, which is why the brand had to stop growing. Note this centres the nav in
-   the space LEFT OVER by the brand and the controls, so if those two differ in width the nav sits
-   off the bar's true centre by half that difference. That is the honest trade for never
-   overlapping either of them, which absolute centring would risk at narrow widths. */
+   Neither grows nor shrinks: the nav is the fixed thing the two elastic sides are centred around.
+   `margin: 0 auto` used to do the centring here and is deliberately gone -- it centred the nav in
+   the space LEFT OVER by the brand and the controls, which put it off the bar's true centre by
+   half the difference between them, and with equal-weight sides it would now fight them for the
+   same free space. */
 .topbar-nav {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 2px;
-  flex-shrink: 0;
-  margin: 0 auto;
+  flex: 0 0 auto;
 }
 
+/* The mirror of .topbar-brand -- same weight, opposite alignment. `justify-content: flex-end`
+   is what keeps the pill and the avatar against the right edge now that this group is as wide as
+   its half of the bar rather than as wide as its contents. */
 .topbar-right {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
-  flex-shrink: 0;
+  flex: 1 1 0;
 }
 
 /* ===== Account avatar and menu =====
@@ -2659,102 +2676,444 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   width: 100%;
 }
 
-/* ===== Digital Thread Timeline ===== */
-.timeline {
-  position: relative;
-  padding-left: 24px;
-  margin-top: 16px;
-}
+/* ===== Digital Thread Swimlanes =====
 
-.timeline::before {
-  content: '';
-  position: absolute;
-  top: 4px;
-  bottom: 4px;
-  left: 7px;
-  width: 2px;
-  background: var(--border);
-}
+   This replaced a vertical list of ~200 bordered cards, each printing its own JSON payload. The
+   list was honest but it was not a TIMELINE: two changes a fortnight apart and two a second
+   apart looked identical, and an asset's history was only legible by scrolling past every other
+   asset's. One lane per entity puts time on the x-axis, where it can be compared. */
 
-/* 16px was the gap between two boxes that already carry a 1px border and 10px of padding each,
-   so the separation was being paid for three times over. At ~200 audit rows the saving is a
-   screenful. */
-.timeline-item {
-  position: relative;
-  margin-bottom: 10px;
-}
-
-.timeline-dot {
-  position: absolute;
-  left: -24px;
-  top: 4px;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid var(--bg-surface);
-  box-shadow: 0 0 10px var(--accent-glow);
-}
-
-.timeline-content {
-  background: var(--bg-glass);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 10px;
-}
-
-.timeline-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-
-.timeline-title {
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.timeline-time {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-/* The identifiers in a timeline row: the entity id in the header and the audit row's own id
-   beside the timestamp. Both are `CopyableId` buttons, so they need the size and colour the
-   plain spans they replaced were carrying inline. */
+/* The identifier on a lane label. A `CopyableId` button, so it needs the size and colour the
+   plain span it replaced was carrying inline. */
 .timeline-id {
   font-size: 11px;
   color: var(--accent);
 }
 
-/* The mutation id is a reference, not the thing you read the row for -- it sits in the muted
-   colour of the timestamp it shares a line with, and brightens only when pointed at. */
-.timeline-time .timeline-id { color: var(--text-muted); }
-.timeline-time .timeline-id:hover,
-.timeline-time .timeline-id:focus-visible { color: var(--accent); }
-
-.timeline-desc {
-  font-size: 13px;
+/* The colour key. `.dt-node-dot` shares the `.dt-node-<kind>` fills with the markers themselves,
+   so the legend cannot drift away from what it describes. */
+.dt-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 10px;
+  font-size: 11px;
   color: var(--text-muted);
-  margin-bottom: 6px;
 }
 
-.timeline-meta {
+.dt-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dt-node-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Horizontal scrolling lives HERE rather than on the page, because the drawer is a flex sibling
+   of the list: opening it takes 360px off this element's width, and a page that scrolled as a
+   whole would push the lane labels off-screen the moment an event was selected. */
+.dt-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.dt-swimlanes {
+  min-width: 620px;
+}
+
+.dt-lane {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+}
+
+.dt-lane:last-child { border-bottom: none; }
+
+/* The section rule: Cells, then Gateways, then Devices -- a plant's own containment order.
+
+   STICKY LIKE THE LABELS BESIDE IT, and for the same reason: the heading is what tells you which
+   kind of asset the row under your cursor is, and a heading that scrolled out horizontally would
+   leave the icon doing that work alone. It spans only the label column, so it never rides over
+   the markers. */
+.dt-section {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 210px;
+  padding: 12px 10px 5px 0;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+/* The first heading sits flush under the axis; the rest earn their space from the lanes above. */
+.dt-section:first-of-type { padding-top: 4px; }
+
+.dt-section-name {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+}
+
+.dt-section-count {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* Sticky, and opaque in the card's own colour: markers scroll UNDER the labels rather than over
+   them, so the asset a lane belongs to stays readable at any scroll offset. A transparent label
+   here would let a dozen dots slide through the text. */
+.dt-lane-label {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  flex: 0 0 210px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 10px 4px 0;
+  background: var(--bg-card);
+  font-size: 12px;
+}
+
+/* The one element allowed to lose characters. Everything else in the label -- the icon, the
+   deleted flag -- is fixed width or must stay whole, so a long asset name is what gives. */
+.dt-lane-name {
+  color: var(--text-primary);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The kind, carried at a twelfth of the width the DEVICE/GATEWAY/CELL badge used to cost -- and
+   still readable when the section heading has been scrolled past. Dim, because it repeats what
+   the heading above already said; the name is what the eye is looking for. */
+.dt-lane-icon {
+  flex-shrink: 0;
+  color: var(--text-dim);
+}
+
+/* No name resolved anywhere -- not from a live row, not from an audit snapshot. Dimmer than a
+   real name so a lane that could not be identified does not read like one that was. */
+.dt-lane-unnamed {
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* The entity is gone and the name came out of its final snapshot. */
+.dt-lane-gone {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--danger-text);
+  opacity: 0.85;
+}
+
+.dt-track {
+  position: relative;
+  flex: 1;
+  min-width: 380px;
+  height: 32px;
+}
+
+/* The lane's rule, inset by the same 14px the markers are padded with so it starts and stops
+   where they do. */
+.dt-track::before {
+  content: '';
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--border);
+}
+
+.dt-axis .dt-lane-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.dt-axis-track { height: 24px; }
+.dt-axis-track::before { display: none; }
+
+.dt-tick {
+  position: absolute;
+  top: 6px;
+  transform: translateX(-50%);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* The end ticks are aligned by their inner edge rather than centred, or each would hang half its
+   width past the track and widen the scroll area by a label. */
+.dt-tick:first-child { transform: none; }
+.dt-tick:last-child  { transform: translateX(-100%); }
+
+/* 14px of padding at each end of the track, so a marker at either extreme is drawn whole instead
+   of being cut in half by the lane's edge. Positions are a calc against that padded width --
+   see offsetFor(). */
+.dt-node {
+  position: absolute;
+  top: 50%;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--bg-card);
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+/* Markers pile up where activity is dense -- a burst of edits within a minute is a handful of
+   overlapping dots. Raising the hovered one is what makes the underneath reachable; the tooltip
+   and the drawer are what tell them apart. */
+.dt-node:hover,
+.dt-node:focus-visible {
+  transform: translate(-50%, -50%) scale(1.4);
+  z-index: 3;
+}
+
+.dt-node-selected {
+  box-shadow: 0 0 0 3px var(--accent-glow);
+  z-index: 3;
+}
+
+.dt-node-creation,    .dt-node-dot.dt-node-creation    { background: var(--success); }
+.dt-node-operational, .dt-node-dot.dt-node-operational { background: var(--accent); }
+.dt-node-governance,  .dt-node-dot.dt-node-governance  { background: var(--warning); }
+.dt-node-critical,    .dt-node-dot.dt-node-critical    { background: var(--danger); }
+
+.dt-lane-toggle { margin-top: 10px; }
+
+/* The classification badge in the drawer's subtitle. Same tinted-fill convention as `.badge-*`
+   above, and the same reason for the `-text` tokens: the bare signal colours are tuned for
+   borders and fills, not for text. */
+.dt-badge-creation    { background: rgba(0, 232, 150, 0.15); color: var(--success-text); }
+.dt-badge-operational { background: var(--accent-dim);       color: var(--accent); }
+.dt-badge-governance  { background: rgba(255, 179, 0, 0.15); color: var(--warning-text); }
+.dt-badge-critical    { background: rgba(255, 77, 109, 0.15); color: var(--danger-text); }
+
+/* ===== Digital Thread: stepping through one asset's history =====
+   Full width of the subtitle row it occupies, stacked, because the position line and the two
+   buttons are three things at three sizes and wrapping them into one row puts the count and the
+   buttons on different lines at unpredictable widths. */
+.dt-drawer-nav {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.dt-drawer-nav-pos {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  overflow-wrap: break-word;
+}
+
+/* Equal halves rather than content width: the two labels are different lengths, and a Next
+   button that sits wherever Previous happens to end moves under the cursor as you step. */
+.dt-drawer-nav-btns {
+  display: flex;
+  gap: 6px;
+}
+
+.dt-nav-btn {
+  flex: 1 1 0;
+  justify-content: center;
+  font-size: 11px;
+}
+
+.dt-drawer-nav-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+/* ===== Digital Thread: the diff inspector inside the drawer ===== */
+.dt-diff { margin-top: 14px; }
+
+.dt-diff-none {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-top: 4px;
+}
+
+.dt-diff-table {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 11px;
+  /* FIXED, so the columns are decided by the rule below rather than by whichever row happens to
+     hold the longest UUID. With `auto`, one 36-character value takes the width it wants and
+     squeezes the other two columns into a character apiece -- which is what made adjacent values
+     read as one run of text. */
+  table-layout: fixed;
+}
+
+/* THE COLLISION WAS `white-space`, INHERITED, and the reset below is the actual fix.
+   The global `th` rule near the top of this file sets `white-space: nowrap` (plus uppercase and
+   0.8px letter-spacing) for every table header in the app. Each property name here is a
+   `<th scope="row">`, so it took all three: `last_birth_metrics_at` rendered as
+   LAST_BIRTH_METRICS_AT, on one unbreakable line, straight across the value beside it. Wrapping
+   rules cannot help while `nowrap` stands -- there is nothing for them to act on -- which is why
+   this resets the inherited three before setting anything of its own. */
+.dt-diff-table th,
+.dt-diff-table td {
+  text-align: left;
+  vertical-align: top;
+  white-space: normal;
+  text-transform: none;
+  letter-spacing: 0;
+  /* Symmetric, so the gutter between two columns is a real 24px rather than one cell's 12px
+     against the next cell's zero. box-sizing is already global, restated because these widths
+     are explicit and the padding has to stay inside them. */
+  padding: 6px 12px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--border);
+  /* `anywhere` rather than `break-word`: an underscore is not a break opportunity, so a 21-
+     character column name has no legal place to wrap and overflows its cell however narrow the
+     column gets. Both are declared -- `anywhere` does the work, `break-word` is the fallback for
+     engines that do not take it. Values wrap; they are never ellipsed, because a truncated UUID
+     is useless and a truncated topic path is worse -- it looks like a shorter path. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* The outer edges have nothing to be separated from, and reclaiming those 12px gives them to the
+   values that need them. */
+.dt-diff-table th:first-child,
+.dt-diff-table td:first-child { padding-left: 0; }
+.dt-diff-table th:last-child,
+.dt-diff-table td:last-child { padding-right: 0; }
+
+/* Equal thirds. The property column was the widest at 38%, which is the right call when names
+   cannot wrap -- now that they can, the values are what need the room, and three even columns
+   keep the header row and the divider lines reading as one grid. */
+.dt-diff-table th:nth-child(1),
+.dt-diff-table td:nth-child(1) { width: 33.34%; }
+.dt-diff-table th:nth-child(2),
+.dt-diff-table td:nth-child(2) { width: 33.33%; }
+
+/* Vertical dividers, and the one between Previous and New is the load-bearing one: those two
+   columns hold the SAME property's two values, often differing by a character, and a reader
+   comparing them needs to know which side they are on. Drawn on the cell rather than the column
+   so it stops at the last row instead of running into the section below. */
+.dt-diff-table tbody th:nth-child(1),
+.dt-diff-table tbody td:nth-child(1),
+.dt-diff-table tbody td:nth-child(2) { border-right: 1px solid var(--border); }
+
+/* An INSERT or a DELETE has one value column, not two. A fixed 130px for the name -- rather than
+   a percentage -- because the name column's job is the same at any drawer width, and every pixel
+   past what it needs is taken from a serialised metric array that will use all of them. */
+.dt-diff-onesided th:nth-child(1),
+.dt-diff-onesided td:nth-child(1) {
+  width: 130px;
+  border-right: 1px solid var(--border);
+}
+.dt-diff-onesided th:nth-child(2),
+.dt-diff-onesided td:nth-child(2) { width: auto; }
+
+.dt-diff-table thead th {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--text-muted);
+}
+
+/* The property name is a LABEL, not a value -- muted, so the two things being compared beside it
+   are what the eye lands on. It was --text-primary, which gave the column name the same weight as
+   the data and made every row read as three equal facts. */
+.dt-diff-table tbody th {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.dt-diff-table td {
+  font-family: var(--font-mono, monospace);
+  color: var(--text-primary);
+}
+
+/* The previous value is struck through and dimmed rather than merely sitting to the left of the
+   new one: at this size the two columns read as a pair of values before they read as a
+   before/after, and which one is current is the whole question. */
+.dt-diff-before {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.dt-diff-empty {
+  color: var(--text-muted);
+  font-style: italic;
+  font-family: inherit;
+}
+
+/* ===== Digital Thread: the raw payload accordion ===== */
+.dt-raw { margin-top: 4px; }
+
+.dt-raw-summary {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--text-muted);
+  list-style: revert;
+}
+
+.dt-raw-summary:hover { color: var(--accent); }
+
+.dt-raw-body { margin-top: 8px; }
+
+.dt-raw-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+
+.dt-raw-json {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.5;
   background: var(--bg-base);
-  padding: 8px;
+  border: 1px solid var(--border);
   border-radius: 4px;
-  color: var(--accent);
-  word-break: break-all;
+  padding: 8px;
+  margin-bottom: 10px;
+  /* Capped and scrollable. A device row serialises to forty-odd keys, and letting that run to
+     its full height would push the accordion's own control off the bottom of the drawer. */
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary);
 }

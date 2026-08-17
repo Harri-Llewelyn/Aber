@@ -474,6 +474,7 @@ function Dashboard({ session, onSignOut }) {
             <DigitalThreadTab
               initialEntity={selectedThreadEntity}
               onClearEntity={() => setSelectedThreadEntity(null)}
+              showToast={showToast}
             />
           )}
           {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={showDevicesForSchema} onSelectDevice={showDevice} initialSchemaId={selectedSchemaId} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} />}
