@@ -16,14 +16,22 @@ const GATEWAY = {
   sparkplug_id: 'gwy2a0000000000400080000'
 }
 
+const FILENAME = 'acs-gateway-Cell-4-Press-Line-gwy2a0000000000400080000.zip'
+const FOLDER = FILENAME.replace(/\.zip$/, '')
+
 /** A blob URL and an anchor click are the download mechanism; both are stubbed so nothing navigates. */
 let clicked
+let written
 beforeEach(() => {
   vi.clearAllMocks()
   clicked = []
+  written = []
   vi.stubGlobal('URL', {
     createObjectURL: vi.fn(() => 'blob:stub'),
     revokeObjectURL: vi.fn()
+  })
+  vi.stubGlobal('navigator', {
+    clipboard: { writeText: vi.fn(async (t) => { written.push(t) }) }
   })
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () {
     clicked.push(this.download)
@@ -45,49 +53,69 @@ const renderModal = (props = {}) => {
 
 const bundleResponse = (overrides = {}) => ({
   blob: new Blob(['PK'], { type: 'application/zip' }),
-  filename: 'acs-gateway-Cell-4-Press-Line-gwy2a0000000000400080000.zip',
+  filename: FILENAME,
   expiresAt: new Date(Date.now() + 30 * 60_000).toISOString(),
   bundleVersion: '1.0.0',
   sparkplugId: GATEWAY.sparkplug_id,
   ...overrides
 })
 
-describe('GatewayBundleModal', () => {
-  /**
-   * THE PROPERTY THAT MATTERS MOST HERE. Re-issuing invalidates the previous bundle, so a modal that
-   * generated on mount would silently kill a bundle a colleague was carrying to a machine every time
-   * somebody clicked in to look at it.
-   */
-  it('mints nothing until the operator asks', () => {
-    renderModal()
-    expect(api.downloadGatewayBundle).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: /Download bundle/i })).toBeTruthy()
-  })
+/** Every ready-state assertion waits on this, so no test races the auto-download. */
+const ready = () => waitFor(() => expect(screen.getByText(/On the appliance/i)).toBeTruthy())
 
-  it('downloads on request and names the file from the server', async () => {
+describe('GatewayBundleModal — single-dialog lifecycle', () => {
+  /**
+   * ONE SCREEN, NOT TWO. Both entry points into this modal are already an explicit request for a
+   * bundle -- saving a gateway with "Virtual" unchecked, or the drawer's "Download Setup Bundle"
+   * action -- so a first screen asking whether you want the thing you just asked for is a step to
+   * click through rather than a safeguard.
+   */
+  it('downloads on open, with no intermediate confirm step', async () => {
     api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
     const { showToast } = renderModal()
 
-    fireEvent.click(screen.getByRole('button', { name: /Download bundle/i }))
-
     await waitFor(() => expect(api.downloadGatewayBundle).toHaveBeenCalledWith(GATEWAY.gateway_id))
+    await ready()
+
+    // The old two-step affordance must be gone, not merely bypassed.
+    expect(screen.queryByRole('button', { name: /^Download bundle$/i })).toBeNull()
     // The FILENAME COMES FROM THE HEADER, not composed here -- the server already slugged the
     // gateway's name and knows the folder inside the archive matches.
-    await waitFor(() => expect(clicked).toContain(
-      'acs-gateway-Cell-4-Press-Line-gwy2a0000000000400080000.zip'
-    ))
+    expect(clicked).toContain(FILENAME)
     expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Bundle downloaded'), 'success')
   })
 
-  it('shows the two commands the operator has to run, with the unpacked folder name', async () => {
+  /**
+   * Minting consumes any live token, so a double-invoked effect would issue two bundles and leave
+   * the modal showing a token that had already invalidated the file the browser just saved.
+   */
+  it('mints exactly once per mount', async () => {
     api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
     renderModal()
-    fireEvent.click(screen.getByRole('button', { name: /Download bundle/i }))
+    await ready()
+    await new Promise(r => setTimeout(r, 50))
+    expect(api.downloadGatewayBundle).toHaveBeenCalledTimes(1)
+  })
 
-    await waitFor(() => expect(screen.getByText(/docker compose up -d --build/)).toBeTruthy())
-    expect(screen.getByText(/docker compose logs bootstrap/)).toBeTruthy()
-    // Derived from the download name, so it is the directory that actually appears after unzipping.
-    expect(screen.getByText(/cd acs-gateway-Cell-4-Press-Line-gwy2a0000000000400080000/)).toBeTruthy()
+  it('reports the download in place while it is running', async () => {
+    let resolve
+    api.downloadGatewayBundle.mockReturnValue(new Promise(r => { resolve = r }))
+    renderModal()
+
+    expect(screen.getByText(/Generating a bundle and starting the download/i)).toBeTruthy()
+    resolve(bundleResponse())
+    await ready()
+    expect(screen.queryByText(/Generating a bundle/i)).toBeNull()
+  })
+
+  it('shows the three appliance commands, with the unpacked folder name', async () => {
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    renderModal()
+    await ready()
+
+    const block = screen.getByText(new RegExp(`cd ${FOLDER}`))
+    expect(block.textContent).toContain('docker compose up -d --build')
+    expect(block.textContent).toContain('docker compose logs bootstrap')
   })
 
   it('counts the token down while it is live', async () => {
@@ -95,61 +123,132 @@ describe('GatewayBundleModal', () => {
       bundleResponse({ expiresAt: new Date(Date.now() + 90_000).toISOString() })
     )
     renderModal()
-    fireEvent.click(screen.getByRole('button', { name: /Download bundle/i }))
-
-    // A TOLERANT PATTERN. The countdown is computed from Date.now() at render, so a 90-second token
-    // reads 1:30 or 1:29 depending on how long the mocked download took -- pinning the exact second
-    // makes this test fail on a slow machine and prove nothing on a fast one.
+    // A TOLERANT PATTERN: the countdown is computed from Date.now() at render, so pinning the exact
+    // second fails on a slow machine and proves nothing on a fast one.
     await waitFor(() => expect(screen.getByText(/Valid for \d+:\d\d/)).toBeTruthy())
     expect(screen.queryByText(/has expired/i)).toBeNull()
   })
 
   /**
-   * An expired bundle fails at the appliance with a 401 whose message deliberately cannot say WHY
-   * (unknown, expired and already-redeemed are indistinguishable, so an enumerator learns nothing).
-   * That makes the expiry something this modal has to state while the operator still knows which
-   * bundle is which.
+   * THE PRICE OF AUTO-DOWNLOADING, said out loud. Opening this modal invalidates any bundle already
+   * in transit, and an appliance started with the stale one fails at enroll-gateway with a 401 that
+   * deliberately cannot say why. This banner is the only place that fact reaches the operator while
+   * they still know which bundle is which.
    */
+  it('warns that any earlier download has stopped working', async () => {
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    renderModal()
+    await ready()
+    expect(screen.getByText(/any earlier download has stopped working/i)).toBeTruthy()
+  })
+
   it('says so plainly once the token has expired, and offers a re-issue', async () => {
     api.downloadGatewayBundle.mockResolvedValue(
       bundleResponse({ expiresAt: new Date(Date.now() - 60_000).toISOString() })
     )
     renderModal()
-    fireEvent.click(screen.getByRole('button', { name: /Download bundle/i }))
 
     await waitFor(() => expect(screen.getByText(/This bundle has expired/i)).toBeTruthy())
-    expect(screen.getByRole('button', { name: /Re-issue bundle/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Re-issue Bundle/i })).toBeTruthy()
     expect(screen.queryByText(/Valid for/)).toBeNull()
   })
+})
 
-  it('re-issues on demand, calling the endpoint a second time', async () => {
+describe('GatewayBundleModal — Copy Commands', () => {
+  it('copies all three commands as one block', async () => {
     api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
     renderModal()
+    await ready()
 
-    fireEvent.click(screen.getByRole('button', { name: /Download bundle/i }))
-    await waitFor(() => expect(screen.getByRole('button', { name: /Re-issue/i })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: /Copy Commands/i }))
 
-    fireEvent.click(screen.getByRole('button', { name: /Re-issue/i }))
-    await waitFor(() => expect(api.downloadGatewayBundle).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(written).toHaveLength(1))
+    // EXACTLY what the block shows -- one source for both, or an operator pastes commands that do
+    // not match the folder named a line above them.
+    expect(written[0]).toBe(
+      `cd ${FOLDER}\ndocker compose up -d --build\ndocker compose logs bootstrap`
+    )
   })
 
-  it('surfaces the server-s reason for a refusal rather than a generic failure', async () => {
+  it('confirms the copy on the button itself', async () => {
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    renderModal()
+    await ready()
+
+    fireEvent.click(screen.getByRole('button', { name: /Copy Commands/i }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /Copied/i })).toBeTruthy())
+  })
+
+  /**
+   * navigator.clipboard is undefined outside a secure context, and this dashboard is served over
+   * plain HTTP -- so it is present on localhost and absent for anyone reaching the app by IP across
+   * the plant, which is how most operators will. A silent no-op there is worse than an error.
+   */
+  it('reports a failure rather than silently doing nothing', async () => {
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    vi.stubGlobal('navigator', {})           // no clipboard API at all
+    document.execCommand = vi.fn(() => false) // and the fallback refuses too
+    const { showToast } = renderModal()
+    await ready()
+
+    fireEvent.click(screen.getByRole('button', { name: /Copy Commands/i }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /Copy failed/i })).toBeTruthy())
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('clipboard'), 'error')
+  })
+})
+
+describe('GatewayBundleModal — footer actions', () => {
+  it('Done closes without minting anything further', async () => {
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    const { onClose } = renderModal()
+    await ready()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Done$/i }))
+    expect(onClose).toHaveBeenCalled()
+    expect(api.downloadGatewayBundle).toHaveBeenCalledTimes(1)
+  })
+
+  it('Re-issue Bundle mints again and downloads a fresh archive', async () => {
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    renderModal()
+    await ready()
+
+    fireEvent.click(screen.getByRole('button', { name: /Re-issue Bundle/i }))
+
+    await waitFor(() => expect(api.downloadGatewayBundle).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(clicked).toHaveLength(2))
+  })
+})
+
+describe('GatewayBundleModal — failure on open', () => {
+  it('surfaces the server-s reason, and offers a retry rather than a dead dialog', async () => {
     // What an Operator or Auditor gets. The message has to reach the screen: a silent modal is
-    // indistinguishable from a broken button.
+    // indistinguishable from a broken feature.
     api.downloadGatewayBundle.mockRejectedValue(new Error('Forbidden: Insufficient privileges'))
     const { showToast } = renderModal()
 
-    fireEvent.click(screen.getByRole('button', { name: /Download bundle/i }))
-
     await waitFor(() => expect(screen.getByText(/Forbidden: Insufficient privileges/)).toBeTruthy())
     expect(showToast).toHaveBeenCalledWith('Forbidden: Insufficient privileges', 'error')
-    // And nothing was handed to the browser to save.
+    expect(screen.getByRole('button', { name: /Try again/i })).toBeTruthy()
+    // Nothing was handed to the browser to save, and no instructions are shown for a bundle that
+    // does not exist.
     expect(clicked).toHaveLength(0)
+    expect(screen.queryByText(/On the appliance/i)).toBeNull()
   })
 
-  it('tells the operator this is a claim rather than a credential', () => {
+  it('recovers when the retry succeeds', async () => {
+    api.downloadGatewayBundle
+      .mockRejectedValueOnce(new Error('Enrolment is temporarily unavailable'))
+      .mockResolvedValueOnce(bundleResponse())
     renderModal()
-    expect(screen.getByText(/single-use claim, not a password/i)).toBeTruthy()
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /Try again/i })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: /Try again/i }))
+
+    await ready()
+    expect(screen.queryByText(/temporarily unavailable/)).toBeNull()
+    expect(clicked).toContain(FILENAME)
   })
 })
 
