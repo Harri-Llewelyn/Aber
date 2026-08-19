@@ -156,6 +156,30 @@ const MIRRORS = [
     why: 'Provisions /data -- settings.js, the credentials and the seeded flow. Runs as an initContainer',
   },
   {
+    source: 'scripts',
+    dest: 'gateway-credential',
+    // The service ONLY. Compose bind-mounts these two from scripts/; the chart projects them
+    // through a ConfigMap, with the library restored to `lib/` by the volume's `items` -- see
+    // templates/messaging/gateway-credential.yaml. The image supplies the runtime (node, and
+    // mosquitto_passwd), the chart supplies the code, so a script change needs no image rebuild.
+    match: (name) => name === 'gateway-credential-service.mjs',
+    why: 'The credential-issuing sidecar in the broker pod; mints one gateway account per call',
+  },
+  {
+    source: join('scripts', 'lib'),
+    // A SEPARATE dest FROM THE ENTRY ABOVE, and it has to be. Each mirror OWNS its destination
+    // directory and deletes anything in it that its own source did not produce -- so two mirrors
+    // pointing at one directory alternately delete each other's file on every run. (Observed, not
+    // theorised: the first attempt shared `gateway-credential` and the sync reported
+    // "updated ... / removed ...' for the same path in a single pass.)
+    //
+    // The two files are reunited at MOUNT time instead: the ConfigMap carries both and the volume's
+    // `items` restores this one to `lib/`. See templates/messaging/gateway-credential.yaml.
+    dest: 'gateway-credential-lib',
+    match: (name) => name === 'mosquitto-credentials.mjs',
+    why: 'The shared merge -- the truncation guard both the CLI and the service depend on',
+  },
+  {
     source: 'grafana',
     dest: 'grafana',
     // The OAuth block only. Everything else Grafana needs comes from GF_* env vars, which is where

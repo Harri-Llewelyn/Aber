@@ -32,11 +32,20 @@ RUN rm -f /home/deno/functions/Dockerfile
 # running Node-RED.
 COPY node_red_flow.json /home/deno/flows/node_red_flow.json
 
+# The physical gateway bundle template -- the files gateway-bundle zips up and hands to an operator.
+# Same delivery reasoning as the flow above: baked in, so which revision of the appliance template a
+# release ships is a property of the artefact rather than of whatever is on a cluster node's disk.
+COPY templates/physical-gateway /home/deno/templates/physical-gateway
+
 # A user worker has NO FILESYSTEM ACCESS to anything in this image -- edge-runtime sandboxes it,
-# and main/index.ts forwards only environment variables to each worker it spawns. So the flow is
-# read here, in the plain container shell before edge-runtime starts, and handed on through the
-# environment. This is the same arrangement docker-compose.yml's entrypoint uses, moved into the
-# image so the Kubernetes Deployment needs no command override at all.
+# and main/index.ts forwards only environment variables to each worker it spawns. So the flow and
+# the bundle templates are read here, in the plain container shell before edge-runtime starts, and
+# handed on through the environment. This is the same arrangement docker-compose.yml's entrypoint
+# uses, moved into the image so the Kubernetes Deployment needs no command override at all.
+#
+# ONE VARIABLE PER FILE, with static names, because main/index.ts's FUNCTION_REGISTRY is an
+# allow-list of variable NAMES -- a dynamically-built set could not be declared there, and that
+# declaration is the one place "what may this code reach" is stated.
 #
 # Exec form with a literal script, so the nested quoting survives.
-ENTRYPOINT ["/bin/sh", "-e", "-c", "export NODERED_FLOW_JSON=\"$(cat /home/deno/flows/node_red_flow.json)\"; exec edge-runtime start --main-service /home/deno/functions/main"]
+ENTRYPOINT ["/bin/sh", "-e", "-c", "export NODERED_FLOW_JSON=\"$(cat /home/deno/flows/node_red_flow.json)\"; T=/home/deno/templates/physical-gateway; export GW_BUNDLE_COMPOSE=\"$(cat $T/docker-compose.yml)\"; export GW_BUNDLE_DOCKERFILE=\"$(cat $T/Dockerfile)\"; export GW_BUNDLE_BOOTSTRAP=\"$(cat $T/bootstrap.mjs)\"; export GW_BUNDLE_FLOWS=\"$(cat $T/flows.template.json)\"; export GW_BUNDLE_README=\"$(cat $T/README.md)\"; exec edge-runtime start --main-service /home/deno/functions/main"]

@@ -3,7 +3,7 @@ import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
-import { gatewayLiveStatus, formatHeartbeat } from '../../utils/gatewayStatus'
+import { gatewayLiveStatus, gatewayNeedsAttention, formatHeartbeat } from '../../utils/gatewayStatus'
 import { effectiveSparkplugId, gatewaySparkplugId } from '../../utils/sparkplugId'
 import { groupDevicesByCell, SOURCE_SITE_WIDE } from '../../utils/cellResolution'
 import CopyableId from '../common/CopyableId'
@@ -202,8 +202,14 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   const liveGateways = (c) => (c.gateways || []).filter(g => !g.is_archived)
   const liveDevices = (c) => (devicesByCell.get(c.cell_id) || []).filter(a => !a.is_archived)
 
+  // gatewayNeedsAttention(), NOT `gatewayLiveStatus(g) !== 'ONLINE'`.
+  //
+  // A physical gateway sits in PENDING_ENROLLMENT from creation until somebody carries its bundle to
+  // a machine, and in AWAITING_BIRTH until that machine publishes. Both are unfinished TASKS, not
+  // faults -- and under the old test, ordering four appliances on a Monday morning flagged every
+  // cell they belong to, which is precisely when this signal needs to still mean something.
   const cellNeedsAttention = (c) =>
-    liveGateways(c).some(g => gatewayLiveStatus(g) !== 'ONLINE') ||
+    liveGateways(c).some(g => gatewayNeedsAttention(g)) ||
     liveDevices(c).some(a => a.is_quarantined)
 
   // Either no gateways at all, or gateways serving nothing -- usually a provisioning mistake or a

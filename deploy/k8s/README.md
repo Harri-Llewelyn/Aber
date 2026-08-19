@@ -483,6 +483,13 @@ docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
 # exists to work around, and one more independent image is cheaper than one more constraint.
 docker build -f i3x/Dockerfile                  -t $NS/i3x-service:$V .
 
+# Broker credential-issuing sidecar — context is gateway-credential/, and the image is built FROM
+# eclipse-mosquitto so it carries the broker's own mosquitto_passwd. That is not incidental: the
+# `$7$` hash has to be readable by the mosquitto that will verify it, and a reimplementation
+# produces a password file that looks correct and refuses every login with nothing logged at either
+# end. The service's own code is NOT baked in — the chart mounts it from a ConfigMap.
+docker build -f gateway-credential/Dockerfile   -t $NS/acs-cymru-gateway-credential:$V gateway-credential
+
 # Conformance test runner (only needed for e2e.enabled=true). EXTENDS the ingestion image, so build
 # that first: it adds jsonschema and the AAS suite in a repo-shaped layout. jsonschema is deliberately
 # NOT in the production ingestion image, and without it the schema-conformance tests skip themselves

@@ -206,7 +206,14 @@ function edgeFunctionNames() {
 {
   const fns = edgeFunctionNames();
   const readme = read('README.md');
-  const WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7 };
+  // A WORD NOT IN THIS MAP PARSES AS NaN AND ALWAYS FAILS, which is the right direction (loud) but
+  // reads as a documentation error rather than as a checker one -- the message says the README is
+  // wrong while the README is correct. Extended past the current count so the next function added
+  // does not spend a debugging round here.
+  const WORDS = {
+    one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
+    seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+  };
   const claimed = readme.match(/daemon, (\w+) edge functions/);
   if (claimed) {
     const n = WORDS[claimed[1].toLowerCase()] ?? Number(claimed[1]);
@@ -289,7 +296,10 @@ function edgeFunctionNames() {
     ...values.matchAll(/repository:\s*(\S+)[\s\S]{0,400}?^\s{4}tag:\s*""\s*$/gm),
   ].map((m) => m[1]);
   const unique = [...new Set(built)];
-  const EXPECTED = 6;
+  // 7 since the gateway-credential sidecar. Bumped deliberately rather than derived: the count is
+  // the check -- an image added to values.yaml without a documented build command is exactly what
+  // this notices, and a self-adjusting total would notice nothing.
+  const EXPECTED = 7;
   if (unique.length !== EXPECTED) {
     fail(
       `expected ${EXPECTED} chart images with an empty tag (built here, resolved from appVersion); ` +
@@ -405,6 +415,10 @@ function edgeFunctionNames() {
     user_roles: 'RBAC internals — read server-side by the two userinfo functions, never by a client',
     webhook_endpoints:
       'migration-managed with NO write RLS policy by design; a writable endpoint table is an SSRF primitive',
+    gateway_enrollment_tokens:
+      'RLS on with NO policy and the anon/authenticated grants revoked — reachable only by '
+      + 'service_role, i.e. only by the enroll-gateway function. Publishing a path for it would '
+      + 'document an endpoint that answers 401 to every caller a reader could actually be',
   };
 
   const spec = read('docs/openapi.yaml');

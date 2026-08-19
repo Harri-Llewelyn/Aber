@@ -1,0 +1,71 @@
+# EditorConfig -- what EDITORS write. https://editorconfig.org
+#
+# THIS IS NOT A DUPLICATE OF .gitattributes, and the two govern different moments:
+#
+#   .gitattributes  what GIT stores and checks out (`* text=auto` normalises to LF in the repository,
+#                   and `core.autocrlf=true` on Windows expands that to CRLF in the working tree)
+#   .editorconfig   what an EDITOR writes when somebody saves a file
+#
+# Both are needed. Git can normalise line endings on commit but has nothing to say about the ENCODING
+# a tool chooses when it rewrites a file -- and that is the gap this file closes.
+#
+# ---------------------------------------------------------------------------------------------
+# WHY charset = utf-8 IS THE MOST IMPORTANT LINE HERE.
+#
+# `utf-8` in EditorConfig means UTF-8 *without* a BOM. That matters, because the failure it prevents
+# has already happened in this repository: a tool read a UTF-8 file with the system ANSI codepage and
+# wrote it back, which turned every multi-byte character into its CP1252 mis-reading -- an em dash
+# became three Latin-1 characters, an arrow likewise -- and added a BOM at the top for good measure.
+# PowerShell 5.1 does exactly this: `Get-Content -Raw` decodes with the ANSI codepage unless told
+# otherwise, and `Set-Content -Encoding utf8` writes a BOM.
+#
+# THE EXAMPLES ARE DESCRIBED RATHER THAN SHOWN, deliberately: a literal sample of the corruption in
+# this file would match every future grep for it and make this the permanent first hit.
+#
+# The damage is invisible in a terminal that happens to share the wrong codepage and shows up as
+# gibberish everywhere else, including in a rendered README. It is also easy to spread: every save
+# re-encodes what is already broken.
+#
+# So the rule for any tool rewriting a file in this repository, editor or script: UTF-8 in, UTF-8
+# out, no BOM. In PowerShell that means passing `-Encoding utf8` on the READ as well as the write.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# ---------------------------------------------------------------------------------------------
+# Per-language indentation, matching what is already committed rather than imposing a new house
+# style -- a mismatch here produces a diff on every save, which is how an .editorconfig gets deleted.
+# ---------------------------------------------------------------------------------------------
+[*.py]
+indent_size = 4
+
+[*.{sql,sh}]
+indent_size = 2
+
+[Makefile]
+indent_style = tab
+
+# TWO TRAILING SPACES ARE A LINE BREAK IN MARKDOWN. Trimming them silently reflows a rendered
+# document, so the general rule above is switched off here rather than quietly changing prose.
+[*.md]
+trim_trailing_whitespace = false
+
+# ---------------------------------------------------------------------------------------------
+# BYTES, NOT TEXT. Nothing here may be re-encoded, newline-normalised or have whitespace trimmed.
+#
+# The chart carries the migration chain as one gzip per file, and `.gitattributes` marks `*.gz` as
+# binary for the same reason: normalise one byte of a deflate stream and the archive stops
+# decompressing, which surfaces at deploy time as a database with no schema.
+# ---------------------------------------------------------------------------------------------
+[*.{gz,png,jpg,jpeg,gif,ico,pdf,glb,stl,woff,woff2}]
+charset = unset
+end_of_line = unset
+insert_final_newline = false
+trim_trailing_whitespace = false

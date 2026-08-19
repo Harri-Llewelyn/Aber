@@ -111,6 +111,129 @@ CREATE POLICY "asset_3d_models_delete_privileged" ON storage.objects
     AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
   );
 
+-- =============================================================================================
+-- gateway-backups -- Node-RED flow backups from physical gateway appliances
+-- =============================================================================================
+--
+-- PRIVATE, AND THE OPPOSITE OF THE BUCKET ABOVE IN EVERY RESPECT THAT MATTERS. `asset-3d-models` is
+-- public-read because an AAS `File` element's URL has to be dereferenceable by a viewer holding no
+-- session. Nothing about a flow backup is public: a `flows.json` describes the plant's edge
+-- topology, its broker addresses, its device ids and its processing logic. There is no
+-- `getPublicUrl()` path for this bucket and there must never be one -- reads go through a signed
+-- URL minted for a caller whose role has already been checked.
+--
+-- WHAT IS IN A BACKUP, AND WHAT IS DELIBERATELY NOT. `flows.json` ONLY. `flows_cred.json` is
+-- Node-RED's credential store, encrypted with NODERED_CREDENTIAL_SECRET, and it is excluded on
+-- purpose: stored here it would either be useless (the secret is not in this bucket) or catastrophic
+-- (if the secret ever were). A restored appliance re-injects its credentials from the environment
+-- the enrolment wrote, exactly as scripts/node-red-init.mjs already does for the platform's own
+-- Node-RED. So a backup is a description of behaviour, never of secrets.
+--
+-- ---------------------------------------------------------------------------------------------
+-- THE ROLE SPLIT IS ASYMMETRIC, AND THAT IS THE DESIGN.
+--
+--   Administrator, Shopfloor_Manager   read, write, replace, delete
+--   Auditor                            READ ONLY
+--   Operator                           nothing
+--
+-- An auditor's job is to see what the plant was configured to do and when it changed, and a flow
+-- backup is the only artefact that answers that for the edge. Giving them SELECT is the point of
+-- the role. Giving them INSERT would let an auditor rewrite the record they exist to examine, which
+-- is the same objection that makes digital_thread append-only.
+--
+-- Operator gets nothing: nothing on the operator dashboard reads or writes a backup, and a role
+-- that cannot use a capability should not hold it.
+--
+-- ---------------------------------------------------------------------------------------------
+-- THE PATH IS CONFINED BY THE DATABASE, NOT BY THE UPLOADER.
+--
+-- Every object must live under `<sparkplug_id>/`, and that first folder must name a gateway that
+-- actually exists. `storage.foldername(name)` returns the path segments, so `[1]` is the leading
+-- folder.
+--
+-- This is the same idea as mosquitto.acl's `pattern readwrite spBv1.0/+/+/%u/#` one layer up: the
+-- client does not get to assert where its data belongs. A convention the frontend happens to follow
+-- is not a control -- Storage's REST API is reachable with any authenticated session, so without
+-- this a privileged user could scatter objects anywhere in the bucket, including paths that shadow
+-- another gateway's backups.
+--
+-- SELECT IS *NOT* PATH-CONFINED, and that asymmetry is deliberate: a reader may list the bucket to
+-- find backups, and requiring a valid gateway prefix on read would hide the backups of a gateway
+-- that had since been deleted -- which is exactly when someone is looking for them.
+--
+-- ---------------------------------------------------------------------------------------------
+-- `storage.objects.name` IS FULLY QUALIFIED INSIDE THE SUBQUERY, AND IT MUST BE.
+--
+-- `public.gateways` HAS ITS OWN COLUMN CALLED `name`. Postgres resolves an unqualified identifier
+-- against the INNERMOST scope first, so the natural-looking
+--
+--     EXISTS (SELECT 1 FROM public.gateways g WHERE g.sparkplug_id = (storage.foldername(name))[1])
+--
+-- binds `name` to `gateways.name` -- the gateway's DISPLAY LABEL -- not to the object's path. It
+-- parses, it runs, and it is false for every row, because `storage.foldername('Sim_Gateway_Cell1')`
+-- is an empty array. The policy then denies every upload, including correct ones.
+--
+-- THAT IS THE BENIGN HALF OF THE FAILURE. The dangerous half is that the same expression would
+-- start ACCEPTING rows if a gateway were ever named something path-shaped, and would then accept
+-- them under ANY prefix -- so the confinement this policy exists to enforce would silently depend on
+-- what somebody typed into a display field. Caught by test_path_is_confined_to_an_existing_gateway,
+-- which is why that test asserts a valid path is accepted as well as that invalid ones are refused:
+-- a check that only tested refusals passes perfectly against a policy that refuses everything.
+-- =============================================================================================
+
+DROP POLICY IF EXISTS "gateway_backups_read_privileged" ON storage.objects;
+CREATE POLICY "gateway_backups_read_privileged" ON storage.objects
+  FOR SELECT TO authenticated
+  USING (
+    bucket_id = 'gateway-backups'
+    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager', 'Auditor'])
+  );
+
+DROP POLICY IF EXISTS "gateway_backups_insert_privileged" ON storage.objects;
+CREATE POLICY "gateway_backups_insert_privileged" ON storage.objects
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    bucket_id = 'gateway-backups'
+    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    -- storage.objects.name, QUALIFIED: public.gateways has a `name` column of its own and would
+    -- otherwise capture this reference. See the header block above.
+    AND EXISTS (
+      SELECT 1 FROM public.gateways g
+       WHERE g.sparkplug_id = (storage.foldername(storage.objects.name))[1]
+    )
+  );
+
+-- UPDATE covers `upsert: true`, which is how storage-js replaces an object that already exists.
+-- Both halves are gated: USING decides which existing objects may be targeted, WITH CHECK decides
+-- what the result may look like -- so an update cannot move an object out from under the prefix
+-- rule that the insert enforced.
+DROP POLICY IF EXISTS "gateway_backups_update_privileged" ON storage.objects;
+CREATE POLICY "gateway_backups_update_privileged" ON storage.objects
+  FOR UPDATE TO authenticated
+  USING (
+    bucket_id = 'gateway-backups'
+    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+  )
+  WITH CHECK (
+    bucket_id = 'gateway-backups'
+    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    -- storage.objects.name, QUALIFIED: public.gateways has a `name` column of its own and would
+    -- otherwise capture this reference. See the header block above.
+    AND EXISTS (
+      SELECT 1 FROM public.gateways g
+       WHERE g.sparkplug_id = (storage.foldername(storage.objects.name))[1]
+    )
+  );
+
+DROP POLICY IF EXISTS "gateway_backups_delete_privileged" ON storage.objects;
+CREATE POLICY "gateway_backups_delete_privileged" ON storage.objects
+  FOR DELETE TO authenticated
+  USING (
+    bucket_id = 'gateway-backups'
+    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+  );
+
+
 -- ---------------------------------------------------------------------------------------------
 -- Grants.
 -- ---------------------------------------------------------------------------------------------
@@ -154,4 +277,37 @@ BEGIN
     RAISE EXCEPTION 'expected 4 asset_3d_models_* policies on storage.objects, found %', n;
   END IF;
   RAISE NOTICE 'storage policies reconciled (4 policies on storage.objects).';
+END $$;
+
+-- A SECOND BLOCK RATHER THAN A WIDER COUNT IN THE FIRST. The assertion above is scoped by prefix
+-- and should stay that way: one count of "8 policies" would be satisfied by five of one bucket's
+-- and three of the other's, which is precisely the state it exists to rule out.
+DO $$
+DECLARE
+  n int;
+  v_auditor_writes int;
+BEGIN
+  SELECT count(*) INTO n FROM pg_policies
+   WHERE schemaname = 'storage' AND tablename = 'objects'
+     AND policyname LIKE 'gateway_backups_%';
+  IF n <> 4 THEN
+    RAISE EXCEPTION 'expected 4 gateway_backups_* policies on storage.objects, found %', n;
+  END IF;
+
+  -- THE ASYMMETRY IS THE POLICY, so it is asserted rather than left to a reading of the SQL above.
+  -- Auditor holds SELECT and must hold nothing else; the failure of getting this wrong is silent
+  -- and permanent -- an auditor able to overwrite a backup is an auditor able to edit the record
+  -- they exist to examine, and nothing would ever error.
+  SELECT count(*) INTO v_auditor_writes FROM pg_policies
+   WHERE schemaname = 'storage' AND tablename = 'objects'
+     AND policyname LIKE 'gateway_backups_%'
+     AND cmd <> 'SELECT'
+     AND (qual LIKE '%Auditor%' OR with_check LIKE '%Auditor%');
+  IF v_auditor_writes <> 0 THEN
+    RAISE EXCEPTION
+      '% gateway_backups_* write policy/policies name Auditor. Auditor is READ ONLY on this '
+      'bucket -- write authority is Administrator and Shopfloor_Manager only.', v_auditor_writes;
+  END IF;
+
+  RAISE NOTICE 'gateway-backups policies reconciled (4 policies; Auditor read-only).';
 END $$;

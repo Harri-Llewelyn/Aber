@@ -131,6 +131,12 @@ const generated = {
   // other credential: it is the whole reason Grafana is not given the service-role key, and a secret
   // reused elsewhere would mean one leak reopens the authority this one exists to withhold.
   GRAFANA_ALERT_WEBHOOK_SECRET: hex(32),
+  // The bearer token supabase-functions presents to the gateway-credential service. Its own value
+  // for the same reason as the one above: that service can mint a Mosquitto account for any edge
+  // node, and mosquitto.acl makes an account the ability to publish telemetry as that gateway --
+  // so a token shared with anything else would mean one leak grants forgery across the site.
+  // The service REFUSES TO START if this is shorter than 32 characters.
+  MQTT_CREDENTIAL_SERVICE_TOKEN: hex(32),
   // The read-only historian role external BI tools connect as, and the one Grafana uses. Generated
   // like the rest so a local stack never runs a reporting tool as the `postgres` superuser, which
   // is what the Grafana datasource did before this existed.

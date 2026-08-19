@@ -54,7 +54,14 @@ const IMAGE_NAMESPACE = 'ghcr.io/harri-llewelyn/acs-cymru';
  * values.yaml their tag is deliberately EMPTY, resolved to Chart.AppVersion by the
  * `acs-cymru.image` helper.
  */
-const BUILT_IMAGES = ['edge-runtime', 'ingestion', 'node-red', 'frontend', 'test-runner', 'i3x-service'];
+const BUILT_IMAGES = [
+  'edge-runtime', 'ingestion', 'node-red', 'frontend', 'test-runner', 'i3x-service',
+  // Built FROM eclipse-mosquitto rather than from a language base, so it carries the broker's own
+  // mosquitto_passwd -- the `$7$` hash has to be readable by the mosquitto that will verify it.
+  // That makes its base subject to the same pin as the broker's, which the eclipse-mosquitto row
+  // above already enforces across both targets.
+  'gateway-credential',
+];
 const LOCALLY_BUILT = new Set(BUILT_IMAGES.map((n) => `${IMAGE_NAMESPACE}/${n}`));
 
 /**

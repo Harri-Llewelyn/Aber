@@ -1,9 +1,9 @@
 # =================================================================================================
-# Release: publish the six images this repository builds, then the Helm chart, to GHCR over OCI.
+# Release: publish the seven images this repository builds, then the Helm chart, to GHCR over OCI.
 #
-# THE ORDER IS THE WHOLE DESIGN. The chart names those five images at `Chart.AppVersion`, so a chart
+# THE ORDER IS THE WHOLE DESIGN. The chart names those seven images at `Chart.AppVersion`, so a chart
 # published before its images resolves to tags that do not exist yet -- and the failure is not a
-# failed install. `helm install` SUCCEEDS, `--wait` blocks for its full timeout, and six workloads
+# failed install. `helm install` SUCCEEDS, `--wait` blocks for its full timeout, and seven workloads
 # sit in ImagePullBackOff while the databases, the broker and Kong all come up healthy. Someone
 # reading `kubectl get pods` sees a stack that is two thirds up and no error naming the release.
 # So: images first, chart last, and the chart job `needs` them.
@@ -31,7 +31,7 @@
 # right blast radius for a workflow that runs on a tag.
 #
 # FIRST PUBLISH IS PRIVATE. GHCR creates every new package private regardless of the repository's
-# visibility, and GITHUB_TOKEN cannot change that -- it is an account-level setting. All six
+# visibility, and GITHUB_TOKEN cannot change that -- it is an account-level setting. All seven
 # packages need a one-time visibility flip; deploy/k8s/README.md carries the `gh` commands.
 # =================================================================================================
 name: Release
@@ -133,7 +133,7 @@ jobs:
         run: node scripts/sync-helm-chart-files.mjs --check
 
       # Both targets must pin the same tag for every shared image, and -- since this workflow --
-      # the five built images must agree across values.yaml, ci.yml and this file. A release is
+      # the seven built images must agree across values.yaml, ci.yml and this file. A release is
       # exactly when that last coupling matters: it is what decides whether the chart names images
       # this workflow actually pushed.
       - name: Verify Image Tag Parity Across Both Targets And The Release Surface
@@ -176,6 +176,16 @@ jobs:
           - name: i3x-service
             dockerfile: i3x/Dockerfile
             context: .
+            build_args: ''
+          # The broker credential-issuing sidecar. Its context is its own directory -- the service's
+          # CODE is not baked in, the chart mounts it from a ConfigMap, so this image supplies only
+          # the runtime. Built FROM eclipse-mosquitto because it must carry the broker's own
+          # mosquitto_passwd: the `$7$` hash has to be readable by the mosquitto that will verify it,
+          # and a reimplementation produces a password file that looks correct and refuses every
+          # login with nothing logged at either end.
+          - name: gateway-credential
+            dockerfile: gateway-credential/Dockerfile
+            context: gateway-credential
             build_args: ''
           # VITE_RUNTIME_CONFIG=true bakes NOTHING, which is what lets one published image serve any
           # environment and read its configuration from the /config.js ConfigMap. A default build
@@ -385,7 +395,7 @@ jobs:
             --set e2e.enabled=true > /tmp/from-package.yaml
 
           MISSING=0
-          for img in edge-runtime ingestion node-red frontend test-runner i3x-service; do
+          for img in edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential; do
             REF="$IMAGE_NAMESPACE/$img:$V"
             if grep -qF "$REF" /tmp/from-package.yaml; then
               echo "  ok  $REF"
@@ -441,7 +451,7 @@ jobs:
             echo '```'
             echo
             echo "Images published at \`$V\`:"
-            for img in edge-runtime ingestion node-red frontend test-runner i3x-service; do
+            for img in edge-runtime ingestion node-red frontend test-runner i3x-service gateway-credential; do
               echo "- \`$IMAGE_NAMESPACE/$img:$V\`"
             done
           } >> "$GITHUB_STEP_SUMMARY"

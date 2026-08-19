@@ -11,7 +11,7 @@ management.
 
 > **Design ethos —** *use pre-existing components and standards; minimise custom code.*
 > Where upstream ACS ships bespoke microservices, this fork uses Supabase, TimescaleDB, Grafana and
-> Node-RED. The custom surface is one Python ingestion daemon, seven edge functions, an i3X server and
+> Node-RED. The custom surface is one Python ingestion daemon, nine edge functions, an i3X server and
 > a React dashboard.
 
 ---
@@ -40,7 +40,7 @@ flowchart TB
 
     subgraph Processing ["Ingestion & Serverless"]
         ING["Python Ingestion Engine<br/>identity - quarantine - binding"]
-        EF["Edge Functions<br/>approve-quarantine - deploy-nodered - aas-export<br/>grafana-userinfo - nodered-userinfo - fplus-directory"]
+        EF["Edge Functions<br/>approve-quarantine - deploy-nodered - aas-export<br/>grafana-userinfo - nodered-userinfo - fplus-directory<br/>grafana-alert-webhook - enroll-gateway - gateway-bundle"]
     end
 
     subgraph Supabase ["Supabase BaaS"]
@@ -125,8 +125,10 @@ shopfloor simulator needed, `0020` retires the introductory single-device simula
 schema and IDTA nameplate onto `Sim_CNC_Mill_01`, `0021` gives each shopfloor cell an icon from a
 closed set, `0022` adds one schema per machine class and attaches it to every simulated device,
 `0023` adds the `device_alerts` occurrence log Grafana alerting writes into and publishes it for
-Realtime, `0024` adds an optional free-text `description` to devices and gateways — plus demo
-accounts (`supabase/seed.sql`).
+Realtime, `0024` adds an optional free-text `description` to devices and gateways, `0025` adds
+physical-gateway enrolment — a `gateway_enrollment_tokens` table reachable only by `service_role`,
+the RPCs that issue and atomically redeem a single-use token, and the `PENDING_ENROLLMENT` /
+`AWAITING_BIRTH` lifecycle states — plus demo accounts (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because `0005` already implements one; a second declaration of `log_digital_thread_event()`
@@ -354,11 +356,29 @@ python supabase/functions/nodered-userinfo/test_nodered_userinfo.py
 python supabase/functions/aas-export/test_aas_export.py
 python supabase/functions/grafana-alert-webhook/test_grafana_alert_webhook.py
 
+# Physical gateway enrolment — signs in as Administrator to mint tokens (issuing is a USER's act,
+# gated on has_role, so the service key cannot do it), then redeems them the way an appliance does:
+# the anon key and no user JWT. Stops the credential service to exercise the 503 rollback path.
+SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+  python supabase/functions/enroll-gateway/test_enroll_gateway.py
+
+# The downloadable bundle — role gating (Operator and Auditor get 403 and no token is minted), ZIP
+# integrity, and that the embedded token is the one the database will accept.
+SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+  python supabase/functions/gateway-bundle/test_gateway_bundle.py
+
+# Broker credential issuance — needs the stack up and the service's own bearer token
+MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credential.py
+
+# The credential merge, in isolation — the one piece of it whose failure is silent
+npm run test:lib
+
 # Database suites — need Postgres
 python supabase/migrations/test_user_roles_rls.py
 python supabase/migrations/test_schema_versioning.py
 python supabase/migrations/test_digital_thread_guard.py
 python supabase/migrations/test_metric_catalog_seed.py
+python supabase/migrations/test_gateway_enrollment.py
 # Needs the TimescaleDB historian (port 5433), not Supabase — the rollups live there
 python timescaledb/test_bi_reader_grants.py
 

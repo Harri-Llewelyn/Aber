@@ -422,6 +422,128 @@ try {
       ok.push('(TLS listener check skipped: openssl unavailable)');
     }
   }
+
+  // -----------------------------------------------------------------------------------------------
+  // 5. THE SHIPPED CERTIFICATE GENERATOR PRODUCES A CHAIN THE BROKER SERVES AND A CLIENT VERIFIES.
+  //
+  // Section 3 proves the TLS stanza is syntactically compatible with the base policy, using a
+  // throwaway self-signed certificate. That is a different claim from the one that matters for
+  // physical gateways: `scripts/mosquitto-tls-init.mjs` issues a proper selfSigned -> CA -> leaf
+  // chain, and a gateway verifies the broker AGAINST THE ROOT rather than against the leaf. A
+  // self-signed leaf is its own CA and would pass section 3 while proving nothing about the real
+  // arrangement.
+  //
+  // Three properties, and the third is the one most likely to regress silently:
+  //   a. the leaf the generator issues is served on 8883 and verifies against the issued root
+  //   b. TLS does not weaken authentication -- an anonymous client is refused on 8883 exactly as on
+  //      1883, which is what the GLOBAL security options in mosquitto.conf are for
+  //   c. RE-RUNNING THE GENERATOR DOES NOT MINT A NEW ROOT. That is the property the entire fleet
+  //      depends on: the root is distributed by hand to every appliance's trust store, so a second
+  //      run that reissued it would take every physical gateway offline while the stack stayed green.
+  //      It is asserted by fingerprint, because "the file still exists" is not the same claim.
+  // -----------------------------------------------------------------------------------------------
+  {
+    const TLS_INIT_IMAGE = 'acs-cymru-mosquitto-tls-init:check';
+    const build = docker(['build', '-q', '-t', TLS_INIT_IMAGE, join(REPO, 'mosquitto-tls-init')]);
+
+    if (build.status !== 0) {
+      problems.push(
+        `could not build mosquitto-tls-init/Dockerfile: ${(build.stderr || '').trim().slice(0, 300)}`
+      );
+    } else {
+      const certs = join(work, 'issued');
+      mkdirSync(certs, { recursive: true });
+
+      /** Run the real generator against `certs`, exactly as the compose service does. */
+      const generate = (extraArgs = []) => docker([
+        'run', '--rm',
+        '-v', `${certs}:/mosquitto/certs`,
+        '-v', `${join(REPO, 'scripts', 'mosquitto-tls-init.mjs')}:/s.mjs:ro`,
+        TLS_INIT_IMAGE,
+        'node', '/s.mjs', ...extraArgs,
+      ]);
+
+      const first = generate();
+      if (first.status !== 0) {
+        problems.push(
+          `scripts/mosquitto-tls-init.mjs failed: ${(first.stderr || first.stdout || '').trim().slice(0, 400)}`
+        );
+      } else {
+        ok.push('mosquitto-tls-init issues a CA and a broker leaf');
+        log(first.stdout.trim().split('\n').slice(-1)[0]);
+
+        // (c) Idempotency, by fingerprint. Read inside the image, because the host is not
+        // guaranteed to have openssl -- that is the whole reason this image exists.
+        const fingerprint = () => docker([
+          'run', '--rm', '-v', `${certs}:/c:ro`, TLS_INIT_IMAGE,
+          'openssl', 'x509', '-in', '/c/ca.crt', '-noout', '-fingerprint', '-sha256',
+        ]).stdout.trim();
+
+        const before = fingerprint();
+        const second = generate();
+        const after = fingerprint();
+
+        if (second.status !== 0) {
+          problems.push('a second mosquitto-tls-init run failed; it must be idempotent');
+        } else if (!before || before !== after) {
+          problems.push(
+            'RE-RUNNING mosquitto-tls-init MINTED A NEW ROOT. Every physical gateway trusts the '
+            + 'previous one by hand-distributed copy, so this would take the whole fleet offline '
+            + 'on the next `docker compose up` while the stack reported itself healthy.'
+          );
+        } else {
+          ok.push('re-running mosquitto-tls-init reuses the existing root (fingerprint unchanged)');
+        }
+
+        // (a) + (b): the broker serves the issued leaf, and TLS does not relax authentication.
+        //
+        // The generator chowns the key to uid 1883 itself -- unlike section 3, which has to widen
+        // the mode by hand -- so this also exercises the ownership logic the real deployment
+        // depends on. A broker that will not start here is the "Unable to load server key file"
+        // failure, not a config error.
+        const r = startBroker({ withTls: true, certsDir: certs, ports: ['28884:8883'] });
+        started.push(r.name);
+
+        if (!r.running) {
+          const err = (r.log.match(/^.*Error.*$/gim) || []).slice(0, 3).join('\n         ');
+          problems.push(
+            'the broker does NOT start on certificates issued by mosquitto-tls-init:\n         '
+            + (err || r.log.slice(0, 300))
+          );
+        } else {
+          const verified = docker([
+            'run', '--rm', '--network', `container:${r.name}`,
+            '-v', `${certs}:/c:ro`, IMAGE,
+            'mosquitto_pub', '--cafile', '/c/ca.crt', '-h', 'localhost', '-p', '8883',
+            '-u', 'probe', '-P', 'probe-secret', '-t', 'probe/tls', '-m', 'x',
+          ]);
+          if (verified.status === 0) {
+            ok.push('8883 serves the issued leaf and a client verifies it against the issued root');
+          } else {
+            problems.push(
+              `a client could not verify the issued chain on 8883: ${(verified.stderr || '').trim()}`
+            );
+          }
+
+          const anonTls = docker([
+            'run', '--rm', '--network', `container:${r.name}`,
+            '-v', `${certs}:/c:ro`, IMAGE,
+            'mosquitto_pub', '--cafile', '/c/ca.crt', '-h', 'localhost', '-p', '8883',
+            '-t', 'probe/anon-tls', '-m', 'x',
+          ]);
+          if (/not authorised|Connection Refused/i.test(anonTls.stderr + anonTls.stdout)) {
+            ok.push('8883 refuses an unauthenticated client (TLS does not relax authentication)');
+          } else {
+            problems.push(
+              'AN UNAUTHENTICATED CLIENT WAS ACCEPTED ON 8883. The security options must stay in '
+              + 'mosquitto.conf\'s GLOBAL section so the TLS listener inherits them; a copy under '
+              + 'the 8883 stanza is also a fatal duplicate on 2.0.x.'
+            );
+          }
+        }
+      }
+    }
+  }
 } finally {
   cleanup();
 }

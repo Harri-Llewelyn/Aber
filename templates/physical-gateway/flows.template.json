@@ -1,0 +1,196 @@
+[
+  {
+    "id": "acs-tab",
+    "type": "tab",
+    "label": "ACS-Cymru Gateway",
+    "disabled": false,
+    "info": "# __GATEWAY_NAME__\n\nThis flow is a STARTING POINT, not a finished integration. It does two things:\n\n1. publishes a gateway heartbeat every 30s, which is what makes this gateway show ONLINE\n2. publishes one device DBIRTH on demand, to demonstrate zero-touch onboarding\n\n## Adding your own device\n\nEdit the **ADD YOUR OWN DEVICE** function node, change `DEVICE_ID` to whatever your machine\nshould be called, and inject it. The device will appear in the dashboard's **quarantine queue** --\nunregistered devices are held there and their data is dropped until an operator approves them.\nThat is the intended path: you do not pre-register anything.\n\nOnce approved, publish DDATA on\n`spBv1.0/__SPARKPLUG_GROUP__/DDATA/__SPARKPLUG_ID__/<your-device-id>` and it will land in the\nhistorian.\n\n## What you may NOT publish\n\nThe broker confines this gateway to `spBv1.0/+/+/__SPARKPLUG_ID__/#`. A message published under\nany other edge node is dropped by the broker, silently, by design -- it is what stops one gateway\nforging another's telemetry."
+  },
+  {
+    "id": "acs-tls",
+    "type": "tls-config",
+    "name": "ACS-Cymru broker CA",
+    "certType": "files",
+    "cert": "",
+    "key": "",
+    "ca": "__CA_FILE__",
+    "certname": "",
+    "keyname": "",
+    "caname": "",
+    "servername": "__MQTT_HOST__",
+    "verifyservercert": true,
+    "alpnprotocol": ""
+  },
+  {
+    "id": "acs-broker",
+    "type": "mqtt-broker",
+    "name": "ACS-Cymru (MQTTS)",
+    "broker": "__MQTT_HOST__",
+    "port": "__MQTT_TLS_PORT__",
+    "tls": "acs-tls",
+    "clientid": "__SPARKPLUG_ID__",
+    "autoConnect": true,
+    "usetls": true,
+    "verifyservercert": true,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willPayload": "",
+    "willMsg": {},
+    "userProps": "",
+    "sessionExpiry": ""
+  },
+  {
+    "id": "acs-readme",
+    "type": "comment",
+    "z": "acs-tab",
+    "name": "READ ME — this appliance publishes as __SPARKPLUG_ID__ and nothing else",
+    "info": "The broker pins the topic's edge-node segment to this gateway's own username\n(`pattern readwrite spBv1.0/+/+/%u/#` in mosquitto.acl). Publishing under a different edge node\nis not an error you will see -- the broker drops the message and tells the client nothing.\n\nThe credential is in `flows_cred.json`, encrypted. It is not recoverable from this appliance and\nnot re-issuable except by generating a new bundle in the dashboard.",
+    "x": 320,
+    "y": 60,
+    "wires": []
+  },
+  {
+    "id": "acs-birth-tick",
+    "type": "inject",
+    "z": "acs-tab",
+    "name": "on start — NBIRTH",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": "5",
+    "topic": "",
+    "payload": "NBIRTH",
+    "payloadType": "str",
+    "x": 180,
+    "y": 140,
+    "wires": [
+      [
+        "acs-node-msg"
+      ]
+    ]
+  },
+  {
+    "id": "acs-data-tick",
+    "type": "inject",
+    "z": "acs-tab",
+    "name": "every 30s — NDATA",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "30",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0,
+    "topic": "",
+    "payload": "NDATA",
+    "payloadType": "str",
+    "x": 180,
+    "y": 200,
+    "wires": [
+      [
+        "acs-node-msg"
+      ]
+    ]
+  },
+  {
+    "id": "acs-node-msg",
+    "type": "function",
+    "z": "acs-tab",
+    "name": "build node-level message",
+    "func": "// Gateway (edge node) heartbeat.\n//\n// WHAT MAKES THE GATEWAY SHOW 'ONLINE'. The ingestion daemon stamps gateways.last_heartbeat on\n// every node-level message -- NBIRTH, NDATA or NDEATH -- and the dashboard derives staleness from\n// it at read time with a 90s threshold. Beating every 30s allows three missed beats before this\n// appliance is reported STALE.\n//\n// PAYLOAD IS JSON, NOT PROTOBUF, and that is a supported encoding rather than a shortcut: the\n// ingestion daemon's parse_sparkplug_payload() tries protobuf first and falls back to this shape.\n// It is what the platform's own simulator publishes. If you later add a protobuf encoder, nothing\n// else in this flow has to change -- the topic is what identifies the asset.\n\nconst GROUP = '__SPARKPLUG_GROUP__';\nconst NODE  = '__SPARKPLUG_ID__';\nconst type  = msg.payload;   // 'NBIRTH' or 'NDATA'\n\n// UPTIME FROM FLOW CONTEXT, NOT process.uptime().\n//\n// A Node-RED function node runs in a SANDBOX with no `process` global. `process.uptime()` is not a\n// syntax error and is not caught at deploy time -- it throws at the first tick:\n//\n//     ReferenceError: process is not defined\n//\n// and because the throw happens BEFORE msg is returned, nothing is ever published. The broker node\n// connects, the editor looks healthy, and the gateway sits in AWAITING_BIRTH forever with the only\n// evidence in the appliance's own logs. Verified against Node-RED 5.0.2.\n//\n// The first tick records its own start instead, which is the process start for every practical\n// purpose here -- this node runs on the same 'on start' inject that produces the NBIRTH.\nlet startedAt = context.get('startedAt');\nif (!startedAt) {\n    startedAt = Date.now();\n    context.set('startedAt', startedAt);\n}\n\nlet seq = context.get('seq') || 0;\n// Sparkplug sequence numbers wrap at 256. A birth resets it to 0 by specification.\nseq = (type === 'NBIRTH') ? 0 : (seq + 1) % 256;\ncontext.set('seq', seq);\n\nmsg.topic = `spBv1.0/${GROUP}/${type}/${NODE}`;\nmsg.payload = {\n    timestamp: Date.now(),\n    seq,\n    metrics: [\n        // Read by ingestion's process_node_message(): a Gateway_Status string metric OVERRIDES the\n        // status implied by the message type. Sending it explicitly means this appliance says what\n        // it thinks its own state is rather than having it inferred.\n        { name: 'Gateway_Status', type: 'String', value: 'ONLINE' },\n        { name: 'bdSeq', type: 'Int64', value: seq },\n        { name: 'Uptime_s', type: 'Int64', value: Math.floor((Date.now() - startedAt) / 1000) }\n    ]\n};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 470,
+    "y": 170,
+    "wires": [
+      [
+        "acs-mqtt-out"
+      ]
+    ]
+  },
+  {
+    "id": "acs-device-birth",
+    "type": "inject",
+    "z": "acs-tab",
+    "name": "▶ ADD YOUR OWN DEVICE (click me)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 230,
+    "y": 300,
+    "wires": [
+      [
+        "acs-device-fn"
+      ]
+    ]
+  },
+  {
+    "id": "acs-device-fn",
+    "type": "function",
+    "z": "acs-tab",
+    "name": "build a device DBIRTH",
+    "func": "// ZERO-TOUCH ONBOARDING, demonstrated.\n//\n// This publishes a birth certificate for a device the platform has NEVER HEARD OF. That is not a\n// mistake and it is not an error path -- it is how devices are meant to arrive:\n//\n//   1. an unregistered device announces itself with a DBIRTH\n//   2. the ingestion daemon writes it into the QUARANTINE QUEUE and drops its data\n//   3. an operator approves it in the dashboard, choosing its name and cell\n//   4. from then on its DDATA is accepted and stored\n//\n// Nothing has to be pre-registered, and this flow deliberately does NOT call the platform's REST\n// API to create the device. Announcing yourself over Sparkplug is the whole interface.\n//\n// CHANGE THIS to whatever your machine should be called, then click the inject node again.\nconst DEVICE_ID = 'press-01';\n\nconst GROUP = '__SPARKPLUG_GROUP__';\nconst NODE  = '__SPARKPLUG_ID__';\n\nmsg.topic = `spBv1.0/${GROUP}/DBIRTH/${NODE}/${DEVICE_ID}`;\nmsg.payload = {\n    timestamp: Date.now(),\n    seq: 0,\n    metrics: [\n        // Every metric this device will ever publish must be DECLARED in its birth certificate.\n        // Sparkplug binds names to aliases here; a DDATA metric whose alias was never declared\n        // cannot be resolved and is dropped (the daemon then asks this node to rebirth).\n        { name: 'Device Control/Rebirth', type: 'Boolean', value: false },\n        { name: 'Properties/Manufacturer', type: 'String', value: 'Example Machine Co' },\n        { name: 'Temperature', type: 'Float', value: 20.0 },\n        { name: 'CycleCount', type: 'Int64', value: 0 }\n    ]\n};\n\nnode.warn(`Published DBIRTH for '${DEVICE_ID}'. It will appear in the dashboard's quarantine queue — approve it there, then publish DDATA on spBv1.0/${GROUP}/DDATA/${NODE}/${DEVICE_ID}.`);\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 530,
+    "y": 300,
+    "wires": [
+      [
+        "acs-mqtt-out"
+      ]
+    ]
+  },
+  {
+    "id": "acs-mqtt-out",
+    "type": "mqtt out",
+    "z": "acs-tab",
+    "name": "ACS-Cymru broker",
+    "topic": "",
+    "qos": "0",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "acs-broker",
+    "x": 810,
+    "y": 230,
+    "wires": []
+  }
+]

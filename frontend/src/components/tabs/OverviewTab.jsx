@@ -4,7 +4,7 @@ import { PERMISSION_UUIDS, REALTIME_ENABLED, STALENESS_TICK_MS, refreshInterval 
 import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
-import { gatewayLiveStatus, isGatewayOnline, formatHeartbeat } from '../../utils/gatewayStatus'
+import { gatewayLiveStatus, isGatewayOnline, isGatewayPending, formatHeartbeat } from '../../utils/gatewayStatus'
 import {
   SCOPE_CELL, SCOPE_SITE_WIDE, SOURCE_UNASSIGNED, SOURCE_SITE_WIDE, groupDevicesByCell
 } from '../../utils/cellResolution'
@@ -322,7 +322,15 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
         onClick={() => onSelectGateway(g.gateway_id)}
         style={{ cursor: 'pointer', borderColor: isGwArch ? 'var(--warning)' : g.is_virtual ? 'var(--accent)' : undefined, opacity: isGwArch ? 0.75 : 1 }}
       >
-        {isGwArch ? <IconArchive size={11} style={{ color: 'var(--warning-text)' }} /> : <span className={`badge-dot ${gwStatus === 'ONLINE' ? 'badge-online' : 'badge-offline'}`} />}
+        {/* THREE OUTCOMES, NOT TWO. A red dot on a gateway nobody has installed yet is a fault report
+            on an unfinished task -- see the .badge-pending block in App.css. */}
+        {isGwArch
+          ? <IconArchive size={11} style={{ color: 'var(--warning-text)' }} />
+          : <span className={`badge-dot ${
+              gwStatus === 'ONLINE' ? 'badge-online'
+                : gwStatus === 'PENDING_ENROLLMENT' ? 'badge-pending'
+                  : gwStatus === 'AWAITING_BIRTH' ? 'badge-provisioned'
+                    : 'badge-offline'}`} />}
         {/* Name only, same as the device chip. The per-gateway "N dev" that used to sit here went
             with the UUIDs: the tile header already totals GW and Dev for the whole zone, and the
             per-gateway figure is on this chip's title. The VIRTUAL and ARCHIVED badges are down to
@@ -438,7 +446,15 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   // A gateway is only "online" while its heartbeat is fresh -- an edge node that stops
   // publishing never writes an OFFLINE status, it just goes quiet.
   const onlineGwCount = gwList.filter(g => !g.is_archived && isGatewayOnline(g)).length
-  const offlineGwCount = gwList.filter(g => !g.is_archived && !isGatewayOnline(g)).length
+  // AWAITING SETUP IS ITS OWN BUCKET, AND OFFLINE EXCLUDES IT -- for exactly the reason the
+  // quarantine note below gives. A physical gateway sits in PENDING_ENROLLMENT from the moment it is
+  // created until somebody carries its bundle to a machine, and in AWAITING_BIRTH until that machine
+  // publishes. Counted as "offline" it reports a fault on every appliance still in its box, so
+  // ordering four gateways on a Monday shows four faults on the overview.
+  const pendingGwCount = gwList.filter(g => !g.is_archived && isGatewayPending(g)).length
+  const offlineGwCount = gwList.filter(
+    g => !g.is_archived && !isGatewayPending(g) && !isGatewayOnline(g)
+  ).length
   const archivedGwCount = gwList.filter(g => g.is_archived).length
 
   // Quarantined is its OWN bucket, and Online/Offline exclude it.
@@ -477,7 +493,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
         <button
           className="kpi-item"
           onClick={() => onNavigateTab && onNavigateTab('gateways')}
-          title={`${onlineGwCount} online / ${offlineGwCount} offline / ${archivedGwCount} archived, of ${stats.gateways} registered edge gateways. Click to view Gateways.`}
+          title={`${onlineGwCount} online / ${pendingGwCount} awaiting setup / ${offlineGwCount} offline / ${archivedGwCount} archived, of ${stats.gateways} registered edge gateways. Click to view Gateways.`}
         >
           <span className="kpi-label">Gateways</span>
           <span className="kpi-value">{onlineGwCount}<span className="kpi-total">/{stats.gateways}</span></span>

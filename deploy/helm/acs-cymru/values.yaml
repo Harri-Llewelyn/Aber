@@ -128,6 +128,14 @@ secrets:
   # load-bearing rather than optional.
   mqttMonitorUser: factoryplus_monitor
   mqttMonitorPassword: ""
+  # The bearer token supabase-functions presents to the gateway-credential sidecar, which is the only
+  # thing that may add an account to the broker's password file.
+  #
+  # ITS OWN VALUE, never shared with another secret. That service can mint a credential for any edge
+  # node, and mosquitto.acl turns an account into the ability to publish Sparkplug telemetry as that
+  # gateway -- so a token reused elsewhere means one leak grants forgery across the site. The service
+  # REFUSES TO START if it is shorter than 32 characters; `npm run setup` generates one for Compose.
+  mqttCredentialServiceToken: ""
 
   grafanaAdminUser: admin
   grafanaAdminPassword: ""
@@ -431,6 +439,26 @@ supabaseFunctions:
   verifyJwt: false
   # AAS export. These MUST be declared on this service, not only in a values file: an edge worker
   # isolate sees nothing but the variables main/index.ts forwards to it.
+  # ===============================================================================================
+  # Physical gateway enrolment addresses (enroll-gateway, gateway-bundle)
+  # ===============================================================================================
+  # WHAT AN APPLIANCE DIALS, which is never what this cluster dials. SUPABASE_PUBLIC_URL is derived
+  # from global.publicBaseDomain automatically; only the broker's address needs stating, and only
+  # when it differs from the `mqtt.` subdomain the chart already derives for the external broker.
+  #
+  # BOTH FUNCTIONS REFUSE RATHER THAN GUESS: gateway-bundle answers 503 and mints no token if the
+  # public URL is in-stack, and enroll-gateway answers 503 WITHOUT CONSUMING THE TOKEN if the broker
+  # host is. A wrong value here would otherwise produce appliances that enrol perfectly and then
+  # connect to nothing, which is the hardest version of this failure to diagnose.
+  #
+  # THE ADDRESS MUST ALSO BE IN THE BROKER CERTIFICATE'S SAN -- see mosquitto.tls.extraSans. A
+  # certificate that does not name it fails verification at every appliance while in-cluster clients
+  # verify perfectly, so the stack reports itself healthy and the fleet is silently off.
+  gatewayEnrolment:
+    # Empty = the `mqtt.<publicBaseDomain>` host the chart already derives.
+    mqttPublicHost: ""
+    mqttPublicTlsPort: 8883
+
   aas:
     # Namespaces every globalAssetId and submodel id the shell carries, so it has to name the
     # organisation publishing the document.
@@ -459,6 +487,17 @@ supabaseStorage:
   replicas: 1
   bucket: asset-3d-models
   fileSizeLimit: 52428800
+  # The PRIVATE bucket holding Node-RED flow backups from physical gateway appliances, stored under
+  # <sparkplug_id>/. Created by the storage-init Job alongside the one above.
+  #
+  # THE NAME MUST MATCH supabase/storage-policies.sql, which grants read to Administrator,
+  # Shopfloor_Manager and Auditor and write to the first two only. A bucket with no policies is
+  # invisible to every browser-facing role, and a policy naming a bucket that was never created is
+  # dead text -- neither errors, which is why these are kept in step by hand.
+  gatewayBackupBucket: gateway-backups
+  # Its own limit, deliberately not fileSizeLimit: that one is sized for 3D geometry, and a
+  # flows.json anywhere near 50 MiB is not a flow.
+  gatewayBackupFileSizeLimit: 5242880
   # file | s3. s3 (MinIO or cloud) is the better production answer and removes the single-writer
   # constraint; file is the default. See docs/kubernetes-architecture.md §4.4 and §11.
   backend: file
@@ -604,8 +643,9 @@ mosquitto:
       requests: { cpu: 10m, memory: 16Mi }
       limits: { memory: 64Mi }
   # Per-gateway credentials live in a Secret so they are reviewable, backed-up state rather than
-  # something typed into a running container. See `credentialSecret` below and
-  # scripts/mosquitto-provision-gateway.mjs.
+  # something typed into a running container. See `credentialSecret` below,
+  # scripts/mosquitto-provision-gateway.mjs (the operator path) and `gatewayCredential` at the
+  # bottom of this file (the automated enrolment path).
   credentials:
     # Name of the Secret holding the hashed `password_file`. The chart CREATES IT EMPTY if absent
     # and never overwrites an existing one -- otherwise every `helm upgrade` would delete every
@@ -1004,6 +1044,34 @@ telemetry:
     #  release: kube-prometheus-stack
     interval: 30s
     scrapeTimeout: 10s
+
+# ===============================================================================================
+# Broker credential-issuing service
+# ===============================================================================================
+# The narrow authority the enroll-gateway edge function calls to mint a gateway's Mosquitto account.
+#
+# IT RUNS AS A SIDECAR IN THE BROKER'S POD, not as a Deployment of its own -- Mosquitto re-reads its
+# password file only on SIGHUP, and a signal cannot cross a PID namespace. See the container block in
+# templates/messaging/mosquitto.yaml, and templates/messaging/gateway-credential.yaml for its
+# ServiceAccount, Role, Service and script ConfigMap.
+#
+# DISABLING IT does not break anything already enrolled -- existing credentials live in the Secret
+# and the broker keeps serving them. It removes the ability to enrol a NEW physical gateway without
+# an operator running scripts/mosquitto-provision-gateway.mjs by hand, which remains supported and
+# is the only path on a cluster where you would rather not run this at all.
+gatewayCredential:
+  enabled: true
+  image:
+    repository: ghcr.io/harri-llewelyn/acs-cymru/gateway-credential
+    # EMPTY = built here, resolved from Chart.appVersion. Built FROM eclipse-mosquitto so it carries
+    # the broker's own mosquitto_passwd -- the hash has to be readable by the mosquitto that will
+    # verify it, and a reimplementation produces a file that looks right and refuses every login.
+    tag: ""
+    pullPolicy: IfNotPresent
+  port: 9010
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 96Mi }
 
 networkPolicy:
   enabled: false

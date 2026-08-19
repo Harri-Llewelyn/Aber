@@ -8,6 +8,8 @@
     "setup": "node scripts/setup.mjs",
     "proto": "node scripts/generate-proto.mjs",
     "provision:gateways": "node scripts/provision-gateways.mjs",
+    "//test:lib": "Explicit file paths, NOT `node --test scripts/lib/`: the directory form's discovery behaves differently on Windows and reports the directory itself as one failing test.",
+    "test:lib": "node --test scripts/lib/mosquitto-credentials.test.mjs",
     "aas:push-basyx": "node scripts/aas-push-basyx.mjs",
     "stack:reset": "bash scripts/stack-reset.sh"
   }

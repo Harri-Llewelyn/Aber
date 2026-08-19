@@ -349,6 +349,42 @@ const mapDigitalThreadRow = (t) => ({
  */
 export const MODEL_3D_BUCKET = 'asset-3d-models';
 
+/**
+ * The PRIVATE bucket holding Node-RED flow backups from physical gateway appliances.
+ *
+ * THE OPPOSITE OF THE BUCKET ABOVE IN EVERY RESPECT THAT MATTERS. There is no `getPublicUrl()` path
+ * for it and there must never be one: a `flows.json` describes the plant's edge topology, its broker
+ * addresses, its device ids and its processing logic. Reads go through a SIGNED URL minted for a
+ * caller whose role the database has already checked.
+ *
+ * Objects live under `<sparkplug_id>/`, and that prefix is enforced by RLS rather than by this
+ * client (supabase/storage-policies.sql). The paths below follow the rule; they do not implement it.
+ */
+export const GATEWAY_BACKUP_BUCKET = 'gateway-backups';
+
+/**
+ * The filename a server offered in Content-Disposition, or null.
+ *
+ * READ FROM THE HEADER rather than composed here, because the server already decided it -- it knows
+ * the gateway's name and sparkplug_id and has slugged them for a filesystem. Composing a second
+ * version in the browser is how the download ends up named differently from the folder inside it.
+ *
+ * Deliberately narrow: only the plain `filename="..."` form, which is what this API emits. RFC 5987
+ * `filename*=UTF-8''...` is not parsed, and a caller that gets null falls back to a name of its own.
+ */
+export function filenameFromDisposition(header) {
+  const match = /filename="([^"]+)"/i.exec(header || '');
+  return match ? match[1] : null;
+}
+
+/** `<sparkplug_id>/<iso-timestamp>-flows.json`, sortable by name so the newest is last. */
+export function gatewayBackupPath(sparkplugId, when = new Date()) {
+  // Colons are legal in an S3 key but awkward in every shell and on Windows, where an operator may
+  // well download one. `-` keeps the timestamp sortable and the filename portable.
+  const stamp = when.toISOString().replace(/[:.]/g, '-');
+  return `${sparkplugId}/${stamp}-flows.json`;
+}
+
 /** The public URL for a stored model path. Composed, never stored -- see migration 0035. */
 export function model3dPublicUrl(path) {
   if (!path) return null;
@@ -431,6 +467,144 @@ const apiMethods = {
     }
 
     if (path) await supabase.storage.from(MODEL_3D_BUCKET).remove([path]);
+  },
+
+  // ===============================================================================================
+  // Physical gateway enrolment and flow backups
+  // ===============================================================================================
+
+  /**
+   * Download the bootstrap bundle for a physical gateway.
+   *
+   * A RAW fetch(), NOT supabase.functions.invoke(), and this is not a preference. invoke() decodes
+   * any response that is neither JSON nor octet-stream as TEXT, which silently corrupts a ZIP -- the
+   * archive arrives the right approximate size and fails to open. Identical constraint to the AASX
+   * path below; see the note there.
+   *
+   * Returns the blob plus the metadata that rides in headers, because a binary body has nowhere to
+   * carry the token expiry the modal counts down.
+   */
+  downloadGatewayBundle: async (gatewayId, { ttlMinutes } = {}) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/gateway-bundle`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        // The CALLER's token: gateway-bundle mints the enrolment token as them, through a SECURITY
+        // DEFINER RPC that checks has_role() itself. The anon key alone would be refused.
+        Authorization: `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ gateway_id: gatewayId, ...(ttlMinutes ? { ttl_minutes: ttlMinutes } : {}) })
+    });
+
+    if (!res.ok) {
+      // The function reports failures as JSON even on this path, so the real reason survives -- a
+      // 403 for an Operator, a 400 for a virtual gateway, a 503 for an unconfigured deployment.
+      let message = `Bundle generation failed (${res.status})`;
+      try { message = (await res.json())?.error || message; } catch { /* non-JSON body */ }
+      throw new Error(message);
+    }
+
+    return {
+      blob: await res.blob(),
+      filename: filenameFromDisposition(res.headers.get('Content-Disposition')),
+      expiresAt: res.headers.get('X-ACS-Token-Expires-At'),
+      bundleVersion: res.headers.get('X-ACS-Bundle-Version'),
+      sparkplugId: res.headers.get('X-ACS-Sparkplug-Id')
+    };
+  },
+
+  /**
+   * Flow backups for one gateway, newest first.
+   *
+   * Storage `list()` is scoped to the gateway's own prefix, which is where RLS confines writes
+   * anyway. A caller without read authority gets an EMPTY LIST rather than an error -- storage-api
+   * applies the SELECT policy and simply returns nothing -- so the UI must decide what to show from
+   * the caller's role, not from the length of this array.
+   */
+  listGatewayBackups: async (sparkplugId) => {
+    const { data, error } = await supabase.storage
+      .from(GATEWAY_BACKUP_BUCKET)
+      .list(sparkplugId, { limit: 100, sortBy: { column: 'name', order: 'desc' } });
+
+    if (error) throw new Error(error.message || 'Could not list backups');
+    return (data || [])
+      // `.emptyFolderPlaceholder` is a zero-byte object storage-api creates for an empty prefix.
+      .filter(o => o.name && !o.name.startsWith('.'))
+      .map(o => ({
+        name: o.name,
+        path: `${sparkplugId}/${o.name}`,
+        size: o.metadata?.size ?? null,
+        createdAt: o.created_at || o.updated_at || null
+      }));
+  },
+
+  /**
+   * Upload a `flows.json` backup.
+   *
+   * VALIDATED AS A NODE-RED FLOW BEFORE IT IS SENT, not merely by extension. The bucket accepts
+   * `application/json` and a few fallbacks because browsers report a hand-picked .json
+   * inconsistently, so the extension is close to no check at all -- and a backup that turns out not
+   * to be a flow is discovered at RESTORE time, which is the worst moment for it.
+   */
+  uploadGatewayBackup: async (sparkplugId, file) => {
+    const text = await file.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error(`"${file.name}" is not valid JSON. Export it from Node-RED with menu → Export → all flows.`);
+    }
+    if (!Array.isArray(parsed)) {
+      throw new Error('A Node-RED flow export is a JSON array of nodes. This file is not one.');
+    }
+    // THE CREDENTIAL FILE IS REFUSED OUTRIGHT. flows_cred.json is encrypted with a secret that lives
+    // only in the appliance's .env, so a copy here would be either useless or dangerous -- and it is
+    // an easy mistake to make, both files sitting side by side in /data.
+    if (parsed.length && parsed.every(n => typeof n === 'object' && n && !n.type)) {
+      throw new Error('That looks like flows_cred.json, not flows.json. Credential files are never backed up.');
+    }
+
+    const path = gatewayBackupPath(sparkplugId);
+    const { error } = await supabase.storage
+      .from(GATEWAY_BACKUP_BUCKET)
+      // upsert FALSE: the path carries a timestamp, so every upload is a new version and an
+      // accidental double-click cannot overwrite the previous one.
+      .upload(path, file, { upsert: false, contentType: 'application/json' });
+
+    if (error) {
+      if (/row-level security|Unauthorized/i.test(error.message || '')) {
+        throw new Error('You do not have permission to upload a backup for this gateway.');
+      }
+      throw new Error(error.message || 'Upload failed');
+    }
+    return { path };
+  },
+
+  /**
+   * A short-lived signed URL for one backup.
+   *
+   * SIGNED, because the bucket is private -- there is no public URL to compose. 60 seconds is long
+   * enough for the browser to follow the link and short enough that a URL pasted into a ticket is
+   * dead before anyone reads it.
+   */
+  gatewayBackupUrl: async (path) => {
+    const { data, error } = await supabase.storage
+      .from(GATEWAY_BACKUP_BUCKET)
+      .createSignedUrl(path, 60);
+    if (error) throw new Error(error.message || 'Could not create a download link');
+    return data.signedUrl;
+  },
+
+  deleteGatewayBackup: async (path) => {
+    const { error } = await supabase.storage.from(GATEWAY_BACKUP_BUCKET).remove([path]);
+    if (error) {
+      if (/row-level security|Unauthorized/i.test(error.message || '')) {
+        throw new Error('You do not have permission to delete backups.');
+      }
+      throw new Error(error.message || 'Delete failed');
+    }
   },
 
   get: async (path, options = {}) => {
