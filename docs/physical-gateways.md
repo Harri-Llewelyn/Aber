@@ -43,12 +43,19 @@ that file would have no revocation story at all.
 1. **Gateways → New Gateway.** Name it after the machine or the cell it serves.
 2. **Leave “Mark as Virtual Gateway” unchecked.** The form says which way it is going before you
    save: *“Runs on its own hardware. On save you will be given a bundle to copy to that machine.”*
-3. **Save.** The bundle modal opens immediately. The gateway is now **AWAITING SETUP**
-   (`PENDING_ENROLLMENT`).
-4. **Download bundle.** Nothing is minted until you press this — see §6.
+3. **Save.** The bundle modal opens and **the download starts immediately** — the gateway is
+   seconds old, so there is no earlier bundle for this one to invalidate. It is now **AWAITING
+   SETUP** (`PENDING_ENROLLMENT`).
+4. **Copy the three commands** shown, or use the **Copy Commands** button beside them, and note the
+   countdown: the token is good for 30 minutes.
 
-Requires **Administrator** or **Shopfloor_Manager**. Operator and Auditor get `403`, and no token is
-minted by the refusal.
+Coming back later — **Gateways → the gateway → Download Setup Bundle** — behaves differently on
+purpose. That gateway may already hold a bundle somebody downloaded, so the modal **asks first and
+makes you type the gateway's name** before it mints anything. See §6.
+
+Requires **Administrator** or **Shopfloor_Manager** (`gateway:manage`). Operator and Auditor never
+see the action, and `gateway-bundle` answers `403` if it is called anyway — no token is minted by
+the refusal.
 
 ### On the appliance
 
@@ -160,17 +167,32 @@ for every appliance. `bootstrap.mjs` retries that case on its own, six times ove
 
 ## 6. Re-issuing, and what it invalidates
 
-**Downloading is what creates state, not opening the modal.** Re-issuing consumes any live token for
-that gateway, so:
+Only **one bundle works at a time**. Issuing consumes any live token for that gateway, so:
 
 > Every re-issue **invalidates the bundle you already have.** Delete the old folder, or you will
 > eventually boot the wrong one and get a `401` that cannot tell you which bundle was stale.
+
+### Which is why it asks
+
+Everywhere except immediately after creating the gateway, the modal stops and makes you **type the
+gateway's name** before it mints. That is not ceremony: the loss is invisible from the dashboard —
+the bundle stays on the operator's laptop, the folder still unpacks, and the failure only appears
+minutes later at an appliance that cannot say what went wrong. A permission check would not have
+helped, because `gateway:manage` **is** the authority to issue bundles; narrowing the role would
+only decide who gets to make the mistake.
+
+The name is matched leniently — trimmed, case-folded, inner whitespace collapsed. The gate is
+against an accidental click, not a determined typist.
+
+**Cancel** puts you back on the bundle you already had, rather than closing over it. A failed issue
+does the same, and leaves the previous bundle live: nothing was minted, so nothing was consumed.
 
 Re-issue when:
 
 * the token expired before the appliance was started (the modal counts it down and says so);
 * the appliance was replaced, or its volume was destroyed;
-* a gateway sits in `AWAITING_BIRTH` and never publishes.
+* a gateway sits in `AWAITING_BIRTH` and never publishes. The modal names this case explicitly,
+  because re-issuing there also revokes the broker credential its appliance already holds.
 
 The **Re-issue Bundle** action is deliberately absent once a gateway is `ONLINE`: re-issuing then
 would invalidate the credential a working appliance is using, which is destructive dressed up as a

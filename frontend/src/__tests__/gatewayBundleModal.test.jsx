@@ -63,12 +63,16 @@ const bundleResponse = (overrides = {}) => ({
 /** Every ready-state assertion waits on this, so no test races the auto-download. */
 const ready = () => waitFor(() => expect(screen.getByText(/On the appliance/i)).toBeTruthy())
 
-describe('GatewayBundleModal — single-dialog lifecycle', () => {
+/** The confirm screen's gate, typed exactly as an operator would. */
+const typeName = (value = GATEWAY.gateway_name) =>
+  fireEvent.change(screen.getByLabelText(/Type .* to confirm/i), { target: { value } })
+
+describe('GatewayBundleModal — straight after creating the gateway', () => {
   /**
-   * ONE SCREEN, NOT TWO. Both entry points into this modal are already an explicit request for a
-   * bundle -- saving a gateway with "Virtual" unchecked, or the drawer's "Download Setup Bundle"
-   * action -- so a first screen asking whether you want the thing you just asked for is a step to
-   * click through rather than a safeguard.
+   * NO CONFIRMATION ON THIS ROUTE. The gateway is seconds old, so there is no earlier bundle for
+   * this one to invalidate -- the entire reason the confirm step exists is absent -- and saving a
+   * gateway with "Virtual" unchecked is already an explicit request for a bundle it cannot be
+   * finished without. Asking again would be a step to click through, not a safeguard.
    */
   it('downloads on open, with no intermediate confirm step', async () => {
     api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
@@ -209,15 +213,199 @@ describe('GatewayBundleModal — footer actions', () => {
     expect(api.downloadGatewayBundle).toHaveBeenCalledTimes(1)
   })
 
-  it('Re-issue Bundle mints again and downloads a fresh archive', async () => {
+  /**
+   * RE-ISSUING ASKS FIRST, even from inside the dialog that just handed over a working bundle --
+   * this is the click that destroys it, and the operator may have the folder open on a machine.
+   */
+  it('Re-issue Bundle asks before minting anything', async () => {
     api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
     renderModal()
     await ready()
 
     fireEvent.click(screen.getByRole('button', { name: /Re-issue Bundle/i }))
 
+    expect(screen.getByText(/Issue a new bundle for this gateway/i)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Issue & Download/i }).disabled).toBe(true)
+    expect(api.downloadGatewayBundle).toHaveBeenCalledTimes(1)
+  })
+
+  it('mints again and downloads a fresh archive once the name is typed', async () => {
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    renderModal()
+    await ready()
+
+    fireEvent.click(screen.getByRole('button', { name: /Re-issue Bundle/i }))
+    typeName()
+    fireEvent.click(screen.getByRole('button', { name: /Issue & Download/i }))
+
     await waitFor(() => expect(api.downloadGatewayBundle).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(clicked).toHaveLength(2))
+    // And it lands back on the setup screen, not on the question it just answered.
+    await ready()
+  })
+
+  /**
+   * CANCELLING A RE-ISSUE MUST NOT CLOSE THE DIALOG. Answering "no" cannot also throw away the
+   * commands and the countdown the operator is working from -- those cannot be got back without
+   * minting again, which is the very act they just declined.
+   */
+  it('Cancel returns to the bundle rather than closing over it', async () => {
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    const { onClose } = renderModal()
+    await ready()
+
+    fireEvent.click(screen.getByRole('button', { name: /Re-issue Bundle/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Cancel$/i }))
+
+    await ready()
+    expect(screen.getByText(/Valid for \d+:\d\d/)).toBeTruthy()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(api.downloadGatewayBundle).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * THE DRAWER'S ROUTE IN. Unlike creation, this gateway already exists and may already hold a live
+ * token somebody downloaded -- or, at AWAITING_BIRTH, a broker credential an appliance is holding.
+ * Issuing destroys whichever it has, and the appliance started with the dead bundle fails at
+ * enroll-gateway with a 401 that deliberately cannot say why. Hence a typed name, not a click.
+ */
+describe('GatewayBundleModal — confirm before issuing', () => {
+  const renderConfirm = (props = {}) => renderModal({ confirmFirst: true, ...props })
+
+  it('mints nothing on mount, and says what issuing would cost', () => {
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    renderConfirm()
+
+    expect(api.downloadGatewayBundle).not.toHaveBeenCalled()
+    expect(clicked).toHaveLength(0)
+    expect(screen.getByText(/invalidates any bundle/i)).toBeTruthy()
+    expect(screen.queryByText(/On the appliance/i)).toBeNull()
+  })
+
+  it('holds the action shut until the gateway name is typed', () => {
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    renderConfirm()
+
+    const issue = screen.getByRole('button', { name: /Issue & Download/i })
+    expect(issue.disabled).toBe(true)
+
+    typeName('Cell 4')                  // a prefix is not the name
+    expect(screen.getByRole('button', { name: /Issue & Download/i }).disabled).toBe(true)
+
+    typeName('Cell 5 Press Line')       // nor is a near miss
+    expect(screen.getByRole('button', { name: /Issue & Download/i }).disabled).toBe(true)
+
+    typeName()
+    expect(screen.getByRole('button', { name: /Issue & Download/i }).disabled).toBe(false)
+  })
+
+  /**
+   * AND IT LOOKS SHUT. The `disabled` attribute changes nothing about how a button reads in this
+   * stylesheet -- `.btn-disabled` is what greys it -- so without the class the operator meets a
+   * bright primary button that silently ignores the click.
+   */
+  it('looks refused while it is refusing', () => {
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    renderConfirm()
+
+    expect(screen.getByRole('button', { name: /Issue & Download/i }).className)
+      .toContain('btn-disabled')
+
+    typeName()
+    expect(screen.getByRole('button', { name: /Issue & Download/i }).className)
+      .not.toContain('btn-disabled')
+  })
+
+  /**
+   * MATCHED LOOSELY, on purpose. The gate stops an accidental click, not a determined typist;
+   * demanding exact capitalisation adds failed attempts without adding safety.
+   */
+  it('accepts the name with stray case and whitespace', () => {
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    renderConfirm()
+
+    typeName('  cell 4   press line  ')
+    expect(screen.getByRole('button', { name: /Issue & Download/i }).disabled).toBe(false)
+  })
+
+  it('issues and downloads once confirmed, then shows the setup screen', async () => {
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    const { showToast } = renderConfirm()
+
+    typeName()
+    fireEvent.click(screen.getByRole('button', { name: /Issue & Download/i }))
+
+    await waitFor(() => expect(api.downloadGatewayBundle).toHaveBeenCalledWith(GATEWAY.gateway_id))
+    await ready()
+    expect(clicked).toContain(FILENAME)
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Bundle downloaded'), 'success')
+  })
+
+  it('submits on Enter, so the typed name does not need a second reach for the mouse', async () => {
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    renderConfirm()
+
+    typeName()
+    fireEvent.keyDown(screen.getByLabelText(/Type .* to confirm/i), { key: 'Enter' })
+
+    await waitFor(() => expect(api.downloadGatewayBundle).toHaveBeenCalledTimes(1))
+  })
+
+  it('ignores Enter while the name is still wrong', () => {
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    renderConfirm()
+
+    typeName('cell')
+    fireEvent.keyDown(screen.getByLabelText(/Type .* to confirm/i), { key: 'Enter' })
+
+    expect(api.downloadGatewayBundle).not.toHaveBeenCalled()
+  })
+
+  it('Cancel closes when there is no bundle behind the question', () => {
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    const { onClose } = renderConfirm()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Cancel$/i }))
+    expect(onClose).toHaveBeenCalled()
+    expect(api.downloadGatewayBundle).not.toHaveBeenCalled()
+  })
+
+  /**
+   * A FAILED ISSUE LEAVES THE PREVIOUS BUNDLE ALIVE -- nothing was minted, so nothing was consumed.
+   * Staying on the confirm screen says that; landing on an empty setup screen would imply the
+   * gateway now has a bundle that does not exist.
+   */
+  it('keeps the operator on the question when the issue fails', async () => {
+    api.downloadGatewayBundle.mockRejectedValue(new Error('Enrolment is temporarily unavailable'))
+    renderConfirm()
+
+    typeName()
+    fireEvent.click(screen.getByRole('button', { name: /Issue & Download/i }))
+
+    await waitFor(() => expect(screen.getByText(/temporarily unavailable/)).toBeTruthy())
+    expect(screen.getByText(/invalidates any bundle/i)).toBeTruthy()
+    expect(screen.queryByText(/On the appliance/i)).toBeNull()
+    expect(clicked).toHaveLength(0)
+  })
+
+  /**
+   * AWAITING_BIRTH is the worse case and is named as such: the appliance already redeemed its token
+   * and is holding a broker credential, which re-issuing revokes. That is a different loss from
+   * "your download stopped working", and the operator is told which one they are about to cause.
+   */
+  it('names the broker credential when the gateway has already enrolled', () => {
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    renderModal({ confirmFirst: true, gateway: { ...GATEWAY, status: 'AWAITING_BIRTH' } })
+
+    expect(screen.getByText(/revokes the broker credential/i)).toBeTruthy()
+  })
+
+  it('says nothing about a credential for a gateway that has never enrolled', () => {
+    api.downloadGatewayBundle.mockResolvedValue(bundleResponse())
+    renderModal({ confirmFirst: true, gateway: { ...GATEWAY, status: 'PENDING_ENROLLMENT' } })
+
+    expect(screen.queryByText(/revokes the broker credential/i)).toBeNull()
   })
 })
 

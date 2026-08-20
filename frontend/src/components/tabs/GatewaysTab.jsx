@@ -192,14 +192,16 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
        * alternative is a row that says AWAITING SETUP with no indication of what the setup IS, which
        * is the state this whole flow exists to remove.
        *
-       * NOTHING IS MINTED BY OPENING IT -- see GatewayBundleModal. Creating the gateway does not
-       * create a token; downloading does.
+       * AND IT DOWNLOADS WITHOUT CONFIRMING, which the drawer's route into the same modal does not.
+       * The row is seconds old, so there is no earlier bundle for this one to invalidate -- the
+       * whole reason that confirmation exists is absent here. See GatewayBundleModal.
        */
       if (!form.is_virtual) {
         setBundleForGw({
           gateway_id: created.id || created.gateway_id,
           gateway_name: created.name || form.gateway_name,
-          sparkplug_id: created.sparkplug_id
+          sparkplug_id: created.sparkplug_id,
+          confirmFirst: false
         })
         showToast('Physical gateway created — download its bundle to finish setup', 'success')
       } else {
@@ -681,6 +683,11 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
            *
            * Absent once the gateway is ONLINE: re-issuing then would invalidate the credential a
            * working appliance is using, which is a destructive act dressed as a convenience.
+           *
+           * CONFIRM FIRST ON THIS ROUTE, unlike the one straight after creation. This gateway is not
+           * new: it may already hold a live token somebody downloaded, or -- at AWAITING_BIRTH -- a
+           * broker credential an appliance is holding. Issuing destroys whichever it has, so the
+           * modal asks for the gateway's name before it mints anything.
            */
           !selected.is_archived && !selected.is_virtual && isGatewayPending(selected) && canManage && {
             label: selected.status === 'AWAITING_BIRTH' ? 'Re-issue Bundle' : 'Download Setup Bundle',
@@ -689,7 +696,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             onClick: () => setBundleForGw({
               gateway_id: selected.gateway_id,
               gateway_name: selected.gateway_name,
-              sparkplug_id: selected.sparkplug_id
+              sparkplug_id: selected.sparkplug_id,
+              status: selected.status,
+              confirmFirst: true
             }),
             title: selected.status === 'AWAITING_BIRTH'
               ? 'This appliance enrolled but has not published. Re-issuing invalidates its current credential.'
@@ -791,6 +800,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
       {bundleForGw && (
         <GatewayBundleModal
           gateway={bundleForGw}
+          confirmFirst={bundleForGw.confirmFirst}
           onClose={() => { setBundleForGw(null); load() }}
           showToast={showToast}
         />
