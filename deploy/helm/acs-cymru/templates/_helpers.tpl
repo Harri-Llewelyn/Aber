@@ -702,27 +702,37 @@ message; without it the message names only the host, which is the least useful h
 {{- end -}}
 
 {{/*
-The five MQTT platform principals, as env, for the two containers that PROVISION them: the
-broker's assemble-config initContainer and the credential-reload sidecar.
+The MQTT principals the chart itself provisions, as env, for the two containers that write them:
+the broker's assemble-config initContainer and the credential-reload sidecar.
 
 ONE DEFINITION, because the two must agree exactly. They write the same password file, and a
 principal present in one and absent from the other produces a broker that authenticates a client
 until the next reload and then stops -- an intermittent CONNACK 5 that looks like a flapping
 network rather than a template that disagrees with itself.
 
+FIVE PLATFORM PRINCIPALS AND FOUR SIMULATED CELL GATEWAYS. The gateways are here for a different
+reason from the rest: node-red-init fails closed when a broker node in the shipped flow declares an
+`acsCredentialsEnv` pair it cannot find, so an install without them does not degrade to a quiet
+simulator -- the init container exits 1 and Node-RED never starts. They are ordinary accounts to
+the broker, and the empty-password skip below is what keeps them optional.
+
 Consumers (ingestion, i3x, node-red, the validator Job) each take only THEIR OWN pair, so this is
 deliberately not used there: the point of the split is that no workload holds another's credential.
 */}}
+{{- define "acs-cymru.mqttPrincipals" -}}
+INGESTION I3X SIMULATOR VALIDATOR MONITOR GW_CNC_MACHINING GW_ROBOTIC_ASSEMBLY GW_AGV_FLEET GW_FACILITY_BMS
+{{- end -}}
+
 {{- define "acs-cymru.mqttPrincipalEnv" -}}
 {{- $secretName := include "acs-cymru.secretName" . -}}
-{{- range $p := list "INGESTION" "I3X" "SIMULATOR" "VALIDATOR" "MONITOR" }}
+{{- range $p := splitList " " (include "acs-cymru.mqttPrincipals" .) }}
 {{ include "acs-cymru.secretEnv" (dict "name" (printf "MQTT_%s_USER" $p) "secretName" $secretName "key" (printf "MQTT_%s_USER" $p)) }}
 {{ include "acs-cymru.secretEnv" (dict "name" (printf "MQTT_%s_PASSWORD" $p) "secretName" $secretName "key" (printf "MQTT_%s_PASSWORD" $p)) }}
 {{- end }}
 {{- end -}}
 
 {{/*
-The shell fragment that upserts those five accounts into an ALREADY-ASSEMBLED password file.
+The shell fragment that upserts those accounts into an ALREADY-ASSEMBLED password file.
 
 `mosquitto_passwd -b` upserts, so this is idempotent and re-applying it on every start is what
 makes a rotated password in values reach the broker on the next restart.
@@ -733,10 +743,12 @@ only clue. It is the single most destructive character available in this script.
 
 An EMPTY password skips that account rather than writing an empty one. `mqttValidatorPassword` is
 the case that matters: the validator is a fixture, so a production install leaves it unset and
-should simply not have the account, not fail to boot over a credential it never wanted.
+should simply not have the account, not fail to boot over a credential it never wanted. The four
+`mqttGw*Password` values are fixtures in the same sense -- a plant that has retired the simulated
+shopfloor leaves them unset, and no account is created.
 */}}
 {{- define "acs-cymru.mqttPrincipalUpserts" -}}
-for p in INGESTION I3X SIMULATOR VALIDATOR MONITOR; do
+for p in {{ include "acs-cymru.mqttPrincipals" . }}; do
   eval user="\$MQTT_${p}_USER"
   eval pass="\$MQTT_${p}_PASSWORD"
   if [ -n "$pass" ]; then

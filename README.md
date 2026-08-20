@@ -336,7 +336,7 @@ Digital Nameplate; what each one covers and how its identity was verified is in
 ## Testing
 
 ```bash
-# Frontend — 1016 tests
+# Frontend — 1225 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required

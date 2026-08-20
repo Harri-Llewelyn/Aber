@@ -46,6 +46,13 @@ secrets:
   mqttValidatorPassword: acscymru123
   mqttMonitorUser: factoryplus_monitor
   mqttMonitorPassword: acscymru123
+  # The four simulated cell gateways. Set here because node-red-init fails closed on a broker node
+  # whose declared `acsCredentialsEnv` pair is missing -- without these the init container exits 1
+  # and Node-RED never starts, which on k3d reads as a stuck rollout rather than as a credential.
+  mqttGwCncMachiningPassword: acscymru123
+  mqttGwRoboticAssemblyPassword: acscymru123
+  mqttGwAgvFleetPassword: acscymru123
+  mqttGwFacilityBmsPassword: acscymru123
 
   grafanaAdminUser: admin
   grafanaAdminPassword: admin

@@ -152,6 +152,23 @@ spec:
             */}}
             {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_SIMULATOR_USER") | nindent 12 }}
             {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_SIMULATOR_PASSWORD") | nindent 12 }}
+            {{- /*
+              AND THE PAIRS THE SHIPPED FLOW ACTUALLY DECLARES, one per cell gateway.
+
+              node-red-init reads `acsCredentialsEnv` off each broker node and FAILS CLOSED when the
+              named pair is absent -- deliberately, because the alternative is seeding an empty
+              username, which the broker refuses with CONNACK 5 while Node-RED reports only
+              "Connection failed to broker: <clientId>@<url>", naming the client id rather than the
+              username and reading identically to a wrong host.
+
+              So an install missing these does not get a quiet simulator: this init container exits 1
+              and Node-RED never starts. Passed to the INIT container only -- the runtime reads the
+              credentials from flows_cred.json, which this writes.
+            */}}
+            {{- range $p := list "GW_CNC_MACHINING" "GW_ROBOTIC_ASSEMBLY" "GW_AGV_FLEET" "GW_FACILITY_BMS" }}
+            {{- include "acs-cymru.secretEnv" (dict "name" (printf "MQTT_%s_USER" $p) "secretName" $secretName "key" (printf "MQTT_%s_USER" $p)) | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" (printf "MQTT_%s_PASSWORD" $p) "secretName" $secretName "key" (printf "MQTT_%s_PASSWORD" $p)) | nindent 12 }}
+            {{- end }}
             {{/*
               The broker's transport, from the same helper the ingestion daemon uses.
 

@@ -128,6 +128,26 @@ secrets:
   # load-bearing rather than optional.
   mqttMonitorUser: factoryplus_monitor
   mqttMonitorPassword: ""
+  # THE FOUR SIMULATED CELL GATEWAYS of the `Simulated Shopfloor` flow. One account each:
+  # mosquitto.acl pins the topic's edge-node segment to the connecting username, so four cells
+  # cannot share a connection and there is no shared principal to fall back on.
+  #
+  # NOT OPTIONAL WHILE THE SHIPPED FLOW DECLARES THEM. Each broker node names its pair through
+  # `acsCredentialsEnv`, and node-red-init fails closed on a declared pair it cannot find -- the
+  # init container exits 1 and Node-RED never starts, rather than the simulator quietly not
+  # publishing. Leave them empty only together with a flow that no longer declares them.
+  #
+  # The usernames are the `sparkplug_id`s of gateway rows seeded by migration 0002, matched
+  # verbatim by the ACL. They are frozen: `mqttGwAgvFleet*` now serves Cell 3 — Production KPIs,
+  # and was renamed in place precisely so this account and its telemetry history stayed valid.
+  mqttGwCncMachiningUser: gwy120000000000400080000
+  mqttGwCncMachiningPassword: ""
+  mqttGwRoboticAssemblyUser: gwy130000000000400080000
+  mqttGwRoboticAssemblyPassword: ""
+  mqttGwAgvFleetUser: gwy140000000000400080000
+  mqttGwAgvFleetPassword: ""
+  mqttGwFacilityBmsUser: gwy150000000000400080000
+  mqttGwFacilityBmsPassword: ""
   # The bearer token supabase-functions presents to the gateway-credential sidecar, which is the only
   # thing that may add an account to the broker's password file.
   #
