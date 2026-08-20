@@ -61,6 +61,14 @@ const BUILT_IMAGES = [
   // That makes its base subject to the same pin as the broker's, which the eclipse-mosquitto row
   // above already enforces across both targets.
   'gateway-credential',
+  // supabase/postgres with supabase/migrations/*.sql copied in. It exists ONLY to carry that
+  // directory: the chain cannot reach a cluster through the chart, because a ConfigMap and Helm's
+  // release Secret are both capped at 1 MiB and the release holds those bytes twice.
+  //
+  // So this image is a schema artefact, not just a runtime. Its tag is the schema version, and
+  // pinning an older one is a database rollback rather than a runtime downgrade -- which is the
+  // reason it is listed here rather than pinned in values.yaml like a third-party image.
+  'db-init',
 ];
 const LOCALLY_BUILT = new Set(BUILT_IMAGES.map((n) => `${IMAGE_NAMESPACE}/${n}`));
 
@@ -158,6 +166,16 @@ const BASE_IMAGE_COUPLINGS = [
     dockerfile: join('supabase', 'functions', 'Dockerfile'),
     base: 'supabase/edge-runtime',
     why: 'Compose runs this image directly; the chart bakes the functions into an image built FROM it.',
+  },
+  {
+    dockerfile: join('supabase', 'db-init', 'Dockerfile'),
+    base: 'supabase/postgres',
+    // The same shape as the row above, one layer deeper: Compose applies the migrations with the
+    // psql inside supabase/postgres, and this image bakes them into a copy of it. Drift means the
+    // two targets parse identical SQL with different psql clients -- and a client older than the
+    // server does not refuse, it mis-handles syntax, which surfaces as a schema fault somewhere
+    // downstream rather than as a version error here.
+    why: 'Compose runs this image directly (supabase-db, supabase-db-init); the chart bakes the migrations into an image built FROM it.',
   },
 ];
 

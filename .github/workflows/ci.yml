@@ -1169,6 +1169,10 @@ jobs:
           # from a ConfigMap, so this image supplies only the runtime -- node, and the broker's own
           # mosquitto_passwd, which is why it is built FROM eclipse-mosquitto.
           docker build -f gateway-credential/Dockerfile  -t "$IMG_NS/gateway-credential:$V" gateway-credential
+          # The schema. Context is supabase/, because that is where migrations/ lives and the whole
+          # image is supabase/postgres plus that directory -- see supabase/db-init/Dockerfile for
+          # why the chart cannot carry it.
+          docker build -f supabase/db-init/Dockerfile    -t "$IMG_NS/db-init:$V" supabase
           # VITE_RUNTIME_CONFIG=true bakes NOTHING -- the whole point of Phase 0. A default build
           # would carry a baked URL that masks a missing ConfigMap instead of surfacing it.
           docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
@@ -1185,10 +1189,20 @@ jobs:
           IMG_NS: ghcr.io/harri-llewelyn/acs-cymru
           V: ${{ steps.appversion.outputs.version }}
         run: |
+          # EVERY IMAGE THIS REPOSITORY BUILDS, not a subset.
+          #
+          # `pullPolicy: IfNotPresent` on a tag that is not in the registry falls through to a pull
+          # and ImagePullBackOffs; on a tag that IS there, it silently runs the LAST RELEASE instead
+          # of this working tree, and the job reports green for code it never executed. db-init and
+          # gateway-credential are the first case (neither has ever been published), i3x-service was
+          # quietly the second.
           k3d image import -c acs-cymru \
             "$IMG_NS/edge-runtime:$V" \
             "$IMG_NS/ingestion:$V" \
             "$IMG_NS/node-red:$V" \
+            "$IMG_NS/i3x-service:$V" \
+            "$IMG_NS/gateway-credential:$V" \
+            "$IMG_NS/db-init:$V" \
             "$IMG_NS/frontend:$V" \
             "$IMG_NS/test-runner:$V"
 
@@ -1203,6 +1217,7 @@ jobs:
           # job stops building.
           docker image rm -f \
             "$IMG_NS/edge-runtime:$V" "$IMG_NS/ingestion:$V" "$IMG_NS/node-red:$V" \
+            "$IMG_NS/i3x-service:$V" "$IMG_NS/gateway-credential:$V" "$IMG_NS/db-init:$V" \
             "$IMG_NS/frontend:$V" "$IMG_NS/test-runner:$V" || true
           docker builder prune -af || true
           docker image prune -af || true

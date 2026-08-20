@@ -40,36 +40,48 @@ lexically, by whatever follows the number — which means the order is decided b
 naming and can change under a rename that looks purely cosmetic. Nothing fails, nothing logs; the
 ordering is simply not the one anybody chose.
 
-`scripts/check-docs-drift.mjs` asserts unique prefixes across **both** `supabase/migrations/` and
-the chart mirror at `deploy/helm/acs-cymru/files/migrations/`, and that the two directories hold
-the same set. `0006_nodered_oidc_auth.sql` was renumbered from `0003` for exactly this reason.
+`scripts/check-docs-drift.mjs` asserts unique prefixes across `supabase/migrations/`.
+`0006_nodered_oidc_auth.sql` was renumbered from `0003` for exactly this reason.
 
-> Renaming a migration means re-running `node scripts/sync-helm-chart-files.mjs`. It removes the
-> orphaned mirror copy; leaving it behind would replay one migration **twice, under two names**,
-> on the Kubernetes target only.
+### How the chain reaches each target
 
-**The chart mirror is gzipped**, one `.sql.gz` per migration, carried in the ConfigMap's
-`binaryData`. The chain is 878 KiB of which 57% is generated reference vocabulary, which put it at
-85% of the 1 MiB ConfigMap limit — an etcd object limit that fails at *apply* time with "Request
-entity too large", naming the ConfigMap rather than the file that grew. Compressed it is 149 KiB
-(~199 KiB base64-encoded), 20% of the limit.
+**Compose bind-mounts this directory** at `/migrations` and applies the plain files, so a migration
+is editable without a rebuild.
 
-Three things follow, and all three are load-bearing:
+**Kubernetes gets them baked into an image.** `supabase/db-init/Dockerfile` is `supabase/postgres`
+with `COPY migrations/*.sql /migrations/`, and the db-init Job reads them from its own filesystem.
+The chart carries none of them.
 
-- **Compose is unaffected.** It bind-mounts `supabase/migrations/` and applies the plain files. The
-  two targets differ in *transport*, never in content.
-- **`db-init` decompresses into an `emptyDir` first**, then applies `*.sql` from there in the same
-  lexical order — so the numeric prefix still decides execution order on both targets.
-- **The sync check compares decompressed bytes, not archives.** zlib writes the gzip OS byte from a
-  compile-time constant (`0x0a` on Windows, `0x03` on Linux), so byte-comparing would report every
-  file stale in CI purely because it was generated on a laptop. `.gitattributes` marks `*.gz` as
-  `binary` for the same class of reason: `* text=auto` would otherwise leave git *guessing*, and a
-  CRLF-normalised archive stops decompressing.
+That is not the original design. They were mirrored into the chart, gzipped, to fit the **1 MiB
+ConfigMap limit** — an etcd object limit that fails at *apply* time with "Request entity too large",
+naming the ConfigMap rather than the file that grew. The chain is 878 KiB, 57% of it generated
+reference vocabulary, so compression was the obvious answer and it worked: 149 KiB.
 
-Squashing the chain into `0001`/`0002` was considered and rejected: 81% of the bytes are generated
-vocabulary and SQL statements that must survive verbatim, so the floor is ~703 KiB — still 69% of the
-limit. The only thing a squash removes at scale is the migration headers, and in this repository
-those are the reasoning for every schema guard.
+It broke the **other** 1 MiB limit. Helm stores a release as `base64(gzip(json(release)))` in a
+Secret with the same cap, and that release carries the migrations **twice** — once as chart files,
+once base64-encoded into the rendered ConfigMap. Gzipped bytes compress no further, so neither copy
+shrinks and base64 adds a third on top of each: 464 KB of a 1,213,920-byte release against a
+1,048,576 limit, and `helm install` failing with
+
+```
+Secret "sh.helm.release.v1.acs-cymru.v1" is invalid: data: Too long
+```
+
+which names the Secret and nothing about migrations. Un-gzipping is worse in both directions at
+once — 1,386,004 bytes in the release, and the ConfigMap back over its own limit at 1,255,337.
+
+**No size of file satisfies both limits as the chain grows**, because the same bytes are counted by
+each. Hence the image. Two consequences worth knowing:
+
+- **The db-init image tag is the schema version.** Pinning an older one replays an older chain,
+  which is a database rollback rather than a runtime downgrade.
+- **There is no mirrored copy left to drift**, so nothing needs a sync check to prove the two
+  targets agree: both read `supabase/migrations/`, one by mount and one by `COPY`.
+
+Squashing the chain was considered and rejected before either of these: 81% of the bytes are
+generated vocabulary and SQL statements that must survive verbatim, so the floor is ~703 KiB. The
+only thing a squash removes at scale is the migration headers, and in this repository those are the
+reasoning for every schema guard.
 
 ### Idempotency is not optional
 

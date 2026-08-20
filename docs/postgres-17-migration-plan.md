@@ -90,6 +90,11 @@ first, so it takes `0011` and the vocabulary work starts at `0012`.
   `supabase/migrations/*.sql` into `deploy/helm/acs-cymru/files/migrations/`, and CI runs it with
   `--check`. Migrations are edited once and synced, never edited twice. The same holds for the
   Grafana dashboard JSON and the `timescaledb/` scripts.
+
+  > **No longer true of the migrations, as of 2026-08-20.** They are baked into the `db-init` image
+  > instead — the chart could not carry them, because a ConfigMap and Helm's release Secret are both
+  > capped at 1 MiB and the release holds those bytes twice. See `supabase/db-init/Dockerfile`. The
+  > mirror still works exactly as described for everything else.
 - **The backup Job follows the pin on its own.** It renders
   `{{ .Values.supabaseDb.image.repository }}:{{ .Values.supabaseDb.image.tag }}`, so the image
   tracks automatically. Only the *stated constraint* in its comment needs revising.

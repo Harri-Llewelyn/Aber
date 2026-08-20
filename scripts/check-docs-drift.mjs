@@ -296,10 +296,11 @@ function edgeFunctionNames() {
     ...values.matchAll(/repository:\s*(\S+)[\s\S]{0,400}?^\s{4}tag:\s*""\s*$/gm),
   ].map((m) => m[1]);
   const unique = [...new Set(built)];
-  // 7 since the gateway-credential sidecar. Bumped deliberately rather than derived: the count is
-  // the check -- an image added to values.yaml without a documented build command is exactly what
-  // this notices, and a self-adjusting total would notice nothing.
-  const EXPECTED = 7;
+  // 8 since db-init, which carries the migrations because the chart cannot. Bumped deliberately
+  // rather than derived: the count is the check -- an image added to values.yaml without a
+  // documented build command is exactly what this notices, and a self-adjusting total would notice
+  // nothing.
+  const EXPECTED = 8;
   if (unique.length !== EXPECTED) {
     fail(
       `expected ${EXPECTED} chart images with an empty tag (built here, resolved from appVersion); ` +
@@ -323,72 +324,51 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 9. Migration filenames carry UNIQUE numeric prefixes, in both the source directory and the chart
-//    mirror, and the two directories hold the same set.
+// 9. Migration filenames carry UNIQUE numeric prefixes.
 //
-// supabase-db-init applies `/migrations/*.sql` in glob order with no applied-migrations ledger, so
-// the filename IS the execution order. Two files sharing a prefix still run -- lexically, by
-// whatever follows the number -- which means the order is decided by an accident of naming and can
-// change under a rename that looks purely cosmetic. That is not a failure anyone would see: both
-// files apply, the stack boots, and the ordering is simply not the one anybody chose.
+// db-init applies `/migrations/*.sql` in glob order with no applied-migrations ledger, so the
+// filename IS the execution order. Two files sharing a prefix still run -- lexically, by whatever
+// follows the number -- which means the order is decided by an accident of naming and can change
+// under a rename that looks purely cosmetic. That is not a failure anyone would see: both files
+// apply, the stack boots, and the ordering is simply not the one anybody chose.
 //
-// The mirror is checked as well because Helm mounts THAT copy. sync-helm-chart-files.mjs removes
-// orphans, but only for mirrors it still knows about -- a rename that slipped past a sync would
-// leave the old file in the chart and replay one migration twice under two names.
-//
-// THE CHART MIRROR IS GZIPPED, one archive per migration, so its names carry a `.sql.gz` suffix --
-// stripped below before the two sets are compared. The ORDER still comes from the filename: db-init
-// decompresses into a scratch directory and applies `*.sql` from there, so the numeric prefix is
-// doing exactly the same job on both targets. Comparing the suffixed names directly would report
-// every migration as missing from both sides.
+// ONE DIRECTORY NOW, WHERE THIS USED TO CHECK TWO. The chart carried a gzipped mirror, and the
+// second half of this check existed to prove the two sets matched. They are baked into the db-init
+// image by `COPY migrations/*.sql` instead, straight from the directory below -- so the copy that
+// could drift no longer exists, and the check that policed it has nothing left to compare. The
+// image TAG can still be wrong, which is check-image-tag-parity.mjs's job.
 // -------------------------------------------------------------------------------------------------
 {
-  const DIRS = ['supabase/migrations', 'deploy/helm/acs-cymru/files/migrations'];
-  const sets = [];
+  const dir = 'supabase/migrations';
+  const files = readdirSync(join(REPO, dir), { withFileTypes: true })
+    .filter((e) => e.isFile() && e.name.endsWith('.sql'))
+    .map((e) => e.name)
+    .sort();
 
-  for (const dir of DIRS) {
-    const files = readdirSync(join(REPO, dir), { withFileTypes: true })
-      .filter((e) => e.isFile() && (e.name.endsWith('.sql') || e.name.endsWith('.sql.gz')))
-      .map((e) => e.name.replace(/\.gz$/, ''))
-      .sort();
-
-    const byPrefix = new Map();
-    for (const name of files) {
-      const match = name.match(/^(\d+)_/);
-      if (!match) {
-        fail(`${dir}/${name} has no numeric prefix; db-init applies these in glob order`);
-        continue;
-      }
-      const prefix = match[1];
-      if (!byPrefix.has(prefix)) byPrefix.set(prefix, []);
-      byPrefix.get(prefix).push(name);
+  const byPrefix = new Map();
+  for (const name of files) {
+    const match = name.match(/^(\d+)_/);
+    if (!match) {
+      fail(`${dir}/${name} has no numeric prefix; db-init applies these in glob order`);
+      continue;
     }
-
-    for (const [prefix, names] of byPrefix) {
-      if (names.length > 1) {
-        fail(
-          `${dir} has ${names.length} migrations numbered ${prefix}: ${names.join(', ')}. ` +
-            `Execution order is then decided by the text after the number, not by anyone's intent.`
-        );
-      }
-    }
-    sets.push({ dir, files });
+    const prefix = match[1];
+    if (!byPrefix.has(prefix)) byPrefix.set(prefix, []);
+    byPrefix.get(prefix).push(name);
   }
 
-  const [source, mirror] = sets;
-  const onlyInSource = source.files.filter((f) => !mirror.files.includes(f));
-  const onlyInMirror = mirror.files.filter((f) => !source.files.includes(f));
-  if (onlyInSource.length || onlyInMirror.length) {
-    fail(
-      `migration directories disagree — only in source: [${onlyInSource.join(', ') || 'none'}]; ` +
-        `only in the chart mirror: [${onlyInMirror.join(', ') || 'none'}]. ` +
-        `Run: node scripts/sync-helm-chart-files.mjs`
-    );
-  } else if (!problems.some((p) => p.includes('numbered'))) {
-    pass(
-      `${source.files.length} migrations carry unique prefixes and both directories agree`
-    );
+  let clash = false;
+  for (const [prefix, names] of byPrefix) {
+    if (names.length > 1) {
+      clash = true;
+      fail(
+        `${dir} has ${names.length} migrations numbered ${prefix}: ${names.join(', ')}. ` +
+          `Execution order is then decided by the text after the number, not by anyone's intent.`
+      );
+    }
   }
+
+  if (!clash) pass(`${files.length} migrations carry unique numeric prefixes`);
 }
 
 // -------------------------------------------------------------------------------------------------

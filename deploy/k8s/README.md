@@ -490,6 +490,17 @@ docker build -f i3x/Dockerfile                  -t $NS/i3x-service:$V .
 # end. The service's own code is NOT baked in — the chart mounts it from a ConfigMap.
 docker build -f gateway-credential/Dockerfile   -t $NS/acs-cymru-gateway-credential:$V gateway-credential
 
+# db-init — THE SCHEMA, baked in. supabase/postgres with supabase/migrations/*.sql copied to
+# /migrations; context is supabase/, where that directory lives. It exists because the chain cannot
+# travel in the chart: a ConfigMap is capped at 1 MiB, which forced it to be gzipped, and Helm's
+# release Secret has the same cap while holding those bytes TWICE -- as chart files and again
+# base64-encoded into the rendered ConfigMap, neither copy compressible. Satisfying one limit broke
+# the other. See supabase/db-init/Dockerfile for the measurements.
+#
+# ITS TAG IS THE DATABASE VERSION. Deploying an older one replays an older schema chain, which is a
+# rollback rather than a runtime downgrade.
+docker build -f supabase/db-init/Dockerfile      -t $NS/db-init:$V supabase
+
 # Conformance test runner (only needed for e2e.enabled=true). EXTENDS the ingestion image, so build
 # that first: it adds jsonschema and the AAS suite in a repo-shaped layout. jsonschema is deliberately
 # NOT in the production ingestion image, and without it the schema-conformance tests skip themselves

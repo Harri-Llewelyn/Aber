@@ -614,6 +614,25 @@ initJobs:
   ttlSecondsAfterFinished: 3600
 
 # ---------------------------------------------------------------------------------------------
+# db-init -- the image that CARRIES THE SCHEMA
+# ---------------------------------------------------------------------------------------------
+# supabase/postgres with supabase/migrations/*.sql copied into /migrations. It exists because the
+# chain cannot reach a cluster through the chart: a ConfigMap is capped at 1 MiB, and Helm's release
+# Secret has the same cap while holding those bytes twice over. See supabase/db-init/Dockerfile.
+#
+# THE TAG IS EMPTY, which resolves to Chart.AppVersion -- the marker for an image this repository
+# builds and publishes. check-image-tag-parity.mjs reads exactly that to decide which images must
+# appear in release.yml and ci.yml, so pinning a tag here quietly removes it from the release.
+#
+# PINNING IT TO AN OLDER VERSION IS A SCHEMA ROLLBACK, not a runtime one. That is the cost of this
+# arrangement, stated where someone would do it: the migrations travel with the image now.
+dbInit:
+  image:
+    repository: ghcr.io/harri-llewelyn/acs-cymru/db-init
+    tag: ""
+    pullPolicy: IfNotPresent
+
+# ---------------------------------------------------------------------------------------------
 # Messaging
 # ---------------------------------------------------------------------------------------------
 mosquitto:
