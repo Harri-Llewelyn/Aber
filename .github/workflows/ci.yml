@@ -1207,15 +1207,60 @@ jobs:
           # of this working tree, and the job reports green for code it never executed. db-init and
           # gateway-credential are the first case (neither has ever been published), i3x-service was
           # quietly the second.
-          k3d image import -c acs-cymru \
-            "$IMG_NS/edge-runtime:$V" \
-            "$IMG_NS/ingestion:$V" \
-            "$IMG_NS/node-red:$V" \
-            "$IMG_NS/i3x-service:$V" \
-            "$IMG_NS/gateway-credential:$V" \
-            "$IMG_NS/db-init:$V" \
-            "$IMG_NS/frontend:$V" \
-            "$IMG_NS/test-runner:$V"
+          IMAGE_NAMES="edge-runtime ingestion node-red i3x-service gateway-credential db-init frontend test-runner"
+          REFS=""
+          for n in $IMAGE_NAMES; do REFS="$REFS $IMG_NS/$n:$V"; done
+
+          # VERIFIED, NOT TRUSTED -- `k3d image import` reports success it did not achieve.
+          #
+          # It writes a tarball into the cluster image volume and `ctr import`s it inside the node. When
+          # the node cannot see that tarball the import fails PER NODE, and k3d prints the error, then
+          # prints "Successfully imported 8 image(s)", then exits 0:
+          #
+          #   ERRO failed to import images in node 'k3d-acs-cymru-server-0': ... exit code '1'
+          #   ctr: open /k3d/images/k3d-acs-cymru-images-<ts>.tar: no such file or directory
+          #   INFO Successfully imported 8 image(s) into 1 cluster(s)
+          #
+          # Seen on main at fc3ac34, on a tree byte-identical to one that had passed ten minutes earlier.
+          # The tell is DURATION: a real import of these eight takes minutes and adds ~10 GB to the disk;
+          # that one took eight seconds and added one. Because the next lines below `docker image rm` the
+          # host copies on the strength of that exit code, the only surviving copy was destroyed -- and the
+          # symptom arrived seventeen minutes later as `helm install` timing out, with ErrImagePull and a
+          # 403 from GHCR for images that have never been published there.
+          #
+          # So the exit code is not the check. The node's own image list is.
+          verify_images_in_node() {
+            present=$(docker exec k3d-acs-cymru-server-0 ctr -n k8s.io images ls -q 2>/dev/null || true)
+            missing=""
+            for n in $IMAGE_NAMES; do
+              case "$present" in
+                *"$IMG_NS/$n:$V"*) ;;
+                *) missing="$missing $n" ;;
+              esac
+            done
+            if [ -n "$missing" ]; then
+              echo "  not in the node:$missing"
+              return 1
+            fi
+            return 0
+          }
+
+          for attempt in 1 2 3; do
+            # shellcheck disable=SC2086
+            k3d image import -c acs-cymru $REFS || echo "  k3d image import exited non-zero on attempt $attempt"
+            if verify_images_in_node; then
+              echo "all $(echo $IMAGE_NAMES | wc -w) images verified present in the node (attempt $attempt)"
+              break
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error::k3d did not place every image in the node after 3 attempts. Host copies are"
+              echo "::error::still present and nothing has been reclaimed; the cluster would fall back to"
+              echo "::error::GHCR, where db-init and gateway-credential have never been published."
+              exit 1
+            fi
+            echo "  retrying in 10s"
+            sleep 10
+          done
 
           # `k3d image import` COPIES into the node's containerd; it does not share the host
           # daemon's store. So after this line every one of those images exists twice on the same
