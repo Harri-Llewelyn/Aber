@@ -22,7 +22,7 @@ export function ApproveQuarantineModal({ item, cells, gateways, suggestion, onAp
   const [connMethod, setConnMethod] = useState('Sparkplug B')
   const [gatewayId, setGatewayId] = useState(item.gateway_id || (gateways[0] ? gateways[0].gateway_id : ''))
 
-  // The cell IS chosen here again (migration 0036). It was removed with the note that "the old
+  // The cell IS chosen here again (archived migration 0036). It was removed with the note that "the old
   // cell picker wrote a value nothing could store" -- devices had no cell_id column. They do
   // now, and this is the one moment an operator is already looking at the device, so making
   // them find it again on the Devices page afterwards is the worse workflow.

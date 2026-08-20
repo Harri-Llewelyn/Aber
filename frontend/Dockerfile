@@ -65,6 +65,12 @@ ARG VITE_GITHUB_REPO_URL
 ARG VITE_GRAFANA_URL
 # Offers the sign-up form on the auth screen.
 ARG VITE_ALLOW_SIGNUP
+# Storage bucket names, matching STORAGE_BUCKET / GATEWAY_BACKUP_BUCKET in scripts/storage-init.mjs.
+# Unset is the ordinary case: src/api.js defaults to the same two names those default to. They are
+# build args at all so a deployment that RENAMED a bucket can move the dashboard with everything
+# else, rather than leaving it reading the old name and 404ing on upload.
+ARG VITE_MODEL_3D_BUCKET
+ARG VITE_GATEWAY_BACKUP_BUCKET
 
 RUN npm run build
 

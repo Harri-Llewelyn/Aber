@@ -554,6 +554,46 @@ using one for both fails in a way that names neither. In-cluster URLs are not co
 {{- define "acs-cymru.studioUrl" -}}{{ include "acs-cymru.publicUrl" (dict "ctx" . "key" "studio" "sub" "studio") }}{{- end -}}
 {{- define "acs-cymru.docsUrl" -}}{{ include "acs-cymru.publicUrl" (dict "ctx" . "key" "docs" "sub" "docs") }}{{- end -}}
 {{- define "acs-cymru.mqttUrl" -}}{{ include "acs-cymru.publicUrl" (dict "ctx" . "key" "mqtt" "sub" "mqtt") }}{{- end -}}
+
+{{/*
+The browser origins Kong echoes an Access-Control-Allow-Origin for -- a JSON array, substituted
+into `__CORS_ORIGINS__` in files/kong/kong.yml.
+
+WHY THIS IS DERIVED AND NOT CONFIGURED. It is the stack's ONLY statement of origin policy: the
+edge functions carry no Access-Control-Allow-Origin of their own on purpose (see
+supabase/functions/_shared/cors.ts), since the gateway is the only layer that sees a request
+before deciding to route it. So an origin that is wrong here has nothing behind it to compensate.
+
+The two browser-facing origins are the dashboard and Swagger UI, and both already have a helper
+because the Ingress needs their hostnames. Deriving from those helpers is what makes it impossible
+for the origin list to name a host the chart does not serve, or to miss one that it does -- the
+same single-source argument values.yaml makes for publicUrls.grafana, and the failure this closes
+is worse: a four-origin localhost literal shipped here for as long as Kubernetes did, so on a real
+cluster the dashboard authenticated and then could not read a single response. Nothing caught it,
+because `curl` sends no Origin and does not enforce the answer.
+
+`corsExtraOrigins` is for the cases the chart cannot know: a reverse proxy in front of the Ingress,
+a tunnel, a second hostname on the same deployment. Appended rather than replacing, so adding one
+cannot silently drop the dashboard's own origin.
+
+EMPTY IS REFUSED. A data-tier install with no publicBaseDomain and no publicUrls has no browser
+origin to name, and rendering `origins: []` produces a gateway that starts and refuses every
+browser request -- the exact failure this helper exists to end, arrived at by a different route.
+*/}}
+{{- define "acs-cymru.corsOrigins" -}}
+{{- $origins := list -}}
+{{- $frontend := include "acs-cymru.frontendUrl" . -}}
+{{- if $frontend -}}{{- $origins = append $origins $frontend -}}{{- end -}}
+{{- $docs := include "acs-cymru.docsUrl" . -}}
+{{- if $docs -}}{{- $origins = append $origins $docs -}}{{- end -}}
+{{- range .Values.global.corsExtraOrigins -}}
+{{- $origins = append $origins (. | trimSuffix "/") -}}
+{{- end -}}
+{{- if not $origins -}}
+{{- fail "\n\nacs-cymru: no browser origin could be derived for Kong's CORS policy.\n\nIt comes from global.publicBaseDomain (or publicUrls.frontend / publicUrls.docs). With none\nof them set there is no origin to allow, and Kong would start cleanly and then block every\nbrowser request to /rest, /auth, /storage, /realtime and /functions -- returning 200 with no\nAccess-Control-Allow-Origin, which presents as a dashboard that signs in and then shows\nempty tables with nothing failing anywhere you would think to look.\n\nSet global.publicBaseDomain, or global.corsExtraOrigins if this deployment is reached only\nthrough a proxy whose hostname the chart cannot derive.\n" -}}
+{{- end -}}
+{{- $origins | uniq | toJson -}}
+{{- end -}}
 {{/*
 The i3X server's browser-facing URL.
 

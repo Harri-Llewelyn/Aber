@@ -21,7 +21,7 @@ const gateway = {
   gateway_id: 'gw-1',
   gateway_name: 'Virtual_Gateway_NodeRED',
   cell_id: 'cell-1',
-  // NOT NULL DEFAULT 'cell' (migration 0036), so every real payload carries it. Virtual and
+  // NOT NULL DEFAULT 'cell' (archived migration 0036), so every real payload carries it. Virtual and
   // site-wide are independent: this fixture is a virtual gateway that has been given a cell.
   location_scope: 'cell',
   status: 'ONLINE',

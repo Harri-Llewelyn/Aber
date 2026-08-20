@@ -34,7 +34,7 @@
 -- mistyped value could only be corrected by DEPRECATING THE METRIC AND RE-PROVISIONING EVERY
 -- DEVICE THAT PUBLISHES IT, to fix a string that never left this database.
 --
--- That is the exact trade migration 0029 already made for `semantic_id`, and for the same reason:
+-- That is the exact trade archived migration 0029 already made for `semantic_id`, and for the same reason:
 -- "semantic_id is an assertion that gets corrected BY HAND, so re-stamping it would make a
 -- hand-entered crosswalk permanently unfixable". This column is in that family, not the other one.
 -- Standards also ADD values between editions -- MTConnect has grown EXECUTION values, PackML

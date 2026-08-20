@@ -19,7 +19,7 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
  *
  * READ-ONLY IS THE DEFAULT, and it is the same read-only the database enforces. An active or
  * archived version renders its metric set as a list, not as a form with a disabled Save --
- * `prevent_active_schema_mutation()` (migration 0037) would reject the write, so offering the
+ * `prevent_active_schema_mutation()` (archived migration 0037) would reject the write, so offering the
  * shape of an edit and failing at the end is worse than not offering it. `isSchemaEditable()` is
  * the single predicate both the mode switch and every affordance below read, and it fails closed:
  * a schema whose status could not be read renders read-only.

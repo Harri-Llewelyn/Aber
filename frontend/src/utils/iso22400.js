@@ -1,5 +1,5 @@
 /**
- * The ISO 22400-2 KPI vocabulary, as served from `iso22400_vocabulary` (migration 0030).
+ * The ISO 22400-2 KPI vocabulary, as served from `iso22400_vocabulary` (archived migration 0030).
  *
  * Unlike MTConnect, a KPI is not composed from parts: `AVAILABILITY` is the whole concept, and the
  * only thing left to choose is which group it files under. So the picker here selects an entry
@@ -80,7 +80,7 @@ export function iso22400Sections(vocabulary) {
 /**
  * The Add Metric form state a KPI implies.
  *
- * `group` is the KPI's family, which is why migration 0030 registers those families as metric
+ * `group` is the KPI's family, which is why archived migration 0030 registers those families as metric
  * groups -- so the name a KPI composes into (`OEE/AVAILABILITY`) matches what is already in the
  * catalog rather than forking a second spelling of the same group.
  */

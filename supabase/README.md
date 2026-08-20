@@ -773,6 +773,70 @@ not a capability.
 
 ---
 
+## Storage buckets and why they differ
+
+Two buckets, created by `scripts/storage-init.mjs` and governed by `storage-policies.sql`. They are
+opposites in the one setting that matters, and the reasoning belongs together rather than split
+across two comment blocks in the policy file.
+
+| | `asset-3d-models` | `gateway-backups` |
+| :--- | :--- | :--- |
+| Public read | **yes** | **no** |
+| Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager |
+| Read | anyone, including `anon` | those two plus **Auditor** |
+| Operator | read | nothing |
+| Reached by | a plain public URL | a signed URL, minted after a role check |
+
+### `asset-3d-models` is public-read, and that is not laziness
+
+An exported AAS `File` element's URL has to be dereferenceable by a viewer holding no Factory+
+session — that is what makes the shell a document rather than a pointer into this stack. A signed
+URL would expire, which turns every shell already handed out into a time bomb.
+
+The consequence is a constraint on what may go in it: **nothing beyond machine geometry.** Writes
+are gated on `device:manage` rather than merely `authenticated`, because an upload both changes
+what a shell publishes *and* puts bytes at a world-readable URL.
+
+### `gateway-backups` is private, and holds behaviour rather than secrets
+
+A `flows.json` describes the plant's edge topology, its broker addresses, its device ids and its
+processing logic. None of that is public, and there is deliberately no `getPublicUrl()` path for
+this bucket.
+
+**`flows.json` only.** `flows_cred.json` — Node-RED's credential store, encrypted with
+`NODERED_CREDENTIAL_SECRET` — is excluded on purpose. Stored here it would either be useless (the
+secret is not in this bucket) or catastrophic (if the secret ever were). A restored appliance
+re-injects its credentials from the environment enrolment wrote, exactly as
+`scripts/node-red-init.mjs` already does for the platform's own Node-RED. So a backup describes
+behaviour, never secrets.
+
+### The role split is asymmetric on purpose
+
+An auditor's job is to see what the plant was configured to do and when it changed, and a flow
+backup is the only artefact that answers that for the edge — so `SELECT` is the point of the role.
+`INSERT` would let an auditor rewrite the record they exist to examine, which is the same objection
+that makes `digital_thread` append-only.
+
+Operator gets nothing: nothing on the operator dashboard reads or writes a backup, and a role that
+cannot use a capability should not hold it.
+
+### The path is confined by the database, not by the uploader
+
+Every object must live under `<sparkplug_id>/`, and that folder must name a gateway that exists.
+Same idea as `mosquitto.acl`'s `pattern readwrite spBv1.0/+/+/%u/#` one layer up: **the client does
+not get to assert where its data belongs.** A convention the frontend happens to follow is not a
+control — Storage's REST API is reachable with any authenticated session.
+
+`SELECT` is deliberately *not* path-confined: a reader may list the bucket to find backups, and
+requiring a valid gateway prefix on read would hide the backups of a gateway that had since been
+deleted — which is exactly when someone is looking for them.
+
+The trap in writing that policy, and why its test asserts an *accepted* path as well as rejected
+ones, is recorded inline in `storage-policies.sql`, because it constrains the SQL on the very next
+line.
+
+---
+
 ## Adding a vocabulary
 
 A **vocabulary** is reference data describing what a standard *defines*. It is deliberately separate

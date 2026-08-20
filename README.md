@@ -107,7 +107,7 @@ runbook; anything not in that table is drift. Design rationale is in
 ## Quick start — Docker Compose
 
 ```bash
-npm run setup                   # writes .env with 14 freshly generated credentials
+npm run setup                   # writes .env with 24 freshly generated credentials
 docker compose up --build -d    # launches the whole stack
 ```
 
@@ -239,6 +239,7 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | **[`deploy/k8s/README.md`](deploy/k8s/README.md)** | Kubernetes runbook: install, upgrade, teardown, hardening, divergence table, releases |
 | [`deploy/helm/acs-cymru/`](deploy/helm/acs-cymru) | The Helm chart; `values.yaml` documents every setting |
 | [`docs/kubernetes-architecture.md`](docs/kubernetes-architecture.md) | Why the Kubernetes target is built the way it is. Source comments cite it by section |
+| [`docs/incidents.md`](docs/incidents.md) | Faults whose FIX LOOKS ARBITRARY without the story. Read before "tidying" a guard that seems redundant |
 | [`docs/openapi.yaml`](docs/openapi.yaml) · [`docs/i3x-openapi.yaml`](docs/i3x-openapi.yaml) | REST and i3X specifications, rendered by Swagger UI |
 | [`supabase/migrations/archive/`](supabase/migrations/archive) | The 38 pre-beta migrations, preserved for their reasoning. Never executed |
 | [`grafana/`](grafana) · [`timescaledb/`](timescaledb) | Provisioning; hypertable schema, retention and rollup reconciliation, the read-only BI role |
@@ -442,6 +443,148 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ---
 
+## Roadmap & Future Extensions
+
+Eight extensions, ordered by how much of each already exists. None is speculative: every one names
+the code it would build on, because the value of writing them down is that a reader can tell how far
+away each is.
+
+**These are not open defects.** Known issues and accepted risks are
+[GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues).
+
+### 1 · Ingestion drop observability
+
+**Builds on:** `count()` / `counter_snapshot()` in [`ingestion/ingestion.py`](ingestion/ingestion.py)
+· Kong's `prometheus` plugin · `templates/obs/servicemonitors.yaml`
+
+The daemon already keeps a monotonic registry of drop counters —
+`dropped_gateway_binding`, `dropped_quarantined_or_unregistered`, `dropped_directory_unavailable`,
+`metrics_rejected_timestamp`, `metrics_unresolved_alias`, `write_failures`, `db_reconnects` and the
+rest. Today they are only reported to the log every 60 s, so **the fail-closed behaviour this stack
+is designed around is asserted but not visible.**
+
+The work is a Prometheus exposition endpoint over the existing registry — not re-instrumentation.
+The counters were deliberately shaped for it: each one is incremented at the site that already made
+the decision, one-to-one with an existing `logger.warning`, so the counters and the log cannot
+disagree about what happened. Kong already exposes `/metrics` on its status listener, and the chart
+already ships `ServiceMonitor` templates.
+
+`dropped_gateway_binding` is the one worth a panel of its own: it is not a health metric, it is the
+**signal that something published telemetry for a device it does not own.**
+
+### 2 · Automated edge gateway telemetry
+
+**Builds on:** `process_node_message()` · `gateways.agent_version` / `enrolled_at` (`0025`) ·
+the appliance's Node-RED runtime ([`templates/physical-gateway/`](templates/physical-gateway))
+
+Enrolment stamps `agent_version` and `enrolled_at` once and never refreshes them, so "what is this
+appliance actually doing" is answerable only by getting a shell on it. The appliance already holds
+an authenticated MQTT connection and already publishes `NDATA`, so a periodic health payload —
+uptime, container and disk metrics, the deployed flow's hash — needs no new transport, no new
+credential and no new table: `process_node_message()` resolves the gateway and writes to its row
+today.
+
+**The case that justifies it on its own is CA expiry.** The internal CA is distributed by hand into
+every appliance's trust store, and
+[re-minting it does not fail loudly — it succeeds and takes the whole fleet offline](docs/incidents.md).
+A `Cert_Expires_At` metric plus one alert rule turns the single worst fleet-wide failure mode into a
+30-day warning.
+
+### 3 · Expanded platform alerting
+
+**Builds on:** [`grafana/provisioning/alerting/`](grafana/provisioning/alerting) · `device_alerts`
+(`0023`) and its Realtime publication · `grafana-alert-webhook`
+
+The three shipped rules — Thermal Excursion, Emergency Stop, Low OEE Availability — are all
+**machine** conditions. Nothing alerts on **platform** conditions, though the data exists:
+
+| Rule | Reads |
+| :--- | :--- |
+| Gateway `STALE` > 5 min | `public.gateway_status.is_stale` |
+| Quarantine queue depth > *n* | `devices.is_quarantined` |
+| Enrolment stuck in `AWAITING_BIRTH` > 1 h | `gateways.status` + `enrolled_at` — a failed enrolment currently has no alarm at all |
+| Binding rejections rising | `dropped_gateway_binding` (needs §1) |
+
+Each is provisioning-only: the delivery path to the dashboard's toast and Topbar pill is already
+built and already carries the machine rules.
+
+### 4 · Horizontal ingestion scaling
+
+**Builds on:** the single-writer note in `get_timescaledb_connection()`
+
+The current ceiling is stated in the code rather than discovered: *"one connection, not a pool.
+Every write happens on the paho callback thread, so there is exactly one writer — and that is the
+thing to revisit first if a worker thread is ever introduced."* Three properties bound throughput on
+that thread: the 5-second directory cache, the per-message PostgREST resolution round trips, and the
+bounded DB retry that deliberately stalls the whole fleet rather than one device.
+
+The honest path is an **MQTT 5 shared subscription** (`$share/<group>/spBv1.0/#`) across clustered
+workers, each holding its own connection. The daemon is already shaped for it — resolution is
+cacheable and per-message, and the historian write is idempotent (`ON CONFLICT DO NOTHING`), so two
+workers seeing a redelivery cannot corrupt a series. What it needs is per-worker connection
+ownership and a rebirth-request path that does not depend on a single node's alias table.
+
+### 5 · Computed ISO 22400 KPIs
+
+**Builds on:** [`timescaledb/aggregates.sql`](timescaledb/aggregates.sql) · the existing rollups ·
+`iso22400_vocabulary`
+
+ISO 22400 is registered as a vocabulary, but its KPIs are by definition **computed** — that is
+exactly what MTConnect and OPC UA exclude and why the standard exists. Availability, Performance and
+Quality can be continuous aggregates over the rollups already in the historian, with **no external
+MES dependency**: `aggregates.sql` is reconciled on every boot on both targets, which is what makes
+a KPI definition a setting rather than a constant fixed before the first row was written.
+
+This is the intermediate step that was previously deferred pending an MES. It does not replace one —
+it makes the vocabulary answer questions instead of only naming them.
+
+### 6 · i3X server optimisations
+
+**Builds on:** `_load_address_space()` · `_build_objects()` · `MAX_BULK_ELEMENT_IDS`
+
+Bulk breadth is now capped and the value-path indexes are built once per request rather than per
+element. What remains is the **six PostgREST queries per request**: the address space is reassembled
+from scratch every time, which is fine for a demonstrator and is the wrong shape for a conformance
+client polling in a loop.
+
+A short TTL cache would fix it, and the constraint on that work is already known and must not be
+lost: the cache **must be keyed by the caller's token**. The address space is deliberately assembled
+from reads made as the caller so RLS decides what it contains, and a cache shared across identities
+would hand one user another's view — re-creating exactly the hole the MQTT value cache is guarded
+against.
+
+Writes stay unimplemented. `PUT /objects/value` answers 405 and `/info` declares
+`update.current: false`; a server that does not implement the verb cannot be talked into it.
+
+### 7 · Ingress → Gateway API
+
+**Builds on:** [`templates/ingress.yaml`](deploy/helm/acs-cymru/templates/ingress.yaml) ·
+`acs-cymru.corsOrigins`
+
+Kong 2.8 is frozen: declarative config gained environment interpolation in 3.x, which is why
+`kong.yml` is a placeholder template substituted twice — once by `sed` on Compose, once by Helm.
+
+Gateway API's `HTTPRoute` filters express **route-level CORS declaratively**, which would retire the
+`__CORS_ORIGINS__` placeholder and the two substituters along with it. That is worth pairing with
+this migration specifically, because the origin list is the stack's *only* statement of origin
+policy — the edge functions deliberately declare none — and the fewer places it is expressed, the
+fewer places it can be wrong.
+
+### 8 · MCP server
+
+**Builds on:** the i3X address space · `fplus-directory`
+
+Read-only shopfloor context and asset metadata over the Model Context Protocol: which machines
+exist, what they measure, what they are reporting now, and what the Digital Thread says changed.
+
+**The security posture is already decided**, which is most of why this is a small piece of work
+rather than a design exercise. i3X implements no write verb at all, so an MCP server over it inherits
+read-only by construction — not by configuration. An `--enable-writes` flag would be a client-side
+switch over a server that has nothing to enable. Writes belong on the Sparkplug/NCMD path, where
+they are auditable.
+
+---
+
 ## Contributing
 
 **The reasoning lives next to the thing it constrains**, not in one design document. A migration's
@@ -461,6 +604,31 @@ Two rules worth stating up front:
   there is no applied-migrations ledger — so a new one must be idempotent. The baseline pair is
   additionally guarded to be a no-op once applied; editing it reaches a fresh database only.
 
+### Packaging a hand-off
+
 ```bash
-docker compose down -v && git status    # before packaging a hand-off
+docker compose down -v && git status    # drop the volumes, confirm the tree is clean
 ```
+
+**`git status` clean is not the same as safe to hand over**, and the gap is the point of this
+section. Everything below is deliberately untracked — it is generated, per-machine, or secret —
+so a clean tree says nothing about it, and a hand-off packaged as an archive or a copied
+directory carries all of it.
+
+| Purge | Holds |
+| :--- | :--- |
+| `backups/` | Full logical dumps from `scripts/backup-databases.sh` — `auth.users` bcrypt hashes, OAuth client secret hashes, every audit row |
+| `.env` | All 24 generated credentials, including `SUPABASE_SERVICE_ROLE_KEY` and `SUPABASE_JWT_SECRET` |
+| `.env.gateways` | Per-gateway broker passwords written by `npm run provision:gateways` |
+| `mosquitto_certs` volume | The internal CA **private key**. Distributed to every physical gateway's trust store — re-minting it takes the fleet offline silently |
+| `frontend/dist/` | A built bundle carrying whichever `VITE_*` values were baked at build time |
+
+```bash
+rm -rf backups/ .env .env.gateways frontend/dist/
+npm run setup                           # regenerate .env for the recipient
+```
+
+The recipient runs `npm run setup` themselves — that is what makes the credentials theirs rather
+than a copy of yours. `.env.example` carries working development secrets so the stack still starts
+without it, which is a convenience and **not** a supported state for anything another person can
+reach.

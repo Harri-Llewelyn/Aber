@@ -57,15 +57,86 @@ would stay wrong until the device's next birth, and rebirths are rare.
 | `utils/sparkplugDatatype.js` | `functions/aas-export/sparkplugToXsd.ts` |
 | `utils/model3d.js` | `functions/aas-export/model3dContentType.ts` |
 
-Five are guarded by CI or by `test_aas_export.py`; four are not
-([issue #2](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/2)). `sparkplugId.js` matters most —
-it derives an **immutable wire identity**, so a divergence cannot be corrected in place.
+All eight are now guarded, by `scripts/check-mirror-drift.mjs`, a CI step, or
+`test_aas_export.py`. `sparkplugId.js` matters most — it derives an **immutable wire identity**, so
+a divergence cannot be corrected in place.
+
+`check-mirror-drift.mjs` reads the **whole applied migration chain in filename order and takes the
+last definition of each function**, because migrations are replayed on every boot with no ledger:
+`ensure_gateway_status_view()` is declared in `0001` and redeclared in `0025`, and for a while the
+guard was reading the dead one.
+
+A ninth mirror — `modelledMetrics()` — is behaviour rather than a literal, so it has a **fixture
+contract** instead: `tests/fixtures/modelled-metrics.json`, asserted by four implementations in
+three languages. See [Migrated design notes](#migrated-design-notes) for what that fixture caught.
 
 ### Permission gating
 
 `hasPermission(uuid)` from `usePermissions`, against `PERMISSION_UUIDS` in `constants.js`. Gating
 is a UI affordance only — RLS is the enforcement, and every gated action is independently refused
 by the database.
+
+### Derived lists in a tab are memoised, and the dependency list is the contract
+
+`DevicesTab` holds around thirty pieces of state, so *any* of them — opening a modal, a Realtime
+tick, one keystroke in the search box — re-renders the whole component. Its filter predicate is not
+cheap: it resolves each device's schemas, tags, gateway and effective cell. Recomputing that for
+every device on every render is what turns a search box sticky on a real fleet, and the cause is
+nowhere near the search box.
+
+So `filteredAssets`, `attentionCount` and `tagOptions` are `useMemo`d, and the per-row
+`gateways.find(...)` / `cells.find(...)` scans are hoisted into `gatewayById` / `cellById` Maps.
+**Miss a dependency and the table silently stops responding to that filter** — a worse bug than the
+slowness, so the list names every value the predicate reads, in the order it reads them.
+
+---
+
+## Migrated design notes
+
+Reasoning that used to sit as long header comments in the files it describes. It was moved here
+because it explains **why the code looks like this**, which is a question a reader asks once,
+rather than **what this line does**, which they ask every time. The mechanism-level notes stayed
+where they were.
+
+### Why entity detail is a drawer, not a modal or an expanding row
+
+`components/common/ContextPanel.jsx` is the third way this dashboard has shown entity detail, and
+the first two are why it looks like it does:
+
+- **Modals covered the list.** Comparing two devices meant open, read, close, open, read — and the
+  row you came from was hidden behind the thing describing it.
+- **Expanding rows** kept the list visible but pushed every row below the one you opened, so the
+  table reflowed under the cursor and a second click landed somewhere else.
+
+A drawer in the layout flow does neither. It is **not an overlay**: `.page-layout` is a flex row
+and the panel is a sibling of the list, so opening it narrows the table instead of hiding it. Rows
+stay clickable while it is open, which is what makes flicking between entities work at all.
+
+It is also **presentational only** — it renders `fields` and `actions` and knows nothing about
+cells, gateways, devices or schemas. Four pages sharing a panel that understood all four would be
+the same component four times over, each conditional branch reachable from exactly one caller.
+
+### What the modelled-metrics fixture caught, twice
+
+`modelledMetrics()` answers "which metrics does this schema model?" and exists four times, in three
+languages, because it runs in four processes that cannot import one another:
+`utils/deviceTags.js`, `ingestion/validate.py`, `i3x/i3x_service.py` and
+`supabase/functions/aas-export/index.ts`.
+
+`typeof [] === 'object'`, so a schema with `properties: ['Temp','Pressure']` reached `Object.keys`
+and came back modelling two metrics named **`'0'` and `'1'`**. The dashboard judged the device
+against those, so nearly everything it published read as Unmodelled, while `validate.py` read the
+same schema as having no model at all.
+
+Writing the fixture found it. Adding a fourth implementation without adding it to the fixture let
+it happen **again**: the AAS exporter was written from the uncorrected JavaScript and carried the
+same bug, unchecked, while the fixture's own comment described it. That copy was the worst place
+for it — those names become Submodel Property `idShort`s in an exported AAS shell, a document
+handed to a third party, and `'0'` cannot begin an `idShort`, so the shell fails validation at the
+**consumer** while the exporter reports success.
+
+The lesson is the one the fixture already taught: *an implementation that is not listed in the
+fixture is an implementation that is not checked.*
 
 ---
 

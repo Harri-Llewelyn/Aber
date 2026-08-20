@@ -21,6 +21,7 @@ import {
   assertGatewayId,
   assertSafePassword,
   generatePassword,
+  hashArgv,
   hashScript,
   mergeCredential,
 } from './mosquitto-credentials.mjs';
@@ -198,14 +199,41 @@ describe('assertSafePassword', () => {
 
 describe('hashScript', () => {
   test('applies -c to a scratch file and never to the real one', () => {
-    const script = hashScript(GW_A, generatePassword());
+    const script = hashScript();
     assert.match(script, /mosquitto_passwd -b -c "\$tmp"/);
     assert.ok(!script.includes('/mosquitto/config/password_file'));
     assert.match(script, /^set -e/);
   });
 
-  test('validates its arguments before building a shell string', () => {
-    assert.throws(() => hashScript('not-a-gateway', generatePassword()), CredentialError);
-    assert.throws(() => hashScript(GW_A, "'; id; '"), CredentialError);
+  test('takes its account from positional parameters, never from interpolation', () => {
+    // The whole point of the change: the script text is a CONSTANT. If a future edit puts a
+    // value back into it, this fails -- which is the only way to notice, since an interpolated
+    // script keeps working perfectly right up until an argument contains a quote.
+    const script = hashScript();
+    assert.match(script, /mosquitto_passwd -b -c "\$tmp" "\$1" "\$2"/);
+    assert.strictEqual(script, hashScript(), 'the script must not vary per account');
+  });
+});
+
+describe('hashArgv', () => {
+  test('puts the id and password on $1 and $2, behind a -- that absorbs $0', () => {
+    const password = generatePassword();
+    const argv = hashArgv(GW_A, password);
+    assert.deepStrictEqual(argv, ['-c', hashScript(), '--', GW_A, password]);
+    // `sh -c script name a b` assigns `name` to $0. Without the `--` the gateway id would land
+    // there and the password would be hashed against nothing.
+    assert.strictEqual(argv[2], '--');
+  });
+
+  test('validates its arguments before they reach a process at all', () => {
+    assert.throws(() => hashArgv('not-a-gateway', generatePassword()), CredentialError);
+    assert.throws(() => hashArgv(GW_A, "'; id; '"), CredentialError);
+  });
+
+  test('a shell-hostile value would be inert even if the allow-lists let it through', () => {
+    // Not a claim that they do -- the case above proves they do not. This pins the SECOND line
+    // of defence the positional form adds: whatever reaches argv is data to `sh`, not script.
+    const argv = hashArgv(GW_A, generatePassword());
+    assert.ok(!argv[1].includes(GW_A), 'the id must not appear in the script text');
   });
 });

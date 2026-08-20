@@ -50,7 +50,9 @@ export function modelExtension(pathOrName) {
 
 /** The AAS `File.contentType` for a stored model path. */
 export function modelContentType(pathOrName) {
-  return MODEL_3D_CONTENT_TYPES[modelExtension(pathOrName)] || DEFAULT_MODEL_CONTENT_TYPE;
+  // `??` to match model3dContentType.ts. See sparkplugDatatype.js for why the operators are
+  // aligned even though no value in either table is falsy.
+  return MODEL_3D_CONTENT_TYPES[modelExtension(pathOrName)] ?? DEFAULT_MODEL_CONTENT_TYPE;
 }
 
 /** Whether a filename is one of the accepted 3D formats. */

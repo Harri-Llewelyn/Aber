@@ -55,7 +55,10 @@ const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
 // afterwards 401s -- see the comment on `users` in the generated file.
 // v3 persisted the username -> permissions map. Holding it only in memory made every restart
 // silently downgrade live sessions to a read-only editor (padlocked Deploy).
-const SETTINGS_VERSION = 3;
+// v4 compares NODERED_ADMIN_TOKEN in constant time. This is exactly the case the bump exists
+// for: the old `===` keeps working, so nothing fails and no deployed volume would ever pick the
+// fix up on its own.
+const SETTINGS_VERSION = 4;
 
 function fail(message) {
   console.error(`[node-red-init] ERROR: ${message}`);
@@ -350,8 +353,34 @@ const SETTINGS_JS = `/**
  */
 const OAuth2Strategy = require(${JSON.stringify(`${RUNTIME_DIR}/passport-oauth2`)});
 const jwt = require(${JSON.stringify(`${RUNTIME_DIR}/jsonwebtoken`)});
+// A Node builtin, so it resolves without the absolute path the two above need.
+const { timingSafeEqual } = require('crypto');
 
 const env = process.env;
+
+/**
+ * Constant-time secret comparison.
+ *
+ * timingSafeEqual THROWS on a length mismatch, which would leak the length through the
+ * exception rather than through the timing -- so unequal lengths are answered by comparing the
+ * expected value against ITSELF and returning false. The work is done either way.
+ *
+ * Used for the break-glass admin token below. That is the highest-value credential on this
+ * host: it returns permissions '*', and a flow \`function\` node executes arbitrary JavaScript
+ * in a container holding the MQTT credential. The rest of the stack already compares its
+ * bearer secrets this way -- gateway-credential-service.mjs and the Grafana alert webhook --
+ * and this was the one that did not.
+ */
+function secretEquals(presented, expected) {
+  if (typeof presented !== 'string' || typeof expected !== 'string' || !expected) return false;
+  const a = Buffer.from(presented, 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  if (a.length !== b.length) {
+    timingSafeEqual(b, b);
+    return false;
+  }
+  return timingSafeEqual(a, b);
+}
 
 /**
  * Supabase RBAC role -> Node-RED permissions.
@@ -602,7 +631,10 @@ module.exports = {
       // Break-glass. Empty by default. If Supabase Auth, Kong or the edge runtime is down then
       // SSO is down with them, and Node-RED may be exactly what you need to reach. Same
       // reasoning as disable_login_form = false in grafana/grafana.ini.
-      if (env.NODERED_ADMIN_TOKEN && token === env.NODERED_ADMIN_TOKEN) {
+      //
+      // secretEquals(), not ===. An unset token is refused by that helper rather than by the
+      // guard here, so there is one answer to "is this the break-glass token" instead of two.
+      if (secretEquals(token, env.NODERED_ADMIN_TOKEN)) {
         return { username: 'acs-cymru-break-glass', permissions: '*' };
       }
 

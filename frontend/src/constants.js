@@ -28,13 +28,6 @@ export const VALID_TABS = [
   'archives'
 ];
 
-export const PERSONAS = [
-  { id: 'admin@acs-cymru.local',    label: 'Administrator (Full Access)' },
-  { id: 'manager@acs-cymru.local',  label: 'Shopfloor Manager (Ops & Approval)' },
-  { id: 'operator@acs-cymru.local', label: 'Operator (Read-Only View)' },
-  { id: 'auditor@acs-cymru.local',  label: 'Auditor (Digital Thread Trace)' },
-];
-
 // Realtime rollout flag and the polling intervals paired with it.
 //
 // REALTIME_ENABLED gates every supabase.channel() subscription in the app. When it is off the

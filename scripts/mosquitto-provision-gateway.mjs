@@ -50,7 +50,7 @@ import {
   assertEntry,
   assertSafePassword,
   generatePassword,
-  hashScript,
+  hashArgv,
   mergeCredential,
 } from './lib/mosquitto-credentials.mjs';
 
@@ -102,12 +102,13 @@ if (!GATEWAY_ID_PATTERN.test(sparkplugId)) {
 // shell-hostile characters so it can be pasted into a gateway config without quoting games.
 const password = suppliedPassword || generatePassword();
 
-// A SUPPLIED PASSWORD IS NOW HELD TO THE SAME ALPHABET, and that is a deliberate tightening rather
-// than an incidental one. This value is interpolated into single-quoted shell fragments on both
-// backends (hashScript below, and the exec reload), so a quote in it would end the quoted string
-// and hand the remainder to the shell running inside the broker container. Nothing this repository
-// generates could ever trip it -- provision-gateways.mjs mints base64url -- but a hand-typed
-// password could, which is exactly the case worth refusing.
+// A SUPPLIED PASSWORD IS HELD TO THE SAME ALPHABET, and that is a deliberate tightening rather
+// than an incidental one. Hashing now passes this value POSITIONALLY (hashArgv below), so the
+// shell no longer parses it -- but the reload path still builds a command string, and the alphabet
+// is what keeps a hand-typed password from ending a quoted argument there. It is defence in depth
+// on the hashing path and the actual boundary on the other, which is why it is asserted once here
+// rather than argued about per call site. Nothing this repository generates could trip it --
+// provision-gateways.mjs mints base64url -- but a hand-typed password could.
 try {
   assertSafePassword(password);
 } catch (err) {
@@ -179,11 +180,15 @@ function brokerPod() {
  * work only if they happened to have a compatible mosquitto installed at a compatible version.
  */
 function hashedEntry(pod) {
-  // hashScript() applies `-c` to a scratch file holding ONE account, which is the only place `-c`
+  // hashArgv() applies `-c` to a scratch file holding ONE account, which is the only place `-c`
   // is ever correct. The real merge happens in the Secret, below. Shared with the enrolment
-  // service so the two cannot drift on that detail.
-  const script = hashScript(sparkplugId, password);
-  return run('kubectl', ['-n', NAMESPACE, 'exec', pod, '-c', 'mosquitto', '--', '/bin/sh', '-c', script]).trim();
+  // service so the two cannot drift on that detail -- including, now, the calling convention:
+  // the id and password ride as positional parameters rather than being interpolated into the
+  // script text, so `kubectl exec` hands them to `sh` as argv and nothing parses them as shell.
+  return run('kubectl', [
+    '-n', NAMESPACE, 'exec', pod, '-c', 'mosquitto', '--', '/bin/sh',
+    ...hashArgv(sparkplugId, password),
+  ]).trim();
 }
 
 /** Current Secret contents, or '' when the Secret or key does not exist yet. */

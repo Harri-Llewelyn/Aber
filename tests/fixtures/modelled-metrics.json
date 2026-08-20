@@ -1,55 +1,110 @@
 {
   "_comment": [
-    "THE CONTRACT BETWEEN TWO IMPLEMENTATIONS OF ONE RULE.",
+    "THE CONTRACT BETWEEN FOUR IMPLEMENTATIONS OF ONE RULE.",
     "",
-    "`modelledMetrics()` in frontend/src/utils/deviceTags.js and `modelled_metrics()` in",
-    "ingestion/validate.py answer the same question — which metrics a schema models — and are",
-    "written in different languages because one runs in a browser and one in a validator. Neither",
-    "can import the other, so this file is the seam: both sides assert against it, in their own",
-    "test runner, in the CI job that already runs them.",
+    "Which metrics does a schema model? Four places answer it, in three languages, because they run",
+    "in four processes that cannot import one another:",
+    "",
+    "  frontend/src/utils/deviceTags.js          modelledMetrics()    -- the browser",
+    "  ingestion/validate.py                     modelled_metrics()   -- the conformance validator",
+    "  i3x/i3x_service.py                        _modelled_metrics()  -- the i3X address space",
+    "  supabase/functions/aas-export/index.ts    modelledMetrics()    -- the AAS exporter",
+    "",
+    "This file is the seam. Each asserts every case below in its own runner, in the CI job that",
+    "already runs it -- vitest, two unittest suites, and (for the Deno one) a Node harness in",
+    "test_aas_export.py that executes the function rather than grepping it.",
     "",
     "WHY A FIXTURE RATHER THAN A grep. The rule is behaviour, not a literal. A grep asserting that",
     "both files mention `required` proves they both spell it, not that they agree about a schema",
     "whose `required` is a string. Writing this file found a divergence that had been shipping:",
-    "for `properties: ['A','B']` the JS returned {'0','1'} — the ARRAY INDICES as metric names,",
-    "because `typeof [] === 'object'` and `Object.keys` on an array yields its indices — while the",
+    "for `properties: ['A','B']` the JS returned {'0','1'} -- the ARRAY INDICES as metric names,",
+    "because `typeof [] === 'object'` and `Object.keys` on an array yields its indices -- while the",
     "Python returned null. A device with such a schema was judged against metrics called '0' and",
     "'1' in the dashboard, so almost everything it published read as Unmodelled, while validate.py",
     "reported it had no model at all.",
     "",
+    "AND IT FOUND THE SAME ONE AGAIN, LATER, IN A COPY THAT HAD NEVER BEEN ADDED HERE. The",
+    "aas-export implementation was written from the uncorrected JS and inherited the array bug,",
+    "then sat outside the contract while this comment described the bug it was carrying. It was",
+    "the worst place for it: those names become Submodel Property idShorts in an exported AAS",
+    "shell -- a document handed to a third party, asserting metrics no device ever published -- and",
+    "'0' cannot begin an AAS idShort, so the shell fails validation at the CONSUMER while the",
+    "exporter reports success. THE LESSON IS THE ONE THIS FILE ALREADY TAUGHT: a fifth",
+    "implementation that is not listed above is a fifth implementation that is not checked.",
+    "",
     "THE EXPECTED VALUES BELOW ARE THE PYTHON SEMANTICS, because they are the correct ones: an",
     "array is not a valid JSON Schema `properties` object, and inventing metric names from its",
-    "indices is meaningless. deviceTags.js was corrected to match.",
+    "indices is meaningless. Every other implementation was corrected to match.",
     "",
-    "`expected: null` means the schema declares neither and therefore CANNOT BE EVALUATED — which",
+    "`expected: null` means the schema declares neither and therefore CANNOT BE EVALUATED -- which",
     "is different from modelling nothing, and is why Unmodelled is not reported for a device with",
-    "no usable schema. Do not collapse null and [].",
+    "no usable schema. Do not collapse null and [] IN THE MIRRORS THAT DISTINGUISH THEM.",
     "",
-    "Adding a case here is the way to extend the contract: both suites read every case."
+    "TWO IMPLEMENTATIONS DELIBERATELY DO COLLAPSE THEM, and that is not drift. i3X and the AAS",
+    "exporter both iterate the result to decide what to project or emit; neither has a caller that",
+    "asks 'was this evaluable?', and neither format can express the answer. Their suites compare",
+    "the NAMES against `expected or []` and assert the collapse explicitly, so it stays a stated",
+    "property rather than an accident. The names themselves must agree exactly in all four.",
+    "",
+    "Adding a case here is the way to extend the contract: all four suites read every case."
   ],
   "cases": [
     {
       "name": "properties only",
-      "schema_definition": { "properties": { "Systems/TEMPERATURE": {}, "Axes/DISPLACEMENT": {} } },
-      "expected": ["Axes/DISPLACEMENT", "Systems/TEMPERATURE"]
+      "schema_definition": {
+        "properties": {
+          "Systems/TEMPERATURE": {},
+          "Axes/DISPLACEMENT": {}
+        }
+      },
+      "expected": [
+        "Axes/DISPLACEMENT",
+        "Systems/TEMPERATURE"
+      ]
     },
     {
       "name": "required only",
-      "schema_definition": { "required": ["Controller/EXECUTION"] },
-      "expected": ["Controller/EXECUTION"]
+      "schema_definition": {
+        "required": [
+          "Controller/EXECUTION"
+        ]
+      },
+      "expected": [
+        "Controller/EXECUTION"
+      ]
     },
     {
       "name": "both, overlapping — the union, not a duplicate",
       "schema_definition": {
-        "properties": { "A": {}, "B": {} },
-        "required": ["B", "C"]
+        "properties": {
+          "A": {},
+          "B": {}
+        },
+        "required": [
+          "B",
+          "C"
+        ]
       },
-      "expected": ["A", "B", "C"]
+      "expected": [
+        "A",
+        "B",
+        "C"
+      ]
     },
     {
       "name": "both, disjoint",
-      "schema_definition": { "properties": { "A": {} }, "required": ["Z"] },
-      "expected": ["A", "Z"]
+      "schema_definition": {
+        "properties": {
+          "A": {}
+        },
+        "required": [
+          "Z"
+        ]
+      },
+      "expected": [
+        "A",
+        "Z"
+      ]
     },
     {
       "name": "empty definition — declares neither, so not evaluable",
@@ -58,27 +113,53 @@
     },
     {
       "name": "explicitly empty properties and required — still not evaluable",
-      "schema_definition": { "properties": {}, "required": [] },
+      "schema_definition": {
+        "properties": {},
+        "required": []
+      },
       "expected": null
     },
     {
       "name": "required is a string, not a list — ignored, properties still count",
-      "schema_definition": { "properties": { "A": {} }, "required": "A" },
-      "expected": ["A"]
+      "schema_definition": {
+        "properties": {
+          "A": {}
+        },
+        "required": "A"
+      },
+      "expected": [
+        "A"
+      ]
     },
     {
       "name": "properties is an ARRAY — malformed, contributes nothing (was the divergence)",
-      "schema_definition": { "properties": ["Temp", "Pressure"] },
+      "schema_definition": {
+        "properties": [
+          "Temp",
+          "Pressure"
+        ]
+      },
       "expected": null
     },
     {
       "name": "properties is an array AND required is valid — only required counts",
-      "schema_definition": { "properties": ["Temp"], "required": ["Real/METRIC"] },
-      "expected": ["Real/METRIC"]
+      "schema_definition": {
+        "properties": [
+          "Temp"
+        ],
+        "required": [
+          "Real/METRIC"
+        ]
+      },
+      "expected": [
+        "Real/METRIC"
+      ]
     },
     {
       "name": "properties is a string — malformed, contributes nothing",
-      "schema_definition": { "properties": "Temp" },
+      "schema_definition": {
+        "properties": "Temp"
+      },
       "expected": null
     },
     {

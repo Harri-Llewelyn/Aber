@@ -9,8 +9,8 @@
  * The three are complementary, not alternatives, which is why the form offers a choice rather than
  * a migration path between them:
  *   MTConnect  -- machine tools: the component/data-item vocabulary (migration 0018)
- *   ISO 22400  -- computed KPIs, which MTConnect deliberately excludes (migration 0030)
- *   OPC UA     -- robotics and general machinery companion specs (migration 0031)
+ *   ISO 22400  -- computed KPIs, which MTConnect deliberately excludes (archived migration 0030)
+ *   OPC UA     -- robotics and general machinery companion specs (archived migration 0031)
  */
 
 export const STANDARDS = {
@@ -90,7 +90,7 @@ export const LOCAL_SEMANTIC_NAMESPACE = 'https://acs-cymru.local/semantics'
  */
 export const MTCONNECT_SEMANTIC_NAMESPACE = `${LOCAL_SEMANTIC_NAMESPACE}/mtconnect/v2.0`
 
-/** ISO 22400 KPI namespace. The ids seeded by migration 0030 are built on this. */
+/** ISO 22400 KPI namespace. The ids seeded by archived migration 0030 are built on this. */
 export const ISO22400_SEMANTIC_NAMESPACE = `${LOCAL_SEMANTIC_NAMESPACE}/iso22400`
 
 /**

@@ -332,7 +332,7 @@ changing one re-points historical telemetry. `permitted_values` is a transcribed
 standard that nothing is configured against — no device reads it, ingestion never consults it, and
 no historical row moves when it changes. Freezing it would mean a mistyped value could only be
 corrected by deprecating the metric and re-provisioning every device that publishes it, to fix a
-string that never left the database. That is exactly the trade migration 0029 already refused for
+string that never left the database. That is exactly the trade archived migration 0029 already refused for
 `semantic_id`, in the same table, for the same reason. Standards also *add* values between
 editions, so a frozen set would go stale by the standard's action rather than anyone's mistake.
 

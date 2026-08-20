@@ -41,7 +41,12 @@ secrets:
   mqttI3xUser: factoryplus_i3x
   mqttI3xPassword: acscymru123
   mqttSimulatorUser: gwy100000000000400080000
-  mqttSimulatorPassword: acscymru123
+  # EMPTY, matching .env.example. This is the RETIRED single-device simulator's account: 0020
+  # deletes its gateway row, so anything published under it is refused by
+  # verify_gateway_binding() anyway. acs-cymru.mqttPrincipalUpserts skips an empty password,
+  # so no account is created and the stack carries no live credential for an edge node that
+  # has no asset record. Set it only for a Node-RED PVC that predates the flow consolidation.
+  mqttSimulatorPassword: ""
   mqttValidatorUser: gwy110000000000400080000
   mqttValidatorPassword: acscymru123
   mqttMonitorUser: factoryplus_monitor

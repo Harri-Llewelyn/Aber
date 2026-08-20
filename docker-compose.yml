@@ -444,7 +444,7 @@ services:
         condition: service_completed_successfully
 
   # Object storage for binary asset artefacts -- today, the 3D visual models an AAS
-  # `VisualRepresentation` submodel points at (migration 0035).
+  # `VisualRepresentation` submodel points at (archived migration 0035).
   #
   # It owns the `storage` schema and runs its OWN migrations against it on boot. Up to
   # supabase/postgres:15.6.1.143 the database image shipped a STUB of that schema
@@ -580,6 +580,19 @@ services:
       # service; on Kubernetes the Service is simply named `realtime-dev` and the chart supplies
       # `http://realtime-dev:4000/socket/` here instead.
       REALTIME_UPSTREAM_URL: ${REALTIME_UPSTREAM_URL:-http://realtime-dev.supabase-realtime:4000/socket/}
+      # THE BROWSER ORIGINS Kong will echo an Access-Control-Allow-Origin for.
+      #
+      # This is the whole origin policy for the stack: the edge functions deliberately declare
+      # none (supabase/functions/_shared/cors.ts), because the gateway is the only layer that
+      # sees a request before deciding to route it. An origin missing from this list is not a
+      # degraded response -- it is a browser refusing to read a 200 the gateway happily returned.
+      #
+      # A JSON ARRAY, substituted into a YAML flow sequence -- see the note in supabase/kong.yml.
+      # The default covers the two published ports of a stock Compose stack. Override it when the
+      # dashboard is reached by any other name (a LAN hostname, a tunnel, a reverse proxy) --
+      # which is the situation Kubernetes is permanently in, and the reason this is a variable
+      # rather than the four literals it used to be.
+      KONG_CORS_ORIGINS: '${KONG_CORS_ORIGINS:-["http://localhost:3000","http://127.0.0.1:3000","http://localhost:8088","http://127.0.0.1:8088"]}'
     volumes:
       - ./supabase/kong.yml:/template/kong.yml:ro
       - kong_config:/config
@@ -595,6 +608,15 @@ services:
           echo 'SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY must be set -- Kong would otherwise register empty API keys, which key-auth accepts.' >&2
           exit 1
         fi
+        # An empty or non-array value renders `origins:` as null, which Kong reads as "no origin
+        # policy": it starts cleanly and then blocks every browser request, logging nothing.
+        case "$$KONG_CORS_ORIGINS" in
+          '['*']') ;;
+          *)
+            echo "KONG_CORS_ORIGINS must be a JSON array of browser origins. Got: $$KONG_CORS_ORIGINS" >&2
+            exit 1
+            ;;
+        esac
         case "$$REALTIME_UPSTREAM_URL" in
           http://realtime-dev*|https://realtime-dev*) ;;
           *)
@@ -605,6 +627,7 @@ services:
         sed -e "s|__SUPABASE_ANON_KEY__|$$SUPABASE_ANON_KEY|g" \
             -e "s|__SUPABASE_SERVICE_ROLE_KEY__|$$SUPABASE_SERVICE_ROLE_KEY|g" \
             -e "s|__REALTIME_UPSTREAM_URL__|$$REALTIME_UPSTREAM_URL|g" \
+            -e "s|__CORS_ORIGINS__|$$KONG_CORS_ORIGINS|g" \
             /template/kong.yml > /config/kong.yml
         # Matches ANY surviving marker, not just the __SUPABASE_ ones. A placeholder added to the
         # template and forgotten here would otherwise render literally into Kong's config, where
@@ -878,22 +901,18 @@ services:
   #
   # NEVER `mosquitto_passwd -b -c` ON THE MERGED FILE: `-c` CREATES the file and discards
   # everything already in it, which on a stack with provisioned gateways means every physical
-  # gateway loses its credential at once.
+  # gateway loses its credential at once. It is conditional on the file not existing, below.
   #
-  # THAT USED TO SAY "except for the first account", AND THE EXCEPTION WAS THE BUG. This is a
-  # one-shot, but Compose re-runs a completed one-shot whenever something that depends on it is
-  # brought up -- `docker compose up -d node-red`, say, or `scripts/stack-reset.sh` recreating
-  # Node-RED after provisioning. Each of those re-entered this entrypoint, and the `-c` on the
-  # first of the five accounts truncated the file, deleting every gateway credential issued since
-  # boot. It is invisible until the broker next reloads: Mosquitto keeps the authenticated
-  # accounts in memory, so the stack keeps working and then comes up with four gateways it has
-  # never heard of. `stack-reset.sh` hit exactly this -- it provisioned four credentials and then
-  # deleted three of them one step later, in a script whose whole purpose is to leave a working
-  # stack.
+  # THE PLATFORM PRINCIPALS ARE REWRITTEN ON EVERY RUN -- they come from .env and must follow it.
+  # Anything else in the file is left alone, because that is where issued gateway credentials live
+  # and this service is not their source of truth.
   #
-  # So `-c` is now conditional on the file not existing. The five platform principals are still
-  # rewritten on every run (they come from .env and must follow it); anything else in the file is
-  # left alone.
+  # Why the `-c` was once applied to the first account, and what that cost:
+  #   docs/incidents.md -> "Truncating the broker password file"
+  #
+  # A one-shot is NOT run once. Compose re-runs a completed one-shot whenever something that
+  # depends on it is brought up, which is the property that made the above a live fault rather
+  # than a first-boot one.
   # ---------------------------------------------------------------------------
   # Broker CA and MQTTS leaf certificate (Compose only)
   # ---------------------------------------------------------------------------
@@ -981,7 +1000,7 @@ services:
       else
         echo 'NO BROKER CERTIFICATES FOUND -- 8883 will not be offered, and physical gateways cannot enrol. Check the mosquitto-tls-init service.' >&2;
       fi;
-      if [ -z \"$$MQTT_INGESTION_PASSWORD\" ] || [ -z \"$$MQTT_I3X_PASSWORD\" ] || [ -z \"$$MQTT_SIMULATOR_PASSWORD\" ] || [ -z \"$$MQTT_VALIDATOR_PASSWORD\" ] || [ -z \"$$MQTT_MONITOR_PASSWORD\" ]; then
+      if [ -z \"$$MQTT_INGESTION_PASSWORD\" ] || [ -z \"$$MQTT_I3X_PASSWORD\" ] || [ -z \"$$MQTT_VALIDATOR_PASSWORD\" ] || [ -z \"$$MQTT_MONITOR_PASSWORD\" ]; then
         echo 'One or more MQTT_*_PASSWORD values are empty. The broker runs allow_anonymous false, so an empty credential fails as CONNACK 5 with no useful log line at either end. Run: node scripts/setup.mjs' >&2;
         exit 1;
       fi;
@@ -991,7 +1010,10 @@ services:
         mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_INGESTION_USER\" \"$$MQTT_INGESTION_PASSWORD\";
       fi;
       mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_I3X_USER\" \"$$MQTT_I3X_PASSWORD\";
-      mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_SIMULATOR_USER\" \"$$MQTT_SIMULATOR_PASSWORD\";
+      if [ -n \"$$MQTT_SIMULATOR_PASSWORD\" ]; then
+        mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_SIMULATOR_USER\" \"$$MQTT_SIMULATOR_PASSWORD\";
+        echo \"Created the LEGACY simulator account '$$MQTT_SIMULATOR_USER' -- its gateway row was deleted by migration 0020, so nothing on a current stack publishes under it.\";
+      fi;
       mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_VALIDATOR_USER\" \"$$MQTT_VALIDATOR_PASSWORD\";
       mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_MONITOR_USER\" \"$$MQTT_MONITOR_PASSWORD\";
       for p in GW_CNC_MACHINING GW_ROBOTIC_ASSEMBLY GW_AGV_FLEET GW_FACILITY_BMS; do
@@ -1145,6 +1167,10 @@ services:
         # registered as the OAuth redirect.
         VITE_GRAFANA_URL: ${VITE_GRAFANA_URL:-${GRAFANA_PUBLIC_URL:-http://localhost:3002}}
         VITE_ALLOW_SIGNUP: ${VITE_ALLOW_SIGNUP:-false}
+        # Only needed if a bucket was renamed; src/api.js defaults to the same names
+        # storage-init.mjs does, so the two agree without either being set.
+        VITE_MODEL_3D_BUCKET: ${STORAGE_BUCKET:-asset-3d-models}
+        VITE_GATEWAY_BACKUP_BUCKET: ${GATEWAY_BACKUP_BUCKET:-gateway-backups}
     restart: always
     ports:
       - "3000:3000"

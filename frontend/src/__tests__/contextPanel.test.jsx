@@ -321,7 +321,7 @@ describe('Devices page drawer', () => {
   it('reports the RESOLVED cell and its source, not the raw column', async () => {
     // The fixture device inherits its cell from its gateway and carries no cell_id of its own.
     // Showing the raw column would render an empty cell for a device that is plainly located --
-    // the exact confusion migration 0036 exists to prevent.
+    // the exact confusion archived migration 0036 exists to prevent.
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
         initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />

@@ -269,14 +269,34 @@ plugins:
   # 'plugins' configuration property` -- which reads as a config-file error and is an env-var one.
   # ---------------------------------------------------------------------------------------------
   - name: prometheus
+  # ---------------------------------------------------------------------------------------------
+  # THE ONLY STATEMENT OF ORIGIN POLICY IN THE STACK, which is why it is substituted rather than
+  # written.
+  #
+  # `supabase/functions/_shared/cors.ts` deliberately carries NO `Access-Control-Allow-Origin`: the
+  # gateway is the only layer that sees a request before deciding to route it, so declaring the
+  # policy in two places would mean two statements to keep in step and one of them unenforceable.
+  # That makes this list load bearing on its own -- there is no second layer to fall back on.
+  #
+  # IT USED TO BE FOUR LITERAL LOCALHOST ORIGINS, and Kubernetes is where that failed. There the
+  # dashboard is served from `app.<publicBaseDomain>` and calls the API on `api.<publicBaseDomain>`
+  # -- a CROSS-ORIGIN request whose Origin appeared nowhere in the list, so Kong set no
+  # Access-Control-Allow-Origin and every browser call was blocked. Nothing caught it: `helm lint`
+  # renders a valid config, `validate.py` is server-side, and the ingress assertions use curl,
+  # which sends no Origin and does not enforce the answer. It presents as a dashboard that logs in
+  # and then shows empty tables, with the gateway reporting 200 for every request it made.
+  #
+  # SUBSTITUTED FROM THE SAME HELPERS THE INGRESS HOSTS COME FROM (`acs-cymru.corsOrigins` ->
+  # frontendUrl + docsUrl), so an origin cannot disagree with a hostname the chart actually serves
+  # -- the same single-source argument values.yaml makes for `publicUrls.grafana`.
+  #
+  # A YAML FLOW SEQUENCE, not a block list: `sed` substitutes a line, and a placeholder occupying
+  # a block-list item cannot expand into several of them. Both substituters emit a JSON array,
+  # which YAML accepts verbatim.
+  # ---------------------------------------------------------------------------------------------
   - name: cors
     config:
-      origins:
-        - "http://localhost:3000"
-        - "http://127.0.0.1:3000"
-        # Swagger UI ("Try it out" issues browser requests from its own origin).
-        - "http://localhost:8088"
-        - "http://127.0.0.1:8088"
+      origins: __CORS_ORIGINS__
       methods:
         - GET
         - POST

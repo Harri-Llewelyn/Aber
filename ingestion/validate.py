@@ -82,7 +82,7 @@ VAL_RENAMED_DEVICE = "VALIDATE_Device_001_Renamed"
 # and an untouched timestamp.
 VAL_ALIAS_DEVICE = "VALIDATE_Alias_Device_001"
 VAL_SCHEMA_NAME = "VALIDATE_Schema_Robot_Standard"
-# A second schema attached to the same device through device_submodels (migration 0034). It exists
+# A second schema attached to the same device through device_submodels (archived migration 0034). It exists
 # to prove the modelled set is the UNION across every attached submodel: VAL_KPI_METRIC is declared
 # at birth and modelled ONLY here, so a reader that looked at one schema would wrongly flag it.
 VAL_KPI_SCHEMA_NAME = "VALIDATE_Schema_OEE"
@@ -183,7 +183,7 @@ def modelled_metrics_across(schema_definitions):
     Python mirror of modelledMetricsAcross() in frontend/src/utils/deviceTags.js: the union of the
     metrics every attached submodel models, or None when none of them can be evaluated.
 
-    A device may have several schemas attached through device_submodels (migration 0034), one AAS
+    A device may have several schemas attached through device_submodels (archived migration 0034), one AAS
     Submodel each. A metric modelled by any one of them is modelled -- judging against a single
     schema would flag a device for publishing what another of its own submodels accounts for.
     """
@@ -692,7 +692,7 @@ def seed_supabase():
     # flagged as unmodelled -- "publishes beyond its model" and "has no model" are different
     # findings -- so this is a prerequisite of checks 6c/6d, not decoration.
     #
-    # SEEDED AS A DRAFT, deliberately. Migration 0037 freezes every column but `status` on an
+    # SEEDED AS A DRAFT, deliberately. Archived migration 0037 freezes every column but `status` on an
     # `active` or `archived` schema, and that guard applies to `service_role` as well as to
     # `authenticated` -- deliberately, since a trusted key is still not a reason to redefine a
     # contract devices are provisioned against. Check 6d widens this schema in place to prove the
@@ -720,7 +720,7 @@ def seed_supabase():
     k_res = supabase_client.table("schemas").insert({
         "schema_name": VAL_KPI_SCHEMA_NAME,
         "description": "End-to-end validation KPI submodel",
-        # Same reason as the schema above: a draft is the editable state (migration 0037).
+        # Same reason as the schema above: a draft is the editable state (archived migration 0037).
         "status": "draft",
         "schema_definition": {
             "type": "object",
@@ -731,7 +731,7 @@ def seed_supabase():
     SEEDED["kpi_schema_uuid"] = k_res.data[0]["id"] if k_res.data else None
 
     if SEEDED.get("schema_uuid") and SEEDED.get("known_uuid"):
-        # devices.schema_id is still written: it is the fallback arm migration 0034 deliberately
+        # devices.schema_id is still written: it is the fallback arm archived migration 0034 deliberately
         # retains, and leaving it unset would mean the join table were the only thing under test.
         supabase_client.table("devices").update(
             {"schema_id": SEEDED["schema_uuid"]}

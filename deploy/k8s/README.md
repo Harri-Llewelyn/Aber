@@ -1122,6 +1122,7 @@ Where they differ, they differ deliberately:
 | `mosquitto-init` writes the password file once | initContainer assembles it, sidecar reloads it | Gateway credentials become reviewable Secret state instead of something typed into a container |
 | Gateway provisioning via `docker exec` | `--target=k8s`: patch the Secret, then force the reload | Same script, two backends, so the ACL reasoning stays in one place |
 | Ingestion has no healthcheck | Liveness probe on the heartbeat file's age | A wedged paho loop is invisible on Compose; Kubernetes can restart it |
+| Kong CORS origins default to `localhost:3000` / `:8088` | Derived from `publicBaseDomain` by `acs-cymru.corsOrigins` | Compose serves the dashboard on a published port; the chart serves it on `app.<domain>` and calls the API on `api.<domain>`, which is cross-origin. Same `__CORS_ORIGINS__` placeholder, different substituter |
 
 **Image tags must match between the two targets, and CI enforces it.**
 
@@ -1161,6 +1162,7 @@ would pass while they diverged. What is actually done instead:
 - **The chart's own guard rails**, which fail the render rather than the pod: partial credential sets,
   Realtime key lengths, the `realtime-dev` Service name, empty browser-facing URLs, TLS with
   `scheme: http`, single-writer workloads being scaled, missing `fsGroup`, published database ports
-  leaking into wiring, privileged credentials outside a Secret, and OAuth redirect URIs disagreeing
-  between what a service advertises and what db-init registers.
+  leaking into wiring, privileged credentials outside a Secret, an origin list Kong would start
+  with and then block every browser request against, and OAuth redirect URIs disagreeing between
+  what a service advertises and what db-init registers.
 - **This divergence table.** Anything intentional is written down; anything not written down is drift.

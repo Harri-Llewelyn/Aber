@@ -2610,7 +2610,7 @@ SELECT setval('public.roles_id_seq', GREATEST((SELECT COALESCE(max(id), 0) FROM 
 -- for the life of the database. Scheduled here rather than in Phase 4 so the janitor exists
 -- before the thing it cleans up.
 --
--- The guard matters: pg_net is not installed until Phase 4 (migration 0026), so an unguarded
+-- The guard matters: pg_net is not installed until Phase 4 (archived migration 0026), so an unguarded
 -- DELETE would fail every 15 minutes until then and fill cron.job_run_details with errors --
 -- the job would be generating exactly the noise it exists to remove. to_regclass() returns
 -- NULL rather than raising for a missing relation, so this no-ops cleanly and starts working
@@ -2709,7 +2709,7 @@ BEGIN
       v_token,
       'nodered_admin_token',
       'Bearer token for the Node-RED admin API. Read by '
-      'public.dispatch_device_quarantine_webhook() (migration 0027).'
+      'public.dispatch_device_quarantine_webhook() (archived migration 0027).'
     );
   ELSE
     -- update_secret rather than create: supabase-db-init replays every migration on every
@@ -2763,7 +2763,7 @@ SELECT set_config('acs_cymru.nodered_admin_token', '', false);
 \set grafana_public_url ''
 \endif
 
--- psql does not substitute :variables inside dollar-quoted blocks (see migration 0026), so
+-- psql does not substitute :variables inside dollar-quoted blocks (see archived migration 0026), so
 -- both values are staged through session GUCs where substitution does happen.
 SELECT set_config('acs_cymru.grafana_oauth_client_secret', :'grafana_oauth_client_secret', false);
 SELECT set_config('acs_cymru.grafana_public_url',          :'grafana_public_url',          false);

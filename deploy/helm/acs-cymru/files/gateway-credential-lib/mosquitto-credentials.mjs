@@ -211,21 +211,42 @@ export function mergeCredential(existing, entry) {
  * detail that matters: `-c` is applied to `$tmp`, a file created by mktemp for this purpose and
  * holding exactly one account. It is never applied to the real password file.
  *
- * SINGLE-QUOTED ARGUMENTS, with the caller responsible for validating them first. `sparkplugId` is
- * checked against GATEWAY_ID_PATTERN (hex only) and the password against PASSWORD_SAFE below, so
- * neither can contain a quote -- which is what makes this interpolation safe rather than merely
- * conventional.
+ * NO INTERPOLATION AT ALL -- the id and the password arrive as POSITIONAL PARAMETERS, `$1` and
+ * `$2`, supplied by hashArgv() below. They used to be interpolated into this string inside single
+ * quotes, which was safe only because assertGatewayId() and assertSafePassword() reject every
+ * character that could close one. That reasoning held, and it made the allow-lists the sole thing
+ * between an argument and a shell: correct today, and one loosened regex away from not being.
+ * Positional parameters are not parsed as script text at all, so the allow-lists become
+ * defence in depth rather than the defence.
+ *
+ * Constant, and therefore argument-free: there is nothing left in it that varies per account.
  */
-export function hashScript(sparkplugId, password) {
-  assertGatewayId(sparkplugId);
-  assertSafePassword(password);
+export function hashScript() {
   return [
     'set -e',
     'tmp=$(mktemp)',
-    `mosquitto_passwd -b -c "$tmp" '${sparkplugId}' '${password}'`,
+    'mosquitto_passwd -b -c "$tmp" "$1" "$2"',
     'cat "$tmp"',
     'rm -f "$tmp"',
   ].join('; ');
+}
+
+/**
+ * The full `/bin/sh` argument vector for hashing one account.
+ *
+ * `['-c', script, '--', id, password]`: `sh -c` assigns the first operand after the script to
+ * `$0`, so the `--` is consumed there and the two real values land on `$1` and `$2`. Without it
+ * the id would become `$0` and the script would hash a password against nothing.
+ *
+ * Both backends build their command from this one function, which is what keeps the CLI's
+ * `kubectl exec` path and the service's local `execFileSync` path from drifting on the calling
+ * convention now that there is one to get wrong. Validation stays here -- an invalid argument
+ * should never reach a process at all, positional or not.
+ */
+export function hashArgv(sparkplugId, password) {
+  assertGatewayId(sparkplugId);
+  assertSafePassword(password);
+  return ['-c', hashScript(), '--', sparkplugId, password];
 }
 
 /**

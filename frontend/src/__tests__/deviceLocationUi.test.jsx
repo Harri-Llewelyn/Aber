@@ -6,7 +6,7 @@ import { api } from '../api'
 import { supabase } from '../lib/supabaseClient'
 
 /**
- * The Devices tab's location UI (migration 0036).
+ * The Devices tab's location UI (archived migration 0036).
  *
  * The distinction under test throughout is between the RESOLVED cell and the EXPLICIT override.
  * They render the same cell name in the common case, so a regression that confused the two --

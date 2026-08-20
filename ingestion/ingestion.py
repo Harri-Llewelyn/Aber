@@ -317,6 +317,31 @@ SOURCE_REPORTED_IDENTITY = "reported_identity"
 SOURCE_INSTANCE_UUID = "instance_uuid"
 SOURCE_LEGACY_NAME = "legacy_name"
 
+# Statuses a gateway may NOT assert about itself, and the length cap on the ones it may.
+#
+# `gateways.status` is deliberately unconstrained text (migration 0025) because a `Gateway_Status`
+# metric in an NBIRTH overrides whatever the message type implies -- the domain is the fleet's, not
+# ours. That is a statement about VOCABULARY, not about authority, and the two were conflated: the
+# payload string was written through verbatim, so a gateway could claim any value at any length.
+#
+# The three below are the platform's own, written by code that knows something the gateway does
+# not. PENDING_ENROLLMENT and AWAITING_BIRTH are enrolment lifecycle, set by the issuing RPC and by
+# enroll-gateway; STALE is DERIVED at read time by public.gateway_status and is never stored at
+# all. All three short-circuit ahead of the staleness arm in that view, so a gateway asserting one
+# renders itself permanently not-stale on the dashboard -- it would go on looking healthy after it
+# stopped publishing, which is the one thing the derived status exists to prevent.
+#
+# REJECTED, NOT TRUNCATED OR REMAPPED. There is no legitimate reading of a gateway claiming to be
+# awaiting its own birth, so the message type's own status is the honest answer and the claim is
+# dropped with a warning.
+RESERVED_GATEWAY_STATUSES = frozenset({"PENDING_ENROLLMENT", "AWAITING_BIRTH", "STALE"})
+
+# Long enough for any status a fleet reasonably uses ("MAINTENANCE_SCHEDULED" is 21), short enough
+# that the column cannot be used as storage. Over-length is refused rather than truncated: a
+# truncated status is a DIFFERENT status, and silently inventing one is worse than keeping the
+# status the message type already implies.
+MAX_GATEWAY_STATUS_LENGTH = 32
+
 # Device resolution TTL cache, keyed by the id seen on the wire.
 # Values are (device_row_or_None, cached_at).
 _device_cache = {}
@@ -334,6 +359,12 @@ UNKNOWN_GATEWAY_WARN_INTERVAL_SECONDS = 300
 # Throttle for legacy name-based identity deprecation warnings, keyed by the id on the wire.
 _legacy_identity_warned = {}
 LEGACY_IDENTITY_WARN_INTERVAL_SECONDS = 300
+
+# Throttle for refused self-reported gateway statuses, keyed by edge node id. A node that reports
+# one reports it on every heartbeat -- 119 an hour -- so the refusal has to be legible without
+# being the whole log.
+_status_rejected_warned = {}
+STATUS_REJECT_WARN_INTERVAL_SECONDS = 300
 
 # Sparkplug B metric alias table, keyed by EDGE NODE -- (group_id, edge_node_id) -> {alias: name}.
 #
@@ -961,12 +992,22 @@ def verify_gateway_binding(device: dict, gateway_wire_id: str, group_id: str = N
     not. Never raises: a lookup failure is reported as a mismatch, which is the fail-closed
     answer.
 
-    Three cases are NOT a mismatch, each guarding a branch below:
+    Two cases are NOT a mismatch, each guarding a branch below:
 
       * No `gateway_id` -- binding is set by an operator at approval, never on the telemetry
         path. Unbound is not mis-bound.
-      * Resolved by legacy `name` -- the row may predate any gateway assignment.
       * A node-level message -- no device segment; handled by process_node_message().
+
+    HOW A DEVICE WAS RESOLVED DOES NOT AFFECT THIS CHECK, and it used to. A device matched by
+    legacy `name` was exempted outright, on the reasoning that such a row "may predate any
+    gateway assignment" -- but that case is the `bound_gateway_id` branch below, which returns
+    before the exemption could ever be reached. The exemption therefore only ever fired for a
+    device that IS bound, which is exactly the device it must not fire for: resolve_device()
+    falls back to a `name` lookup for any wire id that is not a platform-issued `dev` id, so
+    naming another gateway's device in the topic's device segment resolved it, marked it
+    legacy, and skipped this function entirely. The broker cannot close that -- mosquitto.acl
+    pins the topic's EDGE-NODE segment to the connecting username and leaves the device segment
+    free -- so this was the only tier standing, and it stood down.
 
     Threat model and why the broker ACL does not make this redundant:
     ../ingestion/README.md -> "Gateway Binding"
@@ -976,9 +1017,6 @@ def verify_gateway_binding(device: dict, gateway_wire_id: str, group_id: str = N
 
     bound_gateway_id = device.get("gateway_id")
     if not bound_gateway_id:
-        return None
-
-    if device.get("_identity_source") == SOURCE_LEGACY_NAME:
         return None
 
     gateway = resolve_gateway(gateway_wire_id, group_id)
@@ -1373,6 +1411,47 @@ def process_ddeath(wire_id: str, gateway_wire_id: str):
         logger.error("Error applying DDEATH status update for '%s': %s", wire_id, e, exc_info=True)
 
 
+def accept_reported_status(reported: str, edge_node_id: str = None):
+    """
+    Whether a gateway's self-reported status may be written, or None if it may not.
+
+    A gateway names its own operating states -- that is what keeps `gateways.status` an open
+    domain -- but it does not get to name the platform's. See RESERVED_GATEWAY_STATUSES.
+
+    Returns the accepted string (whitespace-trimmed) or None, which the caller answers by
+    keeping the status the message type implies.
+    """
+    if not isinstance(reported, str):
+        return None
+
+    candidate = reported.strip()
+    if not candidate:
+        return None
+
+    if len(candidate) > MAX_GATEWAY_STATUS_LENGTH:
+        if _throttled(_status_rejected_warned, edge_node_id or "", STATUS_REJECT_WARN_INTERVAL_SECONDS):
+            logger.warning(
+                "Edge node '%s' reported a %d-character status; the cap is %d. Keeping the status "
+                "implied by the message type. Statuses are labels, not a data channel.",
+                edge_node_id, len(candidate), MAX_GATEWAY_STATUS_LENGTH
+            )
+        return None
+
+    # Compared upper-cased so `awaiting_birth` cannot walk past a check on `AWAITING_BIRTH`.
+    if candidate.upper() in RESERVED_GATEWAY_STATUSES:
+        if _throttled(_status_rejected_warned, edge_node_id or "", STATUS_REJECT_WARN_INTERVAL_SECONDS):
+            logger.warning(
+                "Edge node '%s' reported the RESERVED status '%s'. Refused: that value is written "
+                "by the platform (enrolment lifecycle) or derived at read time, and a gateway "
+                "asserting it would make itself look healthy after it stopped publishing.",
+                edge_node_id, candidate
+            )
+        count("gateway_status_reserved_rejected")
+        return None
+
+    return candidate
+
+
 def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: str = None):
     """
     On Sparkplug B node-level messages (NBIRTH / NDATA / NDEATH):
@@ -1380,7 +1459,7 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
 
     NBIRTH/NDATA mark the edge node ONLINE; NDEATH marks it OFFLINE. A `Gateway_Status`
     string metric in the payload (what node_red_flow.json publishes) overrides the
-    status derived from the message type.
+    status derived from the message type -- subject to accept_reported_status().
 
     Gateways are never auto-created: an unregistered edge node is logged and dropped,
     mirroring the fail-closed treatment of unregistered devices.
@@ -1402,7 +1481,12 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
         # own reported status is silently replaced by the one inferred from the message type.
         name = resolve_metric_name(group_id, edge_node_id, metric)
         if name in ("Gateway_Status", "Node_Status") and metric.HasField("string_value"):
-            status = metric.string_value
+            # BREAK EITHER WAY. A refused claim is still the node's answer to "what is your
+            # status" -- looking for a second, more acceptable one further down the payload
+            # would let a gateway smuggle a reserved value past this by sending two.
+            accepted = accept_reported_status(metric.string_value, edge_node_id)
+            if accepted is not None:
+                status = accepted
             break
 
     # Receipt time, not the payload timestamp: staleness is judged against this server's

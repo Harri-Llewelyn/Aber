@@ -772,7 +772,7 @@ BEGIN
     UPDATE public.device_submodels SET schema_id = draft.id WHERE schema_id = parent.id;
     GET DIAGNOSTICS v_submodels = ROW_COUNT;
 
-    -- The legacy 1:1 pointer moves too. Migration 0034 kept `devices.schema_id` as the fallback
+    -- The legacy 1:1 pointer moves too. Archived migration 0034 kept `devices.schema_id` as the fallback
     -- arm of the `device_schemas` view, and migrations 0021/0033 still write it -- a device
     -- provisioned only through that column would otherwise stay pinned to an archived version and
     -- start reporting the new version's metrics as Unmodelled. This UPDATE also fires
@@ -1118,7 +1118,7 @@ CREATE TABLE IF NOT EXISTS public.mtconnect_vocabulary (
 COMMENT ON TABLE public.mtconnect_vocabulary IS 'MTConnect controlled vocabularies, generated from the Apache-2.0 mtconnect/schema repository. Reference data, not deployment state.';
 
 -- Name: COLUMN mtconnect_vocabulary.semantic_id; Type: COMMENT; Schema: public; Owner: -
-COMMENT ON COLUMN public.mtconnect_vocabulary.semantic_id IS 'Local-namespace IRI for this vocabulary concept. Minted by this deployment, not issued by MTConnect -- see migration 0032.';
+COMMENT ON COLUMN public.mtconnect_vocabulary.semantic_id IS 'Local-namespace IRI for this vocabulary concept. Minted by this deployment, not issued by MTConnect -- see archived migration 0032.';
 
 -- Name: opcua_vocabulary; Type: TABLE; Schema: public; Owner: -
 CREATE TABLE IF NOT EXISTS public.opcua_vocabulary (

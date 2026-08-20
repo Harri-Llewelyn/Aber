@@ -5,6 +5,7 @@ import { deviceSparkplugId } from './utils/sparkplugId';
 import { resolveDeviceLocation, SCOPE_SITE_WIDE } from './utils/cellResolution';
 import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
 import { metricNameError } from './utils/metricGroup';
+import { readSetting } from './config';
 import {
   MODEL_3D_EXTENSIONS,
   isAcceptedModelFile,
@@ -16,7 +17,7 @@ import {
 //
 //   * `devices.gateway_id -> gateways.cell_id` is the DATA PATH. It is what the Sparkplug topic
 //     carries and what the Gateways page lists by.
-//   * `devices.cell_id` (migration 0036) is an explicit LOCATION override. NULL means inherit
+//   * `devices.cell_id` (archived migration 0036) is an explicit LOCATION override. NULL means inherit
 //     from the gateway; it is not a stored "unassigned".
 //
 // The effective cell is resolved by public.device_locations and merged onto each row as
@@ -120,7 +121,7 @@ const gatewayIdFrom = (body) => emptyToNull(body.active_gateway_id ?? body.gatew
  * a partial update cannot blank a field it never sent.
  *
  * THE PAIR IS NEVER LEFT CONTRADICTORY. devices_site_wide_has_no_cell / gateways_site_wide_has_no_cell
- * (migration 0036) reject a site-wide asset that also names a cell, because "it is in no
+ * (archived migration 0036) reject a site-wide asset that also names a cell, because "it is in no
  * particular cell" and "it is in Bay 4" cannot both be true. Clearing the cell here means
  * marking something Site-Wide is one action in the UI rather than a 400 the user has to decode
  * -- the same discipline api.js already applies to semantic_id / semantic_id_type.
@@ -345,9 +346,16 @@ const mapDigitalThreadRow = (t) => ({
 /**
  * The 3D-model bucket. Public-read by design -- an exported AAS `File` element has to be
  * dereferenceable by a viewer holding no Factory+ session, which a signed URL would not be.
- * Writes are gated by RLS to Administrator/Shopfloor_Manager (migration 0035).
+ * Writes are gated by RLS to Administrator/Shopfloor_Manager (see the policies in
+ * supabase/storage-policies.sql).
+ *
+ * RESOLVED, NOT A LITERAL. The bucket is created by scripts/storage-init.mjs from `STORAGE_BUCKET`
+ * and its policies name it in supabase/storage-policies.sql, so every OTHER consumer already took
+ * it from the environment. This one did not, which made the dashboard the single component a
+ * rename would leave behind -- and it would present as a 404 on upload rather than as a
+ * misconfiguration. The default is the same name those two default to.
  */
-export const MODEL_3D_BUCKET = 'asset-3d-models';
+export const MODEL_3D_BUCKET = readSetting('VITE_MODEL_3D_BUCKET', 'asset-3d-models');
 
 /**
  * The PRIVATE bucket holding Node-RED flow backups from physical gateway appliances.
@@ -360,7 +368,7 @@ export const MODEL_3D_BUCKET = 'asset-3d-models';
  * Objects live under `<sparkplug_id>/`, and that prefix is enforced by RLS rather than by this
  * client (supabase/storage-policies.sql). The paths below follow the rule; they do not implement it.
  */
-export const GATEWAY_BACKUP_BUCKET = 'gateway-backups';
+export const GATEWAY_BACKUP_BUCKET = readSetting('VITE_GATEWAY_BACKUP_BUCKET', 'gateway-backups');
 
 /**
  * The filename a server offered in Content-Disposition, or null.
@@ -385,7 +393,7 @@ export function gatewayBackupPath(sparkplugId, when = new Date()) {
   return `${sparkplugId}/${stamp}-flows.json`;
 }
 
-/** The public URL for a stored model path. Composed, never stored -- see migration 0035. */
+/** The public URL for a stored model path. Composed, never stored -- see archived migration 0035. */
 export function model3dPublicUrl(path) {
   if (!path) return null;
   return supabase.storage.from(MODEL_3D_BUCKET).getPublicUrl(path).data.publicUrl;
@@ -812,7 +820,7 @@ const apiMethods = {
       ]);
       if (error) throw error;
 
-      // The schemas attached through device_submodels (migration 0034), one AAS Submodel each.
+      // The schemas attached through device_submodels (archived migration 0034), one AAS Submodel each.
       // Read from the `device_schemas` view so the fallback to the legacy 1:1 devices.schema_id is
       // applied once, in SQL, rather than being re-derived by every caller. A failure here is
       // non-fatal: schemasForDevice() falls back to schema_id, so the page degrades to
@@ -962,7 +970,7 @@ const apiMethods = {
         .select('*')
         .order('name', { ascending: true });
       if (error) throw error;
-      // semantic_id is the concept-level local IRI added by migration 0032 -- distinct from the
+      // semantic_id is the concept-level local IRI added by archived migration 0032 -- distinct from the
       // observation-level id a catalog metric carries, which is built from the whole metric name.
       return (data || []).map(v => ({
         kind: v.kind, name: v.name, category: v.category, semantic_id: v.semantic_id ?? null
@@ -1074,7 +1082,7 @@ const apiMethods = {
         schema_definition: s.schema_definition,
         semantic_id: s.semantic_id ?? null,
         semantic_id_type: s.semantic_id_type ?? null,
-        // Versioning (migration 0037). Defaulted here as well as in the column, so a client
+        // Versioning (archived migration 0037). Defaulted here as well as in the column, so a client
         // pointed at a database that has not replayed 0037 renders v1/Active rather than
         // `vundefined · ` -- and so `isSchemaEditable()` fails closed on a row it cannot read a
         // status from, rather than opening an editor over a schema devices are attached to.
@@ -1330,7 +1338,7 @@ const apiMethods = {
       return { valid: true, message: 'Payload strictly conforms to target JSON schema' };
     }
 
-    // Versioning (migration 0037). Both of these are RPCs rather than table writes, and that is
+    // Versioning (archived migration 0037). Both of these are RPCs rather than table writes, and that is
     // the point: `version` is computed from the parent and `publish` has to repoint every device
     // and archive the predecessor in one transaction. A client that could do either through
     // PostgREST could renumber history or leave a fleet half-rebound, so the database refuses
@@ -1491,7 +1499,7 @@ const apiMethods = {
     const id = parts[parts.length - 1];
 
     // Editing a DRAFT version's metric set. There is deliberately no status guard here beyond
-    // sending only the editable keys: `prevent_active_schema_mutation()` (migration 0037) is what
+    // sending only the editable keys: `prevent_active_schema_mutation()` (archived migration 0037) is what
     // refuses this write against an active or archived row, and duplicating that decision
     // client-side would be a second source of truth that could disagree with the first. The UI
     // does not offer the editor for a non-draft; the database is what makes that hold.

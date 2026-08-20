@@ -49,7 +49,7 @@ const END_MARKER = '-- <<< END GENERATED mtconnect_vocabulary';
  *
  * THIS IS WHY THE GENERATOR COULD NOT PREVIOUSLY WRITE THE SEED. It emitted only
  * `(kind, name, category)`, while the seeded rows carry `semantic_id` too — backfilled by the old
- * migration 0032 in a separate pass — so splicing its output in would have silently dropped every
+ * archived migration 0032 in a separate pass — so splicing its output in would have silently dropped every
  * semantic id on a fresh database. Emitting the fourth column here is what makes the seed
  * generable at all; it is not a convenience.
  *

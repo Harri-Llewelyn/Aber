@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS public.ashrae223_vocabulary (
                                 'Relation'::text, 'EnumerationKind'::text])
     ),
     -- Every id is issued by ASHRAE under its own namespace. A locally-minted id here would assert
-    -- an interoperability nobody agreed to -- the rule migration 0029 sets out.
+    -- an interoperability nobody agreed to -- the rule archived migration 0029 sets out.
     CONSTRAINT ashrae223_vocabulary_semantic_id_namespace CHECK (
       semantic_id LIKE 'http://data.ashrae.org/standard223#%'
     )

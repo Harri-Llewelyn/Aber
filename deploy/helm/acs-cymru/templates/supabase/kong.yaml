@@ -107,6 +107,13 @@ spec:
             # tenant from it and answers a bare 403 otherwise.
             - name: REALTIME_UPSTREAM_URL
               value: {{ printf "http://%s:%v/socket/" .Values.realtime.serviceName .Values.realtime.port | quote }}
+            # The browser origins Kong will echo an Access-Control-Allow-Origin for, derived from
+            # the SAME helpers the Ingress hosts come from -- so the origin list cannot name a
+            # hostname this chart does not serve. See acs-cymru.corsOrigins; it fails the render
+            # rather than shipping an empty list, because an empty one starts cleanly and blocks
+            # every browser request.
+            - name: KONG_CORS_ORIGINS
+              value: {{ include "acs-cymru.corsOrigins" . | quote }}
           command:
             - /bin/sh
             - -e
@@ -116,6 +123,13 @@ spec:
                 echo 'SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY must be set -- Kong would otherwise register empty API keys, which key-auth accepts.' >&2
                 exit 1
               fi
+              case "$KONG_CORS_ORIGINS" in
+                '['*']') ;;
+                *)
+                  echo "KONG_CORS_ORIGINS must be a JSON array of browser origins. Got: $KONG_CORS_ORIGINS" >&2
+                  exit 1
+                  ;;
+              esac
               case "$REALTIME_UPSTREAM_URL" in
                 http://realtime-dev*|https://realtime-dev*) ;;
                 *)
@@ -128,6 +142,7 @@ spec:
               sed -e "s|__SUPABASE_ANON_KEY__|$SUPABASE_ANON_KEY|g" \
                   -e "s|__SUPABASE_SERVICE_ROLE_KEY__|$SUPABASE_SERVICE_ROLE_KEY|g" \
                   -e "s|__REALTIME_UPSTREAM_URL__|$REALTIME_UPSTREAM_URL|g" \
+                  -e "s|__CORS_ORIGINS__|$KONG_CORS_ORIGINS|g" \
                   /template/kong.yml > /config/kong.yml
               # Matches ANY surviving marker, not just the __SUPABASE_ ones. Comment lines are
               # excluded because kong.yml's header documents the convention by name, so a

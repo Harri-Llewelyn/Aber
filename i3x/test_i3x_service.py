@@ -18,14 +18,22 @@ controlled queue:
 
 Run: python -m unittest discover -s i3x
 """
+import json
 import os
+import re
 import sys
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import address_space as A  # noqa: E402
+import i3x_service  # noqa: E402
 from subscriptions import SubscriptionError, SubscriptionRegistry  # noqa: E402
+
+MODELLED_METRICS_FIXTURE = (
+    Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "modelled-metrics.json"
+)
 
 
 class FakeClock:
@@ -502,6 +510,171 @@ class TestStandardNamespaces(unittest.TestCase):
                 f"{value!r} is offered as a standard but has no i3X namespace, so metrics carrying "
                 f"it would be dropped from GET /namespaces",
             )
+
+
+class ModelledMetricsContractTest(unittest.TestCase):
+    """
+    `_modelled_metrics()` is the THIRD implementation of one rule, and was the second of two with
+    no contract behind it.
+
+    `modelledMetrics()` in frontend/src/utils/deviceTags.js, `modelled_metrics()` in
+    ingestion/validate.py and `modelledMetrics()` in supabase/functions/aas-export/index.ts answer
+    the same question -- which metrics a schema models. None can import another, so
+    `tests/fixtures/modelled-metrics.json` is the seam, and each asserts it in its own runner.
+
+    This copy's own docstring said "this is the third, and all three must agree" while agreeing
+    with nothing that was checked. That is the failure mode a fixture exists to end: the aas-export
+    copy, equally unchecked, was still carrying the array-`properties` divergence the fixture was
+    written to record.
+
+    WHAT THIS ONE DOES DIFFERENTLY, AND WHY IT IS NOT A DIVERGENCE. It returns a set, empty rather
+    than None when a schema declares neither `properties` nor `required`. The mirrors return None
+    there to mean "cannot be evaluated", a distinction `unmodelledMetrics()` needs so that "has no
+    model" is not reported as "publishes beyond its model". i3X has no such caller: `_build_objects`
+    iterates the result to decide which metrics to project, so "not evaluable" and "models nothing"
+    produce the same address space. The NAMES must still agree exactly, and that is what is
+    asserted -- an element that appears here and nowhere else is an elementId a client can
+    subscribe to and never receive a value for.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.fixture = json.loads(MODELLED_METRICS_FIXTURE.read_text(encoding="utf-8"))
+
+    def test_fixture_is_not_empty(self):
+        """A contract test exercising nothing reports green while four implementations drift."""
+        self.assertGreater(len(self.fixture["cases"]), 5)
+
+    def test_every_case_matches_the_contract(self):
+        for case in self.fixture["cases"]:
+            with self.subTest(case=case["name"]):
+                got = i3x_service._modelled_metrics(case.get("schema_definition"))
+                self.assertIsInstance(got, set)
+                self.assertEqual(got, set(case["expected"] or []))
+
+    def test_an_array_properties_contributes_nothing(self):
+        """
+        The regression itself, pinned separately so a failure names it rather than pointing at a
+        fixture row. `properties: ['A','B']` must model NOTHING -- reading it as {'0','1'} is what
+        shipped in the aas-export copy of this same rule.
+        """
+        self.assertEqual(i3x_service._modelled_metrics({"properties": ["A", "B"]}), set())
+        self.assertEqual(
+            i3x_service._modelled_metrics({"properties": ["A", "B"], "required": ["Real/METRIC"]}),
+            {"Real/METRIC"},
+        )
+
+    def test_a_non_dict_definition_models_nothing(self):
+        """`schema_definition` is free-form JSONB, so none of these is unreachable."""
+        for definition in (None, [], "properties", 7, True):
+            with self.subTest(definition=definition):
+                self.assertEqual(i3x_service._modelled_metrics(definition), set())
+
+
+class BulkElementIdsCapTest(unittest.TestCase):
+    """
+    Bulk breadth is bounded, as bulk DEPTH already was.
+
+    `maxDepth` has always been budgeted on the value path; `elementIds` was read straight off the
+    request body, so one POST could name any number of elements and this server would resolve every
+    one against the whole address space, on the request thread, for a caller holding nothing but a
+    valid bearer token.
+
+    A LIMIT, NOT A TRUNCATION, and that is the part worth a test. i3X bulk results are paired to
+    requests BY POSITION -- the conformance suite has a dedicated check for it -- so quietly
+    answering the first N would make a client mis-attribute every value after the cut. Refusing is
+    the only answer that cannot be misread.
+    """
+
+    def test_a_valid_array_passes_through_unchanged(self):
+        self.assertEqual(
+            i3x_service._require_element_ids({"elementIds": ["a", "b"]}), ["a", "b"]
+        )
+
+    def test_a_missing_array_is_a_400_where_it_is_required(self):
+        with self.assertRaises(i3x_service.Problem) as caught:
+            i3x_service._require_element_ids({})
+        self.assertEqual(caught.exception.status, 400)
+
+    def test_a_non_list_is_a_400(self):
+        for value in ("elementIds", 7, {"a": 1}, None):
+            with self.subTest(value=value):
+                with self.assertRaises(i3x_service.Problem):
+                    i3x_service._require_element_ids({"elementIds": value})
+
+    def test_absent_is_allowed_where_it_means_all(self):
+        """The two type endpoints document an absent array as 'every type'."""
+        self.assertEqual(i3x_service._require_element_ids({}, required=False), [])
+
+    def test_exactly_the_cap_is_accepted(self):
+        ids = [str(n) for n in range(i3x_service.MAX_BULK_ELEMENT_IDS)]
+        self.assertEqual(len(i3x_service._require_element_ids({"elementIds": ids})), len(ids))
+
+    def test_one_over_the_cap_is_refused_rather_than_truncated(self):
+        ids = [str(n) for n in range(i3x_service.MAX_BULK_ELEMENT_IDS + 1)]
+        with self.assertRaises(i3x_service.Problem) as caught:
+            i3x_service._require_element_ids({"elementIds": ids})
+        self.assertEqual(caught.exception.status, 400)
+        # The message must name both numbers: "too many" without them leaves a client guessing at
+        # a batch size, which is the one thing it needs in order to retry successfully.
+        self.assertIn(str(len(ids)), caught.exception.detail)
+        self.assertIn(str(i3x_service.MAX_BULK_ELEMENT_IDS), caught.exception.detail)
+
+    def test_the_registration_path_is_capped_too(self):
+        """
+        Subscription registration takes `objects` OR `elementIds`, and is the batch that matters
+        most: it does not merely answer, it adds to the client's monitored set, which outlives the
+        request and is what every later poll is evaluated against.
+        """
+        big = [str(n) for n in range(i3x_service.MAX_BULK_ELEMENT_IDS + 1)]
+        for body in ({"elementIds": big}, {"objects": [{"elementId": e} for e in big]}):
+            with self.subTest(shape=next(iter(body))):
+                with self.assertRaises(i3x_service.Problem) as caught:
+                    i3x_service._registration_entries(body)
+                self.assertEqual(caught.exception.status, 400)
+
+        # And the ordinary case still passes through, normalised.
+        self.assertEqual(
+            i3x_service._registration_entries({"elementIds": ["a"]}), [{"elementId": "a"}]
+        )
+
+    def test_only_the_two_sanctioned_helpers_read_elementIds(self):
+        """
+        The cap is only worth having if a handler added later cannot forget it.
+
+        Asserted against the source, like the telemetry-upsert check in test_gateway_binding.py:
+        there is no seam to test through, and the failure mode of a handler reading `elementIds`
+        directly is an uncapped endpoint that behaves perfectly until someone points a load
+        generator at it.
+
+        TWO readers are legitimate -- `_require_element_ids` (the bulk read endpoints) and
+        `_registration_entries` (subscriptions) -- and both go through `_cap_bulk`. A third is a
+        bug, whatever it looks like.
+        """
+        src = (Path(__file__).resolve().parent / "i3x_service.py").read_text(encoding="utf-8")
+        readers = [
+            src[: m.start()].count("\n") + 1
+            for m in re.finditer(r'get\("elementIds"\)', src)
+        ]
+        sanctioned = {
+            src[: src.index("def _require_element_ids")].count("\n"),
+            src[: src.index("def _registration_entries")].count("\n"),
+        }
+        for line in readers:
+            enclosing = max(
+                (start for start in (
+                    src[: m.start()].count("\n")
+                    for m in re.finditer(r"^def \w+", src, re.M)
+                ) if start < line),
+                default=-1,
+            )
+            with self.subTest(line=line):
+                self.assertIn(
+                    enclosing,
+                    sanctioned,
+                    f"i3x_service.py:{line} reads elementIds outside _require_element_ids() and "
+                    "_registration_entries(), so it is not capped by _cap_bulk()",
+                )
 
 
 if __name__ == "__main__":

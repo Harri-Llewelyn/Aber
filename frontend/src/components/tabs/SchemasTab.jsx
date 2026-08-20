@@ -109,7 +109,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   // wall of rows the collapse was meant to fix.
   const [catalogSearch, setCatalogSearch] = useState('')
   const [showDeprecated, setShowDeprecated] = useState(false)
-  // Version lifecycle (migration 0037). `detailSchema` is the version being read or edited;
+  // Version lifecycle (archived migration 0037). `detailSchema` is the version being read or edited;
   // `forkTarget` is the one a new version is being cut from. Two states rather than one mode flag,
   // because forking is reachable both from the table and from inside the detail modal.
   // An ID, not the schema object -- this page reloads its list after every fork, publish and
@@ -310,7 +310,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         sub_type: newMetric.subType,
         units: unitsApply ? newMetric.units : '',
         standard: effectiveStandard,
-        // AAS alignment (migration 0029). Blank is a legitimate value -- MTConnect
+        // AAS alignment (archived migration 0029). Blank is a legitimate value -- MTConnect
         // publishes no per-type identifier, so those metrics stay unmapped rather than carrying an
         // invented one.
         semantic_id: semanticIdValue,
