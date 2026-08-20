@@ -33,11 +33,16 @@ const RUNTIME_DIR =
   process.env.NODE_RED_RUNTIME_DIR || '/usr/src/node-red/node_modules';
 
 const credentialSecret = process.env.NODERED_CREDENTIAL_SECRET;
-// The SIMULATOR'S OWN GATEWAY CREDENTIAL, not a shared platform account. mosquitto.acl confines
-// each client to `spBv1.0/+/+/%u/#`, so this username must be the `sparkplug_id` of the gateway
-// the flow publishes under -- Virtual_Gateway_NodeRED, whose UUID is pinned in 0002_seed_data.sql
-// precisely so that id is knowable in advance. A friendly name here would authenticate fine and
-// then have every publish silently dropped by the broker.
+// A GATEWAY CREDENTIAL, not a shared platform account. mosquitto.acl confines each client to
+// `spBv1.0/+/+/%u/#`, so this username must be the `sparkplug_id` of the gateway the node publishes
+// under, or every publish is silently dropped by the broker despite a successful connection.
+//
+// THIS PAIR IS THE LEGACY FALLBACK, applied only to a `mqtt-broker-config` node -- see
+// brokerCredentialFor(). No node in the current flow is called that: the consolidated
+// `Simulated Shopfloor` tab has one broker per cell gateway, each naming its own pair through
+// `acsCredentialsEnv`. gwy100000000000400080000 was the retired single-device simulator, whose
+// gateway row migration 0020 deletes, so this default now resolves to nothing on the wire. It stays
+// for volumes seeded before the consolidation, whose flow still carries that node.
 const mqttUser = process.env.MQTT_USER || 'gwy100000000000400080000';
 const mqttPassword = process.env.MQTT_PASSWORD;
 const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
@@ -184,29 +189,29 @@ if (mqttTlsEnabled && !fs.existsSync(mqttTlsCaFile)) {
 
 if (mqttTlsEnabled || mqttPortEnv || mqttHostEnv) {
   const flow = JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
-  const broker = flow.find((n) => n.id === BROKER_NODE_ID);
-  if (!broker) {
+
+  // EVERY BROKER NODE, NOT JUST THE FIRST. A multi-cell floor needs one broker node per gateway --
+  // mosquitto.acl pins the topic's edge-node segment to the connecting USERNAME, so two gateways
+  // cannot share a connection. Reconciling only `mqtt-broker-config` left the others pointing at
+  // whatever host the flow was authored against, which on Kubernetes is nothing.
+  const brokers = flow.filter((n) => n.type === 'mqtt-broker');
+  if (brokers.length === 0) {
     fail(
-      `flow at ${flowsPath} has no node with id '${BROKER_NODE_ID}'. The broker transport settings ` +
-        'could not be applied; the deployed flow does not match the repository flow.'
+      `flow at ${flowsPath} contains no mqtt-broker nodes. The broker transport settings could ` +
+        'not be applied; the deployed flow does not match the repository flow.'
     );
   }
 
   const changes = [];
-  const setField = (key, value) => {
+  const setField = (broker, key, value) => {
     if (broker[key] !== value) {
-      changes.push(`${key}: ${JSON.stringify(broker[key])} -> ${JSON.stringify(value)}`);
+      changes.push(`${broker.id}.${key}: ${JSON.stringify(broker[key])} -> ${JSON.stringify(value)}`);
       broker[key] = value;
     }
   };
 
-  if (mqttHostEnv) setField('broker', mqttHostEnv);
-  // Node-RED stores the port as a STRING. A number works at runtime but shows as empty in the
-  // editor's port field, so the node looks misconfigured to whoever opens it next.
-  if (mqttPortEnv) setField('port', String(mqttPortEnv));
-
-  if (mqttTlsEnabled) {
-    setField('usetls', true);
+  const applyTls = (broker) => {
+    setField(broker, 'usetls', true);
     // ---------------------------------------------------------------------------------------------
     // BOTH `verifyservercert` FIELDS ARE SET, AND THAT IS NOT BELT-AND-BRACES.
     //
@@ -222,9 +227,11 @@ if (mqttTlsEnabled || mqttPortEnv || mqttHostEnv) {
     // certificate whatsoever is accepted. Nothing logs a warning. Setting both makes the outcome
     // independent of which of the two Node-RED happens to consult.
     // ---------------------------------------------------------------------------------------------
-    setField('verifyservercert', true);
-    setField('tls', TLS_NODE_ID);
+    setField(broker, 'verifyservercert', true);
+    setField(broker, 'tls', TLS_NODE_ID);
 
+    // ONE tls-config node shared by every broker. They all reach the same broker over the same
+    // internal CA, so a node each would be N copies of one fact to keep in step.
     let tlsNode = flow.find((n) => n.id === TLS_NODE_ID);
     if (!tlsNode) {
       tlsNode = { id: TLS_NODE_ID, type: 'tls-config' };
@@ -249,6 +256,14 @@ if (mqttTlsEnabled || mqttPortEnv || mqttHostEnv) {
       servername: '',
       alpnprotocol: ''
     });
+  };
+
+  for (const broker of brokers) {
+    if (mqttHostEnv) setField(broker, 'broker', mqttHostEnv);
+    // Node-RED stores the port as a STRING. A number works at runtime but shows as empty in the
+    // editor's port field, so the node looks misconfigured to whoever opens it next.
+    if (mqttPortEnv) setField(broker, 'port', String(mqttPortEnv));
+    if (mqttTlsEnabled) applyTls(broker);
   }
 
   if (changes.length) {
@@ -694,7 +709,7 @@ function credentialsWorthKeeping() {
  * Decrypted with the same scheme the round-trip check below uses. A file we cannot decrypt is not
  * ours to judge, so it reads as null and the keep-them-untouched path applies unchanged.
  */
-function storedBrokerCredential() {
+function storedBrokerCredential(nodeId = BROKER_NODE_ID) {
   if (!fs.existsSync(credentialsPath)) return null;
   try {
     const existing = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
@@ -704,10 +719,59 @@ function storedBrokerCredential() {
     const decipher = crypto.createDecipheriv('aes-256-ctr', key, iv);
     const plain =
       decipher.update(existing.$.substring(32), 'base64', 'utf8') + decipher.final('utf8');
-    return JSON.parse(plain)['mqtt-broker-config'] || null;
+    return JSON.parse(plain)[nodeId] || null;
   } catch {
     return null;
   }
+}
+
+/**
+ * Which credential each broker node in the flow should carry.
+ *
+ * ONE CONNECTION PER GATEWAY, BECAUSE THE BROKER SAYS SO. `mosquitto.acl` pins the topic's
+ * edge-node segment to `%u`, so a client may publish only beneath the gateway whose username it
+ * authenticated as. Four cells therefore means four accounts and four connections; there is no
+ * shared principal to fall back on, because that account was deliberately deleted.
+ *
+ * THE ENV PREFIX IS DECLARED ON THE NODE, in `acsCredentialsEnv`, rather than derived from the
+ * node's id by a naming convention. A convention is invisible when it breaks: renaming a node
+ * would silently move it onto a different account, or onto none, and the only symptom is
+ * "Connection failed to broker: <clientId>@<url>" -- which names the CLIENT ID, not the username,
+ * and is the same line a wrong host produces.
+ *
+ * `provision-gateways.mjs` emits exactly these variable names.
+ *
+ * The legacy node keeps reading MQTT_USER / MQTT_PASSWORD with no declaration, so a flow authored
+ * before this existed still provisions unchanged.
+ */
+function brokerCredentialFor(node) {
+  const prefix = node.acsCredentialsEnv;
+
+  if (!prefix) {
+    if (node.id === BROKER_NODE_ID) return { user: mqttUser, password: mqttPassword };
+    fail(
+      `broker node '${node.id}' (${node.name || 'unnamed'}) declares no 'acsCredentialsEnv' and is ` +
+        `not the legacy '${BROKER_NODE_ID}'. It would connect with no username, and Mosquitto ` +
+        'refuses that with CONNACK 5 while Node-RED reports only "Connection failed to broker".'
+    );
+  }
+
+  const user = process.env[`${prefix}_USER`];
+  const password = process.env[`${prefix}_PASSWORD`];
+
+  // FAIL CLOSED. An absent variable would otherwise seed an empty username, which the broker
+  // refuses and the editor reports as a connection failure with no cause -- the exact ambiguity
+  // this script exists to remove. Naming both the node and the variable makes it one fix.
+  if (!user || !password) {
+    fail(
+      `broker node '${node.id}' declares acsCredentialsEnv='${prefix}', but ` +
+        `${prefix}_USER and/or ${prefix}_PASSWORD are not set.\n` +
+        '  These are written by `npm run provision:gateways -- --env-out=.env.gateways`.\n' +
+        '  Add them to .env (Compose) or to the chart Secret (Kubernetes) and restart node-red-init.'
+    );
+  }
+
+  return { user, password };
 }
 
 /**
@@ -726,16 +790,47 @@ function storedBrokerCredential() {
  * that is a credential for the same account, whereas a different account is a different credential
  * and the environment is authoritative about which one this deployment uses.
  */
-const storedBroker = storedBrokerCredential();
-const brokerIdentityChanged = Boolean(storedBroker) && storedBroker.user !== mqttUser;
+// Read the flow to find every broker node that needs a credential. Done here rather than reusing
+// the copy above, because that block only runs when a transport variable is set.
+const flowForCredentials = JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
+const brokerNodes = flowForCredentials.filter((n) => n.type === 'mqtt-broker');
+const brokerCredentials = new Map(
+  brokerNodes.map((node) => [node.id, brokerCredentialFor(node)])
+);
 
-const writeCredentials = seededFlow || !credentialsWorthKeeping() || brokerIdentityChanged;
+// ANY broker whose stored username no longer matches forces the rewrite. Checked across all of
+// them, not just the first: a single stale account is enough to take one cell silently offline,
+// and the rest of the floor carrying on makes that harder to notice, not easier.
+const identityChanges = [];
+for (const [nodeId, desired] of brokerCredentials) {
+  const stored = storedBrokerCredential(nodeId);
+  if (stored && stored.user !== desired.user) {
+    identityChanges.push(`${nodeId}: '${stored.user}' -> '${desired.user}'`);
+  }
+}
+const brokerIdentityChanged = identityChanges.length > 0;
+
+// A broker node present in the flow with NO stored credential at all is also a rewrite: it is what
+// adding a cell to an existing volume looks like, and without this the new gateway would sit there
+// unauthenticated while the seeded ones kept working.
+const missingCredential = credentialsWorthKeeping() &&
+  [...brokerCredentials.keys()].some((nodeId) => storedBrokerCredential(nodeId) === null);
+
+const writeCredentials =
+  seededFlow || !credentialsWorthKeeping() || brokerIdentityChanged || missingCredential;
 
 if (brokerIdentityChanged) {
   console.log(
-    `[node-red-init] broker username changed ('${storedBroker.user}' -> '${mqttUser}'); ` +
+    `[node-red-init] broker username changed (${identityChanges.join('; ')}); ` +
       'rewriting flows_cred.json. The old account no longer exists, and Node-RED would report ' +
       'only "Connection failed to broker" if it kept using it.'
+  );
+}
+
+if (missingCredential && !brokerIdentityChanged) {
+  console.log(
+    '[node-red-init] a broker node in the flow has no stored credential (a cell was added); ' +
+      'rewriting flows_cred.json so every gateway can authenticate.'
   );
 }
 
@@ -790,10 +885,13 @@ credentials.init({
 });
 
 credentials.setKey(credentialSecret);
-await credentials.add('mqtt-broker-config', {
-  user: mqttUser,
-  password: mqttPassword
-});
+for (const [nodeId, credential] of brokerCredentials) {
+  await credentials.add(nodeId, credential);
+}
+console.log(
+  `[node-red-init] seeding credentials for ${brokerCredentials.size} broker node(s): ` +
+    [...brokerCredentials].map(([id, c]) => `${id}=${c.user}`).join(', ')
+);
 
 const exported = await credentials.export();
 
@@ -806,7 +904,16 @@ if (!Object.prototype.hasOwnProperty.call(exported, '$')) {
   );
 }
 
-// 6. Prove Node-RED will be able to read it back before we commit it to disk.
+// 6. Prove Node-RED will be able to read EVERY credential back before we commit it to disk.
+//
+// CHECKED PER BROKER NODE, not against one hardcoded id. This verified only `mqtt-broker-config`,
+// which stopped existing when the introductory tab was folded into the unified one -- so the
+// lookup returned undefined, the comparison failed, and the script correctly refused to write a
+// file it could not prove readable. The guard was right; its scope was stale.
+//
+// A partial check would have been worse than none: with four gateways it would have passed on the
+// one node it knew about and said nothing about the other three, which is exactly the silent
+// half-configured state this guard exists to prevent.
 try {
   const key = crypto.createHash('sha256').update(credentialSecret).digest();
   const blob = exported.$;
@@ -814,9 +921,17 @@ try {
   const decipher = crypto.createDecipheriv('aes-256-ctr', key, iv);
   const plain =
     decipher.update(blob.substring(32), 'base64', 'utf8') + decipher.final('utf8');
-  const roundTripped = JSON.parse(plain)['mqtt-broker-config'];
-  if (roundTripped?.user !== mqttUser || roundTripped?.password !== mqttPassword) {
-    fail('credential round-trip mismatch; refusing to write.');
+  const decoded = JSON.parse(plain);
+
+  for (const [nodeId, expected] of brokerCredentials) {
+    const roundTripped = decoded[nodeId];
+    if (roundTripped?.user !== expected.user || roundTripped?.password !== expected.password) {
+      fail(
+        `credential round-trip mismatch for broker node '${nodeId}'; refusing to write. ` +
+          'Node-RED would not have been able to decrypt it, and the gateway would report only ' +
+          '"Connection failed to broker".'
+      );
+    }
   }
 } catch (err) {
   fail(`credential round-trip failed: ${err.message}`);
@@ -826,5 +941,5 @@ fs.writeFileSync(credentialsPath, JSON.stringify(exported));
 
 console.log(
   `[node-red-init] broker credentials written encrypted (aes-256-ctr) to ${credentialsPath} ` +
-    `for user '${mqttUser}'.`
+    `for ${brokerCredentials.size} gateway account(s).`
 );

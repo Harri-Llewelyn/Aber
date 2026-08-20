@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Create the 3D-model storage bucket, idempotently.
+ * Create the platform's storage buckets, idempotently.
  *
  * WHY THIS IS NOT A SQL MIGRATION. `storage.buckets` is owned by storage-api, which runs its own
  * migrations against that schema when it boots. The supabase/postgres image ships only a stub of
@@ -11,24 +11,33 @@
  * only correct itself on the second. Creating it through the Storage REST API instead runs after
  * storage-api is healthy and is indifferent to which columns this version's schema has.
  *
- * The RLS policies that govern the objects *inside* the bucket are a different matter and DO live
- * in migration 0035 -- they are policies on storage.objects, which exists from the stub onward.
+ * The RLS policies that govern the objects *inside* each bucket are a different matter and live in
+ * supabase/storage-policies.sql -- they are policies on storage.objects, which exists from the stub
+ * onward. THE TWO FILES MUST AGREE ON THE BUCKET NAMES: a bucket created here with no policies is
+ * invisible to every browser-facing role (RLS denies by default), and a policy naming a bucket that
+ * was never created is dead text. Neither errors.
  *
- * IDEMPOTENT, because compose re-runs this on every `up`. It asks whether the bucket exists before
+ * IDEMPOTENT, because compose re-runs this on every `up`. It asks whether each bucket exists before
  * deciding to create it, rather than creating it and treating the failure as success: storage-api
  * answers a duplicate create with **400** "The resource already exists", not the 409 the status
  * code alone would suggest, so a conflict and a genuinely malformed request are indistinguishable
  * by status. The settings are then reconciled either way, so changing the size limit in .env takes
  * effect on the next boot rather than needing the bucket dropped.
+ *
+ * ---------------------------------------------------------------------------------------------
+ * THIS SCRIPT USED TO CREATE EXACTLY ONE BUCKET, named by STORAGE_BUCKET. It now creates a LIST,
+ * because the second bucket differs from the first in the one setting that matters most -- it is
+ * PRIVATE -- and a single-bucket script parameterised by environment variables would have had to
+ * express that as another variable, leaving "is this bucket public?" answerable only by reading a
+ * .env file. The list below states it per bucket, in code, next to the reason.
  */
 
 const STORAGE_URL = process.env.STORAGE_URL || 'http://supabase-storage:5000';
 const SERVICE_ROLE_KEY = process.env.SERVICE_ROLE_KEY || '';
-const BUCKET = process.env.STORAGE_BUCKET || 'asset-3d-models';
 const FILE_SIZE_LIMIT = Number.parseInt(process.env.STORAGE_FILE_SIZE_LIMIT || '52428800', 10);
 
 /**
- * The formats the UI accepts, declared on the bucket as well as in the browser.
+ * The formats the 3D uploader accepts, declared on the bucket as well as in the browser.
  *
  * The client-side accept filter is a convenience; this is the control. A bucket that took any
  * MIME type would let an authenticated caller store arbitrary content under a path the exporter
@@ -39,9 +48,9 @@ const FILE_SIZE_LIMIT = Number.parseInt(process.env.STORAGE_FILE_SIZE_LIMIT || '
  * .obj and .stl frequently arrive as `application/octet-stream` or an empty string, because the
  * OS has no mapping for them. Rejecting those would make .obj/.stl uploads fail on some machines
  * and not others, so the octet-stream fallback is deliberate rather than lax -- the extension
- * allow-list in migration 0035's CHECK is what actually constrains what can be referenced.
+ * allow-list in the 3D model migration's CHECK is what actually constrains what can be referenced.
  */
-const ALLOWED_MIME_TYPES = [
+const MODEL_MIME_TYPES = [
   'model/gltf-binary',
   'model/gltf+json',
   'model/obj',
@@ -51,16 +60,66 @@ const ALLOWED_MIME_TYPES = [
   'application/octet-stream',
 ];
 
+/**
+ * A Node-RED flow export is JSON and nothing else.
+ *
+ * `text/plain` and `application/octet-stream` are here for the same reason they are in the list
+ * above and NOT because anything else is allowed: a browser handing back a `.json` file picked from
+ * disk reports its type inconsistently across platforms, and a File object built from a fetch of
+ * Node-RED's admin API can arrive with an empty type. The uploader validates that the payload
+ * PARSES as a Node-RED flow array before it is sent; this list is the coarse outer bound.
+ */
+const FLOW_BACKUP_MIME_TYPES = [
+  'application/json',
+  'text/json',
+  'text/plain',
+  'application/octet-stream',
+];
+
+/**
+ * 5 MiB for a flow backup.
+ *
+ * Deliberately NOT STORAGE_FILE_SIZE_LIMIT, which is sized for 3D geometry (50 MiB by default). A
+ * `flows.json` that large is not a flow, and the limit is the cheapest place to say so -- an
+ * appliance uploading its whole /data directory by mistake should fail at the bucket rather than
+ * quietly fill the volume.
+ */
+const FLOW_BACKUP_SIZE_LIMIT = Number.parseInt(
+  process.env.GATEWAY_BACKUP_FILE_SIZE_LIMIT || '5242880',
+  10,
+);
+
+const BUCKETS = [
+  {
+    id: process.env.STORAGE_BUCKET || 'asset-3d-models',
+    // PUBLIC-READ BY DESIGN. An exported AAS `File` element's URL has to be dereferenceable by a
+    // viewer holding no Factory+ session, and a signed URL would expire and break every shell
+    // already handed out.
+    public: true,
+    file_size_limit: FILE_SIZE_LIMIT,
+    allowed_mime_types: MODEL_MIME_TYPES,
+    why: '3D models referenced by exported AAS shells',
+  },
+  {
+    id: process.env.GATEWAY_BACKUP_BUCKET || 'gateway-backups',
+    // PRIVATE, AND THIS IS THE SETTING THE WHOLE BUCKET TURNS ON. A flows.json describes the
+    // plant's edge topology, its broker addresses, its device ids and its processing logic.
+    // `public: true` here would put all of that at a guessable, unauthenticated URL -- and because
+    // storage-api serves public objects without consulting storage.objects RLS at all, the careful
+    // role split in supabase/storage-policies.sql would simply stop applying to reads. The
+    // reconcile step below re-asserts this on every boot, so a bucket flipped public by hand in
+    // Studio is corrected rather than left.
+    public: false,
+    file_size_limit: FLOW_BACKUP_SIZE_LIMIT,
+    allowed_mime_types: FLOW_BACKUP_MIME_TYPES,
+    why: 'Node-RED flow backups from gateway appliances, under <sparkplug_id>/',
+  },
+];
+
 const headers = {
   Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
   apikey: SERVICE_ROLE_KEY,
   'Content-Type': 'application/json',
-};
-
-const settings = {
-  public: true,
-  file_size_limit: FILE_SIZE_LIMIT,
-  allowed_mime_types: ALLOWED_MIME_TYPES,
 };
 
 async function readBody(res) {
@@ -72,13 +131,11 @@ async function readBody(res) {
   }
 }
 
-async function main() {
-  if (!SERVICE_ROLE_KEY) {
-    console.error('[storage-init] SERVICE_ROLE_KEY is empty; cannot authenticate to Storage.');
-    process.exit(1);
-  }
+/** Create the bucket if absent, then reconcile its settings either way. */
+async function ensureBucket(spec) {
+  const { id, why, ...settings } = spec;
 
-  const existing = await fetch(`${STORAGE_URL}/bucket/${encodeURIComponent(BUCKET)}`, { headers });
+  const existing = await fetch(`${STORAGE_URL}/bucket/${encodeURIComponent(id)}`, { headers });
   const existingBody = existing.ok ? null : await readBody(existing);
 
   // storage-api v1.11 answers BOTH "this bucket does not exist" and "this bucket already exists"
@@ -91,27 +148,25 @@ async function main() {
     const create = await fetch(`${STORAGE_URL}/bucket`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ id: BUCKET, name: BUCKET, ...settings }),
+      body: JSON.stringify({ id, name: id, ...settings }),
     });
     if (!create.ok) {
       const body = await readBody(create);
-      console.error(`[storage-init] failed to create bucket (${create.status}):`, body.message || body);
-      process.exit(1);
+      throw new Error(`failed to create bucket "${id}" (${create.status}): ${body.message || body}`);
     }
-    console.log(`[storage-init] created bucket "${BUCKET}" (public, limit ${FILE_SIZE_LIMIT} bytes)`);
+    console.log(`[storage-init] created bucket "${id}" -- ${why}`);
   } else if (existing.ok) {
-    console.log(`[storage-init] bucket "${BUCKET}" already exists; reconciling settings`);
+    console.log(`[storage-init] bucket "${id}" already exists; reconciling settings`);
   } else {
-    console.error(
-      `[storage-init] cannot reach Storage (${existing.status}):`,
-      existingBody?.message || existingBody,
+    throw new Error(
+      `cannot reach Storage for "${id}" (${existing.status}): ${existingBody?.message || existingBody}`,
     );
-    process.exit(1);
   }
 
   // Runs on the create path too. A bucket created by an older revision of this script -- or by
   // hand in Studio -- is brought up to the current settings rather than left as it was found.
-  const update = await fetch(`${STORAGE_URL}/bucket/${encodeURIComponent(BUCKET)}`, {
+  // For gateway-backups this is what re-asserts `public: false` on every boot.
+  const update = await fetch(`${STORAGE_URL}/bucket/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers,
     body: JSON.stringify(settings),
@@ -119,11 +174,29 @@ async function main() {
 
   if (!update.ok) {
     const body = await readBody(update);
-    console.error(`[storage-init] failed to update bucket (${update.status}):`, body.message || body);
+    throw new Error(`failed to update bucket "${id}" (${update.status}): ${body.message || body}`);
+  }
+
+  console.log(
+    `[storage-init] bucket "${id}" is ${settings.public ? 'PUBLIC' : 'private'}, `
+    + `limit ${settings.file_size_limit} bytes.`,
+  );
+}
+
+async function main() {
+  if (!SERVICE_ROLE_KEY) {
+    console.error('[storage-init] SERVICE_ROLE_KEY is empty; cannot authenticate to Storage.');
     process.exit(1);
   }
 
-  console.log(`[storage-init] bucket "${BUCKET}" is public and ready.`);
+  // SEQUENTIAL, not Promise.all. storage-api is single-tenant here and a failure part-way through
+  // should name the bucket that failed rather than surfacing as one rejected promise among several
+  // with the others in an unknown state.
+  for (const spec of BUCKETS) {
+    await ensureBucket(spec);
+  }
+
+  console.log(`[storage-init] ${BUCKETS.length} bucket(s) ready.`);
 }
 
 main().catch((err) => {

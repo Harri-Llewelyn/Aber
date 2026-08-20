@@ -54,6 +54,11 @@
      error toast is the message a user most needs to read. One step lighter clears it at 5.3:1
      while staying the same signal hue. */
   --danger-text:  #ff6b85;
+  /* The monospace stack, as a token. Every rule in this file spelled it out literally, which was
+     fine until a call site wanted `var(--font-mono, monospace)` -- with no token defined that
+     silently falls back to the bare generic and drops JetBrains Mono. Structural, not colour, so
+     the light theme does not restate it. */
+  --font-mono:    'JetBrains Mono', monospace;
   --radius:       12px;
   --radius-sm:    8px;
   --shadow:       0 4px 24px rgba(0, 0, 0, 0.5);
@@ -227,17 +232,26 @@ html, body, #root {
   }
 }
 
+/* THE BRAND AND THE RIGHT-HAND GROUP ARE EQUAL-WEIGHT SIDES, and that is what centres the nav.
+
+   This was `flex: 0 1 auto` here and `margin: 0 auto` on the nav, which centres the nav in the
+   space LEFT OVER between the two -- not in the bar. The two sides are nowhere near the same
+   width (a two-line brand against an alert pill and a 28px avatar), so the nav sat left of the
+   true centre by half their difference. Giving both sides `flex: 1 1 0` makes them claim equal
+   shares of the free space whatever their content measures, which puts the nav's midpoint on the
+   bar's midpoint.
+
+   THE ASYMMETRY THAT REMAINS IS DELIBERATE: only the brand carries `min-width: 0`. That is what
+   lets a flex item shrink below its content, so when the bar runs out of room the brand is the
+   one region that yields -- `.brand-name` truncates and the nav keeps its width. The right-hand
+   group keeps the default `min-width: auto` and so holds at its content size. Past that point the
+   nav is no longer exactly centred, which is correct: nothing here should become unreachable to
+   keep a symmetry. */
 .topbar-brand {
   display: flex;
   align-items: center;
   gap: 10px;
-  /* SHRINK-ONLY (`0 1 auto`), not grow-and-shrink.
-     It is still the only region allowed to give up space -- `min-width: 0` is what actually lets a
-     flex item shrink below its content width, and without it the default `min-width: auto` makes
-     the brand rigid and the overflow lands on the nav instead.
-     But it must not GROW either: a growing brand swallows the bar's free space, and the nav's auto
-     margins then have nothing left to centre it with. */
-  flex: 0 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
 }
@@ -288,61 +302,64 @@ html, body, #root {
 }
 
 /* ===== Primary Navigation (in the top bar) =====
-   Centre region. Fixed-size and never clipped -- see the .topbar comment for why this wins the
-   space fight against the brand.
+   Centre region. Fixed-size and never clipped -- see the .topbar-brand comment for how the two
+   flanks centre it, and for why this one wins the space fight against the brand.
 
-   `margin: 0 auto` is what centres it: auto margins on a flex item absorb the row's leftover space
-   equally on both sides, which is why the brand had to stop growing. Note this centres the nav in
-   the space LEFT OVER by the brand and the controls, so if those two differ in width the nav sits
-   off the bar's true centre by half that difference. That is the honest trade for never
-   overlapping either of them, which absolute centring would risk at narrow widths. */
+   Neither grows nor shrinks: the nav is the fixed thing the two elastic sides are centred around.
+   `margin: 0 auto` used to do the centring here and is deliberately gone -- it centred the nav in
+   the space LEFT OVER by the brand and the controls, which put it off the bar's true centre by
+   half the difference between them, and with equal-weight sides it would now fight them for the
+   same free space. */
 .topbar-nav {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 2px;
-  flex-shrink: 0;
-  margin: 0 auto;
+  flex: 0 0 auto;
 }
 
+/* The mirror of .topbar-brand -- same weight, opposite alignment. `justify-content: flex-end`
+   is what keeps the pill and the avatar against the right edge now that this group is as wide as
+   its half of the bar rather than as wide as its contents. */
 .topbar-right {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
-  flex-shrink: 0;
+  flex: 1 1 0;
 }
 
-/* ===== Account pill and menu =====
-   Replaces the icon + email + role badge + Sign Out button that used to sit side by side in the
-   bar, about 330px of it. See the UserMenu comment in App.jsx for why the role badge stays on the
-   pill while the address and the sign-out action move behind it. */
+/* ===== Account avatar and menu =====
+   Replaces the icon + email + role badge + Sign Out button that used to sit side by side in the bar,
+   about 330px of it -- and, since the topbar declutter, the theme toggle and Report Bug as well. See
+   the UserMenu comment in App.jsx for what the collapse gave up and why.
+
+   FIXED SQUARE, NOT PADDING. A round button sized by its padding goes oval the moment the glyph
+   inside it changes metrics, and this one is 28px at every viewport -- there is no responsive band
+   for it to shrink in, because there is no text left to drop. */
 .user-menu { position: relative; }
 
-.user-pill {
+.user-avatar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 7px;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  flex-shrink: 0;
   background: var(--bg-glass);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-family: 'Outfit', sans-serif;
-  font-size: 13px;
-  font-weight: 600;
+  border-radius: 50%;
+  color: var(--text-muted);
   cursor: pointer;
   transition: var(--transition);
-  white-space: nowrap;
 }
 
-.user-pill:hover { border-color: var(--accent); }
-.user-pill-open { border-color: var(--accent); background: var(--accent-dim); }
-.user-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-
-.user-pill-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
-.user-pill-role { font-size: 11px; }
-.user-pill-caret { color: var(--text-muted); transition: transform 0.2s ease; flex-shrink: 0; }
-.user-pill-caret-open { transform: rotate(180deg); }
+/* The icon takes the accent on hover rather than the border alone: a 1px ring on a 28px circle is a
+   very small change to notice, and this is the only way into four actions. */
+.user-avatar:hover { border-color: var(--accent); color: var(--accent); }
+.user-avatar-open { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+.user-avatar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Escapes the bar downward. `.app-shell` clips at the viewport, not here, and `.topbar` carries
    z-index 100, so the popover paints above the page without needing a portal. */
@@ -399,30 +416,32 @@ html, body, #root {
   transition: var(--transition);
 }
 
-.user-popover-action:hover { background: var(--bg-glass); color: var(--danger-text); }
+/* The item's own label grows to fill, so the hint below is pushed to the right edge of the menu
+   rather than sitting against the label it belongs to. */
+.user-popover-action > span:not(.user-popover-hint) { flex: 1; min-width: 0; }
+
+/* The theme item's destination -- "Dark" / "Light" as a quiet right-aligned tail, so the row's
+   left-hand half stays a statement of the CURRENT value. */
+.user-popover-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+.user-popover-action:hover { background: var(--bg-glass); }
 .user-popover-action:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-.topbar-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--text-muted);
+/* THE DESTRUCTIVE ITEM IS THE ONLY ONE THAT GOES RED ON HOVER. Every item in this menu used to,
+   back when Sign Out was the only item in it -- which made "Theme: Dark" light up in the danger
+   colour for changing a colour scheme. Separated by a rule as well as by colour, because the two
+   items above it are now one keystroke away from it. */
+.user-popover-action-danger {
+  border-top: 1px solid var(--border);
+  color: var(--text-primary);
 }
 
-.pulse-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--success);
-  box-shadow: 0 0 8px var(--success);
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(0.85); }
-}
+.user-popover-action-danger:hover { background: var(--bg-glass); color: var(--danger-text); }
 
 /* ===== Nav Tabs ===== */
 .nav-tab {
@@ -475,13 +494,15 @@ html, body, #root {
 
    Three bands, each shedding the least useful thing left:
      >= 1600px  everything
-     >= 1400px  brand tagline and the user's email drop out (both are context, not controls)
-      < 1400px  tab labels drop out; the nav becomes icons only */
+     >= 1400px  the brand tagline drops out (it is context, not a control)
+      < 1400px  tab labels drop out; the nav becomes icons only
+
+   THE ACCOUNT CONTROL NO LONGER APPEARS IN ANY BAND, and its absence is the point rather than an
+   omission. It used to shed the user's own name at 1600px and keep its role badge below that. It is
+   now a 28px circle at every width, so there is nothing left in it to drop -- the declutter did at
+   every viewport what this block used to do only at narrow ones. */
 @media (max-width: 1599px) {
   .brand-sub { display: none; }
-  /* The role badge stays -- it is the standing answer to "why is that button disabled". The name
-     is recoverable from the pill's title and, in full, from the menu behind it. */
-  .user-pill-name { display: none; }
 }
 
 @media (max-width: 1399px) {
@@ -491,6 +512,10 @@ html, body, #root {
   /* Below this the right-hand controls are what would overflow next. The icons stay, so nothing
      becomes unreachable -- each keeps the `title` it already had. */
   .btn-label { display: none; }
+  /* The alert count keeps its NUMBER and loses only the word. Dropping the label costs ~40px and
+     leaves "⚠ 3", which is still both a shape and a figure -- whereas dropping the pill would hide
+     the only changing thing in the bar at exactly the widths a kiosk display uses. */
+  .alert-pill-label { display: none; }
 }
 
 /* ===== Main Content ===== */
@@ -936,6 +961,30 @@ tbody tr:hover { background: var(--bg-glass); }
 .badge-offline { background: rgba(255, 77, 109, 0.15); color: var(--danger);  }
 .badge-warning { background: rgba(255, 179, 0, 0.15);  color: var(--warning-text); }
 .badge-neutral { background: var(--bg-glass); color: var(--text-muted); border: 1px solid var(--border); }
+
+/* ---------------------------------------------------------------------------------------------
+   The two PHYSICAL GATEWAY ENROLMENT states.
+
+   NEITHER EXISTING VARIANT FITS. `badge-warning` (amber) means "look at this", and a gateway
+   waiting for somebody to carry a bundle to a machine is an unfinished task rather than a fault --
+   amber there turns the whole Cells page into a warning the moment a few appliances are ordered.
+   `badge-neutral` (grey) reads as decommissioned, which says the opposite of what is true.
+
+   THEY DIFFER BY BORDER, NOT ONLY BY TINT. Solid = waiting on a person (go install it); dashed =
+   waiting on a machine that already has everything it needs (just wait). Two states an operator
+   acts on differently must be tellable apart without relying on a colour difference this small.
+   --------------------------------------------------------------------------------------------- */
+.badge-pending {
+  background: rgba(0, 212, 255, 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(0, 212, 255, 0.45);
+}
+
+.badge-provisioned {
+  background: rgba(0, 212, 255, 0.07);
+  color: var(--accent);
+  border: 1px dashed rgba(0, 212, 255, 0.45);
+}
 
 .badge-dot {
   width: 6px;
@@ -1694,11 +1743,17 @@ tbody tr:hover { background: var(--bg-glass); }
   flex-shrink: 0;
 }
 
-.tile-dot-normal  { background: var(--success); box-shadow: 0 0 6px var(--success); }
-.tile-dot-warning { background: var(--warning); box-shadow: 0 0 6px var(--warning); }
-.tile-dot-alarm   { background: var(--danger);  box-shadow: 0 0 6px var(--danger); }
-/* No glow: "nothing live in here" should not draw the eye the way a fault does. */
-.tile-dot-idle    { background: var(--text-dim); }
+.tile-dot-normal    { background: var(--success); box-shadow: 0 0 6px var(--success); }
+/* Quarantined -- something here is waiting to be admitted. Amber, because it is a decision
+   somebody has to make rather than a fault.
+
+   THERE IS NO LONGER A RED `tile-dot-alarm`. The map used to derive one from telemetry values
+   against hardcoded thresholds; see utils/deviceStatus.js for why that was withdrawn. A red dot on
+   this page would now be asserting a process condition the dashboard has no authority over --
+   metric alerting is Grafana's, which has evaluation intervals, state history and silences. */
+.tile-dot-attention { background: var(--warning); box-shadow: 0 0 6px var(--warning); }
+/* No glow: "nothing live in here" should not draw the eye the way something actionable does. */
+.tile-dot-idle      { background: var(--text-dim); }
 
 .zone-body {
   padding: 8px 10px;
@@ -1720,10 +1775,479 @@ tbody tr:hover { background: var(--bg-glass); }
   line-height: 1.35;
 }
 
+/* BOUNDED HEIGHT, SO ONE BUSY CELL DOES NOT SET THE ROW HEIGHT FOR ALL OF THEM.
+   `.shopfloor-grid` uses `align-items: start`, so tiles are only as tall as their content -- which
+   is right until one cell holds three devices and its neighbours hold one, at which point the row
+   is ragged and the map stops reading as a grid. Capping the scrollable list keeps every tile
+   within one card-height of its neighbours however many assets a cell accumulates.
+
+   240px is chosen against the chip height below (~26px + 4px gap = ~30px a row): it shows seven
+   whole and clips the eighth, so a list that scrolls always LOOKS like it scrolls. A cap that
+   happened to land flush on a chip boundary is the one mistaken for the end of the list.
+
+   `overscroll-behavior: contain` stops a flick inside a full cell from scrolling the page once the
+   list bottoms out -- on a map of tiles that reads as the whole view lurching. */
 .zone-chips {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The scrollbar is drawn in the card's own hairline colour rather than the platform default, which
+   on Windows is a light-grey trough that glows against the dark tile. Firefox takes the two-value
+   `scrollbar-color`; WebKit needs the pseudo-elements, so both are given.
+
+   TRANSPARENT TROUGH, not `--surface`: the lanes tint their background (see .shopfloor-lane-site),
+   so a solid trough would show as a pale stripe over the tint on exactly those two tiles. */
+.zone-chips {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule) transparent;
+}
+
+.zone-chips::-webkit-scrollbar {
+  width: 6px;
+}
+
+.zone-chips::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.zone-chips::-webkit-scrollbar-thumb {
+  background: var(--rule);
+  border-radius: 3px;
+}
+
+.zone-chips::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
+
+/* Slightly roomier chips INSIDE A ZONE ONLY. `.chip` is shared with the filter bar and the context
+   panel, where 3px is right against their smaller type; a global bump would have quietly reflowed
+   both. Scoping it costs one selector and keeps the change where it was asked for.
+
+   NO `margin-bottom` -- `.zone-chips` already spaces these with `gap: 4px`, and adding a margin as
+   well would double the spacing AND leave a trailing gap under the last chip, which inside a
+   scroll container reads as a stray blank row at the bottom of the list. */
+.zone-chips .chip {
+  padding: 5px 8px;
+}
+
+/* A chip that navigates. Used in the context drawers for Serving Gateway, Cell Zone and Schema.
+
+   A <button> rather than an <a>, because these are in-app tab switches with filter state, not URLs --
+   an anchor would promise middle-click and "copy link address", neither of which this app can honour.
+   It inherits `.chip` so it sits at the same weight as the read-only chips beside it, and adds only
+   the affordance: a pointer, an accent on hover, and the accent border that says this one does
+   something. `text-align: left` because a button centres its text by default and every other value in
+   the field list is left-aligned. */
+.chip-link {
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  max-width: 100%;
+}
+
+.chip-link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chip-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The active-alert banner at the top of a context drawer.
+   Above the metadata because it is the only item in that panel with a deadline on it -- see the note
+   in ContextPanel.jsx. */
+.context-alert {
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  border: 1px solid var(--warning);
+  background: rgba(255, 179, 0, 0.12);
+}
+
+.context-alert-critical {
+  border-color: var(--danger);
+  background: rgba(255, 77, 109, 0.13);
+}
+
+.context-alert-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warning-text);
+}
+
+.context-alert-critical .context-alert-head { color: var(--danger); }
+
+.context-alert-name { flex: 1; min-width: 0; }
+
+/* The severity spelled out beside the colour, for the same reason the Topbar pill carries its count
+   as a number: colour alone is not a signal every operator can rely on. */
+.context-alert-sev {
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+.context-alert-summary {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  margin-top: 5px;
+}
+
+/* Provenance on the left, the way out on the right. `wrap` rather than `nowrap`: the drawer is 360px
+   and "Raised by Grafana · since 14:22:07" plus the link is close enough to that to wrap on a narrow
+   band, and a clipped link is worse than a two-line footer. */
+.context-alert-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+/* Underlined, not just coloured. This sits inside a tinted amber or red panel where the accent has
+   less contrast to work with than it does against the card, so the affordance cannot rest on hue
+   alone -- and it is the only interactive thing in the banner. */
+.context-alert-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  flex-shrink: 0;
+}
+
+.context-alert-link:hover { color: var(--text-primary); }
+.context-alert-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The Topbar's alert counter and the list behind it.
+   PERMANENT in all three states -- see AlertPill.jsx for why a pill that vanished when healthy was
+   indistinguishable from a pill that had broken.
+
+   `position: relative` on the wrapper anchors the panel, so the panel is positioned against the pill
+   rather than against the topbar. Anchoring to the topbar would put it under the account button at
+   one window width and off-screen at another. */
+.alert-pill-wrap { position: relative; display: flex; }
+
+.alert-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: none;
+  font-family: 'Outfit', sans-serif;
+  /* A FIXED FLOOR, so the pill does not resize the bar as the count crosses 9 or clears to 0. The
+     three states carry three different words and glyphs; without this the account button beside it
+     would step sideways every time an alarm arrived. */
+  min-width: 78px;
+  justify-content: center;
+}
+
+/* --- Firing. The only animated thing in the header, which is the point: with four static controls
+       gone from the bar, motion here is unambiguous rather than one of several things moving. */
+.alert-pill-critical,
+.alert-pill-warning {
+  animation: alert-pill-pulse 2.4s ease-in-out infinite;
+}
+
+.alert-pill-critical {
+  border-color: var(--danger);
+  background: rgba(255, 77, 109, 0.16);
+  color: var(--danger);
+}
+
+.alert-pill-warning {
+  border-color: var(--warning);
+  background: rgba(255, 179, 0, 0.16);
+  color: var(--warning-text);
+}
+
+/* --- Healthy. DELIBERATELY THE QUIETEST THING IN THE BAR: muted text, the plain border, no tint and
+       no motion. It is a permanent element, so anything louder would be a permanent claim on
+       attention -- and the whole reason the firing states read as urgent is that this one does not.
+
+       NOT GREEN. Green on a fixed element is the Live dot's mistake repeated: a colour that never
+       changes stops being read, and it also spends the success colour on "nothing is happening",
+       which leaves nothing left over for a state that IS good news. The tick inside the shield
+       carries the reassurance; the colour stays out of it. */
+.alert-pill-healthy {
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+.alert-pill-healthy:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.alert-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.alert-pill-count { font-variant-numeric: tabular-nums; }
+
+@keyframes alert-pill-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 currentColor; }
+  50%      { box-shadow: 0 0 7px 0 currentColor; }
+}
+
+/* Motion is a preference, and a pulsing element is exactly what someone who set it is asking not to
+   see. The colour, the glyph and the count carry the whole signal without it. */
+@media (prefers-reduced-motion: reduce) {
+  .alert-pill-critical,
+  .alert-pill-warning { animation: none; }
+}
+
+.alert-pill-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  width: 340px;
+  max-height: 420px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+.alert-pill-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.alert-pill-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  padding: 2px;
+}
+
+/* The healthy panel. Centred and roomy rather than a one-line "None": this is the state an operator
+   sees ninety-nine times out of a hundred, and it has to look like a finished answer instead of an
+   empty container. */
+.alert-pill-empty {
+  padding: 22px 18px 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.alert-pill-empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-top: 8px;
+}
+
+.alert-pill-empty-sub {
+  font-size: 11px;
+  line-height: 1.45;
+  margin-top: 5px;
+}
+
+.alert-pill-list { list-style: none; margin: 0; padding: 0; }
+
+.alert-pill-item {
+  display: flex;
+  gap: 9px;
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.alert-pill-item:last-child { border-bottom: none; }
+
+/* The whole row is the hit target, not a "view" affordance at one end of it. The padding moved off
+   .alert-pill-item and onto this so the hover state covers the full row -- a button inset inside a
+   padded li leaves a dead 12px margin that looks clickable and is not. */
+.alert-pill-item-link {
+  display: flex;
+  gap: 9px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: none;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.alert-pill-item-link:hover { background: var(--bg-glass); }
+.alert-pill-item-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* A row with nowhere to navigate keeps the same geometry, so the list does not shift when one
+   alert's sparkplug_id happens not to resolve to a device. */
+.alert-pill-item > .alert-pill-dot { margin-left: 12px; margin-top: 15px; }
+.alert-pill-item > .alert-pill-item-body { padding: 10px 12px 10px 0; }
+
+.alert-pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+
+.alert-pill-dot-critical { background: var(--danger); }
+.alert-pill-dot-warning  { background: var(--warning); }
+.alert-pill-dot-info     { background: var(--accent); }
+
+.alert-pill-item-body { min-width: 0; }
+.alert-pill-item-name { font-size: 12px; font-weight: 600; }
+
+.alert-pill-item-summary {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  line-height: 1.35;
+}
+
+.alert-pill-item-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 3px;
+  /* A sparkplug id is 24 characters in a 340px panel; wrapping beats an ellipsis because the id is
+     the thing someone copies into a query. */
+  word-break: break-all;
+}
+
+.alert-pill-foot {
+  padding: 9px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* The 3D model preview in the device drawer.
+
+   ONE CLASS ON ALL THREE STATES -- the <model-viewer> element, the loading line and the error line
+   -- so the panel does not resize as the viewer module loads or fails. A frame that collapsed to
+   nothing and then sprang to 200px would push the uploader, the size and the Remove button down
+   under the cursor at the exact moment someone is reaching for them.
+
+   The background is `--bg-base` rather than the card surface: a glTF is lit against whatever is
+   behind it, and the recessed ground is what stops a pale model from disappearing into the panel. */
+.model-viewer-frame {
+  display: block;
+  width: 100%;
+  height: 200px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-base);
+  overflow: hidden;
+}
+
+/* The custom element fills the frame rather than carrying it -- see the note in Model3DViewer.jsx
+   for why the class cannot go on the element itself.
+
+   `touch-action: none` is what makes drag-to-orbit work on a touchscreen: without it the browser
+   claims the drag for scrolling and the model never moves. Scoped to the element, so the drawer
+   around it still scrolls normally. */
+.model-viewer-frame > model-viewer {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  --poster-color: transparent;
+}
+
+/* The loading and failure states, sharing the frame's box so neither changes the layout. Centred
+   rather than top-aligned: these replace a picture, and a sentence pinned to the top-left of an
+   otherwise empty 200px box reads as a broken render rather than a message. */
+.model-viewer-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+/* The cell icon picker: a grid of labelled buttons, not a <select>.
+   The operator is choosing what the card will LOOK like on the map, and a dropdown of eight words
+   asks them to imagine the result instead of showing it.
+
+   `auto-fit` rather than a fixed column count so the grid reflows in the modal at any width; each
+   option carries its label because the glyphs alone do not distinguish "metrology" from "energy"
+   to someone who has not seen the set before. */
+.icon-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: 6px;
+}
+
+.icon-picker-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 9px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-base);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.25;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+
+/* 11px, not 10 -- themeContrast.test.js enforces a type-scale floor across App.css and 10px
+   failed it. The floor is not a style preference: below 11px this UI's muted text stops clearing
+   contrast at ordinary viewing distance, which is the thing that test measures. */
+
+.icon-picker-option:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+/* Selection is carried by BORDER AND TEXT COLOUR TOGETHER, not colour alone -- the same reason the
+   status dots pair a hue with a shape. A single accent tint is invisible to anyone who cannot
+   separate it from the resting border. */
+.icon-picker-option.is-selected {
+  border-color: var(--accent);
+  color: var(--text-primary);
+  background: rgba(0, 212, 255, 0.08);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.icon-picker-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* Chips STACK now rather than wrapping in rows. In a ~296px track a wrapped row fits one chip
@@ -2176,102 +2700,444 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   width: 100%;
 }
 
-/* ===== Digital Thread Timeline ===== */
-.timeline {
-  position: relative;
-  padding-left: 24px;
-  margin-top: 16px;
-}
+/* ===== Digital Thread Swimlanes =====
 
-.timeline::before {
-  content: '';
-  position: absolute;
-  top: 4px;
-  bottom: 4px;
-  left: 7px;
-  width: 2px;
-  background: var(--border);
-}
+   This replaced a vertical list of ~200 bordered cards, each printing its own JSON payload. The
+   list was honest but it was not a TIMELINE: two changes a fortnight apart and two a second
+   apart looked identical, and an asset's history was only legible by scrolling past every other
+   asset's. One lane per entity puts time on the x-axis, where it can be compared. */
 
-/* 16px was the gap between two boxes that already carry a 1px border and 10px of padding each,
-   so the separation was being paid for three times over. At ~200 audit rows the saving is a
-   screenful. */
-.timeline-item {
-  position: relative;
-  margin-bottom: 10px;
-}
-
-.timeline-dot {
-  position: absolute;
-  left: -24px;
-  top: 4px;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid var(--bg-surface);
-  box-shadow: 0 0 10px var(--accent-glow);
-}
-
-.timeline-content {
-  background: var(--bg-glass);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 10px;
-}
-
-.timeline-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-
-.timeline-title {
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.timeline-time {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-/* The identifiers in a timeline row: the entity id in the header and the audit row's own id
-   beside the timestamp. Both are `CopyableId` buttons, so they need the size and colour the
-   plain spans they replaced were carrying inline. */
+/* The identifier on a lane label. A `CopyableId` button, so it needs the size and colour the
+   plain span it replaced was carrying inline. */
 .timeline-id {
   font-size: 11px;
   color: var(--accent);
 }
 
-/* The mutation id is a reference, not the thing you read the row for -- it sits in the muted
-   colour of the timestamp it shares a line with, and brightens only when pointed at. */
-.timeline-time .timeline-id { color: var(--text-muted); }
-.timeline-time .timeline-id:hover,
-.timeline-time .timeline-id:focus-visible { color: var(--accent); }
-
-.timeline-desc {
-  font-size: 13px;
+/* The colour key. `.dt-node-dot` shares the `.dt-node-<kind>` fills with the markers themselves,
+   so the legend cannot drift away from what it describes. */
+.dt-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 10px;
+  font-size: 11px;
   color: var(--text-muted);
-  margin-bottom: 6px;
 }
 
-.timeline-meta {
+.dt-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dt-node-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Horizontal scrolling lives HERE rather than on the page, because the drawer is a flex sibling
+   of the list: opening it takes 360px off this element's width, and a page that scrolled as a
+   whole would push the lane labels off-screen the moment an event was selected. */
+.dt-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.dt-swimlanes {
+  min-width: 620px;
+}
+
+.dt-lane {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+}
+
+.dt-lane:last-child { border-bottom: none; }
+
+/* The section rule: Cells, then Gateways, then Devices -- a plant's own containment order.
+
+   STICKY LIKE THE LABELS BESIDE IT, and for the same reason: the heading is what tells you which
+   kind of asset the row under your cursor is, and a heading that scrolled out horizontally would
+   leave the icon doing that work alone. It spans only the label column, so it never rides over
+   the markers. */
+.dt-section {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 210px;
+  padding: 12px 10px 5px 0;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+/* The first heading sits flush under the axis; the rest earn their space from the lanes above. */
+.dt-section:first-of-type { padding-top: 4px; }
+
+.dt-section-name {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+}
+
+.dt-section-count {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* Sticky, and opaque in the card's own colour: markers scroll UNDER the labels rather than over
+   them, so the asset a lane belongs to stays readable at any scroll offset. A transparent label
+   here would let a dozen dots slide through the text. */
+.dt-lane-label {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  flex: 0 0 210px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 10px 4px 0;
+  background: var(--bg-card);
+  font-size: 12px;
+}
+
+/* The one element allowed to lose characters. Everything else in the label -- the icon, the
+   deleted flag -- is fixed width or must stay whole, so a long asset name is what gives. */
+.dt-lane-name {
+  color: var(--text-primary);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The kind, carried at a twelfth of the width the DEVICE/GATEWAY/CELL badge used to cost -- and
+   still readable when the section heading has been scrolled past. Dim, because it repeats what
+   the heading above already said; the name is what the eye is looking for. */
+.dt-lane-icon {
+  flex-shrink: 0;
+  color: var(--text-dim);
+}
+
+/* No name resolved anywhere -- not from a live row, not from an audit snapshot. Dimmer than a
+   real name so a lane that could not be identified does not read like one that was. */
+.dt-lane-unnamed {
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* The entity is gone and the name came out of its final snapshot. */
+.dt-lane-gone {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--danger-text);
+  opacity: 0.85;
+}
+
+.dt-track {
+  position: relative;
+  flex: 1;
+  min-width: 380px;
+  height: 32px;
+}
+
+/* The lane's rule, inset by the same 14px the markers are padded with so it starts and stops
+   where they do. */
+.dt-track::before {
+  content: '';
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--border);
+}
+
+.dt-axis .dt-lane-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.dt-axis-track { height: 24px; }
+.dt-axis-track::before { display: none; }
+
+.dt-tick {
+  position: absolute;
+  top: 6px;
+  transform: translateX(-50%);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* The end ticks are aligned by their inner edge rather than centred, or each would hang half its
+   width past the track and widen the scroll area by a label. */
+.dt-tick:first-child { transform: none; }
+.dt-tick:last-child  { transform: translateX(-100%); }
+
+/* 14px of padding at each end of the track, so a marker at either extreme is drawn whole instead
+   of being cut in half by the lane's edge. Positions are a calc against that padded width --
+   see offsetFor(). */
+.dt-node {
+  position: absolute;
+  top: 50%;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid var(--bg-card);
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+/* Markers pile up where activity is dense -- a burst of edits within a minute is a handful of
+   overlapping dots. Raising the hovered one is what makes the underneath reachable; the tooltip
+   and the drawer are what tell them apart. */
+.dt-node:hover,
+.dt-node:focus-visible {
+  transform: translate(-50%, -50%) scale(1.4);
+  z-index: 3;
+}
+
+.dt-node-selected {
+  box-shadow: 0 0 0 3px var(--accent-glow);
+  z-index: 3;
+}
+
+.dt-node-creation,    .dt-node-dot.dt-node-creation    { background: var(--success); }
+.dt-node-operational, .dt-node-dot.dt-node-operational { background: var(--accent); }
+.dt-node-governance,  .dt-node-dot.dt-node-governance  { background: var(--warning); }
+.dt-node-critical,    .dt-node-dot.dt-node-critical    { background: var(--danger); }
+
+.dt-lane-toggle { margin-top: 10px; }
+
+/* The classification badge in the drawer's subtitle. Same tinted-fill convention as `.badge-*`
+   above, and the same reason for the `-text` tokens: the bare signal colours are tuned for
+   borders and fills, not for text. */
+.dt-badge-creation    { background: rgba(0, 232, 150, 0.15); color: var(--success-text); }
+.dt-badge-operational { background: var(--accent-dim);       color: var(--accent); }
+.dt-badge-governance  { background: rgba(255, 179, 0, 0.15); color: var(--warning-text); }
+.dt-badge-critical    { background: rgba(255, 77, 109, 0.15); color: var(--danger-text); }
+
+/* ===== Digital Thread: stepping through one asset's history =====
+   Full width of the subtitle row it occupies, stacked, because the position line and the two
+   buttons are three things at three sizes and wrapping them into one row puts the count and the
+   buttons on different lines at unpredictable widths. */
+.dt-drawer-nav {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.dt-drawer-nav-pos {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  overflow-wrap: break-word;
+}
+
+/* Equal halves rather than content width: the two labels are different lengths, and a Next
+   button that sits wherever Previous happens to end moves under the cursor as you step. */
+.dt-drawer-nav-btns {
+  display: flex;
+  gap: 6px;
+}
+
+.dt-nav-btn {
+  flex: 1 1 0;
+  justify-content: center;
+  font-size: 11px;
+}
+
+.dt-drawer-nav-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+/* ===== Digital Thread: the diff inspector inside the drawer ===== */
+.dt-diff { margin-top: 14px; }
+
+.dt-diff-none {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-top: 4px;
+}
+
+.dt-diff-table {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 11px;
+  /* FIXED, so the columns are decided by the rule below rather than by whichever row happens to
+     hold the longest UUID. With `auto`, one 36-character value takes the width it wants and
+     squeezes the other two columns into a character apiece -- which is what made adjacent values
+     read as one run of text. */
+  table-layout: fixed;
+}
+
+/* THE COLLISION WAS `white-space`, INHERITED, and the reset below is the actual fix.
+   The global `th` rule near the top of this file sets `white-space: nowrap` (plus uppercase and
+   0.8px letter-spacing) for every table header in the app. Each property name here is a
+   `<th scope="row">`, so it took all three: `last_birth_metrics_at` rendered as
+   LAST_BIRTH_METRICS_AT, on one unbreakable line, straight across the value beside it. Wrapping
+   rules cannot help while `nowrap` stands -- there is nothing for them to act on -- which is why
+   this resets the inherited three before setting anything of its own. */
+.dt-diff-table th,
+.dt-diff-table td {
+  text-align: left;
+  vertical-align: top;
+  white-space: normal;
+  text-transform: none;
+  letter-spacing: 0;
+  /* Symmetric, so the gutter between two columns is a real 24px rather than one cell's 12px
+     against the next cell's zero. box-sizing is already global, restated because these widths
+     are explicit and the padding has to stay inside them. */
+  padding: 6px 12px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--border);
+  /* `anywhere` rather than `break-word`: an underscore is not a break opportunity, so a 21-
+     character column name has no legal place to wrap and overflows its cell however narrow the
+     column gets. Both are declared -- `anywhere` does the work, `break-word` is the fallback for
+     engines that do not take it. Values wrap; they are never ellipsed, because a truncated UUID
+     is useless and a truncated topic path is worse -- it looks like a shorter path. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* The outer edges have nothing to be separated from, and reclaiming those 12px gives them to the
+   values that need them. */
+.dt-diff-table th:first-child,
+.dt-diff-table td:first-child { padding-left: 0; }
+.dt-diff-table th:last-child,
+.dt-diff-table td:last-child { padding-right: 0; }
+
+/* Equal thirds. The property column was the widest at 38%, which is the right call when names
+   cannot wrap -- now that they can, the values are what need the room, and three even columns
+   keep the header row and the divider lines reading as one grid. */
+.dt-diff-table th:nth-child(1),
+.dt-diff-table td:nth-child(1) { width: 33.34%; }
+.dt-diff-table th:nth-child(2),
+.dt-diff-table td:nth-child(2) { width: 33.33%; }
+
+/* Vertical dividers, and the one between Previous and New is the load-bearing one: those two
+   columns hold the SAME property's two values, often differing by a character, and a reader
+   comparing them needs to know which side they are on. Drawn on the cell rather than the column
+   so it stops at the last row instead of running into the section below. */
+.dt-diff-table tbody th:nth-child(1),
+.dt-diff-table tbody td:nth-child(1),
+.dt-diff-table tbody td:nth-child(2) { border-right: 1px solid var(--border); }
+
+/* An INSERT or a DELETE has one value column, not two. A fixed 130px for the name -- rather than
+   a percentage -- because the name column's job is the same at any drawer width, and every pixel
+   past what it needs is taken from a serialised metric array that will use all of them. */
+.dt-diff-onesided th:nth-child(1),
+.dt-diff-onesided td:nth-child(1) {
+  width: 130px;
+  border-right: 1px solid var(--border);
+}
+.dt-diff-onesided th:nth-child(2),
+.dt-diff-onesided td:nth-child(2) { width: auto; }
+
+.dt-diff-table thead th {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--text-muted);
+}
+
+/* The property name is a LABEL, not a value -- muted, so the two things being compared beside it
+   are what the eye lands on. It was --text-primary, which gave the column name the same weight as
+   the data and made every row read as three equal facts. */
+.dt-diff-table tbody th {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.dt-diff-table td {
+  font-family: var(--font-mono, monospace);
+  color: var(--text-primary);
+}
+
+/* The previous value is struck through and dimmed rather than merely sitting to the left of the
+   new one: at this size the two columns read as a pair of values before they read as a
+   before/after, and which one is current is the whole question. */
+.dt-diff-before {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.dt-diff-empty {
+  color: var(--text-muted);
+  font-style: italic;
+  font-family: inherit;
+}
+
+/* ===== Digital Thread: the raw payload accordion ===== */
+.dt-raw { margin-top: 4px; }
+
+.dt-raw-summary {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--text-muted);
+  list-style: revert;
+}
+
+.dt-raw-summary:hover { color: var(--accent); }
+
+.dt-raw-body { margin-top: 8px; }
+
+.dt-raw-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+
+.dt-raw-json {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.5;
   background: var(--bg-base);
-  padding: 8px;
+  border: 1px solid var(--border);
   border-radius: 4px;
-  color: var(--accent);
-  word-break: break-all;
+  padding: 8px;
+  margin-bottom: 10px;
+  /* Capped and scrollable. A device row serialises to forty-odd keys, and letting that run to
+     its full height would push the accordion's own control off the bottom of the drawer. */
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary);
 }

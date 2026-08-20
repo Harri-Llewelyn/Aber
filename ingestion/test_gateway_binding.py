@@ -42,6 +42,7 @@ def _stub(name, **attrs):
 
 
 _stub("psycopg2", connect=lambda *a, **k: None)
+_stub("psycopg2.extras", execute_values=lambda *a, **k: None)
 _stub("sparkplug_b_pb2", Payload=object)
 _stub("paho")
 _stub("paho.mqtt")

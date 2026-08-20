@@ -51,18 +51,22 @@ const MIRRORS = [
     // what makes the compression, retention and rollup definitions settings rather than constants
     // fixed before the first row was written. Mounting them into the initdb ConfigMap would
     // silently restore the old behaviour.
-    match: (name) => name === 'retention.sql' || name === 'aggregates.sql',
-    why: 'Telemetry lifecycle: compression/retention policies and the rollup views, reconciled on every boot',
+    // An explicit allow-list rather than `endsWith('.sql')`, so a new file in timescaledb/ has to
+    // be added here deliberately -- and, more to the point, has to be wired into BOTH the Compose
+    // service and the Helm Job that run these. A file that mirrored automatically but was never
+    // invoked would sit in the ConfigMap looking applied.
+    match: (name) => name === 'retention.sql' || name === 'aggregates.sql' || name === 'roles.sql',
+    why: 'Telemetry lifecycle: compression/retention policies, the rollup views and the read-only BI role, reconciled on every boot',
   },
-  {
-    source: join('supabase', 'migrations'),
-    dest: 'migrations',
-    // Top level only -- readdirSync does not recurse, which is what keeps
-    // supabase/migrations/archive/ out. Those are the pre-beta chain, preserved as reasoning and
-    // deliberately never executed; mounting them would replay 38 superseded migrations.
-    match: (name) => name.endsWith('.sql'),
-    why: 'Applied in order by the db-init Job on every boot, exactly as supabase-db-init does',
-  },
+  // THE MIGRATIONS ARE NOT MIRRORED. They are baked into the db-init image by
+  // supabase/db-init/Dockerfile and read from its filesystem, so the chart carries none of them.
+  //
+  // They were mirrored here, gzipped, to fit the 1 MiB ConfigMap limit. That worked and broke the
+  // OTHER 1 MiB limit: Helm's release Secret carries the same bytes twice -- once as chart files,
+  // once base64-encoded into the rendered ConfigMap -- and gzipped bytes compress no further, so
+  // the release reached 1,213,920 bytes against a 1,048,576 cap and `helm install` failed naming
+  // only the Secret. No size of file satisfies both limits as the chain grows, because each counts
+  // the same bytes. See the Dockerfile for the measurements.
   {
     source: 'supabase',
     dest: 'seed',
@@ -126,6 +130,30 @@ const MIRRORS = [
     why: 'Provisions /data -- settings.js, the credentials and the seeded flow. Runs as an initContainer',
   },
   {
+    source: 'scripts',
+    dest: 'gateway-credential',
+    // The service ONLY. Compose bind-mounts these two from scripts/; the chart projects them
+    // through a ConfigMap, with the library restored to `lib/` by the volume's `items` -- see
+    // templates/messaging/gateway-credential.yaml. The image supplies the runtime (node, and
+    // mosquitto_passwd), the chart supplies the code, so a script change needs no image rebuild.
+    match: (name) => name === 'gateway-credential-service.mjs',
+    why: 'The credential-issuing sidecar in the broker pod; mints one gateway account per call',
+  },
+  {
+    source: join('scripts', 'lib'),
+    // A SEPARATE dest FROM THE ENTRY ABOVE, and it has to be. Each mirror OWNS its destination
+    // directory and deletes anything in it that its own source did not produce -- so two mirrors
+    // pointing at one directory alternately delete each other's file on every run. (Observed, not
+    // theorised: the first attempt shared `gateway-credential` and the sync reported
+    // "updated ... / removed ...' for the same path in a single pass.)
+    //
+    // The two files are reunited at MOUNT time instead: the ConfigMap carries both and the volume's
+    // `items` restores this one to `lib/`. See templates/messaging/gateway-credential.yaml.
+    dest: 'gateway-credential-lib',
+    match: (name) => name === 'mosquitto-credentials.mjs',
+    why: 'The shared merge -- the truncation guard both the CLI and the service depend on',
+  },
+  {
     source: 'grafana',
     dest: 'grafana',
     // The OAuth block only. Everything else Grafana needs comes from GF_* env vars, which is where
@@ -146,11 +174,32 @@ const MIRRORS = [
     match: (name) => name.endsWith('.yml'),
     why: 'Dashboard provider definition',
   },
+  // ONE MIRROR PER FOLDER, because this script does NOT recurse -- readdirSync is top-level only,
+  // which is the same property that keeps supabase/migrations/archive/ out. A single entry
+  // pointing at `dashboards/` would copy dashboards.yml and silently skip both subdirectories,
+  // producing a chart that renders, installs, and serves a Grafana with no dashboards at all.
   {
-    source: join('grafana', 'provisioning', 'dashboards', 'json'),
-    dest: 'grafana-dashboards-json',
+    // Grafana unified-alerting provisioning: the rules, the notification policy tree, and the
+    // contact-point TEMPLATE. All three go in one mirror because they are one Grafana provisioning
+    // directory -- but only the template carries a placeholder, and the chart renders that one
+    // through an initContainer into a Secret-backed emptyDir rather than mounting it from a
+    // ConfigMap. A contact point holds a bearer token; the rules and the policy do not.
+    source: join('grafana', 'provisioning', 'alerting'),
+    dest: 'grafana-alerting',
+    match: (name) => name.endsWith('.yaml'),
+    why: 'Alert rules, notification policy and the webhook contact point Grafana provisions at start',
+  },
+  {
+    source: join('grafana', 'provisioning', 'dashboards', 'platform'),
+    dest: 'grafana-dashboards-platform',
     match: (name) => name.endsWith('.json'),
-    why: 'The dashboards themselves',
+    why: 'Platform Infrastructure folder -- stack and ingestion health',
+  },
+  {
+    source: join('grafana', 'provisioning', 'dashboards', 'shopfloor'),
+    dest: 'grafana-dashboards-shopfloor',
+    match: (name) => name.endsWith('.json'),
+    why: 'Shopfloor Operations folder -- manufacturing cells and telemetry',
   },
 ];
 
@@ -159,10 +208,14 @@ const MIRRORS = [
  * exceeding it fails at APPLY time with "Request entity too large", naming the object rather than
  * the file that grew.
  *
- * The migrations are the group that matters: `0002_seed_data.sql` alone is over 200 KB because it
- * carries three generated reference vocabularies, and it only ever grows. Warn well before the
- * cliff so the choice of what to do about it (split the ConfigMap, gzip, or bake an image) is made
- * deliberately rather than under a failing deploy.
+ * The migrations were the group that mattered, at 878 KiB. THEY ARE NO LONGER MIRRORED AT ALL: they
+ * ride in the db-init image instead.
+ *
+ * GZIP IS NOT THE ANSWER FOR THE NEXT GROUP EITHER, and the support for it has been removed rather
+ * than left available. Compressing a mirror moves its bytes out of one 1 MiB limit and straight
+ * into another -- Helm's release Secret holds the chart file AND the rendered ConfigMap, and
+ * compressed bytes shrink in neither. What remains is to split the ConfigMap across several
+ * objects, or to bake the content into an image as the migrations now are.
  */
 const CONFIGMAP_LIMIT = 1024 * 1024;
 const CONFIGMAP_WARN_AT = 0.75;
@@ -196,8 +249,10 @@ for (const mirror of MIRRORS) {
     // Normalise line endings. Git may check the source out as CRLF on Windows; a byte comparison
     // would then report drift on every developer machine and report nothing useful in CI.
     const content = readFileSync(join(sourceDir, name), 'utf8').replace(/\r\n/g, '\n');
-    groupBytes += Buffer.byteLength(content, 'utf8');
     const destPath = join(destDir, name);
+    const rel = relative(REPO_ROOT, destPath).replace(/\\/g, '/');
+
+    groupBytes += Buffer.byteLength(content, 'utf8');
     const current = existsSync(destPath)
       ? readFileSync(destPath, 'utf8').replace(/\r\n/g, '\n')
       : null;
@@ -205,7 +260,6 @@ for (const mirror of MIRRORS) {
     if (current === content) continue;
 
     stale += 1;
-    const rel = relative(REPO_ROOT, destPath).replace(/\\/g, '/');
     if (checkOnly) {
       console.error(`STALE: ${rel} differs from ${mirror.source}/${name}`);
     } else {
@@ -216,24 +270,28 @@ for (const mirror of MIRRORS) {
 
   // Each mirror becomes ONE ConfigMap, so the group total is what has to stay under the limit.
   const pct = groupBytes / CONFIGMAP_LIMIT;
+  const describe = `${(groupBytes / 1024).toFixed(0)} KiB`;
+
   if (pct >= 1) {
     oversize += 1;
     console.error(
-      `OVERSIZE: ${mirror.dest} is ${(groupBytes / 1024).toFixed(0)} KiB, over the 1 MiB ConfigMap ` +
-        `limit. This fails at apply time with "Request entity too large", naming the ConfigMap and ` +
-        `not the file that grew. Split the ConfigMap, gzip the contents, or bake an image.`
+      `OVERSIZE: ${mirror.dest} is ${describe}, over the 1 MiB ConfigMap limit. This fails at ` +
+        `apply time with "Request entity too large", naming the ConfigMap and not the file that ` +
+        `grew. Split the ConfigMap across several objects, or bake an image -- see the note on ` +
+        `CONFIGMAP_LIMIT for why compressing it is not the third option it looks like.`
     );
   } else if (pct >= CONFIGMAP_WARN_AT) {
     console.warn(
-      `WARNING: ${mirror.dest} is ${(groupBytes / 1024).toFixed(0)} KiB — ` +
-        `${(pct * 100).toFixed(0)}% of the 1 MiB ConfigMap limit.`
+      `WARNING: ${mirror.dest} is ${describe} — ${(pct * 100).toFixed(0)}% of the 1 MiB ` +
+        `ConfigMap limit.`
     );
   }
 
   // Remove copies whose source no longer exists.
+  const expectedDestNames = sourceNames;
   if (existsSync(destDir)) {
     for (const name of readdirSync(destDir)) {
-      if (sourceNames.includes(name)) continue;
+      if (expectedDestNames.includes(name)) continue;
       stale += 1;
       const rel = relative(REPO_ROOT, join(destDir, name)).replace(/\\/g, '/');
       if (checkOnly) {

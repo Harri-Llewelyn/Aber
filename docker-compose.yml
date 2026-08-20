@@ -97,9 +97,13 @@ services:
       TIMESCALE_ROLLUP_1M_RETAIN_FOR: ${TIMESCALE_ROLLUP_1M_RETAIN_FOR:-180 days}
       TIMESCALE_ROLLUP_5M_RETAIN_FOR: ${TIMESCALE_ROLLUP_5M_RETAIN_FOR:-1 year}
       TIMESCALE_ROLLUP_1H_RETAIN_FOR: ${TIMESCALE_ROLLUP_1H_RETAIN_FOR:-5 years}
+      # Read-only role for external BI tools. EMPTY MEANS NO ROLE -- roles.sql skips it rather
+      # than creating one with a blank password. See timescaledb/roles.sql.
+      BI_READER_PASSWORD: ${BI_READER_PASSWORD:-}
     volumes:
       - ./timescaledb/retention.sql:/retention.sql:ro
       - ./timescaledb/aggregates.sql:/aggregates.sql:ro
+      - ./timescaledb/roles.sql:/roles.sql:ro
     # The healthcheck cannot be trusted to mean "init has finished": the postgres entrypoint runs
     # initdb scripts against a temporary server that already answers on the unix socket, which is
     # what `pg_isready` inside the container asks. So wait for the hypertable itself -- the object
@@ -117,6 +121,8 @@ services:
       psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -v compress_after=\"$$TIMESCALE_COMPRESS_AFTER\" -v retain_after=\"$$TIMESCALE_RETAIN_FOR\" -f /retention.sql;
       echo 'Reconciling telemetry rollups...';
       psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -v rollup_1m_retain=\"$$TIMESCALE_ROLLUP_1M_RETAIN_FOR\" -v rollup_5m_retain=\"$$TIMESCALE_ROLLUP_5M_RETAIN_FOR\" -v rollup_1h_retain=\"$$TIMESCALE_ROLLUP_1H_RETAIN_FOR\" -f /aggregates.sql;
+      echo 'Reconciling read-only BI role...';
+      psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -f /roles.sql;
       "
     depends_on:
       timescaledb:
@@ -499,6 +505,15 @@ services:
       SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
       STORAGE_BUCKET: ${STORAGE_MODEL_BUCKET:-asset-3d-models}
       STORAGE_FILE_SIZE_LIMIT: ${STORAGE_FILE_SIZE_LIMIT:-52428800}
+      # The PRIVATE bucket holding Node-RED flow backups from gateway appliances, under
+      # <sparkplug_id>/. Its own size limit, deliberately not STORAGE_FILE_SIZE_LIMIT: that one is
+      # sized for 3D geometry, and a flows.json anywhere near 50 MiB is not a flow.
+      #
+      # THE NAME MUST MATCH supabase/storage-policies.sql. A bucket with no policies is invisible to
+      # every browser-facing role, and a policy naming a bucket that was never created is dead text;
+      # neither errors, so the two files are kept in step by hand.
+      GATEWAY_BACKUP_BUCKET: ${GATEWAY_BACKUP_BUCKET:-gateway-backups}
+      GATEWAY_BACKUP_FILE_SIZE_LIMIT: ${GATEWAY_BACKUP_FILE_SIZE_LIMIT:-5242880}
     volumes:
       - ./scripts/storage-init.mjs:/app/storage-init.mjs:ro
     command: ["node", "/app/storage-init.mjs"]
@@ -682,11 +697,40 @@ services:
       AAS_MODEL_PUBLIC_BASE: ${AAS_MODEL_PUBLIC_BASE:-http://localhost:54321/storage/v1/object/public/asset-3d-models}
       STORAGE_MODEL_BUCKET: ${STORAGE_MODEL_BUCKET:-asset-3d-models}
       AAS_MAX_BUNDLED_MODEL_BYTES: ${AAS_MAX_BUNDLED_MODEL_BYTES:-33554432}
+      # The bearer secret grafana-alert-webhook verifies. Grafana holds the same value, substituted
+      # into its contact point -- it is NOT given the service-role key, which is what this narrow
+      # credential exists to avoid. No `:-` default: an empty value makes the function answer 503
+      # rather than accept unauthenticated writes, and a silent default here would hide that.
+      GRAFANA_ALERT_WEBHOOK_SECRET: ${GRAFANA_ALERT_WEBHOOK_SECRET}
+      # The credential-issuing service enroll-gateway calls (Phase 3). Compose-internal by
+      # construction: that service publishes no port, so this address is only resolvable from
+      # inside the network. The token is its bearer credential -- see .env.example for why it is
+      # its own value and not shared with any other secret.
+      MQTT_CREDENTIAL_SERVICE_URL: ${MQTT_CREDENTIAL_SERVICE_URL:-http://gateway-credential:9010}
+      MQTT_CREDENTIAL_SERVICE_TOKEN: ${MQTT_CREDENTIAL_SERVICE_TOKEN:-}
+      # Where an ENROLLED APPLIANCE dials the broker, returned in the enrolment response. NO
+      # `mosquitto` DEFAULT ON PURPOSE: that resolves on this network and nowhere a gateway lives,
+      # so a default would produce bundles that enrol perfectly and then connect to nothing.
+      # enroll-gateway answers 503 rather than consume a token when this is unset or internal.
+      MQTT_PUBLIC_HOST: ${MQTT_PUBLIC_HOST:-}
+      MQTT_PUBLIC_TLS_PORT: ${MQTT_PUBLIC_TLS_PORT:-8883}
+      # Where an APPLIANCE reaches the platform, written into the bundle's .env.
+      #
+      # NO DEFAULT, DELIBERATELY -- and specifically NOT `${SUPABASE_URL:-...}`. That variable is
+      # http://127.0.0.1:54321 on a local stack, which is correct for a browser on this machine and
+      # wrong for every appliance: inside a container 127.0.0.1 is the container itself. Defaulting
+      # to it would produce bundles that look right and cannot enrol, which is the failure this
+      # whole class of variable exists to prevent. Empty makes gateway-bundle answer 503 naming
+      # this setting, before any token is issued.
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL:-}
     volumes:
       - ./supabase/functions:/home/deno/functions:ro
       # The canonical Node-RED flow - the "git" side of the GitOps sync that
       # deploy-nodered pushes to the running Node-RED.
       - ./node_red_flow.json:/home/deno/flows/node_red_flow.json:ro
+      # The physical gateway bundle template gateway-bundle zips and serves. Read in the entrypoint
+      # below for the same reason as the flow -- an edge worker cannot see this mount.
+      - ./templates/physical-gateway:/home/deno/templates/physical-gateway:ro
       # Persist fetched remote modules so functions don't re-download on restart.
       - deno_cache:/root/.cache/deno
     # An edge-runtime user worker has no filesystem access to these mounts, so the
@@ -701,6 +745,16 @@ services:
       - -c
       - |
         export NODERED_FLOW_JSON="$$(cat /home/deno/flows/node_red_flow.json)"
+        # The bundle template, one variable per file. Static names, because FUNCTION_REGISTRY in
+        # main/index.ts is an allow-list of variable NAMES and a dynamic set could not be declared
+        # there. Kept in step with supabase/functions/Dockerfile's ENTRYPOINT, which does the same
+        # for the Kubernetes target.
+        T=/home/deno/templates/physical-gateway
+        export GW_BUNDLE_COMPOSE="$$(cat $$T/docker-compose.yml)"
+        export GW_BUNDLE_DOCKERFILE="$$(cat $$T/Dockerfile)"
+        export GW_BUNDLE_BOOTSTRAP="$$(cat $$T/bootstrap.mjs)"
+        export GW_BUNDLE_FLOWS="$$(cat $$T/flows.template.json)"
+        export GW_BUNDLE_README="$$(cat $$T/README.md)"
         exec edge-runtime start --main-service /home/deno/functions/main
     depends_on:
       supabase-db-init:
@@ -822,10 +876,58 @@ services:
   # wildcard-write account any more -- see the header of mosquitto.acl for what that account could
   # do and why verify_gateway_binding() could not catch it.
   #
-  # NEVER `mosquitto_passwd -b -c` ON THE MERGED FILE except for the first account: `-c` CREATES
-  # the file and discards everything already in it, which on a stack with provisioned gateways
-  # means every physical gateway loses its credential at once. The first call below uses -c
-  # intentionally (this is the file's initial state); every subsequent call must not.
+  # NEVER `mosquitto_passwd -b -c` ON THE MERGED FILE: `-c` CREATES the file and discards
+  # everything already in it, which on a stack with provisioned gateways means every physical
+  # gateway loses its credential at once.
+  #
+  # THAT USED TO SAY "except for the first account", AND THE EXCEPTION WAS THE BUG. This is a
+  # one-shot, but Compose re-runs a completed one-shot whenever something that depends on it is
+  # brought up -- `docker compose up -d node-red`, say, or `scripts/stack-reset.sh` recreating
+  # Node-RED after provisioning. Each of those re-entered this entrypoint, and the `-c` on the
+  # first of the five accounts truncated the file, deleting every gateway credential issued since
+  # boot. It is invisible until the broker next reloads: Mosquitto keeps the authenticated
+  # accounts in memory, so the stack keeps working and then comes up with four gateways it has
+  # never heard of. `stack-reset.sh` hit exactly this -- it provisioned four credentials and then
+  # deleted three of them one step later, in a script whose whole purpose is to leave a working
+  # stack.
+  #
+  # So `-c` is now conditional on the file not existing. The five platform principals are still
+  # rewritten on every run (they come from .env and must follow it); anything else in the file is
+  # left alone.
+  # ---------------------------------------------------------------------------
+  # Broker CA and MQTTS leaf certificate (Compose only)
+  # ---------------------------------------------------------------------------
+  # THE COMPOSE COUNTERPART OF deploy/k8s/internal-ca.yaml. On Kubernetes cert-manager issues the
+  # broker's leaf from a ClusterIssuer and the chart appends mosquitto-tls.conf when the Secret
+  # exists; Compose had no equivalent, so MQTTS was a manual, documented-but-unbuilt opt-in and the
+  # physical-gateway flow was Kubernetes-only by accident of certificate management.
+  #
+  # THE ROOT IS NEVER REGENERATED ONCE IT EXISTS -- see the script's header. It is distributed by
+  # hand to every physical gateway's trust store, so minting a new one does not fail loudly, it
+  # succeeds and takes the whole fleet offline. `mosquitto_certs` is a named volume for exactly that
+  # reason: `docker compose down` must not take the CA with it.
+  #
+  # THIS SERVICE HAS NO KUBERNETES COUNTERPART. Do not add one -- cert-manager owns that half.
+  mosquitto-tls-init:
+    container_name: acs-cymru_mosquitto_tls_init
+    build:
+      context: ./mosquitto-tls-init
+    # Root, because it chowns the key to the uid mosquitto drops to (1883). The broker reads its
+    # own key AFTER dropping privileges, so a key it cannot read exits the broker with an OpenSSL
+    # "system library" error that names neither the file nor the permission.
+    user: "0"
+    environment:
+      # Folded into the certificate's SAN. A gateway dials the broker by this name, and a
+      # certificate that does not carry it fails verification at the appliance -- which is the
+      # correct outcome for a wrong name and an infuriating one for a missing entry.
+      MQTT_PUBLIC_HOST: ${MQTT_PUBLIC_HOST:-}
+      MQTT_TLS_SAN_EXTRA: ${MQTT_TLS_SAN_EXTRA:-}
+    volumes:
+      - mosquitto_certs:/mosquitto/certs
+      - ./scripts/mosquitto-tls-init.mjs:/scripts/mosquitto-tls-init.mjs:ro
+    command: ["node", "/scripts/mosquitto-tls-init.mjs"]
+    restart: "no"
+
   mosquitto-init:
     container_name: acs-cymru_mosquitto_init
     image: eclipse-mosquitto:2.0.20
@@ -841,22 +943,77 @@ services:
       MQTT_VALIDATOR_PASSWORD: ${MQTT_VALIDATOR_PASSWORD}
       MQTT_MONITOR_USER: ${MQTT_MONITOR_USER:-factoryplus_monitor}
       MQTT_MONITOR_PASSWORD: ${MQTT_MONITOR_PASSWORD}
+      # THE FOUR SIMULATED CELL GATEWAYS, seeded here rather than by `provision:gateways`.
+      #
+      # The broker is the only place these accounts can exist, and node-red-init -- which runs in
+      # this same `up` -- fails closed without them. Provisioning cannot fill that gap because it
+      # needs the stack it is blocking. An EMPTY password skips the account rather than creating an
+      # empty one, so a production install that does not want the simulator simply leaves them
+      # unset. Same rule, same reasoning, as the chart's `acs-cymru.mqttPrincipalUpserts`.
+      MQTT_GW_CNC_MACHINING_USER: ${MQTT_GW_CNC_MACHINING_USER:-gwy120000000000400080000}
+      MQTT_GW_CNC_MACHINING_PASSWORD: ${MQTT_GW_CNC_MACHINING_PASSWORD:-}
+      MQTT_GW_ROBOTIC_ASSEMBLY_USER: ${MQTT_GW_ROBOTIC_ASSEMBLY_USER:-gwy130000000000400080000}
+      MQTT_GW_ROBOTIC_ASSEMBLY_PASSWORD: ${MQTT_GW_ROBOTIC_ASSEMBLY_PASSWORD:-}
+      MQTT_GW_AGV_FLEET_USER: ${MQTT_GW_AGV_FLEET_USER:-gwy140000000000400080000}
+      MQTT_GW_AGV_FLEET_PASSWORD: ${MQTT_GW_AGV_FLEET_PASSWORD:-}
+      MQTT_GW_FACILITY_BMS_USER: ${MQTT_GW_FACILITY_BMS_USER:-gwy150000000000400080000}
+      MQTT_GW_FACILITY_BMS_PASSWORD: ${MQTT_GW_FACILITY_BMS_PASSWORD:-}
     volumes:
       - mosquitto_data:/mosquitto/config
+      # THE POLICY FILES MOVED TO /policy, AND mosquitto.conf IS NOW ASSEMBLED RATHER THAN
+      # BIND-MOUNTED. The TLS stanza has to be APPENDED to the base config when certificates exist
+      # (mosquitto exits 1 on a `certfile` that is not there), and a read-only bind mount cannot be
+      # appended to. This is the same assembly the Helm chart's initContainer already performs, so
+      # the two targets now differ in transport and not in method. mosquitto.acl is deliberately
+      # NOT assembled -- it stays a read-only bind mount on the broker itself, because it is the
+      # security-critical file and nothing should be able to rewrite it at runtime.
+      - ./mosquitto.conf:/policy/mosquitto.conf:ro
+      - ./mosquitto-tls.conf:/policy/mosquitto-tls.conf:ro
+      - mosquitto_certs:/certs:ro
     entrypoint: >
       /bin/sh -e -c "
+      echo 'Assembling broker configuration...';
+      cp /policy/mosquitto.conf /mosquitto/config/mosquitto.conf;
+      if [ -s /certs/tls.crt ] && [ -s /certs/tls.key ] && [ -s /certs/ca.crt ]; then
+        echo '' >> /mosquitto/config/mosquitto.conf;
+        cat /policy/mosquitto-tls.conf >> /mosquitto/config/mosquitto.conf;
+        echo 'Appended the MQTTS listener (8883); certificates are present.';
+      else
+        echo 'NO BROKER CERTIFICATES FOUND -- 8883 will not be offered, and physical gateways cannot enrol. Check the mosquitto-tls-init service.' >&2;
+      fi;
       if [ -z \"$$MQTT_INGESTION_PASSWORD\" ] || [ -z \"$$MQTT_I3X_PASSWORD\" ] || [ -z \"$$MQTT_SIMULATOR_PASSWORD\" ] || [ -z \"$$MQTT_VALIDATOR_PASSWORD\" ] || [ -z \"$$MQTT_MONITOR_PASSWORD\" ]; then
         echo 'One or more MQTT_*_PASSWORD values are empty. The broker runs allow_anonymous false, so an empty credential fails as CONNACK 5 with no useful log line at either end. Run: node scripts/setup.mjs' >&2;
         exit 1;
       fi;
-      mosquitto_passwd -b -c /mosquitto/config/password_file \"$$MQTT_INGESTION_USER\" \"$$MQTT_INGESTION_PASSWORD\";
+      if [ ! -f /mosquitto/config/password_file ]; then
+        mosquitto_passwd -b -c /mosquitto/config/password_file \"$$MQTT_INGESTION_USER\" \"$$MQTT_INGESTION_PASSWORD\";
+      else
+        mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_INGESTION_USER\" \"$$MQTT_INGESTION_PASSWORD\";
+      fi;
       mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_I3X_USER\" \"$$MQTT_I3X_PASSWORD\";
       mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_SIMULATOR_USER\" \"$$MQTT_SIMULATOR_PASSWORD\";
       mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_VALIDATOR_USER\" \"$$MQTT_VALIDATOR_PASSWORD\";
       mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_MONITOR_USER\" \"$$MQTT_MONITOR_PASSWORD\";
+      for p in GW_CNC_MACHINING GW_ROBOTIC_ASSEMBLY GW_AGV_FLEET GW_FACILITY_BMS; do
+        eval user=\"\\$$MQTT_$${p}_USER\";
+        eval pass=\"\\$$MQTT_$${p}_PASSWORD\";
+        if [ -n \"$$pass\" ]; then
+          mosquitto_passwd -b /mosquitto/config/password_file \"$$user\" \"$$pass\";
+        else
+          echo \"MQTT_$${p}_PASSWORD is empty -- not creating an account for '$$user'.\";
+        fi;
+      done;
       chmod 644 /mosquitto/config/password_file;
       echo \"Mosquitto password file initialized with $$(grep -c : /mosquitto/config/password_file) account(s)\";
       "
+    depends_on:
+      # The assembly above decides whether to append the TLS listener by asking whether the
+      # certificates exist, so it must run AFTER they have been issued. Without this the first
+      # `docker compose up` on a fresh volume races: the config is assembled with no certificates,
+      # the broker comes up on 1883 only, and MQTTS appears to be broken until something else
+      # happens to restart this one-shot.
+      mosquitto-tls-init:
+        condition: service_completed_successfully
 
   mosquitto:
     container_name: acs-cymru_mosquitto
@@ -865,17 +1022,32 @@ services:
     ports:
       - "1883:1883"
       - "9001:9001"
+      # MQTTS. PLAINTEXT 1883 STAYS OPEN AND THAT IS DELIBERATE: the in-network services
+      # (ingestion, i3x, the Node-RED simulator) and the virtual gateways all speak to the broker
+      # over the Docker network, where the credential never leaves the host. 8883 exists for the
+      # clients that are NOT on that network -- physical gateways -- whose bundles and templates
+      # are configured for it exclusively. Two listeners, one password file, one ACL: mosquitto.conf
+      # declares the security options globally, so both are authorised identically.
+      - "8883:8883"
     environment:
       # The healthcheck's credential ONLY. It reads $SYS/# and can publish nothing, so the probe
       # is not a standing wildcard credential sitting in the broker's own environment.
       MQTT_MONITOR_USER: ${MQTT_MONITOR_USER:-factoryplus_monitor}
       MQTT_MONITOR_PASSWORD: ${MQTT_MONITOR_PASSWORD}
     volumes:
+      # mosquitto.conf arrives THROUGH THIS VOLUME, assembled by mosquitto-init -- it is no longer
+      # bind-mounted here, because the TLS stanza has to be appended to it and a read-only bind
+      # cannot be appended to. The repository is still the only source of its content; see the
+      # note on mosquitto-init's volumes.
       - mosquitto_data:/mosquitto/config
-      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      # Topic authorisation. Bind-mounted read-only alongside the config for the same reason:
-      # it is repository-managed policy, not runtime state, and must not drift on the volume.
+      # Topic authorisation. STILL a read-only bind mount, and deliberately not assembled: it is
+      # repository-managed policy, it is the file that confines every principal, and nothing at
+      # runtime should be able to rewrite it.
       - ./mosquitto.acl:/mosquitto/config/mosquitto.acl:ro
+      # The paths mosquitto-tls.conf names. Read-only: the broker presents this leaf, it does not
+      # manage it. The CA's private key is NOT in this volume's readable set for the broker uid --
+      # mosquitto-tls-init leaves ca.key root-owned and 0600.
+      - mosquitto_certs:/mosquitto/certs:ro
     healthcheck:
       test: ["CMD-SHELL", "mosquitto_sub -u $${MQTT_MONITOR_USER:-factoryplus_monitor} -P $${MQTT_MONITOR_PASSWORD} -t '$$SYS/broker/version' -C 1 || exit 1"]
       interval: 5s
@@ -885,6 +1057,67 @@ services:
     depends_on:
       mosquitto-init:
         condition: service_completed_successfully
+
+  # ---------------------------------------------------------------------------
+  # Broker credential-issuing service
+  # ---------------------------------------------------------------------------
+  # The narrow authority `enroll-gateway` calls to mint a gateway's Mosquitto account.
+  #
+  # WHY IT IS A SERVICE AT ALL. An edge worker has no Docker socket, no kubectl and no access to the
+  # password file, so it cannot issue an account -- and giving it a credential that could (a Docker
+  # socket is root on the host) would be a far larger authority than "add one line to a file". This
+  # container holds that authority instead, and holds nothing else: one endpoint, one verb, no
+  # database, no way to read a password back.
+  #
+  # NO `ports:`, AND THAT IS THE PRIMARY CONTROL. It is reachable only from the compose network, by
+  # name, on 9010. Publishing it would put credential minting on the host interface, and because
+  # mosquitto.acl confines an account to `spBv1.0/+/+/%u/#`, minting is the ability to publish
+  # telemetry as any gateway on the site. The bearer token is the second layer, not the first.
+  #
+  # `pid: "service:mosquitto"` IS LOAD-BEARING, not a convenience. Mosquitto re-reads the password
+  # file only on SIGHUP, and a signal cannot cross a PID namespace -- without this the service would
+  # write a correct file that the running broker ignores until its next restart, so a freshly
+  # enrolled gateway would be refused with nothing to distinguish "not reloaded" from "wrong
+  # password". It is the Compose equivalent of `shareProcessNamespace: true` on the broker's pod,
+  # which the chart already sets for the existing reload sidecar.
+  gateway-credential:
+    container_name: acs-cymru_gateway_credential
+    build:
+      context: ./gateway-credential
+    restart: always
+    pid: "service:mosquitto"
+    environment:
+      CREDENTIAL_TARGET: compose
+      # The service REFUSES TO START without this, rather than defaulting or running open -- a
+      # default would live in the repository and therefore be known. Generated by scripts/setup.mjs
+      # and shared with supabase-functions, which is the only caller.
+      MQTT_CREDENTIAL_SERVICE_TOKEN: ${MQTT_CREDENTIAL_SERVICE_TOKEN}
+      MQTT_CREDENTIAL_SERVICE_PORT: "9010"
+    volumes:
+      # The same volume the broker reads its password file from. Writable: this is the one service
+      # that may add an account.
+      - mosquitto_data:/mosquitto/config
+      # READ-ONLY, and for the CA only. An appliance needs the root that signs the certificate the
+      # broker will present, and this service is the only component sitting beside the broker on
+      # both targets -- so it is the only one that can read the CA actually in use. `ca.key` is in
+      # this volume too and is never opened: mosquitto-tls-init leaves it root-owned at 0600.
+      - mosquitto_certs:/mosquitto/certs:ro
+      - ./scripts/gateway-credential-service.mjs:/scripts/gateway-credential-service.mjs:ro
+      - ./scripts/lib/mosquitto-credentials.mjs:/scripts/lib/mosquitto-credentials.mjs:ro
+    command: ["node", "/scripts/gateway-credential-service.mjs"]
+    healthcheck:
+      # wget, not curl: the eclipse-mosquitto base is Alpine and ships busybox wget.
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:9010/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      # `pid: service:mosquitto` requires the broker's namespace to exist, so this cannot start
+      # first -- Compose enforces that for the pid reference, and the healthy condition additionally
+      # means the password file is present and readable before the first issuance is attempted.
+      mosquitto:
+        condition: service_healthy
 
   # ---------------------------------------------------------------------------
   # Application Runtimes & Ingestion
@@ -906,6 +1139,11 @@ services:
         VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
         VITE_ENABLE_REALTIME: ${VITE_ENABLE_REALTIME:-true}
         VITE_GITHUB_REPO_URL: ${VITE_GITHUB_REPO_URL:-https://github.com/Harri-Llewelyn/ACS-Cymru}
+        # Defaults to GRAFANA_PUBLIC_URL, so a stack that moves Grafana gets the dashboard's
+        # "View in Grafana" links right without a second variable. VITE_GRAFANA_URL still overrides
+        # it, for the case where the browser reaches Grafana on a different origin from the one
+        # registered as the OAuth redirect.
+        VITE_GRAFANA_URL: ${VITE_GRAFANA_URL:-${GRAFANA_PUBLIC_URL:-http://localhost:3002}}
         VITE_ALLOW_SIGNUP: ${VITE_ALLOW_SIGNUP:-false}
     restart: always
     ports:
@@ -1032,13 +1270,41 @@ services:
     user: "0"
     environment:
       <<: *nodered-auth-env
-      # THE SIMULATOR IS A GATEWAY, so its credential is an ordinary per-gateway one: the username
-      # IS the `sparkplug_id` of the seeded Virtual_Gateway_NodeRED row, and mosquitto.acl's
-      # `pattern readwrite spBv1.0/+/+/%u/#` therefore confines the flow to its own edge node. It
-      # is only pre-provisionable because that row's UUID is pinned in 0002_seed_data.sql, which
-      # is what makes the generated sparkplug_id knowable before the row exists.
+      # LEGACY FALLBACK ONLY. This was the credential of the single-device simulator, whose gateway
+      # row migration 0020 deletes -- so nothing the shipped flow publishes uses it any more. It is
+      # still passed because node-red-init applies it to a `mqtt-broker-config` node, which exists
+      # only on a Node-RED volume created before the flow was consolidated. Every broker node in
+      # the current flow names its own pair through `acsCredentialsEnv`; see below.
       MQTT_USER: ${MQTT_SIMULATOR_USER:-gwy100000000000400080000}
       MQTT_PASSWORD: ${MQTT_SIMULATOR_PASSWORD}
+      # ---------------------------------------------------------------------------------------
+      # ONE CREDENTIAL PAIR PER CELL GATEWAY, because mosquitto.acl pins the topic's edge-node
+      # segment to the connecting username -- four cells cannot share a connection.
+      #
+      # Each broker node in node_red_flow.json names its pair in `acsCredentialsEnv`, and
+      # node-red-init fails closed when a declared pair is absent rather than seeding an empty
+      # username (which the broker refuses with CONNACK 5 while Node-RED reports only
+      # "Connection failed to broker").
+      #
+      # The PASSWORDS are generated by `npm run setup` and the accounts are created by
+      # mosquitto-init, in the same `up` as this container -- provisioning cannot do it, because it
+      # needs the running stack that this container is blocking.
+      #
+      # Rotate with: npm run provision:gateways -- --env-out=.env.gateways
+      # Then fold that file into .env, or mosquitto-init puts the old password back on the next
+      # start: .env is authoritative for these accounts, exactly as values are on Kubernetes.
+      #
+      # THE USERNAMES DEFAULT TO THE SEEDED sparkplug_ids rather than to empty. An empty username
+      # is the failure this whole block exists to prevent, so it is not the fallback.
+      # ---------------------------------------------------------------------------------------
+      MQTT_GW_CNC_MACHINING_USER: ${MQTT_GW_CNC_MACHINING_USER:-gwy120000000000400080000}
+      MQTT_GW_CNC_MACHINING_PASSWORD: ${MQTT_GW_CNC_MACHINING_PASSWORD:-}
+      MQTT_GW_ROBOTIC_ASSEMBLY_USER: ${MQTT_GW_ROBOTIC_ASSEMBLY_USER:-gwy130000000000400080000}
+      MQTT_GW_ROBOTIC_ASSEMBLY_PASSWORD: ${MQTT_GW_ROBOTIC_ASSEMBLY_PASSWORD:-}
+      MQTT_GW_AGV_FLEET_USER: ${MQTT_GW_AGV_FLEET_USER:-gwy140000000000400080000}
+      MQTT_GW_AGV_FLEET_PASSWORD: ${MQTT_GW_AGV_FLEET_PASSWORD:-}
+      MQTT_GW_FACILITY_BMS_USER: ${MQTT_GW_FACILITY_BMS_USER:-gwy150000000000400080000}
+      MQTT_GW_FACILITY_BMS_PASSWORD: ${MQTT_GW_FACILITY_BMS_PASSWORD:-}
       # Seeding is first-run only, so editor changes survive `docker compose up`.
       # Set to true for a deliberate reset back to the repo's flow.
       NODE_RED_FORCE_SEED: ${NODE_RED_FORCE_SEED:-false}
@@ -1082,7 +1348,7 @@ services:
 
   grafana:
     container_name: acs-cymru_grafana
-    image: grafana/grafana:11.6.1
+    image: grafana/grafana:13.1.3
     restart: always
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
@@ -1093,10 +1359,18 @@ services:
       # [server] root_url, which keeps the localhost default for a standalone read of that file.
       GF_SERVER_ROOT_URL: ${GRAFANA_PUBLIC_URL:-http://localhost:3002}/
       GF_INSTALL_PLUGINS: ""
-      DB_PASSWORD: ${DB_PASSWORD}
+      # The READ-ONLY historian role, not DB_PASSWORD. Grafana previously connected as the
+      # `postgres` superuser -- a service fronted by browser SSO holding the credential that owns
+      # the database. See grafana/provisioning/datasources/datasources.template.yml.
+      BI_READER_PASSWORD: ${BI_READER_PASSWORD}
       # Read by grafana.ini through $__env{GRAFANA_OAUTH_CLIENT_SECRET}, so the secret is not
       # committed. Must match what 0002_seed_data.sql hashed into auth.oauth_clients.
       GRAFANA_OAUTH_CLIENT_SECRET: ${GRAFANA_OAUTH_CLIENT_SECRET:-}
+      # The alert webhook's bearer secret, and the anon key that gets the request past Kong's
+      # key-auth. Both are substituted into contact-points.template.yaml below. Grafana is NOT given
+      # the service-role key -- see that file's header for why that distinction is load-bearing.
+      GRAFANA_ALERT_WEBHOOK_SECRET: ${GRAFANA_ALERT_WEBHOOK_SECRET:-}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
     ports:
       - "3002:3000"
     volumes:
@@ -1105,6 +1379,11 @@ services:
       - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./grafana/provisioning/datasources:/tmp/datasources-template:ro
       - grafana_provisioning_datasources:/etc/grafana/provisioning/datasources
+      # Alerting: the rules and the policy tree are plain files; the contact point is a template
+      # because it carries a secret. Same split, and the same rendered-into-a-volume arrangement,
+      # as the datasource above.
+      - ./grafana/provisioning/alerting:/tmp/alerting-template:ro
+      - grafana_provisioning_alerting:/etc/grafana/provisioning/alerting
     # Renders the datasource template, then hands over to Grafana's own /run.sh.
     #
     # The placeholder is __DB_PASSWORD__ rather than ${DB_PASSWORD}, so this expression no longer
@@ -1119,11 +1398,11 @@ services:
       - -e
       - -c
       - |
-        if [ -z "$$DB_PASSWORD" ]; then
-          echo 'DB_PASSWORD must be set -- Grafana would otherwise provision the TimescaleDB datasource with an empty password.' >&2
+        if [ -z "$$BI_READER_PASSWORD" ]; then
+          echo 'BI_READER_PASSWORD must be set -- Grafana would otherwise provision the TimescaleDB datasource with an empty password. It is the password of the read-only powerbi_reader role created by timescaledb/roles.sql.' >&2
           exit 1
         fi
-        sed -e "s|__DB_PASSWORD__|$$DB_PASSWORD|g" \
+        sed -e "s|__BI_READER_PASSWORD__|$$BI_READER_PASSWORD|g" \
             /tmp/datasources-template/datasources.template.yml \
             > /etc/grafana/provisioning/datasources/datasources.yml
         # Comment lines excluded for the same reason as in supabase-kong-init: the template's own
@@ -1131,6 +1410,33 @@ services:
         if grep -vE '^[[:space:]]*#' /etc/grafana/provisioning/datasources/datasources.yml \
            | grep -qE '__[A-Z0-9_]+__'; then
           echo 'Grafana datasource config still contains unsubstituted placeholders.' >&2
+          exit 1
+        fi
+        # -----------------------------------------------------------------------------------
+        # Alerting. The plain files are COPIED and the contact point is RENDERED, so the volume
+        # ends up holding a complete provisioning directory either way.
+        #
+        # COPIED, NOT SYMLINKED OR MOUNTED OVER: the whole directory is one Grafana provisioning
+        # path, and mounting the repo copy read-only at that path would leave nowhere to write the
+        # rendered contact point. Rendering into the same volume keeps it one directory.
+        # -----------------------------------------------------------------------------------
+        if [ -z "$$GRAFANA_ALERT_WEBHOOK_SECRET" ]; then
+          echo 'GRAFANA_ALERT_WEBHOOK_SECRET must be set -- Grafana would otherwise provision the alert contact point with an empty bearer token, and grafana-alert-webhook would refuse every notification with 401 while the rules themselves looked healthy. Run: node scripts/setup.mjs' >&2
+          exit 1
+        fi
+        if [ -z "$$SUPABASE_ANON_KEY" ]; then
+          echo 'SUPABASE_ANON_KEY must be set -- it is what gets the alert webhook past Kong key-auth. Run: node scripts/setup.mjs' >&2
+          exit 1
+        fi
+        cp /tmp/alerting-template/policies.yaml /tmp/alerting-template/alert-rules.yaml \
+           /etc/grafana/provisioning/alerting/
+        sed -e "s|__GRAFANA_ALERT_WEBHOOK_SECRET__|$$GRAFANA_ALERT_WEBHOOK_SECRET|g" \
+            -e "s|__SUPABASE_ANON_KEY__|$$SUPABASE_ANON_KEY|g" \
+            /tmp/alerting-template/contact-points.template.yaml \
+            > /etc/grafana/provisioning/alerting/contact-points.yaml
+        if grep -vE '^[[:space:]]*#' /etc/grafana/provisioning/alerting/contact-points.yaml \
+           | grep -qE '__[A-Z0-9_]+__'; then
+          echo 'Grafana alert contact point still contains unsubstituted placeholders.' >&2
           exit 1
         fi
         exec /run.sh
@@ -1142,8 +1448,23 @@ volumes:
   pgdata:
   nodered_data:
   grafana_data:
+  # Holds the RENDERED alerting provisioning -- the copied rules and policy plus the contact point
+  # with its bearer secret substituted in. A volume rather than a bind mount for the same reason as
+  # grafana_provisioning_datasources: the rendered file carries a credential and must not be written
+  # back into the repository.
+  grafana_provisioning_alerting:
   grafana_provisioning_datasources:
   mosquitto_data:
+  # The broker's CA and its MQTTS leaf, issued by mosquitto-tls-init.
+  #
+  # A NAMED VOLUME BECAUSE THE ROOT MUST SURVIVE `docker compose down`. The CA is distributed by
+  # hand to every physical gateway's trust store; losing it does not fail loudly, it mints a new
+  # root on the next `up` and every appliance in the plant then rejects the broker while the stack
+  # reports itself healthy. Same reasoning as `helm.sh/resource-policy: keep` on the chart's
+  # credential Secret, and as internal-ca.yaml living outside the chart entirely.
+  #
+  # `docker volume rm <project>_mosquitto_certs` IS THEREFORE A FLEET-WIDE RE-ENROLMENT, not a reset.
+  mosquitto_certs:
   supabase_db_data:
   # /etc/postgresql-custom. Holds the pgsodium root key, WITHOUT WHICH every vault.secrets row in
   # supabase_db_data is undecryptable -- see the mount on supabase-db for the failure it prevents

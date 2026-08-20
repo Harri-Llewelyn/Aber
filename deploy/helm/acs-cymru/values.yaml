@@ -97,7 +97,7 @@ secrets:
   # `%u`, and that segment must be the gateway row's GENERATED `sparkplug_id` ('gwy' + the first
   # 21 hex characters of its UUID) or ingestion rejects the message. Both rows therefore have
   # pinned UUIDs, which is the only reason a credential can be issued before the row exists:
-  #   10000000-0000-4000-8000-000000000001 -> gwy100000000000400080000  (Virtual_Gateway_NodeRED)
+  #   10000000-0000-4000-8000-000000000001 -> gwy100000000000400080000  (retired simulator; see below)
   #   11000000-0000-4000-8000-000000000001 -> gwy110000000000400080000  (validate.py's gateway)
   # `acs-cymru.validateMqttPrincipals` fails the render rather than letting a friendly name
   # authenticate successfully and then have every publish silently dropped by the broker.
@@ -111,7 +111,12 @@ secrets:
   # enforce it, which is the control that cannot be argued with.
   mqttI3xUser: factoryplus_i3x
   mqttI3xPassword: ""
-  # The Node-RED demo gateway. An ordinary per-gateway credential.
+  # The RETIRED single-device simulator gateway. Migration 0020 deletes its gateway row, so a
+  # message published under this username is now refused by verify_gateway_binding(); the shipped
+  # flow connects as four per-cell gateways whose credentials `scripts/provision-gateways.mjs`
+  # issues. Kept because node-red-init applies it to the legacy `mqtt-broker-config` node, which
+  # survives on a Node-RED PVC created before the flow was consolidated -- dropping the account
+  # would turn a stale flow into a broker that refuses the connection outright.
   mqttSimulatorUser: gwy100000000000400080000
   mqttSimulatorPassword: ""
   # ingestion/validate.py's gateway. A FIXTURE -- a production install can leave this empty and
@@ -123,10 +128,54 @@ secrets:
   # load-bearing rather than optional.
   mqttMonitorUser: factoryplus_monitor
   mqttMonitorPassword: ""
+  # THE FOUR SIMULATED CELL GATEWAYS of the `Simulated Shopfloor` flow. One account each:
+  # mosquitto.acl pins the topic's edge-node segment to the connecting username, so four cells
+  # cannot share a connection and there is no shared principal to fall back on.
+  #
+  # NOT OPTIONAL WHILE THE SHIPPED FLOW DECLARES THEM. Each broker node names its pair through
+  # `acsCredentialsEnv`, and node-red-init fails closed on a declared pair it cannot find -- the
+  # init container exits 1 and Node-RED never starts, rather than the simulator quietly not
+  # publishing. Leave them empty only together with a flow that no longer declares them.
+  #
+  # The usernames are the `sparkplug_id`s of gateway rows seeded by migration 0002, matched
+  # verbatim by the ACL. They are frozen: `mqttGwAgvFleet*` now serves Cell 3 — Production KPIs,
+  # and was renamed in place precisely so this account and its telemetry history stayed valid.
+  mqttGwCncMachiningUser: gwy120000000000400080000
+  mqttGwCncMachiningPassword: ""
+  mqttGwRoboticAssemblyUser: gwy130000000000400080000
+  mqttGwRoboticAssemblyPassword: ""
+  mqttGwAgvFleetUser: gwy140000000000400080000
+  mqttGwAgvFleetPassword: ""
+  mqttGwFacilityBmsUser: gwy150000000000400080000
+  mqttGwFacilityBmsPassword: ""
+  # The bearer token supabase-functions presents to the gateway-credential sidecar, which is the only
+  # thing that may add an account to the broker's password file.
+  #
+  # ITS OWN VALUE, never shared with another secret. That service can mint a credential for any edge
+  # node, and mosquitto.acl turns an account into the ability to publish Sparkplug telemetry as that
+  # gateway -- so a token reused elsewhere means one leak grants forgery across the site. The service
+  # REFUSES TO START if it is shorter than 32 characters; `npm run setup` generates one for Compose.
+  mqttCredentialServiceToken: ""
 
   grafanaAdminUser: admin
   grafanaAdminPassword: ""
   grafanaOAuthClientSecret: ""
+  # Grafana -> grafana-alert-webhook. Its own value, shared with nothing: this exists precisely so
+  # Grafana is not handed the service-role key, and reusing another secret here would mean one leak
+  # reopens the authority it was created to withhold.
+  grafanaAlertWebhookSecret: ""
+
+  # The read-only historian role external BI tools connect as -- and the role GRAFANA connects as,
+  # replacing the `postgres` superuser it used to hold. Created on the TimescaleDB instance by
+  # timescaledb/roles.sql, which the maintenance Job applies after the rollups it grants on.
+  #
+  # EMPTY MEANS NO ROLE, not a role with a blank password: roles.sql skips it entirely. With
+  # Grafana enabled the render fails instead, because a Grafana that cannot authenticate reports
+  # a database fault rather than a missing setting -- see acs-cymru.validateSecrets.
+  #
+  # It may SELECT telemetry_1m / 5m / 1h and is explicitly revoked on raw `telemetry`, `assets`
+  # and `telemetry_latest`. Setting it here rotates the password on the next install or upgrade.
+  biReaderPassword: ""
 
   noderedCredentialSecret: ""
   noderedOAuthClientSecret: ""
@@ -221,6 +270,10 @@ timescaledb:
     oneMinuteRetainFor: "180 days"
     fiveMinuteRetainFor: "1 year"
     oneHourRetainFor: "5 years"
+  # The read-only BI role's password is a CREDENTIAL and lives under `secrets.biReaderPassword`
+  # with the others, not here -- anything under `secrets` is covered by `secrets.existingSecret`,
+  # and a password declared in this block would quietly bypass that whole mechanism in production.
+  # What the role may read is described in timescaledb/roles.sql.
   resources:
     requests:
       cpu: 100m
@@ -406,6 +459,26 @@ supabaseFunctions:
   verifyJwt: false
   # AAS export. These MUST be declared on this service, not only in a values file: an edge worker
   # isolate sees nothing but the variables main/index.ts forwards to it.
+  # ===============================================================================================
+  # Physical gateway enrolment addresses (enroll-gateway, gateway-bundle)
+  # ===============================================================================================
+  # WHAT AN APPLIANCE DIALS, which is never what this cluster dials. SUPABASE_PUBLIC_URL is derived
+  # from global.publicBaseDomain automatically; only the broker's address needs stating, and only
+  # when it differs from the `mqtt.` subdomain the chart already derives for the external broker.
+  #
+  # BOTH FUNCTIONS REFUSE RATHER THAN GUESS: gateway-bundle answers 503 and mints no token if the
+  # public URL is in-stack, and enroll-gateway answers 503 WITHOUT CONSUMING THE TOKEN if the broker
+  # host is. A wrong value here would otherwise produce appliances that enrol perfectly and then
+  # connect to nothing, which is the hardest version of this failure to diagnose.
+  #
+  # THE ADDRESS MUST ALSO BE IN THE BROKER CERTIFICATE'S SAN -- see mosquitto.tls.extraSans. A
+  # certificate that does not name it fails verification at every appliance while in-cluster clients
+  # verify perfectly, so the stack reports itself healthy and the fleet is silently off.
+  gatewayEnrolment:
+    # Empty = the `mqtt.<publicBaseDomain>` host the chart already derives.
+    mqttPublicHost: ""
+    mqttPublicTlsPort: 8883
+
   aas:
     # Namespaces every globalAssetId and submodel id the shell carries, so it has to name the
     # organisation publishing the document.
@@ -434,6 +507,17 @@ supabaseStorage:
   replicas: 1
   bucket: asset-3d-models
   fileSizeLimit: 52428800
+  # The PRIVATE bucket holding Node-RED flow backups from physical gateway appliances, stored under
+  # <sparkplug_id>/. Created by the storage-init Job alongside the one above.
+  #
+  # THE NAME MUST MATCH supabase/storage-policies.sql, which grants read to Administrator,
+  # Shopfloor_Manager and Auditor and write to the first two only. A bucket with no policies is
+  # invisible to every browser-facing role, and a policy naming a bucket that was never created is
+  # dead text -- neither errors, which is why these are kept in step by hand.
+  gatewayBackupBucket: gateway-backups
+  # Its own limit, deliberately not fileSizeLimit: that one is sized for 3D geometry, and a
+  # flows.json anywhere near 50 MiB is not a flow.
+  gatewayBackupFileSizeLimit: 5242880
   # file | s3. s3 (MinIO or cloud) is the better production answer and removes the single-writer
   # constraint; file is the default. See docs/kubernetes-architecture.md §4.4 and §11.
   backend: file
@@ -530,6 +614,25 @@ initJobs:
   ttlSecondsAfterFinished: 3600
 
 # ---------------------------------------------------------------------------------------------
+# db-init -- the image that CARRIES THE SCHEMA
+# ---------------------------------------------------------------------------------------------
+# supabase/postgres with supabase/migrations/*.sql copied into /migrations. It exists because the
+# chain cannot reach a cluster through the chart: a ConfigMap is capped at 1 MiB, and Helm's release
+# Secret has the same cap while holding those bytes twice over. See supabase/db-init/Dockerfile.
+#
+# THE TAG IS EMPTY, which resolves to Chart.AppVersion -- the marker for an image this repository
+# builds and publishes. check-image-tag-parity.mjs reads exactly that to decide which images must
+# appear in release.yml and ci.yml, so pinning a tag here quietly removes it from the release.
+#
+# PINNING IT TO AN OLDER VERSION IS A SCHEMA ROLLBACK, not a runtime one. That is the cost of this
+# arrangement, stated where someone would do it: the migrations travel with the image now.
+dbInit:
+  image:
+    repository: ghcr.io/harri-llewelyn/acs-cymru/db-init
+    tag: ""
+    pullPolicy: IfNotPresent
+
+# ---------------------------------------------------------------------------------------------
 # Messaging
 # ---------------------------------------------------------------------------------------------
 mosquitto:
@@ -579,8 +682,9 @@ mosquitto:
       requests: { cpu: 10m, memory: 16Mi }
       limits: { memory: 64Mi }
   # Per-gateway credentials live in a Secret so they are reviewable, backed-up state rather than
-  # something typed into a running container. See `credentialSecret` below and
-  # scripts/mosquitto-provision-gateway.mjs.
+  # something typed into a running container. See `credentialSecret` below,
+  # scripts/mosquitto-provision-gateway.mjs (the operator path) and `gatewayCredential` at the
+  # bottom of this file (the automated enrolment path).
   credentials:
     # Name of the Secret holding the hashed `password_file`. The chart CREATES IT EMPTY if absent
     # and never overwrites an existing one -- otherwise every `helm upgrade` would delete every
@@ -825,6 +929,11 @@ frontend:
   # and edge function then refuses them -- an account that signs in and can do nothing reads as a
   # broken deployment rather than a closed one.
   allowSignup: false
+  #
+  # THERE IS DELIBERATELY NO `grafanaUrl` HERE. The dashboard's "View in Grafana" links on an active
+  # alert are built from `publicUrls.grafana` (falling back to grafana.<publicBaseDomain>) -- the same
+  # helper Grafana's own root_url and its OAuth redirect_uris come from. A second value would let the
+  # link and the login point at different origins, and only one of those two failures is visible.
   resources:
     requests: { cpu: 10m, memory: 32Mi }
     limits: { memory: 128Mi }
@@ -839,7 +948,7 @@ grafana:
     # Pinned, unlike Compose's `:latest`. grafana.ini depends on behaviour that has moved between
     # releases -- `use_pkce`, `auth_style`, and the env-override mapping this chart relies on to
     # replace auth_url without editing the file.
-    tag: "11.6.1"
+    tag: "13.1.3"
     pullPolicy: IfNotPresent
   persistence:
     enabled: true
@@ -974,6 +1083,34 @@ telemetry:
     #  release: kube-prometheus-stack
     interval: 30s
     scrapeTimeout: 10s
+
+# ===============================================================================================
+# Broker credential-issuing service
+# ===============================================================================================
+# The narrow authority the enroll-gateway edge function calls to mint a gateway's Mosquitto account.
+#
+# IT RUNS AS A SIDECAR IN THE BROKER'S POD, not as a Deployment of its own -- Mosquitto re-reads its
+# password file only on SIGHUP, and a signal cannot cross a PID namespace. See the container block in
+# templates/messaging/mosquitto.yaml, and templates/messaging/gateway-credential.yaml for its
+# ServiceAccount, Role, Service and script ConfigMap.
+#
+# DISABLING IT does not break anything already enrolled -- existing credentials live in the Secret
+# and the broker keeps serving them. It removes the ability to enrol a NEW physical gateway without
+# an operator running scripts/mosquitto-provision-gateway.mjs by hand, which remains supported and
+# is the only path on a cluster where you would rather not run this at all.
+gatewayCredential:
+  enabled: true
+  image:
+    repository: ghcr.io/harri-llewelyn/acs-cymru/gateway-credential
+    # EMPTY = built here, resolved from Chart.appVersion. Built FROM eclipse-mosquitto so it carries
+    # the broker's own mosquitto_passwd -- the hash has to be readable by the mosquitto that will
+    # verify it, and a reimplementation produces a file that looks right and refuses every login.
+    tag: ""
+    pullPolicy: IfNotPresent
+  port: 9010
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 96Mi }
 
 networkPolicy:
   enabled: false

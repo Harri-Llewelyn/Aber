@@ -31,9 +31,30 @@
  * ------------------------------------------------------------------------------------------------
  */
 import { execFileSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
-const GATEWAY_ID_PATTERN = /^gwy[0-9a-f]{21}$/;
+// ------------------------------------------------------------------------------------------------
+// THE MERGE LIVES IN A LIBRARY NOW, shared with scripts/gateway-credential-service.mjs.
+//
+// This script and that service both add accounts to the same password file, from different places
+// and over different transports. What they must not differ on is which lines survive -- so the
+// merge, the id and password validation, and the hashing fragment are imported rather than
+// duplicated. See that file's header for why the merge in particular is the part worth centralising.
+//
+// The TRANSPORTS stay here: `docker exec` and `kubectl` are how an OPERATOR reaches a broker, and
+// the service (which runs beside the broker and holds a ServiceAccount token) cannot use either.
+// ------------------------------------------------------------------------------------------------
+import {
+  GATEWAY_ID_PATTERN,
+  assertEntry,
+  assertSafePassword,
+  generatePassword,
+  hashScript,
+  mergeCredential,
+} from './lib/mosquitto-credentials.mjs';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // --- Compose backend -------------------------------------------------------------------------
 const CONTAINER = process.env.MOSQUITTO_CONTAINER || 'acs-cymru_mosquitto';
@@ -79,7 +100,20 @@ if (!GATEWAY_ID_PATTERN.test(sparkplugId)) {
 
 // 32 bytes of base64url. Long enough that the credential is not the weak link, and free of
 // shell-hostile characters so it can be pasted into a gateway config without quoting games.
-const password = suppliedPassword || randomBytes(24).toString('base64url');
+const password = suppliedPassword || generatePassword();
+
+// A SUPPLIED PASSWORD IS NOW HELD TO THE SAME ALPHABET, and that is a deliberate tightening rather
+// than an incidental one. This value is interpolated into single-quoted shell fragments on both
+// backends (hashScript below, and the exec reload), so a quote in it would end the quoted string
+// and hand the remainder to the shell running inside the broker container. Nothing this repository
+// generates could ever trip it -- provision-gateways.mjs mints base64url -- but a hand-typed
+// password could, which is exactly the case worth refusing.
+try {
+  assertSafePassword(password);
+} catch (err) {
+  console.error(err.message);
+  process.exit(2);
+}
 
 const run = (cmd, argv, opts = {}) =>
   execFileSync(cmd, argv, { stdio: ['ignore', 'pipe', 'inherit'], encoding: 'utf8', ...opts });
@@ -145,14 +179,10 @@ function brokerPod() {
  * work only if they happened to have a compatible mosquitto installed at a compatible version.
  */
 function hashedEntry(pod) {
-  const script = [
-    'set -e',
-    'tmp=$(mktemp)',
-    // -c: this scratch file holds ONE account. The real merge happens in the Secret, below.
-    `mosquitto_passwd -b -c "$tmp" '${sparkplugId}' '${password}'`,
-    'cat "$tmp"',
-    'rm -f "$tmp"',
-  ].join('; ');
+  // hashScript() applies `-c` to a scratch file holding ONE account, which is the only place `-c`
+  // is ever correct. The real merge happens in the Secret, below. Shared with the enrolment
+  // service so the two cannot drift on that detail.
+  const script = hashScript(sparkplugId, password);
   return run('kubectl', ['-n', NAMESPACE, 'exec', pod, '-c', 'mosquitto', '--', '/bin/sh', '-c', script]).trim();
 }
 
@@ -272,18 +302,29 @@ function provisionK8s() {
     console.error(`Failed to hash the credential in pod '${pod}': ${err.message}`);
     process.exit(1);
   }
-  if (!entry.startsWith(`${sparkplugId}:`)) {
-    console.error(`Unexpected mosquitto_passwd output; refusing to write it:\n  ${entry}`);
+  // Shape-checked before it goes anywhere near the Secret: an error message or an empty string
+  // merged in as though it were an account produces a file the broker rejects WHOLESALE, taking
+  // every other gateway down with it.
+  try {
+    entry = assertEntry(entry, sparkplugId);
+  } catch (err) {
+    console.error(`Unexpected mosquitto_passwd output; refusing to write it:\n  ${err.message}`);
     process.exit(1);
   }
 
-  // Replace an existing line for this gateway rather than appending -- see writeSecret().
+  // Replace an existing line for this gateway rather than appending -- see writeSecret(). The merge
+  // is the shared one, so its truncation guard applies here too: it throws rather than returning
+  // contents that would lose an account.
   const existing = readSecret();
-  const kept = existing
-    .split('\n')
-    .filter((line) => line.trim() && !line.startsWith(`${sparkplugId}:`));
-  const replaced = kept.length !== existing.split('\n').filter((l) => l.trim()).length;
-  const contents = `${[...kept, entry].join('\n')}\n`;
+  let contents;
+  let replaced;
+  let accounts;
+  try {
+    ({ contents, replaced, accounts } = mergeCredential(existing, entry));
+  } catch (err) {
+    console.error(`Refusing to write Secret ${NAMESPACE}/${SECRET_NAME}: ${err.message}`);
+    process.exit(1);
+  }
 
   try {
     writeSecret(contents);
@@ -293,7 +334,7 @@ function provisionK8s() {
   }
   console.log(
     `${replaced ? 'Replaced' : 'Added'} '${sparkplugId}' in Secret ${NAMESPACE}/${SECRET_NAME} ` +
-    `(${kept.length + 1} gateway account(s) total).`
+    `(${accounts.length} gateway account(s) total).`
   );
 
   const { method, disruptive } = reload(pod);

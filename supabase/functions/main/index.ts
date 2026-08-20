@@ -56,6 +56,41 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // No service-role key: it makes no privileged database write.
   "deploy-nodered": ["NODERED_URL", "NODERED_ADMIN_TOKEN", "NODERED_FLOW_JSON"],
 
+  // Physical gateway enrolment. THE ONLY FUNCTION HERE WITH NO USER, by construction: the caller is
+  // an appliance holding a single-use token, and possession of that token is the authorisation. It
+  // holds the service-role key because the token table is reachable by nothing else (RLS on, no
+  // policies), and the credential service's bearer token because minting the broker account is the
+  // point. Both are narrow: the token is short-lived and bound to one gateway, and the credential
+  // service can only add an account to a password file.
+  //
+  // MQTT_PUBLIC_HOST is here because the response tells an appliance where to connect, and that
+  // address cannot be derived from SUPABASE_URL -- inside this network that is supabase-kong, which
+  // resolves for nothing on a shopfloor.
+  "enroll-gateway": [
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "MQTT_CREDENTIAL_SERVICE_URL",
+    "MQTT_CREDENTIAL_SERVICE_TOKEN",
+    "MQTT_PUBLIC_HOST",
+    "MQTT_PUBLIC_TLS_PORT",
+  ],
+
+  // Packages the physical gateway bootstrap bundle as a ZIP.
+  //
+  // NO SERVICE-ROLE KEY, and that is the design rather than an omission. It reads the gateway and
+  // mints the enrolment token AS THE CALLER -- issue_gateway_enrollment_token() is SECURITY
+  // DEFINER and checks has_role() itself -- so this endpoint cannot produce a bundle for a gateway
+  // its caller could not have produced one for. The template files arrive through the environment
+  // because an edge worker cannot read the image's filesystem; SUPABASE_PUBLIC_URL is the address
+  // the APPLIANCE will dial, which cannot be derived from the in-network SUPABASE_URL.
+  "gateway-bundle": [
+    "SUPABASE_PUBLIC_URL",
+    "GW_BUNDLE_COMPOSE",
+    "GW_BUNDLE_DOCKERFILE",
+    "GW_BUNDLE_BOOTSTRAP",
+    "GW_BUNDLE_FLOWS",
+    "GW_BUNDLE_README",
+  ],
+
   // Composes an AAS shell. Needs the service-role key to read across the tables a shell
   // aggregates, plus the identifiers and endpoints the document embeds.
   "aas-export": [
@@ -65,6 +100,22 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "AAS_MODEL_PUBLIC_BASE",
     "AAS_MAX_BUNDLED_MODEL_BYTES",
     "STORAGE_MODEL_BUCKET",
+  ],
+
+  // Records a Grafana alert notification in public.device_alerts.
+  //
+  // TWO KEYS, AND THE ASYMMETRY IS THE WHOLE DESIGN. It holds the service-role key because it
+  // writes to a table whose only write policy is service_role -- but the CALLER never sees that
+  // key. Grafana presents GRAFANA_ALERT_WEBHOOK_SECRET, this function verifies it, and only then
+  // does it use its own privileged client. Giving Grafana the service-role key directly would hand
+  // a browser-SSO-fronted service the credential that bypasses RLS and can rewrite
+  // digital_thread -- the same shape as the `postgres` datasource credential that was removed.
+  //
+  // The secret must be listed here or the worker starts without it, and the function then answers
+  // 503 to every notification: envForFunction() forwards ONLY what this registry names.
+  "grafana-alert-webhook": [
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "GRAFANA_ALERT_WEBHOOK_SECRET",
   ],
 
   // Resolves a role from public.user_roles for Grafana's OIDC `api_url`.

@@ -60,10 +60,16 @@
 # at the application tier even if the broker allowed it.
 #
 # That is also what makes a pre-provisioned credential possible for something that creates its
-# gateway at runtime: pin the UUID and the wire identity is known in advance. Two rows do exactly
-# that -- `Virtual_Gateway_NodeRED` (10000000-…-0001 -> gwy100000000000400080000, seeded by
-# 0002_seed_data.sql) and the validator's gateway (11000000-…-0001 ->
+# gateway at runtime: pin the UUID and the wire identity is known in advance. Every gateway on this
+# stack does exactly that -- `Sim_Gateway_Cell1_Machining` (12000000-…-0001 ->
+# gwy120000000000400080000, seeded by 0002_seed_data.sql and provisioned along with the other three
+# cells by scripts/provision-gateways.mjs) and the validator's gateway (11000000-…-0001 ->
 # gwy110000000000400080000, upserted by ingestion/validate.py).
+#
+# `gwy100000000000400080000` is still in the password file and is NOT in this list on purpose: it
+# belonged to the retired single-device simulator, whose gateway row 0020 deletes. It needs no rule
+# of its own -- the `%u` pattern above already confines it -- and it is kept only so a pre-existing
+# Node-RED volume can still connect. Nothing on a current stack publishes under it.
 #
 # Read is granted on the same subtree so a gateway can receive its own Sparkplug command
 # topics (NCMD/DCMD) -- and, deliberately, on nothing else: one gateway has no business

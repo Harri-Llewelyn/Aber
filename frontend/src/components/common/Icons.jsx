@@ -1,5 +1,58 @@
 import React from 'react'
 
+// =================================================================================================
+// Cell icons -- the closed set `cells.icon` may hold (migration 0021).
+//
+// KEPT IN STEP WITH THE CHECK CONSTRAINT BY HAND, and that is deliberate rather than lazy: a value
+// the database accepts and this file cannot render is a cell that draws nothing, so adding one is
+// meant to be two edits. CELL_ICONS below is the single place both the picker and every renderer
+// resolve through, so there is no third list to forget.
+// =================================================================================================
+
+export const IconBot = ({ size = 16, className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M12 8V4H8" />
+    <rect width="16" height="12" x="4" y="8" rx="2" />
+    <path d="M2 14h2" /><path d="M20 14h2" />
+    <path d="M15 13v2" /><path d="M9 13v2" />
+  </svg>
+)
+
+export const IconCircuitBoard = ({ size = 16, className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <rect width="18" height="18" x="3" y="3" rx="2" />
+    <path d="M11 9h4a2 2 0 0 0 2-2V3" />
+    <circle cx="9" cy="9" r="2" />
+    <path d="M7 21v-4a2 2 0 0 1 2-2h4" />
+    <circle cx="15" cy="15" r="2" />
+  </svg>
+)
+
+export const IconGauge = ({ size = 16, className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="m12 14 4-4" />
+    <path d="M3.34 19a10 10 0 1 1 17.32 0" />
+  </svg>
+)
+
+export const IconBuilding2 = ({ size = 16, className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" />
+    <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" />
+    <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" />
+    <path d="M10 6h4" /><path d="M10 10h4" /><path d="M10 14h4" /><path d="M10 18h4" />
+  </svg>
+)
+
+export const IconTruck = ({ size = 16, className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2" />
+    <path d="M15 18H9" />
+    <path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14" />
+    <circle cx="17" cy="18" r="2" /><circle cx="7" cy="18" r="2" />
+  </svg>
+)
+
 export const IconCog = ({ size = 16, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <circle cx="12" cy="12" r="3" />
@@ -63,6 +116,21 @@ export const IconAlertTriangle = ({ size = 16, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
     <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+  </svg>
+)
+
+/**
+ * The CRITICAL counterpart to IconAlertTriangle.
+ *
+ * Two glyphs rather than one recoloured triangle, because a colour difference is the whole signal
+ * otherwise -- and these render at 11px in a table cell beside a status badge, which is exactly the
+ * size and the context where red-versus-amber stops being reliable. A circle reads as a distinct
+ * mark at a glance; the same triangle in a different fill does not.
+ */
+export const IconAlertCircle = ({ size = 16, className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <circle cx="12" cy="12" r="10" />
+    <line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
   </svg>
 )
 

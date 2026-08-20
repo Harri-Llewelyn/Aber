@@ -390,7 +390,7 @@ paths:
                 success: true
                 results:
                   - success: true
-                    elementId: dev200000000000400080000
+                    elementId: dev220000000000400080000
                     result:
                       isComposition: false
                       value:
@@ -862,8 +862,8 @@ components:
             The platform's `sparkplug_id` — immutable and on the wire. i3X requires an
             elementId that is unique *and persistent*, which `name` is not: it is a freely
             editable display label.
-          example: dev200000000000400080000
-        displayName: { type: string, example: Simulated_CNC_01 }
+          example: dev220000000000400080000
+        displayName: { type: string, example: Sim_CNC_Mill_01 }
         typeElementId: { type: string }
         parentId:
           type: string
@@ -900,7 +900,7 @@ components:
             items: { type: string }
           example:
             HasParent: [i3x:unassigned]
-            ConnectsVia: [gwy100000000000400080000]
+            ConnectsVia: [gwy120000000000400080000]
 
     ValueResult:
       type: object

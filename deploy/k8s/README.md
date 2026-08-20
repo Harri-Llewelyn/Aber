@@ -390,11 +390,13 @@ kubectl -n acs-cymru logs job/acs-cymru-e2e-validate
 - **`validate.py`** — the same 20 checks CI runs against Compose. In-cluster it needs **no host or
   port overrides at all**: the Service names *are* the correct configuration, which makes this the
   simpler of the two topologies.
-- **`test_aas_export.py`** — starts automatically once the first Job completes. The ordering is a
-  **data dependency**, enforced by an initContainer inside the Job rather than by the order you run
-  things: `validate.py` is what approves `Simulated_CNC_01` out of quarantine and records its birth
-  parameters, which is what gives the Nameplate submodel anything to carry. Run first, its live
-  checks skip themselves and report success — silently.
+- **`test_aas_export.py`** — starts automatically once the first Job completes, ordered by an
+  initContainer inside the Job rather than by the order you run things. Its subject, `Sim_CNC_Mill_01`,
+  is **seeded** — registered by migration `0002` and given its schema and IDTA nameplate by `0020` —
+  so it needs no simulator to have published and no operator to have approved anything. The ordering
+  is now only to avoid running a conformance suite against a stack whose conformance run failed.
+  Note its live checks **skip themselves and report success** when the device is absent, which is
+  why CI asserts on the absence of the skip line rather than on the Job's exit status.
 
 Both need the **`acs-cymru/test-runner`** image (`tests/Dockerfile`). It extends the ingestion image
 with `jsonschema` and the AAS suite; jsonschema is deliberately *not* in the production ingestion
@@ -480,6 +482,24 @@ docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
 # resolvable at build time, which is the ordering problem release.yml's build-ingestion-chain
 # exists to work around, and one more independent image is cheaper than one more constraint.
 docker build -f i3x/Dockerfile                  -t $NS/i3x-service:$V .
+
+# Broker credential-issuing sidecar — context is gateway-credential/, and the image is built FROM
+# eclipse-mosquitto so it carries the broker's own mosquitto_passwd. That is not incidental: the
+# `$7$` hash has to be readable by the mosquitto that will verify it, and a reimplementation
+# produces a password file that looks correct and refuses every login with nothing logged at either
+# end. The service's own code is NOT baked in — the chart mounts it from a ConfigMap.
+docker build -f gateway-credential/Dockerfile   -t $NS/acs-cymru-gateway-credential:$V gateway-credential
+
+# db-init — THE SCHEMA, baked in. supabase/postgres with supabase/migrations/*.sql copied to
+# /migrations; context is supabase/, where that directory lives. It exists because the chain cannot
+# travel in the chart: a ConfigMap is capped at 1 MiB, which forced it to be gzipped, and Helm's
+# release Secret has the same cap while holding those bytes TWICE -- as chart files and again
+# base64-encoded into the rendered ConfigMap, neither copy compressible. Satisfying one limit broke
+# the other. See supabase/db-init/Dockerfile for the measurements.
+#
+# ITS TAG IS THE DATABASE VERSION. Deploying an older one replays an older schema chain, which is a
+# rollback rather than a runtime downgrade.
+docker build -f supabase/db-init/Dockerfile      -t $NS/db-init:$V supabase
 
 # Conformance test runner (only needed for e2e.enabled=true). EXTENDS the ingestion image, so build
 # that first: it adds jsonschema and the AAS suite in a repo-shaped layout. jsonschema is deliberately

@@ -290,8 +290,20 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       # Lets the reload sidecar signal the broker process. Without it the sidecar sees only its own
-      # PID namespace and `kill -HUP` has nothing to address.
+      # PID namespace and `kill -HUP` has nothing to address. The gateway-credential sidecar depends
+      # on the same property, and for the same reason.
       shareProcessNamespace: true
+      {{- if .Values.gatewayCredential.enabled }}
+      serviceAccountName: {{ printf "%s-gateway-credential" $fullname }}
+      {{/*
+        OFF AT THE POD LEVEL, ON FOR ONE CONTAINER. The default mounts the ServiceAccount token into
+        EVERY container, which would give the broker and the metrics exporter a token that can patch
+        the credential Secret -- authority neither has any use for, in containers that are the two
+        most exposed things in this pod (one terminates every gateway connection, the other serves
+        HTTP). The token is projected into the gateway-credential container alone; see `volumes`.
+      */}}
+      automountServiceAccountToken: false
+      {{- end }}
       # M5. eclipse-mosquitto runs as uid/gid 1883.
       securityContext:
         {{- toYaml .Values.mosquitto.podSecurityContext | nindent 8 }}
@@ -586,6 +598,87 @@ spec:
           resources:
             requests: { cpu: 10m, memory: 16Mi }
             limits: { memory: 64Mi }
+        {{- if .Values.gatewayCredential.enabled }}
+        {{/*
+          =========================================================================================
+          The credential-issuing service.
+
+          A SIDECAR IN THIS POD, NOT A DEPLOYMENT OF ITS OWN, and the reason is the same one that
+          put the reload sidecar here: Mosquitto re-reads its password file only on SIGHUP, and a
+          signal cannot cross a PID namespace. `shareProcessNamespace: true` is already set above,
+          so a container here can apply a new credential to the RUNNING broker immediately. A
+          separate Deployment could patch the Secret and then wait 60-90 seconds for the kubelet to
+          sync the projected volume -- during which a freshly enrolled gateway is refused with
+          nothing to distinguish "not synced yet" from "wrong password". That is the M1 problem the
+          provisioning script already forces its way around, and re-creating it for the automated
+          enrolment path would be worse: an appliance has no engineer watching it to retry.
+
+          It is the exact counterpart of the Compose service's `pid: "service:mosquitto"`.
+
+          THE SECRET IS STILL THE SOURCE OF TRUTH and is written FIRST, through the Kubernetes API.
+          The local write is an acceleration of a change already committed, never a substitute --
+          a pod rescheduled between the two steps comes back holding the credential.
+
+          IT HOLDS A SERVICEACCOUNT TOKEN, AND ONLY THIS CONTAINER DOES. The pod sets
+          `automountServiceAccountToken: false` and the token is projected into this container
+          alone, so the broker and the exporter cannot reach the API server at all. The Role behind
+          it permits `get` and `patch` on ONE Secret, by name.
+          =========================================================================================
+        */}}
+        - name: gateway-credential
+          image: {{ include "acs-cymru.image" (dict "ctx" . "image" .Values.gatewayCredential.image) | quote }}
+          imagePullPolicy: {{ .Values.gatewayCredential.image.pullPolicy }}
+          securityContext:
+            # Root, for the same two reasons as the reload sidecar: it writes a file owned by uid
+            # 1883 at mode 0600, and it signals a process running as 1883.
+            runAsUser: 0
+          command: ["node", "/scripts/gateway-credential-service.mjs"]
+          env:
+            - name: CREDENTIAL_TARGET
+              value: k8s
+            - name: MQTT_CREDENTIAL_SERVICE_PORT
+              value: {{ .Values.gatewayCredential.port | quote }}
+            - name: MOSQUITTO_SECRET
+              value: {{ .Values.mosquitto.credentials.secretName | quote }}
+            - name: ACS_CYMRU_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_CREDENTIAL_SERVICE_TOKEN" "secretName" $secretName "key" "MQTT_CREDENTIAL_SERVICE_TOKEN") | nindent 12 }}
+          ports:
+            - name: credential
+              containerPort: {{ .Values.gatewayCredential.port }}
+              protocol: TCP
+          readinessProbe:
+            # /healthz reports liveness and the configured target, never the state of the password
+            # file or which accounts exist. It is the one unauthenticated route.
+            httpGet:
+              path: /healthz
+              port: credential
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            # The assembled config directory the broker is actually reading. WRITABLE: this is the
+            # one container that may add an account.
+            - name: config
+              mountPath: /mosquitto/config
+            {{- if $tls.enabled }}
+            # The CA only, returned to an enrolling appliance so it can verify the broker. Read
+            # from the SAME projected Secret the broker serves from, so the two cannot drift --
+            # which is the whole reason this is read here rather than configured into an edge
+            # function. `tls.key` is in this Secret too; nothing in this container reads it.
+            - name: certs
+              mountPath: /mosquitto/certs
+              readOnly: true
+            {{- end }}
+            - name: credential-sa-token
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+          resources:
+            {{- toYaml .Values.gatewayCredential.resources | nindent 12 }}
+        {{- end }}
         {{- if .Values.mosquitto.metrics.enabled }}
         {{/*
           =========================================================================================
@@ -647,6 +740,49 @@ spec:
           secret:
             secretName: {{ .Values.mosquitto.credentials.secretName }}
             optional: true
+        {{- if .Values.gatewayCredential.enabled }}
+        {{/*
+          `items` WITH AN EXPLICIT PATH, not a bare configMap mount. The service does
+          `import ... from './lib/mosquitto-credentials.mjs'`, and a ConfigMap key cannot contain a
+          slash -- so the library is stored under a flat key and projected back into `lib/` here.
+          Mounted flat instead, the import resolves to a file that is not there and the container
+          crash-loops on ERR_MODULE_NOT_FOUND naming a path that exists in the repository.
+        */}}
+        - name: scripts
+          configMap:
+            name: {{ printf "%s-gateway-credential-scripts" $fullname }}
+            items:
+              - key: gateway-credential-service.mjs
+                path: gateway-credential-service.mjs
+              - key: mosquitto-credentials.mjs
+                path: lib/mosquitto-credentials.mjs
+        {{/*
+          THE TOKEN IS PROJECTED, NOT AUTOMOUNTED, so it exists in one container instead of all
+          four. `automountServiceAccountToken: false` on the pod turns the default off; this volume
+          is mounted only by the gateway-credential container above.
+
+          A PROJECTED TOKEN IS ALSO SHORT-LIVED AND ROTATED IN PLACE by the kubelet, unlike the
+          legacy Secret-backed kind. That is why the service re-reads it from disk on every API call
+          rather than caching it at boot -- a cached value expires while the process keeps running,
+          and every write then fails 401 hours after a healthy start.
+        */}}
+        - name: credential-sa-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        fieldPath: metadata.namespace
+        {{- end }}
         {{- if $tls.enabled }}
         # NOT optional. A missing certificate Secret must hold the pod in ContainerCreating with
         # `secret "mosquitto-tls" not found` on the pod's events -- which names the cause exactly.

@@ -4,41 +4,26 @@
 {{- $fullname := include "acs-cymru.fullname" . -}}
 ---
 {{/*
-The migrations and the seed, as ConfigMaps.
+The seed, as a ConfigMap.
 
-MIRRORED from supabase/migrations/ and supabase/seed.sql by scripts/sync-helm-chart-files.mjs --
-Helm cannot read outside its chart. CI runs that script with --check, and it also warns as the
-migrations approach the 1 MiB ConfigMap limit (they are ~396 KiB and only grow; 0002 alone is over
-200 KiB because it carries three generated reference vocabularies).
+MIRRORED from supabase/seed.sql by scripts/sync-helm-chart-files.mjs -- Helm cannot read outside its
+chart. CI runs that script with --check.
 
-supabase/migrations/archive/ is NOT included, and that is load-bearing rather than an oversight:
-those are the 38 pre-beta migrations, preserved as reasoning and deliberately never executed. The
-sync script does not recurse, which is what keeps them out.
+THE MIGRATIONS ARE NOT HERE ANY MORE. They are baked into the db-init image and read from its
+filesystem; supabase/db-init/Dockerfile carries the reasoning. In short: a ConfigMap cannot exceed
+1 MiB, which forced the chain to be gzipped -- and Helm's release Secret has the SAME 1 MiB ceiling
+while carrying those bytes twice, once as chart files and once base64-encoded into the rendered
+ConfigMap, neither copy compressible. Satisfying one limit broke the other, and no size of file
+satisfies both as the chain grows, because the same bytes are counted by each.
+
+THE SEED STAYS A ConfigMap. It is one small file, and it is the one an operator might legitimately
+replace at install time: demo accounts are a deployment choice, whereas the schema is not.
+
+COMPOSE IS UNAFFECTED and still bind-mounts supabase/migrations/ directly, which keeps a migration
+editable without a rebuild. Both targets now read the SAME source directory -- one mounts it, the
+other has it copied in by `COPY migrations/*.sql` -- so there is no mirrored copy left to drift and
+no sync check needed to prove there isn't.
 */}}
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ printf "%s-migrations" $fullname }}
-  labels:
-    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    # WEIGHT -5: the ConfigMaps must exist before the Job that mounts them. A hook resource
-    # created at the same weight as its consumer is a race that usually wins and occasionally
-    # does not.
-    "helm.sh/hook-weight": "-5"
-    "helm.sh/hook-delete-policy": before-hook-creation
-data:
-{{- $found := 0 }}
-{{- range $path, $bytes := .Files.Glob "files/migrations/*.sql" }}
-{{- $found = add1 $found }}
-  {{ base $path }}: |
-{{ $.Files.Get $path | indent 4 }}
-{{- end }}
-{{- if eq $found 0 }}
-{{- fail "\n\nacs-cymru: no migrations found at files/migrations/*.sql\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n\nFailing the render rather than installing an empty ConfigMap is deliberate: db-init would run,\nfind nothing to apply, exit 0, and every downstream service would then fail against a database\nwith no schema -- which reads as a dozen unrelated faults rather than as one missing step.\n" }}
-{{- end }}
----
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -96,8 +81,14 @@ spec:
         {{- end }}
       containers:
         - name: db-init
-          image: "{{ .Values.supabaseDb.image.repository }}:{{ .Values.supabaseDb.image.tag }}"
-          imagePullPolicy: {{ .Values.supabaseDb.image.pullPolicy }}
+          {{/*
+            THIS REPOSITORY'S OWN IMAGE, and the only reason it exists is to carry /migrations --
+            it is supabase/postgres with the chain copied in. check-image-tag-parity.mjs asserts
+            that base tag against the one Compose runs, because psql's client version is what parses
+            this SQL and a client older than the server mis-handles syntax the migrations rely on.
+          */}}
+          image: {{ include "acs-cymru.image" (dict "ctx" . "image" .Values.dbInit.image) | quote }}
+          imagePullPolicy: {{ .Values.dbInit.image.pullPolicy }}
           env:
             {{- include "acs-cymru.secretEnv" (dict "name" "PGPASSWORD" "secretName" $secretName "key" "POSTGRES_PASSWORD") | nindent 12 }}
             # TimescaleDB connection, handed to the migrations as psql variables so
@@ -140,6 +131,27 @@ spec:
               echo 'Configuring PostgreSQL search_path...'
               $PSQL -c 'ALTER ROLE postgres SET search_path TO auth, public, extensions;'
 
+              # -------------------------------------------------------------------------------
+              # THE MIGRATIONS ARE IN THE IMAGE, at /migrations, copied there by
+              # supabase/db-init/Dockerfile. No ConfigMap, no decompression, no scratch volume.
+              #
+              # STILL FAILS CLOSED on an empty directory. That is not paranoia about a mount that no
+              # longer exists: a mistyped COPY, a .dockerignore that grows an entry, or an image tag
+              # resolving to something older than the chart all produce a container with fewer
+              # migrations than the chart expects. Without this the loop below applies nothing,
+              # exits 0, and every downstream service then fails against a database with no schema
+              # -- which reads as a dozen unrelated faults rather than as one missing step.
+              # -------------------------------------------------------------------------------
+              COUNT=$(ls -1 /migrations/*.sql 2>/dev/null | wc -l)
+              if [ "$COUNT" -eq 0 ]; then
+                echo 'No migrations found at /migrations/*.sql in the db-init image.' >&2
+                echo 'That directory is baked in by supabase/db-init/Dockerfile; an image built' >&2
+                echo 'without it, or an older tag, is the usual cause. Check which tag resolved:' >&2
+                echo '  kubectl -n <ns> get job -l app.kubernetes.io/component=db-init -o jsonpath="{..image}"' >&2
+                exit 1
+              fi
+              echo "Found $COUNT migration(s) in the image."
+
               # ORDERING IS LEXICAL, matching docker-compose's `for f in /migrations/*.sql`. The
               # numeric prefixes are what make that correct; a migration added without one would
               # sort unpredictably against the rest.
@@ -171,9 +183,6 @@ spec:
 
               echo 'Supabase database initialized successfully.'
           volumeMounts:
-            - name: migrations
-              mountPath: /migrations
-              readOnly: true
             - name: seed
               mountPath: /seed
               readOnly: true
@@ -181,9 +190,6 @@ spec:
             requests: { cpu: 100m, memory: 128Mi }
             limits: { memory: 512Mi }
       volumes:
-        - name: migrations
-          configMap:
-            name: {{ printf "%s-migrations" $fullname }}
         - name: seed
           configMap:
             name: {{ printf "%s-seed" $fullname }}

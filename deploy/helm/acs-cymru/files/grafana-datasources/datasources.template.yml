@@ -7,13 +7,34 @@
 #     /etc/grafana/provisioning/datasources/datasources.yml, and Grafana runs its stock /run.sh
 #     with no entrypoint override at all. See docs/kubernetes-architecture.md §2.4.
 #
-# THE PLACEHOLDER IS `__DB_PASSWORD__`, not `${DB_PASSWORD}`. The shell form had to survive
-# Compose's own variable substitution AND sed's, which is what produced the barely-readable
-# `sed "s/\$${DB_PASSWORD}/$$DB_PASSWORD/g"` this replaces. `__UPPER_SNAKE__` needs no escaping in
-# either substituter and matches the convention kong.yml already uses.
+# THE PLACEHOLDER IS `__BI_READER_PASSWORD__`, not `${BI_READER_PASSWORD}`. The shell form had to
+# survive Compose's own variable substitution AND sed's, which is what produced the
+# barely-readable `sed "s/\$${DB_PASSWORD}/$$DB_PASSWORD/g"` this replaces. `__UPPER_SNAKE__`
+# needs no escaping in either substituter and matches the convention kong.yml already uses.
 #
 # The password is NOT committed here, for the same reason the Kong API keys are not: .env stays
 # the single source of truth, and the rendered file lands on an internal volume or in a Secret.
+#
+# ---------------------------------------------------------------------------------------------
+# GRAFANA CONNECTS AS `powerbi_reader`, NOT AS `postgres`.
+#
+# It used to hold the superuser credential, which meant a service fronted by browser SSO carried
+# the credential that owns the historian -- and a dashboard query with a typo could DROP a
+# hypertable. The role is created by timescaledb/roles.sql and may SELECT the three rollup views
+# and nothing else: raw `telemetry`, `assets` and `telemetry_latest` are explicitly revoked.
+#
+# THAT RESTRICTION HAS A CONSEQUENCE WORTH KNOWING BEFORE YOU EDIT A DASHBOARD. A panel querying
+# raw `telemetry` now fails with a permission error rather than returning rows. That is the
+# intended behaviour -- charting raw is what the rollups exist to avoid, and `telemetry_gapfill()`
+# is how a report-by-exception series is meant to be read -- but it is a real change in what a
+# dashboard author may write. Widen the grant in roles.sql deliberately if a panel genuinely needs
+# raw, rather than repointing this datasource back at the superuser.
+#
+# The provisioned dashboard already reads only the rollups, so nothing shipped here changes.
+#
+# `BI_READER_PASSWORD` EMPTY MEANS THE ROLE WAS NEVER CREATED, and Grafana will fail to connect
+# with "password authentication failed". That is the honest failure: the alternative is falling
+# back to the superuser, which is the thing this removed.
 apiVersion: 1
 
 datasources:
@@ -25,12 +46,12 @@ datasources:
     # both targets -- which is the point of keeping Kubernetes Service names the same as the
     # Compose service names.
     url: timescaledb:5432
-    user: postgres
+    user: grafana_reader
     database: postgres
     isDefault: true
     version: 2
     secureJsonData:
-      password: __DB_PASSWORD__
+      password: __BI_READER_PASSWORD__
     jsonData:
       database: postgres
       sslmode: disable

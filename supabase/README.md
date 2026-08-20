@@ -1,6 +1,6 @@
 # Supabase Backend
 
-Schema, row-level security, triggers, and the four edge functions. Supabase is the authoritative
+Schema, row-level security, triggers, and the seven edge functions. Supabase is the authoritative
 store for **asset metadata**; time-series telemetry lives in TimescaleDB and is reached through a
 foreign-data-wrapper view.
 
@@ -40,13 +40,48 @@ lexically, by whatever follows the number — which means the order is decided b
 naming and can change under a rename that looks purely cosmetic. Nothing fails, nothing logs; the
 ordering is simply not the one anybody chose.
 
-`scripts/check-docs-drift.mjs` asserts unique prefixes across **both** `supabase/migrations/` and
-the chart mirror at `deploy/helm/acs-cymru/files/migrations/`, and that the two directories hold
-the same set. `0006_nodered_oidc_auth.sql` was renumbered from `0003` for exactly this reason.
+`scripts/check-docs-drift.mjs` asserts unique prefixes across `supabase/migrations/`.
+`0006_nodered_oidc_auth.sql` was renumbered from `0003` for exactly this reason.
 
-> Renaming a migration means re-running `node scripts/sync-helm-chart-files.mjs`. It removes the
-> orphaned mirror copy; leaving it behind would replay one migration **twice, under two names**,
-> on the Kubernetes target only.
+### How the chain reaches each target
+
+**Compose bind-mounts this directory** at `/migrations` and applies the plain files, so a migration
+is editable without a rebuild.
+
+**Kubernetes gets them baked into an image.** `supabase/db-init/Dockerfile` is `supabase/postgres`
+with `COPY migrations/*.sql /migrations/`, and the db-init Job reads them from its own filesystem.
+The chart carries none of them.
+
+That is not the original design. They were mirrored into the chart, gzipped, to fit the **1 MiB
+ConfigMap limit** — an etcd object limit that fails at *apply* time with "Request entity too large",
+naming the ConfigMap rather than the file that grew. The chain is 878 KiB, 57% of it generated
+reference vocabulary, so compression was the obvious answer and it worked: 149 KiB.
+
+It broke the **other** 1 MiB limit. Helm stores a release as `base64(gzip(json(release)))` in a
+Secret with the same cap, and that release carries the migrations **twice** — once as chart files,
+once base64-encoded into the rendered ConfigMap. Gzipped bytes compress no further, so neither copy
+shrinks and base64 adds a third on top of each: 464 KB of a 1,213,920-byte release against a
+1,048,576 limit, and `helm install` failing with
+
+```
+Secret "sh.helm.release.v1.acs-cymru.v1" is invalid: data: Too long
+```
+
+which names the Secret and nothing about migrations. Un-gzipping is worse in both directions at
+once — 1,386,004 bytes in the release, and the ConfigMap back over its own limit at 1,255,337.
+
+**No size of file satisfies both limits as the chain grows**, because the same bytes are counted by
+each. Hence the image. Two consequences worth knowing:
+
+- **The db-init image tag is the schema version.** Pinning an older one replays an older chain,
+  which is a database rollback rather than a runtime downgrade.
+- **There is no mirrored copy left to drift**, so nothing needs a sync check to prove the two
+  targets agree: both read `supabase/migrations/`, one by mount and one by `COPY`.
+
+Squashing the chain was considered and rejected before either of these: 81% of the bytes are
+generated vocabulary and SQL statements that must survive verbatim, so the floor is ~703 KiB. The
+only thing a squash removes at scale is the migration headers, and in this repository those are the
+reasoning for every schema guard.
 
 ### Idempotency is not optional
 
@@ -156,6 +191,79 @@ asserting a human author for its own writes is exactly the claim it must not be 
 
 Once machine writes say so explicitly, `actor_source IS NULL` stops meaning "probably a heartbeat"
 and starts meaning **"we lost track of this"** — a reportable defect rather than the normal case.
+
+#### Verified after the fact
+
+Re-measured on the same topology (one simulated gateway, one device) against the shipped stack:
+
+| Window | `digital_thread` rows added | Traffic in the window |
+| :--- | ---: | :--- |
+| 7 min 6 s steady state | **0** | 14 heartbeats, 8 rebirths, 60 telemetry samples |
+
+175 rows/hour → **0**. The suppression is not sensitive to fleet size — it is evaluated per row, so
+the same measurement holds at 50 gateways.
+
+**The guard now has a test, which it did not before.**
+[`test_digital_thread_guard.py`](migrations/test_digital_thread_guard.py) pins both directions: the
+two non-events stay unlogged, and — the case a careless per-column implementation drops — a
+heartbeat that *also* carries a status change is still logged. `log_digital_thread_event()` is
+re-declared by three migrations (`0001`, `0003`, `0005`), all replayed on every boot with no ledger,
+so a fourth one omitting the suppression block would silently revert it and the only symptom would
+be the table quietly growing again.
+
+**One write the trigger cannot suppress, and the daemon now does.** Suppressing the *audit row* for
+an unchanged UPDATE does not suppress the *UPDATE*: it still costs a PostgREST round trip, a WAL
+record, and — because `devices` is `REPLICA IDENTITY FULL` and published to `supabase_realtime` — a
+full-row change event broadcast to every connected dashboard, once per device per rebirth.
+`process_dbirth()` therefore compares before writing, the same shape `record_declared_metrics()`
+already used. `gateways.last_heartbeat` is deliberately **not** deduplicated for the reason above:
+`public.gateway_status` derives staleness from it, so a suppressed heartbeat would report a live
+gateway as `STALE`.
+
+### Metric catalog standards seed (0018)
+
+`metric_catalog` is **curated, not accreted**: `ingestion.py` contains no reference to it at all,
+and the only insert path is the operator-facing form behind `POST /api/v1/metric-catalog`. Good
+property — but it means a mixed-standard fleet is registered by hand, one form at a time, and
+`name` is UNIQUE and IMMUTABLE, so the first row to claim a name owns it permanently along with
+whichever `standard` and `semantic_id` it was created with. Both flow into the AAS export and the
+i3X `sourceTypeId`.
+
+`0018` front-runs that for the demonstrator's metric set. Three properties worth knowing:
+
+- **Semantic ids are `SELECT`ed from the vocabulary tables, never typed.** Every row joins the
+  vocabulary for its standard, so a metric whose concept is not in the vocabulary is **not
+  inserted at all** rather than inserted with a guessed id — the inner join is the check. Retyping
+  would create a second, unverified copy of an identity `docs/vocabularies.md` confirmed against
+  machine-readable sources, and a typo would assert an interoperability that does not exist while
+  looking exactly like one that does.
+- **The taxonomy extends what `0002` seeded; it does not replace it.** One top-level segment per
+  standard, so a name cannot collide across standards by construction:
+
+  | Segment | Standard |
+  | :--- | :--- |
+  | `Axes/` `Controller/` `Systems/` | MTConnect 2.x |
+  | `MotionDevice/` `Machine/` | OPC 40010 Robotics |
+  | `Energy/` | OPC 40001-4 Machinery Energy |
+  | `BMS/` | ASHRAE 223P |
+  | `OEE/` | ISO 22400 |
+
+  The plan behind this migration proposed `KPI/` and `Robotics/`. Both were rejected on contact
+  with the existing catalog, which already uses `OEE/` and `MotionDevice/` — a parallel prefix
+  would mean two permanent names for one concept, which is the collision the naming plan exists to
+  prevent, arriving from the direction of the plan itself.
+- **Transliteration happens at authoring time, because it cannot happen later.** `0007` forbids
+  dots and hyphens, so the ASHRAE concept `Constituent-CO2` is registered as
+  `BMS/CO2_CONCENTRATION`. The join still uses the vocabulary's own unmodified key.
+
+**One inconsistency this surfaced and deliberately did not fix.** `0002`'s rows mint semantic ids
+*path-shaped* (`…/mtconnect/v2.0/Axes/C/ANGLE`) where `mtconnect_vocabulary` mints them
+*type-shaped* (`…/mtconnect/v2.0/DataItemType/ANGLE`). Both are under the locally-minted
+`acs-cymru.local` namespace, so neither asserts a false interoperability and neither is wrong —
+they are two conventions for the same thing, and `0002`'s predates the vocabulary tables.
+Reconciling them is deprecate-and-supersede with its own reasoning to write.
+`test_metric_catalog_seed.py` scopes its provenance assertions to the rows `0018` owns for exactly
+this reason.
 
 ### Metric name format (0007)
 
@@ -356,6 +464,28 @@ All fail closed: missing or unrecognised role ⇒ `403`.
 | [`grafana-userinfo`](functions/grafana-userinfo) | any mapped role | OIDC userinfo for Grafana SSO |
 | [`nodered-userinfo`](functions/nodered-userinfo) | any mapped role | The same lookup in Node-RED's permission vocabulary |
 | [`fplus-directory`](functions/fplus-directory) | any authenticated user | Factory+ Directory adapter — see below |
+| [`grafana-alert-webhook`](functions/grafana-alert-webhook) | **no Supabase role at all** | Records a Grafana alert in `device_alerts` — see below |
+
+### `grafana-alert-webhook` — the one that authorises on a shared secret
+
+Every other function above authenticates a *user* and resolves their role. This one has no user:
+Grafana is notifying, not somebody clicking. It authorises on `GRAFANA_ALERT_WEBHOOK_SECRET` and then
+writes with its own service-role client.
+
+**Grafana is deliberately not given the service-role key.** That key bypasses RLS entirely and can
+rewrite `digital_thread`, and this stack has already corrected the same shape once — Grafana used to
+reach the historian as the `postgres` superuser, and the fix was the read-only `grafana_reader` role.
+A service fronted by browser SSO gets the narrowest credential that does its job, which here is
+"record an alert". Same arrangement as `nodered_webhook_jwt_secret` for the quarantine webhook, in the
+opposite direction.
+
+**The check fails closed.** An unset secret answers `503`, never `200` — otherwise a missing
+environment variable would turn `Bearer ` into a match and the endpoint into an unauthenticated write
+path. The edge runtime boots with `VERIFY_JWT="false"` because each function authorises itself, so
+this is the only thing standing in front of the table.
+
+**Alerts with no `sparkplug_id` label are counted and skipped.** A `DatasourceError` notification
+carries no device label; inventing one would attribute a broken query to a machine.
 
 ### The Factory+ Directory adapter
 
@@ -391,6 +521,40 @@ exist — the same rule the semantic-id namespace follows.
 Two identity mappings need no new columns, which is why this is an adapter and not a migration:
 `Instance_UUID` is `devices.id` (already RFC4122), and the Sparkplug address is
 `(gateways.sparkplug_group, gateways.sparkplug_id)`.
+
+### Getting a shell into a third-party AAS server
+
+Two routes to the same destination, and it is worth having both before you need either.
+
+**The package.** `?format=aasx` downloads a self-contained OPC container with the 3D model bundled
+in as a supplementary part. This is the handover artefact — it needs nothing from this stack once
+it has been produced.
+
+**The REST push.** `npm run aas:push-basyx -- --device=Sim_CNC_Mill_01` exports the JSON
+environment and POSTs it into a running server's `/submodels` and `/shells`.
+
+The second exists because the AASX carries its Environment as JSON at `aasx/aasenv-root.json` —
+valid AAS Part 5, but some BaSyx builds' upload path expects an XML environment part and will
+reject or half-load a JSON one. That is a property of the consumer, not of the package, and not
+something to discover on the morning of a demonstration.
+
+Three things the script gets right that a hand-rolled client usually does not, verified against
+`eclipsebasyx/aas-environment:2.0.0-milestone-15`:
+
+- **Identifiers are base64url-encoded in the path, without padding.** AAS ids are IRIs; AAS Part 2
+  specifies base64url for an id appearing in a URL. Sending the raw IRI yields a 404 naming a
+  resource that plainly exists, or a 400 from a proxy that split the path on the IRI's own slashes.
+- **Submodels are posted before shells.** A shell carries its submodels as references and BaSyx
+  accepts one whose references dangle — so shell-first appears to work and leaves an AAS whose
+  submodels 404 when a viewer follows them.
+- **Re-running skips rather than duplicating**, and `--replace` is the explicit opt-in to `PUT`
+  over what is there.
+
+**`AAS_MODEL_PUBLIC_BASE` matters more here than anywhere else.** If BaSyx is in a container,
+`localhost` in an exported model URL is BaSyx, not this stack. The exporter now refuses to package
+an `.aasx` whose model could not be bundled *and* whose fallback URL is loopback; the JSON export
+warns instead, via `model_url_resolves_only_on_this_host` in `stats`, and the push script relays
+that warning.
 
 ### The worker router
 

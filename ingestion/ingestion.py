@@ -4,6 +4,7 @@ import ssl
 import threading
 import time
 import psycopg2
+from psycopg2.extras import execute_values
 import paho.mqtt.client as mqtt
 import sparkplug_b_pb2
 from datetime import datetime, timezone
@@ -81,6 +82,39 @@ REBIRTH_REQUEST_INTERVAL_SECONDS = int(os.getenv("REBIRTH_REQUEST_INTERVAL_SECON
 # looping births with fresh aliases would otherwise grow it without limit.
 MAX_ALIASES_PER_NODE = int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))
 
+# Throughput counter reporting. Set to 0 to disable.
+#
+# SEPARATE FROM INGESTION_HEALTH_INTERVAL, and not folded into the liveness heartbeat, because
+# that thread returns immediately when INGESTION_HEALTH_FILE is unset -- which is the Compose
+# default. Counters reported from inside it would therefore never appear on the one target where
+# they are most likely to be read by hand.
+#
+# THIS IS A LOG REPORTER, NOT A METRICS ENDPOINT. It exists to establish a throughput baseline
+# before the telemetry write path is batched, and to make a stalled daemon legible in `docker
+# logs`. Prometheus exposition is issue #22 and is a different piece of work; the counters below
+# are deliberately shaped so that work is a new exporter over the same registry rather than a
+# re-instrumentation.
+INGESTION_STATS_INTERVAL = int(os.getenv("INGESTION_STATS_INTERVAL", "60"))
+
+# How many telemetry rows go into one INSERT statement. A DDATA message is written as a single
+# batched statement; this caps how large that statement may get, so a pathological payload cannot
+# build an unbounded query string. 500 is far above any real Sparkplug payload -- under
+# report-by-exception a DDATA usually carries one metric -- so in practice every message is
+# exactly one statement.
+TELEMETRY_INSERT_PAGE_SIZE = int(os.getenv("TELEMETRY_INSERT_PAGE_SIZE", "500"))
+
+# Bounded retry on a failed TimescaleDB connection.
+#
+# WHY THIS EXISTS. get_timescaledb_connection() previously returned None on the first failure, and
+# every caller answers None by dropping the message with a warning -- so a database blip during a
+# burst lost telemetry silently, visible only in a log line. A short backoff covers the common
+# case (a restart, a brief network fault) without blocking the MQTT callback thread for long: the
+# thread is shared by every device, so a long retry here stalls the whole fleet, which is why the
+# ceiling is deliberately low rather than generous.
+DB_CONNECT_MAX_ATTEMPTS = int(os.getenv("DB_CONNECT_MAX_ATTEMPTS", "3"))
+DB_CONNECT_BACKOFF_SECONDS = float(os.getenv("DB_CONNECT_BACKOFF_SECONDS", "0.25"))
+DB_CONNECT_BACKOFF_MAX_SECONDS = float(os.getenv("DB_CONNECT_BACKOFF_MAX_SECONDS", "2.0"))
+
 # -----------------------------------------------------------------------------
 # Supabase Client Initialization
 # -----------------------------------------------------------------------------
@@ -123,25 +157,82 @@ except Exception as e:
 # -----------------------------------------------------------------------------
 _ts_conn = None
 
+
+def _open_timescaledb_connection():
+    """One connection attempt. Split out so the retry loop below stays readable."""
+    if TIMESCALEDB_URL:
+        return psycopg2.connect(TIMESCALEDB_URL)
+    return psycopg2.connect(
+        host=DB_HOST,
+        port=DB_PORT,
+        database=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD
+    )
+
+
 def get_timescaledb_connection():
+    """
+    The daemon's single TimescaleDB connection, reconnecting when it has gone away.
+
+    ONE CONNECTION, NOT A POOL. Every write happens on the paho callback thread, so there is
+    exactly one writer and a pool would be complexity with no consumer. That property is also
+    what makes the module-level global safe -- and it is the thing to revisit first if a worker
+    thread is ever introduced, because psycopg2 connections are not safe for concurrent use.
+
+    `closed` IS CHECKED BUT IS NOT SUFFICIENT. psycopg2 sets it only when the connection was
+    closed on this side; a connection dropped by the server, a restart, or an idle timeout still
+    reports `closed == 0` and fails on first use. The caller's exception handler is what covers
+    that, and the next call through here re-opens.
+
+    RETRIES ARE BOUNDED AND SHORT. Returning None on the first failure meant a momentary blip
+    dropped telemetry silently, since every caller answers None by dropping the message. But this
+    runs on the callback thread shared by the whole fleet, so a generous retry would stall every
+    other device's messages behind one unreachable database. Three attempts over well under a
+    second is the compromise: it absorbs a restart without becoming a stall.
+    """
     global _ts_conn
-    if _ts_conn is None or _ts_conn.closed != 0:
+
+    if _ts_conn is not None and _ts_conn.closed == 0:
+        return _ts_conn
+
+    if _ts_conn is not None:
+        # Closed on this side. Say so rather than reconnecting silently -- a connection that keeps
+        # having to be re-opened is a symptom worth seeing in the log.
+        logger.info("TimescaleDB connection was closed; re-opening.")
+        count("db_reconnects")
+        _ts_conn = None
+
+    delay = DB_CONNECT_BACKOFF_SECONDS
+    for attempt in range(1, DB_CONNECT_MAX_ATTEMPTS + 1):
         try:
-            if TIMESCALEDB_URL:
-                _ts_conn = psycopg2.connect(TIMESCALEDB_URL)
+            _ts_conn = _open_timescaledb_connection()
+            if attempt > 1:
+                logger.info("Connected to TimescaleDB on attempt %d.", attempt)
             else:
-                _ts_conn = psycopg2.connect(
-                    host=DB_HOST,
-                    port=DB_PORT,
-                    database=DB_NAME,
-                    user=DB_USER,
-                    password=DB_PASSWORD
-                )
-            logger.info("Connected to TimescaleDB successfully.")
+                logger.info("Connected to TimescaleDB successfully.")
+            return _ts_conn
         except Exception as e:
-            logger.warning("TimescaleDB connection failed: %s. Retrying...", e)
-            _ts_conn = None
-    return _ts_conn
+            count("db_connect_failures")
+            if attempt == DB_CONNECT_MAX_ATTEMPTS:
+                # Final failure. The caller drops the message; the counter is what makes that
+                # loss visible without reading the log.
+                logger.warning(
+                    "TimescaleDB connection failed after %d attempt(s): %s. Telemetry for this "
+                    "message is dropped; the next message retries.",
+                    DB_CONNECT_MAX_ATTEMPTS, e
+                )
+                _ts_conn = None
+                return None
+
+            logger.warning(
+                "TimescaleDB connection attempt %d/%d failed: %s. Retrying in %.2fs.",
+                attempt, DB_CONNECT_MAX_ATTEMPTS, e, delay
+            )
+            time.sleep(delay)
+            delay = min(delay * 2, DB_CONNECT_BACKOFF_MAX_SECONDS)
+
+    return None
 
 # -----------------------------------------------------------------------------
 # Sparkplug B Wire Identity
@@ -271,10 +362,45 @@ _seq_lock = threading.Lock()
 _device_seen = {}
 _device_seen_lock = threading.Lock()
 
+# `status` and `identity_source` ARE READ BACK DELIBERATELY, and not merely for display: the
+# DBIRTH path compares them against what it is about to write and skips the write when nothing
+# moved (see process_dbirth). Without them in the cached row every rebirth issues an UPDATE that
+# changes nothing -- which costs a PostgREST round trip and, because `devices` is REPLICA IDENTITY
+# FULL and in the supabase_realtime publication, broadcasts a full-row change event to every
+# connected dashboard. The audit trigger already suppresses the *audit row* for such a write
+# (migration 0005); it cannot suppress the write itself.
 _DEVICE_COLUMNS = (
     "id,name,sparkplug_id,reported_identity,gateway_id,is_quarantined,first_dbirth_at,"
-    "last_birth_metrics"
+    "last_birth_metrics,status,identity_source"
 )
+
+
+# -----------------------------------------------------------------------------
+# Throughput counters
+# -----------------------------------------------------------------------------
+# A plain dict behind a lock rather than a metrics library: the daemon has four dependencies and
+# each one is justified in requirements.txt. Counters are monotonic and are never reset, so a
+# reported delta is the traffic in that interval and the absolute is the traffic since start.
+#
+# INCREMENTED AT THE SITES THAT ALREADY DECIDE, not by wrapping them. Every `drop` reason below
+# corresponds one-to-one with an existing logger.warning, so the counters and the log cannot
+# disagree about what happened.
+_counters = {}
+_counters_lock = threading.Lock()
+
+
+def count(name: str, n: int = 1):
+    """Add to a monotonic counter. Unknown names are created on first use."""
+    if n <= 0:
+        return
+    with _counters_lock:
+        _counters[name] = _counters.get(name, 0) + n
+
+
+def counter_snapshot() -> dict:
+    """A copy of the counters, safe to read while the callback thread is writing."""
+    with _counters_lock:
+        return dict(_counters)
 
 
 def diagnose_device_identity(wire_id: str):
@@ -741,7 +867,10 @@ def resolve_gateway(wire_id: str, group_id: str = None):
         if time.time() - cached_at < CACHE_TTL_SECONDS:
             return row
 
-    columns = "id,name,sparkplug_id,sparkplug_group"
+    # `status` is read back so process_node_message() can tell a genuine ONLINE/OFFLINE transition
+    # from the 119 heartbeats an hour that carry the same status as the last one. It does not gate
+    # the write -- see the comment there for why that write is not skippable.
+    columns = "id,name,sparkplug_id,sparkplug_group,status"
     try:
         # 1. Group-qualified.
         if group_id:
@@ -1142,13 +1271,50 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
                     device.get("name"), hold_reason
                 )
             else:
+                # WRITE ONLY WHAT MOVED. A birth certificate is REPEATED -- the shipped flow
+                # rebirths on a timer and ingestion asks for one whenever it meets an alias it
+                # cannot decode -- so an unconditional UPDATE here fires once per rebirth per
+                # device, forever, and changes nothing on all but the first.
+                #
+                # The audit trigger already refuses to record such a write (migration 0005
+                # subtracts nothing and compares the rows, so an identical UPDATE writes no
+                # digital_thread row). What it CANNOT suppress is the write itself: the round
+                # trip to PostgREST, the WAL record, and -- because `devices` is REPLICA IDENTITY
+                # FULL and published to `supabase_realtime` -- a full-row change event broadcast
+                # to every connected dashboard. This is the half of that problem that has to be
+                # fixed on this side of the wire.
+                #
+                # Same shape as record_declared_metrics() below, and for the same reason.
+                #
                 # first_dbirth_at is write-once: only set it the first time this row sees a
                 # real birth, so a later rebirth never overwrites the original timestamp.
-                update_fields = {"status": "ONLINE", "identity_source": device["_identity_source"]}
+                desired = {"status": "ONLINE", "identity_source": device["_identity_source"]}
+                update_fields = {
+                    field: value
+                    for field, value in desired.items()
+                    if device.get(field) != value
+                }
                 if not device.get("first_dbirth_at"):
                     update_fields["first_dbirth_at"] = datetime.now(timezone.utc).isoformat()
-                supabase_client.table("devices").update(update_fields).eq("id", device["id"]).execute()
-                logger.info("DBIRTH: verified registered device '%s' (%s)", device.get("name"), wire_id)
+
+                if update_fields:
+                    supabase_client.table("devices").update(update_fields).eq("id", device["id"]).execute()
+                    # Updated in place so the next birth inside CACHE_TTL_SECONDS sees the new
+                    # state and does not re-detect the same change. resolve_device() caches this
+                    # exact dict, which is what makes the mutation visible to the next lookup.
+                    device.update(update_fields)
+                    count("device_state_writes")
+                    logger.info(
+                        "DBIRTH: device '%s' (%s) state changed -> %s",
+                        device.get("name"), wire_id,
+                        ", ".join(f"{k}={v}" for k, v in sorted(update_fields.items()))
+                    )
+                else:
+                    count("device_state_writes_skipped")
+                    logger.info(
+                        "DBIRTH: verified registered device '%s' (%s); no state change",
+                        device.get("name"), wire_id
+                    )
 
         # Both run for quarantined devices too: they record what the device *claims*, which is
         # exactly what an administrator needs to inspect before approving it. DDATA telemetry
@@ -1267,16 +1433,43 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
             )
         return
 
+    # THIS WRITE IS NOT SKIPPABLE, and the comparison below is not a guard on it. `last_heartbeat`
+    # has to move on every heartbeat because `public.gateway_status` derives staleness from it at
+    # read time -- suppressing the write would make a live gateway report STALE, which is a far
+    # worse failure than the noise it would save. Migration 0005 is what keeps this out of the
+    # audit trail: it subtracts `last_heartbeat` before comparing, so a heartbeat that moves only
+    # the timestamp writes no digital_thread row while a genuine ONLINE/OFFLINE transition still
+    # does.
+    #
+    # The comparison exists only to tell the two apart IN THE LOG. A transition is an operational
+    # event worth finding later; the other 119 heartbeats an hour are not.
+    previous_status = gateway.get("status")
+    transitioned = previous_status is not None and previous_status != status
+
     try:
         supabase_client.table("gateways").update({
             "status": status,
             "last_heartbeat": heartbeat_dt.isoformat()
         }).eq("id", gateway["id"]).execute()
 
-        logger.info(
-            "HEARTBEAT: %s from edge node '%s' (%s) -> status=%s at %s",
-            msg_type, gateway.get("name"), edge_node_id, status, heartbeat_dt.isoformat()
-        )
+        # Kept in step with the row resolve_gateway() cached, so the next heartbeat inside
+        # CACHE_TTL_SECONDS compares against what was actually written rather than re-reporting
+        # the same transition.
+        gateway["status"] = status
+
+        count("gateway_heartbeats")
+        if transitioned:
+            count("gateway_status_transitions")
+            logger.info(
+                "HEARTBEAT: %s from edge node '%s' (%s) -> STATUS TRANSITION %s -> %s at %s",
+                msg_type, gateway.get("name"), edge_node_id,
+                previous_status, status, heartbeat_dt.isoformat()
+            )
+        else:
+            logger.info(
+                "HEARTBEAT: %s from edge node '%s' (%s) -> status=%s at %s",
+                msg_type, gateway.get("name"), edge_node_id, status, heartbeat_dt.isoformat()
+            )
     except Exception as e:
         logger.error("Error updating gateway heartbeat for '%s': %s", edge_node_id, e, exc_info=True)
 
@@ -1301,6 +1494,7 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         # difference from the old behaviour is only that nothing is written about the DEVICE
         # either: the message is dropped and the stream resumes on its own, instead of the device
         # being pinned to "unregistered" for CACHE_TTL_SECONDS or quarantined by its next DBIRTH.
+        count("dropped_directory_unavailable")
         logger.warning(
             "DIRECTORY UNAVAILABLE: dropping DDATA for '%s' (%s). Not quarantined; the stream "
             "resumes when the directory returns.", wire_id, e
@@ -1308,6 +1502,7 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         return
 
     if device is None or device.get("is_quarantined"):
+        count("dropped_quarantined_or_unregistered")
         logger.warning("Dropping DDATA for quarantined/unregistered device '%s'", wire_id)
         return
 
@@ -1322,6 +1517,7 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         # The binding could not be CHECKED, so the row must not be written -- an unverifiable
         # attribution is exactly what this check exists to refuse. Dropped, not quarantined, for
         # the reason stated above: a DDATA stream must never be able to quarantine a device.
+        count("dropped_directory_unavailable")
         logger.warning(
             "DIRECTORY UNAVAILABLE: cannot verify gateway binding for '%s' (%s); dropping DDATA "
             "rather than attributing it unverified.", wire_id, e
@@ -1329,6 +1525,7 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         return
 
     if binding_fault:
+        count("dropped_gateway_binding")
         logger.warning(
             "Dropping DDATA for device '%s' published via edge node '%s': %s",
             wire_id, gateway_wire_id, binding_fault
@@ -1344,6 +1541,7 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
 
     db_conn = get_timescaledb_connection()
     if not db_conn:
+        count("dropped_db_unavailable")
         logger.warning("TimescaleDB connection unavailable. Skipping DDATA telemetry ingestion for '%s'", wire_id)
         return
 
@@ -1364,7 +1562,15 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                     (asset_id, asset_name)
                 )
 
-                metric_count = 0
+                # Rows are ACCUMULATED and written in ONE statement below rather than executed
+                # per metric. The loop's decisions are unchanged; only the write is moved.
+                #
+                # THIS DOES NOT CHANGE FAILURE GRANULARITY, which is the usual objection. The loop
+                # already ran inside `with db_conn:` -- a transaction block that rolls back
+                # wholesale on any exception -- so a bad row aborted the whole message before this
+                # change and aborts the whole message after it. What changes is the number of
+                # round trips: one per metric becomes one per message.
+                rows = []
                 rejected_timestamps = 0
                 unresolved_aliases = 0
                 for metric in payload.metrics:
@@ -1413,20 +1619,45 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                     else:
                         continue
 
-                    # DO NOTHING, not DO UPDATE. The historian is an append-only record of what
-                    # was observed; an upsert let any publisher rewrite history at a timestamp
-                    # of its choosing, which is not a capability a time-series store should
-                    # offer to the devices feeding it. A genuine duplicate is a redelivered
-                    # MQTT message and the first write already recorded it.
-                    cur.execute(
-                        """
-                        INSERT INTO telemetry (time, asset_id, metric_name, val_double, val_string, val_bool)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (time, asset_id, metric_name) DO NOTHING
-                        """,
+                    rows.append(
                         (metric_dt, asset_id, metric_name, val_double, val_string, val_bool)
                     )
-                    metric_count += 1
+
+                metric_count = len(rows)
+
+                # DO NOTHING, not DO UPDATE. The historian is an append-only record of what was
+                # observed; an upsert let any publisher rewrite history at a timestamp of its
+                # choosing, which is not a capability a time-series store should offer to the
+                # devices feeding it. A genuine duplicate is a redelivered MQTT message and the
+                # first write already recorded it.
+                #
+                # GUARDED ON A NON-EMPTY LIST: execute_values with no rows emits a syntactically
+                # invalid statement (`VALUES` with nothing after it). A message whose every metric
+                # was filtered -- all identity metrics, or every timestamp rejected -- is entirely
+                # ordinary and must not raise.
+                #
+                # page_size caps how many tuples go into one statement; beyond it psycopg2 sends
+                # several. 500 is far above any real Sparkplug payload, so in practice every
+                # message is one statement, while a pathological payload still cannot build an
+                # unbounded query string.
+                if rows:
+                    execute_values(
+                        cur,
+                        """
+                        INSERT INTO telemetry (time, asset_id, metric_name, val_double, val_string, val_bool)
+                        VALUES %s
+                        ON CONFLICT (time, asset_id, metric_name) DO NOTHING
+                        """,
+                        rows,
+                        page_size=TELEMETRY_INSERT_PAGE_SIZE,
+                    )
+
+                # Counted inside the transaction block but after the loop, so this reflects rows
+                # the commit is about to make durable. An exception below unwinds the write and
+                # skips this, keeping the counter honest rather than optimistic.
+                count("metrics_written", metric_count)
+                count("metrics_rejected_timestamp", rejected_timestamps)
+                count("metrics_unresolved_alias", unresolved_aliases)
 
                 if unresolved_aliases:
                     # Skip the undecodable metrics, keep the rest, and ask the node to re-birth.
@@ -1453,6 +1684,10 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
 
                 logger.info("INGESTED DDATA: Ingested %d metrics for asset '%s' into TimescaleDB", metric_count, asset_id)
     except Exception as e:
+        # The whole message is lost: `with db_conn` rolled the transaction back, so none of the
+        # batch landed. Counted so the loss is visible in STATS rather than only in the log --
+        # a write that fails once a minute is invisible in a log nobody is tailing.
+        count("write_failures")
         logger.error("Error writing DDATA telemetry to TimescaleDB: %s", e, exc_info=True)
 
 
@@ -1605,6 +1840,11 @@ def on_message(client, userdata, msg):
     if msg_type in ("NCMD", "DCMD"):
         return
 
+    # Counted AFTER the parse and the command-topic filter, so this is messages the daemon
+    # actually acted on rather than everything the wildcard subscription delivered.
+    count("messages_total")
+    count(f"messages_{msg_type.lower()}")
+
     # Follow the edge node's sequence counter before dispatching. Advisory: a gap is reported
     # and a rebirth requested, but the message itself is still processed -- it is a real
     # observation, and discarding it would compound the loss it is evidence of.
@@ -1738,6 +1978,55 @@ def start_health_heartbeat(client):
     )
 
 
+def start_stats_reporter():
+    """
+    Log the throughput counters every INGESTION_STATS_INTERVAL seconds.
+
+    A DAEMON THREAD OF ITS OWN, not a block inside start_health_heartbeat(), because that function
+    returns immediately when INGESTION_HEALTH_FILE is unset -- the Docker Compose default. Counters
+    reported from inside it would be invisible on the target where `docker logs` is the primary
+    diagnostic.
+
+    BOTH DELTA AND TOTAL ARE REPORTED. The delta is the interval's traffic, which is what answers
+    "is the daemon keeping up"; the total is traffic since start, which is what answers "how much
+    has it dropped today". A reporter emitting only one of them forces the reader to do arithmetic
+    against a previous log line that may have scrolled.
+
+    Counters with a zero delta AND a zero total are omitted, so a healthy line stays short and a
+    drop counter appearing at all is itself the signal.
+    """
+    if INGESTION_STATS_INTERVAL <= 0:
+        logger.info("Throughput counter reporting is disabled (INGESTION_STATS_INTERVAL=0).")
+        return
+
+    def report():
+        previous = {}
+        while True:
+            time.sleep(INGESTION_STATS_INTERVAL)
+            try:
+                current = counter_snapshot()
+                parts = []
+                for name in sorted(current):
+                    total = current[name]
+                    delta = total - previous.get(name, 0)
+                    if total == 0:
+                        continue
+                    parts.append(f"{name}=+{delta}({total})")
+                previous = current
+
+                if parts:
+                    logger.info("STATS (%ss): %s", INGESTION_STATS_INTERVAL, " ".join(parts))
+                else:
+                    # Said explicitly rather than skipped: silence from this reporter would be
+                    # indistinguishable from the thread having died.
+                    logger.info("STATS (%ss): no traffic", INGESTION_STATS_INTERVAL)
+            except Exception as exc:  # noqa: BLE001 - a reporter must never stop ingestion
+                logger.warning("Could not report throughput counters: %s", exc)
+
+    threading.Thread(target=report, name="stats-reporter", daemon=True).start()
+    logger.info("Throughput counters reporting every %ss", INGESTION_STATS_INTERVAL)
+
+
 def main():
     logger.info("Initializing Supabase + TimescaleDB Ingestion Daemon...")
     _require_credentials()
@@ -1765,6 +2054,9 @@ def main():
     # Safe to start here for the opposite reason: it sweeps only devices it has already seen, and
     # it has seen none until the broker connects.
     start_device_watchdog()
+    # Also before the connect loop, so a daemon that cannot reach the broker still reports "no
+    # traffic" on a timer rather than going silent in a way that looks like a crash.
+    start_stats_reporter()
 
     while True:
         try:

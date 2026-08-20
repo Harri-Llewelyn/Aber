@@ -4,6 +4,7 @@ import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId } from './utils/sparkplugId';
 import { resolveDeviceLocation, SCOPE_SITE_WIDE } from './utils/cellResolution';
 import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
+import { metricNameError } from './utils/metricGroup';
 import {
   MODEL_3D_EXTENSIONS,
   isAcceptedModelFile,
@@ -88,10 +89,10 @@ const mapGatewayRow = (g, locations) => {
 // cell_id and location_scope are selected so that local resolution still works when the
 // device_locations read fails -- see loadDeviceLocations().
 const DEVICE_EMBED =
-  'id, name, sparkplug_id, reported_identity, identity_source, status, is_quarantined, ' +
+  'id, name, description, sparkplug_id, reported_identity, identity_source, status, is_quarantined, ' +
   'is_archived, gateway_id, cell_id, location_scope, created_at, model_3d_path';
 const GATEWAY_EMBED =
-  `id, name, sparkplug_id, cell_id, location_scope, access_url, status, last_heartbeat, ` +
+  `id, name, description, sparkplug_id, cell_id, location_scope, access_url, status, last_heartbeat, ` +
   `is_virtual, is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
 
 /**
@@ -348,6 +349,42 @@ const mapDigitalThreadRow = (t) => ({
  */
 export const MODEL_3D_BUCKET = 'asset-3d-models';
 
+/**
+ * The PRIVATE bucket holding Node-RED flow backups from physical gateway appliances.
+ *
+ * THE OPPOSITE OF THE BUCKET ABOVE IN EVERY RESPECT THAT MATTERS. There is no `getPublicUrl()` path
+ * for it and there must never be one: a `flows.json` describes the plant's edge topology, its broker
+ * addresses, its device ids and its processing logic. Reads go through a SIGNED URL minted for a
+ * caller whose role the database has already checked.
+ *
+ * Objects live under `<sparkplug_id>/`, and that prefix is enforced by RLS rather than by this
+ * client (supabase/storage-policies.sql). The paths below follow the rule; they do not implement it.
+ */
+export const GATEWAY_BACKUP_BUCKET = 'gateway-backups';
+
+/**
+ * The filename a server offered in Content-Disposition, or null.
+ *
+ * READ FROM THE HEADER rather than composed here, because the server already decided it -- it knows
+ * the gateway's name and sparkplug_id and has slugged them for a filesystem. Composing a second
+ * version in the browser is how the download ends up named differently from the folder inside it.
+ *
+ * Deliberately narrow: only the plain `filename="..."` form, which is what this API emits. RFC 5987
+ * `filename*=UTF-8''...` is not parsed, and a caller that gets null falls back to a name of its own.
+ */
+export function filenameFromDisposition(header) {
+  const match = /filename="([^"]+)"/i.exec(header || '');
+  return match ? match[1] : null;
+}
+
+/** `<sparkplug_id>/<iso-timestamp>-flows.json`, sortable by name so the newest is last. */
+export function gatewayBackupPath(sparkplugId, when = new Date()) {
+  // Colons are legal in an S3 key but awkward in every shell and on Windows, where an operator may
+  // well download one. `-` keeps the timestamp sortable and the filename portable.
+  const stamp = when.toISOString().replace(/[:.]/g, '-');
+  return `${sparkplugId}/${stamp}-flows.json`;
+}
+
 /** The public URL for a stored model path. Composed, never stored -- see migration 0035. */
 export function model3dPublicUrl(path) {
   if (!path) return null;
@@ -430,6 +467,144 @@ const apiMethods = {
     }
 
     if (path) await supabase.storage.from(MODEL_3D_BUCKET).remove([path]);
+  },
+
+  // ===============================================================================================
+  // Physical gateway enrolment and flow backups
+  // ===============================================================================================
+
+  /**
+   * Download the bootstrap bundle for a physical gateway.
+   *
+   * A RAW fetch(), NOT supabase.functions.invoke(), and this is not a preference. invoke() decodes
+   * any response that is neither JSON nor octet-stream as TEXT, which silently corrupts a ZIP -- the
+   * archive arrives the right approximate size and fails to open. Identical constraint to the AASX
+   * path below; see the note there.
+   *
+   * Returns the blob plus the metadata that rides in headers, because a binary body has nowhere to
+   * carry the token expiry the modal counts down.
+   */
+  downloadGatewayBundle: async (gatewayId, { ttlMinutes } = {}) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/gateway-bundle`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        // The CALLER's token: gateway-bundle mints the enrolment token as them, through a SECURITY
+        // DEFINER RPC that checks has_role() itself. The anon key alone would be refused.
+        Authorization: `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ gateway_id: gatewayId, ...(ttlMinutes ? { ttl_minutes: ttlMinutes } : {}) })
+    });
+
+    if (!res.ok) {
+      // The function reports failures as JSON even on this path, so the real reason survives -- a
+      // 403 for an Operator, a 400 for a virtual gateway, a 503 for an unconfigured deployment.
+      let message = `Bundle generation failed (${res.status})`;
+      try { message = (await res.json())?.error || message; } catch { /* non-JSON body */ }
+      throw new Error(message);
+    }
+
+    return {
+      blob: await res.blob(),
+      filename: filenameFromDisposition(res.headers.get('Content-Disposition')),
+      expiresAt: res.headers.get('X-ACS-Token-Expires-At'),
+      bundleVersion: res.headers.get('X-ACS-Bundle-Version'),
+      sparkplugId: res.headers.get('X-ACS-Sparkplug-Id')
+    };
+  },
+
+  /**
+   * Flow backups for one gateway, newest first.
+   *
+   * Storage `list()` is scoped to the gateway's own prefix, which is where RLS confines writes
+   * anyway. A caller without read authority gets an EMPTY LIST rather than an error -- storage-api
+   * applies the SELECT policy and simply returns nothing -- so the UI must decide what to show from
+   * the caller's role, not from the length of this array.
+   */
+  listGatewayBackups: async (sparkplugId) => {
+    const { data, error } = await supabase.storage
+      .from(GATEWAY_BACKUP_BUCKET)
+      .list(sparkplugId, { limit: 100, sortBy: { column: 'name', order: 'desc' } });
+
+    if (error) throw new Error(error.message || 'Could not list backups');
+    return (data || [])
+      // `.emptyFolderPlaceholder` is a zero-byte object storage-api creates for an empty prefix.
+      .filter(o => o.name && !o.name.startsWith('.'))
+      .map(o => ({
+        name: o.name,
+        path: `${sparkplugId}/${o.name}`,
+        size: o.metadata?.size ?? null,
+        createdAt: o.created_at || o.updated_at || null
+      }));
+  },
+
+  /**
+   * Upload a `flows.json` backup.
+   *
+   * VALIDATED AS A NODE-RED FLOW BEFORE IT IS SENT, not merely by extension. The bucket accepts
+   * `application/json` and a few fallbacks because browsers report a hand-picked .json
+   * inconsistently, so the extension is close to no check at all -- and a backup that turns out not
+   * to be a flow is discovered at RESTORE time, which is the worst moment for it.
+   */
+  uploadGatewayBackup: async (sparkplugId, file) => {
+    const text = await file.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error(`"${file.name}" is not valid JSON. Export it from Node-RED with menu → Export → all flows.`);
+    }
+    if (!Array.isArray(parsed)) {
+      throw new Error('A Node-RED flow export is a JSON array of nodes. This file is not one.');
+    }
+    // THE CREDENTIAL FILE IS REFUSED OUTRIGHT. flows_cred.json is encrypted with a secret that lives
+    // only in the appliance's .env, so a copy here would be either useless or dangerous -- and it is
+    // an easy mistake to make, both files sitting side by side in /data.
+    if (parsed.length && parsed.every(n => typeof n === 'object' && n && !n.type)) {
+      throw new Error('That looks like flows_cred.json, not flows.json. Credential files are never backed up.');
+    }
+
+    const path = gatewayBackupPath(sparkplugId);
+    const { error } = await supabase.storage
+      .from(GATEWAY_BACKUP_BUCKET)
+      // upsert FALSE: the path carries a timestamp, so every upload is a new version and an
+      // accidental double-click cannot overwrite the previous one.
+      .upload(path, file, { upsert: false, contentType: 'application/json' });
+
+    if (error) {
+      if (/row-level security|Unauthorized/i.test(error.message || '')) {
+        throw new Error('You do not have permission to upload a backup for this gateway.');
+      }
+      throw new Error(error.message || 'Upload failed');
+    }
+    return { path };
+  },
+
+  /**
+   * A short-lived signed URL for one backup.
+   *
+   * SIGNED, because the bucket is private -- there is no public URL to compose. 60 seconds is long
+   * enough for the browser to follow the link and short enough that a URL pasted into a ticket is
+   * dead before anyone reads it.
+   */
+  gatewayBackupUrl: async (path) => {
+    const { data, error } = await supabase.storage
+      .from(GATEWAY_BACKUP_BUCKET)
+      .createSignedUrl(path, 60);
+    if (error) throw new Error(error.message || 'Could not create a download link');
+    return data.signedUrl;
+  },
+
+  deleteGatewayBackup: async (path) => {
+    const { error } = await supabase.storage.from(GATEWAY_BACKUP_BUCKET).remove([path]);
+    if (error) {
+      if (/row-level security|Unauthorized/i.test(error.message || '')) {
+        throw new Error('You do not have permission to delete backups.');
+      }
+      throw new Error(error.message || 'Delete failed');
+    }
   },
 
   get: async (path, options = {}) => {
@@ -674,6 +849,14 @@ const apiMethods = {
       // and then show whatever fraction of them happened to be deletions.
       const action = (url.searchParams.get('action') || '').trim().toUpperCase();
       const limit = Number.parseInt(url.searchParams.get('limit') || '', 10);
+      // The timeline's range control, for the same reason the action filter is a SQL predicate
+      // and for one more besides. `limit` is applied by the database to rows ordered NEWEST
+      // FIRST, so a window filtered client-side would first take the newest 200 rows overall and
+      // only then discard everything outside the range -- which means "Last 30 Days" could
+      // legitimately show FEWER events than "Last 24 Hours", having spent its whole budget on
+      // rows it went on to throw away. Pushed down, the limit is spent inside the window.
+      const since = (url.searchParams.get('since') || '').trim();
+      const until = (url.searchParams.get('until') || '').trim();
 
       // A tag that matches no device must return nothing rather than everything.
       if (entityIds && entityIds.length === 0) return [];
@@ -689,6 +872,11 @@ const apiMethods = {
       }
       if (entityIds) query = query.in('entity_id', entityIds);
       if (['INSERT', 'UPDATE', 'DELETE'].includes(action)) query = query.eq('action', action);
+      // Bounds before the limit. PostgREST serialises the whole builder at await-time so the JS
+      // call order does not itself decide anything -- but these are `where` and that is `limit`,
+      // and writing them in that order is the point being made.
+      if (since) query = query.gte('recorded_at', since);
+      if (until) query = query.lte('recorded_at', until);
       if (Number.isFinite(limit) && limit > 0) query = query.limit(limit);
 
       const { data, error } = await query.order('recorded_at', { ascending: false });
@@ -1008,7 +1196,11 @@ const apiMethods = {
     if (path === '/api/v1/cells') {
       const { data, error } = await supabase.from('cells').insert({
         name: body.cell_name,
-        grafana_url: body.access_url
+        grafana_url: body.access_url,
+        // Omitted rather than defaulted here when the caller sends nothing: the column's own
+        // NOT NULL DEFAULT 'Factory' is the single place that value lives, and repeating it in
+        // the client is how the two eventually disagree.
+        ...(body.icon ? { icon: body.icon } : {})
       }).select();
       if (error) throw error;
       return data?.[0] || {};
@@ -1017,6 +1209,7 @@ const apiMethods = {
     if (path === '/api/v1/gateways') {
       const { data, error } = await supabase.from('gateways').insert({
         name: body.gateway_name,
+        description: emptyToNull(body.description),
         access_url: body.access_url,
         is_virtual: !!body.is_virtual,
         status: body.status || 'OFFLINE',
@@ -1029,6 +1222,7 @@ const apiMethods = {
     if (path === '/api/v1/devices') {
       const { data, error } = await supabase.from('devices').insert({
         name: body.asset_name,
+        description: emptyToNull(body.description),
         gateway_id: gatewayIdFrom(body),
         asset_type: emptyToNull(body.asset_type),
         connection_method: emptyToNull(body.connection_method),
@@ -1078,8 +1272,20 @@ const apiMethods = {
     }
 
     if (path === '/api/v1/metric-catalog') {
+      // THE LAST CHECK BEFORE SOMETHING PERMANENT. `metric_catalog.name` is immutable, so a
+      // non-conforming name cannot be corrected -- only deprecated and superseded. The Add Metric
+      // form already refuses one (SchemasTab gates its submit on isValidMetricName), and
+      // `metric_catalog_name_format` in migration 0007 refuses it at the database. This closes the
+      // gap between them: any OTHER caller of this route would otherwise reach the constraint and
+      // get a raw PostgREST 400 quoting a regex, where metricNameError() states the problem in a
+      // sentence naming the offending character.
+      //
+      // Deliberately the same mirrored expression, not a second one -- see utils/metricGroup.js.
+      const nameError = metricNameError(body.name)
+      if (nameError) throw new Error(nameError)
+
       const { data, error } = await supabase.from('metric_catalog').insert({
-        name: body.name,
+        name: (body.name || '').trim(),
         datatype: body.datatype,
         category: emptyToNull(body.category),
         units: emptyToNull(body.units),
@@ -1309,7 +1515,8 @@ const apiMethods = {
     if (path.startsWith('/api/v1/cells/')) {
       const { data, error } = await supabase.from('cells').update({
         name: body.cell_name,
-        grafana_url: body.access_url
+        grafana_url: body.access_url,
+        ...(body.icon ? { icon: body.icon } : {})
       }).eq('id', id).select();
       if (error) throw error;
       return data[0];
@@ -1323,6 +1530,8 @@ const apiMethods = {
         access_url: body.access_url
       };
       if ('is_virtual' in body)  patch.is_virtual = !!body.is_virtual;
+      // See the devices patch: emptyToNull so clearing the field stores NULL, not ''.
+      if ('description' in body) patch.description = emptyToNull(body.description);
       // Same pairing rule as devices: marking a gateway Site-Wide clears its cell rather than
       // letting the CHECK reject the write. is_virtual is NOT what decides this -- a virtual
       // gateway is a deployment fact, site-wide is an operator's assertion about location, and
@@ -1385,6 +1594,10 @@ const apiMethods = {
         is_quarantined: body.is_quarantined
       };
       if ('asset_type' in body) patch.asset_type = emptyToNull(body.asset_type);
+      // emptyToNull, so clearing the field in the form stores NULL rather than ''. Absent and empty
+      // are the same thing to every reader of a description, and two representations of one state is
+      // how a `WHERE description IS NULL` starts missing rows.
+      if ('description' in body) patch.description = emptyToNull(body.description);
       if ('connection_method' in body) patch.connection_method = emptyToNull(body.connection_method);
       if ('schema_id' in body) patch.schema_id = emptyToNull(body.schema_id);
       if ('active_gateway_id' in body || 'gateway_id' in body) {

@@ -1,4 +1,23 @@
 import '@testing-library/jest-dom'
+import { vi } from 'vitest'
+
+/**
+ * `@google/model-viewer`, stubbed for every suite.
+ *
+ * Model3DViewer imports it dynamically, so without this the real package would be pulled into any
+ * test that renders a device with a model attached -- a WebGL renderer, in jsdom, which has no
+ * WebGL. It does not fail cleanly: it registers a custom element whose connected callback reaches
+ * for a canvas context that is not there, so the failure surfaces somewhere inside the element
+ * rather than at the import, and reads as a bug in the component that rendered it.
+ *
+ * Stubbed GLOBALLY rather than per file, because the trap is silent in the other direction too: a
+ * new test that happens to render an attached model would pull in seconds of module evaluation and
+ * nobody would connect the slowdown to this. The factory returns an empty module because that is
+ * exactly what the real one exports for our purposes -- the package's value is its side effect of
+ * defining <model-viewer>, and jsdom treats an undefined custom element as an inert unknown
+ * element, which is all these tests need it to be.
+ */
+vi.mock('@google/model-viewer', () => ({}))
 
 /**
  * jsdom gaps that the download paths depend on.

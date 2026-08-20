@@ -16,6 +16,14 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   VITE_SUPABASE_ANON_KEY: %q,
   VITE_ENABLE_REALTIME: %q,
   VITE_GITHUB_REPO_URL: %q,
+  // Grafana as the BROWSER reaches it, for the "View in Grafana" links on active alerts.
+  //
+  // THE SAME HELPER GRAFANA'S OWN root_url AND ITS OAUTH redirect_uris ARE BUILT FROM, so there is no
+  // separate value to set and the link cannot point somewhere the login does not. It resolves empty
+  // on a data-tier install with no publicUrls.grafana and no publicBaseDomain -- src/config.js reads
+  // blank as "not supplied" and constants.js then falls back to localhost:3002, which is a wrong link
+  // on a cluster but is exactly as wrong as the alternative and does not throw.
+  VITE_GRAFANA_URL: %q,
   VITE_ALLOW_SIGNUP: %q,
 };
 `
@@ -23,6 +31,7 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   .Values.secrets.anonKey
   (.Values.frontend.enableRealtime | toString)
   .Values.frontend.githubRepoUrl
+  (include "acs-cymru.grafanaUrl" .)
   (.Values.frontend.allowSignup | toString) -}}
 ---
 {{/*

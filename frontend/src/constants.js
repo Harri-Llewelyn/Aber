@@ -68,6 +68,48 @@ export const GITHUB_REPO_URL = readSetting(
   'https://github.com/Harri-Llewelyn/ACS-Cymru'
 ).replace(/\/+$/, '');
 
+/**
+ * Grafana, as the BROWSER reaches it -- for the "View in Grafana" link on an active alert.
+ *
+ * THE DEFAULT IS 3002, NOT GRAFANA'S OWN 3000. The container listens on 3000 and docker-compose.yml
+ * publishes it on 3002, because the frontend already has 3000. A link to the wrong port is worse
+ * than no link: it lands on this dashboard, which is where the operator already was, and reads as
+ * "Grafana is broken" rather than as a misconfiguration. Same value as GRAFANA_PUBLIC_URL, which
+ * 0002_seed_data.sql registers as the OAuth redirect origin and grafana.ini builds root_url from --
+ * so a deployment that moves Grafana has to set both, and setting only this one produces a dead link
+ * rather than a broken login.
+ *
+ * A FALLBACK IS KEPT for the same reason GITHUB_REPO_URL keeps one: a wrong-but-present default is
+ * recoverable, whereas throwing would take the whole dashboard down over a hyperlink.
+ */
+export const GRAFANA_URL = readSetting('VITE_GRAFANA_URL', 'http://localhost:3002')
+  .replace(/\/+$/, '');
+
+/**
+ * The Grafana alert page for one rule.
+ *
+ * BY RULE NAME ONLY. It also carried `label:sparkplug_id=<id>`, to land on the one device's instance
+ * rather than on the rule covering all six, and that filter returned an EMPTY LIST every time.
+ *
+ * `/alerting/list` searches RULE DEFINITIONS, so its `label:` prefix matches the static labels a rule
+ * declares in alert-rules.yaml -- which is `severity` and nothing else. `sparkplug_id` is a column in
+ * the rule's SQL: it becomes a label on each evaluated SERIES, so it exists on instances and never on
+ * the definition being searched. The two filters ANDed, and the conjunct that matched nothing took
+ * the whole result with it. Worse, it failed silently and plausibly: an empty alert list reads as
+ * "the alert has cleared", which is the one wrong answer somebody following this link would act on.
+ *
+ * NOT A RULE-UID DEEP LINK EITHER, though the UIDs are stable and pinned (`acs-thermal-excursion` and
+ * friends). They live in the provisioning YAML and nowhere in `device_alerts` -- the Alertmanager
+ * payload the webhook receives does not carry one -- so using them would mean a name-to-UID map in
+ * the frontend that drifts from the YAML the first time a rule is renamed, with nothing to catch it.
+ * The rule NAME is what Grafana itself put in the row, so this cannot disagree with the rule it
+ * points at.
+ */
+export const grafanaAlertUrl = (alertName) =>
+  (alertName
+    ? `${GRAFANA_URL}/alerting/list?search=${encodeURIComponent(`rule:"${alertName}"`)}`
+    : `${GRAFANA_URL}/alerting/list`);
+
 // How often tabs that render wall-clock-derived state re-render (see hooks/useClockTick.js).
 // Gateway heartbeat staleness is the case: a gateway going quiet writes nothing, so it emits
 // no Realtime event, and at a 60s reconciliation it would otherwise show STALE up to ~120s

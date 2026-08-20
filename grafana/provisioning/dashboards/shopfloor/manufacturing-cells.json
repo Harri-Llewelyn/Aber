@@ -1,0 +1,757 @@
+{
+  "uid": "acs-cymru-shopfloor",
+  "title": "Manufacturing Cells & Telemetry Overview",
+  "tags": [
+    "acs-cymru",
+    "shopfloor"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "description": "Four standards on one floor. Every metric name here is registered in `metric_catalog` with its standard and published semantic id (migrations 0018, 0019) -- the panels use the REGISTERED spellings, e.g. BMS/ZONE_TEMPERATURE and OEE/OEE, because a name published outside the catalog creates a series with no provenance.",
+  "panels": [
+    {
+      "type": "row",
+      "title": "Cell 1 — Precision Machining (MTConnect 2.x)",
+      "id": 1,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Machine Tool Thermal Trend",
+      "description": "MTConnect `Systems/TEMPERATURE` across the machining cell, read from the 1-minute rollup. The thermal-fault inject drives Sim_CNC_Mill_01 to ~95 °C within one scan.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 14,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT bucket AS \"time\", coalesce(a.asset_name, t.asset_id) AS metric,\n       sum(sum_double) / NULLIF(sum(n_double), 0) AS value\n  FROM telemetry_1m t LEFT JOIN assets a ON a.asset_id = t.asset_id\n WHERE $__timeFilter(bucket) AND t.metric_name = 'Systems/TEMPERATURE'\n GROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "state-timeline",
+      "title": "Controller Execution State",
+      "description": "MTConnect `Controller/EXECUTION`. State metrics survive the rollups as last(value) -- a rollup covering only val_double would force every state panel back onto raw. Read through telemetry_gapfill() because under RBE a missing bucket means UNCHANGED, not unknown.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 10,
+        "x": 14,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT bucket_ts AS \"time\", asset_id AS metric, val_string AS value\n  FROM telemetry_gapfill($__timeFrom()::timestamptz, $__timeTo()::timestamptz, '1 minute',\n                         NULL, ARRAY['Controller/EXECUTION'])\n WHERE val_string IS NOT NULL ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 0,
+            "fillOpacity": 80
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "ACTIVE": {
+                  "color": "green",
+                  "index": 0
+                },
+                "READY": {
+                  "color": "blue",
+                  "index": 1
+                },
+                "INTERRUPTED": {
+                  "color": "red",
+                  "index": 2
+                },
+                "AUTOMATIC": {
+                  "color": "green",
+                  "index": 3
+                },
+                "STOPPED": {
+                  "color": "red",
+                  "index": 4
+                },
+                "MANUAL": {
+                  "color": "orange",
+                  "index": 5
+                },
+                "ARMED": {
+                  "color": "green",
+                  "index": 6
+                },
+                "TRIGGERED": {
+                  "color": "red",
+                  "index": 7
+                },
+                "AVAILABLE": {
+                  "color": "green",
+                  "index": 8
+                },
+                "UNAVAILABLE": {
+                  "color": "red",
+                  "index": 9
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "mergeValues": true,
+        "showValue": "auto",
+        "alignValue": "center",
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Cell 2 — Robotic Assembly (OPC 40010 / 40001-4)",
+      "id": 4,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 5,
+      "type": "state-timeline",
+      "title": "Robot Operational Mode",
+      "description": "OPC 40010 `Machine/OperationalMode` -- the registered name; the brief's `MotionDevice/OperationalMode` is not in the catalog. The E-Stop inject drives it to STOPPED within one scan.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 11
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT bucket_ts AS \"time\", asset_id AS metric, val_string AS value\n  FROM telemetry_gapfill($__timeFrom()::timestamptz, $__timeTo()::timestamptz, '1 minute',\n                         NULL, ARRAY['Machine/OperationalMode'])\n WHERE val_string IS NOT NULL ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 0,
+            "fillOpacity": 80
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "ACTIVE": {
+                  "color": "green",
+                  "index": 0
+                },
+                "READY": {
+                  "color": "blue",
+                  "index": 1
+                },
+                "INTERRUPTED": {
+                  "color": "red",
+                  "index": 2
+                },
+                "AUTOMATIC": {
+                  "color": "green",
+                  "index": 3
+                },
+                "STOPPED": {
+                  "color": "red",
+                  "index": 4
+                },
+                "MANUAL": {
+                  "color": "orange",
+                  "index": 5
+                },
+                "ARMED": {
+                  "color": "green",
+                  "index": 6
+                },
+                "TRIGGERED": {
+                  "color": "red",
+                  "index": 7
+                },
+                "AVAILABLE": {
+                  "color": "green",
+                  "index": 8
+                },
+                "UNAVAILABLE": {
+                  "color": "red",
+                  "index": 9
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "mergeValues": true,
+        "showValue": "auto",
+        "alignValue": "center",
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Energy — Compressed Air Flow",
+      "description": "OPC 40001-4 `Energy/VolumeFlowRate`. Compressed air rather than electrical power: the seeded 40001-4 subset models energy MEDIA (pressure, volume, flow) and carries no active-power concept, so this is the energy metric with a published semantic id behind it. Electrical power needs a vocabulary extension from the OPC NodeSet.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 11
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT bucket AS \"time\", coalesce(a.asset_name, t.asset_id) AS metric,\n       sum(sum_double) / NULLIF(sum(n_double), 0) AS value\n  FROM telemetry_1m t LEFT JOIN assets a ON a.asset_id = t.asset_id\n WHERE $__timeFilter(bucket) AND t.metric_name = 'Energy/VolumeFlowRate'\n GROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "l/s",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Site-Wide — Facility & BMS (ASHRAE 223P)",
+      "id": 7,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Zone Air Temperature",
+      "description": "ASHRAE 223P `BMS/ZONE_TEMPERATURE`. The semantic id names the 223P sensor CLASS, not the quantity -- 223P models a measurement as a Property attached to a Sensor and this catalog has one flat name per series with nowhere to hang that pair.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT bucket AS \"time\", coalesce(a.asset_name, t.asset_id) AS metric,\n       sum(sum_double) / NULLIF(sum(n_double), 0) AS value\n  FROM telemetry_1m t LEFT JOIN assets a ON a.asset_id = t.asset_id\n WHERE $__timeFilter(bucket) AND t.metric_name = 'BMS/ZONE_TEMPERATURE'\n GROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Supply Air Flow",
+      "description": "ASHRAE 223P `BMS/SUPPLY_AIR_FLOW`, registered by migration 0019 against the ontology's FlowSensor class.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT bucket AS \"time\", coalesce(a.asset_name, t.asset_id) AS metric,\n       sum(sum_double) / NULLIF(sum(n_double), 0) AS value\n  FROM telemetry_1m t LEFT JOIN assets a ON a.asset_id = t.asset_id\n WHERE $__timeFilter(bucket) AND t.metric_name = 'BMS/SUPPLY_AIR_FLOW'\n GROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "l/s",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Cell 3 — Production KPIs (ISO 22400)",
+      "id": 10,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 11,
+      "type": "gauge",
+      "title": "Overall Equipment Effectiveness",
+      "description": "ISO 22400 `OEE/OEE`, computed at the edge from state-time accumulation and published on a fixed 60-second heartbeat. The platform derives none of this -- it holds no schedule or scrap data and deliberately stores none.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 0,
+        "y": 29
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT bucket AS \"time\", coalesce(a.asset_name, t.asset_id) AS metric,\n       last_double AS value\n  FROM telemetry_1m t LEFT JOIN assets a ON a.asset_id = t.asset_id\n WHERE $__timeFilter(bucket) AND t.metric_name = 'OEE/OEE'\n ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 50
+              },
+              {
+                "color": "yellow",
+                "value": 65
+              },
+              {
+                "color": "green",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showThresholdMarkers": true,
+        "showThresholdLabels": false,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Availability",
+      "description": "ISO 22400 `OEE/AVAILABILITY`, computed at the edge from state-time accumulation and published on a fixed 60-second heartbeat. The platform derives none of this -- it holds no schedule or scrap data and deliberately stores none.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 6,
+        "y": 29
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT bucket AS \"time\", coalesce(a.asset_name, t.asset_id) AS metric,\n       last_double AS value\n  FROM telemetry_1m t LEFT JOIN assets a ON a.asset_id = t.asset_id\n WHERE $__timeFilter(bucket) AND t.metric_name = 'OEE/AVAILABILITY'\n ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 50
+              },
+              {
+                "color": "yellow",
+                "value": 65
+              },
+              {
+                "color": "green",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Performance",
+      "description": "ISO 22400 `OEE/PERFORMANCE`, computed at the edge from state-time accumulation and published on a fixed 60-second heartbeat. The platform derives none of this -- it holds no schedule or scrap data and deliberately stores none.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 12,
+        "y": 29
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT bucket AS \"time\", coalesce(a.asset_name, t.asset_id) AS metric,\n       last_double AS value\n  FROM telemetry_1m t LEFT JOIN assets a ON a.asset_id = t.asset_id\n WHERE $__timeFilter(bucket) AND t.metric_name = 'OEE/PERFORMANCE'\n ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 50
+              },
+              {
+                "color": "yellow",
+                "value": 65
+              },
+              {
+                "color": "green",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Quality",
+      "description": "ISO 22400 `OEE/QUALITY`, computed at the edge from state-time accumulation and published on a fixed 60-second heartbeat. The platform derives none of this -- it holds no schedule or scrap data and deliberately stores none.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 18,
+        "y": 29
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "rawSql": "SELECT bucket AS \"time\", coalesce(a.asset_name, t.asset_id) AS metric,\n       last_double AS value\n  FROM telemetry_1m t LEFT JOIN assets a ON a.asset_id = t.asset_id\n WHERE $__timeFilter(bucket) AND t.metric_name = 'OEE/QUALITY'\n ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 50
+              },
+              {
+                "color": "yellow",
+                "value": 65
+              },
+              {
+                "color": "green",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    }
+  ]
+}

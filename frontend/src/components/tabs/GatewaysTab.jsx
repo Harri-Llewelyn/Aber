@@ -4,8 +4,9 @@ import { PERMISSION_UUIDS, REALTIME_ENABLED, STALENESS_TICK_MS, refreshInterval 
 import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
-import { gatewayLiveStatus, formatHeartbeat } from '../../utils/gatewayStatus'
+import { gatewayLiveStatus, isGatewayPending, formatHeartbeat } from '../../utils/gatewayStatus'
 import { gatewaySparkplugId } from '../../utils/sparkplugId'
+import { deviceLifecycleStatus, deviceStatusDotColor, deviceStatusTitle } from '../../utils/deviceStatus'
 import { SCOPE_CELL, SCOPE_SITE_WIDE } from '../../utils/cellResolution'
 import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
@@ -15,6 +16,8 @@ import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
+import { GatewayBundleModal } from '../modals/GatewayBundleModal'
+import { FlowBackupUploader } from '../common/FlowBackupUploader'
 import {
   IconRadio,
   IconPlus,
@@ -26,11 +29,14 @@ import {
   IconExternalLink,
   IconZap,
   IconShieldAlert,
-  IconX
+  IconMap,
+  IconX,
+  IconDownload
 } from '../common/Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
-export function GatewaysTab({ showToast, onViewThread, hasPermission, initialSearchFilter, onClearFilter, onBugReport }) {
+export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDevice, hasPermission, initialSearchFilter, onClearFilter, onBugReport }) {
   const [gateways, setGateways] = useState([])
   const [assets, setAssets]     = useState([])
   const [cells, setCells]       = useState([])
@@ -56,6 +62,9 @@ export function GatewaysTab({ showToast, onViewThread, hasPermission, initialSea
   const blank = { gateway_id: '', gateway_name: '', status: 'OFFLINE', is_virtual: false, access_url: '', cell_id: '', location_scope: SCOPE_CELL }
   const [form, setForm]         = useState(blank)
   const [docsForGw, setDocsForGw] = useState(null)
+  // The gateway whose bundle modal is open. Held as the OBJECT rather than an id: the modal needs
+  // the name and sparkplug_id, and it stays open across a poll that may reorder the list.
+  const [bundleForGw, setBundleForGw] = useState(null)
   const [docRefreshKey, setDocRefreshKey] = useState(0)
   const [filterMode, setFilterMode] = useState('all')
   // Document link counts for the collapsed accordion badge, keyed by gateway id. Fetched once
@@ -165,9 +174,39 @@ export function GatewaysTab({ showToast, onViewThread, hasPermission, initialSea
 
   const save = async () => {
     try {
-      if (editing) await api.put(`/api/v1/gateways/${editing.gateway_id}`, form)
-      else         await api.post('/api/v1/gateways', form)
-      setShowForm(false); load(); showToast(editing ? 'Gateway saved' : 'Gateway created', 'success')
+      if (editing) {
+        await api.put(`/api/v1/gateways/${editing.gateway_id}`, form)
+        setShowForm(false); load(); showToast('Gateway saved', 'success')
+        return
+      }
+
+      const created = await api.post('/api/v1/gateways', form)
+      setShowForm(false); load()
+
+      /**
+       * THE PHYSICAL BRANCH. A virtual gateway is finished the moment its row exists -- it is a
+       * connector running on the app host, and nothing has to be carried anywhere. A PHYSICAL one has
+       * only just started: it needs a bundle, on a machine, before it can publish at all.
+       *
+       * So the bundle modal opens immediately rather than leaving the operator to find a button. The
+       * alternative is a row that says AWAITING SETUP with no indication of what the setup IS, which
+       * is the state this whole flow exists to remove.
+       *
+       * AND IT DOWNLOADS WITHOUT CONFIRMING, which the drawer's route into the same modal does not.
+       * The row is seconds old, so there is no earlier bundle for this one to invalidate -- the
+       * whole reason that confirmation exists is absent here. See GatewayBundleModal.
+       */
+      if (!form.is_virtual) {
+        setBundleForGw({
+          gateway_id: created.id || created.gateway_id,
+          gateway_name: created.name || form.gateway_name,
+          sparkplug_id: created.sparkplug_id,
+          confirmFirst: false
+        })
+        showToast('Physical gateway created — download its bundle to finish setup', 'success')
+      } else {
+        showToast('Gateway created', 'success')
+      }
     } catch (e) { showToast(e.message, 'error') }
   }
 
@@ -189,6 +228,17 @@ export function GatewaysTab({ showToast, onViewThread, hasPermission, initialSea
 
   const canManage = hasPermission(PERMISSION_UUIDS.GATEWAY_MANAGE)
   const canArchive = hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)
+  /**
+   * Flow-backup authority, mirroring supabase/storage-policies.sql rather than reimplementing it.
+   *
+   * WRITE is GATEWAY_MANAGE, which only Administrator and Shopfloor_Manager hold. READ additionally
+   * admits DIGITAL_THREAD_READ, which is the AUDITOR's single permission -- seeing what the edge was
+   * configured to do, and when it changed, is the whole of that role. Operator holds neither
+   * (QUARANTINE_VIEW and TELEMETRY_READ only), so they get nothing, which is what the bucket's RLS
+   * grants them too.
+   */
+  const canManageBackups = canManage
+  const canReadBackups = canManage || hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)
 
   const unassignedDevices = assets.filter(a => !a.is_archived && !a.active_gateway_id)
 
@@ -219,6 +269,15 @@ export function GatewaysTab({ showToast, onViewThread, hasPermission, initialSea
   const activeFilterCount =
     [searchQuery, liveStatusFilter, kindFilter].filter(Boolean).length +
     (quarantineOnly ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
+
+  // Arriving from a cell's gateway chip, a device's Serving Gateway chip or the shopfloor map: the
+  // caller named ONE gateway, so open it. Identifier equality only -- see the hook.
+  useArrivalSelection(
+    searchQuery,
+    gateways,
+    (g, term) => g.gateway_id === term || gatewaySparkplugId(g) === term,
+    (g) => setSelectedId(g.gateway_id)
+  )
 
   // Resolved fresh every render -- see the note on selectedId. A gateway that has been archived
   // out of the current filter, or deleted, resolves to null and the drawer simply closes.
@@ -434,43 +493,31 @@ export function GatewaysTab({ showToast, onViewThread, hasPermission, initialSea
         <div className="modal-overlay">
           <div className="modal">
             <div className="modal-title">{editing ? 'Edit Gateway' : 'Register Gateway'}</div>
-            {/* Name first: it is the human handle. The identifiers below are machine-issued
-                and read-only, and only matter when configuring the physical edge node. */}
+            {/* THE READ-ONLY IDENTIFIER BLOCKS ARE GONE, same as in the device form. Sparkplug ID,
+                the publish-topic helper and the internal UUID were three of this dialog's rows and
+                none of them could be edited; all three are on the context drawer, copyable, where
+                somebody hunting an identifier actually looks. A form whose majority is read-only
+                teaches the reader that its controls are decorative. */}
             <div className="form-group">
               <label className="form-label">Gateway Name</label>
-              <input className="form-control" value={form.gateway_name} onChange={e => setForm(f => ({ ...f, gateway_name: e.target.value }))} title="Friendly label for this gateway" placeholder="e.g. Virtual_Gateway_NodeRED" />
+              <input className="form-control" value={form.gateway_name} onChange={e => setForm(f => ({ ...f, gateway_name: e.target.value }))} title="Friendly label for this gateway" placeholder="e.g. Sim_Gateway_Cell1_Machining" />
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                A display label only — rename it freely. Heartbeats are matched on the Sparkplug ID below.
+                A display label only — rename it freely. Heartbeats are matched on the Sparkplug ID, which is generated from the database key and never moves.
               </div>
             </div>
             <div className="form-group">
-              <label className="form-label">Sparkplug ID</label>
-              {editing ? (
-                <>
-                  <CopyableId value={editing.sparkplug_id || gatewaySparkplugId(editing.gateway_id)} label="Sparkplug edge node id" onNotify={showToast} />
-                  {/* Copyable in its own right -- see the matching comment in DevicesTab. */}
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', marginBottom: '4px' }}>
-                    Configure this edge node to publish on:
-                  </div>
-                  <CopyableId
-                    value={`spBv1.0/<group>/NDATA/${editing.sparkplug_id || gatewaySparkplugId(editing.gateway_id)}`}
-                    label="Sparkplug topic"
-                    onNotify={showToast}
-                    className="copyable-id-wrap"
-                  />
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    Replace <span className="mono">&lt;group&gt;</span> with the Sparkplug group id configured on the edge node.
-                  </div>
-                </>
-              ) : (
-                <input className="form-control" value="— issued on save —" disabled readOnly title="Derived from the gateway's database id once the record exists" />
-              )}
-            </div>
-            <div className="form-group">
-              <label className="form-label">Internal UUID</label>
-              {editing
-                ? <CopyableId value={form.gateway_id} label="gateway UUID" onNotify={showToast} />
-                : <input className="form-control" value="— assigned on save —" disabled readOnly title="Database-generated UUID; not editable" />}
+              <label className="form-label">Description</label>
+              <textarea
+                className="form-control"
+                rows={2}
+                value={form.description || ''}
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                title="Optional free-text note about this gateway"
+                placeholder="e.g. Panel-mounted IPC in the machining cell, north wall"
+              />
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                Optional, and read by nothing — a note for whoever comes to this next.
+              </div>
             </div>
             <div className="form-group">
               <label className="form-label">Shopfloor Cell Zone</label>
@@ -520,6 +567,17 @@ export function GatewaysTab({ showToast, onViewThread, hasPermission, initialSea
               <input type="checkbox" id="is_virtual" checked={form.is_virtual || false} onChange={e => setForm(f => ({ ...f, is_virtual: e.target.checked }))} />
               <label htmlFor="is_virtual" className="form-label">⚡ Mark as Virtual Gateway (Cloud / Server-Simulated)</label>
             </div>
+            {/* THE CONSEQUENCE OF THE CHECKBOX, SAID BEFORE IT IS TICKED. Leaving it clear means a
+                bundle to download and hardware to run it on; ticking it means the row is finished on
+                save. That difference used to be invisible until after the gateway existed. Shown only
+                when creating: an existing gateway's enrolment is not re-run by editing its row. */}
+            {!editing && (
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '-6px', marginBottom: '12px' }}>
+                {form.is_virtual
+                  ? 'Runs on the application host. Nothing to install — this gateway is ready once saved.'
+                  : 'Runs on its own hardware. On save you will be given a bundle to copy to that machine; it enrols itself and appears here as online.'}
+              </div>
+            )}
             <div className="form-group">
               <label className="form-label">Gateway Access URL (Optional UI Console)</label>
               <input className="form-control" value={form.access_url || ''} onChange={e => setForm(f => ({ ...f, access_url: e.target.value }))} placeholder="e.g. http://localhost:1880" title="Web Console / Management URL for this gateway" />
@@ -585,16 +643,67 @@ export function GatewaysTab({ showToast, onViewThread, hasPermission, initialSea
           },
           {
             label: 'Cell Zone',
+            // A LINK when there is a cell to open. Site-Wide is deliberately left as plain text --
+            // it is the assertion that this gateway belongs to no cell, so a chip styled like the
+            // others but leading nowhere would promise an affordance that cannot exist.
             value: selected.location_scope === SCOPE_SITE_WIDE
               ? 'Site-Wide'
-              : selectedCell?.cell_name || (selected.cell_id ? selected.cell_id : null),
+              : selectedCell
+                ? (
+                    <button
+                      className="chip chip-link"
+                      onClick={() => onSelectCell?.(selectedCell.cell_id)}
+                      title="Open this cell on the Cells page"
+                    >
+                      <IconMap size={11} />
+                      <span className="chip-name">{selectedCell.cell_name}</span>
+                    </button>
+                  )
+                : (selected.cell_id || null),
             title: selected.location_scope === SCOPE_SITE_WIDE
               ? 'A host-run or central connector serving the whole facility. Its devices inherit no cell from it.'
               : 'Devices served by this gateway resolve to this cell unless they carry one of their own.'
           },
           { label: 'Last Heartbeat', value: formatHeartbeat(selected.last_heartbeat), title: 'Age of the last NBIRTH/NDATA/NDEATH. STALE after 90 seconds of silence.' },
+          {
+            label: 'Description',
+            value: selected.description || null,
+            full: true,
+            title: 'Operator note. Free text, read by nothing.'
+          },
         ] : []}
         actions={selected ? [
+          /**
+           * SETUP COMES FIRST WHILE IT IS UNFINISHED, above Launch UI and Edit.
+           *
+           * A physical gateway that has never enrolled has no UI to launch and nothing worth editing
+           * -- the only useful action is "give me the bundle". Shown for AWAITING_BIRTH too, because
+           * an appliance that enrolled and then never published is the case where an operator needs to
+           * re-issue and start again, and that is otherwise a dead end.
+           *
+           * Absent once the gateway is ONLINE: re-issuing then would invalidate the credential a
+           * working appliance is using, which is a destructive act dressed as a convenience.
+           *
+           * CONFIRM FIRST ON THIS ROUTE, unlike the one straight after creation. This gateway is not
+           * new: it may already hold a live token somebody downloaded, or -- at AWAITING_BIRTH -- a
+           * broker credential an appliance is holding. Issuing destroys whichever it has, so the
+           * modal asks for the gateway's name before it mints anything.
+           */
+          !selected.is_archived && !selected.is_virtual && isGatewayPending(selected) && canManage && {
+            label: selected.status === 'AWAITING_BIRTH' ? 'Re-issue Bundle' : 'Download Setup Bundle',
+            icon: <IconDownload size={13} />,
+            primary: true,
+            onClick: () => setBundleForGw({
+              gateway_id: selected.gateway_id,
+              gateway_name: selected.gateway_name,
+              sparkplug_id: selected.sparkplug_id,
+              status: selected.status,
+              confirmFirst: true
+            }),
+            title: selected.status === 'AWAITING_BIRTH'
+              ? 'This appliance enrolled but has not published. Re-issuing invalidates its current credential.'
+              : 'Generate the bootstrap bundle for this gateway and download it'
+          },
           selected.access_url && {
             label: 'Launch UI', icon: <IconExternalLink size={13} />, href: selected.access_url, primary: true,
             title: 'Open Node-RED / Virtual Gateway Editor'
@@ -643,22 +752,59 @@ export function GatewaysTab({ showToast, onViewThread, hasPermission, initialSea
             {selectedDevices.length === 0
               ? <div className="context-field-empty" style={{ fontSize: '11px' }}>No devices assigned</div>
               : (
+                /* CHIPS THAT GO SOMEWHERE, not status badges. This list answers "which devices" and
+                   then stranded you: the next question is always "what is wrong with that one", and
+                   the only way through was to read a name off here, switch tab and search for it.
+                   Now it is a click, matching the Cell Zone and Schema chips elsewhere in this
+                   drawer -- one navigation idiom across all four pages rather than three.
+
+                   THE LIFECYCLE STATE SURVIVES THE CHANGE, as a dot rather than as the chip's own
+                   colour. A chip coloured by status would collide with `chip-link`'s hover, and the
+                   two facts are independent: where this goes, and how the device is doing. */
                 <div className="context-device-list">
-                  {selectedDevices.map(d => (
-                    <span
-                      key={d.asset_id}
-                      className={`badge ${d.status === 'OFFLINE' ? 'badge-neutral' : 'badge-online'}`}
-                      style={{ fontSize: '11px' }}
-                      title={`${d.asset_name} — ${d.is_quarantined ? 'QUARANTINED' : d.status || 'ONLINE'}`}
-                    >
-                      {d.asset_name}{d.is_quarantined ? ' (quarantined)' : ''}
-                    </span>
-                  ))}
+                  {selectedDevices.map(d => {
+                    const status = deviceLifecycleStatus(d)
+                    return (
+                      <button
+                        key={d.asset_id}
+                        className="chip chip-link"
+                        onClick={() => onSelectDevice?.(d.asset_id)}
+                        title={`Open ${d.asset_name} on the Devices page — ${deviceStatusTitle(status)}`}
+                      >
+                        <span className="badge-dot" style={{ background: deviceStatusDotColor(status) }} />
+                        <span className="chip-name">{d.asset_name}</span>
+                      </button>
+                    )
+                  })}
                 </div>
               )}
+
+            {/* WITH THE METADATA FOR THE SAME REASON AS THE DEVICE LIST: "what is saved for this
+                appliance" is a fact about the gateway, and it is the question the AWAITING SETUP
+                badge raises. Hidden entirely from a role with no read authority -- see the
+                component's header for why an empty list cannot stand in for a denial. */}
+            {!selected.is_archived && (
+              <div style={{ marginTop: '14px' }}>
+                <FlowBackupUploader
+                  gateway={selected}
+                  canRead={canReadBackups}
+                  canManage={canManageBackups}
+                  showToast={showToast}
+                />
+              </div>
+            )}
           </div>
         )}
       />
+
+      {bundleForGw && (
+        <GatewayBundleModal
+          gateway={bundleForGw}
+          confirmFirst={bundleForGw.confirmFirst}
+          onClose={() => { setBundleForGw(null); load() }}
+          showToast={showToast}
+        />
+      )}
     </div>
   )
 }

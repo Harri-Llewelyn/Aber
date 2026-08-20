@@ -105,6 +105,12 @@ spec:
           imagePullPolicy: {{ .Values.timescaledb.image.pullPolicy }}
           env:
             {{- include "acs-cymru.secretEnv" (dict "name" "PGPASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
+            {{- /*
+              From the Secret, not interpolated into the command at render time: a password in the
+              rendered manifest is readable by anyone who can `helm get manifest`, and it would
+              also land in the Job spec stored in the cluster.
+            */}}
+            {{- include "acs-cymru.secretEnv" (dict "name" "BI_READER_PASSWORD" "secretName" $secretName "key" "BI_READER_PASSWORD") | nindent 12 }}
           {{- /*
             Values are passed as psql VARIABLES rather than substituted into the SQL at render
             time, so the chart's copies stay byte-identical to the repository's -- the same files
@@ -123,9 +129,27 @@ spec:
 
               echo 'Reconciling telemetry rollups...'
               $PSQL -v rollup_1m_retain={{ .Values.timescaledb.rollups.oneMinuteRetainFor | quote }} -v rollup_5m_retain={{ .Values.timescaledb.rollups.fiveMinuteRetainFor | quote }} -v rollup_1h_retain={{ .Values.timescaledb.rollups.oneHourRetainFor | quote }} -f /sql/aggregates.sql
+
+              {{/*
+                AFTER aggregates.sql, necessarily: roles.sql grants on the rollup views that file
+                creates. Run first, it fails with "relation telemetry_1h does not exist" -- and
+                only on a fresh volume, which is the worst kind of ordering bug because every
+                stack that already has the rollups passes.
+
+                An empty password makes roles.sql skip the role rather than create one with a
+                blank secret, so this needs no `if` around it.
+              */}}
+              echo 'Reconciling read-only BI role...'
+              $PSQL -v bi_reader_password="$BI_READER_PASSWORD" -f /sql/roles.sql
               {{- else }}
 
               echo 'Rollups disabled (timescaledb.rollups.enabled=false); skipping aggregates.sql.'
+              {{/*
+                roles.sql is skipped with them, not run alone. Every grant it makes is on a rollup
+                view, so with the rollups disabled it would have nothing to grant on -- and would
+                fail on the first GRANT rather than no-op.
+              */}}
+              echo 'Rollups disabled; skipping roles.sql (it grants only on the rollup views).'
               {{- end }}
           volumeMounts:
             - name: sql

@@ -6,14 +6,25 @@
 =================================================================================================
 `supabase/functions/aas-export/test_aas_export.py`, run in-cluster.
 
-ORDERED AFTER validate.py, AND THE ORDER IS A DATA DEPENDENCY, not tidiness. validate.py is what
-APPROVES `Simulated_CNC_01` out of quarantine and records its birth parameters -- which is what gives
-the Nameplate submodel anything to carry. Run first, this suite's live checks either skip themselves
-(the device is not registered, so `LIVE` is false) or assert against an empty shell. A SUITE THAT
-SKIPS ITS OWN SUBJECT AND REPORTS SUCCESS is the failure mode to avoid here, and it is silent.
+ITS SUBJECT IS SEEDED, NOT PRODUCED BY ANOTHER JOB. `Sim_CNC_Mill_01` is registered unquarantined by
+migration 0002 and given its tri-standard schema and its IDTA Digital Nameplate by 0020, so the live
+checks have something to assert against wherever the migrations have run -- no broker, no simulator
+publishing a DBIRTH, and no operator approval required.
 
-The dependency is enforced by an initContainer that waits for the validate Job to complete, rather
-than by CI running them in sequence -- so the ordering holds however the Jobs are triggered.
+That is a CHANGE, and the note it replaces was wrong in a way worth recording: this block used to
+say the ordering below was "a DATA DEPENDENCY -- validate.py is what APPROVES Simulated_CNC_01 out of
+quarantine and records its birth parameters". validate.py does neither. It seeds a gateway at its own
+pinned UUID, creates its own VALIDATE_* devices at runtime, and never touches the demo device. The
+suite passed regardless because `LIVE` only requires the device ROW to exist, which the seed provided
+-- so the stated dependency was load-bearing for nothing, and the Nameplate submodel was carried by
+whatever the shipped Node-RED flow happened to publish. When that flow was consolidated onto `Sim_`
+devices, nothing published under the demo device's id any more and the nameplate assertions had no
+source at all. Seeding the nameplate is what makes this suite's subject independent of the flow.
+
+The initContainer below is KEPT, for the narrower reason it gives itself: do not run a conformance
+suite against a stack whose conformance run did not pass. A SUITE THAT SKIPS ITS OWN SUBJECT AND
+REPORTS SUCCESS is still the failure mode to avoid here, and it is still silent -- which is why CI
+asserts on the absence of the skip line rather than on this Job's exit status.
 
 WHAT IT COVERS THAT NOTHING ELSE DOES:
   * conformance against the REAL vendored IDTA schema (tests/schemas), which caught three metamodel
@@ -86,14 +97,14 @@ spec:
                   exit 1
                 fi
                 if kubectl get job "$JOB" -o jsonpath='{.status.succeeded}' 2>/dev/null | grep -q 1; then
-                  echo "$JOB completed; the demo device is approved and its birth parameters recorded."
+                  echo "$JOB completed; the stack passed its conformance run."
                   break
                 fi
                 if [ "$(date +%s)" -ge "$deadline" ]; then
                   echo "timed out after {{ .Values.e2e.waitTimeout }}s waiting for $JOB" >&2
                   exit 1
                 fi
-                echo "waiting for $JOB (it approves Simulated_CNC_01, which this suite needs) ..."
+                echo "waiting for $JOB (its verdict gates this suite) ..."
                 sleep 5
               done
           resources:
@@ -120,7 +131,7 @@ spec:
             - name: AAS_TEST_PASSWORD
               value: acscymru123
             - name: AAS_TEST_DEVICE
-              value: Simulated_CNC_01
+              value: Sim_CNC_Mill_01
             - name: STORAGE_MODEL_BUCKET
               value: {{ .Values.supabaseStorage.bucket | quote }}
             - name: PYTHONUNBUFFERED

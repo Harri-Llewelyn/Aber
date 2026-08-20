@@ -28,7 +28,9 @@ const events = [
   {
     event_id: 'dt-1', entity_type: 'DEVICE', entity_id: DEVICE_ID, event_type: 'UPDATE',
     description: 'Device renamed', timestamp: '2026-08-10T10:00:00Z',
-    changed_by: 'admin@acs-cymru.local', actor_source: 'user', metadata: {}
+    changed_by: 'admin@acs-cymru.local', actor_source: 'user',
+    old_data: { id: DEVICE_ID, name: 'CNC_01' },
+    new_data: { id: DEVICE_ID, name: 'Simulated_CNC_01' }
   }
 ];
 
@@ -100,9 +102,33 @@ describe('DigitalThreadTab handover', () => {
   it('renders the handed-over event in full', async () => {
     render(<DigitalThreadTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
 
+    // One lane, one marker. The description and the mutation id moved into the drawer -- they
+    // describe one EVENT, and a lane is one ASSET.
+    const marker = await screen.findByRole('button', { name: /UPDATE on Simulated_CNC_01/ });
+    expect(document.querySelectorAll('.dt-lane:not(.dt-axis)').length).toBe(1);
+    expect(marker.getAttribute('title')).not.toMatch(/Invalid Date/);
+
+    fireEvent.click(marker);
+
     expect(await screen.findByText('Device renamed')).toBeInTheDocument();
     expect(screen.getByText('UPDATE')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Copy mutation id dt-1/ })).toBeInTheDocument();
     expect(screen.queryByText(/Invalid Date/)).not.toBeInTheDocument();
+  });
+
+  /*
+    The reason the default range is All time.
+
+    This fixture is dated 2026-08-10 and is never refreshed. Under a rolling default -- "Last 24
+    Hours" was the obvious choice -- the handover would answer an explicit "show me this asset's
+    history" click with an empty timeline for any device not edited today, which is most of them.
+    An operator asking for one asset's history means all of it.
+  */
+  it('requests an unbounded window, so an old asset history is not silently empty', async () => {
+    render(<DigitalThreadTab initialEntity={{ id: DEVICE_ID, type: 'DEVICE' }} onClearEntity={vi.fn()} />);
+
+    await waitFor(() => expect(threadCalls().length).toBeGreaterThan(0));
+    expect(threadCalls().every((url) => !url.includes('since='))).toBe(true);
+    expect(await screen.findByRole('button', { name: /UPDATE on Simulated_CNC_01/ })).toBeInTheDocument();
   });
 });

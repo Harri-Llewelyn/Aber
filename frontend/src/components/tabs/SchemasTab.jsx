@@ -62,11 +62,22 @@ import {
 import CopyableId from '../common/CopyableId'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import {
-  IconCheck, IconPlus, IconFileCode, IconAlertTriangle, IconArchive,
+  IconCheck, IconPlus, IconFileCode, IconAlertTriangle, IconArchive, IconCpu,
   IconChevronDown, IconChevronUp, IconX, IconLock, IconGitBranch, IconPencil, IconDownload
 } from '../common/Icons'
+import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
-export function SchemasTab({ showToast, hasPermission, onSelectSchema, pendingVocabularyEntry, onConsumeVocabularyEntry }) {
+/**
+ * @param {Function} onSelectSchema   Opens the DEVICES page filtered to a schema. Named for what the
+ *                                    caller passes, not for where it lands -- see App.jsx.
+ * @param {Function} onSelectDevice   Opens one device on the Devices page, from a Provisioned
+ *                                    Devices chip.
+ * @param {string}   initialSchemaId  A schema to open on arrival, handed over by a device drawer's
+ *                                    Schema chip. This page has no search box, so without it that
+ *                                    chip switched tab and left the operator on an unfiltered,
+ *                                    unselected list of every schema in the registry.
+ */
+export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectDevice, initialSchemaId, pendingVocabularyEntry, onConsumeVocabularyEntry }) {
   const [schemas, setSchemas]         = useState([])
   const [catalog, setCatalog]         = useState([])
   const [gateways, setGateways]       = useState([])
@@ -323,10 +334,20 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, pendingVo
   const usageCountFor = (metricName) =>
     schemas.filter(s => modelledMetrics(s)?.has(metricName)).length
 
-  const deviceCountFor = (schemaUuid) =>
+  /**
+   * The devices provisioned against one exact schema version.
+   *
+   * The resolution rule -- submodels if there are any, else the 1:1 `schema_id` -- is the same one
+   * `schemasForDevice` applies from the other direction, and was already written out here inline
+   * before the drawer needed the rows rather than their count. Kept as the list, with the count
+   * derived from it, so the number in the drawer and the chips beside it cannot disagree.
+   */
+  const devicesForSchema = (schemaUuid) =>
     devices.filter(d =>
       (d.submodel_schema_ids?.length ? d.submodel_schema_ids : [d.schema_id]).includes(schemaUuid)
-    ).length
+    )
+
+  const deviceCountFor = (schemaUuid) => devicesForSchema(schemaUuid).length
 
   const handleDeprecate = async (supersededBy) => {
     try {
@@ -590,6 +611,18 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, pendingVo
     // A type without a value would export as an AAS Reference with no key. Rejected here rather
     // than nulled on the way out, so the operator sees the field they left half-filled.
     (semanticIdValue !== '' || semanticIdTypeValue === '')
+
+  // Arriving from a device drawer's Schema chip. Read from the prop AND the URL for the same reason
+  // every other page reads both: the query string survives a reload and a shared link, the prop
+  // covers a navigation that pushed none.
+  const arrivingSchemaId =
+    new URLSearchParams(window.location.search).get('search') || initialSchemaId || ''
+  useArrivalSelection(
+    arrivingSchemaId,
+    schemas,
+    (s, term) => s.schema_uuid === term,
+    (s) => setSelectedId(s.schema_uuid)
+  )
 
   // Resolved fresh every render -- see the note on selectedId.
   const selectedSchema = schemas.find(s => s.schema_uuid === selectedId) || null
@@ -1301,9 +1334,36 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, pendingVo
             title: 'The version this one was forked from. Absent on the first version of a lineage.'
           },
           {
+            // THE COUNT WAS THE WHOLE FIELD, and a count is the one thing this drawer's actions
+            // could already tell you -- "View 4 Provisioned Device(s)" sits a few rows below and
+            // says the same number. So the field said nothing the panel did not, while the question
+            // it actually raises -- WHICH four -- had no answer short of leaving the page.
+            //
+            // The action below stays and is NOT redundant with these chips: it opens the Devices
+            // page FILTERED to this schema, which is what you want when the answer is forty devices
+            // and you intend to work through them. A chip is for when you want one.
             label: 'Provisioned Devices',
-            value: String(deviceCountFor(selectedSchema.schema_uuid)),
-            title: 'Devices registered against this exact version.'
+            value: (() => {
+              const attached = devicesForSchema(selectedSchema.schema_uuid)
+              if (attached.length === 0) return null
+              return (
+                <div className="context-device-list">
+                  {attached.map(d => (
+                    <button
+                      key={d.asset_id}
+                      className="chip chip-link"
+                      onClick={() => onSelectDevice?.(d.asset_id)}
+                      title={`Open ${d.asset_name} on the Devices page`}
+                    >
+                      <IconCpu size={11} />
+                      <span className="chip-name">{d.asset_name}</span>
+                    </button>
+                  ))}
+                </div>
+              )
+            })(),
+            full: true,
+            title: 'Devices registered against this exact version. Each opens on the Devices page.'
           },
         ] : []}
         actions={selectedSchema ? [

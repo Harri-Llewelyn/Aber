@@ -28,6 +28,12 @@ import { TelemetryExportModal } from '../modals/TelemetryExportModal'
 import { TelemetryModal } from '../modals/TelemetryModal'
 import { isProvisioningOverdue, isNeverSeen } from '../../utils/deviceProvisioning'
 import {
+  deviceLifecycleStatus,
+  deviceStatusBadgeClass,
+  deviceStatusDotColor,
+  deviceStatusTitle
+} from '../../utils/deviceStatus'
+import {
   SCOPE_CELL, SCOPE_SITE_WIDE, SOURCE_EXPLICIT, SOURCE_SITE_WIDE,
   resolveDeviceLocation, needsCellAssignment, unassignedHint
 } from '../../utils/cellResolution'
@@ -37,6 +43,9 @@ import {
 import { suggestMatches } from '../../utils/quarantineMatching'
 import {
   IconCpu,
+  IconDrive,
+  IconMap,
+  IconFileText,
   IconPlus,
   IconPencil,
   IconArchive,
@@ -48,18 +57,49 @@ import {
   IconCube,
   IconShieldAlert,
   IconAlertTriangle,
+  IconAlertCircle,
   IconLock,
   IconDownload,
   IconX
 } from '../common/Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
 // Sentinel values for the cell filter's two derived lanes. Prefixed so they can never collide
 // with a cell UUID, and kept out of `cells` because neither lane is a row in that table.
 const CELL_FILTER_UNASSIGNED = '__unassigned__'
 const CELL_FILTER_SITE_WIDE = '__site_wide__'
 
-export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter }) {
+export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelectCell, onSelectSchema, onViewThread, hasPermission, initialSearchFilter, onClearFilter, initialSchemaFilter, onClearSchemaFilter, activeAlerts = [] }) {
+  /**
+   * Firing alerts, indexed by the two keys a device can be matched on.
+   *
+   * BOTH KEYS, because the webhook resolves `device_id` best-effort: an alert whose sparkplug_id
+   * matched no device row is still recorded, with a null device_id. Indexing on sparkplug_id alone
+   * would be enough today and would silently stop matching the moment a device is re-registered
+   * under a new UUID with the same wire id, which is exactly what a re-provision does.
+   *
+   * Severity ordering matters: a device with a critical AND a warning is a device with a critical on
+   * it, so the reduce keeps the worst rather than the last one seen.
+   */
+  const alertsByDevice = React.useMemo(() => {
+    const worst = new Map()
+    const rank = { critical: 3, warning: 2, info: 1 }
+    for (const a of activeAlerts) {
+      for (const key of [a.sparkplug_id, a.device_id]) {
+        if (!key) continue
+        const held = worst.get(key)
+        if (!held || (rank[a.severity] || 0) > (rank[held.severity] || 0)) worst.set(key, a)
+      }
+    }
+    return worst
+  }, [activeAlerts])
+
+  const alertFor = React.useCallback(
+    (device) => alertsByDevice.get(effectiveSparkplugId(device)) || alertsByDevice.get(device?.asset_id) || null,
+    [alertsByDevice]
+  )
+
   const [assets, setAssets]     = useState([])
   const [cells, setCells]       = useState([])
   const [gateways, setGateways] = useState([])
@@ -161,6 +201,34 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
   /** This device's last reported values, keyed the way telemetry keys them. */
   const latestFor = (device) =>
     latestBySparkplugId.get(effectiveSparkplugId(device)) || null
+
+  /**
+   * A device row, shaped for the edit form.
+   *
+   * The only transformation is `schema_id`, and it is here rather than inline because the drawer and
+   * the row's Edit action both open the same form and both used to seed it from the raw row.
+   *
+   * THE DROPDOWN MANAGES `devices.schema_id`, WHICH IS ONE OF THE TWO ROUTES A SCHEMA ARRIVES BY.
+   * Seeding it with the resolved schema makes the control show what is actually attached, so saving
+   * an unrelated field no longer silently clears the picker's apparent value. It also means saving
+   * WRITES that id into `devices.schema_id` for a device that previously carried it only through
+   * `device_submodels` -- which is harmless: schemasForDevice prefers the submodels either way, so
+   * the two agreeing changes nothing about what is displayed or evaluated.
+   *
+   * AN EXPLICIT `schema_id` WINS OVER A SUBMODEL, which is the conservative precedence and not the
+   * obvious one. This control edits that column, so a device that already carries a value there has
+   * already answered the question the dropdown asks -- seeding from a submodel instead would show a
+   * different schema and then WRITE it on the next save, silently reassigning a device because
+   * somebody edited its description. The fallback only fills a hole; it never overrules an answer.
+   *
+   * A device with several submodels is the case this cannot represent, so it does not pretend to:
+   * the form renders a note naming them. Silently dropping them would turn a save into a data loss
+   * the operator had no way to see coming. Not hypothetical -- Sim_CNC_Mill_01 carries two.
+   */
+  const editFormFor = (device) => {
+    const attached = schemasForDevice(device, schemas)
+    return { ...device, schema_id: device.schema_id || attached[0]?.schema_uuid || '' }
+  }
 
   const getInitialSearch = () => {
     const params = new URLSearchParams(window.location.search)
@@ -546,6 +614,16 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
     (attentionOnly ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
   const schemaName = schemas.find(s => s.schema_uuid === schemaFilter)?.schema_name
 
+  // Arriving from a gateway's device chip, a schema's device chip, an alert row or the shopfloor
+  // map: the caller named ONE device, so open it rather than leaving a one-row table to be clicked.
+  // Identifier equality only -- typing a name into the search box opens nothing. See the hook.
+  useArrivalSelection(
+    searchQuery,
+    assets,
+    (a, term) => a.asset_id === term || effectiveSparkplugId(a) === term,
+    (a) => setSelectedId(a.asset_id)
+  )
+
   // Resolved fresh every render -- see the note on selectedId. A device that is archived out of
   // the current filter, or deleted, resolves to null and the drawer closes itself.
   const selectedDevice = assets.find(a => a.asset_id === selectedId) || null
@@ -753,7 +831,6 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
               <thead><tr><th title="Human-readable device name">Name</th><th title="Sparkplug B id this device publishes under">Sparkplug ID</th><th title="Device status">Status</th><th style={{ width: 'auto' }} title="Device classification">Type</th><th title="Assigned cell zone">Cell</th></tr></thead>
               <tbody>
                 {filteredAssets.map(a => {
-                  const isOff = a.status === 'OFFLINE'
                   return (
                     <React.Fragment key={a.asset_id}>
                       {/* Clicks originating on a button, link or input inside the row are ignored
@@ -790,10 +867,52 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
                               <IconAlertTriangle size={11} /> AWAITING FIRST BIRTH
                             </span>
                           ) : (
-                            <span className={`badge ${isOff ? 'badge-neutral' : 'badge-online'}`} title={isOff ? 'Sparkplug B DDEATH Received — Device Offline' : 'Device Active'}>
-                              <span className="badge-dot" style={{ background: isOff ? 'var(--text-muted)' : 'var(--success)' }} />
-                              {isOff ? 'Offline / DDEATH' : 'Online'}
-                            </span>
+                            // The lifecycle badge, resolved by utils/deviceStatus.js so this cell,
+                            // the drawer's subtitle and the shopfloor chip cannot disagree about
+                            // the same row. Three states and no fourth: ONLINE, OFFLINE,
+                            // QUARANTINED.
+                            (() => {
+                              const status = deviceLifecycleStatus(a)
+                              const alert = alertFor(a)
+                              return (
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+                                  <span
+                                    className={`badge ${deviceStatusBadgeClass(status)}`}
+                                    title={deviceStatusTitle(status)}
+                                  >
+                                    <span className="badge-dot" style={{ background: deviceStatusDotColor(status) }} />
+                                    {status.charAt(0) + status.slice(1).toLowerCase()}
+                                  </span>
+                                  {/* THE ALERT SITS BESIDE THE LIFECYCLE STATE, NOT INSTEAD OF IT.
+                                      They answer different questions -- "is this machine talking to
+                                      us" and "is Grafana unhappy about what it said" -- and an
+                                      overheating machine is emphatically still ONLINE. Collapsing
+                                      the two into one badge is what the withdrawn client-side alarm
+                                      did, and it made a hot device indistinguishable from a
+                                      disconnected one. */}
+                                  {/* A LUCIDE GLYPH, NOT AN EMOJI. 🚨 and ⚠️ rendered at whatever
+                                      size, weight and hue the operating system's emoji font chose:
+                                      a full-colour raster on Windows, a flat outline on Linux, and
+                                      neither inherits `currentColor`, so the badge's text went red
+                                      or amber and the icon beside it did not follow. These are
+                                      stroked SVGs at 11px that take their colour from the badge --
+                                      the same treatment as the ARCHIVED and AWAITING FIRST BIRTH
+                                      badges above, which is the other half of the reason: three
+                                      badges in one column drawn from two different icon systems. */}
+                                  {alert && (
+                                    <span
+                                      className={`badge ${alert.severity === 'critical' ? 'badge-offline' : 'badge-warning'}`}
+                                      style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                      title={`${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''} (raised by Grafana)`}
+                                    >
+                                      {alert.severity === 'critical'
+                                        ? <><IconAlertCircle size={11} /> ALARM</>
+                                        : <><IconAlertTriangle size={11} /> WARNING</>}
+                                    </span>
+                                  )}
+                                </div>
+                              )
+                            })()
                           )}
                         </td>
                         <td>
@@ -890,54 +1009,36 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
           <div className="modal">
             <div className="modal-title">{editing ? 'Edit Device Configuration' : 'Register New Device'}</div>
             
-            {/* Name first: it is the human handle. The identifiers below are machine-issued
-                and read-only, and only matter when configuring the physical gateway. */}
+            {/* EVERY FIELD IN HERE IS EDITABLE, WHICH IT WAS NOT BEFORE.
+                The Sparkplug ID and Internal UUID blocks that used to sit under the name are gone.
+                They were three of the form's five rows and none of them could be changed -- an edit
+                dialog whose majority is read-only teaches the reader that its controls are decorative,
+                and both identifiers are on the context drawer beside every other fact about the
+                device, where they are copyable and where somebody looking for an identifier actually
+                goes. The publish-topic helper went with them for the same reason: it is a fact to
+                read, not a value to set, and the drawer is where facts live. */}
             <div className="form-group">
               <label className="form-label">Device Name</label>
-              <input className="form-control" value={form.asset_name} onChange={e => setForm(f => ({ ...f, asset_name: e.target.value }))} title="Friendly label for this device" placeholder="e.g. Simulated_CNC_01" />
+              <input className="form-control" value={form.asset_name} onChange={e => setForm(f => ({ ...f, asset_name: e.target.value }))} title="Friendly label for this device" placeholder="e.g. Sim_CNC_Mill_01" />
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                A display label only — rename it freely. Identity on the wire is the Sparkplug ID below, so renaming never breaks ingestion or detaches telemetry history.
+                A display label only — rename it freely. Identity on the wire is the Sparkplug ID, which is generated from the database key and never moves, so renaming never breaks ingestion or detaches telemetry history.
               </div>
             </div>
 
             <div className="form-group">
-              <label className="form-label">Sparkplug ID</label>
-              {editing ? (
-                <>
-                  <CopyableId value={effectiveSparkplugId(editing)} label="Sparkplug device id" onNotify={showToast} />
-                  {/* The topic is its own copy target. It used to be a plain <span> with the words
-                      "Click to copy" beneath it, which promised an affordance that did not exist --
-                      only the id above was ever clickable, and the sentence sat under the topic.
-                      The edge node segment is filled in from the assigned gateway when there is
-                      one, so what gets copied is a topic you can actually use rather than a
-                      template with two holes in it. */}
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', marginBottom: '4px' }}>
-                    Configure the gateway to publish this device on:
-                  </div>
-                  <CopyableId
-                    value={`spBv1.0/<group>/DDATA/${
-                      gateways.find(g => g.gateway_id === form.active_gateway_id)?.sparkplug_id || '<edge node>'
-                    }/${effectiveSparkplugId(editing)}`}
-                    label="Sparkplug topic"
-                    onNotify={showToast}
-                    className="copyable-id-wrap"
-                  />
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    Replace <span className="mono">&lt;group&gt;</span> with the Sparkplug group id configured on the edge node.
-                  </div>
-                </>
-              ) : (
-                <input className="form-control" value="— issued on save —" disabled readOnly title="Derived from the device's database id once the record exists" />
-              )}
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Internal UUID</label>
-              {editing
-                ? <CopyableId value={form.asset_id} label="device UUID" onNotify={showToast} />
-                : <input className="form-control" value="— assigned on save —" disabled readOnly title="Database-generated UUID; not editable" />}
+              <label className="form-label">Description</label>
+              <textarea
+                className="form-control"
+                rows={2}
+                value={form.description || ''}
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                title="Optional free-text note about this device"
+                placeholder="e.g. Spindle rebuilt 2026-03; runs warmer than its twin"
+              />
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                Database primary key. Needed only for correlating with server logs and the digital thread.
+                {/* Says what it is NOT for, because the tempting misuse is to encode something here
+                    that belongs in a typed field -- and then to start parsing it. */}
+                Optional, and read by nothing. For identification a consumer should trust — manufacturer, serial number, firmware — use the Digital Nameplate, whose fields carry published IDTA identifiers.
               </div>
             </div>
 
@@ -1061,17 +1162,33 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
                 Used to suggest a match if a differently-named device shows up in quarantine reporting metrics that overlap this schema's required fields.
               </div>
+              {/* THE ONE CASE A SINGLE-SELECT CANNOT STATE. A device may carry several submodels
+                  (device_submodels, migration 0034) and this control writes the 1:1 devices.schema_id.
+                  Selecting the first and saying nothing would let somebody press Save believing they
+                  had seen the whole picture and quietly disagree with the drawer beside them, which
+                  lists all of them. Naming the others is the smallest honest version of that. */}
+              {editing && (() => {
+                const attached = schemasForDevice(editing, schemas)
+                if (attached.length < 2) return null
+                return (
+                  <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '6px' }}>
+                    This device has {attached.length} schemas attached
+                    ({attached.map(s => s.schema_name).join(', ')}). This picker sets only the primary
+                    one; the rest are managed as AAS submodels and are unaffected by saving here.
+                  </div>
+                )
+              })()}
             </div>
 
-            <div className="form-group">
-              <label className="form-label">Connection Method</label>
-              <select className="form-control" value={form.connection_method || 'Sparkplug B'} onChange={e => setForm(f => ({ ...f, connection_method: e.target.value }))} title="Protocol connection method">
-                <option value="Sparkplug B">Sparkplug B MQTT</option>
-                <option value="OPC-UA">OPC-UA TCP</option>
-                <option value="Modbus-TCP">Modbus TCP</option>
-                <option value="HTTP-REST">HTTP REST API</option>
-              </select>
-            </div>
+            {/* THE CONNECTION METHOD PICKER IS GONE, and it was the field most likely to be believed.
+                It offered OPC-UA, Modbus TCP and HTTP REST beside Sparkplug B as though choosing one
+                changed how the device is read. Nothing acts on the column: ingestion is a Sparkplug B
+                MQTT subscriber and has no other transport, so picking Modbus recorded a claim the
+                platform then contradicted on every message. The value still displays in the drawer,
+                where it reads as a fact about the asset rather than as a setting.
+
+                Adding a second transport means adding an ingestion path for it. The picker can come
+                back then, and it will mean something. */}
 
             <div className="modal-actions">
               <button className="btn btn-ghost" onClick={() => setShowForm(false)} disabled={saving} title="Cancel edits">Cancel</button>
@@ -1143,13 +1260,26 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
         onClose={() => setSelectedId(null)}
         type="DEVICE"
         onCopy={showToast}
+        alert={selectedDevice ? alertFor(selectedDevice) : null}
         title={selectedDevice?.asset_name || ''}
         subtitle={selectedDevice && (
           <>
-            <span className={`badge ${selectedDevice.status === 'OFFLINE' ? 'badge-neutral' : 'badge-online'}`} style={{ fontSize: '11px' }}>
-              {selectedDevice.status || 'ONLINE'}
-            </span>
-            {selectedDevice.is_quarantined && <span className="badge badge-warning" style={{ fontSize: '11px' }}>QUARANTINED</span>}
+            {/* ONE badge for the lifecycle state, not a status badge plus a QUARANTINED badge
+                beside it -- a quarantined device used to be labelled OFFLINE and QUARANTINED at
+                once, which reads as two facts and is one. ARCHIVED stays separate because it is a
+                separate axis: a decommissioned device still has a last known lifecycle state. */}
+            {(() => {
+              const status = deviceLifecycleStatus(selectedDevice)
+              return (
+                <span
+                  className={`badge ${deviceStatusBadgeClass(status)}`}
+                  style={{ fontSize: '11px' }}
+                  title={deviceStatusTitle(status)}
+                >
+                  {status}
+                </span>
+              )
+            })()}
             {selectedDevice.is_archived && <span className="badge badge-warning" style={{ fontSize: '11px' }}>ARCHIVED</span>}
           </>
         )}
@@ -1174,36 +1304,54 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
                 : "The DDATA topic this device publishes on. No Sparkplug group is recorded on its gateway, so that segment is a wildcard."
           },
           {
-            // The inline <select> that used to be a whole table column, moved here and kept as a
-            // control rather than flattened to text. It was ~170px of every row spent on a write
-            // almost nobody performs, and a dropdown in a row someone is trying to READ is one
-            // mis-scroll away from silently rebinding a device.
+            // A LINK, NOT A PICKER. This was an inline <select> for rebinding the device to another
+            // edge node -- a write almost nobody performs, sitting in the panel people open to READ,
+            // one mis-scroll away from silently moving a device's data path. Reassignment still
+            // exists in Edit Details, where a destructive change belongs behind an explicit save.
+            //
+            // What the field is asked ninety-nine times out of a hundred is "which gateway is this,
+            // and take me to it", so that is what it now does.
             label: 'Serving Gateway',
             full: true,
-            value: (
-              <select
-                className="form-control form-control-sm"
-                style={{ width: '100%' }}
-                value={selectedDevice.active_gateway_id || ''}
-                onChange={e => reassignGatewayInline(selectedDevice, e.target.value)}
-                disabled={!canManage || selectedDevice.is_archived}
-                title={!canManage
-                  ? 'Requires Admin permissions'
-                  : "Rebind this device to another edge node. This changes the DATA PATH, not the device's location."}
+            value: selectedDevice.active_gateway_id ? (
+              <button
+                className="chip chip-link"
+                onClick={() => onSelectGateway?.(selectedDevice.active_gateway_id)}
+                title="Open this gateway on the Gateways page"
               >
-                <option value="">Unassigned</option>
-                {gateways.map(g => <option key={g.gateway_id} value={g.gateway_id}>{g.gateway_name}</option>)}
-              </select>
-            ),
-            title: "The edge node carrying this device's data. Changing it changes the data path, not the location."
+                <IconDrive size={11} />
+                <span className="chip-name">
+                  {gateways.find(g => g.gateway_id === selectedDevice.active_gateway_id)?.gateway_name
+                    || selectedDevice.gateway_name || selectedDevice.active_gateway_id}
+                </span>
+              </button>
+            ) : null,
+            title: "The edge node carrying this device's data. Reassign it in Edit Details."
           },
           {
             // RESOLVED, not the explicit override -- the two read the same in the common case and
             // showing the wrong one is the exact confusion migration 0036 exists to prevent.
+            //
+            // Site-Wide is deliberately NOT a link. It is the assertion that this device belongs to
+            // no cell, so there is nowhere for the link to go -- and a chip that looked identical to
+            // the others and did nothing would be worse than plain text.
             label: 'Cell Zone (resolved)',
             value: selectedLocation?.location_scope === SCOPE_SITE_WIDE
               ? 'Site-Wide'
-              : (cells.find(c => c.cell_id === selectedLocation?.effective_cell_id)?.cell_name || null),
+              : (() => {
+                  const cell = cells.find(c => c.cell_id === selectedLocation?.effective_cell_id)
+                  if (!cell) return null
+                  return (
+                    <button
+                      className="chip chip-link"
+                      onClick={() => onSelectCell?.(cell.cell_id)}
+                      title="Open this cell on the Cells page"
+                    >
+                      <IconMap size={11} />
+                      <span className="chip-name">{cell.cell_name}</span>
+                    </button>
+                  )
+                })(),
             title: selectedLocation?.location_source === SOURCE_EXPLICIT
               ? 'Set on the device itself, so it stays here regardless of its gateway.'
               : selectedLocation?.location_scope === SCOPE_SITE_WIDE
@@ -1215,8 +1363,54 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
             value: selectedLocation?.location_source || null,
             title: 'explicit = set on the device; inherited = from its gateway; site_wide = no single cell; unassigned = nothing to inherit.'
           },
-          { label: 'Schema', value: schemas.find(s => s.schema_uuid === selectedDevice.schema_id)?.schema_name || null },
-          { label: 'Connection Method', value: selectedDevice.connection_method || null },
+          {
+            // RESOLVED THROUGH schemasForDevice, NOT OFF selectedDevice.schema_id, and that was a
+            // real bug rather than a tidy-up. A schema reaches a device by either of two routes: the
+            // 1:1 `devices.schema_id`, or a row in `device_submodels` (migration 0034, surfaced by
+            // api.js as `submodel_schema_ids`). This field read only the first, so every device
+            // migration 0022 attached a class schema to -- which is all six on the demo floor --
+            // showed "Not set" in the drawer while the table beside it, which has always used
+            // schemasForDevice, listed the schema's tags. Two views of one row disagreeing.
+            //
+            // ALL OF THEM, not the first. A device may carry several submodels; rendering one chip
+            // would restate the same bug one submodel later.
+            label: 'Schema',
+            value: (() => {
+              const attached = schemasForDevice(selectedDevice, schemas)
+              if (attached.length === 0) return null
+              return (
+                <div className="context-device-list">
+                  {attached.map(schema => (
+                    <button
+                      key={schema.schema_uuid}
+                      className="chip chip-link"
+                      onClick={() => onSelectSchema?.(schema.schema_uuid)}
+                      title={`Open ${schema.schema_name} on the Schemas page`}
+                    >
+                      <IconFileText size={11} />
+                      <span className="chip-name">{schema.schema_name}</span>
+                    </button>
+                  ))}
+                </div>
+              )
+            })(),
+            full: true,
+            title: 'The metric contract(s) this device is judged against. Opens on the Schemas page.'
+          },
+          /* CONNECTION METHOD IS GONE FROM HERE TOO, which finishes what removing the picker
+             started. Dropping the form control but keeping the read-only field left the drawer
+             stating a transport as though it were a fact about the device -- and it is not one.
+             Ingestion is a Sparkplug B MQTT subscriber with no other transport, so a device row
+             reading "Modbus TCP" describes nothing that happens: the column is a leftover claim
+             that the platform contradicts on every message it receives. A field nothing writes and
+             nothing acts on is not documentation, it is a second answer to a question that already
+             has one. The column itself is left in place; this is a UI removal, not a migration. */
+          {
+            label: 'Description',
+            value: selectedDevice.description || null,
+            full: true,
+            title: 'Operator note. Free text, read by nothing.'
+          },
           {
             label: 'Classification',
             value: deviceTagList(selectedDevice, schemasForDevice(selectedDevice, schemas), latestFor(selectedDevice), catalog).join(', ') || null,
@@ -1238,9 +1432,17 @@ export function DevicesTab({ showToast, onSelectDevice, onViewThread, hasPermiss
             title: !canArchive ? 'Requires Admin permissions' : 'Restore device back to active service'
           } : {
             label: 'Edit Details', icon: <IconPencil size={13} />,
-            onClick: () => { setEditing(selectedDevice); setForm(selectedDevice); setShowForm(true) },
+            // THE FORM IS SEEDED WITH THE RESOLVED SCHEMA, not with the raw row. `setForm(device)`
+            // copied `schema_id` straight across, which is null for every device whose schema
+            // arrives through `device_submodels` -- so the dropdown read "No schema assigned" for a
+            // device the rest of the page correctly showed as schema'd, and saving that form
+            // silently confirmed the wrong answer.
+            onClick: () => { setEditing(selectedDevice); setForm(editFormFor(selectedDevice)); setShowForm(true) },
             disabled: !canManage || selectedDevice.status === 'OFFLINE',
-            primary: true,
+            // NOT `primary`, which is the change. It was the one filled button in a drawer whose
+            // other five actions are ghosts, which read as a recommendation -- and "edit this" is not
+            // what anybody opens a device panel to do. The Gateways and Cells drawers already style
+            // their edit action as a secondary; this matches them.
             title: !canManage
               ? 'Requires Admin permissions'
               : selectedDevice.status === 'OFFLINE'

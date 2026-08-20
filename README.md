@@ -11,7 +11,7 @@ management.
 
 > **Design ethos —** *use pre-existing components and standards; minimise custom code.*
 > Where upstream ACS ships bespoke microservices, this fork uses Supabase, TimescaleDB, Grafana and
-> Node-RED. The custom surface is one Python ingestion daemon, six edge functions, an i3X server and
+> Node-RED. The custom surface is one Python ingestion daemon, nine edge functions, an i3X server and
 > a React dashboard.
 
 ---
@@ -40,7 +40,7 @@ flowchart TB
 
     subgraph Processing ["Ingestion & Serverless"]
         ING["Python Ingestion Engine<br/>identity - quarantine - binding"]
-        EF["Edge Functions<br/>approve-quarantine - deploy-nodered - aas-export<br/>grafana-userinfo - nodered-userinfo - fplus-directory"]
+        EF["Edge Functions<br/>approve-quarantine - deploy-nodered - aas-export<br/>grafana-userinfo - nodered-userinfo - fplus-directory<br/>grafana-alert-webhook - enroll-gateway - gateway-bundle"]
     end
 
     subgraph Supabase ["Supabase BaaS"]
@@ -119,7 +119,22 @@ view, `0011` IDTA Digital Nameplate and per-device nameplate data, `0012` permit
 discrete metric, `0013` ASHRAE 223P vocabulary, `0014` repoints locally-minted semantic
 identifiers onto the `acs-cymru.local` namespace, `0015` moves the default Sparkplug group to
 `ACS-Cymru`, `0016` drops the dashboard's own service-directory entry and renames the Node-RED
-one to say it is the simulator — plus demo accounts (`supabase/seed.sql`).
+one to say it is the simulator, `0018` pre-registers the demonstrator's metric set with each
+row's standard and published semantic id, `0019` adds the 223P supply-air-flow metric the
+shopfloor simulator needed, `0020` retires the introductory single-device simulator and moves its
+schema and IDTA nameplate onto `Sim_CNC_Mill_01`, `0021` gives each shopfloor cell an icon from a
+closed set, `0022` adds one schema per machine class and attaches it to every simulated device,
+`0023` adds the `device_alerts` occurrence log Grafana alerting writes into and publishes it for
+Realtime, `0024` adds an optional free-text `description` to devices and gateways, `0025` adds
+physical-gateway enrolment — a `gateway_enrollment_tokens` table reachable only by `service_role`,
+the RPCs that issue and atomically redeem a single-use token, and the `PENDING_ENROLLMENT` /
+`AWAITING_BIRTH` lifecycle states — plus demo accounts (`supabase/seed.sql`).
+
+> **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
+> because `0005` already implements one; a second declaration of `log_digital_thread_event()`
+> would win by filename order on every boot and would have regressed the `actor_source`
+> attribution `0005` adds. The gap in the numbering is deliberate and the reasoning is in
+> [`supabase/README.md`](supabase/README.md#audit-signal-and-attribution-0005).
 
 | Interface | URL |
 | :--- | :--- |
@@ -150,6 +165,25 @@ Self-registered accounts get read-only `Operator` via the `handle_new_user` trig
 > registered as Kong API keys. **Generate fresh secrets for any shared or hosted environment.**
 
 Teardown: `docker compose down -v` (also drops volumes, invalidating every logged-in browser).
+
+### Resetting to a clean slate
+
+```bash
+npm run stack:reset -- --yes
+```
+
+Tears the stack down **with its volumes**, brings it back, waits for the schema to exist rather
+than for ports to answer, and re-provisions the four cell gateways — printing their credentials
+and writing them to `.env.gateways`, because `mosquitto_passwd` stores only a hash and they cannot
+be read back afterwards.
+
+**`--yes` is required and there is no interactive prompt.** A prompt is something people learn to
+dismiss without reading, and this is most dangerous once it is familiar. It also refuses outright
+when `NODE_ENV=production`, and when `COMPOSE_PROJECT_NAME` names a stack this repository does not
+own — so a shell in the wrong directory cannot take down someone else's.
+
+The one thing it exists for that nothing else can do: **`digital_thread` is append-only to every
+application role**, so dropping the volume is the only way back to an empty audit trail.
 
 ---
 
@@ -207,8 +241,8 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | [`docs/kubernetes-architecture.md`](docs/kubernetes-architecture.md) | Why the Kubernetes target is built the way it is. Source comments cite it by section |
 | [`docs/openapi.yaml`](docs/openapi.yaml) · [`docs/i3x-openapi.yaml`](docs/i3x-openapi.yaml) | REST and i3X specifications, rendered by Swagger UI |
 | [`supabase/migrations/archive/`](supabase/migrations/archive) | The 38 pre-beta migrations, preserved for their reasoning. Never executed |
-| [`grafana/`](grafana) · [`timescaledb/`](timescaledb) | Provisioning; hypertable schema, retention and rollup reconciliation |
-| [`scripts/`](scripts) | Setup, seeding, vocabulary generation, chart-file sync, drift guards, database backup/restore |
+| [`grafana/`](grafana) · [`timescaledb/`](timescaledb) | Provisioning; hypertable schema, retention and rollup reconciliation, the read-only BI role |
+| [`scripts/`](scripts) | Setup, seeding, vocabulary generation, chart-file sync, drift guards, database backup/restore, gateway provisioning, stack reset, AAS push |
 | [`tests/`](tests) | Vendored IDTA AAS schema, conformance test-runner image |
 
 ---
@@ -237,7 +271,7 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | `ingestion` | `acs-cymru_ingestion` | `./Dockerfile` | — |
 | `node-red-init` | `acs-cymru_node_red_init` | `./node-red/Dockerfile` | — |
 | `node-red` | `acs-cymru_node_red` | `./node-red/Dockerfile` | `1880:1880` |
-| `grafana` | `acs-cymru_grafana` | `grafana/grafana:11.6.1` | `3002:3000` |
+| `grafana` | `acs-cymru_grafana` | `grafana/grafana:13.1.3` | `3002:3000` |
 | `swagger-ui` | `acs-cymru_swagger_ui` | `swaggerapi/swagger-ui:v5.17.14` | `8088:8080` |
 
 ---
@@ -302,7 +336,7 @@ Digital Nameplate; what each one covers and how its identity was verified is in
 ## Testing
 
 ```bash
-# Frontend — 1016 tests
+# Frontend — 1225 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required
@@ -313,15 +347,40 @@ python ingestion/test_device_location.py
 python ingestion/test_health_heartbeat.py
 python ingestion/test_rbe_telemetry.py
 python ingestion/test_mqtt_tls.py
+python ingestion/test_audit_write_dedup.py
+python ingestion/test_telemetry_batching.py
 python i3x/test_i3x_service.py
 python supabase/functions/approve-quarantine/test_approve_quarantine.py
 python supabase/functions/deploy-nodered/test_deploy_nodered.py
 python supabase/functions/nodered-userinfo/test_nodered_userinfo.py
 python supabase/functions/aas-export/test_aas_export.py
+python supabase/functions/grafana-alert-webhook/test_grafana_alert_webhook.py
+
+# Physical gateway enrolment — signs in as Administrator to mint tokens (issuing is a USER's act,
+# gated on has_role, so the service key cannot do it), then redeems them the way an appliance does:
+# the anon key and no user JWT. Stops the credential service to exercise the 503 rollback path.
+SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+  python supabase/functions/enroll-gateway/test_enroll_gateway.py
+
+# The downloadable bundle — role gating (Operator and Auditor get 403 and no token is minted), ZIP
+# integrity, and that the embedded token is the one the database will accept.
+SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
+  python supabase/functions/gateway-bundle/test_gateway_bundle.py
+
+# Broker credential issuance — needs the stack up and the service's own bearer token
+MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credential.py
+
+# The credential merge, in isolation — the one piece of it whose failure is silent
+npm run test:lib
 
 # Database suites — need Postgres
 python supabase/migrations/test_user_roles_rls.py
 python supabase/migrations/test_schema_versioning.py
+python supabase/migrations/test_digital_thread_guard.py
+python supabase/migrations/test_metric_catalog_seed.py
+python supabase/migrations/test_gateway_enrollment.py
+# Needs the TimescaleDB historian (port 5433), not Supabase — the rollups live there
+python timescaledb/test_bi_reader_grants.py
 
 # End-to-end — needs the running stack
 set -a && . ./.env && set +a && unset MQTT_HOST DB_HOST DB_PORT
@@ -375,8 +434,11 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
   with it `auth.sessions`. The dashboard clears the stale tokens and returns to the login screen.
 - **Swagger UI's "Example Value" is documentation, not data.** Press **Execute** and read the
   **Response body** panel.
-- **Simulated devices appear quarantined on first start.** `Simulated_CNC_01` is auto-registered
-  with `is_quarantined = true` by design; an `Administrator` must approve it.
+- **An unrecognised device appears in the quarantine queue, not on the shopfloor map.** That is the
+  zero-touch onboarding path working: a device that announces itself under an id nobody registered
+  is held and its telemetry dropped until an `Administrator` approves it. The demonstrator's own
+  `Sim_` devices are pre-registered and so bypass it — publish under any other well-formed
+  `dev`-prefixed id to see it.
 
 ---
 

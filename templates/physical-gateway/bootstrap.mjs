@@ -1,0 +1,494 @@
+#!/usr/bin/env node
+/**
+ * First-boot provisioning for an ACS-Cymru physical gateway appliance.
+ *
+ * WHAT IT DOES, ONCE:
+ *   1. redeems the single-use enrolment token in .env against the platform's enroll-gateway
+ *   2. writes the broker CA, so this appliance can VERIFY the broker rather than trust it
+ *   3. writes /data/flows.json from flows.template.json, with this gateway's identity substituted
+ *   4. writes /data/flows_cred.json, ENCRYPTED, through Node-RED's own credential runtime
+ *   5. writes /data/settings.js with a locally generated admin password, printed once
+ *   6. writes /data/gateway.env, which the node-red service sources at start
+ *
+ * ---------------------------------------------------------------------------------------------
+ * THE TOKEN IS SINGLE-USE, AND EVERYTHING ABOUT THE CONTROL FLOW FOLLOWS FROM THAT.
+ *
+ * A second successful run is impossible: the platform consumed the token the first time. So this
+ * script is not idempotent in the usual sense -- it is ONCE-ONLY, guarded by /data/.enrolled.json,
+ * and a re-run against a provisioned volume exits 0 having done nothing. That is deliberate: the
+ * alternative (attempt, fail, exit non-zero) would make `docker compose up` on an already-working
+ * appliance report a failure.
+ *
+ * RETRYING IS THEREFORE NARROW AND EXPLICIT. Only a 503 carrying `retryable: true` is retried --
+ * that is the platform saying, in as many words, that it RELEASED the claim and the same token is
+ * still good. Every other failure is terminal, because retrying a spent token cannot succeed and
+ * would only bury the real error under a wall of 401s.
+ *
+ * Usage:
+ *   node /bundle/bootstrap.mjs                          # first boot; no-op once enrolled
+ *   node /bundle/bootstrap.mjs --reset-admin-password    # new editor password, keeps enrolment
+ *   node /bundle/bootstrap.mjs --force                   # re-enrol with a NEW token in .env
+ */
+import { createHash, randomBytes } from 'node:crypto';
+import {
+  chownSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync,
+} from 'node:fs';
+import { createRequire } from 'node:module';
+import { join } from 'node:path';
+import process from 'node:process';
+
+// An ESM module gets no implicit require(). One is needed because bcryptjs is CommonJS and has to
+// be loaded by ABSOLUTE PATH: this file runs from /bundle, so a bare specifier would resolve
+// against /bundle/node_modules and /node_modules, never the image's own module directory.
+const require = createRequire(import.meta.url);
+
+const DATA_DIR = process.env.NODE_RED_DATA_DIR || '/data';
+const BUNDLE_DIR = process.env.BUNDLE_DIR || '/bundle';
+/** Where the base image keeps its modules. bootstrap runs from /bundle, so requires are absolute. */
+const RUNTIME_DIR = process.env.NODE_RED_RUNTIME_DIR || '/usr/src/node-red/node_modules';
+
+const MARKER = join(DATA_DIR, '.enrolled.json');
+const FLOWS = join(DATA_DIR, 'flows.json');
+const CREDS = join(DATA_DIR, 'flows_cred.json');
+const SETTINGS = join(DATA_DIR, 'settings.js');
+const GATEWAY_ENV = join(DATA_DIR, 'gateway.env');
+const CA_PATH = join(DATA_DIR, 'certs', 'ca.crt');
+
+const args = process.argv.slice(2);
+const resetPasswordOnly = args.includes('--reset-admin-password');
+const force = args.includes('--force');
+
+const log = (...m) => console.log('[bootstrap]', ...m);
+const die = (message, hint) => {
+  console.error(`\n[bootstrap] FAILED: ${message}\n`);
+  if (hint) console.error(`${hint}\n`);
+  process.exit(1);
+};
+
+// -------------------------------------------------------------------------------------------------
+// Configuration, from .env via compose's env_file
+// -------------------------------------------------------------------------------------------------
+const SUPABASE_URL = (process.env.ACS_SUPABASE_URL || '').replace(/\/+$/, '');
+const ANON_KEY = process.env.ACS_SUPABASE_ANON_KEY || '';
+const TOKEN = (process.env.ACS_ENROLLMENT_TOKEN || '').trim();
+const GATEWAY_NAME = process.env.ACS_GATEWAY_NAME || 'gateway';
+const AGENT_VERSION = process.env.ACS_AGENT_VERSION || 'unknown';
+const CREDENTIAL_SECRET = process.env.NODERED_CREDENTIAL_SECRET || '';
+
+/**
+ * The retry budget for a RELEASED claim.
+ *
+ * Six attempts over roughly two minutes. Long enough to ride out a broker restart or a rolling
+ * update of the platform, short enough that an appliance whose platform is genuinely down reports
+ * so while somebody is still standing next to it. There is no unbounded retry: a bootstrap that
+ * never exits is indistinguishable from one that is stuck.
+ */
+const MAX_ATTEMPTS = 6;
+const BACKOFF_MS = [2000, 5000, 10000, 20000, 30000];
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// -------------------------------------------------------------------------------------------------
+// The admin password
+// -------------------------------------------------------------------------------------------------
+/**
+ * A generated password and its bcrypt hash.
+ *
+ * GENERATED, NEVER TAKEN FROM .env. A password in the bundle would be identical on every appliance
+ * built from it, would sit in a file that travels by USB stick, and would survive in the download
+ * folder of whoever provisioned the fleet. This one exists in exactly two places: this process's
+ * stdout, once, and a bcrypt hash in settings.js.
+ *
+ * base64url, so it survives being copied through a terminal, a ticket and a password manager
+ * without an escaping accident.
+ */
+function generateAdminPassword() {
+  const bcrypt = require(`${RUNTIME_DIR}/bcryptjs`);
+  const password = randomBytes(18).toString('base64url');
+  // Cost 10: Node-RED's own default for adminAuth hashes. Higher costs a noticeable pause on the
+  // low-power hardware these appliances usually run on, for a credential that is already 144 bits
+  // of entropy and never transmitted.
+  return { password, hash: bcrypt.hashSync(password, 10) };
+}
+
+// -------------------------------------------------------------------------------------------------
+// settings.js
+// -------------------------------------------------------------------------------------------------
+/**
+ * LOCAL adminAuth, deliberately -- see the Dockerfile header for why this appliance does not
+ * federate to Supabase Auth.
+ *
+ * `type: 'credentials'` with one user. The hash is bcrypt; Node-RED compares it itself. There is no
+ * `default` user, which is what keeps the editor and the /flows admin API closed to an
+ * unauthenticated caller -- the failure mode this whole block exists to avoid is an appliance on a
+ * plant network with an open flow editor.
+ */
+function settingsJs(adminHash, credentialSecret) {
+  return `/**
+ * GENERATED by bootstrap.mjs -- do not edit by hand.
+ *
+ * Re-running bootstrap with --reset-admin-password rewrites this file with a new password and
+ * prints it once. Everything else here is fixed by the appliance's enrolment.
+ */
+module.exports = {
+    flowFile: 'flows.json',
+    // Encrypts flows_cred.json. It comes from this appliance's .env; LOSING IT means the stored
+    // broker password cannot be decrypted and the appliance must be re-enrolled with a new bundle.
+    credentialSecret: ${JSON.stringify(credentialSecret)},
+    uiPort: process.env.PORT || 1880,
+    // LOCAL CREDENTIALS, NOT SSO. A shopfloor appliance usually has no stable address, and OAuth2
+    // requires the authorisation server to hold an exact redirect_uri per client -- so SSO here
+    // would break every time DHCP moved the appliance, reporting 'invalid redirect_uri' at the
+    // consent step rather than anything that names an address.
+    adminAuth: {
+        type: 'credentials',
+        users: [{
+            username: 'admin',
+            password: ${JSON.stringify(adminHash)},
+            permissions: '*'
+        }]
+    },
+    // The editor is the only HTTP surface. No httpNodeAuth default: the sample flow exposes no
+    // HTTP endpoints, and adding one should be a deliberate act with its own auth decision.
+    functionGlobalContext: {},
+    logging: { console: { level: 'info', metrics: false, audit: false } },
+    editorTheme: {
+        page: { title: 'ACS-Cymru Gateway' },
+        header: { title: ${JSON.stringify(`ACS-Cymru — ${GATEWAY_NAME}`)} }
+    }
+};
+`;
+}
+
+// -------------------------------------------------------------------------------------------------
+// Enrolment
+// -------------------------------------------------------------------------------------------------
+async function enrol() {
+  const url = `${SUPABASE_URL}/functions/v1/enroll-gateway`;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    let response;
+    let payload;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          // THE ANON KEY, and no user JWT. Kong gates /functions/v1/ with key-auth, so a key is
+          // required to get past the gateway -- but this appliance has no session and never will.
+          // The enrolment TOKEN is what authorises the call.
+          apikey: ANON_KEY,
+          Authorization: `Bearer ${ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ token: TOKEN, agent_version: AGENT_VERSION }),
+      });
+      payload = await response.json().catch(() => ({}));
+    } catch (err) {
+      // The platform is unreachable. NOT a spent token, so retrying is correct -- an appliance is
+      // routinely powered on before the network it is meant to reach.
+      if (attempt < MAX_ATTEMPTS) {
+        const wait = BACKOFF_MS[attempt - 1] ?? 30000;
+        log(`cannot reach ${SUPABASE_URL} (${err.message}); retrying in ${wait / 1000}s ` +
+            `(attempt ${attempt}/${MAX_ATTEMPTS})`);
+        await sleep(wait);
+        continue;
+      }
+      die(
+        `the platform at ${SUPABASE_URL} is unreachable after ${MAX_ATTEMPTS} attempts.`,
+        'Check this appliance\'s network route to the platform. The enrolment token has NOT been\n'
+        + 'consumed -- once connectivity is restored, `docker compose up` again with this bundle.'
+      );
+    }
+
+    if (response.ok) return payload;
+
+    // ---------------------------------------------------------------------------------------
+    // THE ONLY RETRYABLE FAILURE. `retryable: true` is the platform stating that it released the
+    // claim, so this exact token is still live. Anything else -- above all a 401 -- means the
+    // token is spent or invalid, and retrying can only produce the same answer more slowly.
+    // ---------------------------------------------------------------------------------------
+    if (response.status === 503 && payload?.retryable === true && attempt < MAX_ATTEMPTS) {
+      const wait = BACKOFF_MS[attempt - 1] ?? 30000;
+      log(`the platform released the claim and asked us to retry: ${payload.error}. ` +
+          `Waiting ${wait / 1000}s (attempt ${attempt}/${MAX_ATTEMPTS}).`);
+      await sleep(wait);
+      continue;
+    }
+
+    if (response.status === 401) {
+      die(
+        'the enrolment token was refused.',
+        'Enrolment tokens are SINGLE-USE and expire (30 minutes by default). This one is\n'
+        + 'unknown, expired, or has already been redeemed -- possibly by an earlier run of this\n'
+        + 'same bundle. Generate a new bundle from the gateway\'s page in the dashboard.'
+      );
+    }
+
+    die(
+      `the platform answered ${response.status}: ${payload?.error || 'unknown error'}`,
+      payload?.details || ''
+    );
+  }
+
+  die(`enrolment did not succeed after ${MAX_ATTEMPTS} attempts.`);
+  return null;
+}
+
+// -------------------------------------------------------------------------------------------------
+// Credentials, encrypted through Node-RED's own runtime
+// -------------------------------------------------------------------------------------------------
+/**
+ * Write flows_cred.json the way Node-RED will read it.
+ *
+ * NOT hand-rolled AES. The file format is Node-RED's, and the one implementation guaranteed to
+ * match what its runtime will decrypt is the runtime's own module. This is the same approach the
+ * platform's scripts/node-red-init.mjs takes, for the same reason.
+ *
+ * IT ASSERTS CIPHERTEXT BEFORE WRITING. An export without the `$` envelope means encryption did not
+ * happen -- and the failure of writing that file anyway is a broker password sitting in plaintext
+ * on the appliance's disk, which nothing downstream would notice.
+ */
+async function writeEncryptedCredentials(brokerNodeId, username, password) {
+  const credentials = (
+    await import(`${RUNTIME_DIR}/@node-red/runtime/lib/nodes/credentials.js`)
+  ).default;
+
+  const noop = () => {};
+  credentials.init({
+    log: { debug: noop, warn: noop, trace: noop, info: noop, _: (s) => s },
+    settings: {},
+  });
+
+  credentials.setKey(CREDENTIAL_SECRET);
+  await credentials.add(brokerNodeId, { user: username, password });
+  const exported = await credentials.export();
+
+  if (!Object.prototype.hasOwnProperty.call(exported, '$')) {
+    die(
+      'the credential export was not encrypted.',
+      'Refusing to write the broker password to disk in plaintext. Node-RED internals may have\n'
+      + 'changed; do not work around this by writing the file yourself.'
+    );
+  }
+
+  writeFileSync(CREDS, JSON.stringify(exported), { mode: 0o600 });
+}
+
+// -------------------------------------------------------------------------------------------------
+// main
+// -------------------------------------------------------------------------------------------------
+mkdirSync(DATA_DIR, { recursive: true });
+
+// --reset-admin-password: a new editor password, nothing else touched. The appliance keeps its
+// enrolment, its flow and its broker credential -- this is a lost-password path, not a re-install.
+if (resetPasswordOnly) {
+  if (!existsSync(MARKER)) {
+    die('this appliance has not been enrolled yet; run bootstrap without --reset-admin-password.');
+  }
+  if (!CREDENTIAL_SECRET) {
+    die(
+      'NODERED_CREDENTIAL_SECRET is not set.',
+      'settings.js is rewritten whole, so it has to carry the same credentialSecret the existing\n'
+      + 'flows_cred.json was encrypted with. It is in this bundle\'s .env -- restore that value\n'
+      + 'before resetting the password, or the appliance will lose its broker credential.'
+    );
+  }
+  const { password, hash } = generateAdminPassword();
+  writeFileSync(SETTINGS, settingsJs(hash, CREDENTIAL_SECRET));
+  console.log(`\n${'='.repeat(78)}\n  NEW NODE-RED EDITOR PASSWORD\n\n    username: admin\n    password: ${password}\n\n  Shown once. Restart the appliance for it to take effect:  docker compose restart node-red\n${'='.repeat(78)}\n`);
+  process.exit(0);
+}
+
+if (existsSync(MARKER) && !force) {
+  const enrolled = JSON.parse(readFileSync(MARKER, 'utf8'));
+  log(`already enrolled as ${enrolled.sparkplug_id} on ${enrolled.enrolled_at}; nothing to do.`);
+  log('The enrolment token in .env was consumed at that point and cannot be reused.');
+  process.exit(0);
+}
+
+const missing = [
+  !SUPABASE_URL && 'ACS_SUPABASE_URL',
+  !ANON_KEY && 'ACS_SUPABASE_ANON_KEY',
+  !TOKEN && 'ACS_ENROLLMENT_TOKEN',
+  !CREDENTIAL_SECRET && 'NODERED_CREDENTIAL_SECRET',
+].filter(Boolean);
+
+if (missing.length) {
+  die(
+    `.env is missing ${missing.join(', ')}.`,
+    'These are written into .env by the dashboard when the bundle is generated. If you edited it,\n'
+    + 'compare against the values in the downloaded copy.'
+  );
+}
+
+if (!/^[0-9a-f]{64}$/.test(TOKEN)) {
+  die(
+    'ACS_ENROLLMENT_TOKEN is not a valid token.',
+    'It should be 64 hexadecimal characters, exactly as generated. A truncated value here is\n'
+    + 'usually a copy-paste that lost the end of the line.'
+  );
+}
+
+log(`enrolling '${GATEWAY_NAME}' with ${SUPABASE_URL} ...`);
+const enrolment = await enrol();
+
+log(`enrolled as ${enrolment.sparkplug_id} (group ${enrolment.sparkplug_group})`);
+log(`broker: ${enrolment.mqtt_host}:${enrolment.mqtt_tls_port} over MQTTS`);
+
+// 1. The CA. Written before anything else that depends on it, so a failure here is unambiguous.
+mkdirSync(join(DATA_DIR, 'certs'), { recursive: true });
+writeFileSync(CA_PATH, enrolment.ca_cert, { mode: 0o644 });
+log(`wrote the broker CA to ${CA_PATH} (${createHash('sha256').update(enrolment.ca_cert).digest('hex').slice(0, 16)}…)`);
+
+// 2. The flow. PLACEHOLDER SUBSTITUTION, not environment variables inside the flow: a flow whose
+//    broker address is an unresolved ${VAR} still deploys, and fails at connect time with a message
+//    that names neither the variable nor the flow. Substituting here means the file on disk is the
+//    file that runs, and can be read to see exactly what this appliance will do.
+const BROKER_NODE_ID = 'acs-broker';
+const template = readFileSync(join(BUNDLE_DIR, 'flows.template.json'), 'utf8');
+const flow = template
+  .replaceAll('__MQTT_HOST__', enrolment.mqtt_host)
+  .replaceAll('__MQTT_TLS_PORT__', String(enrolment.mqtt_tls_port))
+  .replaceAll('__SPARKPLUG_ID__', enrolment.sparkplug_id)
+  .replaceAll('__SPARKPLUG_GROUP__', enrolment.sparkplug_group)
+  .replaceAll('__GATEWAY_NAME__', GATEWAY_NAME)
+  // ---------------------------------------------------------------------------------------------
+  // THE CA PATH, AND WITHOUT IT THIS APPLIANCE ENROLS PERFECTLY AND NEVER CONNECTS.
+  //
+  // The tls-config node's `ca` is a PATH (certType: 'files'), read with fs.readFileSync at deploy
+  // time. Left empty -- which it was -- Node-RED verifies the broker against the SYSTEM TRUST
+  // STORE, which knows nothing about an internal CA. The broker node then reports only
+  //
+  //     Connection failed to broker: <clientid>@<url>
+  //
+  // the same line a wrong password produces, with certificates never mentioned. The CA was being
+  // written to disk correctly the whole time and simply nothing pointed at it.
+  //
+  // The platform's own provisioner refuses to start rather than reach this state -- see the
+  // MQTT_TLS_CA_FILE guard in scripts/node-red-init.mjs, which documents the identical failure.
+  // ---------------------------------------------------------------------------------------------
+  .replaceAll('__CA_FILE__', CA_PATH);
+
+if (flow.includes('__')) {
+  const leftover = [...new Set(flow.match(/__[A-Z0-9_]+__/g) || [])];
+  if (leftover.length) {
+    die(
+      `flows.template.json still contains unsubstituted placeholders: ${leftover.join(', ')}`,
+      'A placeholder reaching Node-RED renders as a literal hostname or topic segment, which\n'
+      + 'fails as a connection error rather than as a missing value.'
+    );
+  }
+}
+
+JSON.parse(flow); // Refuse to write a flow Node-RED cannot parse; it would start with no flows.
+writeFileSync(FLOWS, flow);
+log(`wrote ${FLOWS}`);
+
+// 3. The broker credential, encrypted.
+await writeEncryptedCredentials(BROKER_NODE_ID, enrolment.mqtt_username, enrolment.mqtt_password);
+log(`wrote ${CREDS} (encrypted)`);
+
+// 4. settings.js, with a freshly generated editor password.
+const { password: adminPassword, hash: adminHash } = generateAdminPassword();
+writeFileSync(SETTINGS, settingsJs(adminHash, CREDENTIAL_SECRET));
+log(`wrote ${SETTINGS}`);
+
+// 5. The environment the node-red service sources at start. NO PASSWORD HERE -- the broker
+//    credential lives only in the encrypted flows_cred.json. These are addresses and identity.
+writeFileSync(
+  GATEWAY_ENV,
+  [
+    `export GATEWAY_MQTT_HOST='${enrolment.mqtt_host}'`,
+    `export GATEWAY_MQTT_TLS_PORT='${enrolment.mqtt_tls_port}'`,
+    `export GATEWAY_SPARKPLUG_ID='${enrolment.sparkplug_id}'`,
+    `export GATEWAY_SPARKPLUG_GROUP='${enrolment.sparkplug_group}'`,
+    `export NODERED_CREDENTIAL_SECRET='${CREDENTIAL_SECRET}'`,
+    '',
+  ].join('\n'),
+  { mode: 0o600 },
+);
+
+// 6. The marker. LAST, so a crash part-way through leaves the appliance un-enrolled rather than
+//    marked enrolled with half a configuration -- though the token is spent either way, which is
+//    why every step above either succeeds or exits non-zero.
+writeFileSync(
+  MARKER,
+  JSON.stringify(
+    {
+      sparkplug_id: enrolment.sparkplug_id,
+      sparkplug_group: enrolment.sparkplug_group,
+      gateway_name: enrolment.gateway_name,
+      mqtt_host: enrolment.mqtt_host,
+      enrolled_at: new Date().toISOString(),
+      agent_version: AGENT_VERSION,
+    },
+    null,
+    2,
+  ),
+);
+
+// -------------------------------------------------------------------------------------------------
+// HAND /data BACK TO uid 1000, WHICH IS WHAT NODE-RED RUNS AS.
+//
+// This script runs as ROOT, and it has to: the node-red image ships /data/flows.json owned by
+// root:root, Docker copies it into a fresh named volume with that ownership, and a non-root
+// bootstrap therefore cannot overwrite it -- EACCES, after enrolment has already spent the token.
+// See the `user: "0"` block in docker-compose.yml.
+//
+// The consequence is that everything written above is root-owned, and Node-RED (uid 1000) would then
+// fail to write flows.json when someone deploys from the editor -- the same failure moved one step
+// later, where it looks like a Node-RED bug rather than a provisioning one. So the ownership is
+// corrected here, before this container exits.
+//
+// Recursive and best-effort: a chown that fails on a stray file should not undo a successful
+// enrolment, but it must be reported, because it is the reason a later editor deploy would fail.
+// -------------------------------------------------------------------------------------------------
+function handBackOwnership(dir) {
+  let changed = 0;
+  const walk = (target) => {
+    chownSync(target, 1000, 1000);
+    changed += 1;
+    if (statSync(target).isDirectory()) {
+      for (const entry of readdirSync(target)) walk(join(target, entry));
+    }
+  };
+  try {
+    walk(dir);
+    log(`handed ${changed} path(s) under ${dir} to uid 1000 (the uid Node-RED runs as)`);
+  } catch (err) {
+    console.error(
+      `[bootstrap] WARNING: could not chown ${dir} to uid 1000 (${err.message}). Enrolment `
+      + 'succeeded, but Node-RED may be unable to save flows from the editor until this is fixed.'
+    );
+  }
+}
+
+if (typeof process.getuid === 'function' && process.getuid() === 0) {
+  handBackOwnership(DATA_DIR);
+}
+
+const banner = '='.repeat(78);
+console.log(`
+${banner}
+  ENROLLED — ${enrolment.gateway_name}
+
+    Sparkplug id     ${enrolment.sparkplug_id}
+    Broker           ${enrolment.mqtt_host}:${enrolment.mqtt_tls_port} (MQTTS, CA-verified)
+    Editor           http://<this-appliance>:1880
+
+  NODE-RED EDITOR LOGIN — shown ONCE, not stored anywhere in plaintext
+
+    username: admin
+    password: ${adminPassword}
+
+  Lost it?  docker compose run --rm bootstrap node /bundle/bootstrap.mjs --reset-admin-password
+${banner}
+`);
+
+if (enrolment.applied_to_running_broker === false) {
+  log(
+    'NOTE: the platform reports the credential is not yet live at the broker (its configuration '
+    + 'is still syncing, up to ~90s). The first connection attempts may be refused; Node-RED '
+    + 'retries on its own and no action is needed.'
+  );
+}

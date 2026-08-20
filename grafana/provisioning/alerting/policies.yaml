@@ -1,0 +1,47 @@
+# The notification policy tree.
+#
+# ONE ROUTE, everything to the webhook. There is exactly one consumer -- the dashboard -- so a tree
+# with per-severity branches would be branching on a distinction nothing downstream acts on
+# differently. `severity` still travels as a LABEL and lands in device_alerts.severity, which is
+# where the UI colours on it; routing is not the place to encode it.
+#
+# NO `default_receiver` OVERRIDE OF grafana-default-email. This file REPLACES the default policy
+# tree for org 1, which is what makes it deterministic -- Grafana ships a root route pointing at an
+# email contact point that has no SMTP configured, and leaving it in place means every alert also
+# generates a delivery failure in Grafana's log on every notification.
+#
+# =============================================================================================
+# THE THREE TIMERS, AND WHY THESE VALUES
+#
+#   group_wait: 5s      How long to hold the FIRST notification for a new group, so a
+#                       multi-dimensional rule that trips three devices in the same evaluation
+#                       delivers one webhook carrying three instances rather than three webhooks.
+#                       5s is comfortably inside the fastest rule's 1m evaluation interval, so it
+#                       costs no perceptible latency in the demonstrator while still batching.
+#
+#   group_interval: 10s Minimum gap before a group that has ALREADY notified sends again because
+#                       its membership changed -- a second device joining the same excursion. Short,
+#                       because the dashboard is a live operational view and a device entering alarm
+#                       is precisely the thing not to sit on.
+#
+#   repeat_interval: 12h Re-notification for something still firing and unchanged. LONG on purpose.
+#                       The dashboard holds state -- device_alerts keeps the occurrence open and the
+#                       Topbar pill keeps counting it -- so a repeat delivers nothing new; it just
+#                       rewrites the same row. The mechanism exists to recover from a lost
+#                       notification, and 12h is the interval at which that recovery is worth having
+#                       without generating noise. A short repeat_interval here would rewrite every
+#                       open alert's row continuously and make the realtime feed chatter.
+#
+# group_by IS NOT SET, so Grafana uses its default of grouping by every label. That is the right
+# default for a multi-dimensional rule: grouping by alertname alone would batch six devices'
+# instances into one group whose notifications then share one repeat timer, and a device that
+# resolved would be indistinguishable from one that never fired.
+# =============================================================================================
+apiVersion: 1
+
+policies:
+  - orgId: 1
+    receiver: ACS-Cymru Webhook
+    group_wait: 5s
+    group_interval: 10s
+    repeat_interval: 12h

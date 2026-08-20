@@ -26,6 +26,9 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   VITE_ENABLE_REALTIME: '',
   // Repository the Report Bug button files against.
   VITE_GITHUB_REPO_URL: '',
+  // Grafana as the BROWSER reaches it, for the "View in Grafana" links on active alerts. Same
+  // origin as GRAFANA_PUBLIC_URL / GF_SERVER_ROOT_URL on the server side.
+  VITE_GRAFANA_URL: '',
   // "true" | "false". Offers the sign-up form on the auth screen.
   VITE_ALLOW_SIGNUP: '',
 };

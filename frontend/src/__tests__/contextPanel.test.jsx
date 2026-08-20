@@ -417,12 +417,20 @@ describe('Identifiers in the panel are copyable', () => {
 })
 
 describe('Tables shed what the panel now carries', () => {
-  it('drops the Serving Edge Gateway column and offers the rebind in the panel instead', async () => {
+  it('drops the Serving Edge Gateway column and offers the gateway as a link in the panel', async () => {
     // ~170px of every row spent on a write almost nobody performs -- and a dropdown in a row
     // someone is trying to READ is one mis-scroll from silently rebinding a device.
+    //
+    // THE PANEL NO LONGER CARRIES THE PICKER EITHER, and that is the later correction. An inline
+    // <select> in the panel people open to READ has the same hazard one layer in: a scroll wheel
+    // over it silently moves a device's data path with no confirmation step. Reassignment lives in
+    // Edit Details, behind an explicit save. What the field is actually asked -- "which gateway is
+    // this, take me to it" -- is what it now does.
+    const onSelectGateway = vi.fn()
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
-        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />
+        initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewThread={vi.fn()}
+        onSelectGateway={onSelectGateway} />
     )
     await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
 
@@ -432,10 +440,15 @@ describe('Tables shed what the panel now carries', () => {
     fireEvent.click(list().getByText('Simulated_CNC_01'))
     await waitFor(() => expect(isOpen()).toBe(true))
 
-    // Still a control, not flattened to text: rebinding has to remain possible somewhere.
-    const rebind = within(panel()).getByTitle(/Rebind this device to another edge node/i)
-    expect(rebind.tagName).toBe('SELECT')
-    expect(rebind.value).toBe('gw-1')
+    // No picker anywhere in the panel -- the write is gone from the read surface entirely.
+    expect(within(panel()).queryByTitle(/Rebind this device/i)).toBeNull()
+
+    const link = within(panel()).getByTitle(/Open this gateway on the Gateways page/i)
+    // A button, not an anchor: this is an in-app tab switch with filter state, and an <a> would
+    // promise middle-click and "copy link address" that this app cannot honour.
+    expect(link.tagName).toBe('BUTTON')
+    fireEvent.click(link)
+    expect(onSelectGateway).toHaveBeenCalledWith('gw-1')
   })
 
   it('opens the telemetry inspector as a modal, not inside the narrow panel', async () => {
@@ -577,7 +590,10 @@ describe('Documents accordion no longer duplicates the panel action', () => {
     fireEvent.click(list().getByText('Assembly Line 1'))
     await waitFor(() => expect(isOpen()).toBe(true))
 
-    expect(within(panel()).getByText('Located Devices')).toBeTruthy()
+    // The label now carries the online/total figure ("Located Devices (1/1 online)") because the
+    // value beneath it became a list of chips. That is still ONE count -- which is what this guards
+    // -- so the match is anchored rather than exact.
+    expect(within(panel()).getByText(/^Located Devices\b/)).toBeTruthy()
     expect(within(panel()).queryByText(/Directly Assigned Devices/i)).toBeNull()
     expect(within(panel()).queryByText(/Explicitly Filed Here/i)).toBeNull()
   })

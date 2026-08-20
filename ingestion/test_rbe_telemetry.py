@@ -43,6 +43,7 @@ def _stub(name, **attrs):
 
 
 _stub("psycopg2", connect=lambda *a, **k: None)
+_stub("psycopg2.extras", execute_values=lambda *a, **k: None)
 _stub("sparkplug_b_pb2", Payload=object)
 _stub("paho")
 _stub("paho.mqtt")
@@ -51,8 +52,8 @@ _stub("paho.mqtt.client", Client=object)
 import ingestion  # noqa: E402  (must follow the stubs above)
 
 GROUP = "ACS-Cymru"
-NODE = "gwy100000000000400080000"
-DEVICE = "dev200000000000400080000"
+NODE = "gwy120000000000400080000"
+DEVICE = "dev220000000000400080000"
 
 
 class SeqPayload:
@@ -287,7 +288,7 @@ class TestSparseDdataIngestion(unittest.TestCase):
         reset_module_state()
         self.device = {
             "id": "20000000-0000-4000-8000-000000000002",
-            "name": "Simulated_CNC_01",
+            "name": "Sim_CNC_Mill_01",
             "sparkplug_id": DEVICE,
             "is_quarantined": False,
         }
@@ -308,21 +309,39 @@ class TestSparseDdataIngestion(unittest.TestCase):
         conn.cursor = MagicMock(return_value=self.cursor)
         ingestion.get_timescaledb_connection = lambda: conn
 
+        # Telemetry is written with ONE batched execute_values() per message rather than an
+        # execute() per metric. `ingestion` imported the name directly, so it is bound in that
+        # module's namespace and this is where it has to be replaced.
+        self._real["execute_values"] = ingestion.execute_values
+        self.execute_values = MagicMock()
+        ingestion.execute_values = self.execute_values
+
     def tearDown(self):
         for name, fn in self._real.items():
             setattr(ingestion, name, fn)
         reset_module_state()
 
     def telemetry_writes(self):
-        """The (metric_name, val_double, val_string, val_bool) of each telemetry INSERT issued."""
+        """
+        The (metric_name, val_double, val_string, val_bool) of every telemetry row written.
+
+        Harvested from the batched execute_values() call rather than from execute(). The assertions
+        in this class are unchanged by that -- they are about WHICH ROWS the daemon chose to write,
+        which is the property under test; the statement count is not.
+        """
         rows = []
-        for call in self.cursor.execute.call_args_list:
-            sql = call[0][0]
+        for call in self.execute_values.call_args_list:
+            sql = call[0][1]
             if "INSERT INTO telemetry" not in sql:
                 continue
-            params = call[0][1]
-            rows.append((params[2], params[3], params[4], params[5]))
+            for params in call[0][2]:
+                rows.append((params[2], params[3], params[4], params[5]))
         return rows
+
+    def telemetry_statements(self):
+        """The SQL of each batched telemetry INSERT issued."""
+        return [c[0][1] for c in self.execute_values.call_args_list
+                if "INSERT INTO telemetry" in c[0][1]]
 
     def ingest(self, payload):
         ingestion.process_ddata(DEVICE, NODE, payload, group_id=GROUP, client=MagicMock())
@@ -340,6 +359,7 @@ class TestSparseDdataIngestion(unittest.TestCase):
         rows = []
         for value in (42.0, 43.0, 44.0):
             self.cursor.reset_mock()
+            self.execute_values.reset_mock()
             self.ingest(DataPayload([DataMetric("Systems/TEMPERATURE", double=value)]))
             rows.extend(self.telemetry_writes())
         self.assertEqual([name for name, *_ in rows], ["Systems/TEMPERATURE"] * 3)
@@ -355,10 +375,13 @@ class TestSparseDdataIngestion(unittest.TestCase):
             DataMetric("Systems/TEMPERATURE", double=42.0),
             DataMetric("Controller/EXECUTION", string="ACTIVE"),
         ]))
-        inserts = [c[0][0] for c in self.cursor.execute.call_args_list
-                   if "INSERT INTO telemetry" in c[0][0]]
-        self.assertEqual(len(inserts), 2)
-        for sql in inserts:
+        # ONE statement now carries both rows -- that is the batching change, and it is why this
+        # asserts on the row count separately from the statement count. The conflict clause is the
+        # property under test and it is unchanged.
+        statements = self.telemetry_statements()
+        self.assertEqual(len(statements), 1)
+        self.assertEqual(len(self.telemetry_writes()), 2)
+        for sql in statements:
             self.assertIn("ON CONFLICT (time, asset_id, metric_name) DO NOTHING", sql)
             self.assertNotIn("DO UPDATE", sql)
 
@@ -369,7 +392,7 @@ class TestSparseDdataIngestion(unittest.TestCase):
         """
         self.ingest(DataPayload([
             DataMetric("Asset_ID", string=DEVICE),
-            DataMetric("Asset_Name", string="Simulated_CNC_01"),
+            DataMetric("Asset_Name", string="Sim_CNC_Mill_01"),
             DataMetric("Systems/TEMPERATURE", double=42.0),
         ]))
         self.assertEqual([name for name, *_ in self.telemetry_writes()], ["Systems/TEMPERATURE"])

@@ -245,7 +245,13 @@ describe('OverviewTab shopfloor map', () => {
     // The ribbon reports live/total per row. The full breakdown the stat cards printed underneath
     // moved onto each item's title, so it is read from there.
     expect(kpiItem(/Cells/).textContent).toContain('1/1')
-    expect(kpiItem(/Gateways/)).toHaveAttribute('title', expect.stringContaining('1 online / 0 offline / 0 archived'))
+    // GATEWAYS CARRY A FOURTH BUCKET: "awaiting setup" — the two physical-gateway enrolment states.
+    // They are excluded from `offline` for the same reason quarantined devices are (see the note
+    // below): a gateway waiting for somebody to carry its bundle to a machine is an unfinished task,
+    // and counting it as offline reports a fault on every appliance still in its box.
+    expect(kpiItem(/Gateways/)).toHaveAttribute(
+      'title', expect.stringContaining('1 online / 0 awaiting setup / 0 offline / 0 archived')
+    )
     expect(kpiItem(/Devices/)).toHaveAttribute('title', expect.stringContaining('1 online / 0 offline / 0 archived'))
   })
 

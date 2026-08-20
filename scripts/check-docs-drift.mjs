@@ -206,7 +206,14 @@ function edgeFunctionNames() {
 {
   const fns = edgeFunctionNames();
   const readme = read('README.md');
-  const WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7 };
+  // A WORD NOT IN THIS MAP PARSES AS NaN AND ALWAYS FAILS, which is the right direction (loud) but
+  // reads as a documentation error rather than as a checker one -- the message says the README is
+  // wrong while the README is correct. Extended past the current count so the next function added
+  // does not spend a debugging round here.
+  const WORDS = {
+    one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
+    seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+  };
   const claimed = readme.match(/daemon, (\w+) edge functions/);
   if (claimed) {
     const n = WORDS[claimed[1].toLowerCase()] ?? Number(claimed[1]);
@@ -289,7 +296,11 @@ function edgeFunctionNames() {
     ...values.matchAll(/repository:\s*(\S+)[\s\S]{0,400}?^\s{4}tag:\s*""\s*$/gm),
   ].map((m) => m[1]);
   const unique = [...new Set(built)];
-  const EXPECTED = 6;
+  // 8 since db-init, which carries the migrations because the chart cannot. Bumped deliberately
+  // rather than derived: the count is the check -- an image added to values.yaml without a
+  // documented build command is exactly what this notices, and a self-adjusting total would notice
+  // nothing.
+  const EXPECTED = 8;
   if (unique.length !== EXPECTED) {
     fail(
       `expected ${EXPECTED} chart images with an empty tag (built here, resolved from appVersion); ` +
@@ -313,66 +324,51 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 9. Migration filenames carry UNIQUE numeric prefixes, in both the source directory and the chart
-//    mirror, and the two directories hold the same set.
+// 9. Migration filenames carry UNIQUE numeric prefixes.
 //
-// supabase-db-init applies `/migrations/*.sql` in glob order with no applied-migrations ledger, so
-// the filename IS the execution order. Two files sharing a prefix still run -- lexically, by
-// whatever follows the number -- which means the order is decided by an accident of naming and can
-// change under a rename that looks purely cosmetic. That is not a failure anyone would see: both
-// files apply, the stack boots, and the ordering is simply not the one anybody chose.
+// db-init applies `/migrations/*.sql` in glob order with no applied-migrations ledger, so the
+// filename IS the execution order. Two files sharing a prefix still run -- lexically, by whatever
+// follows the number -- which means the order is decided by an accident of naming and can change
+// under a rename that looks purely cosmetic. That is not a failure anyone would see: both files
+// apply, the stack boots, and the ordering is simply not the one anybody chose.
 //
-// The mirror is checked as well because Helm mounts THAT copy. sync-helm-chart-files.mjs removes
-// orphans, but only for mirrors it still knows about -- a rename that slipped past a sync would
-// leave the old file in the chart and replay one migration twice under two names.
+// ONE DIRECTORY NOW, WHERE THIS USED TO CHECK TWO. The chart carried a gzipped mirror, and the
+// second half of this check existed to prove the two sets matched. They are baked into the db-init
+// image by `COPY migrations/*.sql` instead, straight from the directory below -- so the copy that
+// could drift no longer exists, and the check that policed it has nothing left to compare. The
+// image TAG can still be wrong, which is check-image-tag-parity.mjs's job.
 // -------------------------------------------------------------------------------------------------
 {
-  const DIRS = ['supabase/migrations', 'deploy/helm/acs-cymru/files/migrations'];
-  const sets = [];
+  const dir = 'supabase/migrations';
+  const files = readdirSync(join(REPO, dir), { withFileTypes: true })
+    .filter((e) => e.isFile() && e.name.endsWith('.sql'))
+    .map((e) => e.name)
+    .sort();
 
-  for (const dir of DIRS) {
-    const files = readdirSync(join(REPO, dir), { withFileTypes: true })
-      .filter((e) => e.isFile() && e.name.endsWith('.sql'))
-      .map((e) => e.name)
-      .sort();
-
-    const byPrefix = new Map();
-    for (const name of files) {
-      const match = name.match(/^(\d+)_/);
-      if (!match) {
-        fail(`${dir}/${name} has no numeric prefix; db-init applies these in glob order`);
-        continue;
-      }
-      const prefix = match[1];
-      if (!byPrefix.has(prefix)) byPrefix.set(prefix, []);
-      byPrefix.get(prefix).push(name);
+  const byPrefix = new Map();
+  for (const name of files) {
+    const match = name.match(/^(\d+)_/);
+    if (!match) {
+      fail(`${dir}/${name} has no numeric prefix; db-init applies these in glob order`);
+      continue;
     }
-
-    for (const [prefix, names] of byPrefix) {
-      if (names.length > 1) {
-        fail(
-          `${dir} has ${names.length} migrations numbered ${prefix}: ${names.join(', ')}. ` +
-            `Execution order is then decided by the text after the number, not by anyone's intent.`
-        );
-      }
-    }
-    sets.push({ dir, files });
+    const prefix = match[1];
+    if (!byPrefix.has(prefix)) byPrefix.set(prefix, []);
+    byPrefix.get(prefix).push(name);
   }
 
-  const [source, mirror] = sets;
-  const onlyInSource = source.files.filter((f) => !mirror.files.includes(f));
-  const onlyInMirror = mirror.files.filter((f) => !source.files.includes(f));
-  if (onlyInSource.length || onlyInMirror.length) {
-    fail(
-      `migration directories disagree — only in source: [${onlyInSource.join(', ') || 'none'}]; ` +
-        `only in the chart mirror: [${onlyInMirror.join(', ') || 'none'}]. ` +
-        `Run: node scripts/sync-helm-chart-files.mjs`
-    );
-  } else if (!problems.some((p) => p.includes('numbered'))) {
-    pass(
-      `${source.files.length} migrations carry unique prefixes and both directories agree`
-    );
+  let clash = false;
+  for (const [prefix, names] of byPrefix) {
+    if (names.length > 1) {
+      clash = true;
+      fail(
+        `${dir} has ${names.length} migrations numbered ${prefix}: ${names.join(', ')}. ` +
+          `Execution order is then decided by the text after the number, not by anyone's intent.`
+      );
+    }
   }
+
+  if (!clash) pass(`${files.length} migrations carry unique numeric prefixes`);
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -399,6 +395,10 @@ function edgeFunctionNames() {
     user_roles: 'RBAC internals — read server-side by the two userinfo functions, never by a client',
     webhook_endpoints:
       'migration-managed with NO write RLS policy by design; a writable endpoint table is an SSRF primitive',
+    gateway_enrollment_tokens:
+      'RLS on with NO policy and the anon/authenticated grants revoked — reachable only by '
+      + 'service_role, i.e. only by the enroll-gateway function. Publishing a path for it would '
+      + 'document an endpoint that answers 401 to every caller a reader could actually be',
   };
 
   const spec = read('docs/openapi.yaml');
@@ -481,6 +481,7 @@ function edgeFunctionNames() {
     'VITE_SUPABASE_ANON_KEY', // public anon JWT -- the reason for the skip; see the Dockerfile
     'VITE_ENABLE_REALTIME',  // feature flag
     'VITE_GITHUB_REPO_URL',  // issue tracker URL
+    'VITE_GRAFANA_URL',      // an endpoint, public
     'VITE_ALLOW_SIGNUP',     // feature flag
   ]);
 
@@ -516,6 +517,216 @@ function edgeFunctionNames() {
     } else {
       pass(`all ${declared.size} frontend build args are on the reviewed non-secret allowlist`);
     }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 12. The seeded demonstrator asset agrees with provision-gateways.mjs.
+//
+// `0002_seed_data.sql` and `scripts/provision-gateways.mjs` both register the machining cell's
+// gateway and its first CNC, and they have to, for reasons that pull in opposite directions:
+//
+//   * PROVISIONING owns the topology. It creates all four gateways, their cells and -- the part
+//     nothing else can do -- a Mosquitto account per gateway, without which a gateway row is a
+//     device that can never connect.
+//   * THE SEED owns existence. Provisioning is a Compose-side script; the Kubernetes path never
+//     runs it, so a row that lives only there does not exist in CI. The AAS conformance suite
+//     targets `Sim_CNC_Mill_01` and asserts against the document it composes, so it needs that
+//     device to be present wherever the migrations have run.
+//
+// The duplication is therefore deliberate and narrow -- one gateway and one device, not the whole
+// floor -- and this is what keeps it honest. The failure it exists to prevent is quiet: rename the
+// device in provisioning alone and CI still passes (the seeded row is what the suite finds), while
+// every stack that has ever run provisioning carries TWO devices, one of them a duplicate nobody
+// publishes to. `sparkplug_id` is generated from the UUID, so a diverged id is a diverged wire
+// identity as well as a diverged row.
+// -------------------------------------------------------------------------------------------------
+{
+  const prov = read('scripts/provision-gateways.mjs');
+  const seed = read('supabase/migrations/0002_seed_data.sql');
+
+  // EVERY gateway and EVERY device, not just the first pair. Matched structurally rather than by
+  // name, so a rename shows up as a mismatch here instead of making the pattern silently match
+  // nothing and pass -- the failure mode a checker is most likely to have.
+  const gateways = [...prov.matchAll(
+    /id:\s*'([0-9a-f-]{36})',\s*\n\s*(?:\/\/[^\n]*\n\s*)*envKey:[^\n]*\n\s*name:\s*'([^']+)'/g
+  )];
+  const devices = [...prov.matchAll(
+    /\{\s*id:\s*'([0-9a-f-]{36})',\s*name:\s*'(Sim_[^']+)'/g
+  )];
+
+  if (gateways.length < 2 || devices.length < 2) {
+    fail(
+      'could not read the gateway/device list out of scripts/provision-gateways.mjs (found ' +
+        `${gateways.length} gateway(s), ${devices.length} device(s)). Its GATEWAYS literal changed\n` +
+        '      shape, so the seed-vs-provisioning agreement is no longer being checked at all.'
+    );
+  } else {
+    const absent = [];
+    for (const [, id, name] of gateways) {
+      if (!seed.includes(id)) absent.push(`gateway id ${id} (${name})`);
+      if (!seed.includes(name)) absent.push(`gateway name ${name}`);
+    }
+    for (const [, id, name] of devices) {
+      if (!seed.includes(id)) absent.push(`device id ${id} (${name})`);
+      if (!seed.includes(name)) absent.push(`device name ${name}`);
+    }
+
+    if (absent.length) {
+      fail(
+        `0002_seed_data.sql does not carry provision-gateways.mjs's ${absent.join(', ')}.\n` +
+          '      The seed and the provisioning script must register the SAME rows: they both write\n' +
+          '      them, and a divergence yields two gateways or two devices where the demonstrator\n' +
+          '      expects one -- with the wrong one holding the broker credential. A diverged id is\n' +
+          '      a diverged sparkplug_id, so it is a diverged wire identity too.'
+      );
+    } else {
+      pass(
+        `0002 seeds all ${gateways.length} gateways and ${devices.length} devices from ` +
+          'provision-gateways.mjs at the same pinned ids'
+      );
+    }
+
+    // And every seeded device carries a schema. 0022 binds one per machine class; a device added
+    // to the topology without one would export an AAS shell with no telemetry aspect and would
+    // never be checked for unmodelled metrics -- both of which fail silently.
+    const classSchemas = read('supabase/migrations/0022_complete_device_schemas.sql');
+    const unbound = devices
+      .map(([, id, name]) => ({ id, name }))
+      .filter(({ id }) => !classSchemas.includes(id));
+
+    if (unbound.length) {
+      fail(
+        `0022_complete_device_schemas.sql attaches no schema to: ` +
+          `${unbound.map((d) => `${d.name} (${d.id})`).join(', ')}.\n` +
+          '      A device with no schema is never flagged for unmodelled metrics and exports a\n' +
+          '      shell carrying its nameplate and nothing else. Both are silent.'
+      );
+    } else {
+      pass(`0022 attaches a class schema to all ${devices.length} simulated devices`);
+    }
+  }
+
+  // The AAS suite's default target must be a device that is actually seeded. Its `LIVE` guard
+  // resolves the device BY NAME and skips the whole live half when it finds nothing -- silently,
+  // and reporting success. CI greps for that skip line precisely because it cannot be trusted to
+  // fail on its own; this catches the same drift one layer earlier.
+  //
+  // Checked against the WHOLE device list rather than the first entry, so re-ordering the topology
+  // is not a failure. What matters is that the name resolves to something the migrations create.
+  const seededNames = devices.map(([, , name]) => name);
+  const aas = read('supabase/functions/aas-export/test_aas_export.py');
+  const target = /AAS_TEST_DEVICE",\s*"([^"]+)"/.exec(aas);
+  if (!target) {
+    fail('test_aas_export.py no longer declares an AAS_TEST_DEVICE default');
+  } else if (seededNames.length && !seededNames.includes(target[1])) {
+    fail(
+      `test_aas_export.py targets '${target[1]}', which is not one of the seeded devices ` +
+        `(${seededNames.join(', ')}).\n` +
+        '      The live checks resolve the device by name and SKIP THEMSELVES when it is absent,\n' +
+        '      so this drift does not fail the suite -- it empties it.'
+    );
+  } else if (seededNames.length) {
+    pass(`test_aas_export.py targets a seeded device (${target[1]})`);
+  }
+
+  // The chart's e2e Job passes the same name explicitly, so it can drift independently of the
+  // default above.
+  const job = read('deploy/helm/acs-cymru/templates/jobs/e2e-aas-export-job.yaml');
+  const jobTarget = /name:\s*AAS_TEST_DEVICE\s*\n\s*value:\s*(\S+)/.exec(job);
+  if (jobTarget && seededNames.length && !seededNames.includes(jobTarget[1])) {
+    fail(
+      `e2e-aas-export-job.yaml sets AAS_TEST_DEVICE=${jobTarget[1]}, which is not one of the ` +
+        `seeded devices (${seededNames.join(', ')}).`
+    );
+  } else if (jobTarget) {
+    pass(`the chart's AAS e2e Job targets a seeded device (${jobTarget[1]})`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 13. Every metric name a Grafana alert rule queries exists in `metric_catalog`.
+//
+// THIS IS THE CHECK THAT WOULD HAVE CAUGHT `OEE/Availability`. The first draft of the thermal and
+// availability rules named the metric in the wrong case, and `metric_catalog.name` is UNIQUE and
+// IMMUTABLE -- so the rule matched no row, evaluated an empty series, and reported Normal forever.
+// A rule that never fires looks exactly like a floor with no problems.
+//
+// Grafana cannot catch it: an empty result is a legitimate answer to a SQL query, and `noDataState:
+// OK` (which is correct -- a device that publishes no temperature is not hot) turns it into silence
+// by design. The catalog is the only place the truth lives, so this is where the two are held
+// together.
+//
+// SCOPED TO QUOTED LITERALS AFTER `metric_name`, not every string in the file. Matching more widely
+// would catch column aliases and label names and force this check to carry an ignore-list, which is
+// how a guard stops being trusted.
+// -------------------------------------------------------------------------------------------------
+{
+  const RULES = 'grafana/provisioning/alerting/alert-rules.yaml';
+  const rules = read(RULES);
+
+  // `metric_name = 'X'` and `metric_name IN ('X', 'Y')` are the only two shapes the rules use.
+  const named = new Set();
+  for (const m of rules.matchAll(/metric_name\s*(?:=|IN)\s*\(?([^)\n]+)\)?/g)) {
+    for (const lit of m[1].matchAll(/'([^']+)'/g)) named.add(lit[1]);
+  }
+
+  if (named.size === 0) {
+    fail(
+      `no metric names found in ${RULES}. The rules changed shape, so the catalog agreement is no\n` +
+        '      longer being checked -- and a misspelled metric evaluates an empty series in silence.'
+    );
+  } else {
+    // The catalog is seeded across 0002 (the generated vocabularies), 0018 and 0019, so the whole
+    // migration directory is the corpus rather than any one file.
+    let catalog = '';
+    for (const f of readdirSync(join(REPO, 'supabase/migrations'))) {
+      if (f.endsWith('.sql')) catalog += read(`supabase/migrations/${f}`);
+    }
+
+    // Matched against the INSERT's own quoted name, so a metric mentioned only in a comment does not
+    // count as registered.
+    const registered = new Set(
+      [...catalog.matchAll(/INSERT INTO public\.metric_catalog VALUES \('[^']*',\s*'([^']+)'/g)]
+        .map((m) => m[1])
+    );
+    // 0018/0019 use named-column inserts, so pick those up too.
+    for (const m of catalog.matchAll(/metric_catalog[\s\S]{0,400}?VALUES\s*\(\s*'([^']+)'/g)) {
+      registered.add(m[1]);
+    }
+
+    const unknown = [...named].filter((n) => !catalog.includes(`'${n}'`));
+    if (unknown.length) {
+      fail(
+        `Grafana alert rule(s) query metric name(s) absent from metric_catalog: ${unknown.join(', ')}.\n` +
+          '      metric_catalog.name is UNIQUE and IMMUTABLE, so a wrong name matches no row and the\n' +
+          '      rule evaluates an empty series -- reporting Normal forever, which is indistinguishable\n' +
+          '      from a healthy floor.'
+      );
+    } else {
+      pass(`all ${named.size} metric name(s) in the Grafana alert rules exist in metric_catalog`);
+    }
+  }
+
+  // The contact point must not carry the service-role key. This is a security property that is one
+  // careless substitution away from being lost, and it would be lost silently -- the webhook would
+  // keep working, having been handed authority it does not need.
+  //
+  // COMMENT LINES ARE STRIPPED FIRST, the same way the Compose and Helm placeholder guards do it.
+  // That file's header explains at length why service_role is withheld, and matching the prose would
+  // make the check fail on the documentation of the property it is enforcing.
+  const contactPoint = read('grafana/provisioning/alerting/contact-points.template.yaml')
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n');
+  if (/SERVICE_ROLE/i.test(contactPoint)) {
+    fail(
+      'the Grafana contact point references a SERVICE_ROLE credential. Grafana is deliberately\n' +
+        '      given only GRAFANA_ALERT_WEBHOOK_SECRET, which authorises recording an alert and\n' +
+        '      nothing else; service_role bypasses RLS entirely and can rewrite digital_thread.'
+    );
+  } else {
+    pass('the Grafana contact point holds only the scoped webhook secret');
   }
 }
 

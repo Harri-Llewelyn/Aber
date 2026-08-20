@@ -389,7 +389,7 @@ paths:
         - name: sparkplug_id
           in: query
           schema: { type: string }
-          description: 'e.g. `eq.dev200000000000400080000`'
+          description: 'e.g. `eq.dev220000000000400080000`'
       responses:
         '200':
           description: Matching devices.
@@ -478,13 +478,13 @@ paths:
         `postgres_fdw` pushes `WHERE` clauses to TimescaleDB but **not** `LIMIT`, so always
         constrain the time window on large ranges:
 
-        `?asset_id=eq.dev200000000000400080000&time=gte.2026-01-01T00:00:00Z&order=time.desc&limit=500`
+        `?asset_id=eq.dev220000000000400080000&time=gte.2026-01-01T00:00:00Z&order=time.desc&limit=500`
 
         > **This table cannot be subscribed to over Realtime.** Its rows enter TimescaleDB's
         > WAL, never Supabase's, so adding it to the publication emits nothing — silently.
         > Poll it instead.
       parameters:
-        - { name: asset_id, in: query, schema: { type: string }, description: 'Device Sparkplug ID, e.g. `eq.dev200000000000400080000`.' }
+        - { name: asset_id, in: query, schema: { type: string }, description: 'Device Sparkplug ID, e.g. `eq.dev220000000000400080000`.' }
         - { name: metric_name, in: query, schema: { type: string }, description: 'e.g. `eq.Systems/TEMPERATURE`.' }
         - { name: time, in: query, schema: { type: string }, description: 'e.g. `gte.2026-01-01T00:00:00Z`.' }
         - $ref: '#/components/parameters/Select'
@@ -516,7 +516,7 @@ paths:
         There is no time parameter, deliberately: "latest" is not a window. Filter on `time` if
         you need to exclude series that have gone stale.
       parameters:
-        - { name: asset_id, in: query, schema: { type: string }, description: 'Device Sparkplug ID, e.g. `eq.dev200000000000400080000`.' }
+        - { name: asset_id, in: query, schema: { type: string }, description: 'Device Sparkplug ID, e.g. `eq.dev220000000000400080000`.' }
         - { name: metric_name, in: query, schema: { type: string }, description: 'e.g. `eq.Systems/TEMPERATURE`.' }
         - { name: time, in: query, schema: { type: string }, description: 'Staleness filter, e.g. `gte.2026-01-01T00:00:00Z`.' }
         - $ref: '#/components/parameters/Select'
@@ -550,7 +550,7 @@ paths:
         Buckets still being written are visible immediately — real-time aggregation unions the
         materialised part with the raw tail, so this does not lag behind `/rest/v1/telemetry`.
       parameters:
-        - { name: asset_id, in: query, schema: { type: string }, description: 'e.g. `eq.dev200000000000400080000`.' }
+        - { name: asset_id, in: query, schema: { type: string }, description: 'e.g. `eq.dev220000000000400080000`.' }
         - { name: metric_name, in: query, schema: { type: string }, description: 'e.g. `eq.Systems/TEMPERATURE`.' }
         - { name: bucket, in: query, schema: { type: string }, description: 'Bucket start, e.g. `gte.2026-01-01T00:00:00Z`.' }
         - $ref: '#/components/parameters/Select'
@@ -664,7 +664,7 @@ paths:
         Recorded for quarantined devices too, so an administrator can inspect what a newly
         discovered device claims before approving it.
       parameters:
-        - { name: asset_id, in: query, schema: { type: string }, description: 'Device Sparkplug ID, e.g. `eq.dev200000000000400080000`.' }
+        - { name: asset_id, in: query, schema: { type: string }, description: 'Device Sparkplug ID, e.g. `eq.dev220000000000400080000`.' }
         - $ref: '#/components/parameters/Select'
         - $ref: '#/components/parameters/Order'
       responses:
@@ -1033,6 +1033,65 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/IDTASubmodelTemplateElement' } }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
+  /rest/v1/device_alerts:
+    get:
+      tags: [Registry]
+      summary: Read the Grafana alert occurrence log
+      description: |
+        One row per alert **occurrence**, written by the `grafana-alert-webhook` edge function when
+        Grafana notifies. Append-only on `(fingerprint, starts_at)`: a Grafana fingerprint is a hash
+        of the alert instance's labels and is stable across every fire → resolve → fire cycle, so
+        pairing it with `starts_at` is what makes this a history rather than a latest-state table.
+        An occurrence transitions `firing` → `resolved` in place.
+
+        **Nothing in this platform evaluates alert conditions.** Grafana owns the rules, the
+        evaluation interval, the state history and the silences — see
+        `grafana/provisioning/alerting/`. This table is the landing record, and it is what the
+        dashboard subscribes to over Realtime.
+
+        `sparkplug_id` is the immutable wire identity, never the device name. `device_id` is resolved
+        at write time and is nullable: an alert that fired is a thing that happened, and it is kept
+        even when no device row matches.
+
+        `anon` is revoked. An alert summary names a device and the condition it breached.
+      parameters:
+        - { name: sparkplug_id, in: query, schema: { type: string }, description: 'e.g. `eq.dev220000000000400080000`' }
+        - { name: status, in: query, schema: { type: string, enum: [firing, resolved] }, description: 'e.g. `eq.firing`' }
+        - { name: severity, in: query, schema: { type: string, enum: [critical, warning, info] } }
+        - { name: starts_at, in: query, schema: { type: string, format: date-time }, description: 'e.g. `gte.2026-08-17T00:00:00Z`' }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Matching alert occurrences.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DeviceAlert' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
+  /rest/v1/device_alerts_active:
+    get:
+      tags: [Registry]
+      summary: Read only the alerts currently firing
+      description: |
+        One row per Grafana fingerprint — the newest occurrence — and only while it is still firing.
+        This is what the dashboard's Topbar pill counts.
+
+        **`DISTINCT ON` rather than `WHERE status = 'firing'`**, and the difference matters: if a
+        resolve notification is ever lost (a dropped webhook, a Grafana restart mid-delivery) the
+        series can hold an old firing row *and* a newer resolved one. A plain filter would surface the
+        stale one indefinitely; taking the newest occurrence first and discarding it unless it is
+        still firing means a later resolve always wins.
+      parameters:
+        - { name: severity, in: query, schema: { type: string, enum: [critical, warning, info] } }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Currently firing alerts.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DeviceAlert' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
   /rest/v1/device_nameplate:
     get:
       tags: [Registry]
@@ -1270,6 +1329,160 @@ paths:
         '400': { description: 'Missing or malformed `device_id`.' }
         '401': { description: Missing or invalid Authorization header. }
         '403': { description: 'Forbidden: insufficient privileges.' }
+
+  /functions/v1/gateway-bundle:
+    post:
+      tags: [Edge Functions]
+      summary: Download a physical gateway's bootstrap bundle (ZIP)
+      description: |
+        Returns a `.zip` containing everything needed to turn a machine into a gateway: a
+        `docker-compose.yml`, a `Dockerfile`, `bootstrap.mjs`, a sample `flows.template.json`, a
+        `README.md`, and a generated `.env`.
+
+        **The bundle carries a claim, not a credential.** The only sensitive value in it is a
+        single-use enrolment token valid for 30 minutes; there is no broker password, because the
+        appliance obtains one for itself at first boot via `/functions/v1/enroll-gateway`. An
+        expired bundle is inert.
+
+        **Regenerating invalidates the previous bundle.** Issuing consumes any live token for that
+        gateway, so exactly one download is ever redeemable.
+
+        Requires `Administrator` or `Shopfloor_Manager` — generating a bundle is an operator's act,
+        unlike redeeming one. The token is minted by a `SECURITY DEFINER` RPC called *as the
+        caller*, so this endpoint cannot produce a bundle its caller could not produce themselves.
+
+        > **Fetch this with a raw `fetch()`, not `supabase.functions.invoke()`.** supabase-js
+        > text-decodes any response that is not JSON or octet-stream, which silently corrupts the
+        > archive. The same constraint applies to `aas-export`'s AASX response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [gateway_id]
+              properties:
+                gateway_id:
+                  type: string
+                  format: uuid
+                  description: The physical gateway to generate a bundle for.
+      responses:
+        '200':
+          description: The bundle. `X-ACS-Token-Expires-At` carries the enrolment deadline.
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+              description: 'attachment; filename="acs-gateway-<name>.zip"'
+            X-ACS-Token-Expires-At:
+              schema: { type: string, format: date-time }
+              description: When the embedded enrolment token stops working.
+            X-ACS-Bundle-Version:
+              schema: { type: string }
+              description: Template version, recorded on the gateway when the appliance enrols.
+            X-ACS-Sparkplug-Id:
+              schema: { type: string, pattern: '^gwy[0-9a-f]{21}$' }
+              description: >-
+                The edge node this bundle enrols. Also the MQTT username the appliance will be
+                issued, and the folder the archive expands into.
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        '400': { description: '`gateway_id` missing, or the gateway is virtual.' }
+        '401': { description: Missing or invalid Authorization header. }
+        '403': { description: 'Forbidden: requires Administrator or Shopfloor_Manager.' }
+        '404': { description: No such gateway. }
+        '503':
+          description: >-
+            `SUPABASE_PUBLIC_URL` is unset or names an in-stack address, or the bundle template is
+            missing from the deployment. No token is issued in either case.
+
+  /functions/v1/enroll-gateway:
+    post:
+      tags: [Edge Functions]
+      summary: Redeem a physical gateway's enrolment token for a broker credential
+      description: |
+        Called by a **physical gateway appliance on first boot**, not by a browser. There is no
+        user, no session and no role: possession of the single-use enrolment token is the
+        authorisation. The request still needs the `apikey` header — Kong gates `/functions/v1/`
+        with `key-auth` — but the **anon key is sufficient and no user JWT is required**.
+
+        The token is minted by `issue_gateway_enrollment_token()` when an operator creates a
+        physical gateway in the dashboard, is valid for 30 minutes by default, and is bound to
+        exactly one gateway.
+
+        **The claim is atomic.** Two appliances racing the same token produce exactly one winner —
+        the loser gets `401`. That matters because `mosquitto.acl` pins the topic's edge-node
+        segment to the connecting username, so two credentials for one gateway would silently
+        contend for a single Sparkplug identity.
+
+        **A failed issuance releases the claim.** If the broker credential service is unavailable
+        the response is `503` with `retryable: true` and the *same bundle* can be retried. Only when
+        the release itself fails (`retryable: false`) must a new bundle be generated.
+
+        On success the gateway moves to `AWAITING_BIRTH`; its first Sparkplug `NBIRTH` then sets it
+        `ONLINE` through the ordinary ingestion path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  pattern: '^[0-9a-f]{64}$'
+                  description: The single-use enrolment token from the downloaded bundle.
+                agent_version:
+                  type: string
+                  nullable: true
+                  maxLength: 64
+                  description: >-
+                    Version stamp of the bundle the appliance is running, recorded on the gateway so
+                    the fleet's vintage is visible without reaching into every appliance.
+      responses:
+        '200':
+          description: >-
+            Enrolled. `mqtt_password` is returned EXACTLY ONCE — the broker stores only a hash, so
+            there is no endpoint that could re-read it.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ENROLLED }
+                  gateway_name: { type: string, example: Cell 4 Press Line }
+                  sparkplug_id:
+                    type: string
+                    pattern: '^gwy[0-9a-f]{21}$'
+                    description: The immutable edge-node id. Also the MQTT username; it cannot be anything else.
+                  sparkplug_group: { type: string, example: ACS-Cymru }
+                  mqtt_host: { type: string, example: broker.plant.example }
+                  mqtt_tls_port: { type: integer, example: 8883 }
+                  mqtt_username: { type: string, description: Equal to `sparkplug_id`. }
+                  mqtt_password: { type: string, description: Returned once and not recoverable. }
+                  ca_cert:
+                    type: string
+                    description: >-
+                      The broker's CA in PEM form. Physical gateways connect over MQTTS only and
+                      must verify against this; there is no unverified fallback.
+                  applied_to_running_broker:
+                    type: boolean
+                    description: >-
+                      False means the credential is durable but not yet live (a Kubernetes projected
+                      Secret can take ~90s to sync), so the appliance should retry its first CONNECT
+                      rather than treat a refusal as a bad password.
+        '400': { description: Body is not JSON. }
+        '401':
+          description: >-
+            The token is unknown, expired, or already redeemed. The three are deliberately
+            indistinguishable — reporting which would let an enumerator learn that a token value
+            once existed.
+        '405': { description: Method not allowed. }
+        '503':
+          description: >-
+            Enrolment is unconfigured, or the broker credential service could not be reached. Check
+            `retryable`: when true the token was released and the same bundle can be retried.
 
   /functions/v1/aas-export:
     post:
@@ -1570,6 +1783,80 @@ paths:
                         online: { type: boolean }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /functions/v1/grafana-alert-webhook:
+    post:
+      tags: [Edge Functions]
+      summary: Receive a Grafana alert notification
+      description: |
+        The delivery target of Grafana's `ACS-Cymru Webhook` contact point. Accepts an
+        Alertmanager-shaped payload and records each instance as an occurrence in
+        `public.device_alerts`, which the dashboard then receives over Realtime.
+
+        **Authenticated by a scoped bearer secret, not by a Supabase key.** Grafana presents
+        `GRAFANA_ALERT_WEBHOOK_SECRET`; this function verifies it and then uses its own service-role
+        client internally. Grafana is deliberately *not* given the service-role key — that key
+        bypasses RLS entirely and can rewrite `digital_thread`, and a service fronted by browser SSO
+        gets the narrowest credential that does its job. Same shape as `nodered_webhook_jwt_secret`
+        for the quarantine webhook.
+
+        **An unset secret answers 503, never 200.** The check fails closed, so a missing environment
+        variable is a broken integration rather than an unauthenticated write endpoint.
+
+        **Not exempt from Kong's `key-auth`.** The contact point carries the anon key in the query
+        string (`?apikey=…`) because Grafana's webhook integration exposes only one header pair and
+        it is spent on `Authorization`. `hide_credentials` keeps the key from being forwarded on.
+
+        **Alerts with no `sparkplug_id` label are counted and skipped, not stored.** A
+        `DatasourceError` notification — what `execErrState: Error` produces when a rule's query
+        breaks — carries no device label, and inventing one would attribute a broken query to a
+        machine. The response reports the skipped count so it is visible in Grafana's delivery log.
+      security:
+        - AlertWebhookBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                alerts:
+                  type: array
+                  description: 'Grafana sends an empty array for a contact-point "Test", which answers 200.'
+                  items:
+                    type: object
+                    properties:
+                      status: { type: string, enum: [firing, resolved] }
+                      fingerprint: { type: string }
+                      startsAt: { type: string, format: date-time }
+                      endsAt: { type: string, description: 'Alertmanager sends 0001-01-01T00:00:00Z while still firing.' }
+                      labels:
+                        type: object
+                        properties:
+                          alertname: { type: string }
+                          severity: { type: string, enum: [critical, warning, info] }
+                          sparkplug_id: { type: string }
+                          device: { type: string }
+                      annotations:
+                        type: object
+                        properties:
+                          summary: { type: string }
+      responses:
+        '200':
+          description: Recorded. `written` excludes anything skipped for want of a device label.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  received: { type: integer }
+                  written: { type: integer }
+                  skipped: { type: integer }
+        '400': { description: 'Body is not valid JSON.' }
+        '401': { description: 'Missing, malformed or incorrect bearer secret.' }
+        '405': { description: 'Method other than POST.' }
+        '503': { description: 'GRAFANA_ALERT_WEBHOOK_SECRET is not configured; refusing to accept alerts.' }
+
   /functions/v1/grafana-userinfo:
     get:
       tags: [Edge Functions]
@@ -1654,6 +1941,13 @@ components:
       in: header
       name: apikey
       description: The Supabase anon key. Required on every request except the public-storage and userinfo endpoints.
+    AlertWebhookBearer:
+      type: http
+      scheme: bearer
+      description: |
+        `GRAFANA_ALERT_WEBHOOK_SECRET` — a shared secret, NOT a JWT and not a Supabase key. Held only
+        by Grafana's contact point and verified by `grafana-alert-webhook`, which authorises exactly
+        one action: recording an alert. It exists so Grafana is never given the service-role key.
 
   parameters:
     Select:
@@ -1744,12 +2038,12 @@ components:
         id: { type: string, format: uuid, readOnly: true }
         name:
           type: string
-          example: Virtual_Gateway_NodeRED
+          example: Sim_Gateway_Cell1_Machining
           description: Display label only. Freely editable and NOT unique; edge nodes are matched on `sparkplug_id`.
         sparkplug_id:
           type: string
           readOnly: true
-          example: gwy100000000000400080000
+          example: gwy120000000000400080000
           description: >-
             Immutable Sparkplug B edge node id, generated from the primary key ('gwy' plus 21 hex
             characters, 24 total). This is the edge node segment of the MQTT topic, and the MQTT
@@ -1784,7 +2078,7 @@ components:
     GatewayWrite:
       type: object
       properties:
-        name: { type: string, example: Virtual_Gateway_NodeRED }
+        name: { type: string, example: Sim_Gateway_Cell1_Machining }
         cell_id: { type: string, format: uuid, nullable: true }
         location_scope: { $ref: '#/components/schemas/LocationScope' }
         access_url: { type: string, nullable: true }
@@ -1813,12 +2107,12 @@ components:
         id: { type: string, format: uuid, readOnly: true }
         name:
           type: string
-          example: Simulated_CNC_01
+          example: Sim_CNC_Mill_01
           description: Display label only. Freely editable and NOT unique; renaming does not affect ingestion or telemetry history.
         sparkplug_id:
           type: string
           readOnly: true
-          example: dev200000000000400080000
+          example: dev220000000000400080000
           description: >-
             Immutable Sparkplug B device id, generated from the primary key ('dev' plus 21 hex
             characters, 24 total). Appears in the MQTT topic and keys telemetry and birth
@@ -1900,7 +2194,7 @@ components:
     DeviceWrite:
       type: object
       properties:
-        name: { type: string, example: Simulated_CNC_01 }
+        name: { type: string, example: Sim_CNC_Mill_01 }
         gateway_id: { type: string, format: uuid, nullable: true }
         cell_id: { type: string, format: uuid, nullable: true, description: 'Send NULL to clear an override and return the device to inheriting.' }
         location_scope: { $ref: '#/components/schemas/LocationScope' }
@@ -1951,7 +2245,7 @@ components:
       description: 'One metric sample. Exactly one of val_double / val_string / val_bool is populated.'
       properties:
         time: { type: string, format: date-time }
-        asset_id: { type: string, example: dev200000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
+        asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
         metric_name: { type: string, example: Systems/TEMPERATURE }
         val_double: { type: number, nullable: true }
         val_string: { type: string, nullable: true, description: '`Controller/EXECUTION` and `Controller/EMERGENCY_STOP` are STRINGS. A stale `val_bool` test compares NULL, evaluates false, and stops alerting silently.' }
@@ -1967,7 +2261,7 @@ components:
         be weighted equally.
       properties:
         bucket: { type: string, format: date-time, description: 'Start of the bucket.' }
-        asset_id: { type: string, example: dev200000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
+        asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id)." }
         metric_name: { type: string, example: Systems/TEMPERATURE }
         avg_double: { type: number, nullable: true, description: 'Weighted mean of the numeric samples; NULL when the bucket held none.' }
         min_double: { type: number, nullable: true, description: 'Kept deliberately — an average alone hides the excursion.' }
@@ -1983,7 +2277,7 @@ components:
       description: One DBIRTH birth-certificate parameter.
       properties:
         id: { type: string, format: uuid, readOnly: true }
-        asset_id: { type: string, example: dev200000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id) — not the name." }
+        asset_id: { type: string, example: dev220000000000400080000, description: "Device Sparkplug ID (devices.sparkplug_id) — not the name." }
         metric_name: { type: string, example: Controller/FIRMWARE }
         val_double: { type: number, nullable: true }
         val_string: { type: string, nullable: true }
@@ -2159,6 +2453,36 @@ components:
         is_mandatory: { type: boolean, description: 'What the template requires. Descriptive only — the exporter does not claim the template.' }
         ordinal: { type: integer, description: 'Order in the published template.' }
 
+    DeviceAlert:
+      type: object
+      description: |
+        One Grafana alert occurrence. Written by `grafana-alert-webhook`; never by a user.
+      properties:
+        id: { type: string, format: uuid }
+        fingerprint:
+          type: string
+          description: |
+            Grafana's hash of the alert instance's label set. STABLE across fire/resolve cycles, so it
+            identifies the series and not the occurrence — which is why the unique constraint pairs it
+            with `starts_at`.
+          example: abc123def4567890
+        sparkplug_id:
+          type: string
+          description: 'The immutable wire identity the alert was raised for. Never the device name.'
+          example: dev220000000000400080000
+        device_id: { type: string, format: uuid, nullable: true, description: 'Resolved at write time; null when no device row matched.' }
+        alert_name: { type: string, example: Thermal Excursion }
+        severity: { type: string, enum: [critical, warning, info] }
+        status: { type: string, enum: [firing, resolved] }
+        summary:
+          type: string
+          nullable: true
+          description: "Grafana's own templated annotation, already carrying the device and the values that tripped the rule."
+          example: Sim_CNC_Mill_01 is above its configured thermal limit of 90.0 degC (5.2 degC over).
+        starts_at: { type: string, format: date-time, description: 'When Grafana began firing this occurrence. Part of the occurrence key.' }
+        ends_at: { type: string, format: date-time, nullable: true, description: 'Null while firing. A resolved row always carries one — enforced by CHECK.' }
+        recorded_at: { type: string, format: date-time, description: 'When this platform wrote the row, as distinct from when Grafana observed it.' }
+
     DeviceNameplate:
       type: object
       description: |
@@ -2185,8 +2509,8 @@ components:
       description: A Sparkplug B address. `(group_id, node_id)` names the edge node; `device_id` is its device.
       properties:
         group_id: { type: string, example: ACS-Cymru, description: 'Empty when the device is bound to no gateway.' }
-        node_id: { type: string, example: gwy100000000000400080000 }
-        device_id: { type: string, example: dev200000000000400080000 }
+        node_id: { type: string, example: gwy120000000000400080000 }
+        device_id: { type: string, example: dev220000000000400080000 }
 
     DirectoryDevice:
       type: object

@@ -6,3 +6,16 @@
 # -- the error is `$'\r': command not found`, which names the shell rather than the line endings.
 # These scripts also run inside containers, where the same file is mounted directly.
 *.sh text eol=lf
+
+# Compressed archives are BYTES, and `* text=auto` above must not be allowed to guess at them.
+#
+# The chart carries the migration chain as one gzip per file (see the header of
+# templates/jobs/db-init.yaml). `text=auto` applies git's binary HEURISTIC to those, and a heuristic
+# is the wrong instrument here: misclassify one archive of twenty-one and a Windows checkout
+# CRLF-normalises it, every 0x0d byte in the deflate stream becomes 0x0d0a, and the file stops
+# decompressing. That surfaces at deploy time as db-init failing to gunzip -- which is a database
+# with no schema, reported as a dozen unrelated service faults.
+#
+# `binary` is shorthand for `-text -diff`, so it also stops git printing 149 KiB of deflate noise
+# into a diff.
+*.gz binary

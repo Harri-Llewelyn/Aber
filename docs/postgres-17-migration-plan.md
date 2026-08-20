@@ -90,6 +90,11 @@ first, so it takes `0011` and the vocabulary work starts at `0012`.
   `supabase/migrations/*.sql` into `deploy/helm/acs-cymru/files/migrations/`, and CI runs it with
   `--check`. Migrations are edited once and synced, never edited twice. The same holds for the
   Grafana dashboard JSON and the `timescaledb/` scripts.
+
+  > **No longer true of the migrations, as of 2026-08-20.** They are baked into the `db-init` image
+  > instead — the chart could not carry them, because a ConfigMap and Helm's release Secret are both
+  > capped at 1 MiB and the release holds those bytes twice. See `supabase/db-init/Dockerfile`. The
+  > mirror still works exactly as described for everything else.
 - **The backup Job follows the pin on its own.** It renders
   `{{ .Values.supabaseDb.image.repository }}:{{ .Values.supabaseDb.image.tag }}`, so the image
   tracks automatically. Only the *stated constraint* in its comment needs revising.
@@ -345,7 +350,7 @@ plus `docker compose down -v` — the entire upgrade, in one step, exactly as in
   stays in memory. The 4.8 MB spill here is a floor, not a typical case.
 - **`pg_stat_io` (PG16) and `pg_stat_checkpointer` (PG17) — DONE.** A
   *Historian I/O & Checkpoints* row in
-  [acs-cymru-overview.json](../grafana/provisioning/dashboards/json/acs-cymru-overview.json):
+  [acs-cymru-overview.json](../grafana/provisioning/dashboards/platform/stack-ingestion-health.json):
   shared buffer hit ratio, blocks read from disk, **requested checkpoints**, average checkpoint
   write time, and a `pg_stat_io` breakdown by backend type and context.
 

@@ -2,8 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../api'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { AutoRefreshControl } from '../common/AutoRefreshControl'
-import CopyableId from '../common/CopyableId'
-import { IconHistory, IconDownload, IconX } from '../common/Icons'
+import { ContextPanel } from '../common/ContextPanel'
+import { IconHistory, IconDownload, IconX, IconBuilding2, IconRadio, IconCpu } from '../common/Icons'
 
 /**
  * How a machine-originated change is described. `changed_by` names WHICH user and is NULL for
@@ -17,6 +17,342 @@ const ACTOR_LABELS = {
   service:   { label: 'Service',           title: 'Written by an automated service on the service-role key' }
 }
 
+/** The actor badge's text and hover title, from the pair of columns that describe one actor. */
+export function actorLabel(event) {
+  if (event.actor_source === 'user' || event.changed_by) return ACTOR_LABELS.user.label
+  return ACTOR_LABELS[event.actor_source]?.label || '⚠ Unattributed'
+}
+function actorTitle(event) {
+  if (event.changed_by) return `Changed by user ${event.changed_by}`
+  return ACTOR_LABELS[event.actor_source]?.title || 'No actor recorded for this change'
+}
+
+/**
+ * The trigger writes TG_TABLE_NAME -- 'cells' / 'gateways' / 'devices'. The UI has always spoken
+ * in the singular upper case, and a handover from another page arrives already in that form, so
+ * both spellings reach this component and both have to normalise to one.
+ */
+const ENTITY_KIND = { cells: 'CELL', gateways: 'GATEWAY', devices: 'DEVICE' }
+export const entityKind = (t) =>
+  ENTITY_KIND[String(t || '').toLowerCase()] || String(t || '').toUpperCase()
+
+/**
+ * Columns excluded from every diff.
+ *
+ * Machine churn, not history. Migration 0005 already suppresses the two worst offenders at the
+ * source -- an UPDATE where nothing changed, and a heartbeat-only UPDATE -- so what these catch
+ * is the residue: a real edit that also happened to bump a timestamp, which would otherwise open
+ * every diff with a line nobody came to read.
+ *
+ * `updated_at` and `last_seen` are not columns of cells, gateways or devices in this schema.
+ * They are listed anyway because a denylist that only names what exists today silently stops
+ * working the moment someone adds the column, and the failure mode is noise in an audit trail
+ * rather than an error anyone would notice.
+ */
+const NOISE_FIELDS = new Set(['updated_at', 'last_heartbeat', 'last_seen'])
+
+/**
+ * Fields whose change is a GOVERNANCE act rather than an operational one -- what this asset is
+ * declared to be, as opposed to what it is currently doing. `asset_config` is not a column of
+ * these three tables (it is its own table, and is not audited); it is named here because the
+ * classification is written in terms of the concept, and the day that binding moves onto the row
+ * this keeps saying the right thing.
+ */
+const GOVERNANCE_FIELDS = new Set([
+  'schema_id', 'asset_config', 'asset_type', 'connection_method', 'grafana_url', 'access_url'
+])
+/* `identity_source` was in this set and has been taken out, on the evidence of a reseeded stack.
+   The commonest real event in the audit table is a device's first DBIRTH, which arrives as one
+   UPDATE touching `status`, `first_dbirth_at` and `identity_source` together -- so including it
+   painted the single most frequent lifecycle event on the page amber. It is provenance written
+   by the ingestion daemon, not configuration an operator declared, and it never moves on its
+   own. `name` and `icon` are left out for the mirror-image reason: cosmetic, not governance. */
+
+/** The four marker classes. `kind` is a CSS suffix as well as a key -- see `.dt-node-*`. */
+export const MARKERS = {
+  creation:    { label: 'Created',       hint: 'Row created — provisioning, or a first DBIRTH admitting the asset' },
+  operational: { label: 'Operational',   hint: 'State change — status, cell, or another running-time property' },
+  governance:  { label: 'Configuration', hint: 'Governance change — schema binding or declared configuration' },
+  critical:    { label: 'Lifecycle',     hint: 'Lifecycle event — deleted, archived, or quarantined' }
+}
+
+/** Deep-enough equality for a JSONB snapshot: scalars by value, objects by serialisation. */
+const sameValue = (a, b) => {
+  if (a === b) return true
+  if (a === null || a === undefined) return b === null || b === undefined
+  if (typeof a === 'object' || typeof b === 'object') {
+    try { return JSON.stringify(a) === JSON.stringify(b) } catch { return false }
+  }
+  return false
+}
+
+/**
+ * What actually changed between two row snapshots.
+ *
+ * `old_data` and `new_data` are `to_jsonb(OLD)` / `to_jsonb(NEW)` -- WHOLE ROWS, not deltas. A
+ * one-column rename therefore arrives as two twenty-key objects that agree on nineteen of them,
+ * which is why the drawer computes the difference rather than printing what it was given.
+ *
+ * An INSERT has no `old_data` and a DELETE no `new_data`; those are rendered as one-sided
+ * snapshots with their empty columns dropped, because "every null column this row was born with"
+ * is not a fact about the creation.
+ */
+export function diffFields(oldData, newData) {
+  const before = oldData && typeof oldData === 'object' ? oldData : null
+  const after  = newData && typeof newData === 'object' ? newData : null
+
+  const snapshot = (obj, side) => Object.keys(obj)
+    .filter(k => !NOISE_FIELDS.has(k))
+    .filter(k => obj[k] !== null && obj[k] !== undefined && obj[k] !== '')
+    .sort()
+    .map(k => side === 'after'
+      ? { field: k, before: undefined, after: obj[k] }
+      : { field: k, before: obj[k], after: undefined })
+
+  if (!before && !after) return []
+  if (!before) return snapshot(after, 'after')
+  if (!after)  return snapshot(before, 'before')
+
+  return [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter(k => !NOISE_FIELDS.has(k))
+    .sort()
+    .filter(k => !sameValue(before[k], after[k]))
+    .map(k => ({ field: k, before: before[k], after: after[k] }))
+}
+
+/**
+ * Which marker an event gets.
+ *
+ * DERIVED, because the column it would otherwise read does not exist. `digital_thread.action` is
+ * written from TG_OP and holds only INSERT / UPDATE / DELETE -- there is no QUARANTINE action, no
+ * ARCHIVE action and no SCHEMA action to key off. Archiving and quarantining are UPDATEs whose
+ * boolean flipped, and a schema rebinding is an UPDATE that touched `schema_id`, so the
+ * distinction that matters to an operator lives in the diff and nowhere else.
+ *
+ * An INSERT is always green, including the INSERT of an already-quarantined device -- the arrival
+ * of a rogue asset. That follows the taxonomy as specified (INSERT is creation; the flag tests
+ * apply to transitions) and is worth knowing about, because that one case is arguably red.
+ */
+export function classifyEvent(event, diff) {
+  const action = String(event.event_type || event.action || '').toUpperCase()
+  if (action === 'DELETE') return 'critical'
+  if (action === 'INSERT') return 'creation'
+
+  const changed = new Set(diff.map(d => d.field))
+  const roseTo = (field) => changed.has(field) && event.new_data?.[field] === true
+  if (roseTo('is_archived') || roseTo('is_quarantined')) return 'critical'
+
+  for (const field of changed) if (GOVERNANCE_FIELDS.has(field)) return 'governance'
+  return 'operational'
+}
+
+/** The range presets, and the window each one means. `ms` of null is an unbounded window. */
+export const TIME_PRESETS = [
+  { value: 'all', label: 'All time',      ms: null },
+  { value: '24h', label: 'Last 24 hours', ms: 24 * 60 * 60 * 1000 },
+  { value: '7d',  label: 'Last 7 days',   ms: 7 * 24 * 60 * 60 * 1000 },
+  { value: '30d', label: 'Last 30 days',  ms: 30 * 24 * 60 * 60 * 1000 }
+]
+
+/**
+ * The preset (or the custom dates) as the `since` / `until` the API takes.
+ *
+ * ALL TIME IS THE DEFAULT, and that is a decision about the page's main entry path rather than a
+ * shrug. Most arrivals here are a handover -- "Digital Thread" on a device row -- and a device
+ * whose last edit was at install time would answer that click with an empty timeline under any
+ * rolling default. An operator who asks for one asset's history means all of it.
+ *
+ * Called at fetch time rather than memoised: a page left on "Last 24 hours" with auto-refresh
+ * running would otherwise keep re-requesting the window that was current when the preset was
+ * chosen, and drift a full day behind over a shift.
+ */
+export function timeWindow(preset, customStart, customEnd) {
+  const iso = (value, endOfDay) => {
+    if (!value) return ''
+    // Parsed as LOCAL midnight, not UTC: the operator picking a date means their own day.
+    const d = new Date(`${value}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}`)
+    return Number.isNaN(d.getTime()) ? '' : d.toISOString()
+  }
+
+  if (preset === 'custom') return { since: iso(customStart, false), until: iso(customEnd, true) }
+
+  const ms = TIME_PRESETS.find(p => p.value === preset)?.ms
+  return { since: ms ? new Date(Date.now() - ms).toISOString() : '', until: '' }
+}
+
+/** How many lanes are drawn before the rest are folded behind a toggle. */
+const DEFAULT_LANE_LIMIT = 15
+
+/** The sections, in the order a plant is organised: a cell holds gateways, which hold devices. */
+const SECTIONS = [
+  { kind: 'CELL',    label: 'Cells',    Icon: IconBuilding2 },
+  { kind: 'GATEWAY', label: 'Gateways', Icon: IconRadio },
+  { kind: 'DEVICE',  label: 'Devices',  Icon: IconCpu }
+]
+const SECTION_ICON = Object.fromEntries(SECTIONS.map(s => [s.kind, s.Icon]))
+
+/** A UUID shortened to something a person can compare at a glance, when there is no name. */
+export const shortId = (id) => {
+  const s = String(id || '')
+  return s.length > 13 ? `${s.slice(0, 8)}…${s.slice(-4)}` : s
+}
+
+/**
+ * The name to put on a lane, in three falls.
+ *
+ * The audit row stores only `entity_id`; names live on the entity and carry no identity of their
+ * own, so the first fall is a client-side join. The SECOND is what makes a deleted entity legible
+ * at all: its row is gone from `/api/v1/cells`, so the join can never resolve it -- but the audit
+ * snapshot it left behind holds the name it had when it died, which is exactly the name an
+ * operator remembers it by. A truncated id is the last resort rather than the usual case it was.
+ */
+export function resolveLaneName(entityId, laneEvents, entityNames) {
+  const joined = entityNames.get(entityId)
+  if (joined) return { name: joined, fromSnapshot: false }
+
+  for (const e of laneEvents) {
+    const snapshot = e.new_data?.name || e.old_data?.name
+    if (snapshot) return { name: String(snapshot), fromSnapshot: true }
+  }
+  return { name: null, fromSnapshot: false }
+}
+
+/**
+ * The axis label format, chosen from the span it has to distinguish.
+ *
+ * ONE RULE DECIDES IT: two adjacent ticks must never print the same string. Five ticks across ten
+ * minutes all read `14:03` without seconds; five across six months all read `Aug 2026` with only
+ * a month. Either way the axis stops being an axis and becomes decoration, so each band is the
+ * coarsest format that still separates its own ticks.
+ */
+export function tickFormatter(spanMs) {
+  const MIN = 60 * 1000, HOUR = 60 * MIN, DAY = 24 * HOUR
+
+  // Under ten minutes the minute is constant across several ticks; seconds are the only thing
+  // telling them apart.
+  if (spanMs < 10 * MIN) {
+    return (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }
+  if (spanMs < 24 * HOUR) {
+    return (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }
+  // Past a day the date has to appear. Up to three days the clock still separates ticks that fall
+  // on the same date; beyond that it is noise on a label that is already unambiguous.
+  if (spanMs <= 3 * DAY) {
+    return (d) => `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ` +
+                  `${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+  }
+  if (spanMs <= 30 * DAY) {
+    return (d) => d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  }
+  /* Past thirty days, `MMM YYYY` is the tempting label and it is the one that breaks: five ticks
+     across a 31-day span sit about eight days apart and would all read `Aug 2026`, which is the
+     same repeated-header failure the ten-minute band exists to avoid. An ISO date never repeats
+     at any span this rule covers, and is built from local parts rather than toISOString() --
+     which would report the previous day for anyone west of UTC. */
+  return (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-` +
+                `${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** A diff value as text. Objects are serialised; an absent value is stated, not left blank. */
+const formatValue = (v) => {
+  if (v === null || v === undefined || v === '') return null
+  if (typeof v === 'boolean') return v ? 'true' : 'false'
+  if (typeof v === 'object') { try { return JSON.stringify(v) } catch { return String(v) } }
+  return String(v)
+}
+
+const EmptyValue = ({ label }) => <span className="dt-diff-empty">{label}</span>
+
+/**
+ * The property diff, rendered INSIDE the Digital Thread page rather than inside ContextPanel.
+ *
+ * ContextPanel is presentational by contract -- it renders `fields` and `actions` and knows
+ * nothing about cells, gateways, devices or audit payloads (see its header). Teaching it to read
+ * `old_data` would make it a fifth thing with exactly one caller, so the panel receives this
+ * finished node through its `beforeActions` slot instead: a FACT about the selected event, shown
+ * with the metadata it belongs to.
+ */
+function EventDiff({ event, diff }) {
+  const action = String(event.event_type || event.action || '').toUpperCase()
+  const oneSided = action === 'INSERT' || action === 'DELETE'
+
+  return (
+    <div className="dt-diff">
+      <div className="context-panel-section-label">
+        {action === 'INSERT' ? 'Initial properties'
+          : action === 'DELETE' ? 'Final properties'
+            : 'Changed properties'}
+      </div>
+
+      {diff.length === 0 ? (
+        /* Reachable in two ways, and they are different: an UPDATE whose only changed column was
+           on the noise denylist, or a row whose snapshots were never recorded. Neither is an
+           error, and neither should look like a rendering failure. */
+        <div className="dt-diff-none">
+          No property changes recorded outside the ignored timestamp columns.
+        </div>
+      ) : (
+        <table className={`dt-diff-table${oneSided ? ' dt-diff-onesided' : ''}`}>
+          <thead>
+            <tr>
+              <th>Property</th>
+              {!oneSided && <th>Previous</th>}
+              <th>{action === 'DELETE' ? 'Deleted' : action === 'INSERT' ? 'Created' : 'New'}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {diff.map(d => {
+              const before = formatValue(d.before)
+              const after  = formatValue(d.after)
+              return (
+                <tr key={d.field}>
+                  <th scope="row" title={d.field}>{d.field}</th>
+                  {!oneSided && (
+                    <td className="dt-diff-before" title={before || undefined}>
+                      {before === null ? <EmptyValue label="Not set" /> : before}
+                    </td>
+                  )}
+                  <td className="dt-diff-after" title={(action === 'DELETE' ? before : after) || undefined}>
+                    {action === 'DELETE'
+                      ? (before === null ? <EmptyValue label="Not set" /> : before)
+                      : (after === null ? <EmptyValue label="Cleared" /> : after)}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The unabridged snapshots, collapsed.
+ *
+ * The diff above is the answer to "what changed"; this is the answer to "prove it". Auditing a
+ * disputed change means reading the row as it was actually stored, denylist and all -- so it has
+ * to be here, and it has to be shut by default or it is the JSON dump this page was rebuilt to
+ * stop being.
+ */
+function RawSnapshots({ event }) {
+  const dump = (value) => {
+    try { return JSON.stringify(value, null, 2) } catch { return String(value) }
+  }
+  return (
+    <details className="dt-raw">
+      <summary className="dt-raw-summary">Raw audit payload</summary>
+      <div className="dt-raw-body">
+        <div className="dt-raw-label">old_data</div>
+        <pre className="dt-raw-json">{event.old_data ? dump(event.old_data) : 'null'}</pre>
+        <div className="dt-raw-label">new_data</div>
+        <pre className="dt-raw-json">{event.new_data ? dump(event.new_data) : 'null'}</pre>
+      </div>
+    </details>
+  )
+}
+
 /**
  * `initialEntity` is a handover from another page's "Digital Thread" action: `{ id, type }`.
  *
@@ -26,15 +362,20 @@ const ACTOR_LABELS = {
  * because that filter already matches on id as well as name (see namedEntityIds), which makes the
  * handover exact: two devices may share a name, but the id is the row.
  */
-export function DigitalThreadTab({ initialEntity, onClearEntity }) {
+export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
   const [events, setEvents]           = useState([])
   const [loading, setLoading]         = useState(true)
   const [entityTypeFilter, setEntityTypeFilter] = useState(initialEntity?.type || '')
   const [nameFilter, setNameFilter]   = useState(initialEntity?.id || '')
   const [actionFilter, setActionFilter] = useState('')
+  const [rangePreset, setRangePreset] = useState('all')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd]     = useState('')
   const [devices, setDevices]         = useState([])
   const [gateways, setGateways]       = useState([])
   const [cells, setCells]             = useState([])
+  const [selectedEventId, setSelectedEventId] = useState(null)
+  const [showAllLanes, setShowAllLanes] = useState(false)
 
   useEffect(() => {
     // Cells and gateways join devices here so the audit log can be searched by the NAME an
@@ -64,7 +405,8 @@ export function DigitalThreadTab({ initialEntity, onClearEntity }) {
    *
    * The row limit is applied by the database, so filtering after the fact would page through 200
    * mixed rows and then show whichever fraction happened to match -- the same reason the action
-   * filter is a SQL predicate. Resolving to ids first keeps the limit meaningful.
+   * filter and the time range are SQL predicates. Resolving to ids first keeps the limit
+   * meaningful.
    */
   const namedEntityIds = useMemo(() => {
     const q = nameFilter.trim().toLowerCase()
@@ -81,10 +423,15 @@ export function DigitalThreadTab({ initialEntity, onClearEntity }) {
     if (entityTypeFilter) url += `&entity_type=${encodeURIComponent(entityTypeFilter)}`
     if (actionFilter)     url += `&action=${encodeURIComponent(actionFilter)}`
     if (namedEntityIds)   url += `&entity_ids=${encodeURIComponent(namedEntityIds.join(','))}`
+    // Evaluated here, not held in state: see timeWindow's note on a rolling window going stale
+    // under auto-refresh.
+    const { since, until } = timeWindow(rangePreset, customStart, customEnd)
+    if (since) url += `&since=${encodeURIComponent(since)}`
+    if (until) url += `&until=${encodeURIComponent(until)}`
     api.get(url)
       .then(d => { setEvents(d); setLoading(false) })
       .catch(() => setLoading(false))
-  }, [entityTypeFilter, actionFilter, namedEntityIds])
+  }, [entityTypeFilter, actionFilter, namedEntityIds, rangePreset, customStart, customEnd])
 
   // A later handover -- clicking Digital Thread on a second device without leaving the page --
   // replaces the filter rather than being ignored because state was already initialised.
@@ -94,11 +441,16 @@ export function DigitalThreadTab({ initialEntity, onClearEntity }) {
     setNameFilter(initialEntity.id)
   }, [initialEntity?.id, initialEntity?.type])
 
+  const rangeIsFiltering =
+    rangePreset === 'custom' ? !!(customStart || customEnd) : rangePreset !== 'all'
+
   const activeFilterCount =
-    (entityTypeFilter ? 1 : 0) + (nameFilter ? 1 : 0) + (actionFilter ? 1 : 0)
+    (entityTypeFilter ? 1 : 0) + (nameFilter ? 1 : 0) + (actionFilter ? 1 : 0) +
+    (rangeIsFiltering ? 1 : 0)
 
   const resetFilters = () => {
     setEntityTypeFilter(''); setNameFilter(''); setActionFilter('')
+    setRangePreset('all'); setCustomStart(''); setCustomEnd('')
     // Also drop the handover, or the effect above would immediately re-apply it and Clear Filters
     // would appear to do nothing.
     onClearEntity?.()
@@ -113,139 +465,495 @@ export function DigitalThreadTab({ initialEntity, onClearEntity }) {
     load(true)
   }, [load])
 
+  /** event_id -> { diff, kind }. Computed once per fetch; both the markers and the CSV read it. */
+  const analysis = useMemo(() => {
+    const m = new Map()
+    for (const e of events) {
+      const diff = diffFields(e.old_data, e.new_data)
+      m.set(e.event_id, { diff, kind: classifyEvent(e, diff) })
+    }
+    return m
+  }, [events])
+
+  /**
+   * One lane per audited entity, busiest first.
+   *
+   * Busiest rather than most recent: a lane is worth its row of vertical space in proportion to
+   * how much it has to say, and the top of the list is where the eye starts. Ties break on the
+   * label so the order is stable between refreshes -- lanes that reshuffle under the cursor are
+   * the reason the old flat list was easier to read than an unstable timeline would be.
+   */
+  const lanes = useMemo(() => {
+    const byEntity = new Map()
+    for (const e of events) {
+      const key = `${String(e.entity_type).toLowerCase()}:${e.entity_id}`
+      if (!byEntity.has(key)) {
+        byEntity.set(key, { key, kind: entityKind(e.entity_type), entityId: e.entity_id, events: [] })
+      }
+      byEntity.get(key).events.push(e)
+    }
+    return [...byEntity.values()]
+      .map(lane => ({ ...lane, ...resolveLaneName(lane.entityId, lane.events, entityNames) }))
+      .sort((a, b) =>
+        b.events.length - a.events.length ||
+        String(a.name || a.entityId).localeCompare(String(b.name || b.entityId)))
+  }, [events, entityNames])
+
+  const visibleLanes = showAllLanes ? lanes : lanes.slice(0, DEFAULT_LANE_LIMIT)
+  const hiddenLaneCount = lanes.length - visibleLanes.length
+
+  /**
+   * The visible lanes, cut into Cells / Gateways / Devices.
+   *
+   * The CAP IS APPLIED FIRST and the sections are cut from what survives it, not the other way
+   * round. Fifteen lanes per section would be forty-five rows on a page whose whole point is that
+   * an asset's history is comparable against its neighbours' at a glance; and a per-section cap
+   * would also spend rows on a quiet section while a busy one stayed folded. Ordering by activity
+   * across the whole set and then grouping keeps the cap meaning what it says.
+   *
+   * A section with nothing in it is omitted rather than drawn empty -- "Cells (0)" is a heading
+   * that promises a row and then does not deliver one.
+   */
+  const sections = useMemo(() =>
+    SECTIONS
+      .map(s => ({ ...s, lanes: visibleLanes.filter(l => l.kind === s.kind) }))
+      .filter(s => s.lanes.length > 0),
+  [visibleLanes])
+
+  /**
+   * The x-axis extent, taken from the events themselves rather than from the range control.
+   *
+   * The default range is unbounded, so there is frequently no requested window to scale to; and
+   * even when there is, scaling to it would push a day of dense activity into the left-hand inch
+   * of a thirty-day track. The events decide the domain; the filter decides the events.
+   */
+  const domain = useMemo(() => {
+    const stamps = events
+      .map(e => new Date(e.timestamp).getTime())
+      .filter(Number.isFinite)
+    if (stamps.length === 0) return null
+    let min = Math.min(...stamps)
+    let max = Math.max(...stamps)
+    // A single event, or a burst that all landed in the same millisecond, has no extent to
+    // divide by. Give it an hour of padding so the marker lands in the middle of the track
+    // rather than producing a division by zero.
+    if (max === min) { min -= 30 * 60 * 1000; max += 30 * 60 * 1000 }
+    return { min, max, span: max - min }
+  }, [events])
+
+  /** Fraction of the track, 0..1, for a timestamp. */
+  const fractionFor = useCallback((timestamp) => {
+    if (!domain) return 0.5
+    const t = new Date(timestamp).getTime()
+    if (!Number.isFinite(t)) return 0.5
+    return Math.min(1, Math.max(0, (t - domain.min) / domain.span))
+  }, [domain])
+
+  // The track carries 14px of padding at each end so a marker at either extreme is not clipped
+  // in half by the lane's edge; positions are therefore a calc against the padded width rather
+  // than a bare percentage.
+  const offsetFor = (timestamp) => `calc(14px + (100% - 28px) * ${fractionFor(timestamp)})`
+
+  const ticks = useMemo(() => {
+    if (!domain) return []
+    const format = tickFormatter(domain.span)
+    return [0, 0.25, 0.5, 0.75, 1].map(f => {
+      const at = new Date(domain.min + domain.span * f)
+      // The full timestamp is always one hover away, whatever the axis had room to print.
+      return { f, label: format(at), title: at.toLocaleString() }
+    })
+  }, [domain])
+
+  // Resolved fresh every render rather than held as an object: a refresh replaces every event
+  // object, and a stored one would leave the drawer showing a row that is no longer in the set.
+  // If the selected event drops out of the filter, the drawer simply closes.
+  const selected = events.find(e => String(e.event_id) === String(selectedEventId)) || null
+  const selectedAnalysis = selected ? analysis.get(selected.event_id) : null
+
+  /**
+   * The selected entity's own events, OLDEST FIRST -- the order the drawer steps through.
+   *
+   * Ascending, against the descending order the list is fetched in, because this is the one place
+   * on the page that reads as a story rather than as a feed: Previous goes back in time and Next
+   * goes forward, which is the only mapping that survives someone thinking about it. The feed
+   * order is right for "what just happened"; it is wrong for "and then what".
+   *
+   * Drawn from the FILTERED set, not refetched. Stepping through events the timeline is not
+   * drawing would move the highlight to a marker that is not on screen -- the drawer and the
+   * lane behind it have to be describing the same set.
+   */
+  const selectedLaneEvents = useMemo(() => {
+    if (!selected) return []
+    return events
+      .filter(e => e.entity_id === selected.entity_id)
+      .slice()
+      .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+  }, [events, selected?.entity_id])
+
+  const selectedIndex = selectedLaneEvents
+    .findIndex(e => String(e.event_id) === String(selectedEventId))
+  const stepTo = (i) => {
+    const next = selectedLaneEvents[i]
+    if (next) setSelectedEventId(next.event_id)
+  }
+
+  /**
+   * The export rows, built explicitly rather than by handing the raw events to the CSV writer.
+   *
+   * The raw rows carry `old_data` and `new_data` as whole-row JSONB, which is both unreadable in
+   * a spreadsheet and -- until the fix in downloadCSV -- exported as `[object Object]` on every
+   * line. What an audit export is actually for is answering "who changed what, when", so the
+   * diff this page already computes is flattened into a column that says exactly that.
+   */
+  const exportRows = () => events.map(e => {
+    const a = analysis.get(e.event_id) || { diff: [], kind: 'operational' }
+    return {
+      recorded_at:    e.timestamp,
+      entity_type:    entityKind(e.entity_type),
+      entity_name:    entityNames.get(e.entity_id) || '',
+      entity_id:      e.entity_id,
+      mutation_id:    e.event_id,
+      action:         e.event_type,
+      classification: MARKERS[a.kind].label,
+      actor:          actorLabel(e),
+      actor_user_id:  e.changed_by || '',
+      actor_source:   e.actor_source || '',
+      changed_fields: a.diff.map(d => d.field).join(' '),
+      changes:        a.diff
+        .map(d => `${d.field}: ${formatValue(d.before) ?? '∅'} → ${formatValue(d.after) ?? '∅'}`)
+        .join('; '),
+      description:    e.description || ''
+    }
+  })
+
   return (
-    <>
-      {/* Heading and description removed: the top bar names the page. The event count moved onto
-          the export button, which is the one control whose behaviour depends on it -- it writes
-          exactly these rows.
+    <div className="page-layout">
+      <div className="page-main">
+        {/* Heading and description removed: the top bar names the page. The event count moved onto
+            the export button, which is the one control whose behaviour depends on it -- it writes
+            exactly these rows.
 
-          Export and auto-refresh used to sit in a `.page-actions` row of their own ABOVE the
-          filters, which is backwards: what the export writes is decided by the filters, so the
-          button belongs at the end of the row that decides it, not on a separate row before it.
-          Folding them in also removes a whole 34px band from the top of the page. */}
-      <div className="filter-bar">
-        <select
-          className="form-control"
-          style={{ width: '150px' }}
-          value={entityTypeFilter}
-          onChange={e => setEntityTypeFilter(e.target.value)}
-          title="Show only events against one kind of asset"
-        >
-          <option value="">All entities</option>
-          <option value="CELL">Cells</option>
-          <option value="GATEWAY">Gateways</option>
-          <option value="DEVICE">Devices</option>
-        </select>
+            Export and auto-refresh used to sit in a `.page-actions` row of their own ABOVE the
+            filters, which is backwards: what the export writes is decided by the filters, so the
+            button belongs at the end of the row that decides it, not on a separate row before it.
+            Folding them in also removes a whole 34px band from the top of the page. */}
+        <div className="filter-bar">
+          <select
+            className="form-control"
+            style={{ width: '150px' }}
+            value={entityTypeFilter}
+            onChange={e => setEntityTypeFilter(e.target.value)}
+            title="Show only events against one kind of asset"
+          >
+            <option value="">All entities</option>
+            <option value="CELL">Cells</option>
+            <option value="GATEWAY">Gateways</option>
+            <option value="DEVICE">Devices</option>
+          </select>
 
-        <input
-          className="form-control"
-          style={{ width: '220px' }}
-          value={nameFilter}
-          onChange={e => setNameFilter(e.target.value)}
-          placeholder="Search by entity name or ID…"
-          title="Filter by the asset's name, or by its id"
-        />
+          <input
+            className="form-control"
+            style={{ width: '220px' }}
+            value={nameFilter}
+            onChange={e => setNameFilter(e.target.value)}
+            placeholder="Search by entity name or ID…"
+            title="Filter by the asset's name, or by its id"
+          />
 
-        <select
-          className="form-control"
-          style={{ width: '150px' }}
-          value={actionFilter}
-          onChange={e => setActionFilter(e.target.value)}
-          title="Show only one kind of audit event"
-        >
-          <option value="">Any event</option>
-          <option value="INSERT">Created</option>
-          <option value="UPDATE">Updated</option>
-          <option value="DELETE">Deleted</option>
-        </select>
+          <select
+            className="form-control"
+            style={{ width: '150px' }}
+            value={actionFilter}
+            onChange={e => setActionFilter(e.target.value)}
+            title="Show only one kind of audit event"
+          >
+            <option value="">Any event</option>
+            <option value="INSERT">Created</option>
+            <option value="UPDATE">Updated</option>
+            <option value="DELETE">Deleted</option>
+          </select>
 
-        {activeFilterCount > 0 && (
-          <button className="btn btn-ghost btn-sm" onClick={resetFilters} title="Clear every filter">
-            <IconX size={13} /> Clear filters ({activeFilterCount})
-          </button>
-        )}
+          {/* ALL TIME IS THE DEFAULT -- see timeWindow. The window is a query parameter, not a
+              client-side filter, so a narrower range does not spend the 200-row budget on rows
+              outside it. */}
+          <select
+            className="form-control"
+            style={{ width: '150px' }}
+            value={rangePreset}
+            onChange={e => setRangePreset(e.target.value)}
+            title="Limit the timeline to a time range"
+          >
+            {TIME_PRESETS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+            <option value="custom">Custom range…</option>
+          </select>
 
-        {/* The spacer moved off Clear Filters and onto this group, so the right-hand end of the
-            bar holds the same thing whether or not a filter happens to be set. */}
-        <div className="filter-bar-spacer filter-bar-actions">
-          <button className="btn btn-ghost btn-sm" onClick={() => downloadCSV(events, 'digital-thread-export.csv')} title="Download audit events as CSV"><IconDownload size={13} /> Export CSV ({events.length})</button>
-          <AutoRefreshControl onRefresh={handleRefresh} defaultInterval={0} />
+          {/* Shown only in the custom mode rather than sitting empty beside the presets. Two
+              controls that do nothing until a fifth option is chosen are two controls whose
+              relationship to the preset beside them has to be guessed at. */}
+          {rangePreset === 'custom' && (
+            <>
+              <input
+                type="date"
+                className="form-control"
+                style={{ width: '160px' }}
+                value={customStart}
+                onChange={e => setCustomStart(e.target.value)}
+                title="Range start (from 00:00 local time on this date)"
+                aria-label="Range start date"
+              />
+              <input
+                type="date"
+                className="form-control"
+                style={{ width: '160px' }}
+                value={customEnd}
+                onChange={e => setCustomEnd(e.target.value)}
+                title="Range end (through 23:59 local time on this date)"
+                aria-label="Range end date"
+              />
+            </>
+          )}
+
+          {activeFilterCount > 0 && (
+            <button className="btn btn-ghost btn-sm" onClick={resetFilters} title="Clear every filter">
+              <IconX size={13} /> Clear filters ({activeFilterCount})
+            </button>
+          )}
+
+          {/* The spacer moved off Clear Filters and onto this group, so the right-hand end of the
+              bar holds the same thing whether or not a filter happens to be set. */}
+          <div className="filter-bar-spacer filter-bar-actions">
+            <button className="btn btn-ghost btn-sm" onClick={() => downloadCSV(exportRows(), 'digital-thread-export.csv')} title="Download audit events as CSV"><IconDownload size={13} /> Export CSV ({events.length})</button>
+            <AutoRefreshControl onRefresh={handleRefresh} defaultInterval={0} />
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: '16px' }}>
+          {loading ? (
+            <div className="loading-wrap"><div className="spinner" /> Loading digital thread trace sequence…</div>
+          ) : events.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-icon"><IconHistory size={36} /></div>
+              <div className="empty-text">
+                {rangeIsFiltering
+                  ? 'No digital thread events in this time range. Widen it, or switch back to All time.'
+                  : 'No digital thread events match the filter criteria.'}
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* The key is a legend for a colour scale that is DERIVED rather than stored, so it
+                  is doing more work than a legend usually does: without it there is nothing
+                  anywhere -- no column, no filter option -- that says what amber means. */}
+              <div className="dt-legend">
+                {Object.entries(MARKERS).map(([kind, m]) => (
+                  <span key={kind} className="dt-legend-item" title={m.hint}>
+                    <span className={`dt-node-dot dt-node-${kind}`} aria-hidden="true" />
+                    {m.label}
+                  </span>
+                ))}
+              </div>
+
+              <div className="dt-scroll">
+                <div className="dt-swimlanes">
+                  <div className="dt-lane dt-axis">
+                    <div className="dt-lane-label dt-axis-corner">
+                      {lanes.length} {lanes.length === 1 ? 'asset' : 'assets'} · {events.length} events
+                    </div>
+                    <div className="dt-track dt-axis-track">
+                      {ticks.map(t => (
+                        <span
+                          key={t.f}
+                          className="dt-tick"
+                          style={{ left: `calc(14px + (100% - 28px) * ${t.f})` }}
+                          title={t.title}
+                        >
+                          {t.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {sections.map(section => (
+                    <React.Fragment key={section.kind}>
+                      {/* The heading carries the count, and the count is what is DRAWN rather than
+                          what exists: with the lane cap in play a heading reading "Devices (20)"
+                          above thirteen rows would be stating a number the page is not showing.
+                          The toggle below names the remainder. */}
+                      <div className="dt-section" role="separator" aria-label={`${section.label} lanes`}>
+                        <section.Icon size={13} />
+                        <span className="dt-section-name">{section.label}</span>
+                        <span className="dt-section-count">({section.lanes.length})</span>
+                      </div>
+
+                      {section.lanes.map(lane => (
+                        <div className="dt-lane" key={lane.key}>
+                          {/* NO TYPE BADGE. A pill reading DEVICE on every row of a section headed
+                              Devices restates the one thing the heading directly above it has just
+                              established -- and it cost 60px of a 210px label that the asset's NAME
+                              is a better use of. The icon carries the kind for anyone scrolled past
+                              the heading, at a fraction of the width.
+
+                              THE ID IS NO LONGER COPYABLE HERE. It moved to the drawer's Entity ID
+                              field, which is copyable and always present: an operator who wants the
+                              UUID is one click from it, and a 36-character button on every lane left
+                              no room for the name that made the lane recognisable. */}
+                          <div
+                            className="dt-lane-label"
+                            title={lane.name ? `${lane.name} — ${lane.entityId}` : lane.entityId}
+                          >
+                            {React.createElement(SECTION_ICON[lane.kind] || IconCpu, {
+                              size: 12, className: 'dt-lane-icon'
+                            })}
+                            {lane.name
+                              ? <strong className="dt-lane-name">{lane.name}</strong>
+                              /* Neither the join nor any snapshot could name it. The shortened id
+                                 is the last resort, monospaced so the halves it keeps stay
+                                 comparable between lanes. */
+                              : <span className="dt-lane-name dt-lane-unnamed mono">{shortId(lane.entityId)}</span>}
+                            {/* A name recovered from the audit payload rather than from a live row
+                                means the entity is GONE. Saying so is the difference between "this
+                                asset" and "this asset, as it was named when it was deleted". */}
+                            {lane.fromSnapshot && (
+                              <span className="dt-lane-gone" title="This entity no longer exists — the name is the one recorded in its final audit snapshot">
+                                deleted
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="dt-track">
+                            {lane.events.map(e => {
+                              const kind = analysis.get(e.event_id)?.kind || 'operational'
+                              const isSelected = String(e.event_id) === String(selectedEventId)
+                              return (
+                                <button
+                                  key={e.event_id}
+                                  type="button"
+                                  className={`dt-node dt-node-${kind}${isSelected ? ' dt-node-selected' : ''}`}
+                                  style={{ left: offsetFor(e.timestamp) }}
+                                  onClick={() => setSelectedEventId(e.event_id)}
+                                  /* A plain `title`, which is what the rest of this app uses for a
+                                     hover hint. Three lines -- what, who, when -- is what the hover
+                                     is for; everything else is a click away in the drawer. */
+                                  title={`${e.event_type} · ${MARKERS[kind].label}\n${actorLabel(e)}\n${new Date(e.timestamp).toLocaleString()}`}
+                                  aria-label={`${e.event_type} on ${lane.name || lane.entityId} at ${new Date(e.timestamp).toLocaleString()}`}
+                                  aria-pressed={isSelected}
+                                />
+                              )
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </React.Fragment>
+                  ))}
+                </div>
+              </div>
+
+              {hiddenLaneCount > 0 && (
+                <button
+                  className="btn btn-ghost btn-sm dt-lane-toggle"
+                  onClick={() => setShowAllLanes(true)}
+                  title={`Draw the remaining ${hiddenLaneCount} lanes`}
+                >
+                  Show all lanes (+{hiddenLaneCount})
+                </button>
+              )}
+              {showAllLanes && lanes.length > DEFAULT_LANE_LIMIT && (
+                <button
+                  className="btn btn-ghost btn-sm dt-lane-toggle"
+                  onClick={() => setShowAllLanes(false)}
+                  title={`Collapse back to the ${DEFAULT_LANE_LIMIT} busiest assets`}
+                >
+                  Show fewer lanes
+                </button>
+              )}
+            </>
+          )}
         </div>
       </div>
 
-      <div className="card" style={{ padding: '24px' }}>
-        {loading ? (
-          <div className="loading-wrap"><div className="spinner" /> Loading digital thread trace sequence…</div>
-        ) : events.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon"><IconHistory size={36} /></div>
-            <div className="empty-text">No digital thread events match the filter criteria.</div>
-          </div>
-        ) : (
-          <div className="timeline">
-            {events.map(e => (
-              <div key={e.event_id} className="timeline-item">
-                <div className="timeline-dot" />
-                <div className="timeline-content">
-                  <div className="timeline-header">
-                    <div className="timeline-title">
-                      <span className="badge badge-neutral" title="Entity category">{e.entity_type}</span>
-                      {/* The name leads and the id follows: an operator recognises the asset, not
-                          its UUID. A deleted entity has no name left to resolve, so the id is
-                          what remains and is shown alone. */}
-                      {entityNames.get(e.entity_id)
-                        ? <strong title="Asset name">{entityNames.get(e.entity_id)}</strong>
-                        : null}
-                      {/* Copyable, because this id is the thing an operator carries OUT of this
-                          page -- into a Supabase query, a support ticket, or the search box on
-                          another tab. It was previously plain text they had to select by hand,
-                          bracket characters and all. */}
-                      <CopyableId
-                        value={e.entity_id}
-                        label="entity id"
-                        title="Target entity ID — click to copy"
-                        className="timeline-id"
-                      />
-                      <span className="badge badge-warning" title="Audit event type">{e.event_type}</span>
-                      {/* Who, or failing that what. actor_source is never null on a row written
-                          since migration 0005, so "Unattributed" now means a real gap rather
-                          than the ordinary case it used to be. */}
-                      <span
-                        className="badge badge-neutral"
-                        title={e.changed_by
-                          ? `Changed by user ${e.changed_by}`
-                          : (ACTOR_LABELS[e.actor_source]?.title || 'No actor recorded for this change')}
-                      >
-                        {e.actor_source === 'user' || e.changed_by
-                          ? (ACTOR_LABELS.user.label)
-                          : (ACTOR_LABELS[e.actor_source]?.label || '⚠ Unattributed')}
-                      </span>
-                    </div>
-                    <div className="timeline-time">
-                      {/* The audit row's own id. It identifies THIS mutation rather than the
-                          asset it touched, which is what you need to quote when two edits a
-                          second apart are being told apart. */}
-                      <CopyableId
-                        value={String(e.event_id)}
-                        label="mutation id"
-                        title="Audit row ID for this single change — click to copy"
-                        className="timeline-id"
-                      />
-                      <span title="Event timestamp">{new Date(e.timestamp).toLocaleString()}</span>
-                    </div>
-                  </div>
-                  <div className="timeline-desc">{e.description}</div>
-                  {e.metadata && Object.keys(e.metadata).length > 0 && (
-                    <div className="timeline-meta" title="Event metadata payload">
-                      {JSON.stringify(e.metadata)}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
+      <ContextPanel
+        open={!!selected}
+        onClose={() => setSelectedEventId(null)}
+        type={selected ? entityKind(selected.entity_type) : ''}
+        onCopy={showToast}
+        title={selected ? (entityNames.get(selected.entity_id) || selected.entity_id) : ''}
+        subtitle={selected && (
+          /* One flex ITEM, laid out internally as rows. `.context-panel-subtitle` is a wrapping
+             flex row shared with three other pages, so multi-line content has to bring its own
+             container rather than expect that one to stack it. */
+          <div className="dt-drawer-nav">
+            {/* WHERE THIS SITS IS THE POINT. A control that changes what the drawer is showing
+                belongs above the thing it changes -- put below the fields it would be a footer
+                you discover after reading the record you did not want. It is in the subtitle
+                slot because that is the only slot ContextPanel offers above the metadata, and
+                widening that shared component for one caller is the trade this avoids. */}
+            <div className="dt-drawer-nav-pos" title="Position in this asset's history, oldest first">
+              Event {selectedIndex + 1} of {selectedLaneEvents.length}
+              {' · '}
+              {entityNames.get(selected.entity_id)
+                || selected.new_data?.name || selected.old_data?.name
+                || shortId(selected.entity_id)}
+            </div>
+
+            <div className="dt-drawer-nav-btns">
+              {/* Previous is OLDER. Disabled rather than hidden at the ends: a control that
+                  disappears at the boundary makes the row reflow under the cursor, and the
+                  second click of a double-step lands on whatever moved into its place. */}
+              <button
+                className={`btn btn-ghost btn-sm dt-nav-btn${selectedIndex <= 0 ? ' btn-disabled' : ''}`}
+                onClick={() => stepTo(selectedIndex - 1)}
+                disabled={selectedIndex <= 0}
+                title={selectedIndex <= 0
+                  ? 'This is the oldest recorded change to this asset'
+                  : 'Step back to the previous change to this asset'}
+              >
+                ◀ Previous
+              </button>
+              <button
+                className={`btn btn-ghost btn-sm dt-nav-btn${selectedIndex >= selectedLaneEvents.length - 1 ? ' btn-disabled' : ''}`}
+                onClick={() => stepTo(selectedIndex + 1)}
+                disabled={selectedIndex >= selectedLaneEvents.length - 1}
+                title={selectedIndex >= selectedLaneEvents.length - 1
+                  ? 'This is the most recent change to this asset'
+                  : 'Step forward to the next change to this asset'}
+              >
+                Next ▶
+              </button>
+            </div>
+
+            <div className="dt-drawer-nav-badges">
+              <span className="badge badge-warning" title="Audit event type">{selected.event_type}</span>
+              <span className={`badge dt-badge-${selectedAnalysis?.kind}`} title={MARKERS[selectedAnalysis?.kind]?.hint}>
+                {MARKERS[selectedAnalysis?.kind]?.label}
+              </span>
+            </div>
           </div>
         )}
-      </div>
-    </>
+        fields={selected ? [
+          { label: 'Recorded', value: new Date(selected.timestamp).toLocaleString(), title: selected.timestamp },
+          {
+            label: 'Actor',
+            value: actorLabel(selected),
+            title: actorTitle(selected)
+          },
+          // Only when there is one. `changed_by` is NULL for every machine-originated write, and
+          // an empty "Not set" row against a change the ingestion daemon made would read as a
+          // gap rather than as the ordinary case it is.
+          ...(selected.changed_by
+            ? [{ label: 'User ID', value: selected.changed_by, copyable: true, mono: true, title: 'The signed-in user who made this change' }]
+            : []),
+          { label: 'Entity ID', value: selected.entity_id, copyable: true, mono: true, title: 'The asset this change was made to' },
+          // The audit row's own id. It identifies THIS mutation rather than the asset it touched,
+          // which is what you need to quote when two edits a second apart are being told apart.
+          { label: 'Mutation ID', value: String(selected.event_id), copyable: true, mono: true, title: 'Audit row ID for this single change' },
+          { label: 'Description', value: selected.description, full: true }
+        ] : []}
+        beforeActions={selected && selectedAnalysis && (
+          <EventDiff event={selected} diff={selectedAnalysis.diff} />
+        )}
+      >
+        {selected && <RawSnapshots event={selected} />}
+      </ContextPanel>
+    </div>
   )
 }

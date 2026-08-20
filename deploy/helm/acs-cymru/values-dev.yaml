@@ -46,10 +46,31 @@ secrets:
   mqttValidatorPassword: acscymru123
   mqttMonitorUser: factoryplus_monitor
   mqttMonitorPassword: acscymru123
+  # The four simulated cell gateways. Set here because node-red-init fails closed on a broker node
+  # whose declared `acsCredentialsEnv` pair is missing -- without these the init container exits 1
+  # and Node-RED never starts, which on k3d reads as a stuck rollout rather than as a credential.
+  mqttGwCncMachiningPassword: acscymru123
+  mqttGwRoboticAssemblyPassword: acscymru123
+  mqttGwAgvFleetPassword: acscymru123
+  mqttGwFacilityBmsPassword: acscymru123
+
+  # The bearer token supabase-functions presents to the gateway-credential sidecar.
+  #
+  # NOT OPTIONAL, AND NOT A DEFAULT THE SERVICE CAN INVENT. It exits 2 on anything shorter than 32
+  # characters rather than running open -- that service can mint a broker account for any edge node,
+  # and mosquitto.acl makes an account the ability to publish telemetry as that gateway. Unset, the
+  # sidecar CrashLoopBackOffs, which takes the whole mosquitto POD out of Ready and stalls every
+  # workload that waits on the broker. The symptom is i3x-service and ingestion timing out, naming
+  # neither this value nor the container that refused to start.
+  mqttCredentialServiceToken: acs-cymru-dev-credential-service-token-not-a-secret
 
   grafanaAdminUser: admin
   grafanaAdminPassword: admin
   grafanaOAuthClientSecret: change-me-grafana-oauth-client-secret
+  grafanaAlertWebhookSecret: change-me-grafana-alert-webhook-bearer-min-32-chars
+  # Matches .env.example, so the Compose and k3d stacks come up on the same credential set.
+  # Grafana connects to the historian as `powerbi_reader`, never as `postgres`.
+  biReaderPassword: acscymru123
 
   noderedCredentialSecret: acscymrusecret
   noderedOAuthClientSecret: change-me-nodered-oauth-client-secret

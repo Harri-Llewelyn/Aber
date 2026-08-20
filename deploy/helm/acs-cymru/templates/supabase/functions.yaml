@@ -101,6 +101,39 @@ spec:
                    back to a URL reference. The .aasx still validated, which is why nothing failed. */}}
             - name: AAS_MAX_BUNDLED_MODEL_BYTES
               value: {{ .Values.supabaseFunctions.aas.maxBundledModelBytes | int64 | quote }}
+            {{/*
+              =========================================================================================
+              PHYSICAL GATEWAY ENROLMENT (enroll-gateway, gateway-bundle).
+                                                    #
+              EVERY ONE OF THESE IS AN OUTBOUND ADDRESS OR A NARROW CREDENTIAL, and none of them can be
+              derived from SUPABASE_URL above -- that is `supabase-kong:8000`, which resolves inside
+              this cluster and nowhere a shopfloor appliance lives. A bundle carrying it enrols
+              nothing: bootstrap fails at its first fetch against a URL that looks perfectly
+              plausible. Same reasoning as AAS_MODEL_PUBLIC_BASE two blocks up.
+                                                    #
+              BOTH FUNCTIONS REFUSE RATHER THAN DEFAULT. gateway-bundle answers 503 and mints no
+              token when SUPABASE_PUBLIC_URL is unset or in-stack; enroll-gateway answers 503
+              WITHOUT CONSUMING THE TOKEN when MQTT_PUBLIC_HOST is. So a chart installed without
+              these produces a legible failure at the point of use rather than a fleet of appliances
+              that enrol and then cannot connect.
+              =========================================================================================
+            */}}
+            - name: SUPABASE_PUBLIC_URL
+              value: {{ include "acs-cymru.supabaseUrl" . | quote }}
+            {{- /* The broker as an APPLIANCE dials it. Falls back to the MQTT subdomain the chart
+                   already derives for the external broker route, which is the address the
+                   certificate's SAN carries -- see mosquitto.tls in values.yaml. */}}
+            - name: MQTT_PUBLIC_HOST
+              value: {{ .Values.supabaseFunctions.gatewayEnrolment.mqttPublicHost
+                        | default (include "acs-cymru.hostOf" (dict "ctx" . "name" "mqtt")) | quote }}
+            - name: MQTT_PUBLIC_TLS_PORT
+              value: {{ .Values.supabaseFunctions.gatewayEnrolment.mqttPublicTlsPort | int64 | quote }}
+            {{- /* The credential-issuing sidecar, addressed through its own Service -- NOT the
+                   broker's. It publishes no external route and a NetworkPolicy admits only this
+                   Deployment; see templates/messaging/gateway-credential.yaml. */}}
+            - name: MQTT_CREDENTIAL_SERVICE_URL
+              value: {{ printf "http://%s-gateway-credential:%v" (include "acs-cymru.fullname" .) .Values.gatewayCredential.port | quote }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_CREDENTIAL_SERVICE_TOKEN" "secretName" $secretName "key" "MQTT_CREDENTIAL_SERVICE_TOKEN") | nindent 12 }}
           # tcpSocket, NOT httpGet -- THIS RUNTIME EXPOSES NO HEALTH ROUTE. Verified against
           # supabase/edge-runtime:v1.74.2 by probing it directly:
           #

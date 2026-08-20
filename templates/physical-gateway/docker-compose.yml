@@ -1,0 +1,100 @@
+# =============================================================================================
+# ACS-Cymru physical gateway appliance.
+#
+#   docker compose up -d
+#
+# TWO SERVICES, AND THE ORDER IS THE WHOLE DESIGN. `bootstrap` runs ONCE, exchanges the enrolment
+# token in .env for a broker credential, and provisions /data -- the CA, the flow, the encrypted
+# credentials and a settings.js with a locally generated admin password. `node-red` then starts
+# against that /data and does the actual work.
+#
+# They cannot be one service: Node-RED reads settings.js at load time, and the MQTT credentials do
+# not exist until enrolment has happened. A single container would have to enrol and then restart
+# itself, which is the same two steps with nothing to look at when the first one fails.
+#
+# WHERE THE PASSWORD GOES. `bootstrap` prints the Node-RED editor password ONCE, to its own logs:
+#
+#   docker compose logs bootstrap
+#
+# It is not written anywhere in plaintext. Lost, it is recoverable only by
+# `docker compose run --rm bootstrap node /bundle/bootstrap.mjs --reset-admin-password`.
+# =============================================================================================
+
+services:
+  bootstrap:
+    build: .
+    container_name: acs-gateway-bootstrap
+    # ONE-SHOT. `restart: no` matters more than it looks: the enrolment token is SINGLE-USE, so a
+    # restart loop on a genuine failure would burn the token on the first attempt and then retry
+    # forever against a token the platform has already consumed. bootstrap.mjs does its own bounded
+    # retrying, in the one place that can tell a retryable failure from a permanent one.
+    restart: "no"
+    # ---------------------------------------------------------------------------------------------
+    # ROOT, AND IT IS NOT OPTIONAL. The node-red image SHIPS /data/flows.json owned by root:root,
+    # and Docker copies it -- with that ownership -- into a fresh named volume. Node-RED itself runs
+    # as uid 1000, so a bootstrap running as 1000 can create new files in /data (it owns the
+    # directory) and CANNOT overwrite that one:
+    #
+    #     Error: EACCES: permission denied, open '/data/flows.json'
+    #
+    # It fails AFTER enrolment has succeeded, so the token is already spent and the appliance needs
+    # a new bundle -- the worst possible place for this to surface. bootstrap.mjs chowns /data back
+    # to 1000:1000 before it exits, so the node-red service that follows owns everything it reads.
+    #
+    # Same problem and the same fix as the platform's own provisioner: see the `user: "0"` on
+    # node-red-init in the repository's docker-compose.yml.
+    # ---------------------------------------------------------------------------------------------
+    user: "0"
+    env_file: .env
+    volumes:
+      - nodered_data:/data
+      # The bundle itself, read-only. bootstrap.mjs and flows.template.json are inputs; nothing
+      # here is written back, so a re-run always starts from the files you downloaded.
+      - ./:/bundle:ro
+    # ENTRYPOINT IS OVERRIDDEN, AND IT HAS TO BE. The Node-RED base image declares
+    # `ENTRYPOINT ["./entrypoint.sh"]`, which starts Node-RED and passes `command` to it as
+    # ARGUMENTS -- so a bare `command: ["node", "/bundle/bootstrap.mjs"]` does not run bootstrap at
+    # all. It silently starts a Node-RED with no configuration, reports itself healthy, and leaves
+    # the appliance un-enrolled with `node-red` stuck waiting on a container that will never exit.
+    entrypoint: ["node"]
+    command: ["/bundle/bootstrap.mjs"]
+
+  node-red:
+    build: .
+    container_name: acs-gateway-node-red
+    restart: unless-stopped
+    ports:
+      # The editor, on the appliance's own network. Not the data path -- telemetry leaves over
+      # MQTTS on 8883 and never through this port.
+      - "1880:1880"
+    volumes:
+      - nodered_data:/data
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    # THE BROKER CREDENTIALS ARRIVE THROUGH A FILE THAT DID NOT EXIST AT `compose up` TIME.
+    #
+    # `env_file:` cannot be used for them: Compose reads it when it parses this file, which is
+    # before bootstrap has run, so on a first boot it would resolve to nothing and Node-RED would
+    # start with an empty broker username. Sourcing /data/gateway.env in the command instead means
+    # it is read when the container starts -- after bootstrap completed, which `depends_on`
+    # guarantees.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ ! -f /data/gateway.env ]; then
+          echo 'FATAL: /data/gateway.env is missing -- bootstrap did not complete. Run: docker compose logs bootstrap' >&2
+          exit 1
+        fi
+        . /data/gateway.env
+        exec npm --no-update-notifier --no-fund start --cache /data/.npm -- --userDir /data
+
+volumes:
+  # THE APPLIANCE'S STATE, and the thing to back up. It holds the flow, the encrypted credentials,
+  # the CA and settings.js. `docker compose down -v` destroys it and the enrolment with it -- the
+  # token is already spent, so recovering means issuing a NEW bundle from the dashboard.
+  #
+  # Back the FLOW up through the dashboard's gateway page (Upload flow backup), which stores
+  # flows.json only. flows_cred.json is deliberately never uploaded: it is encrypted with a secret
+  # that lives in this .env, so a copy of it in the platform would be either useless or dangerous.
+  nodered_data:

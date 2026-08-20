@@ -3,7 +3,7 @@ import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
-import { gatewayLiveStatus, formatHeartbeat } from '../../utils/gatewayStatus'
+import { gatewayLiveStatus, gatewayNeedsAttention, formatHeartbeat } from '../../utils/gatewayStatus'
 import { effectiveSparkplugId, gatewaySparkplugId } from '../../utils/sparkplugId'
 import { groupDevicesByCell, SOURCE_SITE_WIDE } from '../../utils/cellResolution'
 import CopyableId from '../common/CopyableId'
@@ -11,6 +11,7 @@ import { StatusBadge } from '../common/StatusBadge'
 import { ActionButton } from '../common/ActionButton'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
+import { CellIcon, CELL_ICONS, DEFAULT_CELL_ICON } from '../../utils/cellIcon'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
 import {
@@ -22,10 +23,13 @@ import {
   IconBookOpen,
   IconHistory,
   IconExternalLink,
+  IconRadio,
   IconShieldAlert,
   IconX
 } from '../common/Icons'
+import { deviceLifecycleStatus, deviceStatusDotColor, deviceStatusTitle } from '../../utils/deviceStatus'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
+import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
 export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThread, hasPermission, initialSearchFilter, onClearFilter }) {
   /**
@@ -51,7 +55,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   // See GatewaysTab: an inline modal is still a modal, and Escape has to close it.
   useEscapeKey(() => setShowForm(false), showForm)
   const [editing, setEditing]   = useState(null)
-  const blank = { cell_name: '', access_url: '' }
+  // DEFAULT_CELL_ICON rather than the literal 'Factory': the column's default, the CHECK
+  // constraint and this form all have to agree, and one imported constant is one place they can.
+  const blank = { cell_name: '', access_url: '', icon: DEFAULT_CELL_ICON }
   const [formVal, setFormVal]   = useState(blank)
   const [archiveTarget, setArchiveTarget] = useState(null)
   const [docsForCell, setDocsForCell] = useState(null)
@@ -196,8 +202,14 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   const liveGateways = (c) => (c.gateways || []).filter(g => !g.is_archived)
   const liveDevices = (c) => (devicesByCell.get(c.cell_id) || []).filter(a => !a.is_archived)
 
+  // gatewayNeedsAttention(), NOT `gatewayLiveStatus(g) !== 'ONLINE'`.
+  //
+  // A physical gateway sits in PENDING_ENROLLMENT from creation until somebody carries its bundle to
+  // a machine, and in AWAITING_BIRTH until that machine publishes. Both are unfinished TASKS, not
+  // faults -- and under the old test, ordering four appliances on a Monday morning flagged every
+  // cell they belong to, which is precisely when this signal needs to still mean something.
   const cellNeedsAttention = (c) =>
-    liveGateways(c).some(g => gatewayLiveStatus(g) !== 'ONLINE') ||
+    liveGateways(c).some(g => gatewayNeedsAttention(g)) ||
     liveDevices(c).some(a => a.is_quarantined)
 
   // Either no gateways at all, or gateways serving nothing -- usually a provisioning mistake or a
@@ -220,6 +232,16 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   const emptyCount = cells.filter(c => !c.is_archived && cellIsEmpty(c)).length
   const activeFilterCount =
     (searchQuery ? 1 : 0) + (attentionOnly ? 1 : 0) + (emptyOnly ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
+
+  // Arriving from a device's or gateway's Cell Zone chip, or the shopfloor map: the caller named ONE
+  // cell, so open it rather than leaving a one-card list to be clicked. Identifier equality only --
+  // this page's own search predicate also matches cell_name, and typing a name must open nothing.
+  useArrivalSelection(
+    searchQuery,
+    cells,
+    (c, term) => c.cell_id === term,
+    (c) => setSelectedId(c.cell_id)
+  )
 
   // Resolved fresh every render -- see the note on selectedId. A cell that is archived out of the
   // current filter, or deleted, resolves to null and the drawer closes itself.
@@ -338,7 +360,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
                   onClick={() => setSelectedId(id => id === c.cell_id ? null : c.cell_id)}
                   title="Click to inspect this cell in the details panel"
                 >
-                  <IconFactory size={18} />
+                  <CellIcon cell={c} size={18} />
                   <span>{c.cell_name}</span>
                   <span className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>ID: {c.cell_id}</span>
                   <span className="badge badge-neutral" title="Count of edge gateways assigned to this cell">{cellGateways.length} Gateway/s</span>
@@ -485,6 +507,28 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
               <input className="form-control" value={formVal.cell_name} onChange={e => setFormVal(f => ({ ...f, cell_name: e.target.value }))} placeholder="e.g. Assembly Line 1" title="Enter descriptive cell zone name" />
             </div>
             <div className="form-group">
+              {/* A GRID OF BUTTONS, NOT A <select>. The choice is visual -- the whole point is
+                  what the card will look like on the map -- and a dropdown of eight words asks
+                  the operator to imagine the result instead of showing it. */}
+              <label className="form-label">Cell Icon</label>
+              <div className="icon-picker" role="radiogroup" aria-label="Cell icon">
+                {CELL_ICONS.map(({ key, label, Icon }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="radio"
+                    aria-checked={(formVal.icon || DEFAULT_CELL_ICON) === key}
+                    className={`icon-picker-option ${(formVal.icon || DEFAULT_CELL_ICON) === key ? 'is-selected' : ''}`}
+                    onClick={() => setFormVal(f => ({ ...f, icon: key }))}
+                    title={label}
+                  >
+                    <Icon size={20} />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="form-group">
               <label className="form-label">Dashboard / UI URL (Optional)</label>
               <input className="form-control" value={formVal.access_url || ''} onChange={e => setFormVal(f => ({ ...f, access_url: e.target.value }))} placeholder="e.g. http://localhost:3002/d/cell-1" title="Enter Grafana dashboard or UI management URL" />
             </div>
@@ -534,18 +578,60 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
         fields={selectedCell ? [
           { label: 'Cell UUID', value: selectedCell.cell_id, mono: true, copyable: true },
           {
+            // A COMMA-JOINED STRING BECOMES CHIPS, and the reason is the same one that took the
+            // gateway's device list: this drawer named the neighbours and then stranded you. A cell
+            // is a junction -- it exists to relate gateways and devices -- so a cell panel that
+            // cannot reach either of them is the one panel where dead-ending costs most.
             label: 'Assigned Gateways',
             value: selectedCellGateways.length
-              ? selectedCellGateways.map(g => g.gateway_name).join(', ')
+              ? (
+                <div className="context-device-list">
+                  {selectedCellGateways.map(g => (
+                    <button
+                      key={g.gateway_id}
+                      className="chip chip-link chip-gw"
+                      onClick={() => onSelectGateway?.(g.gateway_id)}
+                      title={`Open ${g.gateway_name} on the Gateways page`}
+                    >
+                      <IconRadio size={11} />
+                      <span className="chip-name">{g.gateway_name}</span>
+                    </button>
+                  ))}
+                </div>
+              )
               : null,
             full: true,
             title: 'Edge nodes serving this zone. Their devices resolve here unless a device carries a cell of its own.'
           },
           {
-            label: 'Located Devices',
+            // THE COUNT IS KEPT, on the label rather than in place of the list. "12 (9 online)" was
+            // the whole value before, and it answers a real question -- how big is this zone, and is
+            // it healthy -- that twelve chips answer much more slowly. So both: the summary reads at
+            // a glance, the chips carry the navigation.
+            label: selectedCellDevices.length
+              ? `Located Devices (${selectedCellDevices.filter(a => a.status !== 'OFFLINE' && !a.is_archived).length}/${selectedCellDevices.length} online)`
+              : 'Located Devices',
             value: selectedCellDevices.length
-              ? `${selectedCellDevices.length} (${selectedCellDevices.filter(a => a.status !== 'OFFLINE' && !a.is_archived).length} online)`
+              ? (
+                <div className="context-device-list">
+                  {selectedCellDevices.map(d => {
+                    const status = deviceLifecycleStatus(d)
+                    return (
+                      <button
+                        key={d.asset_id}
+                        className="chip chip-link"
+                        onClick={() => onSelectDevice?.(d.asset_id)}
+                        title={`Open ${d.asset_name} on the Devices page — ${deviceStatusTitle(status)}`}
+                      >
+                        <span className="badge-dot" style={{ background: deviceStatusDotColor(status) }} />
+                        <span className="chip-name">{d.asset_name}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )
               : null,
+            full: true,
             title: "This zone's gateways' devices, plus any device filed here explicitly."
           },
           { label: 'Dashboard URL', value: selectedCell.access_url || null, mono: true, copyable: true, full: true },

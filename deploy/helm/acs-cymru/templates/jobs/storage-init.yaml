@@ -77,6 +77,12 @@ spec:
                      storage-init's parseInt reads as 5 -- creating the bucket with a five-byte
                      limit. See the note in supabase/storage.yaml. */}}
               value: {{ .Values.supabaseStorage.fileSizeLimit | int64 | quote }}
+            - name: GATEWAY_BACKUP_BUCKET
+              value: {{ .Values.supabaseStorage.gatewayBackupBucket | quote }}
+            - name: GATEWAY_BACKUP_FILE_SIZE_LIMIT
+              {{- /* int64 first, for the same reason as the limit above -- `quote` alone renders
+                     5242880 as "5.24288e+06", which parseInt reads as 5. */}}
+              value: {{ .Values.supabaseStorage.gatewayBackupFileSizeLimit | int64 | quote }}
           command: ["node", "/app/storage-init.mjs"]
           volumeMounts:
             - name: script

@@ -113,20 +113,49 @@ const generated = {
   PG_META_CRYPTO_KEY: hex(32),
   REALTIME_DB_ENC_KEY: hex(8),          // EXACTLY 16 chars
   REALTIME_SECRET_KEY_BASE: hex(32),    // AT LEAST 64 chars
-  // FOUR MQTT PASSWORDS, ONE PER PRINCIPAL, and independently generated on purpose. mosquitto.acl
-  // confines each account to a different subtree, which is worth nothing if one leaked password
-  // opens all four. The USERNAMES are not generated: two of them are `sparkplug_id`s derived from
-  // pinned UUIDs, and the ACL matches the topic's edge-node segment against the username exactly.
+  // ONE MQTT PASSWORD PER PRINCIPAL, independently generated on purpose. mosquitto.acl confines
+  // each account to a different subtree, which is worth nothing if one leaked password opens the
+  // rest. The USERNAMES are not generated: most are `sparkplug_id`s derived from pinned UUIDs, and
+  // the ACL matches the topic's edge-node segment against the username exactly.
   MQTT_INGESTION_PASSWORD: hex(24),
   MQTT_I3X_PASSWORD: hex(24),
   MQTT_SIMULATOR_PASSWORD: hex(24),
   MQTT_VALIDATOR_PASSWORD: hex(24),
   MQTT_MONITOR_PASSWORD: hex(24),
+  // THE FOUR SIMULATED CELL GATEWAYS, generated here rather than left to `provision:gateways`.
+  //
+  // That script needs a RUNNING stack -- it talks to PostgREST and to the broker container -- but
+  // node-red-init fails closed when a broker node declares a credential pair it cannot find, and
+  // it runs during the very `docker compose up` that would bring that stack up. Leaving these to
+  // provisioning is therefore a deadlock: the documented quickstart exits 1 on
+  // `service "node-red-init" didn't complete successfully`, which names neither the flow, the
+  // variable, nor the script that would have written it.
+  //
+  // Provisioning still works and is still how these are ROTATED; it writes .env.gateways for
+  // folding back in here. See the block on these in .env.example for which way authority runs.
+  MQTT_GW_CNC_MACHINING_PASSWORD: hex(24),
+  MQTT_GW_ROBOTIC_ASSEMBLY_PASSWORD: hex(24),
+  MQTT_GW_AGV_FLEET_PASSWORD: hex(24),
+  MQTT_GW_FACILITY_BMS_PASSWORD: hex(24),
   GRAFANA_ADMIN_PASSWORD: hex(12),
   GRAFANA_OAUTH_CLIENT_SECRET: hex(32),
   NODERED_CREDENTIAL_SECRET: hex(32),
   NODERED_OAUTH_CLIENT_SECRET: hex(32),
   NODERED_WEBHOOK_JWT_SECRET: hex(32),  // at least 32 chars
+  // The bearer secret Grafana presents to grafana-alert-webhook. Its own value, not shared with any
+  // other credential: it is the whole reason Grafana is not given the service-role key, and a secret
+  // reused elsewhere would mean one leak reopens the authority this one exists to withhold.
+  GRAFANA_ALERT_WEBHOOK_SECRET: hex(32),
+  // The bearer token supabase-functions presents to the gateway-credential service. Its own value
+  // for the same reason as the one above: that service can mint a Mosquitto account for any edge
+  // node, and mosquitto.acl makes an account the ability to publish telemetry as that gateway --
+  // so a token shared with anything else would mean one leak grants forgery across the site.
+  // The service REFUSES TO START if this is shorter than 32 characters.
+  MQTT_CREDENTIAL_SERVICE_TOKEN: hex(32),
+  // The read-only historian role external BI tools connect as, and the one Grafana uses. Generated
+  // like the rest so a local stack never runs a reporting tool as the `postgres` superuser, which
+  // is what the Grafana datasource did before this existed.
+  BI_READER_PASSWORD: hex(24),
 };
 
 /**
