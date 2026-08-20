@@ -71,9 +71,6 @@ function fail(message) {
 if (!credentialSecret) {
   fail('NODERED_CREDENTIAL_SECRET is not set; refusing to write credentials unencrypted.');
 }
-if (!mqttPassword) {
-  fail('MQTT_PASSWORD is not set; refusing to seed empty broker credentials.');
-}
 
 // Same posture, applied to authentication. THE PREVIOUS DEFAULT WAS AN OPEN ADMIN API, so a
 // missing variable has to stop the boot rather than quietly fall back to it -- an "auth
@@ -780,7 +777,34 @@ function brokerCredentialFor(node) {
   const prefix = node.acsCredentialsEnv;
 
   if (!prefix) {
-    if (node.id === BROKER_NODE_ID) return { user: mqttUser, password: mqttPassword };
+    if (node.id === BROKER_NODE_ID) {
+      // CHECKED HERE, NOT AT START-UP, and the difference is which stacks can boot.
+      //
+      // This used to be an unconditional guard: no MQTT_PASSWORD, no boot. That was right when
+      // the pair was the only broker credential, and became wrong when the flow was consolidated
+      // onto four per-cell gateways that name their own pairs -- from then on it demanded a
+      // credential for the RETIRED single-device simulator, whose gateway row 0020 deletes, on
+      // every stack including the ones with no legacy node in their flow at all.
+      //
+      // Emptying MQTT_SIMULATOR_PASSWORD (so mosquitto-init stops creating a broker account for
+      // an edge node that has no gateway row) therefore took the whole Compose stack down at
+      // node-red-init. The fail-closed posture is unchanged and is simply asked at the point it
+      // means something: a flow that CONTAINS this node still refuses to be seeded without a
+      // password, because seeding an empty one is what produces a CONNACK 5 the editor reports
+      // as "Connection failed to broker" with no cause.
+      if (!mqttPassword) {
+        fail(
+          `this volume's flow carries the legacy '${BROKER_NODE_ID}' node, but MQTT_PASSWORD is not set.
+  That node predates the per-cell consolidation and reads MQTT_USER / MQTT_PASSWORD
+  (MQTT_SIMULATOR_* on Compose), which are empty by default because the account they
+  name was retired by migration 0020.
+
+  Either set MQTT_SIMULATOR_PASSWORD and re-provision that account, or reseed the flow
+  with NODE_RED_FORCE_SEED=true to drop the legacy node entirely.`
+        );
+      }
+      return { user: mqttUser, password: mqttPassword };
+    }
     fail(
       `broker node '${node.id}' (${node.name || 'unnamed'}) declares no 'acsCredentialsEnv' and is ` +
         `not the legacy '${BROKER_NODE_ID}'. It would connect with no username, and Mosquitto ` +

@@ -589,8 +589,21 @@ browser request -- the exact failure this helper exists to end, arrived at by a 
 {{- range .Values.global.corsExtraOrigins -}}
 {{- $origins = append $origins (. | trimSuffix "/") -}}
 {{- end -}}
-{{- if not $origins -}}
-{{- fail "\n\nacs-cymru: no browser origin could be derived for Kong's CORS policy.\n\nIt comes from global.publicBaseDomain (or publicUrls.frontend / publicUrls.docs). With none\nof them set there is no origin to allow, and Kong would start cleanly and then block every\nbrowser request to /rest, /auth, /storage, /realtime and /functions -- returning 200 with no\nAccess-Control-Allow-Origin, which presents as a dashboard that signs in and then shows\nempty tables with nothing failing anywhere you would think to look.\n\nSet global.publicBaseDomain, or global.corsExtraOrigins if this deployment is reached only\nthrough a proxy whose hostname the chart cannot derive.\n" -}}
+{{/*
+REFUSED ONLY WHEN THERE IS SOMETHING TO REFUSE FOR.
+
+An install with no public surface at all -- no publicBaseDomain and no publicUrls -- has no
+browser to serve and no origin to name, and an empty list is the honest answer there. It is also
+already refused, more specifically, by the `no browser-facing URL` and `no route resolved a
+hostname` guards. Failing here as well would MASK them: this helper is reached first, so a
+missing publicBaseDomain reported the CORS symptom instead of the cause. (Caught by the chart
+guard-rail suite in ci.yml, which asserts each guard's own message.)
+
+The narrow case that IS this helper's to catch: publicUrls.supabase set, so the API is genuinely
+browser-facing, while nothing names an origin allowed to call it.
+*/}}
+{{- if and (not $origins) (include "acs-cymru.supabaseUrl" .) -}}
+{{- fail "\n\nacs-cymru: Kong would be given an EMPTY browser-origin list.\n\npublicUrls.supabase names a browser-facing API, but no origin could be derived for the\ndashboard or for Swagger UI -- so Kong would start cleanly and then refuse every browser\nrequest to it, returning 200 with no Access-Control-Allow-Origin. That presents as a\ndashboard which signs in and then shows empty tables, with nothing failing anywhere you\nwould think to look.\n\nSet global.publicBaseDomain, or publicUrls.frontend / publicUrls.docs, or\nglobal.corsExtraOrigins if this deployment is reached only through a proxy whose hostname\nthe chart cannot derive.\n" -}}
 {{- end -}}
 {{- $origins | uniq | toJson -}}
 {{- end -}}
