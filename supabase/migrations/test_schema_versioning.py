@@ -1,5 +1,5 @@
 """
-PostgreSQL integration test suite for strict schema versioning (migration 0037).
+PostgreSQL integration test suite for strict schema versioning (archived migration 0037).
 
 Genuinely exercises the deployed SQL -- the `prevent_active_schema_mutation()` and
 `enforce_schema_version_provenance()` triggers, and the `fork_schema()` /
@@ -101,7 +101,7 @@ class SchemaVersioningTestCase(unittest.TestCase):
                 """
             )
             if cur.fetchone()[0] < 5:
-                raise RuntimeError("migration 0037's functions are not all present in the database.")
+                raise RuntimeError("archived migration 0037's functions are not all present in the database.")
 
             conn.commit()
         finally:
@@ -607,7 +607,7 @@ class TestPublish(SchemaVersioningTestCase):
             "the submodel attachment must point at the newly published version",
         )
 
-        # The legacy 1:1 arm migration 0034 retains. A device provisioned only through it would
+        # The legacy 1:1 arm archived migration 0034 retains. A device provisioned only through it would
         # otherwise stay pinned to an archived version and report the new version's metrics as
         # Unmodelled.
         self.cur.execute("SELECT schema_id::text FROM public.devices WHERE id = %s;", (device_id,))
@@ -844,7 +844,7 @@ class TestBootReconciliation(SchemaVersioningTestCase):
 
 
 class TestBackfill(SchemaVersioningTestCase):
-    """What migration 0037 left behind for schemas that predate it."""
+    """What archived migration 0037 left behind for schemas that predate it."""
 
     def test_seeded_schemas_backfilled_to_v1_with_a_change_description(self):
         """

@@ -17,6 +17,8 @@ import io
 import json
 import os
 import re
+import shutil
+import subprocess
 import unittest
 import urllib.error
 import urllib.request
@@ -31,6 +33,8 @@ TS_MAPPER = REPO_ROOT / "supabase" / "functions" / "aas-export" / "sparkplugToXs
 JS_MAPPER = REPO_ROOT / "frontend" / "src" / "utils" / "sparkplugDatatype.js"
 TS_MODEL_TYPES = REPO_ROOT / "supabase" / "functions" / "aas-export" / "model3dContentType.ts"
 JS_MODEL_TYPES = REPO_ROOT / "frontend" / "src" / "utils" / "model3d.js"
+TS_INDEX = REPO_ROOT / "supabase" / "functions" / "aas-export" / "index.ts"
+MODELLED_METRICS_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "modelled-metrics.json"
 
 MODEL_BUCKET = os.getenv("STORAGE_MODEL_BUCKET", "asset-3d-models")
 # The AAS metamodel's idShort pattern, transcribed from the vendored schema. Stricter than it
@@ -219,6 +223,137 @@ class TestModel3DContentTypeParity(unittest.TestCase):
         table = parse_model_content_types(TS_MODEL_TYPES)
         self.assertEqual(table["glb"], "model/gltf-binary")
         self.assertEqual(table["gltf"], "model/gltf+json")
+
+
+def run_modelled_metrics(schemas: list) -> list:
+    """
+    Run THIS function's own `modelledMetrics()` over `schemas`, in Node, and return its answers.
+
+    BEHAVIOURAL, NOT A grep, and the distinction earned itself here. The two parity checks above
+    compare TABLES, which a regex can extract honestly. `modelledMetrics` is a RULE, and the
+    divergence it carried -- `typeof [] === "object"`, so an array `properties` yielded its indices
+    as metric names -- is invisible to any check that only asks whether both files mention
+    `required`. The fixture is asserted by executing the code, in all four languages that
+    implement it.
+
+    THE SOURCE IS EXTRACTED FROM index.ts rather than copied here. A copy would be a fifth
+    implementation, and this file would then prove that the copy agrees with the fixture.
+
+    Only three TypeScript-only tokens appear in the function, and each is stripped explicitly
+    rather than by a general-purpose type stripper: a stripper that silently failed would leave a
+    syntax error, which is loud, but one that silently succeeded on the WRONG text would not be.
+    """
+    source = TS_INDEX.read_text(encoding="utf-8")
+    match = re.search(r"^function modelledMetrics\(.*?^\}", source, re.S | re.M)
+    if not match:
+        raise AssertionError(f"modelledMetrics() not found in {TS_INDEX}")
+
+    js = match.group(0)
+    for ts_only, plain in (
+        (": Record<string, unknown> | null): string[]", ")"),
+        ("new Set<string>()", "new Set()"),
+        (" as Record<string, unknown>", ""),
+    ):
+        if ts_only not in js:
+            raise AssertionError(
+                f"expected TypeScript token {ts_only!r} in modelledMetrics(); its signature "
+                "changed, so this test is no longer stripping what it thinks it is"
+            )
+        js = js.replace(ts_only, plain)
+
+    harness = (
+        js
+        + "\nconst input = "
+        + json.dumps(schemas)
+        + ";\nconsole.log(JSON.stringify(input.map((s) => modelledMetrics(s ?? null))));\n"
+    )
+    completed = subprocess.run(
+        [shutil.which("node"), "-e", harness],
+        capture_output=True, text=True, timeout=60, check=True,
+    )
+    return json.loads(completed.stdout)
+
+
+@unittest.skipIf(shutil.which("node") is None, "node is not on PATH")
+class TestModelledMetricsContract(unittest.TestCase):
+    """
+    The FOURTH implementation of `modelledMetrics`, held to the same fixture as the other three.
+
+    `frontend/src/utils/deviceTags.js`, `ingestion/validate.py` and `i3x/i3x_service.py` all assert
+    `tests/fixtures/modelled-metrics.json` in their own runners. This one did not, and it was the
+    only one still carrying the array-`properties` divergence the fixture was written to catch --
+    for two years of `_comment` explaining the bug, in a file the bug was not checked against.
+
+    WHY IT MATTERED MORE HERE THAN IN THE BROWSER. These names become Submodel Property idShorts in
+    an exported AAS shell: a document handed to a third party, asserting metrics no device ever
+    published. And `"0"` does not satisfy the AAS idShort pattern (it must begin with a letter), so
+    the shell fails validation at the CONSUMER -- the exporter reports success.
+
+    SETS ARE COMPARED, NOT SEQUENCES. This implementation returns a sorted array where the mirrors
+    return a set; ordering is a rendering choice and is asserted separately below.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.fixture = json.loads(MODELLED_METRICS_FIXTURE.read_text(encoding="utf-8"))
+        cls.results = run_modelled_metrics(
+            [case.get("schema_definition") for case in cls.fixture["cases"]]
+        )
+
+    def test_fixture_is_not_empty(self):
+        """A contract test exercising nothing reports green while four implementations drift."""
+        self.assertGreater(len(self.fixture["cases"]), 5)
+
+    def test_every_case_matches_the_contract(self):
+        for case, got in zip(self.fixture["cases"], self.results):
+            with self.subTest(case=case["name"]):
+                # `expected: null` means "declares neither, cannot be evaluated". The mirrors
+                # return None to say so; an AAS Submodel has no way to express it and no caller
+                # here distinguishes it, so it renders as no metrics. The NAMES must still agree
+                # exactly -- that is the part a consumer of the shell can see.
+                expected = sorted(case["expected"] or [])
+                self.assertEqual(sorted(got), expected)
+
+    def test_an_array_properties_contributes_nothing(self):
+        """
+        The regression itself, pinned separately from the fixture sweep so a failure names it.
+
+        `properties: ['A','B']` must model NOTHING. Reading it as {'0','1'} is what shipped.
+        """
+        self.assertEqual(run_modelled_metrics([{"properties": ["A", "B"]}])[0], [])
+        self.assertEqual(
+            run_modelled_metrics([{"properties": ["A", "B"], "required": ["Real/METRIC"]}])[0],
+            ["Real/METRIC"],
+        )
+
+    def test_the_result_is_sorted(self):
+        """
+        Submodel elements are emitted in this order. Sorting makes an exported shell byte-stable
+        across two exports of the same device, which is what lets one be diffed against another.
+        """
+        got = run_modelled_metrics([{"properties": {"Zeta": {}, "Alpha": {}, "Mu": {}}}])[0]
+        self.assertEqual(got, sorted(got))
+
+    def test_no_modelled_name_is_an_array_index(self):
+        """
+        The regression's SIGNATURE, as a property over every case rather than one input.
+
+        `Object.keys` on an array yields "0", "1", ... -- decimal strings, which no metric name in
+        `metric_catalog` can be (0007 constrains the format) and which cannot begin an AAS idShort
+        either, since the pattern requires a leading letter. So a bare integer appearing here means
+        an array reached `Object.keys` again, whatever shape the schema arrived in.
+
+        Deliberately NOT a full idShort check: the fixture's names are placeholders like "A", and
+        asserting the two-character minimum against them would test the fixture, not this code.
+        """
+        for case, got in zip(self.fixture["cases"], self.results):
+            for name in got:
+                with self.subTest(case=case["name"], name=name):
+                    self.assertFalse(
+                        name.isdigit(),
+                        f"{name!r} is an array index, not a metric name -- "
+                        "an array reached Object.keys()",
+                    )
 
 
 class TestAasExportAuthorization(unittest.TestCase):

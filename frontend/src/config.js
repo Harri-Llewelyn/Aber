@@ -39,6 +39,16 @@ export const RUNTIME_SETTING_NAMES = [
   'VITE_GITHUB_REPO_URL',
   'VITE_GRAFANA_URL',
   'VITE_ALLOW_SIGNUP',
+  // THE BUCKET NAMES, and they are settings for the same reason the URLs above are.
+  //
+  // Both were literals in api.js while every other consumer read them from the environment --
+  // scripts/storage-init.mjs creates them from STORAGE_BUCKET / GATEWAY_BACKUP_BUCKET,
+  // docker-compose and values.yaml pass those through, and storage-policies.sql names them. So a
+  // deployment that renamed a bucket moved the creation, the policies and the server-side readers
+  // together and left the dashboard reading the old name -- a 404 on upload, from the one
+  // component nobody had listed as a consumer.
+  'VITE_MODEL_3D_BUCKET',
+  'VITE_GATEWAY_BACKUP_BUCKET',
 ];
 
 /**
@@ -56,6 +66,8 @@ const BUILD_TIME_SETTINGS = {
   VITE_GITHUB_REPO_URL: import.meta.env.VITE_GITHUB_REPO_URL,
   VITE_GRAFANA_URL: import.meta.env.VITE_GRAFANA_URL,
   VITE_ALLOW_SIGNUP: import.meta.env.VITE_ALLOW_SIGNUP,
+  VITE_MODEL_3D_BUCKET: import.meta.env.VITE_MODEL_3D_BUCKET,
+  VITE_GATEWAY_BACKUP_BUCKET: import.meta.env.VITE_GATEWAY_BACKUP_BUCKET,
 };
 
 /**

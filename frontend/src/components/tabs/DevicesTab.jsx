@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import { api } from '../../api'
 import { trackRequest } from '../../lib/apiActivity'
@@ -135,7 +135,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   // models (see utils/deviceTags.js), not typed in by hand. The column is left in place so
   // legacy values keep displaying, but nothing writes it any more.
   // cell_id starts EMPTY, not at some default cell: empty means "inherit from the gateway"
-  // (migration 0036), so a device registered without anyone choosing a location follows its
+  // (archived migration 0036), so a device registered without anyone choosing a location follows its
   // gateway rather than being pinned wherever the form happened to default.
   const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_id: '', cell_id: '', location_scope: SCOPE_CELL })
   const [form, setForm]         = useState(blank)
@@ -533,6 +533,27 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     [schemas]
   )
 
+  // ---------------------------------------------------------------------------------------------
+  // INDEXES, NOT `Array.find`, for the two lookups that happen PER DEVICE ROW.
+  //
+  // `needsAttention` and the filter predicate below each resolve a device's gateway and its
+  // effective cell, and both were doing it with `gateways.find(...)` / `cells.find(...)` -- a
+  // linear scan inside a loop over every device, so the work was devices x gateways on every
+  // render. On a four-cell demo that is invisible; on a real fleet it is the search box going
+  // sticky, and the cause is nowhere near the search box.
+  //
+  // Built with useMemo so they survive renders that changed neither list -- which is most of them,
+  // since this component holds thirty-odd pieces of state and any one of them re-renders it.
+  // ---------------------------------------------------------------------------------------------
+  const gatewayById = useMemo(
+    () => new Map(gateways.map(g => [g.gateway_id, g])),
+    [gateways]
+  )
+  const cellById = useMemo(
+    () => new Map(cells.map(c => [c.cell_id, c])),
+    [cells]
+  )
+
   // A device an operator needs to act on: held in quarantine, provisioned but never seen,
   // still being resolved by name because its gateway has not been moved onto Sparkplug IDs
   // yet, or publishing metrics its schema does not model.
@@ -545,17 +566,29 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   // at a decommissioned cell indefinitely with nothing to show for it. Derived, not enforced:
   // archiving a cell should not fail because something still references it.
   const pointsAtArchivedCell = (a) =>
-    !!a.effective_cell_id && !!cells.find(c => c.cell_id === a.effective_cell_id)?.is_archived
+    !!a.effective_cell_id && !!cellById.get(a.effective_cell_id)?.is_archived
 
   const needsAttention = (a) =>
     a.is_quarantined || isProvisioningOverdue(a) || a.identity_source === 'legacy_name' ||
     unmodelledFor(a).length > 0 ||
     // Location findings. Unassigned is the work queue that should drain; a mismatch and an
     // archived cell are both "this resolved to something, but look at it".
-    needsCellAssignment(a, gateways.find(g => g.gateway_id === a.active_gateway_id) || null) ||
+    needsCellAssignment(a, gatewayById.get(a.active_gateway_id) || null) ||
     a.cell_mismatch || pointsAtArchivedCell(a)
 
-  const filteredAssets = assets.filter(a => {
+  // ---------------------------------------------------------------------------------------------
+  // MEMOISED, because this is the hot path and this component re-renders constantly.
+  //
+  // The predicate below is not cheap -- it resolves the device's schemas, its tags, its gateway and
+  // its effective cell -- and it ran on every render, for every device. This component holds thirty
+  // pieces of state; opening a modal, receiving a Realtime tick or typing one character in the
+  // search box all re-ran the whole thing, and only the last of those actually changes the answer.
+  //
+  // THE DEPENDENCY LIST IS THE CONTRACT. Every value the predicate reads is named: miss one and the
+  // table silently stops responding to that filter, which is a worse bug than the slowness this
+  // fixes. They are listed in the order the predicate uses them so the two can be read together.
+  // ---------------------------------------------------------------------------------------------
+  const filteredAssets = useMemo(() => assets.filter(a => {
     // Quarantined devices belong to the Zero-Touch Onboarding Quarantine Queue above and
     // nowhere else. They used to appear here as well, so every pending device was listed
     // twice on the same screen -- once with approve/reject actions, once with the ordinary
@@ -578,7 +611,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     // synthetic values are lanes, not cells: Unassigned is the queue that should drain and
     // Site-Wide is a permanent home, and neither is a row in `cells`.
     if (cellFilter === CELL_FILTER_UNASSIGNED) {
-      if (!needsCellAssignment(a, gateways.find(g => g.gateway_id === a.active_gateway_id) || null)) return false
+      if (!needsCellAssignment(a, gatewayById.get(a.active_gateway_id) || null)) return false
     } else if (cellFilter === CELL_FILTER_SITE_WIDE) {
       if (a.location_source !== SOURCE_SITE_WIDE) return false
     } else if (cellFilter && (a.effective_cell_id || '') !== cellFilter) return false
@@ -600,15 +633,33 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
       if (!haystack.includes(q)) return false
     }
     return true
-  })
+  }), [
+    assets, filterMode, schemaFilter, schemas, tagFilter, latestBySparkplugId, catalog,
+    gatewayFilter, cellFilter, gatewayById, attentionOnly, statusFilter, searchQuery,
+    unmodelledFor, cellById,
+  ])
 
   // Counts only what the "Needs attention" filter can actually reveal in the table below.
   // Quarantined devices are excluded because they are no longer rendered there -- they are
   // counted by the quarantine banner's own badge instead. Including them here would make the
   // number disagree with the rows shown the moment the filter is switched on, and would
   // double-count every pending device across the two badges.
-  const attentionCount = assets.filter(a => !a.is_quarantined && needsAttention(a)).length
-  const tagOptions = availableTags(assets, schemas, latestFor, catalog)
+  // `needsAttention` is a plain function rebuilt on every render, so naming IT here would defeat
+  // the memo entirely. Its own inputs are named instead -- the two Maps and `unmodelledFor` are
+  // everything it closes over that can change. (There is no eslint in this project to check that
+  // for us, which is exactly why it is written down.)
+  const attentionCount = useMemo(
+    () => assets.filter(a => !a.is_quarantined && needsAttention(a)).length,
+    [assets, gatewayById, cellById, unmodelledFor]
+  )
+  // Walks every device's schemas and last-birth metrics to build the tag dropdown. Memoised for
+  // the same reason as the filter: nothing about it changes when a modal opens.
+  // Same reasoning: `latestFor` is rebuilt every render and closes over `latestBySparkplugId`,
+  // which is the dependency that actually moves and is named here in its place.
+  const tagOptions = useMemo(
+    () => availableTags(assets, schemas, latestFor, catalog),
+    [assets, schemas, latestBySparkplugId, catalog]
+  )
   const activeFilterCount =
     [schemaFilter, statusFilter, tagFilter, gatewayFilter, cellFilter, searchQuery].filter(Boolean).length +
     (attentionOnly ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
@@ -960,8 +1011,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                             // The resolved cell, plus how it was resolved. "Inherited" and
                             // "set on device" render the same name but behave differently when
                             // the gateway is reassigned, so the distinction has to be visible.
-                            const gw = gateways.find(g => g.gateway_id === a.active_gateway_id) || null
-                            const cellName = cells.find(c => c.cell_id === a.effective_cell_id)?.cell_name
+                            const gw = gatewayById.get(a.active_gateway_id) || null
+                            const cellName = cellById.get(a.effective_cell_id)?.cell_name
 
                             if (a.location_source === SOURCE_SITE_WIDE) {
                               return <span className="badge badge-neutral" style={{ fontSize: '11px' }} title="Asserted to have no single cell — facility-wide or mobile">Site-Wide</span>
@@ -986,7 +1037,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                                 )}
                                 {a.cell_mismatch && (
                                   <div style={{ fontSize: '11px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '3px' }}
-                                       title={`Its gateway serves ${cells.find(c => c.cell_id === a.gateway_cell_id)?.cell_name || 'another cell'}`}>
+                                       title={`Its gateway serves ${cellById.get(a.gateway_cell_id)?.cell_name || 'another cell'}`}>
                                     <IconAlertTriangle size={10} /> Gateway elsewhere
                                   </div>
                                 )}
@@ -1056,7 +1107,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
 
             {/* WHERE the device is, which is not the same question as how its data reaches us.
                 Leaving the picker on "Inherit" is the normal case and stores NULL; picking a cell
-                stores an override that wins over the gateway's. See migration 0036. */}
+                stores an override that wins over the gateway's. See archived migration 0036. */}
             {(() => {
               const formGateway = gateways.find(g => g.gateway_id === form.active_gateway_id) || null
               const siteWide = form.location_scope === SCOPE_SITE_WIDE
@@ -1163,7 +1214,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                 Used to suggest a match if a differently-named device shows up in quarantine reporting metrics that overlap this schema's required fields.
               </div>
               {/* THE ONE CASE A SINGLE-SELECT CANNOT STATE. A device may carry several submodels
-                  (device_submodels, migration 0034) and this control writes the 1:1 devices.schema_id.
+                  (device_submodels, archived migration 0034) and this control writes the 1:1 devices.schema_id.
                   Selecting the first and saying nothing would let somebody press Save believing they
                   had seen the whole picture and quietly disagree with the drawer beside them, which
                   lists all of them. Naming the others is the smallest honest version of that. */}
@@ -1330,7 +1381,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           },
           {
             // RESOLVED, not the explicit override -- the two read the same in the common case and
-            // showing the wrong one is the exact confusion migration 0036 exists to prevent.
+            // showing the wrong one is the exact confusion archived migration 0036 exists to prevent.
             //
             // Site-Wide is deliberately NOT a link. It is the assertion that this device belongs to
             // no cell, so there is nowhere for the link to go -- and a chip that looked identical to
@@ -1366,7 +1417,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           {
             // RESOLVED THROUGH schemasForDevice, NOT OFF selectedDevice.schema_id, and that was a
             // real bug rather than a tidy-up. A schema reaches a device by either of two routes: the
-            // 1:1 `devices.schema_id`, or a row in `device_submodels` (migration 0034, surfaced by
+            // 1:1 `devices.schema_id`, or a row in `device_submodels` (archived migration 0034, surfaced by
             // api.js as `submodel_schema_ids`). This field read only the first, so every device
             // migration 0022 attached a class schema to -- which is all six on the demo floor --
             // showed "Not set" in the drawer while the table beside it, which has always used

@@ -5,25 +5,17 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { grafanaAlertUrl } from '../../constants'
 
 /**
- * The right-hand context drawer.
+ * The right-hand context drawer: one entity at a time, beside the list it came from.
  *
- * One entity at a time, inspected beside the list it came from rather than on top of it. This is
- * the third way this codebase has shown entity detail, and the first two are why it looks like
- * this:
+ * NOT AN OVERLAY, and the layout depends on it. `.page-layout` is a flex row and this panel is a
+ * SIBLING of the list, so opening it narrows the table rather than covering it, and rows stay
+ * clickable while it is open. Positioning it absolutely would look the same and break that.
  *
- *   * MODALS covered the list. Comparing two devices meant open, read, close, open, read -- and
- *     the row you came from was hidden behind the thing describing it.
- *   * EXPANDING ROWS kept the list visible but pushed every row below the one you opened, so the
- *     table reflowed under the cursor and a second click landed somewhere else.
+ * PRESENTATIONAL ONLY. It renders `fields` and `actions` and knows nothing about cells, gateways,
+ * devices or schemas -- each page supplies its own facts.
  *
- * A drawer in the layout flow does neither. It is NOT an overlay: `.page-layout` is a flex row and
- * the panel is a sibling of the list, so opening it narrows the table instead of hiding it. Rows
- * stay clickable while it is open, which is what makes flicking between entities work at all.
- *
- * PRESENTATIONAL ONLY. It renders `fields` and `actions` and owns no knowledge of cells, gateways,
- * devices or schemas -- each page supplies its own facts. That is deliberate: four pages sharing a
- * panel that understood all four would be the same component four times over, each conditional
- * branch reachable from one caller.
+ * Why a drawer rather than a modal or an expanding row:
+ * ../../README.md -> "Migrated design notes"
  *
  * @param {boolean}  open      Whether the drawer is expanded. Always rendered; see the note on
  *                             `aria-hidden` below for why it is not conditionally mounted.

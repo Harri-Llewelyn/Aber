@@ -55,7 +55,10 @@ const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
 // afterwards 401s -- see the comment on `users` in the generated file.
 // v3 persisted the username -> permissions map. Holding it only in memory made every restart
 // silently downgrade live sessions to a read-only editor (padlocked Deploy).
-const SETTINGS_VERSION = 3;
+// v4 compares NODERED_ADMIN_TOKEN in constant time. This is exactly the case the bump exists
+// for: the old `===` keeps working, so nothing fails and no deployed volume would ever pick the
+// fix up on its own.
+const SETTINGS_VERSION = 4;
 
 function fail(message) {
   console.error(`[node-red-init] ERROR: ${message}`);
@@ -67,9 +70,6 @@ function fail(message) {
 // so there is no longer a path that legitimately runs without these.
 if (!credentialSecret) {
   fail('NODERED_CREDENTIAL_SECRET is not set; refusing to write credentials unencrypted.');
-}
-if (!mqttPassword) {
-  fail('MQTT_PASSWORD is not set; refusing to seed empty broker credentials.');
 }
 
 // Same posture, applied to authentication. THE PREVIOUS DEFAULT WAS AN OPEN ADMIN API, so a
@@ -350,8 +350,34 @@ const SETTINGS_JS = `/**
  */
 const OAuth2Strategy = require(${JSON.stringify(`${RUNTIME_DIR}/passport-oauth2`)});
 const jwt = require(${JSON.stringify(`${RUNTIME_DIR}/jsonwebtoken`)});
+// A Node builtin, so it resolves without the absolute path the two above need.
+const { timingSafeEqual } = require('crypto');
 
 const env = process.env;
+
+/**
+ * Constant-time secret comparison.
+ *
+ * timingSafeEqual THROWS on a length mismatch, which would leak the length through the
+ * exception rather than through the timing -- so unequal lengths are answered by comparing the
+ * expected value against ITSELF and returning false. The work is done either way.
+ *
+ * Used for the break-glass admin token below. That is the highest-value credential on this
+ * host: it returns permissions '*', and a flow \`function\` node executes arbitrary JavaScript
+ * in a container holding the MQTT credential. The rest of the stack already compares its
+ * bearer secrets this way -- gateway-credential-service.mjs and the Grafana alert webhook --
+ * and this was the one that did not.
+ */
+function secretEquals(presented, expected) {
+  if (typeof presented !== 'string' || typeof expected !== 'string' || !expected) return false;
+  const a = Buffer.from(presented, 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  if (a.length !== b.length) {
+    timingSafeEqual(b, b);
+    return false;
+  }
+  return timingSafeEqual(a, b);
+}
 
 /**
  * Supabase RBAC role -> Node-RED permissions.
@@ -602,7 +628,10 @@ module.exports = {
       // Break-glass. Empty by default. If Supabase Auth, Kong or the edge runtime is down then
       // SSO is down with them, and Node-RED may be exactly what you need to reach. Same
       // reasoning as disable_login_form = false in grafana/grafana.ini.
-      if (env.NODERED_ADMIN_TOKEN && token === env.NODERED_ADMIN_TOKEN) {
+      //
+      // secretEquals(), not ===. An unset token is refused by that helper rather than by the
+      // guard here, so there is one answer to "is this the break-glass token" instead of two.
+      if (secretEquals(token, env.NODERED_ADMIN_TOKEN)) {
         return { username: 'acs-cymru-break-glass', permissions: '*' };
       }
 
@@ -748,7 +777,34 @@ function brokerCredentialFor(node) {
   const prefix = node.acsCredentialsEnv;
 
   if (!prefix) {
-    if (node.id === BROKER_NODE_ID) return { user: mqttUser, password: mqttPassword };
+    if (node.id === BROKER_NODE_ID) {
+      // CHECKED HERE, NOT AT START-UP, and the difference is which stacks can boot.
+      //
+      // This used to be an unconditional guard: no MQTT_PASSWORD, no boot. That was right when
+      // the pair was the only broker credential, and became wrong when the flow was consolidated
+      // onto four per-cell gateways that name their own pairs -- from then on it demanded a
+      // credential for the RETIRED single-device simulator, whose gateway row 0020 deletes, on
+      // every stack including the ones with no legacy node in their flow at all.
+      //
+      // Emptying MQTT_SIMULATOR_PASSWORD (so mosquitto-init stops creating a broker account for
+      // an edge node that has no gateway row) therefore took the whole Compose stack down at
+      // node-red-init. The fail-closed posture is unchanged and is simply asked at the point it
+      // means something: a flow that CONTAINS this node still refuses to be seeded without a
+      // password, because seeding an empty one is what produces a CONNACK 5 the editor reports
+      // as "Connection failed to broker" with no cause.
+      if (!mqttPassword) {
+        fail(
+          `this volume's flow carries the legacy '${BROKER_NODE_ID}' node, but MQTT_PASSWORD is not set.
+  That node predates the per-cell consolidation and reads MQTT_USER / MQTT_PASSWORD
+  (MQTT_SIMULATOR_* on Compose), which are empty by default because the account they
+  name was retired by migration 0020.
+
+  Either set MQTT_SIMULATOR_PASSWORD and re-provision that account, or reseed the flow
+  with NODE_RED_FORCE_SEED=true to drop the legacy node entirely.`
+        );
+      }
+      return { user: mqttUser, password: mqttPassword };
+    }
     fail(
       `broker node '${node.id}' (${node.name || 'unnamed'}) declares no 'acsCredentialsEnv' and is ` +
         `not the legacy '${BROKER_NODE_ID}'. It would connect with no username, and Mosquitto ` +

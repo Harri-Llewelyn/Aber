@@ -34,7 +34,9 @@ export function datatypeToJsonSchemaType(code) {
  * a 32-bit signed integer is `xs:int` (`xs:integer` is the *unbounded* one, a different type). A
  * Property carrying an invented type name is an invalid AAS document, and unlike a wrong unit it
  * fails at the consumer rather than here -- the same reason `semantic_id_type` is CHECK-constrained
- * in migration 0029.
+ * in the baseline (the constraint arrived in the pre-beta chain as
+ * `supabase/migrations/archive/20260101000029_semantic_identifiers.sql` and is squashed into
+ * `0001_baseline_schema.sql`).
  *
  * Codes above 12 are mapped even though `SPARKPLUG_TYPES` stops at 14: `metric_catalog.datatype`
  * is a plain INT with no constraint, so an unrecognised code is reachable and must degrade rather
@@ -75,5 +77,8 @@ export const DEFAULT_XSD_TYPE = 'xs:string'
  * lossless form, and a Property is a scalar so a DataSet has no faithful representation anyway.
  */
 export function sparkplugToXsd(code) {
-  return SPARKPLUG_XSD_TYPES[code] || DEFAULT_XSD_TYPE
+  // `??`, NOT `||`, and matched to sparkplugToXsd.ts so the two cannot answer differently.
+  // No value in the table is falsy today, which is exactly why the difference was invisible --
+  // and why it is worth removing rather than reasoning about again the first time one is.
+  return SPARKPLUG_XSD_TYPES[code] ?? DEFAULT_XSD_TYPE
 }

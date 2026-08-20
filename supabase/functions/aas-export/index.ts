@@ -2,7 +2,7 @@
  * AAS export: emit an Asset Administration Shell (IEC 63278) V3 JSON document for one device.
  *
  * An *adapter*, not a migration: the database keeps its own shape and this function projects it
- * into AAS on the way out. Nothing upstream knows AAS exists. Migration 0029's header records why
+ * into AAS on the way out. Nothing upstream knows AAS exists. Archived migration 0029's header records why
  * a native AAS metamodel was rejected (recursive RLS, a third identifier namespace, a fourth type
  * system).
  *
@@ -63,7 +63,7 @@ const MODEL_PUBLIC_BASE = (
     "http://localhost:54321/storage/v1/object/public/asset-3d-models"
 ).replace(/\/+$/, "");
 
-/** The bucket 3D models live in. Matches scripts/storage-init.mjs and migration 0035's policies. */
+/** The bucket 3D models live in. Matches scripts/storage-init.mjs and archived migration 0035's policies. */
 const MODEL_BUCKET = Deno.env.get("STORAGE_MODEL_BUCKET") ?? "asset-3d-models";
 
 /**
@@ -320,14 +320,37 @@ ${
   return zipSync(entries);
 }
 
-/** The metric names a schema models -- the union of `properties` keys and `required`.
- *  Mirrors modelledMetrics() in frontend/src/utils/deviceTags.js and validate.py. */
+/**
+ * The metric names a schema models -- the union of `properties` keys and `required`.
+ *
+ * The FOURTH implementation of one rule, with `modelledMetrics()` in
+ * frontend/src/utils/deviceTags.js, `modelled_metrics()` in ingestion/validate.py and
+ * `_modelled_metrics()` in i3x/i3x_service.py. None can import another, so
+ * `tests/fixtures/modelled-metrics.json` is the seam and all four assert against it --
+ * `test_aas_export.py` runs this one through Node rather than grepping it, because the rule is
+ * behaviour and a grep proves only that both files spell the word `required`.
+ *
+ * `!Array.isArray` IS LOAD-BEARING, and its absence here was a live divergence rather than a
+ * hypothetical one -- this copy was the last to still carry it. `typeof [] === "object"`, so an
+ * array reached `Object.keys`, which yields its INDICES: a schema with
+ * `properties: ["Temp","Pressure"]` was read as modelling two metrics named "0" and "1".
+ *
+ * WORSE HERE THAN IN THE BROWSER. These names become Submodel Property idShorts in an exported AAS
+ * shell -- a document handed to a third party, asserting metrics no device ever published -- and
+ * "0" does not satisfy the AAS idShort pattern, which requires a leading letter. So the shell
+ * fails validation at the CONSUMER while this function reports success. An array is not a valid
+ * JSON Schema `properties` object; it contributes nothing.
+ *
+ * RETURNS A SORTED ARRAY where the mirrors return a set. That is a rendering choice, not a
+ * semantic one: Submodel elements are emitted in this order, and sorting makes two exports of the
+ * same device byte-comparable. The contract compares the two as sets.
+ */
 function modelledMetrics(definition: Record<string, unknown> | null): string[] {
-  if (!definition || typeof definition !== "object") return [];
+  if (!definition || typeof definition !== "object" || Array.isArray(definition)) return [];
   const props = definition.properties;
   const required = definition.required;
   const names = new Set<string>();
-  if (props && typeof props === "object") {
+  if (props && typeof props === "object" && !Array.isArray(props)) {
     for (const key of Object.keys(props as Record<string, unknown>)) names.add(key);
   }
   if (Array.isArray(required)) {
@@ -407,7 +430,7 @@ export default async function handler(req: Request): Promise<Response> {
     // asset_config is keyed by sparkplug_id, not by the row id -- it is written by ingestion from
     // the DBIRTH payload, which only knows the wire identity.
     //
-    // `device_schemas` (migration 0034) is the union of the device_submodels join and the legacy
+    // `device_schemas` (archived migration 0034) is the union of the device_submodels join and the legacy
     // 1:1 devices.schema_id, so this resolves for a device provisioned by either path.
     const [
       { data: configRows },
@@ -564,7 +587,7 @@ export default async function handler(req: Request): Promise<Response> {
       nameplateProperty("CountryOfOrigin", nameplate?.country_of_origin),
 
       // Factory+ concepts. No semanticId, because IDTA defines none for them and inventing one
-      // under admin-shell.io would be a forgery -- see supabase/migrations/0029's header.
+      // under admin-shell.io would be a forgery -- see supabase/migrations/archive/20260101000029_semantic_identifiers.sql's header.
       property("AssetSparkplugId", "xs:string", device.sparkplug_id, {
         description: "Immutable wire identity; the same value keys telemetry in the historian.",
       }),

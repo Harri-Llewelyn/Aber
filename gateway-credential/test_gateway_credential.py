@@ -186,7 +186,10 @@ class TestValidation(CredentialServiceBase):
                 self.assertEqual(payload.get("code"), "invalid_sparkplug_id")
 
     def test_rejects_a_password_containing_shell_metacharacters(self):
-        # The injection boundary that makes the single-quoted interpolation in hashScript safe.
+        # Defence in depth, not the boundary itself any more: hashArgv() passes the password to
+        # `sh` as a positional parameter, so nothing parses it as script text. The alphabet is
+        # still enforced -- an invalid argument should not reach a process at all, and the
+        # reload path does still build a command string.
         status, payload = call({"sparkplug_id": TEST_GW, "password": "a'; id; '"})
         self.assertEqual(status, 400)
         self.assertEqual(payload.get("code"), "invalid_password")

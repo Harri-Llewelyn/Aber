@@ -41,7 +41,7 @@ export function __resetModelViewerLoader() {
 /**
  * @param {string} path  Object key in the `asset-3d-models` bucket, as stored in
  *                       `devices.model_3d_path`. The public URL is composed here rather than
- *                       stored -- see migration 0035.
+ *                       stored -- see archived migration 0035.
  * @param {string} name  Device name, used for the accessible description.
  */
 export function Model3DViewer({ path, name }) {

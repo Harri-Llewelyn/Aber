@@ -9,7 +9,7 @@ import { composeMetricName } from '../utils/metricGroup'
 const vocabulary = [
   { name: 'QUALITY', kpi_id: 'Q', category: 'OEE', unit: 'PERCENT', formula: 'Q = GQ / PQ', description: 'Quality ratio', semantic_id: 'https://acs-cymru.local/semantics/iso22400/QUALITY' },
   // ISO 22400-2's own term for the factor industry calls Performance. The catalog's
-  // OEE/PERFORMANCE was superseded by OEE/EFFECTIVENESS in migration 0032.
+  // OEE/PERFORMANCE was superseded by OEE/EFFECTIVENESS in archived migration 0032.
   { name: 'EFFECTIVENESS', kpi_id: 'E', category: 'OEE', unit: 'PERCENT', formula: 'E = (PRI x PQ) / APT', description: 'Effectiveness ratio', semantic_id: 'https://acs-cymru.local/semantics/iso22400/EFFECTIVENESS' },
   { name: 'AVAILABILITY', kpi_id: 'A', category: 'OEE', unit: 'PERCENT', formula: 'A = APT / PBT', description: 'Availability ratio', semantic_id: 'https://acs-cymru.local/semantics/iso22400/AVAILABILITY' },
   { name: 'MTBF', kpi_id: 'MTBF', category: 'Maintenance', unit: 'HOUR', formula: 'MTBF = APT / number of failures', description: 'Mean operating time between failures', semantic_id: 'https://acs-cymru.local/semantics/iso22400/MTBF' },
@@ -44,7 +44,7 @@ describe('iso22400Sections', () => {
   })
 
   it('uses ISO 22400-2 terminology — EFFECTIVENESS, not PERFORMANCE', () => {
-    // Migration 0032 aligned the vocabulary with the standard's own wording and superseded the
+    // Archived migration 0032 aligned the vocabulary with the standard's own wording and superseded the
     // catalog's OEE/PERFORMANCE metric. The old token must not reappear as a KPI definition.
     expect(kpiNames(vocabulary)).toContain('EFFECTIVENESS')
     expect(kpiNames(vocabulary)).not.toContain('PERFORMANCE')

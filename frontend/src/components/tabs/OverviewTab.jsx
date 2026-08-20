@@ -138,7 +138,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
 
       const targetCellName = cells.find(c => c.cell_id === targetCellId)?.cell_name || 'the target cell'
 
-      // A drop writes devices.cell_id directly (migration 0036). It used to have to rewire the
+      // A drop writes devices.cell_id directly (archived migration 0036). It used to have to rewire the
       // device's GATEWAY to express a move, because location was only inheritable -- which meant
       // the drop was refused outright when the target cell had no gateway or more than one, and
       // when it did work it changed the data path to say something about geography. Dragging a
@@ -194,7 +194,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
    * will inherit that cell again and visibly spring back, which is correct: it is not unassigned,
    * and saying otherwise would be the one lie this model exists to avoid telling. Detaching the
    * gateway to force it would express a location intent by changing the DATA PATH -- exactly the
-   * coupling migration 0036 removed.
+   * coupling archived migration 0036 removed.
    */
   const handleLaneDrop = async (e, lane) => {
     e.preventDefault()

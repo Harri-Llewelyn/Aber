@@ -85,7 +85,7 @@ export function schemaForDevice(device, schemas) {
 /**
  * Every schema attached to a device, as an array.
  *
- * Reads `submodel_schema_ids` -- the device_submodels join added in migration 0034, one AAS
+ * Reads `submodel_schema_ids` -- the device_submodels join added in archived migration 0034, one AAS
  * Submodel per entry -- and falls back to the 1:1 `schema_id` for a device that has no rows there.
  * The fallback is what lets a device provisioned by any path still resolve, and is why 0034 keeps
  * `devices.schema_id` rather than dropping it.

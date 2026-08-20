@@ -3,12 +3,12 @@
  *
  * All of it is DERIVED from the row the server already returns -- nothing here is stored, and
  * nothing here decides anything the database does not also decide. `fork_schema()` and
- * `publish_schema_version()` (migration 0037) are the only things that can actually move a schema
+ * `publish_schema_version()` (archived migration 0037) are the only things that can actually move a schema
  * through its lifecycle; these functions exist so the UI can *say* what will happen before the
  * operator commits to it, and so a read-only version renders as read-only rather than as a form
  * whose Save button fails.
  *
- * `baseSchemaName()` MIRRORS `public.schema_version_base_name()` in migration 0037 -- the same
+ * `baseSchemaName()` MIRRORS `public.schema_version_base_name()` in archived migration 0037 -- the same
  * keep-in-step obligation as `sparkplugId.js`, `metricGroup.js` and `gatewayStatus.js`. Drift here
  * is visible rather than dangerous (the button would predict the wrong name for a version the
  * server then names correctly), but it is still a lie in the UI.
@@ -37,7 +37,7 @@ const STATUS_BADGES = {
   [SCHEMA_STATUS.ARCHIVED]: 'badge-neutral'
 }
 
-/** A schema that predates migration 0037 reads as v1/active -- the same default the column took. */
+/** A schema that predates archived migration 0037 reads as v1/active -- the same default the column took. */
 export const schemaVersion = (schema) => Number(schema?.version) || 1
 export const schemaStatus = (schema) => schema?.status || SCHEMA_STATUS.ACTIVE
 

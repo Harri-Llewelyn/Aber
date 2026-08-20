@@ -119,7 +119,6 @@ const generated = {
   // the ACL matches the topic's edge-node segment against the username exactly.
   MQTT_INGESTION_PASSWORD: hex(24),
   MQTT_I3X_PASSWORD: hex(24),
-  MQTT_SIMULATOR_PASSWORD: hex(24),
   MQTT_VALIDATOR_PASSWORD: hex(24),
   MQTT_MONITOR_PASSWORD: hex(24),
   // THE FOUR SIMULATED CELL GATEWAYS, generated here rather than left to `provision:gateways`.
@@ -159,12 +158,27 @@ const generated = {
 };
 
 /**
- * NODERED_ADMIN_TOKEN is deliberately NOT generated. It is break-glass: a static token accepted on
- * the Node-RED admin API that bypasses Supabase entirely, for when Supabase Auth is down. Minting
- * one by default would create a standing credential nobody asked for, on the one path that skips
- * every check the rest of this stack performs. It stays empty until an operator decides otherwise.
+ * Names this script leaves EMPTY, each because a generated value would be a standing credential
+ * nobody asked for.
+ *
+ * NODERED_ADMIN_TOKEN is break-glass: a static token accepted on the Node-RED admin API that
+ * bypasses Supabase entirely, for when Supabase Auth is down. It returns permissions '*', and a
+ * flow `function` node executes arbitrary JavaScript in a container holding the MQTT credential --
+ * so minting one by default would create the most powerful credential in the stack, on the one
+ * path that skips every check the rest of it performs.
+ *
+ * MQTT_SIMULATOR_PASSWORD is the RETIRED single-device simulator's broker account. Migration 0020
+ * deletes its gateway row, so resolve_gateway() finds nothing for it and every message it could
+ * publish is refused -- yet a password was generated on every `npm run setup` and mosquitto-init
+ * created the account on every boot, on both targets. A live broker credential for an edge node
+ * that has no asset record is exactly the thing an ACL audit is supposed to turn up.
+ *
+ * It is EMPTY rather than removed, because the account still has one real use: a Node-RED volume
+ * created before the flow was consolidated still holds an `mqtt-broker-config` node that node-red-
+ * init points at this pair. Setting a value here re-creates the account for that case;
+ * mosquitto-init now skips it when empty, exactly as it already did for the four cell gateways.
  */
-const deliberatelyEmpty = ['NODERED_ADMIN_TOKEN'];
+const deliberatelyEmpty = ['NODERED_ADMIN_TOKEN', 'MQTT_SIMULATOR_PASSWORD'];
 
 const missing = [];
 for (const [key, value] of Object.entries(generated)) {

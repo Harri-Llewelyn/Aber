@@ -2,7 +2,7 @@
 Unit test suite for the approve-quarantine Supabase Edge Function.
 
 Covers the fail-closed authorization logic (missing or non-privileged role claims) and the
-location patch composition added with migration 0036 -- specifically that an unanswered cell is
+location patch composition added with archived migration 0036 -- specifically that an unanswered cell is
 omitted rather than defaulted, which is what keeps devices.cell_id's NULL-means-inherit intact.
 """
 import os

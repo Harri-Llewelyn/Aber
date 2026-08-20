@@ -1,5 +1,5 @@
 /**
- * The OPC UA companion-specification vocabulary, as served from `opcua_vocabulary` (migration 0031).
+ * The OPC UA companion-specification vocabulary, as served from `opcua_vocabulary` (archived migration 0031).
  *
  * Like MTConnect and unlike ISO 22400, an OPC UA data point is positional: `ActualPosition` means
  * nothing until you say which axis of which motion device. The companion spec supplies that

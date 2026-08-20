@@ -77,7 +77,7 @@ for (const [, name, kind, , , parent, semanticId] of statements) {
     fail(`semantic id does not match the ASHRAE namespace for '${name}'`,
          `expected ${expected}`, `actual   ${semanticId}`,
          'These ids are issued by ASHRAE; one minted locally would assert an interoperability',
-         'nobody agreed to. See migration 0029.');
+         'nobody agreed to. See archived migration 0029.');
   }
   // A dangling parent would give the vocabulary panel a section header for a concept that is not
   // in the table -- the kind of thing that renders as an empty group and reads as a data loss.

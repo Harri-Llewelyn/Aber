@@ -38,7 +38,7 @@
  *
  * ---------------------------------------------------------------------------------------------
  * `-c` IS NEVER APPLIED TO THE PASSWORD FILE. Hashing goes to a scratch file holding exactly one
- * account (scripts/lib/mosquitto-credentials.mjs, hashScript) and the result is merged in by
+ * account (scripts/lib/mosquitto-credentials.mjs, hashArgv) and the result is merged in by
  * mergeCredential(), which THROWS rather than return contents that would lose an account. The real
  * file is only ever replaced wholly, atomically, with a value that guard has passed.
  */
@@ -57,7 +57,7 @@ import {
   assertGatewayId,
   assertSafePassword,
   generatePassword,
-  hashScript,
+  hashArgv,
   mergeCredential,
 } from './lib/mosquitto-credentials.mjs';
 
@@ -157,7 +157,7 @@ function authorised(req) {
  * image for that reason -- see gateway-credential/Dockerfile.
  */
 function hashEntry(sparkplugId, password) {
-  const out = execFileSync('/bin/sh', ['-c', hashScript(sparkplugId, password)], {
+  const out = execFileSync('/bin/sh', hashArgv(sparkplugId, password), {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });

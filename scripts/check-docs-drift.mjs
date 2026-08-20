@@ -372,6 +372,152 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 9b. Every inline `migration NNNN` citation names a migration that exists and executes.
+//
+// WHY THIS ROTS, AND WHY IT ROTTED SILENTLY. The pre-beta chain was squashed into 0001/0002 and
+// moved to `supabase/migrations/archive/`, where the files are named `20260101000029_*.sql`. The
+// comments that cited them were not touched, so ~70 of them across the frontend, the ingestion
+// daemon, the edge functions and the migrations themselves went on citing four-digit numbers above
+// the applied range -- numbers that are not in the applied chain, are not the archived files' names
+// either, and will one day BE applied migrations about something else entirely.
+//
+// (The examples in this comment are deliberately written without the literal `migration NNNN`
+// shape. This check scans its own source like any other file, and an illustration of the mistake
+// is indistinguishable from the mistake.)
+//
+// That is the specific hazard: a citation is not merely stale, it is a reader following a pointer
+// to the wrong file with no way to tell. `CONTRIBUTING` promises that "the reasoning lives next to
+// the thing it constrains", and this is the failure of that promise.
+//
+// THE RULE: a bare `migration NNNN` must name an APPLIED migration. Anything in the archive must
+// say `archived migration NNNN`, which is unambiguous today and stays unambiguous when 0029 is
+// eventually issued to something real.
+//
+// PROSE IS NOT EXEMPTED and markdown is scanned too -- a wrong pointer in a README misleads
+// exactly as much as one in a comment.
+// -------------------------------------------------------------------------------------------------
+{
+  const dir = 'supabase/migrations';
+  const applied = new Set(
+    readdirSync(join(REPO, dir), { withFileTypes: true })
+      .filter((e) => e.isFile() && /^\d+_.*\.sql$/.test(e.name))
+      .map((e) => e.name.match(/^(\d+)_/)[1])
+  );
+
+  // Everything this repository authors. The chart's files/ are generated mirrors, the archive is
+  // the thing being cited, and node_modules is not ours.
+  const scanned = allFiles.filter(
+    (f) =>
+      /\.(js|jsx|ts|mjs|py|sql|md|ya?ml)$/.test(f) &&
+      !f.startsWith('supabase/migrations/archive/') &&
+      !f.startsWith('deploy/helm/acs-cymru/files/') &&
+      !f.startsWith('.claude/') &&
+      !f.startsWith('frontend/dist/')
+  );
+
+  const dangling = [];
+  for (const file of scanned) {
+    const body = read(file);
+    for (const m of body.matchAll(/(archived\s+)?\bmigration (\d{4})\b/gi)) {
+      if (m[1]) continue;            // explicitly archived; the number is the archive's
+      if (applied.has(m[2])) continue;
+      const line = body.slice(0, m.index).split('\n').length;
+      dangling.push(`${file}:${line} cites "migration ${m[2]}", which is not in ${dir}/`);
+    }
+  }
+
+  if (dangling.length) {
+    for (const d of dangling.slice(0, 12)) fail(d);
+    if (dangling.length > 12) fail(`...and ${dangling.length - 12} more dangling migration citation(s)`);
+    fail(
+      'A citation must name an APPLIED migration, or say "archived migration NNNN" for one in\n' +
+        '      supabase/migrations/archive/ -- which never executes and whose files are named\n' +
+        '      20260101000NNN_*.sql. A bare number that is not applied points a reader at nothing,\n' +
+        '      and will point them at the WRONG file once that number is issued for real.'
+    );
+  } else {
+    pass(`every inline migration citation across ${scanned.length} files names an applied migration or is marked archived`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 9c. A function redeclared by a later migration is DELIBERATE, not accidental.
+//
+// THIS IS THE HAZARD README.md's "There is no 0017" NOTE DESCRIBES, and until now nothing enforced
+// it. Migrations are replayed on every boot in filename order with no applied-migrations ledger, so
+// a later `CREATE OR REPLACE FUNCTION` of the same name simply WINS -- silently, on every start,
+// with no error and nothing in the log to say which body is live.
+//
+// `0017` was drafted as an audit-trigger change guard and then deliberately not written, because a
+// second declaration of `log_digital_thread_event()` would have won by filename order and regressed
+// the `actor_source` attribution `0005` adds. That reasoning was recorded in prose and left
+// unenforced, which is the same shape as a comment describing an invariant nothing checks.
+//
+// Three functions ARE redeclared today and all three are intentional -- each later definition is a
+// superset of the earlier one. The allow-list below is not a list of problems; it is the place
+// where "yes, I meant to replace that" has to be written down. Adding a name is the friction, and
+// it is the same arrangement check-image-tag-parity.mjs's TARGET_SPECIFIC map exists for.
+//
+// WHAT THIS WOULD HAVE CAUGHT: check-mirror-drift.mjs read 0001's `ensure_gateway_status_view()`
+// for as long as 0025 had been replacing it, and reported agreement it had not checked.
+// -------------------------------------------------------------------------------------------------
+{
+  const dir = 'supabase/migrations';
+
+  /** name -> why a later migration is allowed to replace an earlier definition. */
+  const INTENDED_REDECLARATIONS = {
+    'public.log_digital_thread_event': `0003 adds append-only enforcement and 0005 adds actor_source
+      attribution. 0005's body is the live one and MUST stay last -- a sixth declaration ordering
+      after it would silently drop the attribution, which is exactly why 0017 was never written.`,
+    'public.ensure_gateway_status_view': `0025 widens public.gateway_status for the enrolment columns
+      and adds the branch that short-circuits PENDING_ENROLLMENT / AWAITING_BIRTH ahead of the
+      staleness test. g.* is expanded at CREATE time, so the view cannot be widened in place.`,
+    'public.dispatch_device_quarantine_webhook': `0006 re-points the webhook at Node-RED's
+      /hooks/quarantine with the scoped signing key, replacing 0001's unsigned dispatch.`,
+  };
+
+  const files = readdirSync(join(REPO, dir), { withFileTypes: true })
+    .filter((e) => e.isFile() && /^\d+_.*\.sql$/.test(e.name))
+    .map((e) => e.name)
+    .sort();
+
+  const seen = new Map();
+  for (const name of files) {
+    for (const m of read(`${dir}/${name}`).matchAll(/CREATE OR REPLACE FUNCTION\s+([a-z_]+\.[a-z_]+)\s*\(/gi)) {
+      const fn = m[1].toLowerCase();
+      if (!seen.has(fn)) seen.set(fn, []);
+      if (!seen.get(fn).includes(name)) seen.get(fn).push(name);
+    }
+  }
+
+  const undeclared = [];
+  const stale = [];
+  for (const [fn, where] of seen) {
+    if (where.length > 1 && !(fn in INTENDED_REDECLARATIONS)) {
+      undeclared.push(`${fn}() is declared in ${where.length} applied migrations (${where.join(', ')}) but is not in the intended-redeclaration list`);
+    }
+  }
+  for (const fn of Object.keys(INTENDED_REDECLARATIONS)) {
+    const where = seen.get(fn) || [];
+    if (where.length < 2) {
+      stale.push(`${fn}() is listed as an intended redeclaration but is declared ${where.length} time(s) -- remove it from the list`);
+    }
+  }
+
+  if (undeclared.length || stale.length) {
+    for (const p of [...undeclared, ...stale]) fail(p);
+    fail(
+      'Every migration is replayed on every boot in filename order and there is no applied-migrations\n' +
+        '      ledger, so the LAST declaration wins -- silently, with no error. A redeclaration is fine when\n' +
+        '      it is meant; record it in INTENDED_REDECLARATIONS with the reason. See README.md, "There is\n' +
+        '      no 0017", for the case where an unrecorded one would have regressed audit attribution.'
+    );
+  } else {
+    pass(`${seen.size} function(s) declared across the chain; all ${Object.keys(INTENDED_REDECLARATIONS).length} redeclarations are recorded as intended`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 10. docs/openapi.yaml covers every public relation and every edge function.
 //
 // The spec is the ONLY externally-facing contract this project publishes, and it had drifted badly
@@ -483,6 +629,8 @@ function edgeFunctionNames() {
     'VITE_GITHUB_REPO_URL',  // issue tracker URL
     'VITE_GRAFANA_URL',      // an endpoint, public
     'VITE_ALLOW_SIGNUP',     // feature flag
+    'VITE_MODEL_3D_BUCKET',       // a bucket name, public -- the objects in it are public-read
+    'VITE_GATEWAY_BACKUP_BUCKET', // a bucket name; the bucket is PRIVATE, but its NAME is not a secret
   ]);
 
   const df = read('frontend/Dockerfile');

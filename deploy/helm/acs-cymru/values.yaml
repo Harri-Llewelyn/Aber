@@ -22,6 +22,27 @@ global:
   # http | https. Decides the scheme in every browser-facing URL the chart composes.
   scheme: http
 
+  # EXTRA browser origins for Kong's CORS policy, appended to the derived ones.
+  #
+  # The dashboard's own origin and Swagger UI's are derived from `publicBaseDomain` (or from
+  # `publicUrls.frontend` / `publicUrls.docs`) by `acs-cymru.corsOrigins`, so the ordinary case
+  # needs nothing here -- and deriving them is the point: an origin list written by hand is one
+  # that can name a hostname the Ingress does not serve, or miss one that it does.
+  #
+  # This is for what the chart cannot know. A reverse proxy or tunnel in front of the Ingress
+  # presents the browser with a hostname no chart value mentions, and Kong sees THAT as the
+  # Origin. Without it here, every API call from the dashboard is refused by the browser while
+  # the gateway reports 200 -- which reads as a broken dashboard, not as a CORS problem.
+  #
+  # APPENDED, never replacing. Adding a proxy hostname must not be able to drop the dashboard's
+  # own origin, which is the mistake a plain override invites.
+  #
+  # Scheme and host, no trailing slash and no path -- an Origin header carries nothing else, and
+  # a value with a path matches no request.
+  #   corsExtraOrigins:
+  #     - https://acs.example.com
+  corsExtraOrigins: []
+
   # PVC storage class for every stateful component. `local-path` is k3s's built-in provisioner and
   # is NODE-LOCAL -- lose the node, lose the volume, with no degraded mode in between.
   #
@@ -945,9 +966,14 @@ grafana:
   enabled: true
   image:
     repository: grafana/grafana
-    # Pinned, unlike Compose's `:latest`. grafana.ini depends on behaviour that has moved between
-    # releases -- `use_pkce`, `auth_style`, and the env-override mapping this chart relies on to
-    # replace auth_url without editing the file.
+    # Pinned, AND PINNED TO THE SAME TAG COMPOSE USES -- check-image-tag-parity.mjs fails the build
+    # if the two disagree. (This note used to read "unlike Compose's `:latest`", which stopped being
+    # true when Compose pinned it and stayed on the page: a comment describing a divergence that no
+    # longer exists is worse than none, because it invites someone to "restore" it.)
+    #
+    # The pin holds a COUPLING, not a preference: grafana.ini depends on behaviour that has moved
+    # between releases -- `use_pkce`, `auth_style`, and the env-override mapping this chart relies
+    # on to replace auth_url without editing the file.
     tag: "13.1.3"
     pullPolicy: IfNotPresent
   persistence:

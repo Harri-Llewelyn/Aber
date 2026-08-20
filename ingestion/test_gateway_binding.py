@@ -121,14 +121,47 @@ class GatewayBindingTest(unittest.TestCase):
             ingestion.verify_gateway_binding(device_bound_to(None), GATEWAY_B["sparkplug_id"])
         )
 
-    def test_a_legacy_name_matched_device_is_exempt(self):
+    def test_a_legacy_name_matched_device_is_still_bound(self):
         """
-        During the migration window a device may still be addressed by name, and its row may
-        predate any gateway assignment. Enforcing binding there would break exactly the
-        deployments the fallback exists to carry.
+        THE SPOOFING CASE AGAIN, BY THE ROUTE THAT USED TO WORK. This was an explicit exemption:
+        a device resolved by legacy `name` skipped the binding check outright.
+
+        The exemption's stated reason was that such a row "may predate any gateway assignment"
+        -- but an unassigned row is caught by the `gateway_id` branch, which returns before the
+        exemption is reached (see test_an_unbound_legacy_device_is_still_not_a_mismatch). So it
+        only ever fired for a device that IS bound, and resolve_device() falls back to a `name`
+        lookup for any wire id that is not a platform-issued `dev` id -- making the topic's
+        device segment, which the broker ACL does not constrain, enough to reach any device on
+        the site and be believed.
         """
         self._resolve_returns(GATEWAY_B)
         device = device_bound_to(GATEWAY_A, identity_source=ingestion.SOURCE_LEGACY_NAME)
+        reason = ingestion.verify_gateway_binding(device, GATEWAY_B["sparkplug_id"])
+        self.assertIsNotNone(
+            reason,
+            "how a device was resolved must not decide whether its binding is enforced"
+        )
+        self.assertTrue(reason.startswith(ingestion.REASON_GATEWAY_MISMATCH))
+
+    def test_a_legacy_name_matched_device_on_its_own_gateway_is_accepted(self):
+        """
+        The migration window is not closed by the above: a legacy-addressed device publishing
+        via the gateway it is actually bound to still passes. Only the mismatch is refused.
+        """
+        self._resolve_returns(GATEWAY_A)
+        device = device_bound_to(GATEWAY_A, identity_source=ingestion.SOURCE_LEGACY_NAME)
+        self.assertIsNone(
+            ingestion.verify_gateway_binding(device, GATEWAY_A["sparkplug_id"])
+        )
+
+    def test_an_unbound_legacy_device_is_still_not_a_mismatch(self):
+        """
+        The case the removed exemption claimed to protect, shown to be covered without it: a
+        legacy-addressed row with no gateway assignment is unbound, and unbound is not
+        mis-bound. This is what keeps a pre-0014 fleet ingesting while it is reconfigured.
+        """
+        self._resolve_returns(GATEWAY_B)
+        device = device_bound_to(None, identity_source=ingestion.SOURCE_LEGACY_NAME)
         self.assertIsNone(
             ingestion.verify_gateway_binding(device, GATEWAY_B["sparkplug_id"])
         )
@@ -197,6 +230,57 @@ class TelemetryIsNotUpsertableTest(unittest.TestCase):
         statement = source[insert_start:insert_start + 600]
         self.assertIn("ON CONFLICT (time, asset_id, metric_name) DO NOTHING", statement)
         self.assertNotIn("DO UPDATE", statement)
+
+
+class ReportedGatewayStatusTest(unittest.TestCase):
+    """
+    A gateway names its own operating states; it does not name the platform's.
+
+    `gateways.status` is unconstrained text on purpose (migration 0025) -- a `Gateway_Status`
+    metric overrides the status the message type implies, so the vocabulary belongs to the
+    fleet. That was read as "any string, any length", and the payload value went to the column
+    verbatim. The three reserved values are written by code that knows something the gateway
+    does not, and all three short-circuit ahead of the staleness arm in public.gateway_status --
+    so a gateway asserting one goes on reporting healthy after it stops publishing.
+    """
+
+    def setUp(self):
+        ingestion._status_rejected_warned.clear()
+
+    def test_an_ordinary_status_is_accepted(self):
+        self.assertEqual(ingestion.accept_reported_status("MAINTENANCE", "gwya"), "MAINTENANCE")
+
+    def test_surrounding_whitespace_is_trimmed(self):
+        self.assertEqual(ingestion.accept_reported_status("  DEGRADED \n", "gwya"), "DEGRADED")
+
+    def test_every_reserved_status_is_refused(self):
+        for reserved in ingestion.RESERVED_GATEWAY_STATUSES:
+            with self.subTest(reserved=reserved):
+                ingestion._status_rejected_warned.clear()
+                self.assertIsNone(ingestion.accept_reported_status(reserved, "gwya"))
+
+    def test_a_reserved_status_cannot_be_smuggled_in_a_different_case(self):
+        """Compared upper-cased, or `awaiting_birth` walks past a check on `AWAITING_BIRTH`."""
+        self.assertIsNone(ingestion.accept_reported_status("awaiting_birth", "gwya"))
+        self.assertIsNone(ingestion.accept_reported_status("Stale", "gwya"))
+
+    def test_an_over_length_status_is_refused_rather_than_truncated(self):
+        """
+        A truncated status is a DIFFERENT status. Refusing keeps the one the message type
+        implies, which is at least true.
+        """
+        self.assertIsNone(
+            ingestion.accept_reported_status("X" * (ingestion.MAX_GATEWAY_STATUS_LENGTH + 1), "gwya")
+        )
+
+    def test_a_status_at_exactly_the_cap_is_accepted(self):
+        at_cap = "X" * ingestion.MAX_GATEWAY_STATUS_LENGTH
+        self.assertEqual(ingestion.accept_reported_status(at_cap, "gwya"), at_cap)
+
+    def test_empty_and_non_string_values_are_refused(self):
+        for value in ("", "   ", None, 123, [], {}):
+            with self.subTest(value=value):
+                self.assertIsNone(ingestion.accept_reported_status(value, "gwya"))
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """
 Unit tests pinning ONE invariant: the ingestion daemon never writes an asset's location.
 
-`devices.cell_id` (migration 0036) is NULL-means-inherit, and it has no column default precisely
+`devices.cell_id` (archived migration 0036) is NULL-means-inherit, and it has no column default precisely
 so that inheritance stays reachable. That only holds if nothing writes a value on an operator's
 behalf -- and the daemon is the one writer with no operator present. A quarantined device must
 therefore arrive with no cell and no scope assertion, so that approving it onto a gateway lets it

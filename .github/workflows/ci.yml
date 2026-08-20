@@ -417,6 +417,17 @@ jobs:
           expect_failure "no public base domain with auth enabled" "no browser-facing URL" \
             -f "$DEV" --set global.publicBaseDomain=
 
+          # An API that is browser-facing with no origin allowed to call it. Kong starts cleanly and
+          # then returns 200 with no Access-Control-Allow-Origin for every request, which the
+          # browser refuses to read -- so the dashboard signs in and shows empty tables.
+          #
+          # THE NARROWNESS IS THE POINT, and is asserted by the two cases above still reporting
+          # THEIR OWN messages. An install with no public surface at all has no origin to name and
+          # is already refused more specifically; when acs-cymru.corsOrigins also failed there, it
+          # ran first and masked both. This case is what is genuinely left for it: a public API
+          # (publicUrls.supabase) with nothing naming a caller.
+          expect_failure "browser-facing API with no derivable CORS origin" "EMPTY browser-origin list"             -f "$DEV" --set global.publicBaseDomain= --set supabaseAuth.enabled=false             --set ingress.enabled=false --set publicUrls.supabase=https://api.example.com
+
           # TLS at the ingress with scheme http registers http:// redirect_uris for an https site.
           # Nothing crashes and no pod reports unhealthy; only sign-in breaks.
           expect_failure "TLS enabled but scheme is http" "global.scheme is" \
@@ -964,7 +975,7 @@ jobs:
           # key, because settings.js keys its refusal on the key's absence.
           python supabase/functions/nodered-userinfo/test_nodered_userinfo.py
           python supabase/migrations/test_user_roles_rls.py
-          # Schema versioning (migration 0037). Runs its assertions as `authenticated` with
+          # Schema versioning (archived migration 0037). Runs its assertions as `authenticated` with
           # simulated JWT claims, because the immutability guard deliberately exempts the owner --
           # a suite connecting as `postgres` would pass against a database with the trigger dropped.
           python supabase/migrations/test_schema_versioning.py
@@ -990,7 +1001,7 @@ jobs:
           python ingestion/test_modelled_metrics_contract.py
 
       # Pins the invariant that the daemon never writes an asset's location. devices.cell_id is
-      # NULL-means-inherit with no column default (migration 0036), which only holds while
+      # NULL-means-inherit with no column default (archived migration 0036), which only holds while
       # nothing writes a value on an operator's behalf -- and a regression here would be silent:
       # devices would simply stop inheriting and the Unassigned queue would stop filling.
       - name: Run Ingestion Device Location Invariant Tests

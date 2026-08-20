@@ -101,6 +101,21 @@ SSE_KEEPALIVE_SECONDS = float(os.getenv("I3X_SSE_KEEPALIVE_SECONDS", "15"))
 # same discipline `sparkplugToXsd.ts` has against `sparkplugDatatype.js`. ingestion.py is not
 # imported here on purpose; see the security note in the module docstring.
 MAX_ALIASES_PER_NODE = int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))
+
+# How many elementIds one bulk request may name.
+#
+# THE DEPTH WAS BOUNDED AND THE BREADTH WAS NOT. `maxDepth` has always been budgeted on the value
+# path, but `elementIds` was read straight off the body -- so a single POST could name a hundred
+# thousand ids and this server would resolve every one against the whole address space, on the
+# request thread, for a caller holding nothing but a valid bearer token.
+#
+# A LIMIT, NOT A TRUNCATION. Silently answering the first N would return a bulk array shorter than
+# the request, and i3X bulk results are paired POSITIONALLY -- a client would mis-attribute every
+# value after the cut. 400 says what happened; a short array does not.
+#
+# 1000 is far above any real client: the conformance suite's largest batch is a few dozen, and a
+# whole demonstrator address space is under a hundred elements.
+MAX_BULK_ELEMENT_IDS = int(os.getenv("I3X_MAX_BULK_ELEMENT_IDS", "1000"))
 DEFAULT_SPARKPLUG_GROUP = os.getenv("DEFAULT_SPARKPLUG_GROUP", "ACS-Cymru")
 IDENTITY_METRICS = ("Asset_ID", "Asset_Name", "Instance_UUID", "Schema_UUID")
 
@@ -224,8 +239,23 @@ def _modelled_metrics(schema_definition) -> set:
     Union of `properties` keys and `required`.
 
     `schema_definition` is free-form JSONB and hand-written schemas carry either, which is why
-    `modelledMetrics()` in deviceTags.js reads both. A Python mirror of that already exists in
-    `ingestion/validate.py`; this is the third, and all three must agree.
+    `modelledMetrics()` in deviceTags.js reads both.
+
+    ONE OF FOUR IMPLEMENTATIONS, all held to `tests/fixtures/modelled-metrics.json` -- with
+    deviceTags.js, `modelled_metrics()` in ingestion/validate.py, and `modelledMetrics()` in
+    supabase/functions/aas-export/index.ts. This one is asserted by
+    `ModelledMetricsContractTest` in test_i3x_service.py.
+
+    `!isinstance(props, dict)` IS LOAD-BEARING. An array `properties` must contribute nothing: the
+    JS mirror once read one through `Object.keys` and got its INDICES, modelling metrics named
+    "0" and "1". Python's `isinstance` closes that by construction rather than by remembering to
+    check, which is why this reads as an accident of the language and is not one.
+
+    RETURNS AN EMPTY SET, NOT None, where the mirrors distinguish "declares neither, cannot be
+    evaluated" from "models nothing". i3X has no caller that asks -- `_build_objects` iterates the
+    result to decide what to project, and the address space has no way to express the difference.
+    The NAMES agree exactly with the other three; only that one distinction is dropped, and the
+    contract test asserts the collapse rather than leaving it implied.
     """
     if not isinstance(schema_definition, dict):
         return set()
@@ -285,6 +315,23 @@ def _build_objects(space: dict) -> Dict[str, dict]:
     ]
     objects[A.UNASSIGNED_ELEMENT_ID] = A.unassigned_object(unassigned)
     objects[A.SITE_ELEMENT_ID] = A.site_object(site_children)
+
+    # ---------------------------------------------------------------------------------------------
+    # THE VALUE-PATH INDEXES, BUILT ONCE HERE RATHER THAN PER LOOKUP.
+    #
+    # `_current_value()` needs "is this elementId a gateway, a device, or a container?", and it was
+    # answering by rebuilding {sparkplug_id: row} for the whole fleet from `space["gateways"]` and
+    # `space["devices"]` on EVERY CALL. That call is per requested elementId and again per
+    # composition child, so a bulk read of N elements with C children each rebuilt both dictionaries
+    # N x (1 + C) times over the entire address space -- quadratic in the fleet, in the one code
+    # path a client is expected to poll.
+    #
+    # Cached on `space` rather than returned separately because `space` is already the thing both
+    # halves are derived from, and the two must describe the same read: an index built from a later
+    # fetch than the objects would resolve an elementId the caller was never shown.
+    # ---------------------------------------------------------------------------------------------
+    space["_gateways_by_sid"] = {g["sparkplug_id"]: g for g in space["gateways"]}
+    space["_devices_by_sid"] = {d["sparkplug_id"]: d for d in space["devices"]}
     return objects
 
 
@@ -495,6 +542,47 @@ class Problem(Exception):
         self.detail = detail
 
 
+def _require_element_ids(body: dict, required: bool = True) -> list:
+    """
+    The `elementIds` array from a bulk request body, validated and capped.
+
+    ONE HELPER FOR EVERY BULK ENDPOINT, because the cap is only worth having if it is not possible
+    to add a sixth handler that forgets it -- the same argument main/index.ts makes for its function
+    allow-list.
+
+    `required=False` for the two type endpoints, where an absent array means "all of them" and is a
+    documented shorthand rather than a malformed request. An array that IS present is capped either
+    way: "all types" is bounded by the schema count, a caller-supplied list is not.
+    """
+    wanted = body.get("elementIds")
+    if wanted is None and not required:
+        return []
+    if not isinstance(wanted, list):
+        raise Problem(400, "Bad Request", "elementIds array is required.")
+    return _cap_bulk(wanted, "elementIds")
+
+
+def _cap_bulk(entries: list, field: str) -> list:
+    """
+    Refuse a caller-supplied batch larger than the cap.
+
+    SEPARATE FROM THE SHAPE CHECK because two different shapes arrive: the bulk read endpoints take
+    `elementIds`, and subscription registration takes either that or an `objects` array of
+    dictionaries. Both are unbounded lists from an authenticated-but-otherwise-unprivileged caller,
+    and the registration one is the more expensive -- it does not merely answer, it ADDS TO
+    PER-CLIENT STATE that outlives the request and that every later poll is evaluated against.
+    """
+    if len(entries) > MAX_BULK_ELEMENT_IDS:
+        raise Problem(
+            400,
+            "Bad Request",
+            f"{field} names {len(entries)} elements; this server accepts at most "
+            f"{MAX_BULK_ELEMENT_IDS} per request. Split the batch -- results are paired to "
+            f"requests by position, so a truncated answer would be mis-read rather than short.",
+        )
+    return entries
+
+
 def _require_client_id(body: dict) -> str:
     client_id = body.get("clientId")
     if not isinstance(client_id, str) or not client_id:
@@ -667,7 +755,7 @@ def h_objecttypes(req: Handler) -> None:
 
 def h_objecttypes_query(req: Handler) -> None:
     body = req._body()
-    wanted = body.get("elementIds") or []
+    wanted = _require_element_ids(body, required=False)
     types = {t["elementId"]: t for t in _build_types(_load_address_space(req._pg()))}
     if not wanted:
         req._ok(list(types.values()))
@@ -697,7 +785,7 @@ def h_relationshiptypes(req: Handler) -> None:
 
 def h_relationshiptypes_query(req: Handler) -> None:
     req._bearer()
-    wanted = req._body().get("elementIds") or []
+    wanted = _require_element_ids(req._body(), required=False)
     types = {t["elementId"]: t for t in A.relationship_types()}
     if not wanted:
         req._ok(list(types.values()))
@@ -756,9 +844,7 @@ def h_objects(req: "Handler") -> None:
 
 def h_objects_list(req: "Handler") -> None:
     body = req._body()
-    wanted = body.get("elementIds")
-    if not isinstance(wanted, list):
-        raise Problem(400, "Bad Request", "elementIds array is required.")
+    wanted = _require_element_ids(body)
     include_metadata = body.get("includeMetadata") is True
     objects = _build_objects(_load_address_space(req._pg()))
     # Bulk results MUST come back in the order requested -- the suite has a dedicated check
@@ -787,9 +873,7 @@ def h_objects_related(req: "Handler") -> None:
     exploratory UI feel slow against a remote server.
     """
     body = req._body()
-    wanted = body.get("elementIds")
-    if not isinstance(wanted, list):
-        raise Problem(400, "Bad Request", "elementIds array is required.")
+    wanted = _require_element_ids(body)
     wanted_type = body.get("relationshipType")
     include_metadata = body.get("includeMetadata") is True
     objects = _build_objects(_load_address_space(req._pg()))
@@ -842,10 +926,12 @@ def _current_value(objects, space: dict, element_id: str):
     obj = objects.get(element_id)
     if obj is None:
         return None
-    gateways_by_sid = {g["sparkplug_id"]: g for g in space["gateways"]}
+    # Built once by _build_objects(); see the note there. Falling back to a fresh index keeps this
+    # function correct if it is ever called with a `space` that did not come through that path.
+    gateways_by_sid = space.get("_gateways_by_sid") or {g["sparkplug_id"]: g for g in space["gateways"]}
     if element_id in gateways_by_sid:
         return A.gateway_value(gateways_by_sid[element_id])
-    devices_by_sid = {d["sparkplug_id"]: d for d in space["devices"]}
+    devices_by_sid = space.get("_devices_by_sid") or {d["sparkplug_id"]: d for d in space["devices"]}
     if element_id in devices_by_sid:
         return A.device_value(devices_by_sid[element_id], metrics_for(element_id))
     rels = (obj.get("metadata") or {}).get("relationships") or {}
@@ -863,9 +949,7 @@ def h_objects_value(req: "Handler") -> None:
     stops it becoming a way to read every device on the site.
     """
     body = req._body()
-    wanted = body.get("elementIds")
-    if not isinstance(wanted, list):
-        raise Problem(400, "Bad Request", "elementIds array is required.")
+    wanted = _require_element_ids(body)
     max_depth = body.get("maxDepth", 1)
     space = _load_address_space(req._pg())
     objects = _build_objects(space)
@@ -913,9 +997,7 @@ def h_objects_history(req: "Handler") -> None:
     spec makes both mandatory for that reason.
     """
     body = req._body()
-    wanted = body.get("elementIds")
-    if not isinstance(wanted, list):
-        raise Problem(400, "Bad Request", "elementIds array is required.")
+    wanted = _require_element_ids(body)
     start, end = body.get("startTime"), body.get("endTime")
     if not start or not end:
         raise Problem(400, "Bad Request", "startTime and endTime are required.")
@@ -1070,8 +1152,21 @@ def h_sub_delete(req: Handler) -> None:
 
 
 def _registration_entries(body: dict) -> list:
-    entries = body.get("objects") or body.get("elementIds") or []
-    return [{"elementId": e} if isinstance(e, str) else (e or {}) for e in entries]
+    """
+    The objects a subscription request wants registered, normalised and capped.
+
+    TWO ACCEPTED SHAPES: `objects` (dictionaries) or `elementIds` (strings). Capped through the
+    same helper the bulk READ endpoints use, and this is the path where the cap earns most: a
+    registration does not merely produce a response, it adds to the client's monitored set, which
+    outlives the request and is what every later poll is evaluated against.
+    """
+    raw = body.get("objects") or body.get("elementIds") or []
+    if not isinstance(raw, list):
+        raise Problem(400, "Bad Request", "objects (or elementIds) must be an array.")
+    return [
+        {"elementId": e} if isinstance(e, str) else (e or {})
+        for e in _cap_bulk(raw, "objects" if body.get("objects") else "elementIds")
+    ]
 
 
 def h_sub_register(req: Handler) -> None:

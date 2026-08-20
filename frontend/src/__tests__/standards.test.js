@@ -29,7 +29,7 @@ describe('standards registry', () => {
     expect(MTCONNECT_STANDARD).toBe(STANDARDS.MTCONNECT)
   })
 
-  it('mirrors the CHECK constraint on semantic_id_type (migration 0029)', () => {
+  it('mirrors the CHECK constraint on semantic_id_type (archived migration 0029)', () => {
     expect(SEMANTIC_ID_TYPES).toEqual(['IRI', 'IRDI', 'ModelReference'])
     expect(SEMANTIC_ID_TYPES).toContain(DEFAULT_SEMANTIC_ID_TYPE)
   })
@@ -77,7 +77,7 @@ describe('semantic id namespaces', () => {
 })
 
 describe('mtconnectSemanticId', () => {
-  it('mirrors the SQL in migration 0032 — namespace plus the whole metric name', () => {
+  it('mirrors the SQL in archived migration 0032 — namespace plus the whole metric name', () => {
     expect(mtconnectSemanticId('Axes/C/ANGLE'))
       .toBe('https://acs-cymru.local/semantics/mtconnect/v2.0/Axes/C/ANGLE')
   })

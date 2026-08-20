@@ -115,34 +115,15 @@ CREATE POLICY "asset_3d_models_delete_privileged" ON storage.objects
 -- gateway-backups -- Node-RED flow backups from physical gateway appliances
 -- =============================================================================================
 --
--- PRIVATE, AND THE OPPOSITE OF THE BUCKET ABOVE IN EVERY RESPECT THAT MATTERS. `asset-3d-models` is
--- public-read because an AAS `File` element's URL has to be dereferenceable by a viewer holding no
--- session. Nothing about a flow backup is public: a `flows.json` describes the plant's edge
--- topology, its broker addresses, its device ids and its processing logic. There is no
--- `getPublicUrl()` path for this bucket and there must never be one -- reads go through a signed
--- URL minted for a caller whose role has already been checked.
---
--- WHAT IS IN A BACKUP, AND WHAT IS DELIBERATELY NOT. `flows.json` ONLY. `flows_cred.json` is
--- Node-RED's credential store, encrypted with NODERED_CREDENTIAL_SECRET, and it is excluded on
--- purpose: stored here it would either be useless (the secret is not in this bucket) or catastrophic
--- (if the secret ever were). A restored appliance re-injects its credentials from the environment
--- the enrolment wrote, exactly as scripts/node-red-init.mjs already does for the platform's own
--- Node-RED. So a backup is a description of behaviour, never of secrets.
---
--- ---------------------------------------------------------------------------------------------
--- THE ROLE SPLIT IS ASYMMETRIC, AND THAT IS THE DESIGN.
+-- PRIVATE, and there is no `getPublicUrl()` path for this bucket. Reads go through a signed URL
+-- minted for a caller whose role has already been checked.
 --
 --   Administrator, Shopfloor_Manager   read, write, replace, delete
 --   Auditor                            READ ONLY
 --   Operator                           nothing
 --
--- An auditor's job is to see what the plant was configured to do and when it changed, and a flow
--- backup is the only artefact that answers that for the edge. Giving them SELECT is the point of
--- the role. Giving them INSERT would let an auditor rewrite the record they exist to examine, which
--- is the same objection that makes digital_thread append-only.
---
--- Operator gets nothing: nothing on the operator dashboard reads or writes a backup, and a role
--- that cannot use a capability should not hold it.
+-- Why the split is asymmetric, and what a backup does and does not contain:
+--   ./README.md -> "Storage buckets and why they differ"
 --
 -- ---------------------------------------------------------------------------------------------
 -- THE PATH IS CONFINED BY THE DATABASE, NOT BY THE UPLOADER.
