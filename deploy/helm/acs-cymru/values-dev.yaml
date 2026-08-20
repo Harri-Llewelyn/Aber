@@ -54,6 +54,16 @@ secrets:
   mqttGwAgvFleetPassword: acscymru123
   mqttGwFacilityBmsPassword: acscymru123
 
+  # The bearer token supabase-functions presents to the gateway-credential sidecar.
+  #
+  # NOT OPTIONAL, AND NOT A DEFAULT THE SERVICE CAN INVENT. It exits 2 on anything shorter than 32
+  # characters rather than running open -- that service can mint a broker account for any edge node,
+  # and mosquitto.acl makes an account the ability to publish telemetry as that gateway. Unset, the
+  # sidecar CrashLoopBackOffs, which takes the whole mosquitto POD out of Ready and stalls every
+  # workload that waits on the broker. The symptom is i3x-service and ingestion timing out, naming
+  # neither this value nor the container that refused to start.
+  mqttCredentialServiceToken: acs-cymru-dev-credential-service-token-not-a-secret
+
   grafanaAdminUser: admin
   grafanaAdminPassword: admin
   grafanaOAuthClientSecret: change-me-grafana-oauth-client-secret

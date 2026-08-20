@@ -158,6 +158,24 @@ in CrashLoopBackOff reporting a database it cannot authenticate against.
 {{- if and .Values.grafana.enabled (not .Values.secrets.biReaderPassword) -}}
 {{- $missing = append $missing "secrets.biReaderPassword (BI_READER_PASSWORD, required when grafana.enabled)" -}}
 {{- end -}}
+{{/*
+THE CREDENTIAL SERVICE'S TOKEN, for the same reason one line up and with a worse blast radius.
+
+It exits 2 on anything shorter than 32 characters rather than running open -- correctly, because it
+can mint a Mosquitto account for any edge node and mosquitto.acl turns an account into the ability
+to publish Sparkplug telemetry AS that gateway. There is no safe default to fall back to.
+
+But it is a SIDECAR IN THE BROKER'S POD (it needs a shared PID namespace to signal mosquitto), so
+its refusal is not contained the way Grafana's would be: the pod never reaches Ready, and every
+workload that waits on the broker -- ingestion, i3x-service, both e2e Jobs -- times out against a
+broker that is running perfectly well. The rollout error then names i3x-service, which is neither
+the cause nor anywhere near it.
+
+32, not "not empty", because the length is the check the service actually applies.
+*/}}
+{{- if and .Values.gatewayCredential.enabled (lt (len (.Values.secrets.mqttCredentialServiceToken | default "")) 32) -}}
+{{- $missing = append $missing "secrets.mqttCredentialServiceToken (MQTT_CREDENTIAL_SERVICE_TOKEN, 32+ characters, required when gatewayCredential.enabled)" -}}
+{{- end -}}
 {{- if $missing -}}
 {{- fail (printf "\n\nacs-cymru: required credentials are not set:\n  - %s\n\nThese are a SET, not independent values: anonKey and serviceRoleKey are JWTs signed by\njwtSecret, so supplying some and not others yields a stack that reports healthy and rejects\nevery request at the gateway. The chart deliberately does not generate them.\n\nFor a local k3s stack:   helm install ... -f values-dev.yaml\nFor anything else:       copy values-prod.yaml.example and supply a matching set.\n" (join "\n  - " $missing)) -}}
 {{- end -}}
