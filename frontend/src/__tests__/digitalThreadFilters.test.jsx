@@ -124,6 +124,24 @@ const show = async () => {
   await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
 }
 
+/**
+ * Render with purged assets INCLUDED.
+ *
+ * Hiding them is the page default (issue #44). Several suites below are ABOUT the two purged
+ * entities in the fixture -- `cell-gone` carries the deleted-name fallback and the only DELETE,
+ * and the orphan uuid on event 6 is the only entity with no name anywhere -- so for those the
+ * toggle is the subject of the test rather than incidental setup.
+ *
+ * Turning it on here rather than relaxing each assertion is deliberate: the alternative was to
+ * expect the smaller numbers, which would have quietly converted tests about three sections and a
+ * DELETE marker into tests about two sections and no DELETE.
+ */
+const showAll = async () => {
+  await show()
+  fireEvent.click(screen.getByRole('button', { name: /Show deleted assets/i }))
+  await waitFor(() => expect(screen.getByTitle('Clear every filter')).toBeInTheDocument())
+}
+
 /** Every marker on the timeline, in DOM order. */
 const nodes = () => [...document.querySelectorAll('.dt-node')]
 const nodeFor = (pattern) => screen.getAllByRole('button', { name: pattern })[0]
@@ -225,7 +243,7 @@ describe('Digital Thread time range', () => {
     two weeks old and must still render.
   */
   it('renders events far older than any rolling window, because the default is unbounded', async () => {
-    await show()
+    await showAll()
     expect(nodes().length).toBe(EVENTS.length)
   })
 
@@ -292,7 +310,7 @@ describe('Digital Thread time range', () => {
  */
 describe('Digital Thread swimlanes', () => {
   it('draws one lane per entity, not one row per event', async () => {
-    await show()
+    await showAll()
 
     expect(document.querySelectorAll('.dt-lane:not(.dt-axis)').length).toBe(ENTITY_COUNT)
     expect(nodes().length).toBe(EVENTS.length)
@@ -332,7 +350,7 @@ describe('Digital Thread swimlanes', () => {
   })
 
   it('recovers a deleted entity name from its audit snapshot, and says it is deleted', async () => {
-    await show()
+    await showAll()
     const lane = screen.getByText('Decommissioned Line').closest('.dt-lane')
     expect(lane).toBeTruthy()
     // Flagged, or the name reads as a live asset that simply is not in the list.
@@ -340,7 +358,7 @@ describe('Digital Thread swimlanes', () => {
   })
 
   it('falls back to a truncated id only when no name exists anywhere', async () => {
-    await show()
+    await showAll()
     // Neither joinable nor recoverable from a snapshot: event 6 carries no payload at all.
     expect(screen.getByText('99999999…5555')).toBeInTheDocument()
     // Not flagged deleted -- nothing says it was; it is merely unidentifiable.
@@ -356,14 +374,14 @@ describe('Digital Thread swimlanes', () => {
     scrolling.
   */
   it('groups lanes under Cells, Gateways and Devices, in containment order', async () => {
-    await show()
+    await showAll()
     const headings = [...document.querySelectorAll('.dt-section .dt-section-name')]
       .map(h => h.textContent)
     expect(headings).toEqual(['Cells', 'Gateways', 'Devices'])
   })
 
   it('counts what it draws in each heading', async () => {
-    await show()
+    await showAll()
     const counts = [...document.querySelectorAll('.dt-section')]
       .map(s => s.textContent.replace(/[^0-9]/g, ''))
     // One cell, one gateway, three devices (dev-1, dev-2, the unnamed one).
@@ -390,21 +408,33 @@ describe('Digital Thread swimlanes', () => {
   })
 
   it('folds the long tail of lanes behind a toggle', async () => {
-    const many = Array.from({ length: 20 }, (_, i) => ({
+    /*
+     * FORTY LANES, against a cap of thirty. This used to build twenty against a cap of fifteen --
+     * which stopped demonstrating anything once the cap moved, because twenty no longer overflows.
+     *
+     * The bulk assets are also returned by the devices lookup, so none of them reads as purged.
+     * Without that they would all be hidden by default and the page would draw nothing at all,
+     * making this a test of the purge filter wearing a lane-fold test's clothes.
+     */
+    const many = Array.from({ length: 40 }, (_, i) => ({
       event_id: 100 + i, entity_type: 'devices', entity_id: `bulk-${i}`, event_type: 'UPDATE',
       timestamp: '2026-08-02T12:00:00Z', description: 'x', changed_by: null, actor_source: 'service'
     }))
+    const bulkDevices = Array.from({ length: 40 }, (_, i) => ({
+      asset_id: `bulk-${i}`, asset_name: `Bulk_${i}`, last_birth_metrics: []
+    }))
     api.get.mockImplementation((path) => {
       if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve(many)
+      if (path.startsWith('/api/v1/devices')) return Promise.resolve(bulkDevices)
       return Promise.resolve([])
     })
     render(<DigitalThreadTab />)
 
-    const toggle = await screen.findByText(/Show all lanes \(\+5\)/)
-    expect(document.querySelectorAll('.dt-lane:not(.dt-axis)').length).toBe(15)
+    const toggle = await screen.findByText(/Show all lanes \(\+10\)/)
+    expect(document.querySelectorAll('.dt-lane:not(.dt-axis)').length).toBe(30)
 
     fireEvent.click(toggle)
-    await waitFor(() => expect(document.querySelectorAll('.dt-lane:not(.dt-axis)').length).toBe(20))
+    await waitFor(() => expect(document.querySelectorAll('.dt-lane:not(.dt-axis)').length).toBe(40))
   })
 })
 
@@ -489,7 +519,7 @@ describe('Digital Thread event classification', () => {
   })
 
   it('paints a DELETE as lifecycle-critical', async () => {
-    await show()
+    await showAll()
     expect(classOf(/DELETE on Decommissioned Line/)).toContain('dt-node-critical')
   })
 
@@ -505,7 +535,7 @@ describe('Digital Thread event classification', () => {
   })
 
   it('paints an archival as critical, though its action is only UPDATE', async () => {
-    await show()
+    await showAll()
     // Two UPDATEs on Press_02; exactly one of them flipped is_archived to true.
     const critical = nodes().filter(n => n.className.includes('dt-node-critical'))
     // The DELETE, plus the archival.
@@ -601,7 +631,7 @@ describe('Digital Thread event drawer', () => {
   })
 
   it('renders a DELETE as the properties it was deleted with', async () => {
-    await show()
+    await showAll()
     await selectEvent(/DELETE on Decommissioned Line/)
 
     expect(screen.getByText('Final properties')).toBeInTheDocument()
@@ -801,7 +831,7 @@ describe('Digital Thread attribution', () => {
   })
 
   it('flags a row with no actor_source at all, so a real gap is visible', async () => {
-    await show()
+    await showAll()
     await selectEvent(/DELETE on Decommissioned Line/)
     // Rows written before 0005. After it, this should never appear -- which is the point of
     // making it loud rather than blank.
@@ -920,53 +950,82 @@ describe('Digital Thread — removed tag filter', () => {
    * THE FIXTURE ALREADY CONTAINED THE CASE: `cell-gone` and the orphan UUID on event 6 appear in
    * EVENTS and in none of CELLS/GATEWAYS/DEVICES, which is exactly what a purged asset looks like.
    */
-  describe('hiding events for assets that no longer exist', () => {
-    const toggle = () => screen.getByRole('checkbox', { name: /Hide deleted assets/i })
+  describe('events for assets that no longer exist', () => {
+    const toggle = () => screen.getByRole('button', { name: /Show deleted assets/i })
 
-    it('offers the control with a count of what it would hide', async () => {
-      await show()
-      // Two purged entities in the fixture, one event each.
-      expect(toggle()).toBeInTheDocument()
-      expect(screen.getByText(/Hide deleted assets \(2\)/)).toBeInTheDocument()
-    })
-
-    it('shows every event by default, because this is an audit trail', async () => {
+    it('counts distinct ASSETS, not the events belonging to them', async () => {
       /*
-       * THE DEFAULT IS THE DECISION HERE. A page that omitted records unless you knew to ask for
-       * them invites exactly one conclusion -- that the event never happened. The control is
-       * offered with a count instead, so nothing is hidden by surprise.
+       * The reported bug: the control read "(54)" on a page whose own header said 16 assets, so the
+       * number could only be parsed as a count of something else. Two purged entities in the
+       * fixture -- `cell-gone` and the orphan uuid on event 6 -- so the answer is 2 however many
+       * rows they own between them.
        */
       await show()
-      expect(toggle()).not.toBeChecked()
-      expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (6)')
+      expect(toggle()).toHaveTextContent('Show deleted assets (2)')
+    })
+
+    it('hides them by default, and that is not an active filter', async () => {
+      /*
+       * The resting view is the live plant. A deleted Test gateway is noise on every visit, and
+       * Clear filters must not appear merely because the page is in its default state -- the
+       * contract every other control in this bar has is that clearing restores the resting view.
+       */
+      await show()
+
+      expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (4)')
+      expect(screen.queryByTitle('Clear every filter')).not.toBeInTheDocument()
+    })
+
+    it('showing them is the deviation, so Clear filters appears', async () => {
+      await show()
+      fireEvent.click(toggle())
+
+      await waitFor(() =>
+        expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (6)'))
+      expect(screen.getByTitle('Clear every filter')).toHaveTextContent('Clear filters (1)')
+    })
+
+    it('Clear filters returns them to hidden', async () => {
+      await show()
+      fireEvent.click(toggle())
+      fireEvent.click(await screen.findByTitle('Clear every filter'))
+
+      await waitFor(() =>
+        expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (4)'))
+    })
+
+    it('is styled as the toggle Gateways and Cells already use', async () => {
+      /*
+       * Has quarantined devices (Gateways) and Empty (Cells) are both `btn btn-sm`, ghost at rest
+       * and primary when engaged, with an icon and a count. This was a bare checkbox -- the only
+       * control of its kind in the app. Unlit at rest is also why the label says Show rather than
+       * Hide: with hiding as the default, a Hide button would load already pressed.
+       */
+      await show()
+      expect(toggle()).toHaveClass('btn', 'btn-sm', 'btn-ghost')
+      expect(toggle()).not.toHaveClass('btn-primary')
+
+      fireEvent.click(toggle())
+      await waitFor(() => expect(toggle()).toHaveClass('btn-primary'))
+      expect(toggle()).not.toHaveClass('btn-ghost')
     })
 
     it('drops those events from the export as well as the timeline', async () => {
       // The count on the button is the count the CSV writes -- both read the same derived list,
       // which is why `events` is derived once rather than filtered at each call site.
       await show()
-      fireEvent.click(toggle())
+      expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (4)')
 
+      fireEvent.click(toggle())
       await waitFor(() =>
-        expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (4)'))
-    })
-
-    it('counts as an active filter and is cleared with the rest', async () => {
-      await show()
-      fireEvent.click(toggle())
-
-      const clear = await screen.findByTitle('Clear every filter')
-      expect(clear).toHaveTextContent('Clear filters (1)')
-
-      fireEvent.click(clear)
-      await waitFor(() => expect(toggle()).not.toBeChecked())
+        expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (6)'))
     })
 
     it('hides the control when nothing would be hidden', async () => {
       /*
-       * The overwhelmingly common case on a healthy stack. A permanent checkbox reading "(0)" is a
-       * control whose relationship to the page has to be guessed at -- the same reasoning that
-       * keeps the custom date inputs out of the bar until the custom preset is chosen.
+       * The overwhelmingly common case on a healthy stack. A permanent control reading "(0)" is one
+       * whose relationship to the page has to be guessed at -- the same reasoning that keeps the
+       * custom date inputs out of the bar until the custom preset is chosen.
        */
       api.get.mockImplementation((path) => {
         if (path.startsWith('/api/v1/digital-thread')) {
@@ -979,14 +1038,15 @@ describe('Digital Thread — removed tag filter', () => {
       })
       await show()
 
-      expect(screen.queryByRole('checkbox', { name: /Hide deleted assets/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Show deleted assets/i })).not.toBeInTheDocument()
     })
 
     it('hides nothing while the asset lookups are still outstanding', async () => {
       /*
-       * THE BUG THIS PREVENTS, and it would have been silent. The purged test is "absent from the
-       * three lookups", and before those resolve EVERY entity_id is absent -- so a filter that ran
-       * eagerly would classify the entire page as deleted and, with the box ticked, blank it.
+       * THE BUG THIS PREVENTS, and it would have been silent. The purged test is absence from the
+       * three lookups, and before those resolve EVERY entity_id is absent -- so filtering eagerly
+       * would classify the whole page as deleted and, with hiding now the DEFAULT, blank it
+       * outright with no interaction at all.
        *
        * Lookups that never resolve are the same situation as lookups still in flight, so this also
        * covers the failure path: unable to tell purged from live means hide nothing.
@@ -999,16 +1059,16 @@ describe('Digital Thread — removed tag filter', () => {
 
       await waitFor(() =>
         expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (6)'))
-      // Nothing is classifiable as purged, so the control is not offered at all.
-      expect(screen.queryByRole('checkbox', { name: /Hide deleted assets/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Show deleted assets/i })).not.toBeInTheDocument()
     })
 
     it('does not treat an ARCHIVED asset as deleted', async () => {
       /*
-       * The distinction the whole test rests on. `/api/v1/devices` does not filter `is_archived`,
-       * so an archived device is still in the lookup and is therefore still live as far as this
-       * filter is concerned -- which is correct, because archiving is reversible and the audit
-       * page must not imply a deletion that did not happen.
+       * The distinction the whole filter rests on, and it matters more now that hiding is the
+       * default: /api/v1/devices does not filter is_archived, so an archived device is still in the
+       * lookup and is therefore still live as far as this filter is concerned. Getting it wrong
+       * would silently drop a retired -- but recoverable -- asset's whole history from the resting
+       * view.
        */
       api.get.mockImplementation((path) => {
         if (path.startsWith('/api/v1/digital-thread')) {
@@ -1024,7 +1084,7 @@ describe('Digital Thread — removed tag filter', () => {
       render(<DigitalThreadTab />)
       await waitFor(() => expect(screen.getByText('Press_02')).toBeInTheDocument())
 
-      expect(screen.queryByRole('checkbox', { name: /Hide deleted assets/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Show deleted assets/i })).not.toBeInTheDocument()
     })
   })
 

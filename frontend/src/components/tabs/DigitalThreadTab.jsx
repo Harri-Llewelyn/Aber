@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../api'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { ContextPanel } from '../common/ContextPanel'
-import { IconHistory, IconDownload, IconX, IconBuilding2, IconRadio, IconCpu } from '../common/Icons'
+import { IconHistory, IconDownload, IconX, IconBuilding2, IconRadio, IconCpu, IconTrash } from '../common/Icons'
 import { DIGITAL_THREAD_ACTIONS } from '../../constants'
 
 /**
@@ -188,8 +188,19 @@ export function timeWindow(preset, customStart, customEnd) {
   return { since: ms ? new Date(Date.now() - ms).toISOString() : '', until: '' }
 }
 
-/** How many lanes are drawn before the rest are folded behind a toggle. */
-const DEFAULT_LANE_LIMIT = 15
+/**
+ * How many lanes are drawn before the rest are folded behind a toggle.
+ *
+ * 30, NOT 15. At fifteen the toggle appeared on a seeded demonstrator -- sixteen assets, so the
+ * page folded away a single lane and asked for a click to see it. A control that hides one row is
+ * pure cost: the reader pays the click and the uncertainty of not knowing what was withheld, and
+ * saves 33 pixels on a page that scrolls anyway.
+ *
+ * The cap exists for a genuinely large estate, where a few hundred lanes would make the initial
+ * render the slowest thing on the page. Thirty is roughly a screen of lanes at 33px, so the fold
+ * now happens when there is actually something to fold.
+ */
+const DEFAULT_LANE_LIMIT = 30
 
 /** The sections, in the order a plant is organised: a cell holds gateways, which hold devices. */
 const SECTIONS = [
@@ -509,8 +520,13 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
   // CSV -- reads `events`, so deriving it is what keeps the purged filter from applying to some of
   // them and not others. A filter applied at each call site would have eight chances to be missed.
   const [allEvents, setAllEvents]     = useState([])
-  // Whether to hide events whose asset is no longer in the database (issue #44).
-  const [hidePurged, setHidePurged]   = useState(false)
+  // Whether to INCLUDE events whose asset is no longer in the database (issue #44).
+  //
+  // HIDDEN IS THE DEFAULT, and the control is phrased as "Show" rather than "Hide" so that the
+  // default state renders unlit -- matching `Has quarantined devices` on Gateways and `Empty` on
+  // Cells, both of which are off at rest and light up when engaged. A bar that loaded with a
+  // primary-coloured button already pressed would read as a filter someone had left on.
+  const [showPurged, setShowPurged]   = useState(false)
   // Set once the three asset lookups have landed. Until then EVERY entity_id looks absent, so the
   // purged test would classify the whole page as deleted. It also stays false if the lookups fail,
   // which is the fail-safe direction: unable to tell purged from live means hide nothing.
@@ -564,23 +580,29 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
    * the query is capped at 200 rows inside a time window, so an asset purged before the window
    * would read as live.
    */
-  const purgedEventCount = useMemo(() => {
+  const purgedAssetCount = useMemo(() => {
     if (!lookupsLoaded) return 0
-    return allEvents.reduce((n, e) => n + (entityNames.has(e.entity_id) ? 0 : 1), 0)
+    // DISTINCT ASSETS, not events. Counting rows answered a question nobody asked -- the button
+    // read "(54)" beside a page whose own header said 16 assets, so the number could only be
+    // parsed as a count of something else entirely. What the control acts on is assets.
+    const seen = new Set()
+    for (const e of allEvents) if (!entityNames.has(e.entity_id)) seen.add(e.entity_id)
+    return seen.size
   }, [allEvents, entityNames, lookupsLoaded])
 
   /**
    * What the page actually renders.
    *
-   * SHOWING EVERYTHING IS THE DEFAULT, deliberately. This is an audit trail, and a page that
-   * omitted records unless you knew to ask for them would be the wrong kind of quiet -- the
-   * failure mode is someone concluding an event never happened. The control is offered instead,
-   * with a count, so the clutter is one click from gone and its absence is never a surprise.
+   * PURGED ASSETS ARE HIDDEN BY DEFAULT. The records are never removed -- `digital_thread` is
+   * append-only and 0026 revoked DELETE even from `service_role` -- so this is a question about
+   * the resting view rather than about retention, and the resting view should be the live plant.
+   * A deleted Test gateway is noise on every visit; the button restores it in one click and
+   * carries a count, so nothing is hidden without saying so.
    */
   const events = useMemo(() => {
-    if (!hidePurged || !lookupsLoaded) return allEvents
+    if (showPurged || !lookupsLoaded) return allEvents
     return allEvents.filter(e => entityNames.has(e.entity_id))
-  }, [allEvents, entityNames, hidePurged, lookupsLoaded])
+  }, [allEvents, entityNames, showPurged, lookupsLoaded])
 
   /**
    * A name search resolves to the ids that match it, rather than filtering the fetched page.
@@ -628,11 +650,14 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
 
   const activeFilterCount =
     (entityTypeFilter ? 1 : 0) + (nameFilter ? 1 : 0) + (actionFilter ? 1 : 0) +
-    (rangeIsFiltering ? 1 : 0) + (hidePurged ? 1 : 0)
+    // SHOWING the purged assets is the deviation, because hiding them is the default. Clear
+    // filters therefore returns them to hidden, which is the same contract every other control in
+    // this bar has: clearing restores the resting view.
+    (rangeIsFiltering ? 1 : 0) + (showPurged ? 1 : 0)
 
   const resetFilters = () => {
     setEntityTypeFilter(''); setNameFilter(''); setActionFilter('')
-    setRangePreset('all'); setCustomStart(''); setCustomEnd(''); setHidePurged(false)
+    setRangePreset('all'); setCustomStart(''); setCustomEnd(''); setShowPurged(false)
     // Also drop the handover, or the effect above would immediately re-apply it and Clear Filters
     // would appear to do nothing.
     onClearEntity?.()
@@ -929,26 +954,26 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
           )}
 
           {/* SHOWN ONLY WHEN IT WOULD DO SOMETHING, matching Clear filters beside it and the custom
-              date inputs above. A permanent checkbox reading "(0)" on the overwhelmingly common
+              date inputs above. A permanent control reading "(0)" on the overwhelmingly common
               case -- nothing purged -- is a control whose relationship to the page has to be
               guessed at.
 
-              THE LABEL SAYS "no longer in the database", NOT "deleted", because that is what the
-              test can actually see: an entity_id absent from all three lookups. Purged is the
-              usual reason; an asset the caller's own policies hide would look the same, and
-              claiming it was deleted would be asserting something this page cannot know. */}
-          {purgedEventCount > 0 && (
-            <label
-              className="filter-toggle"
-              title="Hide events whose asset is no longer in the database. The records are kept either way -- this only changes what is listed."
+              SAME SHAPE AS `Has quarantined devices` (Gateways) AND `Empty` (Cells): a `btn-sm`
+              that carries `btn-primary` when engaged and `btn-ghost` at rest, an icon, and a
+              count. It was a bare checkbox, which was the only control of its kind in the app.
+
+              The TOOLTIP says "no longer in the database" where the label says "deleted", because
+              absence from the three lookups is all the test can actually see. Purged is the usual
+              reason; an asset the caller's own policies hide would look identical. The label has
+              to be short enough to read in a filter bar, so the precision lives in the tooltip. */}
+          {purgedAssetCount > 0 && (
+            <button
+              className={`btn btn-sm ${showPurged ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => setShowPurged(v => !v)}
+              title="Include events for assets that are no longer in the database. The records are kept either way -- this only changes what is listed."
             >
-              <input
-                type="checkbox"
-                checked={hidePurged}
-                onChange={e => setHidePurged(e.target.checked)}
-              />
-              Hide deleted assets ({purgedEventCount})
-            </label>
+              <IconTrash size={13} /> Show deleted assets ({purgedAssetCount})
+            </button>
           )}
 
           {activeFilterCount > 0 && (
