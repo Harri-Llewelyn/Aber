@@ -853,7 +853,7 @@ describe('Digital Thread — removed tag filter', () => {
     await waitFor(() => expect(controls().length).toBe(6))
   })
 
-  it('folds export and auto-refresh into the filter bar rather than a row of their own', async () => {
+  it('folds export into the filter bar rather than a row of its own', async () => {
     // What the export writes is decided by the filters, so the button belongs at the end of the
     // row that decides it. Removing the separate `.page-actions` row is also a whole band of
     // vertical space off the top of the page.
@@ -863,7 +863,169 @@ describe('Digital Thread — removed tag filter', () => {
     const actions = document.querySelector('.filter-bar .filter-bar-actions')
     expect(actions).toBeTruthy()
     expect(within(actions).getByTitle('Download audit events as CSV')).toBeInTheDocument()
-    expect(within(actions).getByTitle('Auto-refresh interval')).toBeInTheDocument()
+  })
+
+  it('no longer offers the auto-refresh control, having replaced it with a poll (issue #42)', async () => {
+    /*
+     * WHAT WAS REPORTED: the field was unneeded, because a default auto-update does the same job.
+     *
+     * It defaulted to Off, so the page was static until somebody noticed the control and picked a
+     * value -- and it then offered 1s and 5s against an audit log that only changes when an
+     * operator does something. Neither end of that range was useful.
+     */
+    await show()
+
+    expect(screen.queryByTitle('Auto-refresh interval')).not.toBeInTheDocument()
+    expect(screen.queryByTitle('Refresh now')).not.toBeInTheDocument()
+  })
+
+  it('polls every 60 seconds without blanking the timeline (issue #42)', async () => {
+    /*
+     * THE HALF THAT MATTERS. Removing a control and adding nothing would leave a page that never
+     * updates, and the assertion above -- that the control is gone -- would still pass.
+     *
+     * `load(false)`, not `load(true)`: the flag raises the loading state and swaps the timeline for
+     * a spinner, which is right on first paint and a flicker every minute afterwards. This asserts
+     * the refetch happens AND that the lanes are still on screen when it does.
+     */
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      render(<DigitalThreadTab />)
+      await vi.waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
+
+      const threadCalls = () =>
+        api.get.mock.calls.filter(c => String(c[0]).startsWith('/api/v1/digital-thread')).length
+      const before = threadCalls()
+
+      await vi.advanceTimersByTimeAsync(60_000)
+
+      expect(threadCalls()).toBe(before + 1)
+      // Still the timeline, not a spinner.
+      expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument()
+      expect(document.querySelector('.loading-wrap')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /*
+   * Hiding events whose asset is gone (issue #44).
+   *
+   * WHAT WAS REPORTED: a Test gateway created in error, never brought online, since deleted -- and
+   * still occupying the timeline. The reporter also proposed deleting the records outright; that
+   * half is deliberately NOT built here. `digital_thread` is append-only and 0026 revoked DELETE
+   * even from `service_role`, so removing rows is an administrative act, not a filter. Hiding is
+   * the part that answers the complaint without asserting anything about what was kept.
+   *
+   * THE FIXTURE ALREADY CONTAINED THE CASE: `cell-gone` and the orphan UUID on event 6 appear in
+   * EVENTS and in none of CELLS/GATEWAYS/DEVICES, which is exactly what a purged asset looks like.
+   */
+  describe('hiding events for assets that no longer exist', () => {
+    const toggle = () => screen.getByRole('checkbox', { name: /Hide deleted assets/i })
+
+    it('offers the control with a count of what it would hide', async () => {
+      await show()
+      // Two purged entities in the fixture, one event each.
+      expect(toggle()).toBeInTheDocument()
+      expect(screen.getByText(/Hide deleted assets \(2\)/)).toBeInTheDocument()
+    })
+
+    it('shows every event by default, because this is an audit trail', async () => {
+      /*
+       * THE DEFAULT IS THE DECISION HERE. A page that omitted records unless you knew to ask for
+       * them invites exactly one conclusion -- that the event never happened. The control is
+       * offered with a count instead, so nothing is hidden by surprise.
+       */
+      await show()
+      expect(toggle()).not.toBeChecked()
+      expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (6)')
+    })
+
+    it('drops those events from the export as well as the timeline', async () => {
+      // The count on the button is the count the CSV writes -- both read the same derived list,
+      // which is why `events` is derived once rather than filtered at each call site.
+      await show()
+      fireEvent.click(toggle())
+
+      await waitFor(() =>
+        expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (4)'))
+    })
+
+    it('counts as an active filter and is cleared with the rest', async () => {
+      await show()
+      fireEvent.click(toggle())
+
+      const clear = await screen.findByTitle('Clear every filter')
+      expect(clear).toHaveTextContent('Clear filters (1)')
+
+      fireEvent.click(clear)
+      await waitFor(() => expect(toggle()).not.toBeChecked())
+    })
+
+    it('hides the control when nothing would be hidden', async () => {
+      /*
+       * The overwhelmingly common case on a healthy stack. A permanent checkbox reading "(0)" is a
+       * control whose relationship to the page has to be guessed at -- the same reasoning that
+       * keeps the custom date inputs out of the bar until the custom preset is chosen.
+       */
+      api.get.mockImplementation((path) => {
+        if (path.startsWith('/api/v1/digital-thread')) {
+          return Promise.resolve(EVENTS.filter(e => ['dev-1', 'dev-2', 'gw-1'].includes(e.entity_id)))
+        }
+        if (path.startsWith('/api/v1/devices'))  return Promise.resolve(DEVICES)
+        if (path.startsWith('/api/v1/gateways')) return Promise.resolve(GATEWAYS)
+        if (path.startsWith('/api/v1/cells'))    return Promise.resolve(CELLS)
+        return Promise.resolve([])
+      })
+      await show()
+
+      expect(screen.queryByRole('checkbox', { name: /Hide deleted assets/i })).not.toBeInTheDocument()
+    })
+
+    it('hides nothing while the asset lookups are still outstanding', async () => {
+      /*
+       * THE BUG THIS PREVENTS, and it would have been silent. The purged test is "absent from the
+       * three lookups", and before those resolve EVERY entity_id is absent -- so a filter that ran
+       * eagerly would classify the entire page as deleted and, with the box ticked, blank it.
+       *
+       * Lookups that never resolve are the same situation as lookups still in flight, so this also
+       * covers the failure path: unable to tell purged from live means hide nothing.
+       */
+      api.get.mockImplementation((path) => {
+        if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve(EVENTS)
+        return new Promise(() => {})   // never resolves
+      })
+      render(<DigitalThreadTab />)
+
+      await waitFor(() =>
+        expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (6)'))
+      // Nothing is classifiable as purged, so the control is not offered at all.
+      expect(screen.queryByRole('checkbox', { name: /Hide deleted assets/i })).not.toBeInTheDocument()
+    })
+
+    it('does not treat an ARCHIVED asset as deleted', async () => {
+      /*
+       * The distinction the whole test rests on. `/api/v1/devices` does not filter `is_archived`,
+       * so an archived device is still in the lookup and is therefore still live as far as this
+       * filter is concerned -- which is correct, because archiving is reversible and the audit
+       * page must not imply a deletion that did not happen.
+       */
+      api.get.mockImplementation((path) => {
+        if (path.startsWith('/api/v1/digital-thread')) {
+          return Promise.resolve(EVENTS.filter(e => e.entity_id === 'dev-2'))
+        }
+        if (path.startsWith('/api/v1/devices')) {
+          return Promise.resolve([{ ...DEVICES[1], is_archived: true, archived_at: '2026-08-01T00:00:00Z' }])
+        }
+        if (path.startsWith('/api/v1/gateways')) return Promise.resolve([])
+        if (path.startsWith('/api/v1/cells'))    return Promise.resolve([])
+        return Promise.resolve([])
+      })
+      render(<DigitalThreadTab />)
+      await waitFor(() => expect(screen.getByText('Press_02')).toBeInTheDocument())
+
+      expect(screen.queryByRole('checkbox', { name: /Hide deleted assets/i })).not.toBeInTheDocument()
+    })
   })
 
   it('no longer fetches schemas, which it needed only to derive tags', async () => {

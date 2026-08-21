@@ -619,6 +619,35 @@ html, body, #root {
   font-size: 13px;
 }
 
+/* A checkbox filter sitting inline among the selects (Digital Thread's "Hide deleted assets").
+   Matched to `.filter-bar .form-control` at 34px and 13px so the row keeps ONE baseline -- a
+   bare <label> is shorter than the controls beside it and makes the bar look misaligned rather
+   than looking like a deliberate difference. 13px is above the 11px type-scale floor the theme
+   contrast tests enforce. */
+.filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: var(--transition);
+}
+.filter-toggle:hover { border-color: var(--accent); }
+/* The native control, tinted to the theme accent rather than the browser default blue, which
+   is the one colour on the page that answers to no token. */
+.filter-toggle input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+  margin: 0;
+}
+
 /* Pushes everything after it to the right-hand end of the bar. */
 .filter-bar-spacer { margin-left: auto; }
 

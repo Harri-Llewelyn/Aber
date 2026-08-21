@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../api'
 import { downloadCSV } from '../../utils/downloadCSV'
-import { AutoRefreshControl } from '../common/AutoRefreshControl'
 import { ContextPanel } from '../common/ContextPanel'
 import { IconHistory, IconDownload, IconX, IconBuilding2, IconRadio, IconCpu } from '../common/Icons'
 import { DIGITAL_THREAD_ACTIONS } from '../../constants'
@@ -505,7 +504,17 @@ function RawSnapshots({ event }) {
  * handover exact: two devices may share a name, but the id is the row.
  */
 export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
-  const [events, setEvents]           = useState([])
+  // RAW, straight from the API. `events` below is the DISPLAYED set, derived from this one.
+  // Every consumer on this page -- the lanes, the domain, the drawer, the causation siblings, the
+  // CSV -- reads `events`, so deriving it is what keeps the purged filter from applying to some of
+  // them and not others. A filter applied at each call site would have eight chances to be missed.
+  const [allEvents, setAllEvents]     = useState([])
+  // Whether to hide events whose asset is no longer in the database (issue #44).
+  const [hidePurged, setHidePurged]   = useState(false)
+  // Set once the three asset lookups have landed. Until then EVERY entity_id looks absent, so the
+  // purged test would classify the whole page as deleted. It also stays false if the lookups fail,
+  // which is the fail-safe direction: unable to tell purged from live means hide nothing.
+  const [lookupsLoaded, setLookupsLoaded] = useState(false)
   const [loading, setLoading]         = useState(true)
   const [entityTypeFilter, setEntityTypeFilter] = useState(initialEntity?.type || '')
   const [nameFilter, setNameFilter]   = useState(initialEntity?.id || '')
@@ -529,7 +538,7 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
       api.get('/api/v1/gateways'),
       api.get('/api/v1/cells')
     ])
-      .then(([d, g, c]) => { setDevices(d); setGateways(g); setCells(c) })
+      .then(([d, g, c]) => { setDevices(d); setGateways(g); setCells(c); setLookupsLoaded(true) })
       .catch(() => {})
   }, [])
 
@@ -541,6 +550,37 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
     for (const d of devices)  m.set(d.asset_id, d.asset_name)
     return m
   }, [cells, gateways, devices])
+
+  /**
+   * Events whose asset has been PURGED -- the row is in the audit log, the asset is not in any of
+   * the three live tables (issue #44).
+   *
+   * ABSENCE FROM THE LOOKUP IS THE TEST, and it is exact rather than a heuristic: the three list
+   * endpoints do NOT filter `is_archived`, so an archived asset is still present here. Absent
+   * therefore means genuinely gone, not merely retired -- which matters, because archiving is
+   * reversible and the audit page must not imply otherwise.
+   *
+   * A DELETE event in the loaded page would have been the obvious alternative test and is worse:
+   * the query is capped at 200 rows inside a time window, so an asset purged before the window
+   * would read as live.
+   */
+  const purgedEventCount = useMemo(() => {
+    if (!lookupsLoaded) return 0
+    return allEvents.reduce((n, e) => n + (entityNames.has(e.entity_id) ? 0 : 1), 0)
+  }, [allEvents, entityNames, lookupsLoaded])
+
+  /**
+   * What the page actually renders.
+   *
+   * SHOWING EVERYTHING IS THE DEFAULT, deliberately. This is an audit trail, and a page that
+   * omitted records unless you knew to ask for them would be the wrong kind of quiet -- the
+   * failure mode is someone concluding an event never happened. The control is offered instead,
+   * with a count, so the clutter is one click from gone and its absence is never a surprise.
+   */
+  const events = useMemo(() => {
+    if (!hidePurged || !lookupsLoaded) return allEvents
+    return allEvents.filter(e => entityNames.has(e.entity_id))
+  }, [allEvents, entityNames, hidePurged, lookupsLoaded])
 
   /**
    * A name search resolves to the ids that match it, rather than filtering the fetched page.
@@ -571,7 +611,7 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
     if (since) url += `&since=${encodeURIComponent(since)}`
     if (until) url += `&until=${encodeURIComponent(until)}`
     api.get(url)
-      .then(d => { setEvents(d); setLoading(false) })
+      .then(d => { setAllEvents(d); setLoading(false) })
       .catch(() => setLoading(false))
   }, [entityTypeFilter, actionFilter, namedEntityIds, rangePreset, customStart, customEnd])
 
@@ -588,23 +628,40 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
 
   const activeFilterCount =
     (entityTypeFilter ? 1 : 0) + (nameFilter ? 1 : 0) + (actionFilter ? 1 : 0) +
-    (rangeIsFiltering ? 1 : 0)
+    (rangeIsFiltering ? 1 : 0) + (hidePurged ? 1 : 0)
 
   const resetFilters = () => {
     setEntityTypeFilter(''); setNameFilter(''); setActionFilter('')
-    setRangePreset('all'); setCustomStart(''); setCustomEnd('')
+    setRangePreset('all'); setCustomStart(''); setCustomEnd(''); setHidePurged(false)
     // Also drop the handover, or the effect above would immediately re-apply it and Clear Filters
     // would appear to do nothing.
     onClearEntity?.()
   }
 
-  // Same wrapper TelemetryTab needs: AutoRefreshControl wires onRefresh straight to onClick, so
-  // passing `load` directly hands the click event in as `isInitial` -- truthy -- and blanks the
-  // timeline on every manual refresh.
-  const handleRefresh = useCallback(() => load(false), [load])
-
   useEffect(() => {
     load(true)
+  }, [load])
+
+  /**
+   * A fixed 60-second poll, replacing the auto-refresh control (issue #42).
+   *
+   * `load(false)`, NOT `load(true)`. The flag raises the loading state, which swaps the timeline
+   * for a spinner -- acceptable on first paint, and a flicker every minute otherwise. This is the
+   * same distinction the removed control needed a wrapper for: it wired onRefresh straight to
+   * onClick, so passing `load` directly handed the click event in as `isInitial` and blanked the
+   * timeline on every press.
+   *
+   * SAFE WITH THE DRAWER OPEN. `selected` is resolved from `events` by id on every render rather
+   * than held, so a refresh that returns the same event leaves the drawer exactly as it was, and
+   * one that no longer contains it closes it -- which is the correct outcome either way.
+   *
+   * The interval is rebuilt whenever `load` changes identity, i.e. whenever a filter changes. That
+   * is deliberate: the timer should measure from the most recent fetch, not keep firing on a
+   * schedule set by a query that is no longer running.
+   */
+  useEffect(() => {
+    const timer = setInterval(() => load(false), 60_000)
+    return () => clearInterval(timer)
   }, [load])
 
   /** event_id -> { diff, kind }. Computed once per fetch; both the markers and the CSV read it. */
@@ -871,6 +928,29 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
             </>
           )}
 
+          {/* SHOWN ONLY WHEN IT WOULD DO SOMETHING, matching Clear filters beside it and the custom
+              date inputs above. A permanent checkbox reading "(0)" on the overwhelmingly common
+              case -- nothing purged -- is a control whose relationship to the page has to be
+              guessed at.
+
+              THE LABEL SAYS "no longer in the database", NOT "deleted", because that is what the
+              test can actually see: an entity_id absent from all three lookups. Purged is the
+              usual reason; an asset the caller's own policies hide would look the same, and
+              claiming it was deleted would be asserting something this page cannot know. */}
+          {purgedEventCount > 0 && (
+            <label
+              className="filter-toggle"
+              title="Hide events whose asset is no longer in the database. The records are kept either way -- this only changes what is listed."
+            >
+              <input
+                type="checkbox"
+                checked={hidePurged}
+                onChange={e => setHidePurged(e.target.checked)}
+              />
+              Hide deleted assets ({purgedEventCount})
+            </label>
+          )}
+
           {activeFilterCount > 0 && (
             <button className="btn btn-ghost btn-sm" onClick={resetFilters} title="Clear every filter">
               <IconX size={13} /> Clear filters ({activeFilterCount})
@@ -880,8 +960,12 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
           {/* The spacer moved off Clear Filters and onto this group, so the right-hand end of the
               bar holds the same thing whether or not a filter happens to be set. */}
           <div className="filter-bar-spacer filter-bar-actions">
+            {/* AutoRefreshControl removed (issue #42). It was a Refresh button and an interval
+                select defaulting to Off, so the page was static until someone noticed the control
+                and chose a value -- and the same widget then offered 1s and 5s against an audit
+                log that changes when an operator does something. A fixed 60s poll below does what
+                the control was there to arrange, without asking. */}
             <button className="btn btn-ghost btn-sm" onClick={() => downloadCSV(exportRows(), 'digital-thread-export.csv')} title="Download audit events as CSV"><IconDownload size={13} /> Export CSV ({events.length})</button>
-            <AutoRefreshControl onRefresh={handleRefresh} defaultInterval={0} />
           </div>
         </div>
 
