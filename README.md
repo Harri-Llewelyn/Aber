@@ -166,6 +166,63 @@ Self-registered accounts get read-only `Operator` via the `handle_new_user` trig
 
 Teardown: `docker compose down -v` (also drops volumes, invalidating every logged-in browser).
 
+### Windows: `bind: An attempt was made to access a socket in a way forbidden by its access permissions`
+
+```
+Error response from daemon: ports are not available: exposing port TCP 0.0.0.0:54322 -> 127.0.0.1:0:
+listen tcp 0.0.0.0:54322: bind: An attempt was made to access a socket in a way forbidden by its
+access permissions.
+```
+
+**Nothing is wrong with the stack.** Hyper-V/WSL2 reserves blocks of high ports for NAT on boot,
+and those blocks routinely swallow the `543xx` range this stack publishes Supabase on. The port is
+not in use by another process — Windows has withdrawn it.
+
+**Docker names only the first port it fails on, and that is the misleading part.** Three ports are
+in that range, and the one that matters is not the one in the message:
+
+| Port | Service | Consequence if lost |
+| :--- | :--- | :--- |
+| `54321` | Kong | **the browser has no API** — the dashboard loads and every request fails |
+| `54322` | supabase-db | no `psql` from the host; the stack itself is unaffected |
+| `54323` | Supabase Studio | Studio unreachable |
+
+So fixing the port in the error changes nothing: `supabase-db` fails, every service that depends on
+it never starts, and what you see is a dashboard that loads and then reports **`Failed to fetch`**.
+`docker compose ps` shows the shape of it — `frontend`, `swagger-ui` and `timescaledb` up, because
+they are the only three that do not depend on `supabase-db`.
+
+Confirm it is this and not a real conflict:
+
+```powershell
+netsh interface ipv4 show excludedportrange protocol=tcp
+```
+
+A range covering `54321`–`54323` and **no `*`** beside it is a dynamic Hyper-V reservation. (`*`
+marks an administered exclusion — one somebody added deliberately.)
+
+**The fix**, in an **Administrator** PowerShell:
+
+```powershell
+net stop winnat
+netsh int ipv4 add excludedportrange protocol=tcp startport=54320 numberofports=8 store=persistent
+net start winnat
+```
+
+Then `docker compose up -d`.
+
+The middle line is the part that lasts. It claims `54320`–`54327` as an *administered* exclusion,
+so WinNAT cannot take the range again — `store=persistent` carries that across reboots. Restarting
+`winnat` on its own releases the current reservation but simply re-rolls it, so the same failure
+returns on the next boot or Docker Desktop restart.
+
+**If you cannot get an Administrator prompt**, the ports are configurable — `KONG_HTTP_PORT`,
+`SUPABASE_DB_PORT` and `STUDIO_PORT` in `.env`. Moving Kong is not a one-line change, though:
+`SUPABASE_URL`, `AAS_MODEL_PUBLIC_BASE` and `AAS_HISTORIAN_ENDPOINT` all carry the port, the
+Node-RED and Grafana OAuth URLs are derived from `SUPABASE_URL`, and `VITE_SUPABASE_URL` is a
+**build arg** — so the frontend needs `--build`, not just a restart. Change `.env` only and leave
+`.env.example` alone, or the divergence follows you into every other environment.
+
 ### Resetting to a clean slate
 
 ```bash
