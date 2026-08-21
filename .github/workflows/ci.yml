@@ -480,6 +480,36 @@ jobs:
               -f "$DEV" --set autoscaling.enabled=true --set "autoscaling.components[0]=$c"
           done
 
+          # A NAME THAT IS NEITHER ALLOWED NOR FORBIDDEN (issue #31). This was the third class and
+          # the unvalidated one: it rendered no HPA and no error, so a typo installed cleanly and
+          # then never scaled. The symptom arrives months later, under load, as a component that
+          # "should be autoscaling and isn't" -- with nothing logged at install time to search for.
+          #
+          # `superbase-rest` is the case from the issue, and it is the one worth pinning: it is one
+          # transposed letter from a legitimate value, so it is what an operator actually types.
+          for c in superbase-rest swagger-ui not-a-component; do
+            expect_failure "autoscaling unknown component $c" "not a component this chart can scale" \
+              -f "$DEV" --set autoscaling.enabled=true --set "autoscaling.components[0]=$c"
+          done
+
+          # THE ALLOW-LIST MUST STILL LET THE FOUR THROUGH, asserted here because every case above
+          # is a refusal -- a guard that refused EVERYTHING would satisfy all of them and break the
+          # feature completely. Rendered in one go, expecting exactly four HPAs.
+          HPAS=$(helm template acs-cymru deploy/helm/acs-cymru -f "$DEV" \
+                   --set autoscaling.enabled=true \
+                   --set autoscaling.components[0]=supabase-rest \
+                   --set autoscaling.components[1]=supabase-kong \
+                   --set autoscaling.components[2]=supabase-functions \
+                   --set autoscaling.components[3]=frontend \
+                 | grep -c '^kind: HorizontalPodAutoscaler' || true)
+          if [ "$HPAS" != "4" ]; then
+            echo "::error::expected 4 HorizontalPodAutoscalers for the four permitted components,"
+            echo "::error::rendered $HPAS. The allow-list added in issue #31 refuses anything it"
+            echo "::error::does not name, so an over-tight list breaks autoscaling outright."
+            exit 1
+          fi
+          echo "  ok: the four permitted components render an HPA each"
+
           # A nightly backup that writes nowhere is worse than none, because it looks like one.
           expect_failure "backup to s3 with no bucket" "backup.s3.bucket is empty" \
             -f "$DEV" --set backup.enabled=true --set backup.destination=s3
@@ -498,6 +528,88 @@ jobs:
             -f "$DEV" --set mosquitto.tls.enabled=true
 
           exit $fail
+
+      # ---------------------------------------------------------------------------------------
+      # The production example, rendered (issue #30).
+      #
+      # `values-prod.yaml.example` is the file an operator copies to stand up a real deployment,
+      # and nothing looked at it. Every other values file is exercised -- the chart lints and
+      # renders against values-dev.yaml, and the step above drives twenty-odd bad configurations
+      # through `helm template` -- but the one carrying the posture we actually RECOMMEND was
+      # never rendered.
+      #
+      # It is a worked example, so it is full of values the chart must still accept:
+      # `clusterIssuer`, `extraIpSans`, `internalClients`, `external.plaintext`,
+      # `metrics.enabled`. Any of them can be invalidated by a rename in values.yaml or by a new
+      # guard rail in _helpers.tpl, and the failure is otherwise deferred to the worst possible
+      # moment -- an operator's first `helm install`, against a real cluster, following our own
+      # documentation. It is also the only place several settings appear at all, so a rename
+      # applied mechanically to values.yaml and values-dev.yaml simply misses it.
+      #
+      # WHY `existingSecret` AND NOT A PILE OF THROWAWAY CREDENTIALS. The example deliberately
+      # carries no credentials -- pointing at an externally managed Secret is the whole point of
+      # it -- so a bare render fails the credential guard, correctly, and that guard must not be
+      # weakened to make a test pass.
+      #
+      # The obvious alternative, underlaying values-dev.yaml to supply credentials, DOES NOT WORK
+      # and is worth recording: the example pins `jwtSecret: ""`, `anonKey: ""` and the rest to
+      # empty strings, and an explicit empty string overrides an underlaid value rather than
+      # deferring to it. Setting `existingSecret` instead skips the credential block entirely --
+      # which is exactly what the External Secrets path the file recommends does in production.
+      # ---------------------------------------------------------------------------------------
+      - name: Render The Production Values Example
+        run: |
+          set -euo pipefail
+          PROD=deploy/helm/acs-cymru/values-prod.yaml.example
+
+          # RENDERED TO A FILE, and every check below reads the file rather than piping a variable.
+          #
+          # `printf '%s' "$OUT" | grep -q ...` is wrong under `set -o pipefail`, which this step
+          # needs so a helm failure is not swallowed. `grep -q` exits on the FIRST match, closing
+          # the pipe; printf is then killed by SIGPIPE; pipefail promotes that to the pipeline's
+          # status. The check fails precisely when the string IS present, which is the most
+          # confusing available direction. Found while writing this step.
+          helm template acs-cymru deploy/helm/acs-cymru \
+            -f "$PROD" --set secrets.existingSecret=ci-render-check > /tmp/prod-render.yaml
+
+          # A render that succeeds and emits nothing would satisfy a bare exit-code check.
+          COUNT=$(grep -c '^kind:' /tmp/prod-render.yaml || true)
+          if [ "$COUNT" -lt 40 ]; then
+            echo "::error::values-prod.yaml.example rendered only $COUNT objects, expected 40+."
+            echo "::error::A near-empty render usually means a top-level key was renamed and the"
+            echo "::error::example now disables far more than it means to."
+            exit 1
+          fi
+
+          # The posture the file exists to carry. These are not incidental -- each is a setting
+          # that appears in this file and nowhere else in the repository, so nothing else would
+          # notice if the chart stopped honouring it.
+          for want in 'kind: Ingress' 'cert-manager.io/cluster-issuer' 'kind: ServiceMonitor'; do
+            grep -q "$want" /tmp/prod-render.yaml || {
+              echo "::error::the production example rendered no '$want'."
+              echo "::error::That posture is what this file is FOR, so losing it silently is the"
+              echo "::error::failure mode this check exists to catch."
+              exit 1
+            }
+          done
+
+          # THE CHART'S OWN CREDENTIALS SECRET MUST NOT RENDER: `existingSecret` says one already
+          # exists, and shipping a second, empty copy alongside it is how the documented External
+          # Secrets path would quietly break -- pods reading the chart's blank Secret instead of
+          # the operator's real one.
+          #
+          # Matched on the TEMPLATE that produces it, not on `kind: Secret`. Mosquitto renders a
+          # Secret of its own regardless, so a bare kind check would fail here permanently and be
+          # "fixed" by deleting the assertion.
+          if grep -q 'templates/secret.yaml' /tmp/prod-render.yaml; then
+            echo "::error::the chart rendered its own credentials Secret despite"
+            echo "::error::secrets.existingSecret being set, so the External Secrets path in"
+            echo "::error::values-prod.yaml.example would ship an empty Secret over the real one."
+            exit 1
+          fi
+
+          echo "  ok: values-prod.yaml.example renders $COUNT objects with its TLS, ingress and"
+          echo "      metrics posture intact, and defers the Secret to the external one"
 
       # M4. The whole design of templates/networkpolicy.yaml is that the flow graph is declared ONCE
       # as edges and both directions are generated from it -- so allowing egress from A while
