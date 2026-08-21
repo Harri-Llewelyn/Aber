@@ -29,6 +29,14 @@ jobs:
       - name: Run Vitest Unit Tests
         run: |
           cd frontend
+          # `set -o pipefail` IS LOAD-BEARING, and its absence hid a red suite for a whole run.
+          #
+          # A pipeline reports the exit status of its LAST command, which here is `tee` -- and tee
+          # succeeds whatever vitest did. So a failing test left this step GREEN, and the only
+          # thing that noticed was the count check below, which could not parse
+          # `Tests  1 failed | 1289 passed` and reported ITSELF broken. The job failed one step
+          # late, for the wrong reason, pointing at the wrong file.
+          set -o pipefail
           npm test 2>&1 | tee /tmp/vitest.log
 
       # The one documented count that cannot be derived statically -- so it is asserted HERE, where
@@ -41,8 +49,18 @@ jobs:
           #   ^[[2m      Tests ^[[22m ^[[1m^[[32m684 passed^[[39m…
           # and a naive `grep 'Tests +[0-9]+ passed'` matches NOTHING -- which would have failed this
           # step on a perfectly green build, and pointed at the README rather than at the grep.
-          ACTUAL=$(sed -r 's/\x1B\[[0-9;]*[mGKH]//g' /tmp/vitest.log \
-                   | grep -oE 'Tests +[0-9]+ passed' | grep -oE '[0-9]+' | tail -1)
+          # A FAILING SUITE IS NAMED AS SUCH. vitest writes `Tests  1 failed | 1289 passed` when
+          # anything is red, which matches neither pattern below -- so this check used to report
+          # "could not read the test count" and send the reader off to fix the grep. `set -o
+          # pipefail` above now fails the run before this step is reached, but the branch stays:
+          # a parser that cannot tell a broken CHECK from a broken SUITE is one bad day away from
+          # being believed.
+          STRIPPED=$(sed -r 's/\x1B\[[0-9;]*[mGKH]//g' /tmp/vitest.log)
+          if printf '%s' "$STRIPPED" | grep -qE 'Tests +[0-9]+ failed'; then
+            echo "::error::the frontend suite has failing tests; the documented count is not the problem"
+            exit 1
+          fi
+          ACTUAL=$(printf '%s' "$STRIPPED" | grep -oE 'Tests +[0-9]+ passed' | grep -oE '[0-9]+' | tail -1)
           CLAIMED=$(grep -oE 'Frontend — [0-9]+ tests' README.md | grep -oE '[0-9]+')
           echo "vitest reports ${ACTUAL:-<unparsed>}; README claims ${CLAIMED:-<absent>}"
           # An empty ACTUAL is a broken check, not a documentation problem -- say which.

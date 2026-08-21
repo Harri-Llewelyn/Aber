@@ -548,6 +548,12 @@ function edgeFunctionNames() {
       'RLS on with NO policy and the anon/authenticated grants revoked — reachable only by '
       + 'service_role, i.e. only by the enroll-gateway function. Publishing a path for it would '
       + 'document an endpoint that answers 401 to every caller a reader could actually be',
+  platform_health:
+      'Platform condition counts -- stale gateways, stuck enrolments, quarantine depth -- '
+      + 'granted to `grafana_reader` alone and revoked from anon/authenticated by 0029. It exists '
+      + 'so an alert rule can read a COUNT without the dashboard reader being granted the asset '
+      + 'inventory it would otherwise derive one from; the browser gets the same facts through '
+      + 'its own RLS-checked queries',
   storage_footprint:
       'Byte counts and chunk horizons for both databases, granted to `grafana_reader` alone and '
       + 'revoked from anon/authenticated by 0027. It is read by the Grafana `supabase` datasource '

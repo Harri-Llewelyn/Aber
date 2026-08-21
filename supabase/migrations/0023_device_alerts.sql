@@ -1,7 +1,27 @@
 -- =============================================================================================
--- 0023_device_alerts.sql
+-- 0023_platform_alerts.sql
 --
 -- The landing table for Grafana alert notifications, and the realtime feed the dashboard reads.
+--
+-- ---------------------------------------------------------------------------------------------
+-- THE TABLE IS `platform_alerts`, AND IT WAS `platform_alerts` UNTIL THE PLATFORM RULES ARRIVED.
+--
+-- It was built when every rule was a MACHINE condition -- a thermal excursion, an emergency stop --
+-- so `sparkplug_id NOT NULL` and a foreign key to `devices` were exactly right. Roadmap item 3 adds
+-- rules about the PLATFORM: a gateway that has gone stale, an enrolment stuck in AWAITING_BIRTH,
+-- a quarantine queue that is filling. The first two are about a gateway and the third is about no
+-- single entity at all, and none of them fits a table whose every row must name a device.
+--
+-- So the subject is now (`entity_type`, `entity_id`) with `sparkplug_id` kept as the wire identity
+-- where one exists -- the same shape `digital_thread` uses, and NO FOREIGN KEY, for the same reason
+-- it has none: an alert that fired is a thing that happened, and purging the asset does not unhappen
+-- it. The old `device_id` FK was already `ON DELETE SET NULL`, which conceded the point while still
+-- costing a join.
+--
+-- 0028 migrates an existing database. THIS FILE DESCRIBES A FRESH ONE, which is why it simply
+-- creates the new table: on a database that 0028 has already converted, every statement here is a
+-- no-op, and on one it has not yet reached, 0023 creates the new table and 0028 moves the rows in.
+-- ---------------------------------------------------------------------------------------------
 --
 -- WHY GRAFANA IS THE ENGINE AND THIS IS ONLY A LOG. The dashboard used to derive an "alarm" state
 -- in the browser by comparing the latest telemetry against literals -- see
@@ -34,21 +54,31 @@
 
 SET search_path TO public;
 
-CREATE TABLE IF NOT EXISTS public.device_alerts (
+CREATE TABLE IF NOT EXISTS public.platform_alerts (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     -- Grafana's own identifier for the alert INSTANCE (a hash of its labels). Not unique on its
     -- own -- see the header.
     fingerprint text NOT NULL,
-    -- THE IMMUTABLE WIRE IDENTITY, not the device name. `devices.name` is a mutable display label
-    -- and `identity_source = 'legacy_name'` exists to deprecate matching on it; telemetry is keyed
-    -- by `asset_id` in the historian, so this is also the label Grafana naturally carries.
-    sparkplug_id text NOT NULL,
-    -- Resolved by the webhook at write time, so a reader can join without going through the
-    -- historian. ON DELETE SET NULL rather than CASCADE: an alert that fired is a thing that
-    -- happened, and deleting the device does not unhappen it. Nullable for the same reason it is
-    -- resolvable-or-not -- an alert can arrive for an id no row matches, and dropping it on the
-    -- floor would hide exactly the case worth seeing.
-    device_id uuid,
+    -- WHAT THE ALERT IS ABOUT. 'device' and 'gateway' name an asset; 'platform' is an alert with no
+    -- single subject -- a quarantine queue depth, a count of stuck enrolments -- where inventing one
+    -- would be worse than admitting there is none.
+    entity_type text DEFAULT 'device' NOT NULL,
+    -- The asset's row id, resolved by the webhook at write time so a reader can join without going
+    -- through the historian. NULL for `platform`, and NULL for an asset the id did not match.
+    --
+    -- NO FOREIGN KEY, deliberately, and the same decision `digital_thread.entity_id` makes: an alert
+    -- that fired is a thing that happened, and purging the asset does not unhappen it. The column
+    -- this replaces carried `ON DELETE SET NULL`, which conceded exactly that while still costing a
+    -- constraint -- and a generic subject cannot reference two different tables anyway.
+    entity_id uuid,
+    -- THE IMMUTABLE WIRE IDENTITY, not the display name. `devices.name` is mutable and
+    -- `identity_source = 'legacy_name'` exists to deprecate matching on it; telemetry is keyed by
+    -- `asset_id` in the historian, so this is also the label Grafana naturally carries.
+    --
+    -- NULLABLE SINCE THE PLATFORM RULES: a fleet-wide alert has no wire identity to carry, and the
+    -- webhook used to drop any notification without one. The CHECK below is what keeps that
+    -- nullability from becoming an excuse for an unattributed ASSET alert.
+    sparkplug_id text,
     alert_name text NOT NULL,
     severity text DEFAULT 'warning' NOT NULL,
     status text NOT NULL,
@@ -56,21 +86,29 @@ CREATE TABLE IF NOT EXISTS public.device_alerts (
     starts_at timestamp with time zone NOT NULL,
     ends_at timestamp with time zone,
     recorded_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT device_alerts_severity_valid CHECK ((severity = ANY (ARRAY['critical'::text, 'warning'::text, 'info'::text]))),
-    CONSTRAINT device_alerts_status_valid CHECK ((status = ANY (ARRAY['firing'::text, 'resolved'::text]))),
+    CONSTRAINT platform_alerts_severity_valid CHECK ((severity = ANY (ARRAY['critical'::text, 'warning'::text, 'info'::text]))),
+    CONSTRAINT platform_alerts_status_valid CHECK ((status = ANY (ARRAY['firing'::text, 'resolved'::text]))),
     -- A resolved occurrence must say when. Without this a resolve that lost its endsAt would sit
     -- in the table as closed-but-open-ended, and every "how long did it last" reader would have to
     -- guess.
-    CONSTRAINT device_alerts_resolved_has_end CHECK ((status <> 'resolved') OR (ends_at IS NOT NULL))
+    CONSTRAINT platform_alerts_resolved_has_end CHECK ((status <> 'resolved') OR (ends_at IS NOT NULL)),
+    CONSTRAINT platform_alerts_entity_type_valid
+        CHECK ((entity_type = ANY (ARRAY['device'::text, 'gateway'::text, 'platform'::text]))),
+    -- AN ASSET ALERT MUST NAME THE ASSET. Making `sparkplug_id` nullable for the platform rules
+    -- would otherwise quietly permit a device alert that identifies nothing -- which is the failure
+    -- the webhook's skip-and-count behaviour existed to prevent, moved into the schema where it
+    -- cannot be bypassed by a future caller.
+    CONSTRAINT platform_alerts_asset_has_wire_id
+        CHECK ((entity_type = 'platform') OR (sparkplug_id IS NOT NULL))
 );
 
 DO $migration$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
-     WHERE conname = 'device_alerts_pkey' AND conrelid = 'public.device_alerts'::regclass
+     WHERE conname = 'platform_alerts_pkey' AND conrelid = 'public.platform_alerts'::regclass
   ) THEN
-    ALTER TABLE ONLY public.device_alerts ADD CONSTRAINT device_alerts_pkey PRIMARY KEY (id);
+    ALTER TABLE ONLY public.platform_alerts ADD CONSTRAINT platform_alerts_pkey PRIMARY KEY (id);
   END IF;
 
   -- The occurrence key. This is what the webhook's ON CONFLICT targets, so it is a constraint
@@ -78,34 +116,37 @@ BEGIN
   -- more thing that has to be guessed correctly at 3am.
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
-     WHERE conname = 'uq_device_alerts_event' AND conrelid = 'public.device_alerts'::regclass
+     WHERE conname = 'uq_platform_alerts_event' AND conrelid = 'public.platform_alerts'::regclass
   ) THEN
-    ALTER TABLE ONLY public.device_alerts
-        ADD CONSTRAINT uq_device_alerts_event UNIQUE (fingerprint, starts_at);
+    ALTER TABLE ONLY public.platform_alerts
+        ADD CONSTRAINT uq_platform_alerts_event UNIQUE (fingerprint, starts_at);
   END IF;
 
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-     WHERE conname = 'device_alerts_device_id_fkey' AND conrelid = 'public.device_alerts'::regclass
-  ) THEN
-    ALTER TABLE ONLY public.device_alerts
-        ADD CONSTRAINT device_alerts_device_id_fkey
-        FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE SET NULL;
-  END IF;
 END
 $migration$;
 
--- The two access patterns, and nothing speculative. "What is firing now" drives the view below;
--- "this device's history" drives the drawer.
-CREATE INDEX IF NOT EXISTS idx_device_alerts_status_started
-    ON public.device_alerts (status, starts_at DESC);
-CREATE INDEX IF NOT EXISTS idx_device_alerts_sparkplug_started
-    ON public.device_alerts (sparkplug_id, starts_at DESC);
+-- The three access patterns, and nothing speculative. "What is firing now" drives the view below,
+-- "this asset's history" drives the drawer, and the third arrived with the platform rules: the
+-- dashboard reddens a device chip only for a DEVICE alert, so it filters on entity_type before it
+-- looks at anything else.
+CREATE INDEX IF NOT EXISTS idx_platform_alerts_status_started
+    ON public.platform_alerts (status, starts_at DESC);
+CREATE INDEX IF NOT EXISTS idx_platform_alerts_sparkplug_started
+    ON public.platform_alerts (sparkplug_id, starts_at DESC);
+CREATE INDEX IF NOT EXISTS idx_platform_alerts_entity
+    ON public.platform_alerts (entity_type, entity_id);
 
-COMMENT ON TABLE public.device_alerts IS
-  'One row per Grafana alert OCCURRENCE, delivered by the grafana-alert-webhook edge function. Append-only on (fingerprint, starts_at); an occurrence transitions firing -> resolved in place.';
-COMMENT ON COLUMN public.device_alerts.sparkplug_id IS
-  'The immutable Sparkplug device id the alert was raised for, taken from the Grafana label. Never the device name.';
+COMMENT ON TABLE public.platform_alerts IS
+  'One row per Grafana alert OCCURRENCE -- machine conditions and platform conditions alike -- delivered by the grafana-alert-webhook edge function. Append-only on (fingerprint, starts_at); an occurrence transitions firing -> resolved in place.';
+COMMENT ON COLUMN public.platform_alerts.sparkplug_id IS
+  'The immutable Sparkplug id of the asset the alert was raised for, taken from the Grafana label. '
+  'Never a display name. NULL only for entity_type = platform, which has no single subject.';
+COMMENT ON COLUMN public.platform_alerts.entity_type IS
+  'What the alert is about: device | gateway | platform. The dashboard reddens an asset only for '
+  'its own kind, so this is read before entity_id anywhere a colour or a link is derived.';
+COMMENT ON COLUMN public.platform_alerts.entity_id IS
+  'The subject row id, or NULL for a platform-scoped alert or an id that matched nothing. '
+  'Carries no foreign key on purpose -- see the column definition.';
 
 
 -- ---------------------------------------------------------------------------------------------
@@ -117,18 +158,18 @@ COMMENT ON COLUMN public.device_alerts.sparkplug_id IS
 -- one, and a naive filter would show the stale one forever. Taking the newest occurrence first and
 -- then discarding it unless it is still firing means a later resolve always wins.
 -- ---------------------------------------------------------------------------------------------
-CREATE OR REPLACE VIEW public.device_alerts_active WITH (security_invoker='true') AS
+CREATE OR REPLACE VIEW public.platform_alerts_active WITH (security_invoker='true') AS
 SELECT *
   FROM (
     SELECT DISTINCT ON (a.fingerprint)
-           a.id, a.fingerprint, a.sparkplug_id, a.device_id, a.alert_name,
+           a.id, a.fingerprint, a.entity_type, a.entity_id, a.sparkplug_id, a.alert_name,
            a.severity, a.status, a.summary, a.starts_at, a.ends_at, a.recorded_at
-      FROM public.device_alerts a
+      FROM public.platform_alerts a
      ORDER BY a.fingerprint, a.starts_at DESC, a.recorded_at DESC
   ) newest
  WHERE newest.status = 'firing';
 
-COMMENT ON VIEW public.device_alerts_active IS
+COMMENT ON VIEW public.platform_alerts_active IS
   'Currently firing alerts, one row per Grafana fingerprint (the newest occurrence). A later resolved occurrence supersedes an earlier firing one, so a missed resolve cannot pin a stale alert.';
 
 
@@ -146,22 +187,22 @@ COMMENT ON VIEW public.device_alerts_active IS
 -- yet, and adding a write policy before there is a caller would be authority granted for
 -- convenience.
 -- ---------------------------------------------------------------------------------------------
-ALTER TABLE public.device_alerts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.platform_alerts ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS device_alerts_select_authenticated ON public.device_alerts;
-CREATE POLICY device_alerts_select_authenticated
-    ON public.device_alerts FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS platform_alerts_select_authenticated ON public.platform_alerts;
+CREATE POLICY platform_alerts_select_authenticated
+    ON public.platform_alerts FOR SELECT TO authenticated USING (true);
 
-DROP POLICY IF EXISTS device_alerts_all_service_role ON public.device_alerts;
-CREATE POLICY device_alerts_all_service_role
-    ON public.device_alerts FOR ALL TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS platform_alerts_all_service_role ON public.platform_alerts;
+CREATE POLICY platform_alerts_all_service_role
+    ON public.platform_alerts FOR ALL TO service_role USING (true) WITH CHECK (true);
 
-REVOKE ALL ON public.device_alerts FROM anon;
-REVOKE ALL ON public.device_alerts_active FROM anon;
-GRANT SELECT ON public.device_alerts TO authenticated;
-GRANT SELECT ON public.device_alerts_active TO authenticated;
-GRANT ALL ON public.device_alerts TO service_role;
-GRANT SELECT ON public.device_alerts_active TO service_role;
+REVOKE ALL ON public.platform_alerts FROM anon;
+REVOKE ALL ON public.platform_alerts_active FROM anon;
+GRANT SELECT ON public.platform_alerts TO authenticated;
+GRANT SELECT ON public.platform_alerts_active TO authenticated;
+GRANT ALL ON public.platform_alerts TO service_role;
+GRANT SELECT ON public.platform_alerts_active TO service_role;
 
 
 -- ---------------------------------------------------------------------------------------------
@@ -173,21 +214,21 @@ GRANT SELECT ON public.device_alerts_active TO service_role;
 -- subscription, would be invisible in the payload.
 --
 -- THE ADD IS HERE AND THE INTENT IS DECLARED IN 0001. That file's `ALTER PUBLICATION ... SET TABLE`
--- is absolute and replays on every boot, so it lists `device_alerts` among its intended tables and
+-- is absolute and replays on every boot, so it lists `platform_alerts` among its intended tables and
 -- publishes whichever of them exist. On a fresh database 0001 runs before this file and cannot
 -- include it, which is why this migration adds it directly: without that, realtime for alerts
 -- would not work until the second boot.
 -- ---------------------------------------------------------------------------------------------
-ALTER TABLE public.device_alerts REPLICA IDENTITY FULL;
+ALTER TABLE public.platform_alerts REPLICA IDENTITY FULL;
 
 DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_publication_tables
-     WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'device_alerts'
+     WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'platform_alerts'
   ) THEN
-    ALTER PUBLICATION supabase_realtime ADD TABLE public.device_alerts;
-    RAISE NOTICE '0023: device_alerts added to the supabase_realtime publication.';
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.platform_alerts;
+    RAISE NOTICE '0023: platform_alerts added to the supabase_realtime publication.';
   END IF;
 END $$;
 
@@ -239,22 +280,22 @@ DECLARE
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_publication_tables
-     WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'device_alerts'
+     WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'platform_alerts'
   ) THEN
     RAISE EXCEPTION
-      '0023 self-check: device_alerts is not in the supabase_realtime publication, so the '
+      '0023 self-check: platform_alerts is not in the supabase_realtime publication, so the '
       'dashboard would never receive an alert';
   END IF;
 
-  IF (SELECT relreplident FROM pg_class WHERE oid = 'public.device_alerts'::regclass) <> 'f' THEN
+  IF (SELECT relreplident FROM pg_class WHERE oid = 'public.platform_alerts'::regclass) <> 'f' THEN
     RAISE EXCEPTION
-      '0023 self-check: device_alerts is not REPLICA IDENTITY FULL, so a firing -> resolved '
+      '0023 self-check: platform_alerts is not REPLICA IDENTITY FULL, so a firing -> resolved '
       'UPDATE would reach subscribers carrying only its primary key';
   END IF;
 
   -- anon must not be able to read it, by grant OR by policy.
-  IF has_table_privilege('anon', 'public.device_alerts', 'SELECT') THEN
-    RAISE EXCEPTION '0023 self-check: anon can SELECT device_alerts';
+  IF has_table_privilege('anon', 'public.platform_alerts', 'SELECT') THEN
+    RAISE EXCEPTION '0023 self-check: anon can SELECT platform_alerts';
   END IF;
 
   IF EXISTS (SELECT 1 FROM public.schemas WHERE schema_name = 'Machining_Cell_Schema') THEN
@@ -269,7 +310,7 @@ BEGIN
     END IF;
   END IF;
 
-  RAISE NOTICE '0023 self-check passed: device_alerts published with full replica identity, anon '
+  RAISE NOTICE '0023 self-check passed: platform_alerts published with full replica identity, anon '
                'excluded, machining schema models its thermal limit.';
 END $$;
 

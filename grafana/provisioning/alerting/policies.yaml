@@ -2,7 +2,7 @@
 #
 # ONE ROUTE, everything to the webhook. There is exactly one consumer -- the dashboard -- so a tree
 # with per-severity branches would be branching on a distinction nothing downstream acts on
-# differently. `severity` still travels as a LABEL and lands in device_alerts.severity, which is
+# differently. `severity` still travels as a LABEL and lands in platform_alerts.severity, which is
 # where the UI colours on it; routing is not the place to encode it.
 #
 # NO `default_receiver` OVERRIDE OF grafana-default-email. This file REPLACES the default policy
@@ -25,7 +25,7 @@
 #                       is precisely the thing not to sit on.
 #
 #   repeat_interval: 12h Re-notification for something still firing and unchanged. LONG on purpose.
-#                       The dashboard holds state -- device_alerts keeps the occurrence open and the
+#                       The dashboard holds state -- platform_alerts keeps the occurrence open and the
 #                       Topbar pill keeps counting it -- so a repeat delivers nothing new; it just
 #                       rewrites the same row. The mechanism exists to recover from a lost
 #                       notification, and 12h is the interval at which that recovery is worth having

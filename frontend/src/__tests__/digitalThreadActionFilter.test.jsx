@@ -137,26 +137,50 @@ describe('an unrecognised action must not widen the query', () => {
     expect(rows).toEqual([])
   })
 
-  it('accepts every action the shared enum declares', async () => {
+  it('sends a recognised action to the database instead of short-circuiting', async () => {
     /*
-     * The other direction, and it has to be asserted INDIRECTLY. The allow-list must not be
-     * narrower than the filter -- if it were, a legitimate option would return an empty list and
-     * read as "no such events ever happened", which is the same invisible failure in reverse.
+     * THE OTHER DIRECTION, and the allow-list must not be narrower than the filter: if it were, a
+     * legitimate option would return an empty list and read as "no such events ever happened" --
+     * the same invisible failure in reverse.
      *
-     * A recognised action cannot simply be run here, because it reaches Supabase and there is no
-     * backend in this environment. So the distinction under test is REFUSED versus ATTEMPTED: an
-     * unrecognised action short-circuits to [] with no request at all, while a recognised one gets
-     * as far as the network and fails there. Anything that returned [] for a valid action would be
-     * indistinguishable from the bug.
+     * ASSERTED ON WHETHER A QUERY WAS BUILT, not on what came back. The first version of this test
+     * ran each valid action for real and expected it to REJECT, on the reasoning that a request
+     * reaching a dead backend fails fast. It does locally. In CI there is no Supabase at all, so
+     * the fetch hung and the test died on a 5s timeout -- a test that passed or failed on network
+     * timing rather than on the branch it was written to cover. Stubbing the client makes the
+     * question deterministic and offline: did the recognised action reach `.from()`, and did the
+     * unrecognised one not?
      */
+    vi.resetModules()
+    const built = []
+    const chain = () => {
+      const q = {
+        select: () => q, eq: (col, val) => { built.push([col, val]); return q },
+        in: () => q, gte: () => q, lte: () => q, order: () => q, limit: () => q,
+        then: (resolve) => resolve({ data: [], error: null })
+      }
+      return q
+    }
+    vi.doMock('../lib/supabaseClient', () => ({
+      supabase: { from: () => chain() },
+      SUPABASE_URL: 'http://localhost:54321',
+      SUPABASE_ANON_KEY: 'test'
+    }))
+
     const { api: realApi } = await vi.importActual('../api')
 
     for (const action of Object.keys(DIGITAL_THREAD_ACTIONS)) {
-      await expect(realApi.get(`/api/v1/digital-thread?action=${action}`))
-        .rejects.toThrow()
+      built.length = 0
+      await realApi.get(`/api/v1/digital-thread?action=${action}`)
+      expect(built, `${action} should have become a predicate`)
+        .toContainEqual(['action', action])
     }
 
-    await expect(realApi.get('/api/v1/digital-thread?action=NOT_AN_ACTION'))
-      .resolves.toEqual([])
+    built.length = 0
+    await expect(realApi.get('/api/v1/digital-thread?action=NOT_AN_ACTION')).resolves.toEqual([])
+    expect(built, 'an unrecognised action must build no predicate at all').toEqual([])
+
+    vi.doUnmock('../lib/supabaseClient')
+    vi.resetModules()
   })
 })

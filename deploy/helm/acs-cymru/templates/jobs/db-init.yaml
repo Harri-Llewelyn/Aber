@@ -169,7 +169,7 @@ spec:
                 RETRIED ONLY ON A DEADLOCK, never on anything else.
 
                 db-init takes DDL locks on tables that supabase-realtime is concurrently reading
-                to evaluate its subscriptions -- 0023 alters policies on `public.device_alerts`,
+                to evaluate its subscriptions -- 0023 alters policies on `public.platform_alerts`,
                 which the dashboard subscribes to -- so the two can invert lock order and either
                 side can be chosen as the victim. Seen in the wild as `exit 3` from db-init with
                 the rest of the chain unapplied, which on that boot left `public.storage_footprint`

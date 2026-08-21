@@ -27,7 +27,7 @@ import { REALTIME_ENABLED } from '../../constants'
  * asking is usually mid-task on another tab -- and each row then navigates to its own device, which
  * is the one case where leaving the current page is what was wanted.
  *
- * @param {Array}    alerts          Rows from `device_alerts_active` -- see hooks/useDeviceAlerts.
+ * @param {Array}    alerts          Rows from `platform_alerts_active` -- see hooks/usePlatformAlerts.
  * @param {Function} onSelectDevice  Called with a sparkplug_id when a row is clicked. Optional: the
  *                                   panel is still worth opening read-only without it.
  * @param {boolean}  realtime        Whether Realtime is carrying updates. Defaults to the deployment
@@ -125,7 +125,7 @@ export function AlertPill({ alerts = [], onSelectDevice, realtime = REALTIME_ENA
                       <button
                         className="alert-pill-item-link"
                         onClick={() => { setOpen(false); onSelectDevice(a.sparkplug_id) }}
-                        /* The sparkplug id, not a device name: `device_alerts` does not carry one.
+                        /* The sparkplug id, not a device name: `platform_alerts` does not carry one.
                            The webhook resolves the NAME only far enough to template Grafana's
                            summary, and the id is what the Devices search matches on anyway. */
                         title={`Show ${a.sparkplug_id} on the Devices page`}

@@ -316,3 +316,264 @@ groups:
               datasource:
                 type: __expr__
                 uid: __expr__
+
+  # ===============================================================================================
+  # PLATFORM CONDITIONS -- the stack's own health, not the machines'.
+  #
+  # WHY THIS GROUP COULD NOT EXIST UNTIL NOW. Every signal below lives in Supabase, and this file's
+  # header states the blocker plainly: postgres_fdw runs Supabase -> TimescaleDB and not the
+  # reverse, so Grafana could only ever see the historian. Migration 0027 gave it a second
+  # datasource against the metadata database; these rules are what that was for.
+  #
+  # THEY READ ONE VIEW, `public.platform_health` (migration 0029), and the narrowness is deliberate.
+  # `grafana_reader` may SELECT that view and `storage_footprint` and nothing else -- not `devices`,
+  # not `gateways`. A rule needs a number and, where the condition is about an asset, that asset's
+  # wire id; handing a browser-SSO-fronted service the plant's inventory to compute three counts is
+  # the trade the narrow grant exists to refuse.
+  #
+  # A SEPARATE GROUP, NOT THREE MORE RULES IN "Shopfloor Conditions". The two differ in what a
+  # reader should do about them: a thermal excursion is for whoever is on the floor, a stuck
+  # enrolment is for whoever runs the stack. They also want different evaluation intervals -- the
+  # machine group runs at 10s because someone is standing in front of a fault-injection button,
+  # and nothing here changes that fast.
+  #
+  # `entity_type` IS THE LABEL THAT MAKES THESE LAND CORRECTLY. grafana-alert-webhook defaults it to
+  # `device`, which is what keeps the three machine rules above working untouched; these declare
+  # `gateway` or `platform` so the dashboard can tell an asset alert from a fleet one -- and so the
+  # shopfloor map does not paint a machine red for a gateway fault.
+  # ===============================================================================================
+  - orgId: 1
+    name: Platform Conditions
+    folder: ACS-Cymru - Alerts
+    # ONE MINUTE, NOT TEN SECONDS. None of these conditions moves faster than that: the staleness
+    # threshold behind `gateway_stale` is 90 seconds, an enrolment is measured in hours, and a
+    # quarantine queue changes when a person approves something. Evaluating at the machine group's
+    # 10s would be three more queries every ten seconds against the metadata database to re-read
+    # numbers that cannot have changed.
+    interval: 1m
+    rules:
+      # -----------------------------------------------------------------------------------------
+      # 1. GATEWAY STALE -- an appliance that has stopped reporting.
+      #
+      # THE VIEW OWNS THE DEFINITION OF STALE, not this rule. `gateway_status.is_stale` applies the
+      # 90-second threshold that check-mirror-drift.mjs holds in step with the frontend; the rule
+      # only decides how long to tolerate it before telling anyone. Re-deriving the arithmetic here
+      # would put the threshold in a third place.
+      #
+      # `for: 5m` ON TOP OF THAT 90 SECONDS. A gateway that misses a couple of heartbeats across a
+      # broker reconnect is ordinary and self-heals; one that has been quiet for five minutes has
+      # not. Roadmap item 2 would make this sharper by having the appliance report its own health,
+      # at which point silence and unhealthy stop being the same signal.
+      # -----------------------------------------------------------------------------------------
+      - uid: acs-gateway-stale
+        title: Gateway Stale
+        condition: C
+        for: 5m
+        # NoData IS OK HERE, and that is a real decision rather than a default. The query returns NO
+        # ROWS when every gateway is healthy -- there is nothing to report -- so treating an empty
+        # frame as anything but OK would alarm permanently on a well-behaved stack.
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: gateway
+        annotations:
+          summary: >-
+            {{ $labels.gateway }} has not sent a heartbeat for
+            {{ printf "%.0f" $values.B.Value }}s. Check the appliance and its broker credential.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: supabase
+            model:
+              refId: A
+              datasource:
+                type: postgres
+                uid: supabase
+              format: time_series
+              rawQuery: true
+              editorMode: code
+              # `collected_at AS "time"` because Grafana's time_series format requires a time
+              # column, and this view is a point-in-time answer rather than a series. The reduce
+              # below takes the single value regardless.
+              rawSql: |
+                SELECT collected_at   AS "time",
+                       subject        AS gateway,
+                       sparkplug_id   AS sparkplug_id,
+                       value          AS quiet_seconds
+                  FROM public.platform_health
+                 WHERE condition = 'gateway_stale'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              # ANY ROW AT ALL IS THE ALERT. The view only emits a gateway that is already stale, so
+              # the threshold is a formality -- `> 0` on a quiet-seconds count that cannot be zero.
+              # Expressed rather than omitted because a Grafana rule needs a condition node.
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -----------------------------------------------------------------------------------------
+      # 2. ENROLMENT STUCK -- a gateway that authenticated and then never published.
+      #
+      # THE FAILURE THIS EXISTS FOR IS SILENT TODAY. 0025 introduced AWAITING_BIRTH: a physical
+      # gateway redeems its enrolment token, lands in that state, and leaves it on its first NBIRTH.
+      # One that stays has a working broker credential and a flow that did not deploy -- and nothing
+      # has ever alarmed on it, so the symptom is an appliance that quietly never arrives and is
+      # noticed when somebody asks where it got to.
+      #
+      # `for: 0s` BECAUSE THE VIEW ALREADY CARRIES THE DELAY. The threshold below is one hour of
+      # `enrolled_at` age, so a debounce on top would only postpone a condition that has already
+      # been true for an hour.
+      # -----------------------------------------------------------------------------------------
+      - uid: acs-enrolment-stuck
+        title: Enrolment Stuck
+        condition: C
+        for: 0s
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: gateway
+        annotations:
+          summary: >-
+            {{ $labels.gateway }} has been AWAITING_BIRTH for
+            {{ printf "%.0f" $values.B.Value }}s without publishing an NBIRTH. Its flow may not have
+            deployed.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: supabase
+            model:
+              refId: A
+              datasource:
+                type: postgres
+                uid: supabase
+              format: time_series
+              rawQuery: true
+              editorMode: code
+              rawSql: |
+                SELECT collected_at   AS "time",
+                       subject        AS gateway,
+                       sparkplug_id   AS sparkplug_id,
+                       value          AS stuck_seconds
+                  FROM public.platform_health
+                 WHERE condition = 'enrolment_stuck'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              # One hour. An enrolment that completes normally does so in seconds; an hour is long
+              # enough that nobody is still watching the appliance boot.
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [3600]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -----------------------------------------------------------------------------------------
+      # 3. QUARANTINE QUEUE DEPTH -- devices waiting on a human decision.
+      #
+      # THE ONE RULE HERE WITH NO SUBJECT, and `entity_type: platform` is how it says so. A queue
+      # depth is a property of the queue; naming one of its members would be arbitrary, and the
+      # `platform_alerts` schema was generalised specifically so this could be recorded without
+      # inventing an asset for it.
+      #
+      # THE VIEW EMITS THIS ROW AT ZERO AS WELL, which is why `noDataState` barely matters here --
+      # a healthy stack returns a row saying 0 rather than returning nothing. That makes "the queue
+      # is empty" and "the datasource is down" distinguishable, which they are not when a rule's
+      # healthy state is an empty frame.
+      #
+      # FIVE IS A DEMONSTRATOR THRESHOLD. On a real floor it depends on how many devices are
+      # commissioned at once and who is expected to approve them.
+      # -----------------------------------------------------------------------------------------
+      - uid: acs-quarantine-depth
+        title: Quarantine Queue Depth
+        condition: C
+        for: 5m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            {{ printf "%.0f" $values.B.Value }} devices are quarantined and waiting for an approval
+            decision on the Devices page.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: supabase
+            model:
+              refId: A
+              datasource:
+                type: postgres
+                uid: supabase
+              format: time_series
+              rawQuery: true
+              editorMode: code
+              rawSql: |
+                SELECT collected_at AS "time",
+                       value        AS quarantined
+                  FROM public.platform_health
+                 WHERE condition = 'quarantine_depth'
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [5]
+              datasource:
+                type: __expr__
+                uid: __expr__

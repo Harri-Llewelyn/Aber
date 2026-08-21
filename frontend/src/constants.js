@@ -119,7 +119,7 @@ export const GRAFANA_URL = readSetting('VITE_GRAFANA_URL', 'http://localhost:300
  * "the alert has cleared", which is the one wrong answer somebody following this link would act on.
  *
  * NOT A RULE-UID DEEP LINK EITHER, though the UIDs are stable and pinned (`acs-thermal-excursion` and
- * friends). They live in the provisioning YAML and nowhere in `device_alerts` -- the Alertmanager
+ * friends). They live in the provisioning YAML and nowhere in `platform_alerts` -- the Alertmanager
  * payload the webhook receives does not carry one -- so using them would mean a name-to-UID map in
  * the frontend that drifts from the YAML the first time a rule is renamed, with nothing to catch it.
  * The rule NAME is what Grafana itself put in the row, so this cannot disagree with the rule it

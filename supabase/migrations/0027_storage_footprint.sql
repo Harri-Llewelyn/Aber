@@ -110,7 +110,7 @@ AS $fn$
     SELECT
         CASE
           WHEN c.relname = 'digital_thread' THEN 'audit'
-          WHEN c.relname = 'device_alerts'  THEN 'alerts'
+          WHEN c.relname = 'platform_alerts' THEN 'alerts'
           -- The standards vocabularies are seeded reference data, not operational state. They are
           -- large (ASHRAE 223P alone is a six-figure INSERT chain in 0013) and they never grow at
           -- runtime, so folding them into `metadata` would put a fixed cost in the same bar as the

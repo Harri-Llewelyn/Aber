@@ -8,7 +8,7 @@
  * that take a *status* still never return red.
  *
  * AN ALERT IS THE ONE CASE THAT IS NOT A DERIVATION. Grafana evaluated its own rules against the
- * historian, posted the verdict to `grafana-alert-webhook`, and it landed in `device_alerts`.
+ * historian, posted the verdict to `grafana-alert-webhook`, and it landed in `platform_alerts`.
  * Painting that red RELAYS a judgement rather than making one -- so `deviceChipClass` and
  * `deviceDotColor` take an ALERT, never a threshold, and there is no path through either that turns
  * a telemetry value into a colour. These tests pin both halves: red appears for an alert, and the
@@ -37,7 +37,8 @@ const device = (over = {}) => ({
 const alert = (over = {}) => ({
   fingerprint: 'f1',
   sparkplug_id: 'dev220000000000400080000',
-  device_id: '22000000-0000-4000-8000-000000000001',
+  entity_type: 'device',
+  entity_id: '22000000-0000-4000-8000-000000000001',
   alert_name: 'Thermal Excursion',
   severity: 'critical',
   summary: 'Spindle over temperature',
@@ -47,13 +48,14 @@ const alert = (over = {}) => ({
 
 describe('matching an alert to the device it is about', () => {
   it('resolves on the wire identity', () => {
-    const index = alertIndex([alert({ device_id: null })])
+    const index = alertIndex([alert({ entity_id: null })])
     expect(alertForDevice(index, device())?.alert_name).toBe('Thermal Excursion')
   })
 
   it('resolves on the row UUID when the alert carries no wire id', () => {
-    // `device_alerts.device_id` is resolved by the webhook at write time and is nullable both ways:
-    // an alert can arrive for an id no row matches, and ON DELETE SET NULL clears it on a purge.
+    // `platform_alerts.entity_id` is resolved by the webhook at write time and is nullable: an
+    // alert can arrive for an id no row matches. It carries no foreign key, so a purge leaves the
+    // alert intact with an id that now points at nothing -- which is the intended trade.
     const index = alertIndex([alert({ sparkplug_id: null })])
     expect(alertForDevice(index, device())?.alert_name).toBe('Thermal Excursion')
   })
@@ -68,13 +70,61 @@ describe('matching an alert to the device it is about', () => {
   })
 
   it('returns null for a device nothing is firing on', () => {
-    const index = alertIndex([alert({ sparkplug_id: 'devOTHER', device_id: 'other-uuid' })])
+    const index = alertIndex([alert({ sparkplug_id: 'devOTHER', entity_id: 'other-uuid' })])
     expect(alertForDevice(index, device())).toBeNull()
   })
 
   it('survives an empty list and a missing device', () => {
     expect(alertForDevice(alertIndex([]), device())).toBeNull()
     expect(alertForDevice(alertIndex(), null)).toBeNull()
+  })
+})
+
+
+describe('only DEVICE alerts can redden a device', () => {
+  /*
+   * Roadmap item 3 put gateway and platform alerts in the same feed. The shopfloor map uses this
+   * index to paint a device chip, so without a filter a gateway fault could colour a machine --
+   * not today, because the two id spaces do not collide, but on the day a re-provision makes them.
+   * The map would then be asserting something no rule said.
+   */
+  const gatewayAlert = alert({
+    entity_type: 'gateway',
+    sparkplug_id: 'gwy120000000000400080000',
+    entity_id: '12000000-0000-4000-8000-000000000001',
+    alert_name: 'Gateway Stale'
+  })
+
+  it('excludes a gateway alert from the device index', () => {
+    const index = alertIndex([gatewayAlert])
+    expect(index.size).toBe(0)
+  })
+
+  it('excludes a platform alert, which names no asset at all', () => {
+    const index = alertIndex([
+      { fingerprint: 'p1', entity_type: 'platform', sparkplug_id: null, entity_id: null,
+        alert_name: 'Quarantine Queue Depth', severity: 'warning' }
+    ])
+    expect(index.size).toBe(0)
+  })
+
+  it('would redden the WRONG asset without the filter, which is the case it exists for', () => {
+    // A gateway alert whose wire id collides with a device's. Contrived, and exactly what a
+    // re-provision under a reused id would produce.
+    const colliding = alert({ entity_type: 'gateway', alert_name: 'Gateway Stale' })
+    expect(alertForDevice(alertIndex([colliding]), device())).toBeNull()
+  })
+
+  it('indexes gateways when asked for them', () => {
+    // The same helper serves the Gateways page; the filter is a parameter, not a hardcoded kind.
+    const index = alertIndex([gatewayAlert], 'gateway')
+    expect(index.get('gwy120000000000400080000')?.alert_name).toBe('Gateway Stale')
+  })
+
+  it('treats a row with no entity_type as a device, for rows written before 0023 was generalised', () => {
+    const legacy = { fingerprint: 'l1', sparkplug_id: 'dev220000000000400080000',
+                     alert_name: 'Thermal Excursion', severity: 'critical' }
+    expect(alertForDevice(alertIndex([legacy]), device())?.alert_name).toBe('Thermal Excursion')
   })
 })
 

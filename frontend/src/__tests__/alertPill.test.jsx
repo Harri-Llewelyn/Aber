@@ -197,7 +197,7 @@ describe('AlertPill', () => {
 
       expect(row()).toHaveAttribute('title', expect.stringContaining('dev220000000000400080000'))
       fireEvent.click(row())
-      // The sparkplug id, not a name: device_alerts carries no device name, and the Devices search
+      // The sparkplug id, not a name: platform_alerts carries no device name, and the Devices search
       // matches on the id anyway.
       expect(onSelectDevice).toHaveBeenCalledWith('dev220000000000400080000')
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()

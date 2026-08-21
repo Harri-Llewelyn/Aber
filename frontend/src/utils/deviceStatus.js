@@ -83,7 +83,7 @@ export function deviceStatusChipClass(status) {
  * threshold alerting was moved to Grafana. That rule is unchanged and this does not weaken it.
  *
  * An alert is the one case that is not a derivation. Grafana evaluated its own rules against the
- * historian, posted the verdict to grafana-alert-webhook, and it landed in `device_alerts`. Painting
+ * historian, posted the verdict to grafana-alert-webhook, and it landed in `platform_alerts`. Painting
  * that red RELAYS a judgement rather than making one -- so this takes an alert, never a threshold,
  * and there is no code path here that can turn a telemetry value into a colour.
  *

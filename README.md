@@ -124,7 +124,7 @@ row's standard and published semantic id, `0019` adds the 223P supply-air-flow m
 shopfloor simulator needed, `0020` retires the introductory single-device simulator and moves its
 schema and IDTA nameplate onto `Sim_CNC_Mill_01`, `0021` gives each shopfloor cell an icon from a
 closed set, `0022` adds one schema per machine class and attaches it to every simulated device,
-`0023` adds the `device_alerts` occurrence log Grafana alerting writes into and publishes it for
+`0023` adds the `platform_alerts` occurrence log Grafana alerting writes into and publishes it for
 Realtime, `0024` adds an optional free-text `description` to devices and gateways, `0025` adds
 physical-gateway enrolment — a `gateway_enrollment_tokens` table reachable only by `service_role`,
 the RPCs that issue and atomically redeem a single-use token, and the `PENDING_ENROLLMENT` /
@@ -134,7 +134,11 @@ produces can be read back as one act, and adds `record_ingestion_rejection()` �
 SECURITY DEFINER gate through which the ingestion daemon records a payload it judged
 non-conforming, replacing `service_role`'s direct INSERT on the audit table — and `0027` maps the
 historian's storage footprint over `postgres_fdw` and unions it with Supabase's own table sizes as
-`public.storage_footprint`, read by Grafana's `supabase` datasource — plus demo accounts
+`public.storage_footprint`, read by Grafana's `supabase` datasource — `0028` generalises the alert
+table from `device_alerts` to `platform_alerts`, whose subject is `(entity_type, entity_id)` rather
+than a device, because roadmap item 3 adds rules about a gateway and about the fleet and neither
+fits a row that must name a machine — and `0029` adds `public.platform_health`, the narrow view
+those rules evaluate so the Grafana reader never needs the asset inventory — plus demo accounts
 (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
@@ -407,7 +411,7 @@ Digital Nameplate; what each one covers and how its identity was verified is in
 ## Testing
 
 ```bash
-# Frontend — 1225 tests
+# Frontend — 1290 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required
@@ -564,7 +568,7 @@ A `Cert_Expires_At` metric plus one alert rule turns the single worst fleet-wide
 
 ### 3 · Expanded platform alerting
 
-**Builds on:** [`grafana/provisioning/alerting/`](grafana/provisioning/alerting) · `device_alerts`
+**Builds on:** [`grafana/provisioning/alerting/`](grafana/provisioning/alerting) · `platform_alerts`
 (`0023`) and its Realtime publication · `grafana-alert-webhook`
 
 The three shipped rules — Thermal Excursion, Emergency Stop, Low OEE Availability — are all

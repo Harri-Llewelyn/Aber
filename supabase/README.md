@@ -464,7 +464,7 @@ All fail closed: missing or unrecognised role ⇒ `403`.
 | [`grafana-userinfo`](functions/grafana-userinfo) | any mapped role | OIDC userinfo for Grafana SSO |
 | [`nodered-userinfo`](functions/nodered-userinfo) | any mapped role | The same lookup in Node-RED's permission vocabulary |
 | [`fplus-directory`](functions/fplus-directory) | any authenticated user | Factory+ Directory adapter — see below |
-| [`grafana-alert-webhook`](functions/grafana-alert-webhook) | **no Supabase role at all** | Records a Grafana alert in `device_alerts` — see below |
+| [`grafana-alert-webhook`](functions/grafana-alert-webhook) | **no Supabase role at all** | Records a Grafana alert in `platform_alerts` — see below |
 
 ### `grafana-alert-webhook` — the one that authorises on a shared secret
 
