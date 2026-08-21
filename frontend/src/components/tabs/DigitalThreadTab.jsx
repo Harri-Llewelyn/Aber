@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { api } from '../../api'
 import { downloadCSV } from '../../utils/downloadCSV'
 import { ContextPanel } from '../common/ContextPanel'
@@ -201,6 +201,79 @@ export function timeWindow(preset, customStart, customEnd) {
  * now happens when there is actually something to fold.
  */
 const DEFAULT_LANE_LIMIT = 30
+
+/*
+ * MARKERS THAT WOULD SIT ON TOP OF EACH OTHER ARE FANNED VERTICALLY.
+ *
+ * WHY NOT NUDGE THEM ALONG THE TIME AXIS, which is the obvious fix. Two reasons, and the second is
+ * worse than the distortion the first describes:
+ *
+ *   1. It would be ZOOM-DEPENDENT. Over an all-time range of ten hours an 8px nudge reads as about
+ *      twelve minutes of separation; over a one-hour range the same nudge reads as one minute. The
+ *      same pair of events would appear to be different distances apart depending on a control that
+ *      has nothing to do with them.
+ *   2. It would ERASE THE CAUSATION SIGNAL. Rows written in one transaction share a timestamp
+ *      exactly -- `recorded_at` is transaction start time, which is why causationSiblings() orders
+ *      by event_id rather than by time. Perfect overlap is the visual signature of one act, and
+ *      nudging turns the clearest case of "these happened together" into "these happened near
+ *      each other".
+ *
+ * THE VERTICAL AXIS INSIDE A LANE ENCODES NOTHING. Every marker is otherwise pinned to the lane's
+ * centre line, so displacing along it costs no information and distorts no claim: x stays exactly
+ * where the timestamp puts it. The dilemma only exists if the displacement has to be sideways.
+ */
+// EIGHT, NOT NINE, AND THE PIXEL MATTERS. A fan of three spans (2 x step) + 15px for the marker
+// and its ring; at 9px that is 33px in a 32px track, so the outer two clip at the lane boundary.
+// Caught by the span assertion in digitalThreadDodge.test.js rather than by looking at it.
+export const DODGE_STEP_PX = 8
+/**
+ * Three, because that is what fits. The track is 32px and a marker is 13px plus a 2px ring, so a
+ * fan of three spans 31px -- any more would clip at the lane boundary. A cluster larger than this
+ * cycles back through the slots and overlaps again; the drawer's entity trail is the path that
+ * enumerates a dense burst properly, and it is already ordered.
+ */
+export const DODGE_SLOTS = 3
+
+/**
+ * @param {Array}    events      one lane's events
+ * @param {Function} xOf         event -> 0..1 along the track
+ * @param {number}   trackWidth  measured px; 0 disables dodging entirely
+ * @param {number}   markerPx    how close in px counts as a collision
+ * @returns {Map} event_id -> vertical offset in px from the lane's centre line
+ */
+export function dodgeOffsets(events, xOf, trackWidth, markerPx = 15) {
+  const offsets = new Map()
+  // NO MEASUREMENT, NO DODGE. Guessing a width would move markers by an amount unrelated to
+  // whether they actually collide, and not dodging is the status quo rather than a new fault.
+  if (!trackWidth) {
+    for (const e of events) offsets.set(e.event_id, 0)
+    return offsets
+  }
+
+  let cluster = []
+  let lastX = null
+  const flush = () => {
+    // Centred on the lane rule rather than growing downwards, so a fan reads as one group sitting
+    // on the line instead of as markers that have slipped off it.
+    const span = Math.min(cluster.length, DODGE_SLOTS)
+    cluster.forEach((e, i) => {
+      offsets.set(e.event_id, ((i % DODGE_SLOTS) - (span - 1) / 2) * DODGE_STEP_PX)
+    })
+    cluster = []
+  }
+
+  // CHAINED, not measured from the first of the cluster: a run of events each 10px from the last
+  // is one continuous pile, and testing against the cluster's start would break it into groups
+  // that still overlap at their seams.
+  for (const e of [...events].sort((a, b) => xOf(a) - xOf(b))) {
+    const x = xOf(e) * trackWidth
+    if (lastX !== null && x - lastX < markerPx) cluster.push(e)
+    else { flush(); cluster = [e] }
+    lastX = x
+  }
+  flush()
+  return offsets
+}
 
 /** The sections, in the order a plant is organised: a cell holds gateways, which hold devices. */
 const SECTIONS = [
@@ -778,6 +851,41 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
   // than a bare percentage.
   const offsetFor = (timestamp) => `calc(14px + (100% - 28px) * ${fractionFor(timestamp)})`
 
+  /*
+   * The track's rendered width, needed to know which markers actually COLLIDE.
+   *
+   * MEASURED RATHER THAN ASSUMED, because the collision threshold is in pixels and the track is
+   * `flex: 1` over a `min-width: 380px` -- so the same two timestamps overlap at one viewport
+   * width and are comfortably apart at another. A hardcoded fraction would dodge markers that do
+   * not overlap on a wide screen and miss ones that do on a narrow one.
+   *
+   * The axis track is measured because it always exists, and every track shares its width. In
+   * jsdom `offsetWidth` is 0, which disables dodging -- the right default for an environment with
+   * no layout, and what makes `dodgeOffsets` testable directly instead of through the DOM.
+   */
+  const axisTrackNode = useRef(null)
+  const [trackWidth, setTrackWidth] = useState(0)
+
+  /*
+   * A CALLBACK REF, NOT A `useEffect` ON MOUNT, and the difference is the whole thing working.
+   *
+   * The timeline does not exist on first paint -- the page renders a spinner until the fetch lands,
+   * so the axis track is absent -- and an effect with `[]` deps measures a null ref, records 0, and
+   * NEVER RUNS AGAIN. The dodge would then be silently disabled forever, on a page that looked
+   * exactly as it does now. A callback ref fires when the node actually attaches, which is the
+   * moment there is something to measure.
+   */
+  const axisTrackRef = useCallback((node) => {
+    axisTrackNode.current = node
+    if (node) setTrackWidth(node.offsetWidth || 0)
+  }, [])
+
+  useEffect(() => {
+    const measure = () => setTrackWidth(axisTrackNode.current?.offsetWidth || 0)
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [])
+
   const ticks = useMemo(() => {
     if (!domain) return []
     const format = tickFormatter(domain.span)
@@ -1026,7 +1134,7 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
                     <div className="dt-lane-label dt-axis-corner">
                       {lanes.length} {lanes.length === 1 ? 'asset' : 'assets'} · {events.length} events
                     </div>
-                    <div className="dt-track dt-axis-track">
+                    <div className="dt-track dt-axis-track" ref={axisTrackRef}>
                       {ticks.map(t => (
                         <span
                           key={t.f}
@@ -1088,15 +1196,29 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
                           </div>
 
                           <div className="dt-track">
-                            {lane.events.map(e => {
+                            {(() => {
+                              /* Per lane, because a collision is only a collision within one row --
+                                 two assets acting at the same instant are two markers on different
+                                 lanes and were never in each other's way. */
+                              const dodge = dodgeOffsets(
+                                lane.events, (e) => fractionFor(e.timestamp), trackWidth
+                              )
+                              return lane.events.map(e => {
                               const kind = analysis.get(e.event_id)?.kind || 'operational'
                               const isSelected = String(e.event_id) === String(selectedEventId)
+                              const dy = dodge.get(e.event_id) || 0
                               return (
                                 <button
                                   key={e.event_id}
                                   type="button"
                                   className={`dt-node dt-node-${kind}${isSelected ? ' dt-node-selected' : ''}`}
-                                  style={{ left: offsetFor(e.timestamp) }}
+                                  style={{
+                                    left: offsetFor(e.timestamp),
+                                    // `top` rather than a transform: .dt-node already carries
+                                    // `translate(-50%, -50%)` to centre itself, and overriding that
+                                    // to add the offset would undo the centring.
+                                    ...(dy ? { top: `calc(50% + ${dy}px)` } : null)
+                                  }}
                                   onClick={() => setSelectedEventId(e.event_id)}
                                   /* A plain `title`, which is what the rest of this app uses for a
                                      hover hint. Three lines -- what, who, when -- is what the hover
@@ -1106,7 +1228,8 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
                                   aria-pressed={isSelected}
                                 />
                               )
-                            })}
+                              })
+                            })()}
                           </div>
                         </div>
                       ))}

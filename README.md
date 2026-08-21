@@ -413,7 +413,7 @@ Digital Nameplate; what each one covers and how its identity was verified is in
 ## Testing
 
 ```bash
-# Frontend — 1305 tests
+# Frontend — 1322 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required
@@ -524,7 +524,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Eleven extensions, ordered by how much of each already exists. None is speculative: every one names
+Twelve extensions, ordered by how much of each already exists. None is speculative: every one names
 the code it would build on, because the value of writing them down is that a reader can tell how far
 away each is.
 
@@ -777,6 +777,34 @@ The real work on that side is narrower and has two parts:
   keys. That is a real upstream deprecation with a real end date, and it touches Kong's key-auth
   consumers, the edge-function registry and `custom_access_token_hook`. It should be scoped against
   the pinned `supabase/gotrue` and `kong` versions before it is planned, not assumed to apply.
+
+---
+
+### 12 · A time range the Digital Thread can actually zoom into
+
+**Builds on:** `timeWindow()` / `TIME_PRESETS` / the custom range inputs in
+[`DigitalThreadTab.jsx`](frontend/src/components/tabs/DigitalThreadTab.jsx)
+
+The custom range pickers are `type="date"`, so **the narrowest window expressible is one whole
+day** — `timeWindow()` reads them as 00:00 and 23:59 local. On a stack commissioned this morning
+that makes *All time* and *today* the same picture, and a burst of commissioning writes lands in a
+few pixel columns however the page is filtered.
+
+Markers that collide are now fanned vertically rather than being left on top of each other, which
+was the reported symptom. **That is a legibility fix, not a zoom**: it makes two or three
+simultaneous events countable, and it deliberately does nothing for a dense burst of twenty, where
+the honest answer is to narrow the axis rather than to fan markers into a column that no longer
+fits the lane.
+
+`datetime-local` inputs are most of the work. The rest is the boundary handling in `timeWindow()`,
+which currently appends the day's start and end to a bare date — a narrower range needs the value
+passed through as an instant instead, and the ISO conversion is the part that will get local time
+wrong if it is done casually.
+
+**The reason to want it is not zooming for its own sake.** The causation work made
+`digital_thread` legible as *acts* rather than rows, and an act is exactly the thing that happens
+inside one second — so the page's most interesting content is at the resolution the range control
+cannot currently reach.
 
 ---
 
