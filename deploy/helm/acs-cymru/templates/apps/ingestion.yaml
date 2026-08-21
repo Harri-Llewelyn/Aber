@@ -5,8 +5,10 @@
 =================================================================================================
 The Sparkplug B ingestion daemon: MQTT -> Supabase (metadata, quarantine) + TimescaleDB (telemetry).
 
-NO SERVICE. It is a pure consumer -- it subscribes to `spBv1.0/#` and writes to two databases.
-Nothing calls it, so exposing it would be surface area with no purpose.
+NO SERVICE FOR ITS WORK, ONE FOR ITS METRICS. It is a pure consumer -- it subscribes to
+`spBv1.0/#` and writes to two databases -- so nothing calls it and there is no application traffic
+to expose. The headless Service at the foot of this file carries the `/metrics` port and nothing
+else, because a ServiceMonitor selects Services rather than Pods (issue #22).
 =================================================================================================
 */}}
 apiVersion: apps/v1
@@ -109,6 +111,13 @@ spec:
           image: {{ include "acs-cymru.image" (dict "image" .Values.ingestion.image "ctx" $) | quote }}
           imagePullPolicy: {{ .Values.ingestion.image.pullPolicy }}
           env:
+            {{- /*
+              The Prometheus endpoint (issues #22, #24). 0 disables it in ingestion.py -- see
+              start_metrics_endpoint(), where the disable is a CONFIGURATION decision; metrics.py
+              treats port 0 as "ask the OS for a free one", as the socket API does everywhere else.
+            */}}
+            - name: INGESTION_METRICS_PORT
+              value: {{ ternary (.Values.ingestion.metrics.port | toString) "0" .Values.ingestion.metrics.enabled | quote }}
             # TimescaleDB. M2: the in-cluster name and the STANDARD port -- 5433 is only
             # docker-compose's published port and means nothing here.
             - name: DB_HOST
@@ -187,10 +196,27 @@ spec:
             periodSeconds: {{ .Values.ingestion.healthIntervalSeconds }}
             timeoutSeconds: 5
             failureThreshold: 3
+          {{- if .Values.ingestion.metrics.enabled }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.ingestion.metrics.port }}
+              protocol: TCP
+          {{- end }}
           {{/*
-            NO READINESS PROBE, deliberately. Readiness gates Service endpoints, and this pod backs
-            no Service -- so a readiness probe here would have no consumer and no effect, while
-            adding a second way for the pod to look broken.
+            NO READINESS PROBE, AND THE REASON HAS CHANGED RATHER THAN GONE AWAY.
+
+            It used to be that this pod backed no Service, so readiness had no consumer. It now
+            backs one -- the metrics Service below, added for issue #22 -- and readiness would
+            therefore start gating something: Prometheus stops scraping a target whose pod is not
+            Ready.
+
+            That is precisely the wrong behaviour here. The moment worth scraping is the one where
+            the daemon is unhealthy, and a readiness probe would remove the evidence exactly then.
+            `acs_ingestion_up` and a flat `messages_total` say "running but consuming nothing",
+            which is a diagnosis; a target that has vanished says only that something is wrong
+            somewhere.
+
+            Liveness above still restarts a wedged daemon, which is the failure Kubernetes can fix.
           */}}
           resources:
             {{- toYaml .Values.ingestion.resources | nindent 12 }}
@@ -202,4 +228,40 @@ spec:
       volumes:
         {{- include "acs-cymru.brokerClientCaVolume" . | nindent 8 }}
       {{- end }}
+
+{{- if .Values.ingestion.metrics.enabled }}
+---
+{{/*
+A SERVICE THAT EXISTS ONLY TO BE SCRAPED.
+
+The daemon serves no application traffic -- it is an MQTT client and a database writer, and nothing
+in the cluster calls it. This Service exists because a ServiceMonitor selects Services, not Pods,
+which is the one piece of plumbing between a `/metrics` endpoint and a Prometheus that will read it.
+
+`clusterIP: None` because there is nothing to load-balance: the workload is pinned to one replica
+(it holds an unshared `spBv1.0/#` subscription) and a headless Service gives the operator the pod
+endpoint directly rather than a virtual IP in front of a single backend.
+
+publishNotReadyAddresses IS DELIBERATE. There is no readiness probe here, but this states the
+intent rather than relying on its absence: an unhealthy daemon is exactly what someone wants to
+scrape, and a Service that withdrew the endpoint would take the evidence away at the only moment
+it mattered.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingestion-metrics
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.ingestion.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+{{- end }}
 {{- end }}

@@ -43,10 +43,13 @@ DELIBERATELY ABSENT, and this is the part worth reading:
   timescaledb     deployment with its own credentials and its own scrape story. Worth doing, and
                   worth doing properly rather than half-added here.
 
-  ingestion       A Python daemon with no HTTP server. Its liveness signal is the heartbeat file
-                  the kubelet probe reads (see apps/ingestion.yaml); making it serve metrics would
-                  mean adding an HTTP listener to a process whose whole design is a single MQTT
-                  loop.
+  (ingestion USED TO BE LISTED HERE, on the reasoning that it was "a Python daemon with no HTTP
+  server" and that giving it one would mean adding a listener to a process whose whole design is a
+  single MQTT loop. Issues #22 and #24 overturned that, and the second half of the argument turned
+  out to be the weaker one: the daemon ALREADY runs three background threads -- a device watchdog,
+  a liveness heartbeat and a stats reporter -- so a fourth serving a text endpoint fits the shape
+  it already had. What it is NOT is a re-instrumentation: the counters existed, and metrics.py
+  renders the registry they already fill. It is a target below.)
 
 REQUIRES THE PROMETHEUS OPERATOR CRDs. ServiceMonitor is not a core Kubernetes type; without
 kube-prometheus-stack (or at least its CRDs) installed, `helm install` fails with
@@ -76,6 +79,25 @@ Without it the targets are simply DOWN, which reads as the pods being unreachabl
       "port" "metrics"
       "path" "/metrics"
       "why" "the prometheus plugin on the status listener") -}}
+{{- end -}}
+{{/*
+  THE ONLY TARGET ON THE CRITICAL DATA PATH. Everything else here observes a request tier; this one
+  says whether telemetry is being recorded at all.
+
+  It scrapes `ingestion-metrics`, the headless Service in apps/ingestion.yaml, which exists solely
+  because a ServiceMonitor selects Services rather than Pods.
+
+  `acs_ingestion_messages_dropped_total` is the series worth a panel: any non-zero value is
+  telemetry that was NOT written, and under report-by-exception nothing ever restates it.
+*/}}
+{{- if and .Values.ingestion.enabled .Values.ingestion.metrics.enabled -}}
+{{- $targets = append $targets (dict
+      "name" "ingestion"
+      "component" "ingestion"
+      "service" "ingestion-metrics"
+      "port" "metrics"
+      "path" "/metrics"
+      "why" "the daemon's own counter registry, rendered by ingestion/metrics.py") -}}
 {{- end -}}
 {{- if and .Values.mosquitto.enabled .Values.mosquitto.metrics.enabled -}}
 {{- $targets = append $targets (dict

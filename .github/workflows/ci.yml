@@ -1198,6 +1198,18 @@ jobs:
         run: |
           python ingestion/test_declared_metrics.py
 
+      # The Prometheus endpoint and the sequence-gap counters (issues #22, #24). Same reason this
+      # runs here rather than in e2e: `render_exposition` is a pure function, and the sequence
+      # tests stub protobuf/MQTT/psycopg2 before importing ingestion.py -- so neither `protoc` nor
+      # a running stack is needed.
+      #
+      # ONE ASSERTION IN IT READS ingestion.py's SOURCE: every `count("dropped_*")` must have a
+      # mapping in metrics.py, or the drop would be counted and never exported. That is the
+      # acceptance criterion from #22 expressed as a test rather than as a review step.
+      - name: Run Ingestion Metrics Endpoint Unit Tests
+        run: |
+          python ingestion/test_metrics_endpoint.py
+
       # Payload conformance -- the SCHEMA_REJECTION half of the digital thread. Same reasoning as
       # the suite above for why it runs here: it stubs protobuf/MQTT/psycopg2 before importing
       # ingestion.py, so it needs neither `protoc` nor a running stack.

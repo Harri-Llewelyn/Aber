@@ -1209,6 +1209,13 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: always
+    # PUBLISHED SO IT CAN BE SCRAPED, and there is nothing here to scrape it with -- this stack
+    # ships no Prometheus, and Grafana holds two Postgres datasources and no others. The port is
+    # published anyway because the endpoint is how the daemon is INSPECTED: `curl localhost:9108/
+    # metrics` answers "is it dropping anything" without reading a log, and an operator running
+    # their own Prometheus alongside can point it here. See issues #22 and #24.
+    ports:
+      - "${INGESTION_METRICS_PORT:-9108}:9108"
     environment:
       DB_HOST: ${DB_HOST:-timescaledb}
       DB_PORT: ${DB_PORT:-5432}

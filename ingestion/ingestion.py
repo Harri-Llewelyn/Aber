@@ -9,6 +9,8 @@ import paho.mqtt.client as mqtt
 import sparkplug_b_pb2
 from datetime import datetime, timezone
 from logging_config import get_logger
+import metrics
+from metrics import start_metrics_server
 
 logger = get_logger("ingestion")
 
@@ -89,12 +91,23 @@ MAX_ALIASES_PER_NODE = int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))
 # default. Counters reported from inside it would therefore never appear on the one target where
 # they are most likely to be read by hand.
 #
-# THIS IS A LOG REPORTER, NOT A METRICS ENDPOINT. It exists to establish a throughput baseline
-# before the telemetry write path is batched, and to make a stalled daemon legible in `docker
-# logs`. Prometheus exposition is issue #22 and is a different piece of work; the counters below
-# are deliberately shaped so that work is a new exporter over the same registry rather than a
-# re-instrumentation.
+# THIS IS A LOG REPORTER, AND IT IS NOT THE METRICS ENDPOINT. It exists to establish a throughput
+# baseline before the telemetry write path is batched, and to make a stalled daemon legible in
+# `docker logs`. The Prometheus endpoint below reads the same registry -- which is what the note
+# here predicted it would: "a new exporter over the same registry rather than a
+# re-instrumentation". Both remain, because they answer different questions: this one is what
+# somebody reads at 3am with no Prometheus to hand.
 INGESTION_STATS_INTERVAL = int(os.getenv("INGESTION_STATS_INTERVAL", "60"))
+
+# The Prometheus exposition endpoint (issues #22 and #24). 0 disables it.
+#
+# ITS OWN PORT, not a path on something that already listens, because the daemon listens for
+# nothing else -- it is an MQTT client and a database writer. 9108 is in the unassigned exporter
+# range and does not collide with the stack's published ports.
+#
+# NO CREDENTIAL, deliberately, and that decides what may appear on it: counters and nothing else.
+# No metric values, no device names, no payloads. See ingestion/metrics.py.
+INGESTION_METRICS_PORT = int(os.getenv("INGESTION_METRICS_PORT", "9108"))
 
 # How many telemetry rows go into one INSERT statement. A DDATA message is written as a single
 # batched statement; this caps how large that statement may get, so a pathological payload cannot
@@ -457,6 +470,32 @@ def counter_snapshot() -> dict:
         return dict(_counters)
 
 
+# LABELLED COUNTERS, kept beside the flat ones rather than replacing them.
+#
+# The flat registry is a name -> int dict, which cannot express "gaps, by edge node" without
+# encoding the node into the name and making the STATS line unreadable. This holds the few series
+# that genuinely need a dimension.
+#
+# CARDINALITY IS BOUNDED BY DESIGN. The only label in use is `edge_node`, which is one per gateway
+# on the site. Labelling by DEVICE would be unbounded -- and `seq` is an edge-node-scoped counter
+# anyway, so a device label would be describing the wrong thing.
+_labelled = {}
+
+
+def count_labelled(name: str, labels: dict, n: int = 1):
+    """Add to a monotonic counter carrying labels. Key order is normalised so it cannot split."""
+    if n <= 0:
+        return
+    key = (name, tuple(sorted(labels.items())))
+    with _counters_lock:
+        _labelled[key] = _labelled.get(key, 0) + n
+
+
+def labelled_snapshot() -> dict:
+    with _counters_lock:
+        return dict(_labelled)
+
+
 def diagnose_device_identity(wire_id: str):
     """
     Explain how `wire_id` fails the wire-identity contract, or return None if it is acceptable.
@@ -690,6 +729,23 @@ def check_message_sequence(group_id, edge_node_id, msg_type, payload, client=Non
         return True
 
     missed = (seq - expected) % 256
+
+    # THE COUNTER IS THE WHOLE POINT OF ISSUE #24, and it changes nothing else here: the message is
+    # still processed, the rebirth is still requested, the rate limit is still honoured. A gap is
+    # evidence of loss, and discarding the message that carries the evidence would compound it.
+    #
+    # BOTH COUNTERS, because one gap of 200 and 200 gaps of 1 are different faults -- a single
+    # broker reconnect against a gateway that is dropping messages continuously. The rate of the
+    # first is what to alert on; the second is what says how much was lost.
+    #
+    # NEITHER LEGITIMATE NON-GAP REACHES HERE. The 255 -> 0 wrap is absorbed by `expected` being
+    # modulo 256, and the first message after a restart returns above on `previous is None`. Both
+    # are asserted in test_sequence_gap_metrics.py rather than re-checked here.
+    count_labelled("acs_ingestion_sequence_gaps_total", {"edge_node": edge_node_id})
+    count_labelled(
+        "acs_ingestion_sequence_messages_missed_total", {"edge_node": edge_node_id}, missed
+    )
+
     requested = request_node_rebirth(client, group_id, edge_node_id)
     logger.warning(
         "SEQUENCE GAP: edge node '%s' sent %s with seq %d, expected %d -- %d message(s) lost or "
@@ -2487,6 +2543,37 @@ def start_stats_reporter():
     logger.info("Throughput counters reporting every %ss", INGESTION_STATS_INTERVAL)
 
 
+def start_metrics_endpoint():
+    """
+    Serve the counter registry in Prometheus exposition format (issues #22 and #24).
+
+    `db_connected` IS READ AT SCRAPE TIME rather than tracked as a counter, because it is a state
+    and not an event. `_ts_conn.closed` is psycopg2's own view: non-zero once the connection was
+    closed on this side. It cannot see a connection dropped by the server -- that still reports 0
+    and fails on first use -- so this gauge answers "did the daemon believe it had a connection",
+    which is the honest question. `acs_ingestion_db_connect_failures_total` rising while this reads
+    1 is the shape of a server-side drop.
+    """
+    if INGESTION_METRICS_PORT <= 0:
+        # The policy decision lives here rather than in metrics.py, where port 0 means "ask the OS
+        # for a free one" as it does everywhere else in the socket API.
+        logger.info("Metrics endpoint disabled (INGESTION_METRICS_PORT=%s).", INGESTION_METRICS_PORT)
+        return None
+
+    def collect():
+        return metrics.render_exposition(
+            counters=counter_snapshot(),
+            labelled=labelled_snapshot(),
+            gauges={
+                "acs_ingestion_up": 1,
+                "acs_ingestion_db_connected":
+                    1 if (_ts_conn is not None and not _ts_conn.closed) else 0,
+            },
+        )
+
+    start_metrics_server(INGESTION_METRICS_PORT, collect, logger)
+
+
 def main():
     logger.info("Initializing Supabase + TimescaleDB Ingestion Daemon...")
     _require_credentials()
@@ -2517,6 +2604,11 @@ def main():
     # Also before the connect loop, so a daemon that cannot reach the broker still reports "no
     # traffic" on a timer rather than going silent in a way that looks like a crash.
     start_stats_reporter()
+    # Same reasoning, and it matters more here: a daemon stuck retrying the broker must still be
+    # SCRAPEABLE, or the one condition worth alerting on is the one that takes the endpoint down
+    # with it. `acs_ingestion_up` is 1 and every throughput counter is flat -- which is exactly
+    # what "connected to nothing" looks like, and is distinguishable from a dead target.
+    start_metrics_endpoint()
 
     while True:
         try:

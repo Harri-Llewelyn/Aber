@@ -830,6 +830,19 @@ ingestion:
   # the heartbeat is a no-op.
   healthFile: /tmp/ingestion-health
   healthIntervalSeconds: 15
+  # The Prometheus exposition endpoint (issues #22 and #24).
+  #
+  # ON BY DEFAULT, unlike telemetry.serviceMonitor below, and the two are deliberately separate.
+  # Serving counters on a pod-network port costs nothing and is how the daemon is inspected --
+  # `kubectl port-forward` and curl answers "is it dropping anything" without reading a log.
+  # Whether a Prometheus is told to SCRAPE it is a different question and depends on the cluster
+  # having an operator, which most do not by default.
+  #
+  # The endpoint takes no credential, so what may appear on it is decided here: counters only, no
+  # metric values, no device names. See ingestion/metrics.py.
+  metrics:
+    enabled: true
+    port: 9108
   # Device liveness watchdog. A device that stops publishing writes nothing and emits no DDEATH,
   # so without this it stays ONLINE forever. Gateway staleness is a read-time VIEW instead, for
   # reasons the 0024 migration header sets out; a device has no last-seen column to derive from,

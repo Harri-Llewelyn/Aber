@@ -426,6 +426,8 @@ python ingestion/test_rbe_telemetry.py
 python ingestion/test_mqtt_tls.py
 python ingestion/test_audit_write_dedup.py
 python ingestion/test_payload_conformance.py
+# The Prometheus endpoint and the Sparkplug seq gap counters -- no stack, no broker
+python ingestion/test_metrics_endpoint.py
 python ingestion/test_telemetry_batching.py
 python i3x/test_i3x_service.py
 python supabase/functions/approve-quarantine/test_approve_quarantine.py
@@ -531,31 +533,36 @@ away each is.
 **These are not open defects.** Known issues and accepted risks are
 [GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues).
 
-### 1 · Ingestion drop observability
+### 1 · A Prometheus to read the ingestion metrics
 
-**Builds on:** `count()` / `counter_snapshot()` in [`ingestion/ingestion.py`](ingestion/ingestion.py)
-· Kong's `prometheus` plugin · `templates/obs/servicemonitors.yaml`
+**Builds on:** [`ingestion/metrics.py`](ingestion/metrics.py) · `templates/obs/servicemonitors.yaml`
+· `telemetry.serviceMonitor.enabled`
 
-The daemon already keeps a monotonic registry of drop counters —
-`dropped_gateway_binding`, `dropped_quarantined_or_unregistered`, `dropped_directory_unavailable`,
-`metrics_rejected_timestamp`, `metrics_unresolved_alias`, `write_failures`, `db_reconnects` and the
-rest. Today they are only reported to the log every 60 s, so **the fail-closed behaviour this stack
-is designed around is asserted but not visible.**
+**The endpoint shipped.** The daemon serves its counter registry at `:9108/metrics` in Prometheus
+text format — every drop reason as a `reason` label on one metric, message counts by `msg_type`,
+the historian connection as a gauge, and sequence gaps by `edge_node`. A headless Service and a
+`ServiceMonitor` are rendered on Kubernetes. See
+[`ingestion/README.md`](ingestion/README.md#metrics) for what each metric means and what a non-zero
+value tells you.
 
-The work is a Prometheus exposition endpoint over the existing registry — not re-instrumentation.
-The counters were deliberately shaped for it: each one is incremented at the site that already made
-the decision, one-to-one with an existing `logger.warning`, so the counters and the log cannot
-disagree about what happened. Kong already exposes `/metrics` on its status listener, and the chart
-already ships `ServiceMonitor` templates.
+**What remains is something to scrape it.** `docker-compose.yml` ships no Prometheus, and Grafana
+is provisioned with two Postgres datasources and no others — so on the Compose target the endpoint
+is an inspection surface (`curl localhost:9108/metrics`) rather than a monitored one. On Kubernetes
+the `ServiceMonitor` needs the Prometheus Operator CRDs, which the chart deliberately does not
+install.
 
-`dropped_gateway_binding` is the one worth a panel of its own: it is not a health metric, it is the
-**signal that something published telemetry for a device it does not own.**
+That is the actual remaining work, and it is a deployment decision rather than a code one: add
+Prometheus to the Compose stack and a third Grafana datasource, or document that a real deployment
+brings its own. **Five alert rules are already written** against these metrics, with thresholds and
+rationale, in `ingestion/README.md` — including *binding rejections rising*, which is the fourth
+platform rule the alerting work left outstanding. They are recorded rather than provisioned
+precisely because nothing could evaluate them today, and a rule that cannot be evaluated is worse
+than an absent one: it renders in the UI and reports nothing.
 
-**It also carries the last piece of the platform alerting work.** The three platform rules that
-shipped — Gateway Stale, Enrolment Stuck, Quarantine Queue Depth — all read state out of Supabase
-through `public.platform_health`. A fourth, *binding rejections rising*, reads a COUNTER rather
-than a state, and there is nowhere for a Grafana rule to read one from until this exists. It is
-the only alert on that list still outstanding.
+**Also still open:** `acs_ingestion_write_seconds`, the latency histogram. It needs a timing
+wrapper on the per-sample historian write, which runs on the broker callback thread — the one path
+where casual overhead is least welcome. It belongs with §3's batching work, where there will be
+something to compare it against.
 
 ### 2 · Automated edge gateway telemetry
 
