@@ -82,6 +82,34 @@ def as_role(cur, user_id, role_name):
     )
 
 
+# WHETHER A MISSING PREREQUISITE IS A SKIP OR A FAILURE, and the answer depends on who is running.
+#
+# Skipping is right at a developer's terminal: a stack brought up without seed.sql cannot support
+# these assertions, and refusing to run is more honest than failing on an absence the developer
+# already knows about.
+#
+# It is WRONG IN CI, and quietly so. `unittest` reports a fully-skipped run as `OK (skipped=6)` and
+# exits 0, so a job that lost its seed data would go green while asserting NOTHING -- and this is
+# the suite covering the enrolment-token secrecy boundary, where "nothing was checked" and "nothing
+# is wrong" look identical from the outside. That is worse than not running the suite at all,
+# because it reads as coverage.
+#
+# So the caller declares which situation it is in. CI's end-to-end job sets this, because there the
+# seed is guaranteed and its absence is a real fault.
+STRICT = os.getenv("REQUIRE_SEEDED_ACCOUNTS", "").lower() in ("1", "true", "yes")
+
+
+def _absent(reason):
+    """Raise the right kind of stop for the caller: a failure under STRICT, otherwise a skip."""
+    if STRICT:
+        raise AssertionError(
+            f"{reason}\n\n"
+            "REQUIRE_SEEDED_ACCOUNTS is set, so this is a failure rather than a skip: "
+            "the caller has declared that the seeded stack is expected to be present."
+        )
+    raise unittest.SkipTest(reason)
+
+
 class GatewayEnrollmentBase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -90,7 +118,7 @@ class GatewayEnrollmentBase(unittest.TestCase):
         try:
             cur.execute("SELECT to_regclass('public.gateway_enrollment_tokens');")
             if not cur.fetchone()[0]:
-                raise unittest.SkipTest(
+                _absent(
                     "public.gateway_enrollment_tokens does not exist -- apply "
                     "0025_physical_gateway_enrollment.sql first"
                 )
@@ -108,7 +136,7 @@ class GatewayEnrollmentBase(unittest.TestCase):
             )
             found = sorted(r[0] for r in cur.fetchall())
             if found != ["Administrator", "Auditor", "Operator", "Shopfloor_Manager"]:
-                raise unittest.SkipTest(
+                _absent(
                     "the seeded demo accounts are absent or their roles differ "
                     f"(found {found}) -- apply supabase/seed.sql first"
                 )

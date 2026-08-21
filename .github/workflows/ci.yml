@@ -1064,6 +1064,17 @@ jobs:
           # firing. The suite also runs the naive predicate against the same fixture and asserts it
           # DOES destroy the row, so the other cases cannot pass vacuously.
           python supabase/migrations/test_platform_alerts_retention.py
+          # THE AUDIT SUPPRESSION RULES. 0005 suppresses the no-op UPDATE and the heartbeat-only
+          # UPDATE, and ingestion.py relies on that being true -- a regression here does not fail
+          # anything, it just resumes writing an audit row per heartbeat until the table is mostly
+          # noise. Self-seeding and rolled back, so it needs no seed.sql; its one attribution test
+          # skips without a seeded account and the other 26 run.
+          python supabase/migrations/test_digital_thread_guard.py
+          # The vocabulary seed's PROVENANCE. A metric seeded with a missing or wrong semantic id
+          # breaks nothing at runtime -- it asserts an interoperability claim that is simply untrue,
+          # which no other check would notice. Reads rows seeded by migration 0018, which the loop
+          # above applies, so it needs no seed.sql either.
+          python supabase/migrations/test_metric_catalog_seed.py
           # No stack here, so this run covers the authorization ladder and the Sparkplug -> XSD
           # mapper parity guard; its live export checks skip themselves and run in e2e-validation.
           python supabase/functions/aas-export/test_aas_export.py
@@ -1772,6 +1783,30 @@ jobs:
           export MQTT_PORT=1883        # mosquitto    1883:1883
           export SUPABASE_URL=http://127.0.0.1:54321  # supabase-kong 54321:8000
           python ingestion/validate.py
+
+      # ---------------------------------------------------------------------------------------
+      # Enrolment-token secrecy, which can only be checked WHERE THE SEED EXISTS.
+      #
+      # This suite asserts that the raw token is never stored, that RLS is on with no policies, and
+      # that not even an Administrator can SELECT claim material. Every one of those assertions is
+      # made AS a seeded demo account, so it cannot run in the migrations-only job -- that one
+      # deliberately does not apply seed.sql, and the suite skips itself there.
+      #
+      # `REQUIRE_SEEDED_ACCOUNTS` IS WHAT MAKES RUNNING IT HERE WORTH ANYTHING. A fully-skipped
+      # unittest run reports `OK (skipped=6)` and exits 0, so without the flag a stack that had
+      # lost its seed would give this step a green tick while checking nothing -- on the suite
+      # covering a secrecy boundary, where "not checked" and "not broken" look identical from
+      # outside. The flag turns the absence into a failure, because here the seed is guaranteed.
+      # ---------------------------------------------------------------------------------------
+      - name: Enrolment Token Secrecy — Against The Seeded Stack
+        env:
+          SUPABASE_DB_HOST: localhost
+          SUPABASE_DB_PORT: '54322'
+          REQUIRE_SEEDED_ACCOUNTS: '1'
+        run: |
+          set -a && . ./.env && set +a
+          export SUPABASE_DB_PASSWORD="$POSTGRES_PASSWORD"
+          python supabase/migrations/test_gateway_enrollment.py
 
       # ---------------------------------------------------------------------------------------
       # i3X 1.0 conformance, run by CESMII'S OWN TEST SUITE rather than by assertions of ours.
