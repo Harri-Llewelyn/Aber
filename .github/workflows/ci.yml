@@ -369,22 +369,52 @@ jobs:
             --set mosquitto.metrics.enabled=true > /tmp/sm.yaml
           python3 - <<'PY'
           import sys, yaml
+          # RESOLVED BY LABEL SELECTOR AND THEN BY PORT, THE WAY THE OPERATOR ACTUALLY DOES IT.
+          #
+          # This used to look the Service up by NAME, keyed on the ServiceMonitor's component label --
+          # which worked only while every Service happened to be named after its component. The metrics
+          # Service added for issue #22 is `ingestion-metrics` on component `ingestion`, so the check
+          # reported a broken target for a pairing that resolves perfectly in a cluster.
+          #
+          # A SELECTOR MATCHING SEVERAL SERVICES IS NOT ITSELF AN ERROR, and assuming it was is the second
+          # thing this got wrong. `mosquitto` and `mosquitto-external` both carry the mosquitto component
+          # label, but only the first publishes a `metrics` port -- the Operator builds targets from the
+          # Endpoints of the named port, so the external LoadBalancer contributes none and nothing is
+          # duplicated. What matters is how many matched Services actually CARRY the port: none means no
+          # target at all, more than one means every sample is scraped twice.
           docs = [d for d in yaml.safe_load_all(open('/tmp/sm.yaml', encoding='utf-8')) if d]
-          svc = {d['metadata']['name']: {p['name'] for p in d['spec']['ports']}
-                 for d in docs if d['kind'] == 'Service'}
+          services = [d for d in docs if d['kind'] == 'Service']
           sms = [d for d in docs if d['kind'] == 'ServiceMonitor']
           if not sms:
               print('::error::no ServiceMonitors rendered with the feature enabled')
               sys.exit(1)
+
+          def ports_of(svc):
+              return {p['name'] for p in svc['spec']['ports'] if 'name' in p}
+
           errors = []
           for sm in sms:
-              comp = sm['spec']['selector']['matchLabels']['app.kubernetes.io/component']
+              want = sm['spec']['selector']['matchLabels']
+              name = sm['metadata']['name']
+              matched = [
+                  svc for svc in services
+                  if all((svc['metadata'].get('labels') or {}).get(k) == v for k, v in want.items())
+              ]
+              if not matched:
+                  errors.append(f"{name}: selector {want} matches no Service, so it would have no target")
+                  continue
               for ep in sm['spec']['endpoints']:
-                  if ep['port'] not in svc.get(comp, set()):
-                      errors.append(f"{sm['metadata']['name']}: port '{ep['port']}' is not a named "
-                                    f"port on Service '{comp}' (has {sorted(svc.get(comp, []))})")
+                  carrying = [svc for svc in matched if ep['port'] in ports_of(svc)]
+                  if not carrying:
+                      seen = {svc['metadata']['name']: sorted(ports_of(svc)) for svc in matched}
+                      errors.append(f"{name}: no Service matched by its selector publishes a port named "
+                                    f"'{ep['port']}' ({seen})")
+                  elif len(carrying) > 1:
+                      names = sorted(svc['metadata']['name'] for svc in carrying)
+                      errors.append(f"{name}: port '{ep['port']}' is published by {len(carrying)} matched "
+                                    f"Services ({names}) -- every sample would be scraped twice")
                   else:
-                      print(f"  ok  {sm['metadata']['name']} -> {comp}:{ep['port']}{ep['path']}")
+                      print(f"  ok  {name} -> {carrying[0]['metadata']['name']}:{ep['port']}{ep['path']}")
           for e in errors:
               print(f"::error::{e}")
           sys.exit(1 if errors else 0)
