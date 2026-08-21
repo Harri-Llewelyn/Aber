@@ -929,6 +929,13 @@ function edgeFunctionNames() {
       'the OAuth consent screen, which names the identity a user is being asked to share',
     'deploy/helm/acs-cymru/values.yaml':
       'supabaseStudio.organizationName is displayed in Studio',
+    // Swagger UI renders info.title as the page heading, so this is the same surface as the Grafana
+    // login button: the product naming itself. It read "Factory+ i3X 1.0 Server" while contact.name
+    // in the same block already said ACS-Cymru. Whole-file, because every OTHER Factory+ reference
+    // in this repository is to the framework and belongs in docs/openapi.yaml -- which is why that
+    // file is deliberately not listed here and this one can be.
+    'docs/i3x-openapi.yaml':
+      'Swagger UI renders info.title as the heading of the published i3X specification',
   };
 
   const branded = [];

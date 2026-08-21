@@ -310,8 +310,18 @@ ingress.yaml simply renders nothing when there is nothing to render.
 {{/*
 The single-writer workloads, and why each one is.
 
-USED BY THREE THINGS: the autoscaling guard, the PDB template, and CI. One list, so "which workloads
-must never be scaled" has one answer rather than three that can drift.
+ONE LIST, READ RATHER THAN RESTATED. `acs-cymru.validateAutoscaling` below derives its refusal set
+from this block, and CI's replica/strategy check parses this same block out of the file. Neither
+keeps its own copy, because a copy is how this list came to be wrong: it named `i3x-service` from the
+day it was written, the guard hardcoded a duplicate that did not, and nothing compared them -- so the
+one workload whose in-memory state makes a second replica CLIENT-VISIBLE was the one the guard would
+have let through (issue #27).
+
+PARSED AS YAML, so the shape matters: `name: reason`, with continuation lines indented. The KEY is
+the name `autoscaling.components` takes, which for the Supabase components is the unprefixed one --
+`realtime`, not `supabase-realtime`. CI resolves both spellings against the rendered manifests and
+treats a name that matches NEITHER as an error rather than skipping it, because a name nothing
+resolves to protects nothing and would do so silently.
 */}}
 {{- define "acs-cymru.singleWriterWorkloads" -}}
 ingestion: a plain paho subscribe with no shared-subscription group -- every replica consumes every
@@ -341,7 +351,17 @@ telemetry, a split fleet, or two processes racing on one volume. An autoscaler m
 */}}
 {{- define "acs-cymru.validateAutoscaling" -}}
 {{- if .Values.autoscaling.enabled -}}
-{{- $forbidden := list "ingestion" "node-red" "mosquitto" "realtime" "supabase-storage" "grafana" "supabase-db" "timescaledb" -}}
+{{- $forbidden := keys (include "acs-cymru.singleWriterWorkloads" . | fromYaml) -}}
+{{- if lt (len $forbidden) 9 -}}
+{{/*
+  A PARSE FAILURE MUST NOT READ AS "NOTHING IS FORBIDDEN". `fromYaml` answers a map carrying an
+  `Error` key rather than failing, so a typo in the block above would silently empty this guard and
+  every single-writer workload would become autoscalable with no error anywhere. Checked against a
+  floor rather than an exact count, so that adding a workload does not mean editing two places --
+  which is the whole point of deriving the list.
+*/}}
+{{- fail (printf "\n\nacs-cymru: the single-writer workload list did not parse -- got %d entries: %v.\n\nThis guard derives its refusal set from `acs-cymru.singleWriterWorkloads` in _helpers.tpl, which\nis read as YAML. An unparseable block would leave the guard EMPTY and every single-writer\nworkload autoscalable, with no error, so it fails here instead. Check that block for a broken\nindent or a stray colon.\n" (len $forbidden) $forbidden) -}}
+{{- end -}}
 {{- range .Values.autoscaling.components -}}
 {{- if has . $forbidden -}}
 {{- fail (printf "\n\nacs-cymru: autoscaling.components includes %q, which is a SINGLE-WRITER workload.\n\nRefused rather than warned about. The reasons are per-component and recorded in each manifest, but\nthey share a shape: the damage is SILENT. Scaling `ingestion` duplicates every telemetry row, every\nquarantine decision and every append-only audit row -- no error, no crash. An autoscaler makes that\nhappen under load, which is the worst moment to discover it.\n\nOnly these may autoscale: supabase-rest, supabase-kong, supabase-functions, frontend.\n" .) -}}

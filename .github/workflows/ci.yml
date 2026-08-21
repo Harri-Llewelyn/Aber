@@ -460,7 +460,22 @@ jobs:
           # is silent -- scaling `ingestion` duplicates every telemetry row, every quarantine decision
           # and every append-only audit row, with no error and no crash. An autoscaler does it under
           # load, which is the worst moment to find out.
-          for c in ingestion node-red mosquitto realtime supabase-storage grafana supabase-db timescaledb; do
+          #
+          # THE NAMES COME FROM THE CHART, not from a list retyped here. This loop used to name
+          # eight components; the guard it tests hardcoded the same eight; and the chart's own
+          # `singleWriterWorkloads` block named NINE. `i3x-service` was the extra one, so the
+          # guard let it through and this loop never noticed -- three lists, no comparison
+          # (issue #27).
+          SW=$(sed -n '/define "acs-cymru.singleWriterWorkloads"/,/{{- end -}}/p' \
+                 deploy/helm/acs-cymru/templates/_helpers.tpl \
+               | grep -E '^[a-z0-9-]+:' | cut -d: -f1)
+          if [ "$(echo $SW | wc -w)" -lt 9 ]; then
+            echo "::error::parsed only [$SW] from acs-cymru.singleWriterWorkloads. The guard"
+            echo "::error::this loop tests derives its refusal set from that same block, so a"
+            echo "::error::parse this thin means the guard is near-empty too."
+            exit 1
+          fi
+          for c in $SW; do
             expect_failure "autoscaling $c" "SINGLE-WRITER workload" \
               -f "$DEV" --set autoscaling.enabled=true --set "autoscaling.components[0]=$c"
           done
@@ -720,39 +735,78 @@ jobs:
       #
       # Recreate matters as much as the count: a RollingUpdate briefly runs two pods, which lands
       # duplicate telemetry on every single deploy.
+      #
+      # THE LIST IS READ FROM THE CHART, not restated here, and that is the point of this version.
+      # It used to be a dict in this file naming five workloads. `i3x-service` was not one of them --
+      # nor was `grafana` -- so the manifest could have been switched to RollingUpdate and CI would
+      # have agreed. i3x-service is the worst one to miss: its subscription state is in memory, so a
+      # second pod answers /subscriptions/sync with 404 for a subscription that is perfectly alive,
+      # intermittently, depending on which pod the Service picked (issue #27).
+      #
+      # A NAME THAT RESOLVES TO NOTHING IS AN ERROR, which is what makes this a check rather than a
+      # hopeful loop: a typo in the chart's list would otherwise silently protect nothing, in both
+      # this check and the autoscaling guard that reads the same block.
       - name: Verify Single-Writer Workloads Are Not Scaled Or Rolling
         run: |
           python3 - <<'PY'
-          import re, sys
-          SINGLE = {
-              'ingestion': 'plain paho subscribe: every replica consumes every message',
-              'node-red': 'single-writer /data (flows, credentials, sessions)',
-              'mosquitto': 'does not cluster; two brokers split the fleet',
-              'supabase-realtime': 'holds a logical replication slot',
-              'supabase-storage': 'file backend on a ReadWriteOnce PVC',
-          }
+          import re, sys, io
+
+          # The chart's own list, parsed out of the block that `acs-cymru.validateAutoscaling`
+          # derives its refusal set from. One source, so "which workloads must never be scaled" has
+          # one answer -- see the header on that define in _helpers.tpl.
+          tpl = io.open('deploy/helm/acs-cymru/templates/_helpers.tpl', encoding='utf-8').read()
+          block = re.search(
+              r'define "acs-cymru[.]singleWriterWorkloads" -}}(.*?){{- end -}}', tpl, re.S)
+          if not block:
+              print('::error::could not find acs-cymru.singleWriterWorkloads in _helpers.tpl')
+              sys.exit(1)
+          SINGLE = dict(re.findall(r'^([a-z0-9-]+): (.+)$', block.group(1), re.M))
+          if len(SINGLE) < 9:
+              print(f'::error::parsed only {len(SINGLE)} single-writer workloads: {sorted(SINGLE)}')
+              sys.exit(1)
+          print(f"chart declares {len(SINGLE)} single-writer workloads: {', '.join(sorted(SINGLE))}")
+
           docs = open('/tmp/rendered.yaml', encoding='utf-8').read().split('\n---\n')
-          bad = []
+          workloads = {}
           for d in docs:
               kind = re.search(r'^kind: (\S+)', d, re.M)
               name = re.search(r'^  name: (\S+)', d, re.M)
-              if not kind or kind.group(1) != 'Deployment' or not name:
+              if not kind or not name or kind.group(1) not in ('Deployment', 'StatefulSet'):
                   continue
-              n = name.group(1)
-              if n not in SINGLE:
+              workloads[name.group(1)] = (kind.group(1), d)
+
+          bad = []
+          for n, why in sorted(SINGLE.items()):
+              # The chart's list is keyed by the name `autoscaling.components` takes, which for the
+              # Supabase components is the unprefixed one -- `realtime`, not `supabase-realtime`.
+              # Resolving both spellings keeps ONE list serving both key spaces instead of pairing
+              # it with an alias table that is itself a place to drift.
+              resolved = n if n in workloads else f'supabase-{n}' if f'supabase-{n}' in workloads else None
+              if resolved is None:
+                  bad.append(f"{n}: named as single-writer but no Deployment or StatefulSet renders "
+                             f"under that name (or supabase-{n}) -- the chart's list protects nothing "
+                             f"for it")
                   continue
+              kind, d = workloads[resolved]
+              before = len(bad)
               reps = re.search(r'^  replicas: (\d+)', d, re.M)
-              strat = re.search(r'^    type: (\S+)', d, re.M)
               if not reps or reps.group(1) != '1':
-                  bad.append(f"{n}: replicas={reps.group(1) if reps else 'unset'} ({SINGLE[n]})")
-              if not strat or strat.group(1) != 'Recreate':
-                  bad.append(f"{n}: strategy={strat.group(1) if strat else 'unset'}, must be Recreate ({SINGLE[n]})")
-              print(f"  ok: {n} replicas=1 strategy=Recreate")
+                  bad.append(f"{resolved}: replicas={reps.group(1) if reps else 'unset'} ({why})")
+              # Recreate is a Deployment concern. A StatefulSet never runs two pods of the same
+              # ordinal, so RollingUpdate on a single-replica StatefulSet is not the same hazard.
+              if kind == 'Deployment':
+                  strat = re.search(r'^    type: (\S+)', d, re.M)
+                  if not strat or strat.group(1) != 'Recreate':
+                      bad.append(f"{resolved}: strategy={strat.group(1) if strat else 'unset'}, "
+                                 f"must be Recreate ({why})")
+              if len(bad) == before:
+                  print(f"  ok: {resolved} ({kind}) replicas=1"
+                        + (" strategy=Recreate" if kind == 'Deployment' else ""))
           if bad:
               for b in bad:
                   print(f"::error::{b}")
               sys.exit(1)
-          print("All single-writer workloads are pinned to one replica with Recreate.")
+          print("Every workload the chart calls single-writer is pinned to one replica.")
           PY
 
       # M5. local-path provisions a root-owned host directory and several of these images run as a

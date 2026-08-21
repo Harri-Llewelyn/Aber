@@ -251,13 +251,71 @@ clock.
 | `I3X_SUBSCRIPTION_QUEUE_LIMIT` | `10000` | Batches per subscription before 206 |
 | `SUPABASE_SERVICE_ROLE_KEY` | **must be absent** | Its presence is a startup refusal |
 
+## Availability
+
+**This is a declared characteristic, not a target being missed.** The service runs as a single
+replica and loses every subscription when it restarts. Both are deliberate, both are consequences of
+the design argued at the top of this document, and neither is going to change quietly. It is stated
+here as a commitment rather than as an aside because a client integrating against this endpoint has
+to build for it, and the bad outcome is not that they dislike the answer — it is that they never ask
+and discover it during their own integration.
+
+| | Commitment |
+| :--- | :--- |
+| Replicas | **Exactly one, always.** `replicas: 1` with `strategy: Recreate` is a correctness constraint, not tuning — see [`templates/apps/i3x-service.yaml`](../deploy/helm/acs-cymru/templates/apps/i3x-service.yaml) |
+| Endpoint reachability across a restart | **None.** `Recreate` stops the old pod before starting the new one, so there is a window with no i3X endpoint at all rather than a degraded one |
+| Subscription survival across a restart | **None.** Queues, sequence numbers and open SSE streams are process memory |
+| Current values immediately after a restart | **Cold, and reported as cold.** The MQTT cache refills from `spBv1.0/#` as devices publish; until a device next publishes, `/objects/value` answers `quality: "GoodNoData"` with a null value for it |
+| Metadata and history across a restart | **Unaffected.** Neither is held here — metadata is PostgREST's and history is TimescaleDB's, so a restart cannot lose either |
+| Client contract | `/subscriptions/sync` and `/subscriptions/stream` answer **404** for a subscriptionId this process has never seen. Create a new subscription |
+
+### Why 404-then-recreate is the contract and not a workaround
+
+The i3X subscription lifecycle already requires a client to handle a subscription disappearing — TTL
+expiry does exactly this to an idle subscription after `I3X_SUBSCRIPTION_TTL_SECONDS`, and that is a
+spec MUST rather than a local decision. A conformant client therefore has the recovery path already
+built, and a restart exercises it on the same code path as an expiry. What this section commits to is
+that the server will not do anything *else*: no partially-restored queue, no sequence number that
+resumes from a value the client never saw, no subscription that answers but has silently missed
+updates. **A dropped subscription is reported as gone.** That is the property worth guaranteeing,
+because a subscription that lies about its continuity is worse than one that admits it is new.
+
+### What causes a restart, and how often to expect one
+
+| Cause | Expected frequency | Detection-to-recovery |
+| :--- | :--- | :--- |
+| Chart upgrade that changes the pod spec | Every release that moves `appVersion` — the image tag is the chart's own, so in practice **once per release** | Immediate; bounded by image pull and the 10s readiness period |
+| Liveness probe failure on `/v1/info` | Unplanned, and rare enough that one is worth investigating | Up to **3 minutes** to detect — `periodSeconds: 30` × `failureThreshold: 6`, set deliberately high because a restart costs every open stream |
+| Node drain, eviction or loss | Cluster-operational, not application-driven | Reschedule time, which is the cluster's property rather than this service's |
+
+A `helm upgrade` that does not touch the i3X pod template does not restart it. The controlling number
+is therefore the release cadence, and **an operator who needs a quiet window should treat an i3X
+restart as a planned client-visible event** in the same way as any other rolling deployment — the
+difference being that here there is no rolling, by design.
+
+### Why subscriptions are not made to survive
+
+Backing subscription state with Redis is the obvious fix and is deliberately not being done. The
+reasons are the four rules in [Subscriptions](#subscriptions) above: every one of them is a property
+that is easy to hold inside one process and becomes a distributed-systems problem outside it.
+`/sync` acknowledgement has to stay exact under concurrent access; overflow has to drop and report a
+*computable* gap atomically; "one stream per subscription" becomes cross-replica coordination to
+close the displaced stream cleanly; and the MQTT value cache would have to move too, or replicas
+would disagree about current values. That is a substantial amount of machinery, and a hard Redis
+dependency, added to a service whose entire design argument is that it is a thin read-side adapter
+that owns no data.
+
+The trade is only worth making against a real requirement. It is tracked separately, and this
+section is what it would have to improve on.
+
 ## Known limitations
+
 
 - **HTTPS terminates at the ingress**, not here. The conformance suite raises this as an advisory
   warning (CORE-05) on a plain-HTTP endpoint; in-cluster the TLS edge is browser-only, as it is for
   every other service.
 - **`isExtended` reads `last_birth_metrics`**, so it reflects the device's most recent DBIRTH. A
   device that has never birthed reports `false` rather than unknown.
-- **Subscription state is in memory**, which is why the workload is pinned to one replica. A restart
-  drops every subscription; clients get 404 and must re-create, which the spec's lifecycle already
-  requires them to handle.
+- **Subscriptions do not survive a restart, and neither does the endpoint during one.** That is an
+  availability commitment rather than a limitation to be worked around, so it is stated in full
+  under [Availability](#availability) above.
