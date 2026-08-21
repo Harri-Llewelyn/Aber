@@ -137,9 +137,11 @@ historian's storage footprint over `postgres_fdw` and unions it with Supabase's 
 `public.storage_footprint`, read by Grafana's `supabase` datasource — `0028` generalises the alert
 table from `device_alerts` to `platform_alerts`, whose subject is `(entity_type, entity_id)` rather
 than a device, because the platform alert rules cover a gateway and the fleet and neither
-fits a row that must name a machine — and `0029` adds `public.platform_health`, the narrow view
-those rules evaluate so the Grafana reader never needs the asset inventory — plus demo accounts
-(`supabase/seed.sql`).
+fits a row that must name a machine — `0029` adds `public.platform_health`, the narrow view
+those rules evaluate so the Grafana reader never needs the asset inventory — and `0030` gives that
+alert table a **7-day retention window**, pruned nightly by `pg_cron`, whose predicate ages out
+closed and superseded occurrences but never the newest firing row of a fingerprint — plus demo
+accounts (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because `0005` already implements one; a second declaration of `log_digital_thread_event()`
@@ -454,6 +456,7 @@ python supabase/migrations/test_user_roles_rls.py
 python supabase/migrations/test_schema_versioning.py
 python supabase/migrations/test_digital_thread_guard.py
 python supabase/migrations/test_ingestion_rejection_rpc.py
+python supabase/migrations/test_platform_alerts_retention.py
 python supabase/migrations/test_metric_catalog_seed.py
 python supabase/migrations/test_gateway_enrollment.py
 # Needs the TimescaleDB historian (port 5433), not Supabase — the rollups live there

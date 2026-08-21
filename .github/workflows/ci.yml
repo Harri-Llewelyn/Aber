@@ -1057,6 +1057,13 @@ jobs:
           # audit row naming an operator who was not there. A later migration re-granting INSERT
           # would restore that silently and nothing else here would notice.
           python supabase/migrations/test_ingestion_rejection_rpc.py
+          # 0030's retention window. THE INVARIANT IS THAT A LONG-FIRING ALERT SURVIVES THE PRUNE:
+          # `recorded_at` is stamped on the first write and never refreshed, so an alert firing for
+          # longer than the window has one row, older than the cutoff, and a flat age cutoff deletes
+          # the current state of a live alert -- the pill disappears while Grafana still has it
+          # firing. The suite also runs the naive predicate against the same fixture and asserts it
+          # DOES destroy the row, so the other cases cannot pass vacuously.
+          python supabase/migrations/test_platform_alerts_retention.py
           # No stack here, so this run covers the authorization ladder and the Sparkplug -> XSD
           # mapper parity guard; its live export checks skip themselves and run in e2e-validation.
           python supabase/functions/aas-export/test_aas_export.py

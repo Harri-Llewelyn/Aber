@@ -990,6 +990,83 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 15. The alert retention window is declared once and cited consistently.
+//
+// `0030` gives `platform_alerts` a retention window, and the number lives in ONE place: the default
+// argument of `public.prune_platform_alerts(p_retain interval)`. Everything else -- two READMEs and
+// the migration's own header -- quotes it.
+//
+// A RETUNED WINDOW THAT ONLY MOVES IN THE FUNCTION is the failure this catches, and it is worse than
+// an ordinary stale number. The documentation is what an operator reads to answer "how far back do
+// alerts go"; a README saying 7 while the job deletes at 30 sends them looking for rows that were
+// never removed, or -- the other direction -- makes a support question about a missing alert
+// unanswerable.
+//
+// THE HEADER'S COUNTER-EXAMPLE IS CHECKED TOO. The migration explains at length why the obvious
+// one-line predicate is wrong, and prints it. If the window moved and that illustration did not,
+// the file would argue against a query nobody would have written.
+// -------------------------------------------------------------------------------------------------
+{
+  const MIGRATION = 'supabase/migrations/0030_platform_alerts_retention.sql';
+  const sql = read(MIGRATION);
+  const declared = sql.match(/p_retain\s+interval\s+DEFAULT\s+interval\s+'(\d+)\s+days?'/);
+
+  if (!declared) {
+    fail(
+      `${MIGRATION}: no \`p_retain interval DEFAULT interval 'N days'\` in ` +
+        'prune_platform_alerts(). That default IS the retention window and the single source ' +
+        'every other mention is checked against.'
+    );
+  } else {
+    const days = declared[1];
+
+    // Where the number is quoted, and what it would mean for each to be stale.
+    // SUBSTRING MATCHES, NOT REGEXES. The strings looked for below are full of characters a regex
+    // reserves -- asterisks, quotes, a trailing double-dash comment -- and an escaping slip in one
+    // built by template literal fails OPEN: it matches nothing and reports drift that is not there.
+    // A literal is what these citations actually are.
+    const CITATIONS = [
+      {
+        file: MIGRATION,
+        needle: `interval '${days} days';  -- NO`,
+        what: 'the header counter-example showing the predicate that must NOT be used',
+      },
+      {
+        file: 'README.md',
+        needle: `**${days}-day retention window**`,
+        what: 'the migration narrative',
+      },
+      {
+        file: 'supabase/README.md',
+        needle: `kept for ${days} days`,
+        what: 'the retention section headline',
+      },
+      {
+        file: 'supabase/README.md',
+        needle: `interval '${days} days';  -- WRONG`,
+        what: 'the counter-example in the retention section',
+      },
+    ];
+
+    const stale = CITATIONS.filter(({ file, needle }) => !read(file).includes(needle));
+
+    if (stale.length) {
+      for (const { file, what } of stale) {
+        fail(
+          `alert retention: prune_platform_alerts() declares ${days} days, but ${file} does not ` +
+            `state it where expected -- ${what}`
+        );
+      }
+    } else {
+      pass(
+        `the ${days}-day alert retention window is declared once in prune_platform_alerts() and ` +
+          `cited consistently in ${new Set(CITATIONS.map((c) => c.file)).size} files`
+      );
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 for (const line of ok) console.log(`  ok   ${line}`);
 if (problems.length) {
   console.error('\nDocumentation drift:\n');
