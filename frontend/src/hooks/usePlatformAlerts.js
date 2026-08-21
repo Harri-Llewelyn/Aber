@@ -11,7 +11,7 @@ const POLL_INTERVAL_MS = 15000
  * The live set of firing Grafana alerts, and a toast on each transition.
  *
  * MACHINE AND PLATFORM ALIKE. It was `useDeviceAlerts` while every rule was a machine condition;
- * roadmap item 3 added rules about a gateway going stale and about the fleet as a whole, so the
+ * the platform alert rules added rules about a gateway going stale and about the fleet as a whole, so the
  * row it reads now carries `entity_type` and the hook is named for what it actually holds. What a
  * CONSUMER does with a non-device alert is the consumer's decision -- notably, the shopfloor map
  * reddens a device only for a `device` alert; see utils/deviceAlerts.js.

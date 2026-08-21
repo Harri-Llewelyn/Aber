@@ -8,7 +8,7 @@ import { effectiveSparkplugId } from './sparkplugId';
  * Gateways, and copying the logic to three more call sites is how four pages end up disagreeing
  * about which device an alert belongs to. The rules below are that implementation, moved.
  *
- * DEVICE-SCOPED ALERTS ONLY, AND THAT FILTER IS THE POINT OF THIS PARAGRAPH. Since roadmap item 3
+ * DEVICE-SCOPED ALERTS ONLY, AND THAT FILTER IS THE POINT OF THIS PARAGRAPH. Since the platform alert rules landed
  * the same feed carries `gateway` and `platform` alerts, and the shopfloor map uses what this
  * returns to paint a device chip red. Without the filter a stale GATEWAY would redden nothing (its
  * wire id matches no device) right up until the day someone re-provisions an asset and the two id

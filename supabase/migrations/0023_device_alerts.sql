@@ -7,7 +7,7 @@
 -- THE TABLE IS `platform_alerts`, AND IT WAS `platform_alerts` UNTIL THE PLATFORM RULES ARRIVED.
 --
 -- It was built when every rule was a MACHINE condition -- a thermal excursion, an emergency stop --
--- so `sparkplug_id NOT NULL` and a foreign key to `devices` were exactly right. Roadmap item 3 adds
+-- so `sparkplug_id NOT NULL` and a foreign key to `devices` were exactly right. The platform alert rules add
 -- rules about the PLATFORM: a gateway that has gone stale, an enrolment stuck in AWAITING_BIRTH,
 -- a quarantine queue that is filling. The first two are about a gateway and the third is about no
 -- single entity at all, and none of them fits a table whose every row must name a device.

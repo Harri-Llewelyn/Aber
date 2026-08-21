@@ -6,7 +6,7 @@
 -- Idempotent: db-init replays every /migrations/*.sql on every boot.
 --
 -- 0023 now DESCRIBES A FRESH DATABASE -- it creates `platform_alerts` with a generalised subject,
--- because roadmap item 3 adds rules about gateways and about the platform as a whole, and neither
+-- because the platform alert rules cover gateways and the platform as a whole, and neither
 -- fits a table whose every row must name a device. This file is the other half: an existing
 -- database still holds `device_alerts`, with rows in it, and needs them moved.
 --

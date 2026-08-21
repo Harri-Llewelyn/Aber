@@ -83,7 +83,7 @@ describe('matching an alert to the device it is about', () => {
 
 describe('only DEVICE alerts can redden a device', () => {
   /*
-   * Roadmap item 3 put gateway and platform alerts in the same feed. The shopfloor map uses this
+   * The platform alert rules put gateway and platform alerts in the same feed. The shopfloor map uses this
    * index to paint a device chip, so without a filter a gateway fault could colour a machine --
    * not today, because the two id spaces do not collide, but on the day a re-provision makes them.
    * The map would then be asserting something no rule said.

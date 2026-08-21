@@ -136,7 +136,7 @@ non-conforming, replacing `service_role`'s direct INSERT on the audit table — 
 historian's storage footprint over `postgres_fdw` and unions it with Supabase's own table sizes as
 `public.storage_footprint`, read by Grafana's `supabase` datasource — `0028` generalises the alert
 table from `device_alerts` to `platform_alerts`, whose subject is `(entity_type, entity_id)` rather
-than a device, because roadmap item 3 adds rules about a gateway and about the fleet and neither
+than a device, because the platform alert rules cover a gateway and the fleet and neither
 fits a row that must name a machine — and `0029` adds `public.platform_health`, the narrow view
 those rules evaluate so the Grafana reader never needs the asset inventory — plus demo accounts
 (`supabase/seed.sql`).
@@ -521,7 +521,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Twelve extensions, ordered by how much of each already exists. None is speculative: every one names
+Eleven extensions, ordered by how much of each already exists. None is speculative: every one names
 the code it would build on, because the value of writing them down is that a reader can tell how far
 away each is.
 
@@ -548,6 +548,12 @@ already ships `ServiceMonitor` templates.
 `dropped_gateway_binding` is the one worth a panel of its own: it is not a health metric, it is the
 **signal that something published telemetry for a device it does not own.**
 
+**It also carries the last piece of the platform alerting work.** The three platform rules that
+shipped — Gateway Stale, Enrolment Stuck, Quarantine Queue Depth — all read state out of Supabase
+through `public.platform_health`. A fourth, *binding rejections rising*, reads a COUNTER rather
+than a state, and there is nowhere for a Grafana rule to read one from until this exists. It is
+the only alert on that list still outstanding.
+
 ### 2 · Automated edge gateway telemetry
 
 **Builds on:** `process_node_message()` · `gateways.agent_version` / `enrolled_at` (`0025`) ·
@@ -566,25 +572,7 @@ every appliance's trust store, and
 A `Cert_Expires_At` metric plus one alert rule turns the single worst fleet-wide failure mode into a
 30-day warning.
 
-### 3 · Expanded platform alerting
-
-**Builds on:** [`grafana/provisioning/alerting/`](grafana/provisioning/alerting) · `platform_alerts`
-(`0023`) and its Realtime publication · `grafana-alert-webhook`
-
-The three shipped rules — Thermal Excursion, Emergency Stop, Low OEE Availability — are all
-**machine** conditions. Nothing alerts on **platform** conditions, though the data exists:
-
-| Rule | Reads |
-| :--- | :--- |
-| Gateway `STALE` > 5 min | `public.gateway_status.is_stale` |
-| Quarantine queue depth > *n* | `devices.is_quarantined` |
-| Enrolment stuck in `AWAITING_BIRTH` > 1 h | `gateways.status` + `enrolled_at` — a failed enrolment currently has no alarm at all |
-| Binding rejections rising | `dropped_gateway_binding` (needs §1) |
-
-Each is provisioning-only: the delivery path to the dashboard's toast and Topbar pill is already
-built and already carries the machine rules.
-
-### 4 · Horizontal ingestion scaling
+### 3 · Horizontal ingestion scaling
 
 **Builds on:** the single-writer note in `get_timescaledb_connection()`
 
@@ -600,7 +588,7 @@ cacheable and per-message, and the historian write is idempotent (`ON CONFLICT D
 workers seeing a redelivery cannot corrupt a series. What it needs is per-worker connection
 ownership and a rebirth-request path that does not depend on a single node's alias table.
 
-### 5 · Computed ISO 22400 KPIs
+### 4 · Computed ISO 22400 KPIs
 
 **Builds on:** [`timescaledb/aggregates.sql`](timescaledb/aggregates.sql) · the existing rollups ·
 `iso22400_vocabulary`
@@ -614,7 +602,7 @@ a KPI definition a setting rather than a constant fixed before the first row was
 This is the intermediate step that was previously deferred pending an MES. It does not replace one —
 it makes the vocabulary answer questions instead of only naming them.
 
-### 6 · i3X server optimisations
+### 5 · i3X server optimisations
 
 **Builds on:** `_load_address_space()` · `_build_objects()` · `MAX_BULK_ELEMENT_IDS`
 
@@ -632,7 +620,7 @@ against.
 Writes stay unimplemented. `PUT /objects/value` answers 405 and `/info` declares
 `update.current: false`; a server that does not implement the verb cannot be talked into it.
 
-### 7 · Ingress → Gateway API
+### 6 · Ingress → Gateway API
 
 **Builds on:** [`templates/ingress.yaml`](deploy/helm/acs-cymru/templates/ingress.yaml) ·
 `acs-cymru.corsOrigins`
@@ -646,7 +634,7 @@ this migration specifically, because the origin list is the stack's *only* state
 policy — the edge functions deliberately declare none — and the fewer places it is expressed, the
 fewer places it can be wrong.
 
-### 8 · MCP server
+### 7 · MCP server
 
 **Builds on:** the i3X address space · `fplus-directory`
 
@@ -659,7 +647,7 @@ read-only by construction — not by configuration. An `--enable-writes` flag wo
 switch over a server that has nothing to enable. Writes belong on the Sparkplug/NCMD path, where
 they are auditable.
 
-### 9 · Administrative Settings & Runtime Configuration
+### 8 · Administrative Settings & Runtime Configuration
 
 **Builds on:** `has_role('Administrator')` · PostgREST RLS · Supabase Vault
 
@@ -675,7 +663,7 @@ giving deployed shopfloor instances an operational management plane.
 
 ---
 
-### 10 · Cold Telemetry Archival & Query-in-Place
+### 9 · Cold Telemetry Archival & Query-in-Place
 
 **Builds on:** TimescaleDB retention policies · `telemetry` hypertable · Edge Functions · Apache Parquet
 
@@ -692,7 +680,7 @@ gigabytes of raw points back into TimescaleDB.
 
 ---
 
-### 11 · Deferred commit for Rearrange mode
+### 10 · Deferred commit for Rearrange mode
 
 **Builds on:** `handleDrop()` / `handleLaneDrop()` / `pendingZone` in
 [`OverviewTab.jsx`](frontend/src/components/tabs/OverviewTab.jsx) ·
@@ -736,7 +724,7 @@ Three things the present design gets right and a staged version must not lose:
 
 ---
 
-### 12 · Vestigial column and configuration audit
+### 11 · Vestigial column and configuration audit
 
 **Builds on:** [`scripts/check-docs-drift.mjs`](scripts/check-docs-drift.mjs) ·
 [`.env.example`](.env.example) · `0001_baseline_schema.sql`

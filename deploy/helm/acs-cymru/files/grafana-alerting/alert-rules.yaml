@@ -362,7 +362,8 @@ groups:
       #
       # `for: 5m` ON TOP OF THAT 90 SECONDS. A gateway that misses a couple of heartbeats across a
       # broker reconnect is ordinary and self-heals; one that has been quiet for five minutes has
-      # not. Roadmap item 2 would make this sharper by having the appliance report its own health,
+      # not. Automated edge gateway telemetry -- still on the roadmap -- would make this sharper by having
+      # the appliance report its own health,
       # at which point silence and unhealthy stop being the same signal.
       # -----------------------------------------------------------------------------------------
       - uid: acs-gateway-stale

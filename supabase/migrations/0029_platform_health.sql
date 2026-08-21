@@ -12,7 +12,7 @@
 -- ---------------------------------------------------------------------------------------------
 -- WHY THIS EXISTS AT ALL, WHEN THE DATA ALREADY DOES.
 --
--- Roadmap item 3 asks for alerts on PLATFORM conditions -- a gateway gone stale, an enrolment stuck
+-- The platform alert rules alert on PLATFORM conditions -- a gateway gone stale, an enrolment stuck
 -- in AWAITING_BIRTH, a quarantine queue filling. Every one of those signals is already in this
 -- database. None of them was reachable, and `grafana/provisioning/alerting/alert-rules.yaml` says
 -- why in its own header:
