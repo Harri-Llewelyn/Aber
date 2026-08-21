@@ -1007,6 +1007,11 @@ tbody tr:hover { background: var(--bg-glass); }
   cursor: pointer;
   transition: var(--transition);
   white-space: nowrap;
+  /* A `.btn` is sometimes an <a> -- a link that navigates to a file, like the model
+     download. Without this it renders underlined, so the row reads as one button and one
+     link rather than three controls. Previously worked around inline at the one call site
+     that hit it. */
+  text-decoration: none;
 }
 
 .btn-primary {

@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { api, model3dPublicUrl } from '../../api'
+import { api, model3dPublicUrl, model3dDownloadUrl } from '../../api'
 import {
   MODEL_3D_EXTENSIONS,
   formatFileSize,
   isAcceptedModelFile,
   modelFileName
 } from '../../utils/model3d'
-import { IconCube, IconUpload, IconTrash, IconExternalLink, IconAlertTriangle } from './Icons'
+import { IconCube, IconUpload, IconTrash, IconDownload, IconAlertTriangle } from './Icons'
 import { ActionButton } from './ActionButton'
 import { Model3DViewer } from './Model3DViewer'
 
@@ -126,7 +126,9 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
     if (canManage && !busy) setDragging(true)
   }
 
-  const publicUrl = path ? model3dPublicUrl(path) : null
+  // `?download=` rather than the bare public URL -- see model3dDownloadUrl() for why the
+  // `download` attribute alone cannot do this across origins.
+  const downloadUrl = path ? model3dDownloadUrl(path) : null
 
   return (
     /* NO HEADING OF ITS OWN. This used to carry "3D Visual Model" plus a line explaining that the
@@ -155,41 +157,57 @@ export function Model3DUploader({ device, canManage, showToast, onChange }) {
             <div style={{ fontWeight: 600, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               Model attached: {modelFileName(path)}
             </div>
+            {/* THE SIZE ONLY. This line used to end with a small "Open" link, which was the only
+                way to reach the file and sat at 11px beside two full-sized buttons -- so the
+                control an operator wants most often was the least visible thing in the card
+                (issue #43). Getting the file is a Download button below now. */}
             <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
               {size !== null ? formatFileSize(size) : 'size unavailable'}
-              {publicUrl && (
-                <>
-                  {' · '}
-                  <a href={publicUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>
-                    Open <IconExternalLink size={10} />
-                  </a>
-                </>
-              )}
             </div>
           </div>
-          {canManage && (
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                className="btn btn-ghost"
-                disabled={busy}
-                onClick={() => inputRef.current?.click()}
-                title="Upload a different model in place of this one"
+          {/* OUTSIDE THE `canManage` GATE, deliberately. The link this replaces was available to
+              every role, and moving downloading into the write-gated row would have taken the file
+              away from Operators and Auditors -- who are the roles most likely to want to open a
+              model and least likely to be replacing one. Reading a public-read object is not a
+              write, and the export already publishes the URL. */}
+          <div style={{ display: 'flex', gap: '8px' }}>
+            {downloadUrl && (
+              <a
+                className="btn btn-primary"
+                href={downloadUrl}
+                /* Belt and braces: `download` is ignored cross-origin, so `?download=` on the URL
+                   is what actually sets Content-Disposition. Kept because it costs nothing and is
+                   what applies if the bucket is ever served same-origin. */
+                download={modelFileName(path)}
+                title="Download this model file"
               >
-                <IconUpload size={12} /> Replace
-              </button>
-              {/* `busy` covers upload AND removal -- both write to the same device row -- but only
-                  Remove can report, because Replace merely opens the file picker. */}
-              <ActionButton
-                className="btn btn-ghost"
-                pending={busy}
-                pendingLabel="Removing…"
-                onClick={handleRemove}
-                title="Detach this model and delete it from storage"
-              >
-                <IconTrash size={12} /> Remove
-              </ActionButton>
-            </div>
-          )}
+                <IconDownload size={12} /> Download
+              </a>
+            )}
+            {canManage && (
+              <>
+                <button
+                  className="btn btn-ghost"
+                  disabled={busy}
+                  onClick={() => inputRef.current?.click()}
+                  title="Upload a different model in place of this one"
+                >
+                  <IconUpload size={12} /> Replace
+                </button>
+                {/* `busy` covers upload AND removal -- both write to the same device row -- but
+                    only Remove can report, because Replace merely opens the file picker. */}
+                <ActionButton
+                  className="btn btn-ghost"
+                  pending={busy}
+                  pendingLabel="Removing…"
+                  onClick={handleRemove}
+                  title="Detach this model and delete it from storage"
+                >
+                  <IconTrash size={12} /> Remove
+                </ActionButton>
+              </>
+            )}
+          </div>
         </div>
       ) : (
         <div

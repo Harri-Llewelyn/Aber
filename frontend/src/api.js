@@ -401,6 +401,27 @@ export function model3dPublicUrl(path) {
 }
 
 /**
+ * The same object, asked for as a DOWNLOAD rather than a navigation.
+ *
+ * THE `download` HTML ATTRIBUTE CANNOT DO THIS, and that is the whole reason this function exists
+ * rather than a one-word change on an anchor. The bucket is served from the storage origin and the
+ * dashboard from its own, so `<a download>` is CROSS-ORIGIN -- browsers ignore the attribute
+ * entirely in that case and navigate instead. What actually happened next depended on the file
+ * type: a .glb the browser cannot render downloads anyway, and a .gltf (which is JSON) renders in
+ * the tab. So the control would have worked for some models and silently not for others.
+ *
+ * `?download=` makes storage send `Content-Disposition: attachment`, which is a server-side
+ * instruction and therefore origin-independent. Passing the filename also names the saved file
+ * after the model instead of after its storage key.
+ */
+export function model3dDownloadUrl(path) {
+  if (!path) return null;
+  const name = path.split('/').pop() || 'model';
+  return supabase.storage.from(MODEL_3D_BUCKET).getPublicUrl(path, { download: name }).data
+    .publicUrl;
+}
+
+/**
  * The API surface itself. Exported below as `api`, wrapped so that every call through it is
  * counted by lib/apiActivity -- which is what lights the top bar's activity line. Declared
  * separately only because the wrapper has to be applied to the finished object; nothing should
