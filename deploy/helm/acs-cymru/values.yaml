@@ -1,5 +1,5 @@
 # =============================================================================================
-# Factory+ — default values
+# ACS-Cymru — default values
 #
 # These defaults are deliberately NOT a working configuration: the four Supabase credentials in
 # `secrets` are empty and the chart REFUSES TO RENDER without them (see _helpers.tpl,
@@ -405,10 +405,17 @@ supabaseAuth:
     tag: v2.189.0
     pullPolicy: IfNotPresent
   replicas: 1
-  # Allows self-registration through the auth API. Off is the safe default: a self-registered user
-  # has no row in public.user_roles, and every RLS policy and edge function then refuses them --
-  # an account that signs in and can do nothing reads as a broken deployment.
-  disableSignup: false
+  # Whether GoTrue REFUSES self-registration at POST /auth/v1/signup. True is closed.
+  #
+  # THE NAME IS NEGATIVE AND THE PREVIOUS DEFAULT DID NOT MATCH ITS OWN COMMENT: it read "off is
+  # the safe default" above a value of `false`, which disables the disabling and left the endpoint
+  # OPEN. Anyone who could reach the gateway could self-register and be handed the default
+  # 'Operator' role by handle_new_user(), past every RBAC decision in the database.
+  #
+  # The dashboard no longer offers a sign-up form at all, so setting this to false reopens the
+  # endpoint for API callers only. Accounts otherwise arrive from seed.sql, an admin invite through
+  # the Auth API, or an upstream identity provider.
+  disableSignup: true
   jwtExpiry: 3600
   resources:
     requests: { cpu: 50m, memory: 128Mi }
@@ -600,7 +607,7 @@ supabaseStudio:
     tag: 2026.07.07-sha-a6a04f2
     pullPolicy: IfNotPresent
   replicas: 1
-  organizationName: Factory+
+  organizationName: ACS-Cymru
   projectName: ACS-Cymru Asset Tracking
   resources:
     requests: { cpu: 100m, memory: 256Mi }
@@ -946,10 +953,10 @@ frontend:
   # Where the Report Bug button files issues. A fork that leaves this at the default sends its
   # reports to the upstream tracker.
   githubRepoUrl: https://github.com/Harri-Llewelyn/ACS-Cymru
-  # Off by default: a self-registered user has no row in public.user_roles, and every RLS policy
-  # and edge function then refuses them -- an account that signs in and can do nothing reads as a
-  # broken deployment rather than a closed one.
-  allowSignup: false
+  #
+  # THERE IS DELIBERATELY NO `allowSignup` HERE ANY MORE. It gated the sign-up form in the browser
+  # while `supabaseAuth.disableSignup` left the endpoint behind it open, so it never controlled
+  # anything -- see that value. The server-side flag is the only switch.
   #
   # THERE IS DELIBERATELY NO `grafanaUrl` HERE. The dashboard's "View in Grafana" links on an active
   # alert are built from `publicUrls.grafana` (falling back to grafana.<publicBaseDomain>) -- the same

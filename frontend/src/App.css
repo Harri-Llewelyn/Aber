@@ -1026,6 +1026,22 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 .btn-ghost:hover { border-color: var(--border-hover); color: var(--accent); }
 
+/* The count pill inside a SELECTED filter button (issue #32).
+ *
+ * `.section-count` paints --accent on --accent-dim, which is legible on a card and nearly invisible
+ * once the button it sits in turns into `.btn-primary` -- an --accent-strong fill. Reported on the
+ * Vocabulary filter bar, where every tab carries its own count.
+ *
+ * INVERTED FROM THE BUTTON'S OWN PAIRING rather than given colours of its own: the pill takes the
+ * button's ink as its fill and the button's fill as its ink. That yields exactly the contrast ratio
+ * of the button's label, which themeContrast.test.js already measures against AA and APCA in both
+ * themes -- so this cannot be legible in one theme and not the other, which is how the original
+ * got through. */
+.btn-primary .section-count {
+  background: var(--accent-contrast);
+  color: var(--accent-strong);
+}
+
 /* --danger-text, not --danger. This is TEXT on a rose-tinted fill, which is the exact case the
    -text tier exists for: --danger on the 0.2 hover tint measures 4.09:1 in dark and 3.69:1 in
    light, both under AA. The toast and .badge-offline were moved off --danger for this reason;
@@ -2324,6 +2340,23 @@ tbody tr:hover { background: var(--bg-glass); }
    `visibility: hidden` on the closed state (not `display: none`) keeps the transition alive while
    still taking the panel out of the accessibility tree and hit testing. It is delayed until the
    width transition finishes so the panel does not vanish before it has finished sliding. */
+/* The context drawer's width, declared ONCE and referenced by both rules that need it.
+ *
+ * IT IS IN ITS OWN :root BLOCK, deliberately, and not in the themed one above. themeContrast.test.js
+ * builds its palette by scraping every `--x: y` out of `:root, [data-theme="dark"]` and comparing
+ * the result against the light block -- a layout length landing in that scrape would be measured
+ * for contrast, which is meaningless, and would read as a token missing from the light theme.
+ *
+ * clamp() RATHER THAN A FIXED 360px (issue #35). The drawer showed the same column on a 13-inch
+ * laptop and a 34-inch monitor, so the tables inside it -- the Digital Thread diff, the document
+ * list -- wrapped on hardware with room to spare. The floor is what the diff table needs to stay
+ * three readable columns; the ceiling stops it from eating the list it is meant to sit beside on a
+ * very wide screen, because a drawer that dominates the page has stopped being a drawer.
+ */
+:root {
+  --context-panel-width: clamp(320px, 28vw, 560px);
+}
+
 .context-panel {
   flex-shrink: 0;
   width: 0;
@@ -2338,13 +2371,13 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 .context-panel-open {
-  width: 360px;
+  width: var(--context-panel-width);
   visibility: visible;
   transition: width 0.25s ease, visibility 0s;
 }
 
 .context-panel-inner {
-  width: 360px;
+  width: var(--context-panel-width);
   max-height: calc(100vh - 84px);
   display: flex;
   flex-direction: column;
@@ -2567,7 +2600,10 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
     top: 52px;
     right: 0;
     bottom: 0;
-    width: 360px;
+    /* NOT the desktop clamp, and not a bare 360px either. As an overlay it is measured against
+       the whole viewport rather than against the space left over, so vw is the wrong basis for
+       its width -- but a flat 360px overflows a 320px phone. A cap, not a proportion. */
+    width: min(360px, 90vw);
     max-height: none;
     z-index: 90;
   }
@@ -2976,6 +3012,89 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 2px;
+}
+
+/* ===== Digital Thread: the other changes one transaction made =====
+   Sits ABOVE the diff in the drawer, so the reader learns this row was part of a larger act before
+   they finish reading the row. Same top border and rhythm as .dt-diff, because the two are peers:
+   one says what THIS change did, the other says what else the same act did. */
+.dt-causation {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* THE CAVEAT IS PART OF THE CONTROL, not a tooltip. The sibling list is drawn from the fetched and
+   filtered set, so it is a lower bound rather than a count -- and a reader who takes it for a count
+   will conclude a transaction did less than it did. That is exactly the kind of claim this page
+   exists to get right, so it is on screen rather than on hover. */
+.dt-causation-hint {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  margin: 0 0 8px 0;
+}
+
+.dt-causation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* A BUTTON, not a link or a bare row. It changes what the drawer is showing without navigating,
+   so it must be reachable and activatable from the keyboard -- and `button` gets Enter, Space and
+   the focus ring for free, where a click-handled <div> gets none of them and needs three
+   attributes to imitate each one badly. */
+.dt-causation-item {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dt-causation-item:hover {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+/* Fixed width so the three columns line up down the list rather than stepping in and out with
+   whichever entity kind each row happens to be. DEVICE is the longest of the three. */
+.dt-causation-kind {
+  flex: 0 0 auto;
+  min-width: 58px;
+  /* NO font-size OF ITS OWN: it inherits 11px from .dt-causation-item, which is the floor
+     themeContrast.test.js enforces across App.css. These read as secondary through weight,
+     letter-spacing and --text-muted rather than by shrinking below the scale. */
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+}
+
+/* Takes the slack, and wraps rather than truncating: an asset name is the thing the reader is
+   scanning for, and an ellipsis in the middle of `Sim_Gateway_Cell1_Machining` hides the half that
+   distinguishes it from the other three. */
+.dt-causation-name {
+  flex: 1 1 auto;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.dt-causation-action {
+  flex: 0 0 auto;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
 }
 
 /* ===== Digital Thread: the diff inspector inside the drawer ===== */

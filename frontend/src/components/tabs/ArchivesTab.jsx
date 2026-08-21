@@ -121,7 +121,13 @@ export function ArchivesTab({ showToast, hasPermission }) {
       </div>
 
       {/* Named in the prompt, not just "this entity": the archives table is a mixed list of
-          cells, gateways and devices, and the wrong row is easy to hit. */}
+          cells, gateways and devices, and the wrong row is easy to hit.
+
+          AND THE NAME HAS TO BE TYPED BACK (issue #38). This is the one irreversible action in
+          the application, so it is the one dialog that asks for it. Every other ConfirmModal --
+          here and elsewhere -- guards something recoverable, archiving being a soft flag with a
+          Restore button beside it, and gating all of them would train people to type through the
+          one dialog where reading it matters. Friction only buys attention while it is rare. */}
       {confirmPurge && (
         <ConfirmModal
           message={
@@ -130,6 +136,8 @@ export function ArchivesTab({ showToast, hasPermission }) {
             'it does not wait for the retention timer. Its digital thread history is kept.'
           }
           pendingLabel="Deleting…"
+          requireTyped={confirmPurge.name}
+          requireTypedLabel={`${confirmPurge.entity_type} name`}
           onConfirm={() => purge(confirmPurge)}
           onCancel={() => setConfirmPurge(null)}
         />

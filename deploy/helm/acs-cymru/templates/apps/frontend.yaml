@@ -24,7 +24,6 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   // blank as "not supplied" and constants.js then falls back to localhost:3002, which is a wrong link
   // on a cluster but is exactly as wrong as the alternative and does not throw.
   VITE_GRAFANA_URL: %q,
-  VITE_ALLOW_SIGNUP: %q,
   // Storage buckets, from the same values scripts/storage-init.mjs creates them with -- so a
   // rename moves the dashboard with the bucket instead of leaving it on the old name.
   VITE_MODEL_3D_BUCKET: %q,
@@ -36,7 +35,6 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   (.Values.frontend.enableRealtime | toString)
   .Values.frontend.githubRepoUrl
   (include "acs-cymru.grafanaUrl" .)
-  (.Values.frontend.allowSignup | toString)
   .Values.supabaseStorage.bucket
   .Values.supabaseStorage.gatewayBackupBucket -}}
 ---

@@ -13,7 +13,7 @@ import { supabase, SUPABASE_URL } from '../lib/supabaseClient'
  * POST the user's decision back. With no path configured, /oauth/authorize fails outright
  * with "oauth authorization path not configured" and no OIDC client can complete a login.
  *
- * CONSEQUENCE FOR THE UX: the user must already be signed in to the Factory+ dashboard for
+ * CONSEQUENCE FOR THE UX: the user must already be signed in to the ACS-Cymru dashboard for
  * Grafana SSO to work, because approving requires their Supabase access token. Arriving here
  * without a session shows a prompt to sign in first rather than a second login form -- this
  * page is deliberately not an identity provider login screen.
@@ -118,7 +118,7 @@ export function OAuthConsent() {
       <>
         <h2 style={{ marginTop: 0 }}>Sign in required</h2>
         <p>
-          Sign in to the Factory+ dashboard first, then retry the application you were
+          Sign in to the ACS-Cymru dashboard first, then retry the application you were
           connecting.
         </p>
         <a className="btn btn-primary" href="/">Go to sign in</a>
@@ -146,7 +146,7 @@ export function OAuthConsent() {
       <h2 style={{ marginTop: 0 }}>Authorize {client?.name || 'application'}</h2>
       <p>
         <strong>{client?.name || 'An application'}</strong> is requesting access to your
-        Factory+ identity as <strong>{user?.email}</strong>.
+        ACS-Cymru identity as <strong>{user?.email}</strong>.
       </p>
       <p style={{ fontSize: 13, opacity: 0.8 }}>
         Requested scope: <span className="mono">{scope || 'openid'}</span>

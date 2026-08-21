@@ -157,6 +157,21 @@ BEGIN
   -- pg_stat_* and nothing else.
   EXECUTE format('GRANT pg_monitor TO %I', v_role);
 
+  -- The storage footprint, created by storage.sql -- which is why THAT file must run before this
+  -- one, and does in both runners. Bytes and chunk time-spans only: storage_footprint_rows() is
+  -- SECURITY DEFINER precisely so this grant does not have to be widened to the hypertables it
+  -- reports on.
+  --
+  -- NOT ALSO GRANTED TO powerbi_reader. The size of the telemetry is an operations question, and
+  -- that role exists to answer business ones from aggregated buckets.
+  EXECUTE format('GRANT SELECT ON public.storage_footprint TO %I', v_role);
+
+  -- AND EXECUTE ON THE FUNCTION BEHIND IT, which SELECT on the view does not imply. A
+  -- non-security_invoker view checks TABLE access as its owner, but a function called in the view
+  -- body is still checked against the CALLING role -- so without this the role has SELECT on a view
+  -- it cannot run, and the error names the function rather than the missing grant.
+  EXECUTE format('GRANT EXECUTE ON FUNCTION public.storage_footprint_rows() TO %I', v_role);
+
   RAISE NOTICE
     'roles: % may read the rollups, raw telemetry, telemetry_latest, assets, telemetry_gapfill() '
     'and pg_stat_* -- read-only throughout.', v_role;
@@ -204,6 +219,22 @@ BEGIN
       RAISE EXCEPTION
         'roles self-check: grafana_reader cannot read one of telemetry / telemetry_latest / '
         'assets / telemetry_1h, so the provisioned dashboard has panels that will fail';
+    END IF;
+
+    -- Separate from the block above so the message names the cause. This one fails when
+    -- storage.sql did not run, or ran AFTER this file -- an ordering fault, not a grant fault, and
+    -- one that otherwise presents as a data-lifecycle panel that is empty on a fresh volume and
+    -- correct everywhere else.
+    IF to_regclass('public.storage_footprint') IS NULL THEN
+      RAISE EXCEPTION
+        'roles self-check: public.storage_footprint does not exist. storage.sql must run BEFORE '
+        'roles.sql -- check the ordering in docker-compose.yml and in the Helm maintenance Job.';
+    END IF;
+
+    IF NOT has_table_privilege('grafana_reader', 'public.storage_footprint', 'SELECT') THEN
+      RAISE EXCEPTION
+        'roles self-check: grafana_reader cannot read storage_footprint, so the data-lifecycle '
+        'panels will fail';
     END IF;
     RAISE NOTICE 'roles self-check passed: grafana_reader can read every object the dashboard queries.';
   END IF;

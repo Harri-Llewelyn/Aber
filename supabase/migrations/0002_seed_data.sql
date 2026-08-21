@@ -2803,7 +2803,7 @@ BEGIN
     'manual',                                        -- seeded, not self-registered
     v_base || '/login/generic_oauth',                -- Grafana's fixed generic_oauth callback
     'authorization_code,refresh_token',
-    'Factory+ Grafana',
+    'ACS-Cymru Grafana',
     v_base,
     'confidential',
     'client_secret_basic'

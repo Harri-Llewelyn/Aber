@@ -93,7 +93,11 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
 
   return (
     <div className="modal-overlay">
-      <div className="modal">
+      {/* WIDE, not the bare `.modal` 480px (issue #36). This dialog is a two-column list --
+          metric name against its description -- and at 480px the description was compressed to a
+          few words per line, which is the half a reader is choosing between metrics ON. That is
+          the same argument `.modal-wide` was written for. */}
+      <div className="modal modal-wide">
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <IconFileCode size={18} />
           <span>Build Schema from Catalog</span>
@@ -164,7 +168,11 @@ export function SchemaBuilderModal({ catalog, gateways, onSubmit, onCancel }) {
               ))}
             </select>
           </div>
-          <div style={{ maxHeight: '220px', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+          {/* Was a flat 220px -- about four rows on any screen, which is the "see more metrics"
+              half of #36. Scales with the viewport but stays capped: `.modal` already caps its own
+              height and scrolls, so an uncapped list here would just move the scrollbar outwards
+              and take the search box off screen with it. */}
+          <div style={{ maxHeight: 'min(46vh, 440px)', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
             {filteredCatalog.length === 0 ? (
               <div style={{ padding: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>No matching catalog metrics.</div>
             ) : (

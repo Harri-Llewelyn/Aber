@@ -979,6 +979,12 @@ jobs:
           # simulated JWT claims, because the immutability guard deliberately exempts the owner --
           # a suite connecting as `postgres` would pass against a database with the trigger dropped.
           python supabase/migrations/test_schema_versioning.py
+          # 0026's two halves: causation grouping, and -- the security one -- that `service_role`
+          # can no longer INSERT into digital_thread directly. That key ships in .env and is held
+          # by the daemon and every edge function; while it could insert, any holder could forge an
+          # audit row naming an operator who was not there. A later migration re-granting INSERT
+          # would restore that silently and nothing else here would notice.
+          python supabase/migrations/test_ingestion_rejection_rpc.py
           # No stack here, so this run covers the authorization ladder and the Sparkplug -> XSD
           # mapper parity guard; its live export checks skip themselves and run in e2e-validation.
           python supabase/functions/aas-export/test_aas_export.py
@@ -989,6 +995,19 @@ jobs:
       - name: Run Ingestion Birth-Metric Observation Unit Tests
         run: |
           python ingestion/test_declared_metrics.py
+
+      # Payload conformance -- the SCHEMA_REJECTION half of the digital thread. Same reasoning as
+      # the suite above for why it runs here: it stubs protobuf/MQTT/psycopg2 before importing
+      # ingestion.py, so it needs neither `protoc` nor a running stack.
+      #
+      # THE DEDUPLICATION IS WHAT THIS IS FOR. These rows go into `digital_thread`, which is
+      # append-only to every application role and which the application cannot prune at all. DDATA
+      # arrives continuously, so a regression that writes one row per message does not degrade --
+      # it fills the disk. Migration 0005 gave the audit TRIGGER a guard against exactly this; the
+      # RPC these rows go through is not a trigger, so the only guard is in Python.
+      - name: Run Ingestion Payload Conformance Tests
+        run: |
+          python ingestion/test_payload_conformance.py
 
       # The Python half of the modelled-metrics contract; the JavaScript half runs in
       # frontend-build. Both assert tests/fixtures/modelled-metrics.json, because the rule is

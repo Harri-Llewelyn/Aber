@@ -63,8 +63,6 @@ ARG VITE_GITHUB_REPO_URL
 # Where "View in Grafana" points from an active alert. Unset is survivable -- constants.js falls back
 # to localhost:3002 -- but a deployment that has moved Grafana gets a dead link.
 ARG VITE_GRAFANA_URL
-# Offers the sign-up form on the auth screen.
-ARG VITE_ALLOW_SIGNUP
 # Storage bucket names, matching STORAGE_BUCKET / GATEWAY_BACKUP_BUCKET in scripts/storage-init.mjs.
 # Unset is the ordinary case: src/api.js defaults to the same two names those default to. They are
 # build args at all so a deployment that RENAMED a bucket can move the dashboard with everything

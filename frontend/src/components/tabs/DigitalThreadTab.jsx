@@ -4,6 +4,7 @@ import { downloadCSV } from '../../utils/downloadCSV'
 import { AutoRefreshControl } from '../common/AutoRefreshControl'
 import { ContextPanel } from '../common/ContextPanel'
 import { IconHistory, IconDownload, IconX, IconBuilding2, IconRadio, IconCpu } from '../common/Icons'
+import { DIGITAL_THREAD_ACTIONS } from '../../constants'
 
 /**
  * How a machine-originated change is described. `changed_by` names WHICH user and is NULL for
@@ -123,11 +124,18 @@ export function diffFields(oldData, newData) {
 /**
  * Which marker an event gets.
  *
- * DERIVED, because the column it would otherwise read does not exist. `digital_thread.action` is
- * written from TG_OP and holds only INSERT / UPDATE / DELETE -- there is no QUARANTINE action, no
- * ARCHIVE action and no SCHEMA action to key off. Archiving and quarantining are UPDATEs whose
- * boolean flipped, and a schema rebinding is an UPDATE that touched `schema_id`, so the
- * distinction that matters to an operator lives in the diff and nowhere else.
+ * MOSTLY DERIVED, because the column it would otherwise read barely exists. `digital_thread.action`
+ * is written from TG_OP for everything the audit TRIGGER records, so it holds INSERT / UPDATE /
+ * DELETE and nothing more -- there is no QUARANTINE action and no ARCHIVE action to key off.
+ * Archiving and quarantining are UPDATEs whose boolean flipped, and a schema rebinding is an UPDATE
+ * that touched `schema_id`, so the distinction that matters to an operator lives in the diff.
+ *
+ * THE ONE EXCEPTION IS SCHEMA_REJECTION, written by `record_ingestion_rejection()` (migration 0026)
+ * rather than by the trigger. It is not a row mutation at all -- it records a payload the ingestion
+ * daemon judged non-conforming -- so there is no diff to classify it from and the action itself is
+ * the answer. Governance rather than critical: it says the asset is publishing something its
+ * declared model does not account for, which is the same category as a schema being rebound, and
+ * NOT a lifecycle event of the kind `critical` is reserved for.
  *
  * An INSERT is always green, including the INSERT of an already-quarantined device -- the arrival
  * of a rogue asset. That follows the taxonomy as specified (INSERT is creation; the flag tests
@@ -135,6 +143,7 @@ export function diffFields(oldData, newData) {
  */
 export function classifyEvent(event, diff) {
   const action = String(event.event_type || event.action || '').toUpperCase()
+  if (action === 'SCHEMA_REJECTION') return 'governance'
   if (action === 'DELETE') return 'critical'
   if (action === 'INSERT') return 'creation'
 
@@ -198,21 +207,55 @@ export const shortId = (id) => {
 }
 
 /**
+ * The identity an audit row carries in its own payload, for an entity no longer in the database.
+ *
+ * TWO FALLS, AND THE SECOND IS THE ONE THAT SURVIVES A RENAME. `name` is what an operator
+ * remembers, so it comes first -- but it is mutable, and a device that was renamed shortly before
+ * being purged leaves snapshots under a name nobody recognises. `sparkplug_id` is the immutable
+ * wire identity: it is what the historian keyed its telemetry by, what the gateway was configured
+ * with, and what appears in every Grafana panel and alert about the asset. When the two disagree
+ * it is the one that can still be matched against something outside this table.
+ *
+ * `old_data` is preferred over `new_data` for neither -- both are checked, newest first -- because
+ * an INSERT has only `new_data` and a DELETE only `old_data`, and a purged entity's final row is
+ * the DELETE.
+ *
+ * Cells carry no `sparkplug_id`, so for those this falls through to null and the caller shortens
+ * the uuid. That is correct rather than a gap: a cell has no second identity to recover.
+ */
+export function snapshotIdentity(event) {
+  const name = event?.new_data?.name || event?.old_data?.name
+  if (name) return { label: String(name), field: 'name' }
+
+  const wireId = event?.new_data?.sparkplug_id || event?.old_data?.sparkplug_id
+  if (wireId) return { label: String(wireId), field: 'sparkplug_id' }
+
+  return null
+}
+
+/**
  * The name to put on a lane, in three falls.
  *
  * The audit row stores only `entity_id`; names live on the entity and carry no identity of their
  * own, so the first fall is a client-side join. The SECOND is what makes a deleted entity legible
  * at all: its row is gone from `/api/v1/cells`, so the join can never resolve it -- but the audit
- * snapshot it left behind holds the name it had when it died, which is exactly the name an
- * operator remembers it by. A truncated id is the last resort rather than the usual case it was.
+ * snapshot it left behind holds the identity it had when it died. A truncated id is the last
+ * resort rather than the usual case it was.
+ *
+ * THE JOIN CAN FAIL FOR TWO DIFFERENT REASONS and this deliberately does not distinguish them: the
+ * entity was hard-purged from the Archives tab, or it is merely absent from the page the caller
+ * fetched. Both want the snapshot, and guessing which one it was would put a claim on screen that
+ * the data does not support.
  */
 export function resolveLaneName(entityId, laneEvents, entityNames) {
   const joined = entityNames.get(entityId)
   if (joined) return { name: joined, fromSnapshot: false }
 
   for (const e of laneEvents) {
-    const snapshot = e.new_data?.name || e.old_data?.name
-    if (snapshot) return { name: String(snapshot), fromSnapshot: true }
+    const snapshot = snapshotIdentity(e)
+    if (snapshot) {
+      return { name: snapshot.label, fromSnapshot: true, identityField: snapshot.field }
+    }
   }
   return { name: null, fromSnapshot: false }
 }
@@ -265,6 +308,98 @@ const formatValue = (v) => {
 const EmptyValue = ({ label }) => <span className="dt-diff-empty">{label}</span>
 
 /**
+ * The other audit rows written by the same transaction as `event`.
+ *
+ * WHY THIS IS A DIFFERENT AXIS FROM THE PREVIOUS/NEXT BUTTONS, and why it needed its own control
+ * rather than folding into them. Those step through ONE ASSET over time -- they never leave the
+ * lane. A transaction goes the other way: one operator action crosses assets, and the rows it
+ * produced are related to each other by cause, not by subject. Approving a quarantined device
+ * updates the device and rebinds its schema; the schema-version rebinding at 0001:779 touches
+ * every device on the superseded version in one statement. Read one row at a time, those look like
+ * unrelated edits that happen to share a second.
+ *
+ * ORDERED BY `event_id` ASCENDING -- the order the rows were WRITTEN, which inside one transaction
+ * is the order the act performed them. Not by timestamp: `recorded_at` is `NOW()`, which is the
+ * TRANSACTION start time in PostgreSQL and is therefore identical across every row here. Sorting
+ * by it would produce an arbitrary order that looked meaningful.
+ *
+ * DRAWN FROM THE FETCHED, FILTERED SET, exactly as `selectedLaneEvents` is, and the consequence is
+ * stated on the control itself rather than left to be discovered: a sibling excluded by the current
+ * filter or time window is not counted. The alternative -- refetching by causation_id -- would let
+ * the drawer step to an event the timeline behind it is not drawing, which is the same trap that
+ * paragraph warns about.
+ */
+export function causationSiblings(event, events) {
+  // NULL is not a group. Every row written before migration 0026 carries no causation, and there
+  // is no honest backfill for a transaction that is long over -- so a NULL must never match
+  // another NULL, which would collect the entire pre-0026 history into one imaginary act.
+  if (!event?.causation_id) return []
+
+  return events
+    .filter(e => e.causation_id === event.causation_id
+              && String(e.event_id) !== String(event.event_id))
+    .slice()
+    .sort((a, b) => Number(a.event_id) - Number(b.event_id))
+}
+
+/**
+ * "This change was part of a larger act -- here is the rest of it."
+ *
+ * RENDERED ONLY WHEN THERE ARE SIBLINGS, and the silence is deliberate. Most operator edits touch
+ * exactly one row, so a permanent "0 related changes" line would occupy space on almost every event
+ * to say nothing -- and, worse, it would be a CLAIM. Because the set is filtered (see above), the
+ * page cannot actually tell "this was a single-row act" from "the others are outside your filter",
+ * and a control that asserted the first would be wrong some of the time with no way to notice.
+ * Absence asserts nothing.
+ */
+function CausationGroup({ siblings, entityNames, onSelect }) {
+  if (!siblings.length) return null
+
+  return (
+    <div className="dt-causation">
+      <div className="context-panel-section-label">
+        Same transaction
+        <span className="section-count">{siblings.length}</span>
+      </div>
+
+      <p className="dt-causation-hint">
+        {siblings.length === 1 ? 'One other change was' : `${siblings.length} other changes were`}
+        {' '}written by the same act. Limited to the events currently loaded and filtered.
+      </p>
+
+      <ul className="dt-causation-list">
+        {siblings.map(s => {
+          // Same three falls as the lane label: the live join, then the audit snapshot, then a
+          // shortened id. A sibling can perfectly well be an entity that has since been purged --
+          // a cell deletion cascading to its gateways is exactly this shape.
+          const name = entityNames.get(s.entity_id) || snapshotIdentity(s)?.label
+          return (
+            <li key={s.event_id}>
+              <button
+                type="button"
+                className="dt-causation-item"
+                onClick={() => onSelect(s.event_id)}
+                title={`Open this change to ${name || s.entity_id}`}
+                /* EXPLICIT, because the computed name would be the three spans read in order --
+                   "DEVICE Press_02 UPDATE" -- which names the row without saying that activating
+                   it does anything. Same reason the timeline markers carry one. */
+                aria-label={`Open this change to ${name || s.entity_id}`}
+              >
+                <span className="dt-causation-kind">{entityKind(s.entity_type)}</span>
+                <span className="dt-causation-name">
+                  {name || <span className="mono">{shortId(s.entity_id)}</span>}
+                </span>
+                <span className="dt-causation-action">{s.event_type}</span>
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
+/**
  * The property diff, rendered INSIDE the Digital Thread page rather than inside ContextPanel.
  *
  * ContextPanel is presentational by contract -- it renders `fields` and `actions` and knows
@@ -275,14 +410,18 @@ const EmptyValue = ({ label }) => <span className="dt-diff-empty">{label}</span>
  */
 function EventDiff({ event, diff }) {
   const action = String(event.event_type || event.action || '').toUpperCase()
-  const oneSided = action === 'INSERT' || action === 'DELETE'
+  // SCHEMA_REJECTION joins the one-sided set because it records an OBSERVATION, not a mutation:
+  // `old_data` is NULL by construction (migration 0026), and rendering a "Previous" column that
+  // can never hold anything invites the reader to look for a prior state that does not exist.
+  const oneSided = action === 'INSERT' || action === 'DELETE' || action === 'SCHEMA_REJECTION'
 
   return (
     <div className="dt-diff">
       <div className="context-panel-section-label">
         {action === 'INSERT' ? 'Initial properties'
           : action === 'DELETE' ? 'Final properties'
-            : 'Changed properties'}
+            : action === 'SCHEMA_REJECTION' ? 'Rejected payload'
+              : 'Changed properties'}
       </div>
 
       {diff.length === 0 ? (
@@ -298,7 +437,10 @@ function EventDiff({ event, diff }) {
             <tr>
               <th>Property</th>
               {!oneSided && <th>Previous</th>}
-              <th>{action === 'DELETE' ? 'Deleted' : action === 'INSERT' ? 'Created' : 'New'}</th>
+              <th>{action === 'DELETE' ? 'Deleted'
+                : action === 'INSERT' ? 'Created'
+                  : action === 'SCHEMA_REJECTION' ? 'Observed'
+                    : 'New'}</th>
             </tr>
           </thead>
           <tbody>
@@ -597,6 +739,12 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
     if (next) setSelectedEventId(next.event_id)
   }
 
+  /** The other rows this event's transaction wrote. See causationSiblings(). */
+  const selectedSiblings = useMemo(
+    () => (selected ? causationSiblings(selected, events) : []),
+    [events, selected?.event_id, selected?.causation_id]
+  )
+
   /**
    * The export rows, built explicitly rather than by handing the raw events to the CSV writer.
    *
@@ -610,9 +758,19 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
     return {
       recorded_at:    e.timestamp,
       entity_type:    entityKind(e.entity_type),
-      entity_name:    entityNames.get(e.entity_id) || '',
+      // FALLS BACK THE SAME WAY THE LANE LABEL DOES. This was `entityNames.get(...) || ''`, so
+      // every row about a purged entity exported with an EMPTY name column -- exactly the rows an
+      // audit export exists to carry, since a live entity can be looked up afterwards and a
+      // deleted one cannot. `entity_name_source` says which fall produced the value, because a
+      // spreadsheet that silently mixes current names with historical ones is worse than one that
+      // labels them.
+      entity_name:    entityNames.get(e.entity_id) || snapshotIdentity(e)?.label || '',
+      entity_name_source: entityNames.get(e.entity_id)
+        ? 'current'
+        : (snapshotIdentity(e) ? `audit snapshot (${snapshotIdentity(e).field})` : 'unresolved'),
       entity_id:      e.entity_id,
       mutation_id:    e.event_id,
+      causation_id:   e.causation_id ?? '',
       action:         e.event_type,
       classification: MARKERS[a.kind].label,
       actor:          actorLabel(e),
@@ -665,12 +823,12 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
             style={{ width: '150px' }}
             value={actionFilter}
             onChange={e => setActionFilter(e.target.value)}
-            title="Show only one kind of audit event"
+            title="Filter by the database action recorded on the audit row -- the same value the event drawer shows as a badge. The coloured markers below are a SEPARATE, derived classification; see the key beside the timeline."
           >
-            <option value="">Any event</option>
-            <option value="INSERT">Created</option>
-            <option value="UPDATE">Updated</option>
-            <option value="DELETE">Deleted</option>
+            <option value="">Any action</option>
+            {Object.entries(DIGITAL_THREAD_ACTIONS).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
           </select>
 
           {/* ALL TIME IS THE DEFAULT -- see timeWindow. The window is a query parameter, not a
@@ -876,7 +1034,9 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
         onClose={() => setSelectedEventId(null)}
         type={selected ? entityKind(selected.entity_type) : ''}
         onCopy={showToast}
-        title={selected ? (entityNames.get(selected.entity_id) || selected.entity_id) : ''}
+        title={selected
+          ? (entityNames.get(selected.entity_id) || snapshotIdentity(selected)?.label || selected.entity_id)
+          : ''}
         subtitle={selected && (
           /* One flex ITEM, laid out internally as rows. `.context-panel-subtitle` is a wrapping
              flex row shared with three other pages, so multi-line content has to bring its own
@@ -891,7 +1051,7 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
               Event {selectedIndex + 1} of {selectedLaneEvents.length}
               {' · '}
               {entityNames.get(selected.entity_id)
-                || selected.new_data?.name || selected.old_data?.name
+                || snapshotIdentity(selected)?.label
                 || shortId(selected.entity_id)}
             </div>
 
@@ -946,10 +1106,36 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
           // The audit row's own id. It identifies THIS mutation rather than the asset it touched,
           // which is what you need to quote when two edits a second apart are being told apart.
           { label: 'Mutation ID', value: String(selected.event_id), copyable: true, mono: true, title: 'Audit row ID for this single change' },
+          // Only when there is one, for the same reason `User ID` is conditional: every row written
+          // before migration 0026 carries no causation, and there is no honest value to backfill
+          // for a transaction that is long over. A "Not set" row against a year of history would
+          // read as a gap in the record rather than as the boundary of a feature.
+          ...(selected.causation_id
+            ? [{
+                label: 'Transaction',
+                value: String(selected.causation_id),
+                copyable: true,
+                mono: true,
+                title: 'The database transaction that wrote this row. Every audit row sharing it '
+                     + 'was written by ONE act. Unique within this database only.'
+              }]
+            : []),
           { label: 'Description', value: selected.description, full: true }
         ] : []}
         beforeActions={selected && selectedAnalysis && (
-          <EventDiff event={selected} diff={selectedAnalysis.diff} />
+          <>
+            {/* ABOVE THE DIFF, and that placement follows the rule the subtitle nav is written to:
+                a control that changes what the drawer is showing belongs above the thing it
+                changes. Below the diff it would be a footer you find after reading the record you
+                did not want -- and the whole point of this control is that the row you are looking
+                at may not be the one that explains what happened. */}
+            <CausationGroup
+              siblings={selectedSiblings}
+              entityNames={entityNames}
+              onSelect={setSelectedEventId}
+            />
+            <EventDiff event={selected} diff={selectedAnalysis.diff} />
+          </>
         )}
       >
         {selected && <RawSnapshots event={selected} />}

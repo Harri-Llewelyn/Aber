@@ -225,7 +225,23 @@ describe('Panel layout pushes rather than covers', () => {
     const closed = APP_CSS.match(/\.context-panel \{([\s\S]*?)\n\}/)[1]
     expect(closed).not.toMatch(/position:\s*fixed/)
     expect(closed).toMatch(/width:\s*0/)
-    expect(APP_CSS).toMatch(/\.context-panel-open \{[\s\S]*?width:\s*360px/)
+    /*
+     * SCOPED TO THE RULE, which the previous form was not. It read
+     *   /\.context-panel-open \{[\s\S]*?width:\s*360px/
+     * whose unbounded `[\s\S]*?` walked straight past the desktop block and matched the
+     * `width: 360px` inside the @media (max-width: 1100px) override 250 lines later. So it
+     * asserted nothing about the width it named, and went on passing when that width changed.
+     *
+     * The invariant worth pinning is not a NUMBER anyway (issue #35 made it responsive): it is
+     * that the open panel and its inner shell agree. They are separate rules and a drawer whose
+     * shell is wider than its slot clips its own content, so the two are declared once as
+     * --context-panel-width and this checks both read it.
+     */
+    const openRule  = APP_CSS.match(/\.context-panel-open \{([^}]*)\}/)[1]
+    const innerRule = APP_CSS.match(/\.context-panel-inner \{([^}]*)\}/)[1]
+    expect(openRule).toMatch(/width:\s*var\(--context-panel-width\)/)
+    expect(innerRule).toMatch(/width:\s*var\(--context-panel-width\)/)
+    expect(APP_CSS).toMatch(/--context-panel-width:\s*clamp\(/)
   })
 })
 

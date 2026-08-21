@@ -116,6 +116,29 @@ DB_CONNECT_BACKOFF_SECONDS = float(os.getenv("DB_CONNECT_BACKOFF_SECONDS", "0.25
 DB_CONNECT_BACKOFF_MAX_SECONDS = float(os.getenv("DB_CONNECT_BACKOFF_MAX_SECONDS", "2.0"))
 
 # -----------------------------------------------------------------------------
+# Payload conformance auditing
+# -----------------------------------------------------------------------------
+# ON BY DEFAULT, and switchable because it writes to an APPEND-ONLY table. Every other counter this
+# daemon keeps can be reset by restarting it; a digital_thread row cannot be removed by any
+# application role, by design. An operator commissioning a noisy new gateway needs a way to stop
+# the record filling with the same finding while they fix it, and the honest way to offer that is a
+# flag rather than a hope that the deduplication below is always enough.
+AUDIT_PAYLOAD_REJECTIONS = os.getenv("AUDIT_PAYLOAD_REJECTIONS", "true").lower() == "true"
+
+# How long a device's attached schemas are cached before being re-read.
+#
+# MUCH LONGER THAN CACHE_TTL_SECONDS (5s, for the device row), because the two answer different
+# questions. The device row carries `status` and `is_quarantined`, which change under the daemon's
+# own feet and must be near-live. A schema binding changes when an engineer edits it, which is a
+# human-scale event -- so re-reading it per message would be one PostgREST round trip per DDATA to
+# learn nothing, on the hottest path in the process.
+#
+# The cost of the staleness is bounded and worth stating: for up to this long after a schema edit,
+# conformance is judged against the previous definition. It cannot cause a wrong DROP, because
+# nothing is dropped for non-conformance -- see payload_violations().
+SCHEMA_CACHE_TTL_SECONDS = int(os.getenv("SCHEMA_CACHE_TTL_SECONDS", "300"))
+
+# -----------------------------------------------------------------------------
 # Supabase Client Initialization
 # -----------------------------------------------------------------------------
 supabase_client = None
@@ -1558,6 +1581,282 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
         logger.error("Error updating gateway heartbeat for '%s': %s", edge_node_id, e, exc_info=True)
 
 
+# -----------------------------------------------------------------------------
+# Payload conformance -- what the device sent against what its schema allows
+# -----------------------------------------------------------------------------
+# WHAT THIS DOES NOT DO, STATED FIRST BECAUSE IT IS THE DESIGN DECISION THAT MATTERS.
+#
+# It does not drop telemetry. A metric that no schema models, or whose type contradicts the one its
+# schema declares, is STILL WRITTEN to the historian exactly as before. That is not timidity about
+# changing behaviour; it is the same principle extract_declared_metrics() already states -- the
+# historian records what was observed, and whether an observation was supposed to happen is a
+# judgement made at read time, against a schema an engineer can edit afterwards. Refusing the row
+# would destroy the evidence of the very fault being reported, and would do it on the strength of a
+# schema that may itself be the thing that is wrong.
+#
+# What it adds is the RECORD. Until now a non-conforming payload produced nothing at all -- not a
+# counter, not a row -- so "this machine has been publishing a metric nobody modelled since
+# Tuesday" was unanswerable. Now it is one SCHEMA_REJECTION row in the digital thread.
+#
+# THE DROPPED METRICS ARE INCLUDED FOR THE SAME REASON. A metric skipped for an unresolvable alias
+# or a timestamp outside the sanity window IS genuinely lost, and those were `logger.warning` and a
+# counter -- both of which vanish on restart. Those two carry `dropped: true` so a reader can tell
+# a lost sample from a recorded-but-unmodelled one, which is the distinction that decides whether
+# anyone needs to go and look at the gateway.
+
+# JSON Schema type names satisfied by each Sparkplug value column. `integer` is accepted for a
+# double because Sparkplug has no integer wire type that survives this far -- process_ddata casts
+# int_value and long_value to float -- so rejecting `{"type": "integer"}` would flag every
+# correctly-modelled counter in the plant.
+_JSON_TYPES_FOR_VALUE = {
+    "double": frozenset({"number", "integer"}),
+    "string": frozenset({"string"}),
+    "bool": frozenset({"boolean"}),
+}
+
+# {device_uuid: (modelled_types, fetched_at)}. Unbounded in principle, bounded in practice by the
+# device count -- the same shape and the same reasoning as _device_cache.
+_schema_cache = {}
+
+
+def modelled_types(schema_definitions):
+    """
+    Metric name -> the set of JSON Schema types it may carry, across every attached schema.
+
+    `None` as a value means "declared, but with no type constraint" -- a metric named in `required`
+    but absent from `properties`, or one whose `properties` entry omits `type`. That is a real and
+    legitimate schema, and it must not be read as "declares no types", which would make every
+    value it carries a mismatch.
+
+    THE UNION ACROSS SCHEMAS IS DELIBERATE and mirrors modelled_metrics_across() in validate.py: a
+    device may carry several submodels, and a metric modelled by any one of them is modelled. A
+    per-schema check would flag a device for publishing what another of its own submodels accounts
+    for.
+    """
+    result = {}
+
+    for definition in schema_definitions or []:
+        if not isinstance(definition, dict):
+            continue
+
+        properties = definition.get("properties")
+        properties = properties if isinstance(properties, dict) else {}
+
+        # RESOLVED PER SCHEMA BEFORE THE UNION, and the two steps cannot be collapsed. Within ONE
+        # schema, `required: ["M"]` alongside `properties: {"M": {"type": "number"}}` means M is
+        # required AND typed -- the `required` entry adds no type information and must not erase
+        # the one next to it. ACROSS schemas the opposite holds: a schema that declares M with no
+        # type permits any value, which widens the union to unconstrained.
+        #
+        # Folding both into a single pass gets the answer right only when the schemas happen to
+        # arrive in a convenient order, which is a bug that hides until a device gains a second
+        # submodel.
+        this_schema = {}
+
+        for name, spec in properties.items():
+            if not isinstance(name, str):
+                continue
+            declared = spec.get("type") if isinstance(spec, dict) else None
+            if isinstance(declared, str):
+                this_schema[name] = frozenset({declared})
+            elif isinstance(declared, list):
+                this_schema[name] = frozenset(t for t in declared if isinstance(t, str))
+            else:
+                this_schema[name] = None
+
+        for name in definition.get("required") or []:
+            if isinstance(name, str):
+                this_schema.setdefault(name, None)
+
+        for name, types in this_schema.items():
+            if name not in result:
+                result[name] = types
+            elif result[name] is None or types is None:
+                # Unconstrained wins: the union is what the device is PERMITTED to send, and the
+                # widest permission is the answer.
+                result[name] = None
+            else:
+                result[name] = result[name] | types
+
+    return result
+
+
+def device_modelled_types(device_uuid: str):
+    """
+    The cached type map for a device, or None when it has no schema attached at all.
+
+    NONE AND AN EMPTY MAP ARE DIFFERENT ANSWERS and the caller depends on it. None means no schema
+    is bound, so there is nothing to judge against and conformance is not evaluated -- the ordinary
+    state of a newly onboarded device. An empty map means a schema IS bound and models no metrics,
+    which makes every metric unmodelled and is worth reporting.
+    """
+    cached = _schema_cache.get(device_uuid)
+    if cached and time.time() - cached[1] < SCHEMA_CACHE_TTL_SECONDS:
+        return cached[0]
+
+    if not supabase_client:
+        return None
+
+    try:
+        links = supabase_client.table("device_schemas").select("schema_id").eq(
+            "device_id", device_uuid
+        ).execute()
+        ids = [row["schema_id"] for row in (links.data or []) if row.get("schema_id")]
+
+        if not ids:
+            result = None
+        else:
+            rows = supabase_client.table("schemas").select(
+                "id,schema_definition"
+            ).in_("id", ids).execute()
+            result = modelled_types([r.get("schema_definition") for r in (rows.data or [])])
+    except Exception as e:
+        # NOT CACHED, and returned as None so no violation is reported. A directory blip must not
+        # be able to write an audit row accusing a device of publishing something unmodelled --
+        # that row is permanent, and the accusation would be an artefact of our own outage.
+        logger.warning(
+            "Could not read schemas for device %s (%s); conformance not evaluated for this "
+            "message.", device_uuid, e
+        )
+        return None
+
+    _schema_cache[device_uuid] = (result, time.time())
+    return result
+
+
+def payload_violations(observed, dropped, modelled):
+    """
+    Everything wrong with one DDATA payload, as a list of audit-shaped dicts.
+
+    `observed` -- [(metric_name, value_kind)] for metrics that were written, where value_kind is a
+                  key of _JSON_TYPES_FOR_VALUE.
+    `dropped`  -- [(metric_name_or_None, code, detail)] for metrics the loop skipped.
+    `modelled` -- the map from device_modelled_types(), or None to skip the schema half entirely.
+
+    Pure, and that is the point: every branch below is reachable from a unit test with three
+    literals, which is not true of anything that has to be handed a protobuf and a live client.
+    """
+    violations = []
+
+    for name, code, detail in dropped:
+        violations.append({
+            "metric": name,
+            "code": code,
+            "detail": detail,
+            # The half that is genuinely lost. See the section header.
+            "dropped": True,
+        })
+
+    if modelled is None:
+        return violations
+
+    for name, value_kind in observed:
+        if name not in modelled:
+            violations.append({
+                "metric": name,
+                "code": "unmodelled_metric",
+                "detail": "no attached schema declares this metric",
+                "observed_type": value_kind,
+                "dropped": False,
+            })
+            continue
+
+        allowed = modelled[name]
+        if allowed is None:
+            continue  # Declared without a type constraint; any value conforms.
+
+        satisfied = _JSON_TYPES_FOR_VALUE.get(value_kind, frozenset())
+        if not (satisfied & allowed):
+            violations.append({
+                "metric": name,
+                "code": "type_mismatch",
+                "detail": "schema declares %s" % "/".join(sorted(allowed)),
+                "observed_type": value_kind,
+                "expected_types": sorted(allowed),
+                "dropped": False,
+            })
+
+    return violations
+
+
+def _violation_signature(violations):
+    """
+    A hashable summary of WHAT is wrong, ignoring how often and when.
+
+    Deliberately excludes `detail` and every count: a device publishing the same unmodelled metric
+    on every message has one problem, not one per message, and the audit trail should say so once.
+    """
+    return frozenset((v.get("metric"), v.get("code")) for v in violations)
+
+
+# {device_uuid: signature}. In-memory, so a daemon restart re-reports each distinct fault once --
+# which is the right trade: an operator who restarts ingestion to clear a fault wants to know
+# whether it came back.
+_last_violation_signature = {}
+
+
+def record_payload_violations(device: dict, violations, observed_at):
+    """
+    Write one SCHEMA_REJECTION row to the digital thread, but only when the fault is NEW.
+
+    THE CHANGE CHECK IS NOT AN OPTIMISATION -- it is the difference between a feature and an
+    outage. DDATA arrives continuously; under report-by-exception a busy cell publishes several
+    messages a second. Writing a row per non-conforming message would append tens of thousands of
+    rows a day to a table that is append-only and that NO application role can prune, and the first
+    symptom would be the disk filling. Migration 0005 made exactly this argument about heartbeat
+    UPDATEs; this is the same argument about a path 0005 cannot see, because these rows are written
+    through an RPC rather than by the audit trigger.
+
+    So: write when the SET of (metric, code) pairs changes, and never otherwise. A device whose
+    fault persists is recorded once; a device that develops a second fault is recorded again.
+    """
+    if not AUDIT_PAYLOAD_REJECTIONS or not supabase_client or not device:
+        return
+
+    device_id = device.get("id")
+    if not device_id:
+        return
+
+    signature = _violation_signature(violations)
+
+    if not violations:
+        # RECOVERY CLEARS THE MEMO, so a fault that returns after being fixed is recorded again.
+        # Without this, a device that was repaired and then regressed would stay silent forever --
+        # the worst possible failure for an audit trail, because it is indistinguishable from
+        # health.
+        _last_violation_signature.pop(device_id, None)
+        return
+
+    if _last_violation_signature.get(device_id) == signature:
+        count("payload_violations_suppressed", len(violations))
+        return
+
+    try:
+        supabase_client.rpc("record_ingestion_rejection", {
+            "p_device_id": device_id,
+            "p_violations": violations,
+            "p_observed_at": observed_at.isoformat(),
+        }).execute()
+
+        # Recorded only after the write SUCCEEDS. Marking it first would mean a transient PostgREST
+        # failure silently swallowed the fault until its signature happened to change -- the same
+        # trap test_audit_write_dedup.py already covers on the DBIRTH path.
+        _last_violation_signature[device_id] = signature
+        count("payload_violations_recorded", len(violations))
+
+        logger.warning(
+            "SCHEMA REJECTION: device '%s' -- %d violation(s): %s",
+            device.get("name") or device_id,
+            len(violations),
+            ", ".join(sorted({"%s (%s)" % (v.get("metric") or "?", v["code"]) for v in violations}))
+        )
+    except Exception as e:
+        count("payload_violation_write_failures")
+        logger.error(
+            "Could not record payload violations for '%s': %s", device.get("name"), e, exc_info=True
+        )
+
+
 def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = None, client=None):
     """
     On Sparkplug B DDATA:
@@ -1632,6 +1931,13 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     payload_ts = payload.timestamp if hasattr(payload, 'timestamp') and payload.timestamp > 0 else int(time.time() * 1000)
     payload_dt = datetime.fromtimestamp(payload_ts / 1000.0, timezone.utc)
 
+    # DECLARED OUT HERE so they survive the try, and so the conformance record is written only
+    # after the telemetry write has actually committed. An exception inside rolls the batch back
+    # and leaves these unread, which is correct: a message whose rows were never stored is not
+    # evidence about the device, it is evidence about the database.
+    observed = []
+    dropped = []
+
     try:
         with db_conn:
             with db_conn.cursor() as cur:
@@ -1658,6 +1964,13 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                 rejected_timestamps = 0
                 unresolved_aliases = 0
                 for metric in payload.metrics:
+                    # -----------------------------------------------------------------------
+                    # `observed` and `dropped` are filled alongside the decisions the loop was
+                    # already making -- never by a second pass. A separate conformance walk over
+                    # the payload would have to re-resolve every alias and re-derive every value
+                    # kind, and would then be free to disagree with what was actually written,
+                    # which is the one thing an audit record must not do.
+                    # -----------------------------------------------------------------------
                     # The alias is the only identity an optimised DATA metric carries. Resolve
                     # before every other test, including the identity-metric filter -- comparing
                     # an empty name against IDENTITY_METRICS never matches, so an aliased Asset_ID
@@ -1665,6 +1978,16 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                     metric_name = resolve_metric_name(group_id, gateway_wire_id, metric)
                     if metric_name is None:
                         unresolved_aliases += 1
+                        # NO NAME, and that is the whole condition being reported -- the metric
+                        # arrived as an alias no birth certificate explains. The alias number is
+                        # the only identity it has, so it is what the record carries.
+                        dropped.append((
+                            None,
+                            "unresolved_alias",
+                            "alias %s is not in edge node '%s' alias table" % (
+                                getattr(metric, "alias", None), gateway_wire_id
+                            ),
+                        ))
                         continue
 
                     if metric_name in IDENTITY_METRICS:
@@ -1682,26 +2005,57 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                     # key would collapse them into a single row anyway.
                     if not _timestamp_is_sane(metric_dt):
                         rejected_timestamps += 1
+                        dropped.append((
+                            metric_name,
+                            "timestamp_out_of_window",
+                            "timestamp %s is outside the sanity window (-%ds/+%ds)" % (
+                                metric_dt.isoformat(),
+                                TELEMETRY_MAX_AGE_SECONDS,
+                                TELEMETRY_MAX_FUTURE_SECONDS,
+                            ),
+                        ))
                         continue
 
                     val_double = None
                     val_string = None
                     val_bool = None
 
+                    # WHICH OF THE THREE COLUMNS THE VALUE LANDS IN is exactly what a JSON Schema
+                    # `type` constrains, so the conformance check reads this rather than
+                    # re-inspecting the protobuf. The four numeric wire types collapse to one kind
+                    # here for the same reason they collapse to one column.
+                    value_kind = None
+
                     if metric.HasField("int_value"):
                         val_double = float(metric.int_value)
+                        value_kind = "double"
                     elif metric.HasField("long_value"):
                         val_double = float(metric.long_value)
+                        value_kind = "double"
                     elif metric.HasField("float_value"):
                         val_double = float(metric.float_value)
+                        value_kind = "double"
                     elif metric.HasField("double_value"):
                         val_double = metric.double_value
+                        value_kind = "double"
                     elif metric.HasField("boolean_value"):
                         val_bool = metric.boolean_value
+                        value_kind = "bool"
                     elif metric.HasField("string_value"):
                         val_string = metric.string_value
+                        value_kind = "string"
                     else:
+                        # A metric carrying no recognised value field. Skipped before this change
+                        # too, and skipped in silence -- no counter, no log line, nothing. It is a
+                        # genuine loss and now says so.
+                        dropped.append((
+                            metric_name,
+                            "no_value",
+                            "metric carries no recognised Sparkplug value field",
+                        ))
                         continue
+
+                    observed.append((metric_name, value_kind))
 
                     rows.append(
                         (metric_dt, asset_id, metric_name, val_double, val_string, val_bool)
@@ -1773,6 +2127,28 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         # a write that fails once a minute is invisible in a log nobody is tailing.
         count("write_failures")
         logger.error("Error writing DDATA telemetry to TimescaleDB: %s", e, exc_info=True)
+        return
+
+    # -------------------------------------------------------------------------------------
+    # Conformance, AFTER the commit and OUTSIDE the transaction.
+    #
+    # Outside because this writes to Supabase over PostgREST, not to the historian: holding a
+    # TimescaleDB transaction open across an HTTP round trip would put network latency inside a
+    # lock on the hottest path in the process.
+    #
+    # After because a rejection row asserts something about the DEVICE. If the batch rolled back,
+    # the honest statement is that we know nothing about this message -- hence the early return
+    # above rather than falling through.
+    # -------------------------------------------------------------------------------------
+    # The flag is tested HERE as well as inside record_payload_violations, and the duplication is
+    # deliberate: device_modelled_types() can issue a PostgREST round trip on a cache miss, and a
+    # daemon with auditing switched off must not pay for a lookup whose only consumer is disabled.
+    if AUDIT_PAYLOAD_REJECTIONS:
+        record_payload_violations(
+            device,
+            payload_violations(observed, dropped, device_modelled_types(device["id"])),
+            payload_dt,
+        )
 
 
 def on_connect(client, userdata, flags, rc):

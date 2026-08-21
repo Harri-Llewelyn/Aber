@@ -4,6 +4,7 @@ import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId } from './utils/sparkplugId';
 import { resolveDeviceLocation, SCOPE_SITE_WIDE } from './utils/cellResolution';
 import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
+import { DIGITAL_THREAD_ACTIONS } from './constants';
 import { metricNameError } from './utils/metricGroup';
 import { readSetting } from './config';
 import {
@@ -345,7 +346,7 @@ const mapDigitalThreadRow = (t) => ({
 
 /**
  * The 3D-model bucket. Public-read by design -- an exported AAS `File` element has to be
- * dereferenceable by a viewer holding no Factory+ session, which a signed URL would not be.
+ * dereferenceable by a viewer holding no ACS-Cymru session, which a signed URL would not be.
  * Writes are gated by RLS to Administrator/Shopfloor_Manager (see the policies in
  * supabase/storage-policies.sql).
  *
@@ -879,7 +880,19 @@ const apiMethods = {
         query = query.eq('entity_type', stored || entityType);
       }
       if (entityIds) query = query.in('entity_id', entityIds);
-      if (['INSERT', 'UPDATE', 'DELETE'].includes(action)) query = query.eq('action', action);
+      // ALLOW-LISTED AGAINST THE SHARED ENUM, not a literal array. Written out by hand this read
+      // ['INSERT', 'UPDATE', 'DELETE'], so when 0026 added SCHEMA_REJECTION the filter silently
+      // stopped being able to select it -- and not by erroring: an unlisted action fell through
+      // and applied no predicate, so asking for one kind of event returned every kind. Same trap
+      // as the empty-entityIds guard above, and the same answer: a filter that matches nothing
+      // must return nothing.
+      if (action && Object.prototype.hasOwnProperty.call(DIGITAL_THREAD_ACTIONS, action)) {
+        query = query.eq('action', action);
+      } else if (action) {
+        // An action the client does not know about. Refusing beats widening: returning every row
+        // for an unrecognised filter is how a caller ends up believing it has seen a filtered set.
+        return [];
+      }
       // Bounds before the limit. PostgREST serialises the whole builder at await-time so the JS
       // call order does not itself decide anything -- but these are `where` and that is `limit`,
       // and writing them in that order is the point being made.

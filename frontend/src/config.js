@@ -38,7 +38,6 @@ export const RUNTIME_SETTING_NAMES = [
   'VITE_ENABLE_REALTIME',
   'VITE_GITHUB_REPO_URL',
   'VITE_GRAFANA_URL',
-  'VITE_ALLOW_SIGNUP',
   // THE BUCKET NAMES, and they are settings for the same reason the URLs above are.
   //
   // Both were literals in api.js while every other consumer read them from the environment --
@@ -65,7 +64,6 @@ const BUILD_TIME_SETTINGS = {
   VITE_ENABLE_REALTIME: import.meta.env.VITE_ENABLE_REALTIME,
   VITE_GITHUB_REPO_URL: import.meta.env.VITE_GITHUB_REPO_URL,
   VITE_GRAFANA_URL: import.meta.env.VITE_GRAFANA_URL,
-  VITE_ALLOW_SIGNUP: import.meta.env.VITE_ALLOW_SIGNUP,
   VITE_MODEL_3D_BUCKET: import.meta.env.VITE_MODEL_3D_BUCKET,
   VITE_GATEWAY_BACKUP_BUCKET: import.meta.env.VITE_GATEWAY_BACKUP_BUCKET,
 };

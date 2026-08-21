@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react'
+import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, STALENESS_TICK_MS, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
@@ -13,6 +14,7 @@ import {
   DEVICE_STATUS,
   deviceLifecycleStatus,
   deviceStatusChipClass,
+  deviceChipClass,
   deviceStatusTitle,
   rollupDeviceStatus
 } from '../../utils/deviceStatus'
@@ -28,7 +30,7 @@ import {
   IconCog
 } from '../common/Icons'
 
-export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, showToast, hasPermission, onNavigateTab }) {
+export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, showToast, hasPermission, onNavigateTab, activeAlerts = [] }) {
   const [stats, setStats]     = useState({ cells: 0, gateways: 0, assets: 0, telemetry: 0 })
   const [cells, setCells]     = useState([])
   const [gwList, setGwList]   = useState([])
@@ -262,6 +264,14 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
    */
   const rollupStatus = useCallback((devices) => rollupDeviceStatus(devices), [])
 
+  /**
+   * Which devices Grafana currently has an alert firing on (issue #34).
+   *
+   * Indexed once per render of the page rather than searched per chip: a cell with forty devices
+   * would otherwise walk the alert list forty times to draw one row.
+   */
+  const alerts = useMemo(() => alertIndex(activeAlerts), [activeAlerts])
+
   const STATUS_LABEL = {
     attention: 'Needs attention — a device here is quarantined, waiting to be admitted',
     normal: 'Normal — at least one device here is online',
@@ -276,7 +286,10 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
     const isArch = a.is_archived
     // Archived reads as inert regardless of the last lifecycle state it held -- a decommissioned
     // machine that happens to still be publishing must not look like a running one.
-    const colorCls = isArch ? 'chip-offline' : deviceStatusChipClass(status)
+    // ARCHIVED STILL WINS, which is why this is one helper rather than a ternary per site: an
+    // alert firing against something taken out of service is noise about a decision already made.
+    const alert = alertForDevice(alerts, a)
+    const colorCls = deviceChipClass(a, alert)
     const isOff = status !== DEVICE_STATUS.ONLINE
     const isInactive = isOff || isArch
     return (
@@ -287,7 +300,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
         onDragStart={(e) => handleDragStart(e, a)}
         onClick={() => onSelectDevice(a.asset_id)}
         style={{ cursor: isInactive ? 'pointer' : canRearrange ? 'grab' : 'pointer', userSelect: 'none', opacity: isArch ? 0.7 : 1 }}
-        title={`${a.asset_name} [${a.asset_id}] — ${isArch ? 'Device Archived (Out of Commission)' : deviceStatusTitle(status)} — ${canRearrange && !isInactive ? 'Drag to reassign Cell, or click' : 'Click'} to view on Devices page`}
+        title={`${a.asset_name} [${a.asset_id}] — ${isArch ? 'Device Archived (Out of Commission)' : alert ? `ALERT: ${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''}` : deviceStatusTitle(status)} — ${canRearrange && !isInactive ? 'Drag to reassign Cell, or click' : 'Click'} to view on Devices page`}
       >
         {isArch ? <IconArchive size={11} /> : <IconCog size={11} />}
         {/* NAME ONLY. The UUID used to sit inline beside it, capped at ~72px, and it was buying

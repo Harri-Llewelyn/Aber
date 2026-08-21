@@ -220,6 +220,37 @@ describe.each(Object.keys(THEMES))('filled buttons: %s', (themeName) => {
     ).toBeGreaterThanOrEqual(APCA_BODY)
   })
 
+  /*
+   * The count pill inside a selected filter button (issue #32).
+   *
+   * `.section-count` paints --accent on --accent-dim, which disappears once its button becomes
+   * `.btn-primary` -- an --accent-strong fill. Reported on the Vocabulary filter bar, and reported
+   * as WORSE IN DARK MODE, which is the tell: it was never measured in either.
+   *
+   * The fix inverts the button's own pairing -- the pill takes --accent-contrast as its fill and
+   * --accent-strong as its ink -- so it is the same two colours as the button label with the roles
+   * swapped. Contrast is symmetric, so this passes exactly where the label above it passes. That
+   * is the point of asserting it rather than eyeballing it: it cannot now be fixed in one theme
+   * and left broken in the other.
+   */
+  it('count pill ink clears WCAG 2 AA on a selected filter button', () => {
+    const ratio = contrast(rgb(t['--accent-strong']), rgb(t['--accent-contrast']))
+    expect(
+      Number(ratio.toFixed(2)),
+      `${themeName}: ${t['--accent-strong']} on ${t['--accent-contrast']} is ${ratio.toFixed(2)}:1`
+    ).toBeGreaterThanOrEqual(AA_TEXT)
+  })
+
+  it('rejects the pill styling it replaced, which was invisible on that fill', () => {
+    // --accent on --accent-strong: what `.section-count` inherited before the override. Asserted
+    // as a NEGATIVE so the regression is named, not merely absent.
+    const ratio = contrast(rgb(t['--accent']), rgb(t['--accent-strong']))
+    expect(
+      Number(ratio.toFixed(2)),
+      `${themeName}: --accent on --accent-strong is ${ratio.toFixed(2)}:1 -- if this now passes, 
+       the palette moved and .btn-primary .section-count may no longer be needed`
+    ).toBeLessThan(AA_TEXT)
+  })
   // The amber counterpart. Archive and Deprecate paint a button filled with --warning, and both
   // hardcoded `color: '#000'` for its ink -- a guess that happened to land, rather than a
   // measured pairing, and the one thing the theme rules rule out.

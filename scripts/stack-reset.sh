@@ -177,6 +177,28 @@ demo_accounts_exist() {
 }
 wait_for "the demo accounts" demo_accounts_exist
 
+# THE LAST THING seed.sql DOES, and that is the whole reason it is probed separately.
+#
+# The check above reads auth.users, which seed.sql inserts at its TOP -- so it goes true while the
+# rest of the file is still running, or has failed. The causation demonstration is the file's final
+# block, so this is what actually proves the seed COMPLETED rather than merely started.
+#
+# What it looks for is the property the Digital Thread drawer needs: one transaction that wrote
+# audit rows for a gateway AND more than one device, which is what makes the "Same transaction"
+# control render anything at all. Without it the reset finishes reporting success and the demo is
+# quietly not there -- discovered in front of an audience, which is the failure this whole script
+# exists to prevent.
+causation_demo_ready() {
+  docker exec acs-cymru_supabase_db psql -U postgres -d postgres -tAc \
+    "SELECT EXISTS (
+       SELECT 1 FROM public.digital_thread
+        WHERE causation_id IS NOT NULL
+        GROUP BY causation_id
+       HAVING count(*) FILTER (WHERE entity_type = 'gateways') > 0
+          AND count(*) FILTER (WHERE entity_type = 'devices')  > 1)" | grep -q t
+}
+wait_for "the Digital Thread causation demo" causation_demo_ready
+
 rest_answers() {
   docker exec acs-cymru_supabase_db psql -U postgres -d postgres -tAc "SELECT 1" | grep -q 1
 }
@@ -259,4 +281,26 @@ if [ "$SKIP_GATEWAYS" -ne 1 ] && [ -f .env.gateways ]; then
   printf 'They cannot be read back from the broker -- keep that file or re-provision.\n'
 fi
 
-printf '\nThe audit trail is empty. Every row from here on records a real change.\n'
+# THE AUDIT TRAIL IS NO LONGER EMPTY AFTER A RESET, and saying so would be the exact kind of stale
+# claim this repository treats as worse than no claim: a reader cannot tell it is stale and will act
+# on it. seed.sql deliberately commits one multi-entity act -- commissioning Cell 1 -- so the
+# Digital Thread drawer has a causation group to show, and gateway provisioning writes a dozen rows
+# of its own after that.
+#
+# THE COUNT IS QUERIED RATHER THAN WRITTEN DOWN, for the same reason. A literal here would be wrong
+# the first time somebody adds a device to Cell 1 in 0002_seed_data.sql, and nothing would catch it.
+demo_rows=$(docker exec acs-cymru_supabase_db psql -U postgres -d postgres -tAc \
+  "SELECT count(*) FROM public.digital_thread
+    WHERE causation_id = (
+      SELECT causation_id FROM public.digital_thread
+       WHERE causation_id IS NOT NULL
+       GROUP BY causation_id
+      HAVING count(*) FILTER (WHERE entity_type = 'gateways') > 0
+         AND count(*) FILTER (WHERE entity_type = 'devices')  > 1
+       ORDER BY causation_id DESC LIMIT 1)" 2>/dev/null | tr -d '[:space:]')
+
+printf '\nThe Digital Thread opens on one seeded act: commissioning Cell 1 wrote %s audit rows in a\n' "${demo_rows:-4}"
+printf 'SINGLE transaction, which is what gives the Same transaction control in the event drawer\n'
+printf 'something to show. Open Digital Thread and click the newest marker on\n'
+printf 'Sim_Gateway_Cell1_Machining.\n'
+printf '\nEvery row after those records a real change.\n'

@@ -6,7 +6,8 @@ import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
 import { gatewayLiveStatus, isGatewayPending, formatHeartbeat } from '../../utils/gatewayStatus'
 import { gatewaySparkplugId } from '../../utils/sparkplugId'
-import { deviceLifecycleStatus, deviceStatusDotColor, deviceStatusTitle } from '../../utils/deviceStatus'
+import { deviceLifecycleStatus, deviceStatusDotColor, deviceStatusTitle, deviceDotColor } from '../../utils/deviceStatus'
+import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { SCOPE_CELL, SCOPE_SITE_WIDE } from '../../utils/cellResolution'
 import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
@@ -36,7 +37,9 @@ import {
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
-export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDevice, hasPermission, initialSearchFilter, onClearFilter, onBugReport }) {
+export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDevice, hasPermission, initialSearchFilter, onClearFilter, onBugReport, activeAlerts = [] }) {
+  /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js (issue #34). */
+  const alerts = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
   const [gateways, setGateways] = useState([])
   const [assets, setAssets]     = useState([])
   const [cells, setCells]       = useState([])
@@ -404,7 +407,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                          <td>
                            <strong>{g.gateway_name}</strong>
                            {g.is_virtual && (
-                             <span className="badge badge-warning" style={{ background: 'rgba(0,212,255,0.15)', color: 'var(--accent)', border: '1px solid var(--accent)', marginLeft: '8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Factory+ Cloud Virtual Gateway">
+                             <span className="badge badge-warning" style={{ background: 'rgba(0,212,255,0.15)', color: 'var(--accent)', border: '1px solid var(--accent)', marginLeft: '8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="ACS-Cymru Cloud Virtual Gateway">
                                <IconZap size={11} /> VIRTUAL
                              </span>
                            )}
@@ -769,9 +772,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                         key={d.asset_id}
                         className="chip chip-link"
                         onClick={() => onSelectDevice?.(d.asset_id)}
-                        title={`Open ${d.asset_name} on the Devices page — ${deviceStatusTitle(status)}`}
+                        title={`Open ${d.asset_name} on the Devices page — ${alertForDevice(alerts, d) ? `ALERT: ${alertForDevice(alerts, d).alert_name}` : deviceStatusTitle(status)}`}
                       >
-                        <span className="badge-dot" style={{ background: deviceStatusDotColor(status) }} />
+                        <span className="badge-dot" style={{ background: deviceDotColor(d, alertForDevice(alerts, d)) }} />
                         <span className="chip-name">{d.asset_name}</span>
                       </button>
                     )

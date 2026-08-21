@@ -244,3 +244,132 @@ INSERT INTO public.user_roles (user_id, role_id) VALUES
   ('a0000000-0000-0000-0000-000000000003', 3), -- Operator
   ('a0000000-0000-0000-0000-000000000004', 4)  -- Auditor
 ON CONFLICT (user_id, role_id) DO NOTHING;
+
+
+-- =============================================================================================
+-- Digital Thread causation demonstration -- ONE act, four audit rows, two entity types
+-- =============================================================================================
+--
+-- WHAT THIS IS FOR. `digital_thread.causation_id` (migration 0026) stamps every audit row with the
+-- transaction that wrote it, so the several rows one operator action produces can be read back as
+-- one act rather than reassembled from timestamps. The dashboard renders that as the "Same
+-- transaction" control in the Digital Thread drawer.
+--
+-- THE FEATURE IS INVISIBLE ON A FRESH STACK WITHOUT THIS BLOCK, and that is the problem it solves.
+-- Almost every audit row a fresh boot produces comes from a single-row write -- provisioning a
+-- device, a gateway registering -- so its causation group has exactly one member and the control
+-- correctly renders nothing at all. `npm run stack:reset -- --yes` drops every volume, so a
+-- demonstration created by hand does not survive one. This is a seeded act that does.
+--
+-- WHY A GATEWAY AND ITS DEVICES RATHER THAN TWO DEVICES. Causation crosses entity types, and that
+-- is exactly the axis the drawer's Previous/Next buttons cannot reach -- those step through ONE
+-- asset over time and never leave its lane. A group spanning a GATEWAY and three DEVICEs shows the
+-- thing the control exists for; a group of two devices in the same lane section barely does.
+-- (`cells` carries no `description` column, so the third entity type cannot join in without
+-- inventing a schema change for a demo, which is not a trade worth making.)
+--
+-- Commissioning a cell is also a REAL act of this shape: an engineer describing the edge gateway
+-- and the machines behind it, in one edit, is one intent -- which is what causation is for.
+--
+-- ---------------------------------------------------------------------------------------------
+-- IT IS ATTRIBUTED TO THE SEEDED ADMINISTRATOR, AND THAT IS A DELIBERATE FICTION.
+--
+-- `SET LOCAL acs_cymru.actor_id` is the mechanism migration 0003 built so a SECURITY DEFINER RPC
+-- acting on a user's behalf records the operator rather than the machine credential the request
+-- travelled on. Used here it makes the demo rows read `actor_source = 'user'` with the admin
+-- persona's id, instead of `migration`.
+--
+-- That is a claim that a person did something no person did, and it is acceptable HERE and ONLY
+-- here for the reason stated at the top of this file: this is local development seed data, in the
+-- same file that fabricates four personas with published passwords. It must never be copied into a
+-- migration. Without it the demonstration would be of a migration editing rows, which is not the
+-- case anybody needs to understand.
+--
+-- ---------------------------------------------------------------------------------------------
+-- IDEMPOTENT IN TWO INDEPENDENT WAYS, because db-init replays this file on EVERY boot and
+-- `digital_thread` is append-only -- a block that appended four rows per restart would grow the
+-- audit table forever and bury the demonstration in copies of itself.
+--
+--   1. `IS DISTINCT FROM` in each WHERE clause. On a second boot the descriptions already hold
+--      these values, so the statements match no rows and write nothing at all -- no UPDATE, no WAL,
+--      and no Realtime broadcast to every connected dashboard.
+--
+--   2. Migration 0005's suppression guard would catch it anyway: an UPDATE whose row is unchanged
+--      writes no audit row. Belt and braces on purpose -- (1) is the cheap one and (2) is the one
+--      that still holds if someone edits (1) carelessly.
+--
+-- ROWS ARE ADDRESSED BY THEIR PINNED UUIDs, not by name, matching how 0002_seed_data.sql seeds
+-- them. A name is a mutable display label; addressing by it would make this block silently do
+-- nothing the first time somebody renames a machine in the dashboard.
+-- =============================================================================================
+
+BEGIN;
+
+-- The transaction the whole demonstration rests on. Every audit row written between here and
+-- COMMIT shares one `txid_current()`, which is what `causationSiblings()` groups by in the browser.
+SET LOCAL acs_cymru.actor_id = 'a0000000-0000-0000-0000-000000000001';
+
+-- Cell 1's edge gateway.
+UPDATE public.gateways
+   SET description = 'Edge gateway for Cell 1 - Precision Machining. Commissioned with the cell.'
+ WHERE id = '12000000-0000-4000-8000-000000000001'
+   AND description IS DISTINCT FROM
+       'Edge gateway for Cell 1 - Precision Machining. Commissioned with the cell.';
+
+-- The three machines behind it. ONE STATEMENT for all three, which is what a batch commissioning
+-- actually is -- and it demonstrates that a causation group is not one row per statement.
+UPDATE public.devices
+   SET description = 'Commissioned with Cell 1 - Precision Machining.'
+ WHERE id IN (
+         '22000000-0000-4000-8000-000000000001',  -- Sim_CNC_Mill_01
+         '23000000-0000-4000-8000-000000000001',  -- Sim_CNC_Mill_02
+         '27000000-0000-4000-8000-000000000001'   -- Sim_Tool_Changer_01
+       )
+   AND description IS DISTINCT FROM 'Commissioned with Cell 1 - Precision Machining.';
+
+COMMIT;
+
+
+-- ---------------------------------------------------------------------------------------------
+-- Self-check: the demonstration is actually there
+-- ---------------------------------------------------------------------------------------------
+-- WHAT THIS CATCHES that nothing else would. The block above is idempotent by design, so on every
+-- boot after the first it legitimately writes nothing -- which makes "it ran without error"
+-- worthless as evidence. If a future edit broke the grouping (a stray COMMIT between the two
+-- statements, a renamed persona breaking the actor foreign key, a device id changed in 0002), a
+-- fresh `stack:reset` would come up with the Digital Thread drawer quietly showing no related
+-- changes, and the only symptom would be a demo that does not demonstrate anything.
+--
+-- ASSERTED AS A PROPERTY OF THE TABLE, NOT OF THIS BOOT: "some transaction grouped a gateway with
+-- more than one device". That holds on a fresh volume and on the hundredth restart alike, and it
+-- does not break if an operator later edits one of these rows by hand.
+DO $causation_demo$
+DECLARE
+  v_group BIGINT;
+  v_rows  INTEGER;
+BEGIN
+  SELECT causation_id INTO v_group
+    FROM public.digital_thread
+   WHERE causation_id IS NOT NULL
+   GROUP BY causation_id
+  HAVING count(*) FILTER (WHERE entity_type = 'gateways') > 0
+     AND count(*) FILTER (WHERE entity_type = 'devices')  > 1
+   ORDER BY causation_id DESC
+   LIMIT 1;
+
+  IF v_group IS NULL THEN
+    RAISE EXCEPTION
+      'seed: the Digital Thread causation demonstration is missing. No transaction in '
+      'digital_thread groups a gateway with more than one device, so the "Same transaction" '
+      'control in the drawer will render nothing on this stack. Check that the BEGIN/COMMIT block '
+      'above still commits ONCE, and that the ids it names still exist in 0002_seed_data.sql.';
+  END IF;
+
+  SELECT count(*) INTO v_rows
+    FROM public.digital_thread WHERE causation_id = v_group;
+
+  RAISE NOTICE
+    'seed: causation demonstration ready -- transaction % groups % audit rows across a gateway '
+    'and its devices.', v_group, v_rows;
+END;
+$causation_demo$;

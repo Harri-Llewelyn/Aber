@@ -80,6 +80,21 @@ describe('ArchivesTab Component', () => {
  * survives, which migration 0006 guarantees by making audit rows immutable and independent of
  * the entity they describe.
  */
+/**
+ * Open the dialog and satisfy its typed-name gate (issue #38).
+ *
+ * The three tests below assert what happens AFTER a confirmed delete, so each has to get past
+ * the gate first. Sharing one helper keeps that setup from being restated -- and means the gate's
+ * own behaviour is asserted in exactly one place, in its own describe, rather than incidentally in
+ * three tests that are about something else.
+ */
+const confirmPurge = async (name = 'Assembly Line 1') => {
+  fireEvent.click(purgeButton())
+  const field = await screen.findByLabelText(/Type the .* to confirm/i)
+  fireEvent.change(field, { target: { value: name } })
+  fireEvent.click(await screen.findByRole('button', { name: /^Confirm$/ }))
+}
+
 describe('ArchivesTab permanent delete', () => {
   beforeEach(() => { vi.clearAllMocks() })
 
@@ -116,8 +131,7 @@ describe('ArchivesTab permanent delete', () => {
     api.delete.mockResolvedValue(true)
     const { showToast } = await showArchives()
 
-    fireEvent.click(purgeButton())
-    fireEvent.click(await screen.findByRole('button', { name: /^Confirm$/ }))
+    await confirmPurge()
 
     // Pluralised to the collection route, the same shape restore uses -- entity_type is
     // singular on the row ('cell') and the API is not ('/cells/').
@@ -130,8 +144,7 @@ describe('ArchivesTab permanent delete', () => {
     await showArchives()
     const before = api.get.mock.calls.length
 
-    fireEvent.click(purgeButton())
-    fireEvent.click(await screen.findByRole('button', { name: /^Confirm$/ }))
+    await confirmPurge()
 
     await waitFor(() => expect(api.get.mock.calls.length).toBeGreaterThan(before))
   })
@@ -140,8 +153,7 @@ describe('ArchivesTab permanent delete', () => {
     api.delete.mockRejectedValue(new Error('foreign key violation'))
     const { showToast } = await showArchives()
 
-    fireEvent.click(purgeButton())
-    fireEvent.click(await screen.findByRole('button', { name: /^Confirm$/ }))
+    await confirmPurge()
 
     await waitFor(() => expect(showToast).toHaveBeenCalledWith('foreign key violation', 'error'))
   })
@@ -167,5 +179,82 @@ describe('ArchivesTab permanent delete', () => {
     expect(purgeButton().className).toMatch(/btn-danger-reveal/)
     // Neither is the page's primary action.
     expect(screen.getByRole('button', { name: /Restore/i }).className).not.toMatch(/btn-primary/)
+  })
+})
+
+/**
+ * The typed-name gate on permanent delete (issue #38).
+ *
+ * WHY THIS ONE DIALOG AND NOT ALL OF THEM. `ConfirmModal` has ten callers and every other one
+ * guards something recoverable -- archiving is a soft flag with a Restore button beside it,
+ * deprecating a metric is reversible, discarding a draft costs a retype. Gating them all would
+ * train an operator to type through the single dialog where reading it matters, which is the
+ * opposite of what the issue asks for. Friction only buys attention while it is rare, so the
+ * prop is opt-in and these tests pin that it stays opt-in.
+ */
+describe('permanent delete asks for the name back', () => {
+  beforeEach(() => { vi.clearAllMocks() })
+
+  it('disables the confirming button until the name is typed', async () => {
+    await showArchives()
+    fireEvent.click(purgeButton())
+
+    const confirm = await screen.findByRole('button', { name: /^Confirm$/ })
+    expect(confirm).toBeDisabled()
+  })
+
+  it('stays disabled for a near miss', async () => {
+    // The whole value of the gate is that it fails on the WRONG name -- the archives table is a
+    // mixed list of look-alike rows, which is how the wrong one gets hit in the first place.
+    await showArchives()
+    fireEvent.click(purgeButton())
+    fireEvent.change(await screen.findByLabelText(/Type the .* to confirm/i),
+      { target: { value: 'Assembly Line 2' } })
+
+    expect(await screen.findByRole('button', { name: /^Confirm$/ })).toBeDisabled()
+  })
+
+  it('stays disabled for the right name in the wrong case', async () => {
+    // Exact, case included: a different case means they typed a different name.
+    await showArchives()
+    fireEvent.click(purgeButton())
+    fireEvent.change(await screen.findByLabelText(/Type the .* to confirm/i),
+      { target: { value: 'assembly line 1' } })
+
+    expect(await screen.findByRole('button', { name: /^Confirm$/ })).toBeDisabled()
+  })
+
+  it('accepts the name with stray whitespace, which is what a copy-paste brings', async () => {
+    // Trailing space off the table beside it teaches nothing, so it is trimmed rather than
+    // refused. The characters themselves still have to match.
+    api.delete.mockResolvedValue(true)
+    await showArchives()
+    await confirmPurge('  Assembly Line 1  ')
+
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/v1/cells/Cell_1'))
+  })
+
+  it('shows the name it wants, rather than making it a memory test', async () => {
+    // The point is to make the operator look at WHICH asset is about to go. A dialog that made
+    // them recall it would just send them back to the table with the dialog still open.
+    await showArchives()
+    fireEvent.click(purgeButton())
+
+    const field = await screen.findByLabelText(/Type the .* to confirm/i)
+    expect(field.getAttribute('placeholder')).toBe('Assembly Line 1')
+  })
+
+  it('leaves every other confirmation ungated', async () => {
+    /*
+     * THE OPT-IN, ASSERTED. Archiving is the reversible neighbour of this action and shares the
+     * dialog; if a future change flipped `requireTyped` on by default, this is what would notice.
+     */
+    const { ConfirmModal } = await import('../components/modals/ConfirmModal')
+    const { container } = render(
+      <ConfirmModal message="Archive it?" onConfirm={vi.fn()} onCancel={vi.fn()} />
+    )
+
+    expect(container.querySelector('input')).toBeNull()
+    expect(screen.getByRole('button', { name: /^Confirm$/ })).not.toBeDisabled()
   })
 })

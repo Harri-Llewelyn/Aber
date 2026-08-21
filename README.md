@@ -1,4 +1,4 @@
-# AMRC Connectivity Stack - Cymru
+﻿# AMRC Connectivity Stack - Cymru
 
 [![CI Pipeline](https://github.com/Harri-Llewelyn/acs-cymru/actions/workflows/ci.yml/badge.svg)](https://github.com/Harri-Llewelyn/acs-cymru/actions/workflows/ci.yml)
 
@@ -128,13 +128,26 @@ closed set, `0022` adds one schema per machine class and attaches it to every si
 Realtime, `0024` adds an optional free-text `description` to devices and gateways, `0025` adds
 physical-gateway enrolment — a `gateway_enrollment_tokens` table reachable only by `service_role`,
 the RPCs that issue and atomically redeem a single-use token, and the `PENDING_ENROLLMENT` /
-`AWAITING_BIRTH` lifecycle states — plus demo accounts (`supabase/seed.sql`).
+`AWAITING_BIRTH` lifecycle states — `0026` stamps every audit row with the transaction that wrote
+it (`digital_thread.causation_id`, from `txid_current()`) so the several rows one operator action
+produces can be read back as one act, and adds `record_ingestion_rejection()` — the narrow
+SECURITY DEFINER gate through which the ingestion daemon records a payload it judged
+non-conforming, replacing `service_role`'s direct INSERT on the audit table — and `0027` maps the
+historian's storage footprint over `postgres_fdw` and unions it with Supabase's own table sizes as
+`public.storage_footprint`, read by Grafana's `supabase` datasource — plus demo accounts
+(`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because `0005` already implements one; a second declaration of `log_digital_thread_event()`
 > would win by filename order on every boot and would have regressed the `actor_source`
 > attribution `0005` adds. The gap in the numbering is deliberate and the reasoning is in
 > [`supabase/README.md`](supabase/README.md#audit-signal-and-attribution-0005).
+>
+> `0026` is that later declaration, written deliberately and on those terms: it reproduces `0005`'s
+> body **in full** and adds two lines, rather than patching it. Its self-check asserts that both the
+> heartbeat suppression guard and the causation stamp are present in the live definition, because
+> `check-docs-drift.mjs` can verify a redeclaration was *intended* and cannot verify it was
+> *complete*.
 
 | Interface | URL |
 | :--- | :--- |
@@ -406,6 +419,7 @@ python ingestion/test_health_heartbeat.py
 python ingestion/test_rbe_telemetry.py
 python ingestion/test_mqtt_tls.py
 python ingestion/test_audit_write_dedup.py
+python ingestion/test_payload_conformance.py
 python ingestion/test_telemetry_batching.py
 python i3x/test_i3x_service.py
 python supabase/functions/approve-quarantine/test_approve_quarantine.py
@@ -435,6 +449,7 @@ npm run test:lib
 python supabase/migrations/test_user_roles_rls.py
 python supabase/migrations/test_schema_versioning.py
 python supabase/migrations/test_digital_thread_guard.py
+python supabase/migrations/test_ingestion_rejection_rpc.py
 python supabase/migrations/test_metric_catalog_seed.py
 python supabase/migrations/test_gateway_enrollment.py
 # Needs the TimescaleDB historian (port 5433), not Supabase — the rollups live there
@@ -502,7 +517,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Eight extensions, ordered by how much of each already exists. None is speculative: every one names
+Twelve extensions, ordered by how much of each already exists. None is speculative: every one names
 the code it would build on, because the value of writing them down is that a reader can tell how far
 away each is.
 
@@ -639,6 +654,134 @@ rather than a design exercise. i3X implements no write verb at all, so an MCP se
 read-only by construction — not by configuration. An `--enable-writes` flag would be a client-side
 switch over a server that has nothing to enable. Writes belong on the Sparkplug/NCMD path, where
 they are auditable.
+
+### 9 · Administrative Settings & Runtime Configuration
+
+**Builds on:** `has_role('Administrator')` · PostgREST RLS · Supabase Vault
+
+In-app configuration management allowing `Administrator` users to tune runtime parameters
+(cold storage endpoints, retention policies, OIDC provider metadata, alert thresholds) directly
+from the React dashboard without host-level `.env` edits or container restarts.
+
+**Settings override defaults dynamically at runtime rather than mutating disk.** Sensitive secrets
+(S3 keys, OIDC client secrets) land encrypted in Supabase Vault, while non-sensitive runtime
+flags live in a `system_settings` table gated strictly on `Administrator` via RLS. Host `.env`
+values remain the initial fallback, preserving deterministic, zero-configuration local boot while
+giving deployed shopfloor instances an operational management plane.
+
+---
+
+### 10 · Cold Telemetry Archival & Query-in-Place
+
+**Builds on:** TimescaleDB retention policies · `telemetry` hypertable · Edge Functions · Apache Parquet
+
+Tiering high-volume time-series telemetry out of the operational database into vendor-neutral
+Apache Parquet files on S3-compatible or Azure Blob storage once the hot hypertable retention
+window expires (e.g., >90 days).
+
+**Preserves long-horizon traceability without re-bloating the operational database.** A scheduled
+maintenance task exports date-partitioned chunks to compressed `.parquet` files, verifies storage,
+records a manifest row in `telemetry_archive_manifest`, and safely drops the raw chunk. The React
+Archives view renders the catalog and allows operators to query historical months in place via
+short-lived presigned URLs and DuckDB—rendering historical charts on demand without rehydrating
+gigabytes of raw points back into TimescaleDB.
+
+---
+
+### 11 · Deferred commit for Rearrange mode
+
+**Builds on:** `handleDrop()` / `handleLaneDrop()` / `pendingZone` in
+[`OverviewTab.jsx`](frontend/src/components/tabs/OverviewTab.jsx) ·
+`digital_thread.causation_id` (`0026`)
+
+Rearrange mode is a mode already — off by default, turned on deliberately, turned off by clicking
+**Rearranging — click to finish**. What it is not yet is a *transaction*: each drop issues its own
+`PUT /api/v1/devices/{id}` the moment the mouse is released, and the button's own tooltip says so
+("Every move is written immediately"). The work is to stage the moves and apply them when the
+operator finishes, so the mode has a beginning, an end, and one outcome.
+
+**The reason this is worth doing is not tidiness, it is the audit trail.** Reassigning six machines
+is one decision, and it currently lands as six independent `UPDATE`s — six transactions, six
+`causation_id`s, six unrelated-looking rows in the Digital Thread. Deferring the commit makes it one
+transaction, which is exactly what the "Same transaction" control in the event drawer exists to
+show. Today the only multi-entity act on a fresh stack is the one `supabase/seed.sql` commits
+deliberately so that control has something to demonstrate; this would make a real operator action
+produce one.
+
+**The crux is that atomicity has to come from the server.** Device writes go through PostgREST
+per-row (`supabase.from('devices').update(...).eq('id', ...)`), so staging in the browser and then
+firing six requests on finish would still be six transactions and would change nothing about the
+thread — it would only move when they happen. One `causation_id` needs a single SECURITY DEFINER RPC
+taking the whole batch, in the shape `fork_schema` and `publish_schema_version` already use. A
+half-applied batch also becomes possible without it, which is worse than the present behaviour.
+
+Three things the present design gets right and a staged version must not lose:
+
+- **`pendingZone` exists because a drop has no optimistic feedback**: the device keeps rendering in
+  its old tile until the reload lands, and on a slow link a silent drop is indistinguishable from a
+  refused one — which is how one move became two writes. Staging inverts this. The tile must move
+  immediately, and *staged* must then be visually distinct from *saved*, or the operator cannot tell
+  what is already durable.
+- **A discard path becomes necessary.** With immediate writes the only undo is dragging back, which
+  writes again. With staging, leaving the mode without committing has to mean something explicit —
+  and navigating away mid-rearrange must not lose the work silently.
+- **Unassigned is not settable**, and staging must keep that true: dropping there clears the
+  explicit cell and lets resolution run, so a device may visibly spring back. That is correct
+  behaviour, not a failed write, and a staged view that pretended the drop stuck would be telling
+  the one lie this location model exists to avoid.
+
+---
+
+### 12 · Vestigial column and configuration audit
+
+**Builds on:** [`scripts/check-docs-drift.mjs`](scripts/check-docs-drift.mjs) ·
+[`.env.example`](.env.example) · `0001_baseline_schema.sql`
+
+Columns and settings accumulate faster than they are retired. `devices.connection_method` is the
+clearest example: it is written by the device form and by the quarantine approval modal, exported
+into the AAS as `ConnectionMethod`, and classified as a governance field in the Digital Thread — and
+on a seeded stack **all six devices hold the same value**, `Sparkplug B`, because that is the only
+transport this platform ingests. It is not dead code. It is a field that carries no information,
+which is a harder thing to notice and a harder thing to justify keeping.
+
+**THE AUDIT'S WHOLE DIFFICULTY IS TELLING "UNUSED" FROM "EMPTY HERE", and a scan that cannot will do
+damage.** On a freshly reset stack these are all NULL for every row:
+
+| Column | Why it is empty | Verdict |
+| :--- | :--- | :--- |
+| `devices.quarantine_reason` | Only set when a device is quarantined | **Load-bearing** — ingestion writes it |
+| `devices.reported_identity` | Only set on an identity mismatch | **Load-bearing** — the spoofing diagnosis |
+| `devices.model_3d_path` | Only set once a model is uploaded | **Load-bearing** |
+| `gateways.agent_version` | Stamped at enrolment; every seeded gateway is simulated | **Load-bearing** — §2 builds on it |
+| `devices.asset_type` | Never written by any code path | Candidate |
+| `cells.grafana_url` | Never written by any code path | Candidate |
+
+Four of those six would be deleted by a "drop the columns that are always NULL" pass, and two of
+them are exactly the evidence the platform keeps for its own security decisions. The audit therefore
+has to be **reachability of the write path**, not occupancy of the column — which is a static
+question, and so a checkable one: a guard in `check-docs-drift.mjs` that fails when a `public`
+column is named by no migration other than its own `CREATE TABLE`, no frontend module, no edge
+function and no ingestion path, with the same stated-exception list `NOT_PUBLISHED` already uses for
+relations.
+
+**On the configuration half, the finding is the opposite of the suspicion.** All 66 variables in
+`.env.example` are referenced somewhere in the repository, and `SUPABASE_ANON_KEY` in particular is
+consumed by twelve files — Kong's key-auth, the Grafana alert contact point, the frontend bundle,
+the i3X service and both e2e Jobs. It is also **public by construction**: it is the `anon` role and
+is readable in any built bundle, which is why the chart renders it outside a Secret deliberately.
+Retiring it is not a cleanup, it is a migration.
+
+The real work on that side is narrower and has two parts:
+
+- **Drift between a working `.env` and the template**, which nothing checks in either direction. A
+  developer's file accumulates keys that were retired from the template (`VITE_ALLOW_SIGNUP` is one
+  today) and misses keys that were added to it, silently falling through to a Compose default. The
+  same one-pass comparison this entry was written from is the guard.
+- **Supabase's legacy API keys.** The `anon` / `service_role` JWTs this stack mints in
+  `scripts/setup.mjs` are the key format Supabase has since superseded with publishable and secret
+  keys. That is a real upstream deprecation with a real end date, and it touches Kong's key-auth
+  consumers, the edge-function registry and `custom_access_token_hook`. It should be scoped against
+  the pinned `supabase/gotrue` and `kong` versions before it is planned, not assumed to apply.
 
 ---
 

@@ -15,7 +15,20 @@ import path from 'node:path'
 import { DigitalThreadTab, classifyEvent, diffFields, tickFormatter, shortId } from '../components/tabs/DigitalThreadTab'
 import { api } from '../api'
 
-const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
+/*
+ * NEWLINES NORMALISED ON READ, because `cssRule()` below matches multi-line SELECTORS and its
+ * patterns are written with `\n`.
+ *
+ * .gitattributes normalises this file to LF in the repository and checks it out with the
+ * platform's native ending, so on Windows it arrives as CRLF and every one of those patterns
+ * silently matches nothing -- `cssRule()` returns undefined and the failure reads as
+ * ".toMatch() expects to receive a string". Three guards here were failing for that reason alone,
+ * on a working tree whose CSS was correct, while CI on Linux passed.
+ *
+ * Normalising is the right fix rather than teaching each pattern about \r?\n: the guards are about
+ * what the rules SAY, and line endings are not part of that.
+ */
+const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8').replace(/\r\n/g, '\n')
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -132,7 +145,11 @@ describe('Digital Thread filter bar', () => {
     expect(document.querySelector('.filter-bar')).toBeTruthy()
     expect(screen.getByTitle(/Show only events against one kind of asset/)).toBeInTheDocument()
     expect(screen.getByPlaceholderText(/Search by entity name or ID/)).toBeInTheDocument()
-    expect(screen.getByTitle(/Show only one kind of audit event/)).toBeInTheDocument()
+    // The wording is load-bearing, not incidental. This control filters `digital_thread.action`,
+    // while the coloured markers below it show a DERIVED classification -- two taxonomies on one
+    // screen, which issue #37 reported as a single one with a missing option. See
+    // digitalThreadActionFilter.test.jsx.
+    expect(screen.getByTitle(/Filter by the database action/)).toBeInTheDocument()
     expect(rangeSelect()).toBeInTheDocument()
   })
 
@@ -145,7 +162,7 @@ describe('Digital Thread filter bar', () => {
 
   it('filters by audit event type', async () => {
     await show()
-    fireEvent.change(screen.getByTitle(/Show only one kind of audit event/), { target: { value: 'DELETE' } })
+    fireEvent.change(screen.getByTitle(/Filter by the database action/), { target: { value: 'DELETE' } })
 
     await waitFor(() => expect(lastThreadUrl()).toContain('action=DELETE'))
   })
@@ -169,7 +186,7 @@ describe('Digital Thread filter bar', () => {
 
   it('counts the active filters and clears them together, the time range included', async () => {
     await show()
-    fireEvent.change(screen.getByTitle(/Show only one kind of audit event/), { target: { value: 'UPDATE' } })
+    fireEvent.change(screen.getByTitle(/Filter by the database action/), { target: { value: 'UPDATE' } })
     fireEvent.change(screen.getByPlaceholderText(/Search by entity name or ID/), { target: { value: 'Press' } })
     fireEvent.change(rangeSelect(), { target: { value: '7d' } })
 

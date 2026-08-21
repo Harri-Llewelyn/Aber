@@ -107,9 +107,10 @@ ConfigMap is mounted over. Both paths run the same code, so Compose behaves exac
 
 - **Keys are the `VITE_*` names, unchanged**, so a ConfigMap is generated from the same variable
   names `.env` and the Dockerfile already use and there is no second vocabulary to keep in step.
-  `VITE_ALLOW_SIGNUP` was folded in too — it was reading `import.meta.env` directly in `App.jsx`
-  and was neither a Dockerfile build arg nor in `.env.example`, so it could not be set at all
-  through the documented path. It is now both.
+  `VITE_ALLOW_SIGNUP` was folded in here once and has since been removed entirely: it gated the
+  sign-up *form* while `GOTRUE_DISABLE_SIGNUP` left the endpoint behind it open, so it never
+  controlled anything. The server-side flag is now the only switch and the dashboard offers no
+  sign-up path at all.
 - **`BUILD_TIME_SETTINGS` uses static property accesses, and that spelling is load-bearing.** Vite
   substitutes `import.meta.env.VITE_FOO` *textually*; a dynamic `import.meta.env[name]` lookup is
   not a substitution site and would read `undefined` for everything in a production bundle. Every

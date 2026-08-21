@@ -23,6 +23,33 @@ export const PERMISSION_UUIDS = {
   DIGITAL_THREAD_READ: 'd345e678-9012-4c1d-8706-933e08544e42',
 };
 
+/**
+ * Every value `digital_thread.action` can hold, with the label the filter offers for it.
+ *
+ * SHARED BECAUSE TWO PLACES MUST AGREE AND NEITHER COULD SEE THE OTHER. The Digital Thread filter
+ * renders these as options; `api.js` uses the same keys as an ALLOW-LIST before turning the choice
+ * into a SQL predicate. That allow-list was `['INSERT', 'UPDATE', 'DELETE']` written out by hand,
+ * so when migration 0026 added SCHEMA_REJECTION the filter could not have selected it -- and the
+ * failure would not have been an error. An unlisted action fell through the `if` and applied NO
+ * predicate at all, so asking for one kind of event returned EVERY kind. That is the same trap the
+ * empty-entityIds guard beside it exists to close: a filter that matches nothing must return
+ * nothing, never everything.
+ *
+ * THE LABELS NAME THE DATABASE ACTION, deliberately, and do not reuse the marker vocabulary. The
+ * timeline colours events by a DERIVED classification -- Created / Operational / Configuration /
+ * Lifecycle (see MARKERS) -- and the filter previously borrowed two of those words for a different
+ * taxonomy: its "Created" meant INSERT, while the legend's "Lifecycle" spans a DELETE and any
+ * UPDATE that archived or quarantined a row. Two overlapping vocabularies on one screen, reported
+ * as issue #37. These labels match the raw badge shown in the event drawer instead, so the filter
+ * and the badge name the same thing.
+ */
+export const DIGITAL_THREAD_ACTIONS = {
+  INSERT:           'Insert',
+  UPDATE:           'Update',
+  DELETE:           'Delete',
+  SCHEMA_REJECTION: 'Schema rejection',
+};
+
 export const VALID_TABS = [
   'overview', 'cells', 'gateways', 'devices', 'digital-thread', 'schemas', 'vocabulary', 'directory',
   'archives'

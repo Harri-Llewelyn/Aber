@@ -102,6 +102,7 @@ services:
       BI_READER_PASSWORD: ${BI_READER_PASSWORD:-}
     volumes:
       - ./timescaledb/retention.sql:/retention.sql:ro
+      - ./timescaledb/storage.sql:/storage.sql:ro
       - ./timescaledb/aggregates.sql:/aggregates.sql:ro
       - ./timescaledb/roles.sql:/roles.sql:ro
     # The healthcheck cannot be trusted to mean "init has finished": the postgres entrypoint runs
@@ -121,6 +122,8 @@ services:
       psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -v compress_after=\"$$TIMESCALE_COMPRESS_AFTER\" -v retain_after=\"$$TIMESCALE_RETAIN_FOR\" -f /retention.sql;
       echo 'Reconciling telemetry rollups...';
       psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -v rollup_1m_retain=\"$$TIMESCALE_ROLLUP_1M_RETAIN_FOR\" -v rollup_5m_retain=\"$$TIMESCALE_ROLLUP_5M_RETAIN_FOR\" -v rollup_1h_retain=\"$$TIMESCALE_ROLLUP_1H_RETAIN_FOR\" -f /aggregates.sql;
+      echo 'Reconciling the storage footprint view...';
+      psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -f /storage.sql;
       echo 'Reconciling read-only BI role...';
       psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -f /roles.sql;
       "
@@ -271,6 +274,12 @@ services:
       # NODERED_PUBLIC_URL as the callbackURL settings.js uses, so the two cannot drift apart --
       # they must match exactly or /oauth/authorize answers "invalid redirect_uri".
       NODERED_OAUTH_CALLBACK_URL: ${NODERED_PUBLIC_URL:-http://localhost:1880}/auth/strategy/callback
+      # Creates the Supabase-side `grafana_reader` in migration 0027 -- the role Grafana connects
+      # as to read public.storage_footprint. THE SAME CREDENTIAL as the historian's reader of the
+      # same name, on purpose: it is the same tool, and a second secret to rotate for it is a
+      # second secret to forget. The privileges are granted per database and share nothing but the
+      # password. Empty skips the role entirely rather than creating one with a blank secret.
+      BI_READER_PASSWORD: ${BI_READER_PASSWORD:-}
     volumes:
       - ./supabase/migrations:/migrations:ro
       - ./supabase/seed.sql:/seed.sql:ro
@@ -282,7 +291,22 @@ services:
       for f in /migrations/*.sql; do
         if [ -f \"$$f\" ]; then
           echo \"Executing migration $$f...\";
-          psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v grafana_public_url=\"$$GRAFANA_PUBLIC_URL\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -h supabase-db -U postgres -d postgres -f \"$$f\";
+          attempt=1;
+          while :; do
+            if psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v grafana_public_url=\"$$GRAFANA_PUBLIC_URL\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -h supabase-db -U postgres -d postgres -f \"$$f\" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi;
+            cat /tmp/migration.log;
+            # RETRIED ONLY ON A DEADLOCK, never on anything else. Every migration here is
+            # idempotent and is replayed on every boot already, so re-running one is safe by
+            # construction -- but retrying a genuine schema error three times only delays the
+            # failure and prints it three times. A deadlock is the transient case: db-init takes
+            # DDL locks on tables that supabase-realtime is concurrently reading for its
+            # subscriptions, and either side can be chosen as the victim.
+            if [ $$attempt -ge 3 ] || ! grep -q 'deadlock detected' /tmp/migration.log; then
+              echo \"Migration $$f failed.\" >&2; exit 1;
+            fi;
+            echo \"Deadlock on $$f (attempt $$attempt) -- retrying in 3s.\" >&2;
+            attempt=$$((attempt+1)); sleep 3;
+          done;
         fi
       done;
       if [ -f /seed.sql ]; then
@@ -327,7 +351,12 @@ services:
       GOTRUE_JWT_ADMIN_ROLES: service_role
       GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
       GOTRUE_MAILER_AUTOCONFIRM: "true"
-      GOTRUE_DISABLE_SIGNUP: "false"
+      # CLOSED BY DEFAULT, and this is the only switch. There used to be a VITE_ALLOW_SIGNUP
+      # build arg on the frontend that hid the sign-up form while this stayed "false" -- so the
+      # endpoint was open to anyone who could reach Kong, and a self-registered account landed on
+      # the default 'Operator' role handle_new_user() assigns. A client-side flag is not an access
+      # control; this is.
+      GOTRUE_DISABLE_SIGNUP: ${GOTRUE_DISABLE_SIGNUP:-true}
       GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_ENABLED: "true"
       GOTRUE_HOOK_CUSTOM_ACCESS_TOKEN_URI: "pg-functions://postgres/public/custom_access_token_hook"
       # OAuth 2.1 / OIDC authorization server, used by Grafana's [auth.generic_oauth].
@@ -833,7 +862,7 @@ services:
       SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
       AUTH_JWT_SECRET: ${SUPABASE_JWT_SECRET}
       DEFAULT_ORGANIZATION_NAME: ACS-Cymru
-      DEFAULT_PROJECT_NAME: ACS-Cymru Asset Tracking
+      DEFAULT_PROJECT_NAME: ACS-Cymru
       # Studio reads Edge Functions from disk, not over HTTP.
       EDGE_FUNCTIONS_MANAGEMENT_FOLDER: /app/edge-functions
       SNIPPETS_MANAGEMENT_FOLDER: /app/snippets
@@ -1166,7 +1195,6 @@ services:
         # it, for the case where the browser reaches Grafana on a different origin from the one
         # registered as the OAuth redirect.
         VITE_GRAFANA_URL: ${VITE_GRAFANA_URL:-${GRAFANA_PUBLIC_URL:-http://localhost:3002}}
-        VITE_ALLOW_SIGNUP: ${VITE_ALLOW_SIGNUP:-false}
         # Only needed if a bucket was renamed; src/api.js defaults to the same names
         # storage-init.mjs does, so the two agree without either being set.
         VITE_MODEL_3D_BUCKET: ${STORAGE_BUCKET:-asset-3d-models}
