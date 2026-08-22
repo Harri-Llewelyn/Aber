@@ -69,7 +69,7 @@ const DirectoryTab     = lazy(() => import('./components/tabs/DirectoryTab').the
 const ArchivesTab      = lazy(() => import('./components/tabs/ArchivesTab').then(m => ({ default: m.ArchivesTab })))
 const SettingsTab      = lazy(() => import('./components/tabs/SettingsTab').then(m => ({ default: m.SettingsTab })))
 
-const TABS = [
+export const TABS = [
   { id: 'overview',       label: 'Overview',          icon: <IconLayoutDashboard size={15} /> },
   { id: 'cells',          label: 'Cells',             icon: <IconFactory size={15} /> },
   { id: 'gateways',       label: 'Gateways',          icon: <IconRadio size={15} /> },
