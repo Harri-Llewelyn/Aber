@@ -140,8 +140,11 @@ than a device, because the platform alert rules cover a gateway and the fleet an
 fits a row that must name a machine — `0029` adds `public.platform_health`, the narrow view
 those rules evaluate so the Grafana reader never needs the asset inventory — and `0030` gives that
 alert table a **7-day retention window**, pruned nightly by `pg_cron`, whose predicate ages out
-closed and superseded occurrences but never the newest firing row of a fingerprint — plus demo
-accounts (`supabase/seed.sql`).
+closed and superseded occurrences but never the newest firing row of a fingerprint — and `0031`
+adds `public.system_settings`, the runtime configuration plane an `Administrator` edits from the
+dashboard instead of a host `.env`, whose **key set is closed**: RLS grants UPDATE and nothing
+else, so a new setting arrives by migration beside the code that reads it — plus demo accounts
+(`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because `0005` already implements one; a second declaration of `log_digital_thread_event()`
@@ -463,6 +466,7 @@ python supabase/migrations/test_schema_versioning.py
 python supabase/migrations/test_digital_thread_guard.py
 python supabase/migrations/test_ingestion_rejection_rpc.py
 python supabase/migrations/test_platform_alerts_retention.py
+python supabase/migrations/test_system_settings_rls.py
 python supabase/migrations/test_metric_catalog_seed.py
 python supabase/migrations/test_gateway_enrollment.py
 # Needs the TimescaleDB historian (port 5433), not Supabase — the rollups live there
