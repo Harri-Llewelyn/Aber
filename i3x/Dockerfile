@@ -11,8 +11,10 @@
 # cheaper than one more ordering constraint.
 FROM python:3.10-slim
 
-# protobuf-compiler matches the pinned protobuf runtime; without it sparkplug_b_pb2 cannot be
-# generated and every DDATA arrives undecodable.
+# protobuf-compiler generates sparkplug_b_pb2 at build time; without it every DDATA arrives
+# undecodable. It does NOT match the pinned runtime and does not need to -- apt supplies libprotoc
+# 3.21.12 against a 5.x runtime. See ingestion/requirements.txt for why that pairing is deliberate;
+# this image and that one must keep making the same choice, since both decode the same wire format.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
