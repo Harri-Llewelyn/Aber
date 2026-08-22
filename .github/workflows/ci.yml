@@ -1939,6 +1939,76 @@ jobs:
           python ingestion/validate.py
 
       # ---------------------------------------------------------------------------------------
+      # Every Prometheus target is actually UP.
+      #
+      # THE SAME FAILURE THE SERVICEMONITOR GUARD EXISTS FOR, one target lower. A scrape config
+      # naming an endpoint that serves nothing does not fail: Prometheus lists the target as DOWN,
+      # the dashboards built on it render empty panels, and someone concludes the component is
+      # idle. That is a monitoring stack lying about the thing it was installed to observe, which
+      # is worse than not monitoring it at all.
+      #
+      # It would have caught a real one: `kong` serves metrics only when the `prometheus` plugin
+      # AND `KONG_STATUS_LISTEN` are both set. With the plugin alone there is no endpoint, and
+      # nothing anywhere says so.
+      #
+      # Run after validate.py so the daemon has consumed traffic and its counters are non-empty --
+      # a target that is up but serving nothing is the next failure along, and the assertion on
+      # `acs_ingestion_messages_total` below is what separates them.
+      # ---------------------------------------------------------------------------------------
+      - name: Verify Every Prometheus Target Is Up
+        run: |
+          set -euo pipefail
+          PROM=http://127.0.0.1:9090
+
+          # Prometheus needs one scrape interval (15s) plus start-up before every target has been
+          # tried once; a target never yet scraped reports health "unknown", not "down".
+          for i in $(seq 1 20); do
+            if curl -sf "$PROM/-/ready" >/dev/null 2>&1; then break; fi
+            sleep 3
+          done
+          curl -sf "$PROM/-/ready" >/dev/null || { echo "::error::Prometheus never became ready"; exit 1; }
+          sleep 20
+
+          curl -sf "$PROM/api/v1/targets?state=active" > /tmp/targets.json
+
+          python3 - <<'PY'
+          import json, sys
+          targets = json.load(open('/tmp/targets.json'))['data']['activeTargets']
+          if not targets:
+              print('::error::Prometheus has no active targets at all')
+              sys.exit(1)
+          bad = []
+          for t in targets:
+              job = t['labels'].get('job', '?')
+              if t['health'] != 'up':
+                  bad.append(f"{job} ({t['scrapeUrl']}): {t['health']} -- {t.get('lastError') or 'no error reported'}")
+              else:
+                  print(f"  ok  {job} -> {t['scrapeUrl']}")
+          # Named explicitly rather than counted: a config that silently lost a job would still
+          # satisfy "every target listed is up", because the missing one is not listed.
+          jobs = {t['labels'].get('job') for t in targets}
+          for want in ('ingestion', 'node', 'kong', 'grafana', 'prometheus'):
+              if want not in jobs:
+                  bad.append(f"scrape job '{want}' is absent from prometheus.yml")
+          for b in bad:
+              print(f'::error::{b}')
+          sys.exit(1 if bad else 0)
+          PY
+
+          # The ingestion endpoint must be serving REAL counters, not just answering 200. validate.py
+          # has just published a run's worth of Sparkplug traffic through the daemon.
+          VALUE=$(curl -sf --get "$PROM/api/v1/query" \
+                    --data-urlencode 'query=sum(acs_ingestion_messages_total)' \
+                  | python3 -c 'import json,sys; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else "0")')
+          echo "  acs_ingestion_messages_total = $VALUE"
+          python3 -c "import sys; sys.exit(0 if float('$VALUE') > 0 else 1)" || {
+            echo "::error::Prometheus scraped the ingestion daemon but recorded no messages."
+            echo "::error::The target is up and the counters are empty, which means the endpoint"
+            echo "::error::is serving but the daemon consumed nothing during the validation run."
+            exit 1
+          }
+
+      # ---------------------------------------------------------------------------------------
       # Enrolment-token secrecy, which can only be checked WHERE THE SEED EXISTS.
       #
       # This suite asserts that the raw token is never stored, that RLS is on with no policies, and

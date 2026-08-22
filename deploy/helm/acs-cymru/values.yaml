@@ -984,6 +984,19 @@ frontend:
 # ---------------------------------------------------------------------------------------------
 grafana:
   enabled: true
+  # WHERE THE CLUSTER'S PROMETHEUS LIVES. Substituted into the shared datasource template, which
+  # both targets render from -- Compose points it at the Prometheus it runs itself, this points it
+  # at the one the cluster already has.
+  #
+  # THIS CHART DOES NOT DEPLOY A PROMETHEUS, deliberately. It ships ServiceMonitors
+  # (obs/servicemonitors.yaml) and lets the Operator collect; a second Prometheus would duplicate
+  # every series and give an operator two places to configure retention.
+  #
+  # The default is kube-prometheus-stack's conventional service. On a cluster with no Prometheus,
+  # or one installed elsewhere, the datasource fails its health check and the five ingestion alert
+  # rules report DatasourceError -- the same honest failure the Supabase datasource makes with no
+  # BI_READER_PASSWORD, and better than a rule that cannot reach its data evaluating to OK.
+  prometheusUrl: http://prometheus-operated.monitoring.svc:9090
   image:
     repository: grafana/grafana
     # Pinned, AND PINNED TO THE SAME TAG COMPOSE USES -- check-image-tag-parity.mjs fails the build

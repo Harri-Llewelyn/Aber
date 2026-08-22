@@ -694,6 +694,11 @@ services:
       # publish; loading the plugin without it costs a shared-dict counter per request and is what
       # keeps the two targets' gateway configuration identical.
       KONG_PLUGINS: request-transformer,cors,key-auth,prometheus
+      # THE PLUGIN ALONE SERVES NOTHING. `prometheus` collects, but the metrics are published on
+      # the STATUS listener, which Kong does not start unless this is set -- so without it the
+      # plugin is enabled, the scrape target is DOWN, and nothing says why. Bound to the compose
+      # network only; it is not in `ports:` and no host publishes it.
+      KONG_STATUS_LISTEN: 0.0.0.0:8100
     volumes:
       - kong_config:/usr/local/kong/declarative:ro
     # ADDED so `ingestion` can wait on it -- see that service's depends_on for the failure this
@@ -1407,6 +1412,82 @@ services:
       ingestion:
         condition: service_started
 
+  # ===============================================================================================
+  # Prometheus -- the metrics store the alert rules read.
+  #
+  # COMPOSE ONLY. On Kubernetes the chart renders ServiceMonitor objects and defers to the cluster's
+  # own Operator-managed Prometheus; shipping a second one there would duplicate every series and
+  # give an operator two places to set retention. The divergence is recorded in
+  # deploy/k8s/README.md and in prometheus/prometheus.yml's header.
+  #
+  # NOT AN ALERT ENGINE HERE. It stores; Grafana evaluates. That keeps every alert in this platform
+  # in one file and one contact-point tree rather than splitting them by which datasource answers.
+  # ===============================================================================================
+  prometheus:
+    container_name: acs-cymru_prometheus
+    image: prom/prometheus:v3.1.0
+    restart: always
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      # THIRTY DAYS, SET RATHER THAN DEFAULTED. The default is 15d, which is a reasonable number
+      # nobody chose; this host also carries two Postgres data directories, so the size of this
+      # database is a decision about somebody else's disk. Long enough that a weekly pattern is
+      # visible and a Monday-morning question about last Tuesday can be answered.
+      - '--storage.tsdb.retention.time=30d'
+      # A hard ceiling as well as a time bound. Retention by time alone is unbounded in BYTES: a
+      # burst of new series -- a fleet of gateways enrolled at once -- fills the disk inside the
+      # window. Whichever limit is reached first wins.
+      - '--storage.tsdb.retention.size=8GB'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      # Published for inspection -- the expression browser is how you find out what a rule would
+      # match before writing it. Grafana reaches it over the compose network, not through this.
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    depends_on:
+      ingestion:
+        condition: service_started
+
+  # ===============================================================================================
+  # node_exporter -- HOST metrics for the machine the stack runs on.
+  #
+  # WHAT IT MEASURES DEPENDS ON WHERE THIS RUNS, and it is worth being explicit rather than letting
+  # someone read a graph about the wrong computer: on the Debian VM this is intended for, the mounts
+  # below give the real host. On Docker Desktop for Windows or macOS it reports the Linux virtual
+  # machine the engine runs inside, which is not the developer's laptop.
+  #
+  # DISK IS THE METRIC THAT EARNS IT. This host carries two Postgres data directories and now a
+  # TSDB; filling it takes the whole stack down at once, and it is the failure `storage_footprint`
+  # (migration 0027) was added to make visible from the inside. This is the same question asked from
+  # outside the databases, which is the half that notices the log files and the images.
+  #
+  # READ-ONLY MOUNTS AND NO CAPABILITIES. It reads /proc and /sys and reports numbers; nothing here
+  # needs to write, and `pid: host` is required for process metrics rather than for privilege.
+  # ===============================================================================================
+  node-exporter:
+    container_name: acs-cymru_node_exporter
+    image: prom/node-exporter:v1.8.2
+    restart: always
+    pid: host
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      # Container and pseudo filesystems excluded, or every image layer and overlay mount appears
+      # as a separate "disk" and the one number anybody wants -- free space on the real volume --
+      # is buried among dozens that are not disks at all.
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|cgroup.*|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|mqueue|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$$'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    # NOT PUBLISHED. Nothing outside the compose network has any business reading host metrics, and
+    # unlike the ingestion endpoint there is no inspection case that justifies the exposure.
+
   grafana:
     container_name: acs-cymru_grafana
     image: grafana/grafana:13.1.3
@@ -1463,7 +1544,11 @@ services:
           echo 'BI_READER_PASSWORD must be set -- Grafana would otherwise provision the TimescaleDB datasource with an empty password. It is the password of the read-only powerbi_reader role created by timescaledb/roles.sql.' >&2
           exit 1
         fi
+        # __PROMETHEUS_URL__ is substituted here rather than committed into the template, because
+        # Kubernetes puts a DIFFERENT value into the same file -- it defers to the cluster's own
+        # Operator-managed Prometheus. See the template's header.
         sed -e "s|__BI_READER_PASSWORD__|$$BI_READER_PASSWORD|g" \
+            -e "s|__PROMETHEUS_URL__|http://prometheus:9090|g" \
             /tmp/datasources-template/datasources.template.yml \
             > /etc/grafana/provisioning/datasources/datasources.yml
         # Comment lines excluded for the same reason as in supabase-kong-init: the template's own
@@ -1509,6 +1594,11 @@ volumes:
   pgdata:
   nodered_data:
   grafana_data:
+  # Prometheus' TSDB. A named volume rather than a bind mount because it is a database, not
+  # configuration -- and because it shares a disk with two Postgres data directories, which is
+  # exactly why `--storage.tsdb.retention.time` below is set rather than left at the 15-day
+  # default nobody remembers.
+  prometheus_data:
   # Holds the RENDERED alerting provisioning -- the copied rules and policy plus the contact point
   # with its bearer secret substituted in. A volume rather than a bind mount for the same reason as
   # grafana_provisioning_datasources: the rendered file carries a credential and must not be written

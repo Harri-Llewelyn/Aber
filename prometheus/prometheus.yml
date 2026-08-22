@@ -1,0 +1,109 @@
+# =================================================================================================
+# Prometheus scrape configuration -- THE COMPOSE TARGET ONLY.
+#
+# THIS FILE IS NOT MIRRORED INTO THE HELM CHART, and that is a deliberate divergence rather than an
+# omission. On Kubernetes the chart renders `ServiceMonitor` objects and defers to the cluster's own
+# Operator-managed Prometheus -- see deploy/helm/acs-cymru/templates/obs/servicemonitors.yaml. A
+# second Prometheus shipped inside the chart would compete with the one the cluster already runs,
+# duplicate every series, and give an operator two places to configure retention.
+#
+# Compose has no such operator, so it gets its own. The two targets therefore reach the same
+# endpoints by different means, which is recorded in deploy/k8s/README.md's divergence table.
+#
+# -------------------------------------------------------------------------------------------------
+# WHAT IS SCRAPED, AND WHY EACH ONE EARNS ITS PLACE
+#
+#   ingestion       THE ONLY TARGET ON THE CRITICAL DATA PATH. Everything else here observes a
+#                   request tier or a host; this one says whether telemetry is being recorded at
+#                   all. `acs_ingestion_messages_dropped_total` is the series worth watching: any
+#                   non-zero value is telemetry that was NOT written, and under report-by-exception
+#                   nothing ever restates it.
+#
+#   node-exporter   HOST metrics for the machine the stack runs on -- typically a Debian VM under
+#                   Proxmox. DISK IS THE ONE THAT MATTERS: this host carries two Postgres data
+#                   directories and a TSDB, and filling it takes the whole stack down at once.
+#
+#   supabase-kong   Every REST, Auth, Storage, Realtime and edge-function request passes through
+#                   the gateway, so one target covers the entire HTTP tier. PostgREST itself
+#                   exposes no metrics at all (its admin server serves only /ready and /live), which
+#                   is why gateway-side measurement is not a compromise here but the design.
+#
+#   grafana         Serves metrics natively and unauthenticated on its normal port.
+#
+#   prometheus      Itself. A scrape config that cannot see its own health is one blind spot away
+#                   from reporting nothing and looking fine.
+#
+# NOT SCRAPED: mosquitto, which has no HTTP surface and publishes to `$SYS` MQTT topics instead.
+# The Kubernetes target runs `sapcc/mosquitto-exporter` as a sidecar to translate; adding it here is
+# now possible for the first time -- the reason it was Kubernetes-only was that Compose had nothing
+# to scrape into -- and is left as a follow-up rather than folded into this change.
+#
+# -------------------------------------------------------------------------------------------------
+# NO ALERTING BLOCK. Prometheus here is a STORE, not an alert engine: the rules live in
+# grafana/provisioning/alerting/alert-rules.yaml and Grafana evaluates them against this datasource.
+# That keeps every alert in this platform in one file and one contact-point tree, rather than
+# splitting them by which datasource happens to answer.
+# =================================================================================================
+
+global:
+  # 15s, matching the interval every dashboard and rule here assumes. `rate()` over a 5m window
+  # needs several samples inside it to be meaningful, and a longer scrape interval quietly makes
+  # short-window rates noisy rather than wrong -- which is harder to notice.
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  # Only relevant for recording rules, of which there are none; set so it is not left to a default
+  # that differs between versions.
+  evaluation_interval: 15s
+  external_labels:
+    stack: acs-cymru
+
+scrape_configs:
+  # -----------------------------------------------------------------------------------------------
+  # The ingestion daemon (issues #22, #24).
+  #
+  # STATIC, NOT SERVICE-DISCOVERED. Compose resolves service names on its own network, the daemon is
+  # pinned to one replica for correctness, and there is exactly one of it -- so DNS is the discovery
+  # mechanism and anything more would be machinery with no consumer.
+  # -----------------------------------------------------------------------------------------------
+  - job_name: ingestion
+    static_configs:
+      - targets: ['ingestion:9108']
+        labels:
+          component: ingestion
+
+  # -----------------------------------------------------------------------------------------------
+  # Host metrics.
+  #
+  # WHAT THIS MEASURES DEPENDS ON WHERE THE STACK RUNS, and it is worth being explicit. On the Debian
+  # VM this is intended for, the mounts below give the real host. On Docker Desktop for Windows or
+  # macOS it reports the Linux virtual machine the engine runs inside, which is not the developer's
+  # laptop -- the numbers are real, they are just about a different computer.
+  # -----------------------------------------------------------------------------------------------
+  - job_name: node
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          component: host
+
+  # -----------------------------------------------------------------------------------------------
+  # The API gateway's status listener. Requires BOTH the `prometheus` plugin (declared globally in
+  # supabase/kong.yml and named in KONG_PLUGINS) and KONG_STATUS_LISTEN. With the plugin and without
+  # the listener there is no endpoint at all, and the target simply reports DOWN.
+  # -----------------------------------------------------------------------------------------------
+  - job_name: kong
+    static_configs:
+      - targets: ['supabase-kong:8100']
+        labels:
+          component: supabase-kong
+
+  - job_name: grafana
+    static_configs:
+      - targets: ['grafana:3000']
+        labels:
+          component: grafana
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          component: prometheus

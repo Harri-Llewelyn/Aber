@@ -112,3 +112,38 @@ datasources:
       # that has no TimescaleDB extension installed, and the resulting panel fails at run time with
       # an undefined-function error that names neither cause.
       timescaledb: false
+
+  # ===============================================================================================
+  # Prometheus -- the metrics store, and the only datasource here that is not a database.
+  #
+  # NO CREDENTIAL, AND NOTHING TO SUBSTITUTE. The two Postgres datasources above carry
+  # __BI_READER_PASSWORD__ because they authenticate; Prometheus is reachable on the compose network
+  # and serves reads to anything that can connect. That is also why the port is not published to the
+  # host for Grafana's benefit -- it does not need to be.
+  #
+  # THE URL IS A PLACEHOLDER BECAUSE THE TWO TARGETS REACH DIFFERENT PROMETHEUS INSTANCES. Compose
+  # runs its own and substitutes the compose service name; Kubernetes defers to the cluster's
+  # Operator-managed one and substitutes `grafana.prometheusUrl`, which defaults to
+  # kube-prometheus-stack's conventional service. Hardcoding `prometheus:9090` here would have put
+  # a name that means nothing on Kubernetes into the file both targets share.
+  #
+  # A CLUSTER WITH NO PROMETHEUS gets a datasource whose health check fails, and the five ingestion
+  # rules report DatasourceError. That is the same honest failure the Supabase datasource above
+  # makes when BI_READER_PASSWORD is unset -- a rule that cannot reach its data should say so rather
+  # than evaluate to OK.
+  # ===============================================================================================
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: __PROMETHEUS_URL__
+    # NOT default. The historian stays default so an existing panel, and any dashboard imported
+    # without an explicit datasource, keeps resolving to the telemetry it was written against.
+    isDefault: false
+    version: 1
+    jsonData:
+      # Matches `global.scrape_interval` in prometheus/prometheus.yml. Grafana uses it to choose a
+      # sensible minimum step, and a value larger than the real interval silently coarsens every
+      # graph drawn against this datasource.
+      timeInterval: 15s
+      httpMethod: POST

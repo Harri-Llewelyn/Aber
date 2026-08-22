@@ -578,3 +578,354 @@ groups:
               datasource:
                 type: __expr__
                 uid: __expr__
+
+  # ===============================================================================================
+  # INGESTION PIPELINE -- whether telemetry is being recorded at all.
+  #
+  # THE THIRD GROUP, AND THE ONE CLOSEST TO THE DATA. "Shopfloor Conditions" reads the historian and
+  # says what the machines are doing; "Platform Conditions" reads Supabase and says what the stack
+  # believes about itself. Neither can see the pipe BETWEEN them -- a daemon that has stopped
+  # writing looks exactly like a quiet shopfloor, because under report-by-exception absence of data
+  # is ambiguous by construction.
+  #
+  # THESE READ PROMETHEUS, WHICH IS WHY THEY COULD NOT EXIST BEFORE. The daemon's counters have
+  # always been there; issues #22 and #24 exposed them at :9108/metrics and a Prometheus was added
+  # to the Compose stack to collect them. Until that existed there was nowhere for a Grafana rule to
+  # read a COUNTER from -- every rule above reads state out of a database.
+  #
+  # A NOTE ON THE KUBERNETES TARGET. The chart ships ServiceMonitors and defers to the cluster's own
+  # Operator-managed Prometheus, so the datasource these rules name resolves only where a Prometheus
+  # datasource with uid `prometheus` exists. On a cluster without one they load and report
+  # `DatasourceError`, which the policy tree routes like any other error rather than silently
+  # dropping. That is the intended failure: a rule that cannot reach its data should say so.
+  # ===============================================================================================
+  - orgId: 1
+    name: Ingestion Pipeline
+    folder: ACS-Cymru - Alerts
+    # 1m. These are rates over 5-15 minute windows; evaluating faster re-reads a number that cannot
+    # have moved, and the machine group's 10s exists only because someone is standing in front of a
+    # fault-injection button.
+    interval: 1m
+    rules:
+      # -------------------------------------------------------------------------------------------
+      # 1. CONSUMING NOTHING -- a daemon that is running and has stopped recording.
+      #
+      # THE HIGHEST-VALUE RULE HERE, and the one the liveness heartbeat cannot express: the health
+      # file is written while the MQTT connection is up, so a daemon connected to a broker that has
+      # stopped delivering is healthy by that measure and silent by this one.
+      #
+      # `for: 10m` AGAINST A 5m RATE WINDOW. On a plant that is always publishing, ten minutes of
+      # nothing is not a quiet period -- it is a fault. Long enough to ride out a broker restart and
+      # the daemon's own reconnect, short enough that a shift does not pass unnoticed.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-ingestion-silent
+        title: Ingestion Consuming Nothing
+        condition: C
+        for: 10m
+        # NoData IS NOT OK HERE, unlike every platform rule above. An empty frame means the SCRAPE
+        # failed -- the daemon is gone, or Prometheus cannot reach it -- and that is strictly worse
+        # than the condition being alerted on, not better. Treating it as OK would make killing the
+        # daemon the way to silence the alarm about the daemon.
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: critical
+          entity_type: platform
+        annotations:
+          summary: >-
+            The ingestion daemon has recorded no Sparkplug messages for 10 minutes. Telemetry is
+            not reaching the historian. Check the broker connection and
+            acs_ingestion_messages_dropped_total.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              # sum() ACROSS msg_type, because the series is labelled per message type and a daemon
+              # receiving only NDATA is still consuming. instant:true so the reduce below has a
+              # single value rather than a range to collapse.
+              expr: sum(rate(acs_ingestion_messages_total[5m]))
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              # BELOW, not above. The alert is the ABSENCE of traffic, which is the inversion that
+              # makes this rule different in kind from every other one in this file.
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [0.001]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -------------------------------------------------------------------------------------------
+      # 2. TELEMETRY BEING DROPPED.
+      #
+      # NOT "ABOVE A THRESHOLD" -- the correct number is zero. Every drop is a message the daemon
+      # refused, and under report-by-exception nothing ever restates it. `for: 5m` is what absorbs a
+      # restart or a momentary directory outage, rather than a threshold pretending some steady loss
+      # is acceptable.
+      #
+      # Multi-dimensional on `reason`, so a quarantine backlog and a database outage are separate
+      # instances of one rule with the reason in the labels.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-ingestion-drops
+        title: Telemetry Being Dropped
+        condition: C
+        for: 5m
+        # OK, unlike the rule above. No dropped series exists until something is dropped -- the
+        # counter is created on first use -- so an empty frame here genuinely means nothing has been
+        # refused. The silent-daemon rule is what covers the scrape being broken.
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: platform
+        annotations:
+          summary: >-
+            Ingestion is dropping messages ({{ $labels.reason }}). This is telemetry that was NOT
+            recorded and will not be restated. See ingestion/README.md for what each reason means.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: sum by (reason) (rate(acs_ingestion_messages_dropped_total[5m]))
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -------------------------------------------------------------------------------------------
+      # 3. BINDING REJECTIONS RISING -- the fourth platform alert, and NOT a health metric.
+      #
+      # This is the signal that something published telemetry for a device it does not own. The
+      # daemon refuses it -- `verify_gateway_binding()` is the check -- so nothing is corrupted, and
+      # that is exactly why it needs its own rule: the platform absorbs it silently and the only
+      # trace is a counter.
+      #
+      # A misconfigured gateway republishing another's devices looks identical to an attempt to
+      # forge telemetry, and both are worth a person's attention. Separated from the drop rule above
+      # at a higher severity for that reason, even though it is the same counter with one label.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-ingestion-binding-rejections
+        title: Gateway Binding Rejections Rising
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          entity_type: platform
+        annotations:
+          summary: >-
+            Telemetry is being published for devices the sending gateway does not own, and refused.
+            Either a gateway is misconfigured or something is publishing as an asset it is not.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: rate(acs_ingestion_messages_dropped_total{reason="gateway_binding"}[15m])
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -------------------------------------------------------------------------------------------
+      # 4. HISTORIAN UNREACHABLE.
+      #
+      # A GAUGE, NOT A RATE: 0 means telemetry is being dropped NOW. `for: 2m` is short because the
+      # daemon already retries internally -- three attempts inside a second -- so two minutes of
+      # this reading 0 means the retries are not winning.
+      #
+      # `db_connected` is psycopg2's own view and cannot see a connection dropped by the SERVER,
+      # which still reports open and fails on first use. `acs_ingestion_db_connect_failures_total`
+      # rising while this reads 1 is the shape of that; the drop rule above catches the consequence.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-ingestion-db-down
+        title: Historian Unreachable From Ingestion
+        condition: C
+        for: 2m
+        noDataState: Alerting
+        execErrState: Error
+        labels:
+          severity: critical
+          entity_type: platform
+        annotations:
+          summary: >-
+            The ingestion daemon cannot reach TimescaleDB. Telemetry is being dropped for as long as
+            this lasts.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: acs_ingestion_db_connected
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
+      # -------------------------------------------------------------------------------------------
+      # 5. MESSAGE LOSS -- a Sparkplug sequence gap (issue #24).
+      #
+      # UNDER REPORT-BY-EXCEPTION THIS IS THE ONLY LOSS SIGNAL THERE IS. A metric that stopped
+      # arriving is indistinguishable from a metric that stopped changing -- that ambiguity is
+      # inherent -- but `seq` skipping is unambiguous evidence that a change was published and never
+      # recorded. The historian is then confidently wrong about that device until a rebirth.
+      #
+      # PER EDGE NODE, which is what makes the alert actionable: one flapping gateway is a different
+      # problem from plant-wide loss, and the label says which.
+      #
+      # A NOTE ON RESTARTS. Messages published while the daemon is down are not replayed, so a
+      # deploy produces a real gap at every active node. `for: 15m` rides that out; a sustained rate
+      # is live loss and is what this exists to catch.
+      # -------------------------------------------------------------------------------------------
+      - uid: acs-ingestion-sequence-gaps
+        title: Sparkplug Message Loss
+        condition: C
+        for: 15m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: gateway
+        annotations:
+          summary: >-
+            Edge node {{ $labels.edge_node }} is losing messages between the broker and the
+            historian. Any metric carried by them is stale here until the node re-births.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 1800
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: rate(acs_ingestion_sequence_gaps_total[15m])
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+              datasource:
+                type: __expr__
+                uid: __expr__

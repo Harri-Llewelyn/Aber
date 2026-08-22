@@ -162,6 +162,7 @@ accounts (`supabase/seed.sql`).
 | Swagger UI | http://localhost:8088 |
 | Node-RED | http://localhost:1880 |
 | Grafana | http://localhost:3002 |
+| Prometheus | http://localhost:9090 |
 
 **Sign in to the React dashboard first.** Node-RED and Grafana both federate to Supabase Auth, and
 the consent step needs your dashboard session — going straight to either shows a "sign in required"
@@ -345,11 +346,13 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | `mosquitto-init` | `acs-cymru_mosquitto_init` | `eclipse-mosquitto:2.0.20` | — |
 | `mosquitto` | `acs-cymru_mosquitto` | `eclipse-mosquitto:2.0.20` | `1883`, `9001` |
 | `frontend` | `acs-cymru_frontend` | `./frontend/Dockerfile` | `3000:3000` |
-| `ingestion` | `acs-cymru_ingestion` | `./Dockerfile` | — |
+| `ingestion` | `acs-cymru_ingestion` | `./Dockerfile` | `9108:9108` |
 | `node-red-init` | `acs-cymru_node_red_init` | `./node-red/Dockerfile` | — |
 | `node-red` | `acs-cymru_node_red` | `./node-red/Dockerfile` | `1880:1880` |
 | `grafana` | `acs-cymru_grafana` | `grafana/grafana:13.1.3` | `3002:3000` |
 | `swagger-ui` | `acs-cymru_swagger_ui` | `swaggerapi/swagger-ui:v5.17.14` | `8088:8080` |
+| `prometheus` | `acs-cymru_prometheus` | `prom/prometheus:v3.1.0` | `9090:9090` |
+| `node-exporter` | `acs-cymru_node_exporter` | `prom/node-exporter:v1.8.2` | — |
 
 ---
 
@@ -567,7 +570,8 @@ something to compare it against.
 ### 2 · Automated edge gateway telemetry
 
 **Builds on:** `process_node_message()` · `gateways.agent_version` / `enrolled_at` (`0025`) ·
-the appliance's Node-RED runtime ([`templates/physical-gateway/`](templates/physical-gateway))
+the appliance's Node-RED runtime ([`templates/physical-gateway/`](templates/physical-gateway)) ·
+`node_exporter`
 
 Enrolment stamps `agent_version` and `enrolled_at` once and never refreshes them, so "what is this
 appliance actually doing" is answerable only by getting a shell on it. The appliance already holds
@@ -581,6 +585,44 @@ every appliance's trust store, and
 [re-minting it does not fail loudly — it succeeds and takes the whole fleet offline](docs/incidents.md).
 A `Cert_Expires_At` metric plus one alert rule turns the single worst fleet-wide failure mode into a
 30-day warning.
+
+#### Use `node_exporter` as the collector, but do not scrape it from here
+
+The appliances are Ubuntu Server and the stack now runs a Prometheus, so the obvious move is to run
+`node_exporter` on each gateway and add it as a scrape target. **The collector half is right and the
+scrape half is wrong**, and the reason is the network shape this platform deliberately has:
+
+- **The appliance's connection is outbound only.** It dials `<broker>:8883`; nothing anywhere
+  assumes traffic in the other direction, and
+  [`templates/physical-gateway/README.md`](templates/physical-gateway/README.md) troubleshoots
+  exactly that way round.
+- **Scraping means an inbound path per gateway** through the plant firewall — the thing an
+  outbound-only design exists to avoid, and a separate conversation with someone's IT department
+  per site.
+- **Gateways are enrolled dynamically** with single-use tokens (`0025`), so a static scrape config
+  cannot know them. Pull would additionally need `http_sd` backed by the `gateways` table: a
+  discovery endpoint to build, secure and keep correct.
+
+So run `node_exporter` on the appliance and **scrape it locally**. A Node-RED flow polls
+`localhost:9100/metrics`, selects a handful of series — filesystem free, load, memory, uptime — and
+publishes them as Sparkplug metrics on the connection that is already open and already
+authenticated. `process_node_message()` writes them to the gateway's row exactly as this section
+already describes.
+
+That keeps `node_exporter`'s correctness — it collects host metrics properly, which hand-rolled
+disk and CPU reads in a Node-RED function node will not — while changing nothing about the network,
+the credential model, or discovery. It also makes this item substantially cheaper, because the
+collector was the part that had to be written.
+
+**And it removes the Windows question.** `windows_exporter` (prometheus-community, formerly
+`wmi_exporter`) serves the same exposition format, so a Windows gateway differs only in which
+collector is installed; the transport, the flow and the database write are identical. Under a pull
+model it would have been a second scrape story.
+
+**Where it would go:** `templates/physical-gateway/docker-compose.yml`, which the bundle ships and
+the appliance runs — one service alongside `node-red`, with the same `/proc`, `/sys` and `/` mounts
+the central stack's exporter uses. The bundle is assembled by `gateway-bundle` from
+`GW_BUNDLE_COMPOSE`, so the template is the only file that changes.
 
 ### 3 · Horizontal ingestion scaling
 
