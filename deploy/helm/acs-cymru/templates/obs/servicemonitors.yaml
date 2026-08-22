@@ -34,10 +34,15 @@ DELIBERATELY ABSENT, and this is the part worth reading:
                   serves /ready and /live and nothing else -- there is no metrics setting in the
                   configuration at all. A ServiceMonitor for it would be pure fiction.
                   It is not a real gap: every PostgREST request arrives through Kong, so
-                  kong_http_requests_total and the latency histograms already carry it, labelled
-                  by service. Gateway-side measurement is one hop removed from the process but it
-                  covers the entire HTTP tier from a single target -- which is also why enabling
-                  Kong's metrics matters more than any other switch in this file.
+                  `kong_http_status` and the `kong_latency_*` histograms already carry it, labelled
+                  by service and route. Gateway-side measurement is one hop removed from the
+                  process but it covers the entire HTTP tier from a single target -- which is also
+                  why enabling Kong's metrics matters more than any other switch in this file.
+
+                  THE METRIC NAME WAS WRONG HERE UNTIL A LIVE SCRAPE CHECKED IT. This said
+                  `kong_http_requests_total`, which is Kong 3.x; the pinned 2.8.1 plugin exposes
+                  `kong_http_status`. A panel built from the old name would have drawn an empty
+                  graph -- the exact failure this file's header is about.
 
   supabase-db /   Postgres exposes nothing without postgres_exporter, which is a separate
   timescaledb     deployment with its own credentials and its own scrape story. Worth doing, and

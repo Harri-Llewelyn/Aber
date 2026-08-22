@@ -2565,6 +2565,31 @@ ON CONFLICT (service_name) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000d', 'API Reference (Swagger UI)', 'DOCUMENTATION', 'http://localhost:8088', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
 ON CONFLICT (service_name) DO NOTHING;
 
+-- ---------------------------------------------------------------------------------------------
+-- The metrics tier.
+--
+-- ADDED TO 0002 RATHER THAN A NEW MIGRATION, and that works here where it did not for 0016: every
+-- insert in this block is `ON CONFLICT (service_name) DO NOTHING`, so a row that is MISSING is
+-- inserted on the next replay. 0016 needed its own file because it RENAMED and REMOVED, which
+-- ON CONFLICT DO NOTHING cannot express.
+--
+-- TWO ROWS, AND ONLY ONE OF THEM IS SOMEWHERE TO GO. Prometheus serves a browsable expression
+-- browser on a published port. node_exporter does not: it is bound to the compose network with no
+-- host port, deliberately, because nothing outside has any business reading host metrics.
+--
+-- It is listed anyway, at the address it actually answers on. The directory is an inventory of what
+-- is DEPLOYED -- `mqtt://localhost:1883` and `postgres://localhost:5433` are already here and
+-- neither opens in a browser either -- and an exporter that is running and absent from the
+-- inventory is the more misleading of the two options. The in-network URL is what makes the
+-- distinction visible rather than hidden: a reader who tries it learns something true.
+-- ---------------------------------------------------------------------------------------------
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000e', 'Prometheus Metrics Store', 'MONITORING', 'http://localhost:9090', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+ON CONFLICT (service_name) DO NOTHING;
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000f', 'Host Metrics Exporter (node_exporter)', 'MONITORING', 'http://node-exporter:9100/metrics', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+ON CONFLICT (service_name) DO NOTHING;
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000010', 'Ingestion Metrics Endpoint', 'INGESTION', 'http://localhost:9108/metrics', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+ON CONFLICT (service_name) DO NOTHING;
+
 
 -- -------------------------------------------------------------------------------------------
 -- Outbound webhook targets  (1 row)

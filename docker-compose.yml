@@ -1439,7 +1439,14 @@ services:
       # burst of new series -- a fleet of gateways enrolled at once -- fills the disk inside the
       # window. Whichever limit is reached first wins.
       - '--storage.tsdb.retention.size=8GB'
-      - '--web.enable-lifecycle'
+      # NO `--web.enable-lifecycle`, AND IT WAS HERE UNTIL IT WAS TESTED. That flag enables
+      # POST /-/reload, which is convenient -- and POST /-/quit, which is a REMOTE SHUTDOWN of the
+      # monitoring, on an endpoint that takes no credential. Verified reachable before removing it.
+      #
+      # Prometheus has no authentication of its own beyond a basic-auth web config, so the controls
+      # available are: what the endpoint can DO, and who can reach the port. This is the first.
+      # A config change here is a `docker compose restart prometheus`, which is what the reload
+      # would have saved and is not worth a kill switch.
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
