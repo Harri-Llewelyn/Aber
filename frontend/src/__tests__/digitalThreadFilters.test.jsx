@@ -1221,12 +1221,36 @@ describe('Digital Thread — removed tag filter', () => {
     it('rings the active node in a solid accent rather than a halo', async () => {
       /*
        * `--accent-glow` alone is translucent: it reads well against the card background and almost
-       * disappears against the fanned neighbours a collision puts either side of it. The inner gap
-       * in the card colour is what separates the selected node from what it overlaps.
+       * disappears against the neighbours a dense stretch of track puts either side of it. The
+       * inner gap in the card colour is what separates the selected mark from what it sits among.
        */
       const rule = ruleFor('.dt-node-selected')
       expect(rule).toMatch(/var\(--accent\)/)
       expect(rule).toMatch(/var\(--bg-card\)/)
+    })
+
+    it('is shared with the cluster badge rather than being a .dt-node compound', async () => {
+      /*
+       * WHAT LETS A BADGE CARRY THE RING while the drawer steps through the events inside it. If
+       * this were written `.dt-node.dt-node-selected`, a selected group would show no highlight
+       * at all -- and the page would look, at exactly the densest moments, as though Previous and
+       * Next were doing nothing.
+       */
+      expect(APP_CSS).toContain('\n.dt-node-selected {')
+      expect(APP_CSS).not.toContain('.dt-node.dt-node-selected {')
+    })
+
+    it('paints the cluster badge outside the four-colour classification', async () => {
+      /*
+       * A BADGE IS NOT A KIND OF EVENT, it is a count -- and a group routinely holds two or three
+       * of the four kinds, so borrowing any one of their fills would assert a classification the
+       * group does not have. Guarded because the tempting shortcut is to reach for --accent.
+       */
+      const rule = ruleFor('.dt-cluster')
+      expect(rule).toMatch(/var\(--cluster/)
+      for (const kind of ['--accent', '--success', '--warning', '--danger']) {
+        expect(rule).not.toContain(`var(${kind})`)
+      }
     })
 
     it('marks the node the drawer is showing, and moves it with Previous/Next', async () => {

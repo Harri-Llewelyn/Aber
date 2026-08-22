@@ -233,10 +233,24 @@ export function timeWindow(preset, customStart, customEnd) {
 const DEFAULT_LANE_LIMIT = 30
 
 /*
- * MARKERS THAT WOULD SIT ON TOP OF EACH OTHER ARE FANNED VERTICALLY.
+ * MARKERS TOO CLOSE TO DRAW SEPARATELY BECOME ONE BADGE THAT SAYS HOW MANY THERE ARE.
  *
- * WHY NOT NUDGE THEM ALONG THE TIME AXIS, which is the obvious fix. Two reasons, and the second is
- * worse than the distortion the first describes:
+ * WHAT THIS REPLACED, and why the replacement is better rather than merely different. The first
+ * answer to the reported overlap was a VERTICAL FAN -- colliding markers displaced up and down off
+ * the lane's centre line. It fixed the reported case (a Created and an Operational two seconds
+ * apart) and then failed at exactly the point where this page is most interesting:
+ *
+ *   * IT HELD THREE. The track is 32px and a marker is 15px with its ring, so the fan had three
+ *     slots; a fourth event cycled back into the first and overlapped anyway. A commissioning burst
+ *     is routinely five or six rows, so the densest moments on the page were the ones it could not
+ *     draw -- and it gave no sign of that, which is the same fault as the original overlap.
+ *   * IT COULD NOT BE COUNTED. Three fanned dots and five fanned dots look alike. The reader's
+ *     actual question is "how much happened here", and a fan answers "some".
+ *
+ * A badge answers it: `6` is a claim the page can honour at any density, and the hover breaks it
+ * down by classification.
+ *
+ * WHY NOT NUDGE ALONG THE TIME AXIS, which is the other obvious fix and stays ruled out:
  *
  *   1. It would be ZOOM-DEPENDENT. Over an all-time range of ten hours an 8px nudge reads as about
  *      twelve minutes of separation; over a one-hour range the same nudge reads as one minute. The
@@ -244,65 +258,122 @@ const DEFAULT_LANE_LIMIT = 30
  *      has nothing to do with them.
  *   2. It would ERASE THE CAUSATION SIGNAL. Rows written in one transaction share a timestamp
  *      exactly -- `recorded_at` is transaction start time, which is why causationSiblings() orders
- *      by event_id rather than by time. Perfect overlap is the visual signature of one act, and
- *      nudging turns the clearest case of "these happened together" into "these happened near
- *      each other".
+ *      by event_id rather than by time. Perfect overlap is the visual signature of one act.
  *
- * THE VERTICAL AXIS INSIDE A LANE ENCODES NOTHING. Every marker is otherwise pinned to the lane's
- * centre line, so displacing along it costs no information and distorts no claim: x stays exactly
- * where the timestamp puts it. The dilemma only exists if the displacement has to be sideways.
+ * CLUSTERING KEEPS BOTH PROPERTIES. Every badge sits where its events' timestamps put it, so x
+ * still tells the truth; and a transaction that wrote six rows becomes one badge reading `6` whose
+ * hover SAYS they were one act -- stating the causation signal outright instead of leaving it to be
+ * inferred from a pile of dots that happen to be exactly on top of each other.
  */
-// EIGHT, NOT NINE, AND THE PIXEL MATTERS. A fan of three spans (2 x step) + 15px for the marker
-// and its ring; at 9px that is 33px in a 32px track, so the outer two clip at the lane boundary.
-// Caught by the span assertion in digitalThreadDodge.test.js rather than by looking at it.
-export const DODGE_STEP_PX = 8
-/**
- * Three, because that is what fits. The track is 32px and a marker is 13px plus a 2px ring, so a
- * fan of three spans 31px -- any more would clip at the lane boundary. A cluster larger than this
- * cycles back through the slots and overlaps again; the drawer's entity trail is the path that
- * enumerates a dense burst properly, and it is already ordered.
- */
-export const DODGE_SLOTS = 3
 
 /**
+ * How close, in pixels, is too close to draw separately.
+ *
+ * A marker is 13px plus a 2px ring, so at 14px apart two of them still touch. Below that the reader
+ * cannot tell how many dots are there, which is the whole complaint.
+ *
+ * PIXELS, NOT TIME, AND THAT IS THE ENTIRE RULE. A time-based threshold -- "group anything inside a
+ * minute" -- is wrong in both directions: it would hold a burst grouped on a 15-minute range where
+ * its events are 200px apart and plainly separate, and it would leave two events a quarter of an
+ * hour apart overlapping on an all-time range spanning a month. "Do these overlap" is a question
+ * about pixels. Which is also what makes the range control a ZOOM: narrow the range and clusters
+ * dissolve into their members, because the same events are now further apart on screen.
+ */
+export const CLUSTER_GAP_PX = 14
+
+/**
+ * One lane's events, as the things its track actually draws.
+ *
  * @param {Array}    events      one lane's events
  * @param {Function} xOf         event -> 0..1 along the track
- * @param {number}   trackWidth  measured px; 0 disables dodging entirely
- * @param {number}   markerPx    how close in px counts as a collision
- * @returns {Map} event_id -> vertical offset in px from the lane's centre line
+ * @param {number}   trackWidth  measured px; 0 draws everything singly
+ * @returns {Array} `{ isCluster, events, event, xOffset }`, left to right. `xOffset` is a fraction
+ *                  of the track, 0..1; `event` is the earliest member, and is what a click selects.
  */
-export function dodgeOffsets(events, xOf, trackWidth, markerPx = 15) {
-  const offsets = new Map()
-  // NO MEASUREMENT, NO DODGE. Guessing a width would move markers by an amount unrelated to
-  // whether they actually collide, and not dodging is the status quo rather than a new fault.
-  if (!trackWidth) {
-    for (const e of events) offsets.set(e.event_id, 0)
-    return offsets
-  }
+export function clusterEvents(events, xOf, trackWidth) {
+  // CHRONOLOGICAL, and the tiebreak is the interesting half. `xOf` is monotone in the timestamp, so
+  // ordering by it is ordering by time -- except for events sharing a timestamp exactly, which is
+  // precisely the transaction case. Those fall back to `event_id`, the order the rows were WRITTEN,
+  // for the same reason causationSiblings() does: inside one act that is the order it performed
+  // them, and it is therefore the row a click on the badge should open first.
+  const ordered = [...events].sort(
+    (a, b) => xOf(a) - xOf(b) || Number(a.event_id) - Number(b.event_id)
+  )
 
-  let cluster = []
+  const item = (members) => ({
+    isCluster: members.length > 1,
+    events: members,
+    event: members[0],
+    // THE GROUP'S CENTRE, not its earliest member's. A badge is wider than a dot and stands for all
+    // of them, so pinning it to the first would sit it left of the events it represents.
+    xOffset: members.reduce((sum, e) => sum + xOf(e), 0) / members.length
+  })
+
+  // NO MEASUREMENT, NO CLUSTERING. Guessing a width would fold together markers that do not touch,
+  // and drawing them all singly is the status quo rather than a new fault. This is also the jsdom
+  // path -- `offsetWidth` is 0 with no layout engine -- which is what makes this function testable
+  // directly rather than only through the DOM.
+  if (!trackWidth) return ordered.map(e => item([e]))
+
+  const groups = []
+  let current = []
   let lastX = null
-  const flush = () => {
-    // Centred on the lane rule rather than growing downwards, so a fan reads as one group sitting
-    // on the line instead of as markers that have slipped off it.
-    const span = Math.min(cluster.length, DODGE_SLOTS)
-    cluster.forEach((e, i) => {
-      offsets.set(e.event_id, ((i % DODGE_SLOTS) - (span - 1) / 2) * DODGE_STEP_PX)
-    })
-    cluster = []
-  }
 
-  // CHAINED, not measured from the first of the cluster: a run of events each 10px from the last
-  // is one continuous pile, and testing against the cluster's start would break it into groups
-  // that still overlap at their seams.
-  for (const e of [...events].sort((a, b) => xOf(a) - xOf(b))) {
+  // CHAINED, not measured from the first of the group: a run of events each 10px from the last is
+  // one continuous pile, and testing against the group's start would split it into badges that
+  // still overlap at their seams.
+  for (const e of ordered) {
     const x = xOf(e) * trackWidth
-    if (lastX !== null && x - lastX < markerPx) cluster.push(e)
-    else { flush(); cluster = [e] }
+    if (lastX !== null && x - lastX <= CLUSTER_GAP_PX) current.push(e)
+    else { if (current.length) groups.push(current); current = [e] }
     lastX = x
   }
-  flush()
-  return offsets
+  if (current.length) groups.push(current)
+
+  return groups.map(item)
+}
+
+/**
+ * What a cluster badge says on hover.
+ *
+ * THE BREAKDOWN IS BY CLASSIFICATION, in `MARKERS` order so it reads in the same order as the
+ * legend above the timeline, and in the legend's own words rather than a second set of names for
+ * the same four things.
+ *
+ * THE SECOND LINE IS THE ONE THAT EARNS ITS PLACE. Collapsing events into a count loses exactly the
+ * thing a pile of dots used to show by accident: whether these happened TOGETHER or merely near
+ * each other. A shared non-null `causation_id` across every member says one act wrote them;
+ * identical timestamps without one say only that they landed in the same instant. Those are
+ * different claims and this does not conflate them.
+ */
+export function clusterSummary(events, kindOf) {
+  const counts = new Map()
+  for (const e of events) {
+    const kind = kindOf(e)
+    counts.set(kind, (counts.get(kind) || 0) + 1)
+  }
+  const breakdown = Object.keys(MARKERS)
+    .filter(k => counts.has(k))
+    .map(k => `${counts.get(k)} ${MARKERS[k].label}`)
+    .join(', ')
+
+  const stamps = events
+    .map(e => new Date(e.timestamp).getTime())
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b)
+  const first = stamps.length ? new Date(stamps[0]).toLocaleString() : ''
+  const last  = stamps.length ? new Date(stamps[stamps.length - 1]).toLocaleString() : ''
+
+  const causation = events[0]?.causation_id
+  const oneAct = !!causation && events.every(e => e.causation_id === causation)
+
+  const when = !stamps.length ? ''
+    : oneAct ? `One transaction, at ${first}`
+      : first === last ? `All at ${first}`
+        : `${first} → ${last}`
+
+  return `${events.length} events: ${breakdown}\n${when}\n`
+       + 'Click to open the first — narrow the time range to separate them'
 }
 
 /** The sections, in the order a plant is organised: a cell holds gateways, which hold devices. */
@@ -881,7 +952,10 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
   // The track carries 14px of padding at each end so a marker at either extreme is not clipped
   // in half by the lane's edge; positions are therefore a calc against the padded width rather
   // than a bare percentage.
-  const offsetFor = (timestamp) => `calc(14px + (100% - 28px) * ${fractionFor(timestamp)})`
+  //
+  // TAKES A FRACTION, not a timestamp, because a cluster badge does not have one: it sits at the
+  // MEAN of its members' positions (see clusterEvents), which is not any single event's time.
+  const offsetForFraction = (f) => `calc(14px + (100% - 28px) * ${f})`
 
   /*
    * The track's rendered width, needed to know which markers actually COLLIDE.
@@ -917,6 +991,37 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
     window.addEventListener('resize', measure)
     return () => window.removeEventListener('resize', measure)
   }, [])
+
+  /**
+   * lane.key -> the items its track draws: single markers and cluster badges, left to right.
+   *
+   * COMPUTED HERE RATHER THAN INSIDE THE LANE'S RENDER, where the fan used to be worked out. Two
+   * consumers now need it and only one of them is a lane: the legend states how many badges are on
+   * the timeline, and it cannot count something each row computes privately while drawing itself.
+   *
+   * PER LANE, because a collision is only a collision within one row -- two assets acting at the
+   * same instant are two markers on different lanes and were never in each other's way.
+   */
+  const laneClusters = useMemo(() => {
+    const m = new Map()
+    for (const lane of visibleLanes) {
+      m.set(lane.key, clusterEvents(lane.events, (e) => fractionFor(e.timestamp), trackWidth))
+    }
+    return m
+  }, [visibleLanes, fractionFor, trackWidth])
+
+  /**
+   * How many badges are drawn, which is what the legend's "Grouped" entry counts.
+   *
+   * BADGES, NOT THE EVENTS INSIDE THEM. "Grouped (9)" beside three purple pills is a number the
+   * reader cannot reconcile with what is on screen; "Grouped (3)" is the thing they can point at.
+   * How many events any one badge holds is written on the badge itself.
+   */
+  const clusterCount = useMemo(
+    () => [...laneClusters.values()]
+      .reduce((n, items) => n + items.filter(i => i.isCluster).length, 0),
+    [laneClusters]
+  )
 
   const ticks = useMemo(() => {
     if (!domain) return []
@@ -1163,6 +1268,28 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
                     {m.label}
                   </span>
                 ))}
+
+                {/* SHOWN ONLY WHEN THERE IS NOTATION TO EXPLAIN, which follows the rule the purged
+                    toggle and the custom date inputs already follow on this page. A key entry for
+                    a mark that is not on screen is a reader looking for a purple pill that does
+                    not exist -- and at a narrow enough range there are none, which is the feature
+                    rather than an edge case.
+
+                    THE SAMPLE IS A REAL `.dt-cluster`, exactly as the four dots above are real
+                    `.dt-node-<kind>` fills: the key cannot drift away from what it describes. It
+                    reads `n` rather than a specific number so it is plainly a placeholder for the
+                    count each badge carries, not a claim that every group holds two. */}
+                {clusterCount > 0 && (
+                  <span
+                    className="dt-legend-item"
+                    title={`Events too close together to draw separately are ONE badge carrying the count — `
+                         + `${clusterCount} on this timeline. Hover one for the breakdown, or narrow the `
+                         + `time range and they separate back into individual markers.`}
+                  >
+                    <span className="dt-cluster dt-legend-cluster" aria-hidden="true">n</span>
+                    Grouped ({clusterCount})
+                  </span>
+                )}
               </div>
 
               <div className="dt-scroll">
@@ -1240,29 +1367,50 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
                           </div>
 
                           <div className="dt-track">
-                            {(() => {
-                              /* Per lane, because a collision is only a collision within one row --
-                                 two assets acting at the same instant are two markers on different
-                                 lanes and were never in each other's way. */
-                              const dodge = dodgeOffsets(
-                                lane.events, (e) => fractionFor(e.timestamp), trackWidth
-                              )
-                              return lane.events.map(e => {
+                            {(laneClusters.get(lane.key) || []).map(item => {
+                              /* THE RING FOLLOWS THE DRAWER, and for a badge that means "the
+                                 drawer is showing one of MY events" rather than "the drawer is
+                                 showing the one I open on click". That is what keeps the highlight
+                                 in place while Previous/Next steps through a burst: the badge is
+                                 where those events are, so the badge is what stays lit. */
+                              const isSelected = item.events
+                                .some(e => String(e.event_id) === String(selectedEventId))
+
+                              if (item.isCluster) {
+                                return (
+                                  <button
+                                    key={`cluster-${item.event.event_id}`}
+                                    type="button"
+                                    className={`dt-cluster${isSelected ? ' dt-node-selected' : ''}`}
+                                    style={{ left: offsetForFraction(item.xOffset) }}
+                                    /* THE FIRST, i.e. the oldest -- see clusterEvents on why the
+                                       tiebreak is event_id. Opening a burst at its start is the
+                                       only choice that makes Next mean "and then what"; opening
+                                       it in the middle would leave half the group behind the
+                                       Previous button with nothing saying so. */
+                                    onClick={() => setSelectedEventId(item.event.event_id)}
+                                    title={clusterSummary(
+                                      item.events,
+                                      (e) => analysis.get(e.event_id)?.kind || 'operational'
+                                    )}
+                                    aria-label={`${item.events.length} events on `
+                                      + `${lane.name || lane.entityId} from `
+                                      + `${new Date(item.event.timestamp).toLocaleString()} — open the first`}
+                                    aria-pressed={isSelected}
+                                  >
+                                    {item.events.length}
+                                  </button>
+                                )
+                              }
+
+                              const e = item.event
                               const kind = analysis.get(e.event_id)?.kind || 'operational'
-                              const isSelected = String(e.event_id) === String(selectedEventId)
-                              const dy = dodge.get(e.event_id) || 0
                               return (
                                 <button
                                   key={e.event_id}
                                   type="button"
                                   className={`dt-node dt-node-${kind}${isSelected ? ' dt-node-selected' : ''}`}
-                                  style={{
-                                    left: offsetFor(e.timestamp),
-                                    // `top` rather than a transform: .dt-node already carries
-                                    // `translate(-50%, -50%)` to centre itself, and overriding that
-                                    // to add the offset would undo the centring.
-                                    ...(dy ? { top: `calc(50% + ${dy}px)` } : null)
-                                  }}
+                                  style={{ left: offsetForFraction(item.xOffset) }}
                                   onClick={() => setSelectedEventId(e.event_id)}
                                   /* A plain `title`, which is what the rest of this app uses for a
                                      hover hint. Three lines -- what, who, when -- is what the hover
@@ -1272,8 +1420,7 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
                                   aria-pressed={isSelected}
                                 />
                               )
-                              })
-                            })()}
+                            })}
                           </div>
                         </div>
                       ))}

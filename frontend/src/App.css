@@ -54,6 +54,18 @@
      error toast is the message a user most needs to read. One step lighter clears it at 5.3:1
      while staying the same signal hue. */
   --danger-text:  #ff6b85;
+  /* ===== The cluster badge =====
+     A FIFTH COLOUR, DELIBERATELY OUTSIDE THE FOUR-COLOUR CLASSIFICATION. Green/blue/amber/red say
+     what KIND of event a marker is; a cluster badge says how MANY events are here, which is not a
+     kind at all -- and a group routinely holds two or three of the four, so painting it in any one
+     of them would assert a classification the group does not have. Violet is the nearest unused
+     hue to the accent without being mistakable for it.
+     The -text variant exists for the same reason --danger-text does: #a855f7 is a border tone, and
+     the fill is a 0.18 tint of it, so the label needs its own value. #d8b4fe on that tint over
+     --bg-surface measures 7.8:1. */
+  --cluster:      #a855f7;
+  --cluster-bg:   rgba(168, 85, 247, 0.18);
+  --cluster-text: #d8b4fe;
   /* The monospace stack, as a token. Every rule in this file spelled it out literally, which was
      fine until a call site wanted `var(--font-mono, monospace)` -- with no token defined that
      silently falls back to the bare generic and drops JetBrains Mono. Structural, not colour, so
@@ -104,6 +116,11 @@
   /* --danger (#e11d48) measures 4.72:1 on a white card -- a pass -- but drops to 3.94:1 once the
      0.15 rose tint lightens the surface under it. Rose-700 clears that at 5.21:1. */
   --danger-text:  #be123c;
+  /* The dark theme's #d8b4fe is a pale lavender: on a white card under a light violet tint it is
+     effectively invisible. Violet-700 on a 0.12 tint of violet-600 measures 7.4:1. */
+  --cluster:      #7e22ce;
+  --cluster-bg:   rgba(147, 51, 234, 0.12);
+  --cluster-text: #6b21a8;
   --shadow:       0 4px 20px rgba(0, 0, 0, 0.06);
 }
 
@@ -2973,8 +2990,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* THE TRACK IS A CONTAINER, not an area of card background with a line through it.
 
-   Given edges, a lane reads as one asset's stretch of time -- and a marker near the top or bottom
-   of it is unambiguously IN that lane, which matters now that colliding markers fan vertically. */
+   Given edges, a lane reads as one asset's stretch of time, and a marker is unambiguously IN that
+   lane rather than floating between two rows of card background. */
 .dt-track {
   position: relative;
   flex: 1;
@@ -3003,8 +3020,8 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   margin-top: -0.5px;
   /* ONE PIXEL, AND LIGHTER THAN THE BORDER IT SITS INSIDE. At 2px in the border colour the
      guideline was the same weight as the container edge, so a track read as three stacked rules.
-     It exists to say where the timeline runs, which a hairline does; the fanned markers above and
-     below it are what the eye should be finding. */
+     It exists to say where the timeline runs, which a hairline does; the markers on it are what the
+     eye should be finding. */
   background: var(--border);
   opacity: 0.7;
 }
@@ -3050,18 +3067,19 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   height: 13px;
   padding: 0;
   border-radius: 50%;
-  /* The ring is what keeps two fanned markers from reading as one blob where they overlap. In the
-     CARD's colour rather than the track's: it has to separate a marker from its NEIGHBOUR, and a
-     ring matching the surface behind would only separate it from the background. */
+  /* The ring is what keeps two ADJACENT markers from reading as one blob. Clustering removes the
+     overlapping case, but not the near miss -- two events 20px apart are separate dots that still
+     touch. In the CARD's colour rather than the track's: it has to separate a marker from its
+     NEIGHBOUR, and a ring matching the surface behind would only separate it from the background. */
   border: 2px solid var(--bg-card);
   cursor: pointer;
   transform: translate(-50%, -50%);
   transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
-/* Markers pile up where activity is dense -- a burst of edits within a minute is a handful of
-   overlapping dots. Raising the hovered one is what makes the underneath reachable; the tooltip
-   and the drawer are what tell them apart. */
+/* Markers crowd where activity is dense. A pile is a badge now, but a near miss is still two dots
+   with barely a gap, so raising the hovered one keeps its neighbour reachable; the tooltip and the
+   drawer are what tell them apart. */
 .dt-node:hover,
 .dt-node:focus-visible {
   transform: translate(-50%, -50%) scale(1.4);
@@ -3071,9 +3089,14 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 /* THE ACTIVE MARKER, and it has to survive being surrounded.
 
    `--accent-glow` is a translucent halo, which reads well against the card background and almost
-   disappears against the fanned neighbours a collision now puts either side of it. A solid accent
-   ring with a dark gap inside it separates the selected node from whatever it is stacked with --
-   which is the point, because this is the marker the drawer is showing. */
+   disappears against the neighbours a dense stretch of the track puts either side of it. A solid
+   accent ring with a dark gap inside it separates the selected marker from whatever it sits among
+   -- which is the point, because this is the one the drawer is showing.
+
+   SHARED WITH `.dt-cluster`, not a `.dt-node` compound, and that is what lets a badge carry the
+   ring while the drawer steps through the events inside it. `box-shadow` follows the element's own
+   border-radius, so the same rule draws a circle round a dot and a rounded rectangle round a
+   pill. */
 .dt-node-selected {
   box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 4px var(--accent), 0 0 10px var(--accent-glow);
   z-index: 4;
@@ -3083,6 +3106,65 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .dt-node-operational, .dt-node-dot.dt-node-operational { background: var(--accent); }
 .dt-node-governance,  .dt-node-dot.dt-node-governance  { background: var(--warning); }
 .dt-node-critical,    .dt-node-dot.dt-node-critical    { background: var(--danger); }
+
+/* THE CLUSTER BADGE: several events too close together to draw separately, replaced by their
+   count. See the header on clusterEvents() in DigitalThreadTab.jsx for why this replaced a
+   vertical fan -- briefly, a fan held three and could not be counted.
+
+   VIOLET, which is not one of the four classification fills, because a badge is not a KIND of
+   event. See --cluster in the token block.
+
+   POSITIONING IS SEPARATE FROM THE LOOK. This rule is the pill; the `.dt-track` rule below places
+   it. That split is what lets the legend render a real `.dt-cluster` as an inline sample instead
+   of describing the badge in a second, driftable set of values. */
+.dt-cluster {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--cluster-bg);
+  border: 1px solid var(--cluster);
+  color: var(--cluster-text);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+/* On a track it is a marker. 18px inside a 32px lane, centred on the same rule the dots sit on.
+   Above them in the stack, because a badge that a stray single dot painted over would be the
+   overlap problem again in a new colour. */
+.dt-track .dt-cluster {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+  z-index: 3;
+}
+
+.dt-track .dt-cluster:hover,
+.dt-track .dt-cluster:focus-visible {
+  /* A smaller lift than a dot's 1.4x: the badge is already 18px, and at 1.4 it would overhang the
+     lane it belongs to. */
+  transform: translate(-50%, -50%) scale(1.15);
+  background: var(--cluster);
+  color: var(--accent-contrast);
+  z-index: 5;
+}
+
+/* The legend's sample. Not clickable, and a notch smaller so it sits on the 11px key line beside
+   the four 9px dots rather than setting the row's height on its own. */
+.dt-legend-cluster {
+  cursor: default;
+  height: 16px;
+  min-width: 16px;
+  line-height: 16px;
+  padding: 0 5px;
+}
 
 .dt-lane-toggle { margin-top: 10px; }
 
