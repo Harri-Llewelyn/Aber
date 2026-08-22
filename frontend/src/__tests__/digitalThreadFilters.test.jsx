@@ -12,7 +12,7 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { DigitalThreadTab, classifyEvent, diffFields, tickFormatter, shortId } from '../components/tabs/DigitalThreadTab'
+import { DigitalThreadTab, classifyEvent, diffFields, tickFormatter, shortId, timeWindow } from '../components/tabs/DigitalThreadTab'
 import { api } from '../api'
 
 /*
@@ -261,20 +261,78 @@ describe('Digital Thread time range', () => {
 
   it('sends both bounds for a custom range, and only shows the pickers in that mode', async () => {
     await show()
-    expect(screen.queryByLabelText('Range start date')).toBeNull()
+    expect(screen.queryByLabelText('Range start')).toBeNull()
 
     fireEvent.change(rangeSelect(), { target: { value: 'custom' } })
-    fireEvent.change(screen.getByLabelText('Range start date'), { target: { value: '2026-08-01' } })
-    fireEvent.change(screen.getByLabelText('Range end date'), { target: { value: '2026-08-03' } })
+    fireEvent.change(screen.getByLabelText('Range start'), { target: { value: '2026-08-01T09:30' } })
+    fireEvent.change(screen.getByLabelText('Range end'), { target: { value: '2026-08-01T09:45' } })
 
     await waitFor(() => expect(lastThreadUrl()).toContain('until='))
     const params = new URL(lastThreadUrl(), 'http://x').searchParams
-    // Local midnight through local end-of-day: the operator picking a date means their own day,
-    // not UTC's.
+    // LOCAL, not UTC: an operator choosing 09:30 means 09:30 where they are standing. The end
+    // bound is widened to the end of that MINUTE, or everything during 09:45 would be excluded by
+    // a range the operator read as including it.
     expect(new Date(params.get('since')).getTime())
-      .toBe(new Date('2026-08-01T00:00:00.000').getTime())
+      .toBe(new Date('2026-08-01T09:30:00.000').getTime())
     expect(new Date(params.get('until')).getTime())
-      .toBe(new Date('2026-08-03T23:59:59.999').getTime())
+      .toBe(new Date('2026-08-01T09:45:59.999').getTime())
+  })
+
+  it('takes a window narrower than a day, which the date pickers could not express', async () => {
+    /*
+     * THE WHOLE POINT OF THE CHANGE (roadmap item 12). `type="date"` bounded the narrowest
+     * expressible window at 24 hours, so on a stack commissioned this morning "All time" and
+     * "today" drew the same picture -- and a commissioning burst stayed in a few pixel columns
+     * however the page was filtered.
+     */
+    await show()
+    fireEvent.change(rangeSelect(), { target: { value: 'custom' } })
+    fireEvent.change(screen.getByLabelText('Range start'), { target: { value: '2026-08-01T16:11' } })
+    fireEvent.change(screen.getByLabelText('Range end'), { target: { value: '2026-08-01T16:12' } })
+
+    await waitFor(() => expect(lastThreadUrl()).toContain('until='))
+    const params = new URL(lastThreadUrl(), 'http://x').searchParams
+    const spanMs = new Date(params.get('until')) - new Date(params.get('since'))
+    expect(spanMs).toBeLessThan(2 * 60 * 1000)
+    expect(spanMs).toBeGreaterThan(0)
+  })
+
+  it('still understands a date-only bound, tested on the function rather than the input', () => {
+    /*
+     * A `datetime-local` input REFUSES a date-only value -- the browser and jsdom both leave the
+     * field empty rather than accept `2026-08-01` -- so this cannot be driven through the DOM, and
+     * a test that tried would be asserting that the input rejected it.
+     *
+     * The branch is kept because `timeWindow` is an exported pure function with its own contract:
+     * a bare date means the whole of that day. It is no longer reachable from this page's controls,
+     * which is why it is tested here and not through them.
+     */
+    const { since, until } = timeWindow('custom', '2026-08-01', '2026-08-03')
+    expect(new Date(since).getTime()).toBe(new Date('2026-08-01T00:00:00.000').getTime())
+    expect(new Date(until).getTime()).toBe(new Date('2026-08-03T23:59:59.999').getTime())
+  })
+
+  it('offers the sub-day presets, with All time still the default', async () => {
+    await show()
+    const values = [...rangeSelect().querySelectorAll('option')].map(o => o.value)
+
+    expect(values).toContain('15m')
+    expect(values).toContain('1h')
+    // All time stays first and stays selected: most arrivals here are a handover from a device
+    // row, and a rolling default would answer that click with an empty timeline.
+    expect(values[0]).toBe('all')
+    expect(rangeSelect().value).toBe('all')
+  })
+
+  it('asks for a 15-minute window when that preset is chosen', async () => {
+    await show()
+    fireEvent.change(rangeSelect(), { target: { value: '15m' } })
+
+    await waitFor(() => expect(lastThreadUrl()).toContain('since='))
+    const since = new URL(lastThreadUrl(), 'http://x').searchParams.get('since')
+    const ageMs = Date.now() - new Date(since).getTime()
+    expect(ageMs).toBeGreaterThan(14.5 * 60 * 1000)
+    expect(ageMs).toBeLessThan(15.5 * 60 * 1000)
   })
 
   it('says the range is why the timeline is empty, rather than blaming the filters', async () => {
@@ -1085,6 +1143,108 @@ describe('Digital Thread — removed tag filter', () => {
       await waitFor(() => expect(screen.getByText('Press_02')).toBeInTheDocument())
 
       expect(screen.queryByRole('button', { name: /Show deleted assets/i })).not.toBeInTheDocument()
+    })
+  })
+
+  /*
+   * The swimlane redesign: contained track cards rather than ruled rows.
+   *
+   * ASSERTED THROUGH THE STYLESHEET, using the `cssRule()` helper this file already uses for the
+   * other CSS guards. The rules are what make a lane read as one asset's stretch of time; jsdom
+   * applies no layout, so the DOM cannot answer whether a track has edges.
+   */
+  /** The rule body for a selector, from the stylesheet on disk. jsdom applies no layout, so a
+      question about whether a track has edges can only be asked of the CSS. Local to these two
+      describes; the diff-table guards further down carry their own. */
+  const ruleFor = (selector) => {
+    const escaped = selector.replace(/[.:()\-*+?^${}|[\]\\]/g, '\\$&')
+    return APP_CSS.match(new RegExp(`\\n${escaped} \\{([\\s\\S]*?)\\n\\}`))?.[1]
+  }
+
+  describe('swimlanes render as contained tracks', () => {
+    it('gives the track a container rather than a bare line', async () => {
+      const rule = ruleFor('.dt-track')
+      expect(rule).toMatch(/background:/)
+      expect(rule).toMatch(/border:/)
+      expect(rule).toMatch(/border-radius:/)
+    })
+
+    it('leaves the axis row unboxed, because a scale is not a lane', async () => {
+      // Boxing the tick labels like data would make the ruler read as another asset.
+      const rule = ruleFor('.dt-track.dt-axis-track')
+      expect(rule).toMatch(/background:\s*none/)
+      expect(rule).toMatch(/border:\s*none/)
+    })
+
+    it('keeps a centre guideline lighter than the container edge', async () => {
+      /*
+       * At the old 2px in the border colour, the guideline weighed the same as the track's own
+       * border and a lane read as three stacked rules. It says where the timeline runs; the
+       * markers are what the eye should find.
+       */
+      const rule = ruleFor('.dt-track::before')
+      expect(rule).toMatch(/height:\s*1px/)
+      expect(rule).toMatch(/opacity:/)
+    })
+
+    it('separates lanes with space rather than a divider', async () => {
+      // `border-bottom` made the page a stack of table rows: the eye followed the rules instead of
+      // the tracks, and a marker near one read as belonging to the boundary.
+      const rule = ruleFor('.dt-lane')
+      expect(rule).not.toMatch(/border-bottom/)
+      expect(rule).toMatch(/gap:/)
+    })
+
+    it('draws the label as a pill without breaking its scroll-under opacity', async () => {
+      /*
+       * TWO JOBS IN TENSION. The label is sticky so markers pass UNDER it, which needs an opaque
+       * background in the card's colour; it should also read as a container, which wants a lighter
+       * inset surface. The pill is therefore drawn by ::before, and the element itself stays
+       * opaque -- if that were swapped for a translucent pill background, dots would show through
+       * the asset name as they scrolled past.
+       */
+      expect(ruleFor('.dt-lane-label')).toMatch(/background:\s*var\(--bg-card\)/)
+      expect(ruleFor('.dt-lane-label::before')).toMatch(/border-radius:/)
+    })
+
+    it('renders the section heading as one badge', async () => {
+      await show()
+      const badge = document.querySelector('.dt-section-badge')
+      expect(badge).toBeTruthy()
+      // The count lives inside the badge, so it cannot drift away from the label it counts.
+      expect(badge.querySelector('.dt-section-count')).toBeTruthy()
+      expect(badge.querySelector('.dt-section-name')).toBeTruthy()
+    })
+  })
+
+  describe('the selected marker is findable among the ones it is stacked with', () => {
+    it('rings the active node in a solid accent rather than a halo', async () => {
+      /*
+       * `--accent-glow` alone is translucent: it reads well against the card background and almost
+       * disappears against the fanned neighbours a collision puts either side of it. The inner gap
+       * in the card colour is what separates the selected node from what it overlaps.
+       */
+      const rule = ruleFor('.dt-node-selected')
+      expect(rule).toMatch(/var\(--accent\)/)
+      expect(rule).toMatch(/var\(--bg-card\)/)
+    })
+
+    it('marks the node the drawer is showing, and moves it with Previous/Next', async () => {
+      await show()
+      const nodes = () => [...document.querySelectorAll('.dt-node')]
+      const selected = () => document.querySelector('.dt-node-selected')
+
+      expect(selected()).toBeNull()
+      fireEvent.click(nodes()[0])
+      await waitFor(() => expect(selected()).toBeTruthy())
+
+      const first = selected()
+      const prev = screen.getByRole('button', { name: /Previous/ })
+      if (!prev.disabled) {
+        fireEvent.click(prev)
+        // The ring follows the drawer rather than staying where it was clicked.
+        await waitFor(() => expect(selected()).not.toBe(first))
+      }
     })
   })
 

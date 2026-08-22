@@ -154,12 +154,22 @@ export function classifyEvent(event, diff) {
   return 'operational'
 }
 
-/** The range presets, and the window each one means. `ms` of null is an unbounded window. */
+/**
+ * The range presets, and the window each one means. `ms` of null is an unbounded window.
+ *
+ * THE SHORT ONES ARE WHY THIS PAGE CAN NOW BE READ AT ALL AT COMMISSIONING RESOLUTION. The
+ * causation work made `digital_thread` legible as ACTS rather than rows, and an act is exactly the
+ * thing that happens inside one second -- so the page's most interesting content sat at a
+ * resolution the range control could not reach. `24h` was the narrowest option and the custom
+ * pickers were date-only, which meant the narrowest expressible window was a whole day.
+ */
 export const TIME_PRESETS = [
-  { value: 'all', label: 'All time',      ms: null },
-  { value: '24h', label: 'Last 24 hours', ms: 24 * 60 * 60 * 1000 },
-  { value: '7d',  label: 'Last 7 days',   ms: 7 * 24 * 60 * 60 * 1000 },
-  { value: '30d', label: 'Last 30 days',  ms: 30 * 24 * 60 * 60 * 1000 }
+  { value: 'all', label: 'All time',       ms: null },
+  { value: '15m', label: 'Last 15 minutes', ms: 15 * 60 * 1000 },
+  { value: '1h',  label: 'Last 1 hour',     ms: 60 * 60 * 1000 },
+  { value: '24h', label: 'Last 24 hours',   ms: 24 * 60 * 60 * 1000 },
+  { value: '7d',  label: 'Last 7 days',     ms: 7 * 24 * 60 * 60 * 1000 },
+  { value: '30d', label: 'Last 30 days',    ms: 30 * 24 * 60 * 60 * 1000 }
 ]
 
 /**
@@ -175,11 +185,31 @@ export const TIME_PRESETS = [
  * chosen, and drift a full day behind over a shift.
  */
 export function timeWindow(preset, customStart, customEnd) {
-  const iso = (value, endOfDay) => {
+  /**
+   * A custom bound as an ISO instant.
+   *
+   * TWO SHAPES, BECAUSE THE INPUT CHANGED UNDER IT. `datetime-local` yields `YYYY-MM-DDTHH:mm`,
+   * which names an instant; the `date` input it replaces yielded `YYYY-MM-DD`, which names a DAY
+   * and has to be widened to one of its ends. Both are still handled -- a value persisted from the
+   * older control, or typed by hand, must not silently produce an invalid date.
+   *
+   * PARSED AS LOCAL, NOT UTC, in both shapes. An operator choosing 16:11 means 16:11 where they
+   * are standing. `new Date('2026-08-22T16:11')` is local by specification; appending a `Z` -- or
+   * building the string with toISOString() -- would shift the window by the timezone offset and
+   * quietly return the wrong hour's events.
+   */
+  const iso = (value, endOfRange) => {
     if (!value) return ''
-    // Parsed as LOCAL midnight, not UTC: the operator picking a date means their own day.
-    const d = new Date(`${value}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}`)
-    return Number.isNaN(d.getTime()) ? '' : d.toISOString()
+    const hasTime = String(value).includes('T')
+    const d = hasTime
+      ? new Date(value)
+      : new Date(`${value}T${endOfRange ? '23:59:59.999' : '00:00:00.000'}`)
+    if (Number.isNaN(d.getTime())) return ''
+    // `datetime-local` has minute granularity, so an end bound of 16:11 would exclude everything
+    // that happened during 16:11. Widened to the end of that minute -- the same widening the
+    // date-only path does to the end of the day, one unit down.
+    if (hasTime && endOfRange) d.setSeconds(59, 999)
+    return d.toISOString()
   }
 
   if (preset === 'custom') return { since: iso(customStart, false), until: iso(customEnd, true) }
@@ -354,9 +384,11 @@ export function resolveLaneName(entityId, laneEvents, entityNames) {
 export function tickFormatter(spanMs) {
   const MIN = 60 * 1000, HOUR = 60 * MIN, DAY = 24 * HOUR
 
-  // Under ten minutes the minute is constant across several ticks; seconds are the only thing
-  // telling them apart.
-  if (spanMs < 10 * MIN) {
+  // UNDER AN HOUR, SECONDS ARE SHOWN. Widened from ten minutes when the 15-minute and 1-hour
+  // presets arrived: within a commissioning burst the minute is constant across several ticks and
+  // the seconds are the only thing telling them apart. Above an hour they are always `:00` on a
+  // round tick and are noise on a label that is already unambiguous.
+  if (spanMs < HOUR) {
     return (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   }
   if (spanMs < 24 * HOUR) {
@@ -1040,23 +1072,28 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
               relationship to the preset beside them has to be guessed at. */}
           {rangePreset === 'custom' && (
             <>
+              {/* `datetime-local`, NOT `date`. The narrowest window a date pair can express is a
+                  whole day, which on a stack commissioned this morning makes All time and today
+                  the same picture. Minute granularity is what lets an operator frame the burst
+                  itself. `timeWindow()` widens the end bound to :59.999 so the closing minute is
+                  included rather than cut in half. */}
               <input
-                type="date"
+                type="datetime-local"
                 className="form-control"
-                style={{ width: '160px' }}
+                style={{ width: '210px' }}
                 value={customStart}
                 onChange={e => setCustomStart(e.target.value)}
-                title="Range start (from 00:00 local time on this date)"
-                aria-label="Range start date"
+                title="Range start, in local time"
+                aria-label="Range start"
               />
               <input
-                type="date"
+                type="datetime-local"
                 className="form-control"
-                style={{ width: '160px' }}
+                style={{ width: '210px' }}
                 value={customEnd}
                 onChange={e => setCustomEnd(e.target.value)}
-                title="Range end (through 23:59 local time on this date)"
-                aria-label="Range end date"
+                title="Range end, in local time (inclusive of that minute)"
+                aria-label="Range end"
               />
             </>
           )}
@@ -1155,9 +1192,16 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
                           above thirteen rows would be stating a number the page is not showing.
                           The toggle below names the remainder. */}
                       <div className="dt-section" role="separator" aria-label={`${section.label} lanes`}>
-                        <section.Icon size={13} />
-                        <span className="dt-section-name">{section.label}</span>
-                        <span className="dt-section-count">({section.lanes.length})</span>
+                        {/* The icon, name and count are one BADGE now rather than three loose
+                            items on a row, so a section reads as a heading over the track cards
+                            below it rather than as another lane. The rule to its right is what
+                            carries the eye across; it is drawn by CSS so it cannot be mistaken for
+                            content. */}
+                        <span className="dt-section-badge">
+                          <section.Icon size={12} />
+                          <span className="dt-section-name">{section.label}</span>
+                          <span className="dt-section-count">{section.lanes.length}</span>
+                        </span>
                       </div>
 
                       {section.lanes.map(lane => (

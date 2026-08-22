@@ -2830,13 +2830,19 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   min-width: 620px;
 }
 
+/* A lane is a ROW OF TWO CARDS, not a ruled line.
+
+   It used to be separated from its neighbours by `border-bottom`, which made the page a stack of
+   table rows: the eye followed the horizontal rules rather than the tracks, and a marker sitting
+   near a divider read as belonging to the boundary rather than to its lane. Giving the label and
+   the track each a container, and separating lanes by SPACE, makes each asset's history a thing
+   with edges. */
 .dt-lane {
   display: flex;
   align-items: stretch;
-  border-bottom: 1px solid var(--border);
+  gap: 10px;
+  padding: 3px 0;
 }
-
-.dt-lane:last-child { border-bottom: none; }
 
 /* The section rule: Cells, then Gateways, then Devices -- a plant's own containment order.
 
@@ -2850,12 +2856,24 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   z-index: 2;
   display: flex;
   align-items: center;
-  gap: 6px;
   width: 210px;
-  padding: 12px 10px 5px 0;
+  padding: 14px 10px 6px 0;
   background: var(--bg-card);
-  border-bottom: 1px solid var(--border);
   color: var(--text-muted);
+}
+
+/* The heading as a BADGE rather than three loose items on a ruled row. The rule that used to sit
+   under it was the same weight as the lane dividers, so a section heading and an asset lane were
+   separated by identical lines and the hierarchy had to be inferred from the text. */
+.dt-section-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
 }
 
 /* The first heading sits flush under the axis; the rest earn their space from the lanes above. */
@@ -2868,28 +2886,53 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   letter-spacing: 0.7px;
 }
 
+/* No parentheses: inside a badge the count is already visually separate, and `( 6 )` was
+   punctuation doing a job the container now does. */
 .dt-section-count {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   color: var(--text-dim);
+  padding-left: 5px;
+  border-left: 1px solid var(--border);
 }
 
 /* Sticky, and opaque in the card's own colour: markers scroll UNDER the labels rather than over
    them, so the asset a lane belongs to stays readable at any scroll offset. A transparent label
    here would let a dozen dots slide through the text. */
+/* THE LABEL IS A PILL, and it has two jobs that pull in opposite directions.
+
+   It is STICKY, so markers scroll underneath it -- which needs an opaque background in the CARD's
+   colour, or dots show through the name as they pass. It should also read as a container, which
+   wants a lighter surface and a border, inset from the edges.
+
+   So the element stays opaque and the pill is drawn by `::before` inside it. The children sit
+   above that layer; nothing else changes. */
 .dt-lane-label {
   position: sticky;
   left: 0;
   z-index: 2;
   flex: 0 0 210px;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
-  padding: 4px 10px 4px 0;
+  padding: 0 17px 0 9px;
   background: var(--bg-card);
   font-size: 12px;
 }
+
+.dt-lane-label::before {
+  content: '';
+  position: absolute;
+  inset: 1px 8px 1px 0;
+  border-radius: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  pointer-events: none;
+}
+
+/* Above the pill layer. Without this the children paint under it and vanish. */
+.dt-lane-label > * { position: relative; z-index: 1; }
 
 /* The one element allowed to lose characters. Everything else in the label -- the icon, the
    deleted flag -- is fixed width or must stay whole, so a long asset name is what gives. */
@@ -2928,11 +2971,24 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   opacity: 0.85;
 }
 
+/* THE TRACK IS A CONTAINER, not an area of card background with a line through it.
+
+   Given edges, a lane reads as one asset's stretch of time -- and a marker near the top or bottom
+   of it is unambiguously IN that lane, which matters now that colliding markers fan vertically. */
 .dt-track {
   position: relative;
   flex: 1;
   min-width: 380px;
   height: 32px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+/* The axis row is a scale, not a lane. Left bare so the tick labels are not boxed like data. */
+.dt-track.dt-axis-track {
+  background: none;
+  border: none;
 }
 
 /* The lane's rule, inset by the same 14px the markers are padded with so it starts and stops
@@ -2943,16 +2999,28 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   left: 14px;
   right: 14px;
   top: 50%;
-  height: 2px;
-  margin-top: -1px;
+  height: 1px;
+  margin-top: -0.5px;
+  /* ONE PIXEL, AND LIGHTER THAN THE BORDER IT SITS INSIDE. At 2px in the border colour the
+     guideline was the same weight as the container edge, so a track read as three stacked rules.
+     It exists to say where the timeline runs, which a hairline does; the fanned markers above and
+     below it are what the eye should be finding. */
   background: var(--border);
+  opacity: 0.7;
 }
 
+/* The axis has no timeline to mark. */
+.dt-track.dt-axis-track::before { display: none; }
+
+/* The axis corner is a caption, not an asset. No pill: boxing "16 assets - 102 events" like a lane
+   label would put a count where a name goes. */
 .dt-axis .dt-lane-label {
   font-size: 11px;
   color: var(--text-muted);
   font-weight: 600;
+  padding-left: 0;
 }
+.dt-axis .dt-lane-label::before { display: none; }
 
 .dt-axis-track { height: 24px; }
 .dt-axis-track::before { display: none; }
@@ -2982,6 +3050,9 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   height: 13px;
   padding: 0;
   border-radius: 50%;
+  /* The ring is what keeps two fanned markers from reading as one blob where they overlap. In the
+     CARD's colour rather than the track's: it has to separate a marker from its NEIGHBOUR, and a
+     ring matching the surface behind would only separate it from the background. */
   border: 2px solid var(--bg-card);
   cursor: pointer;
   transform: translate(-50%, -50%);
@@ -2997,9 +3068,15 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   z-index: 3;
 }
 
+/* THE ACTIVE MARKER, and it has to survive being surrounded.
+
+   `--accent-glow` is a translucent halo, which reads well against the card background and almost
+   disappears against the fanned neighbours a collision now puts either side of it. A solid accent
+   ring with a dark gap inside it separates the selected node from whatever it is stacked with --
+   which is the point, because this is the marker the drawer is showing. */
 .dt-node-selected {
-  box-shadow: 0 0 0 3px var(--accent-glow);
-  z-index: 3;
+  box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 4px var(--accent), 0 0 10px var(--accent-glow);
+  z-index: 4;
 }
 
 .dt-node-creation,    .dt-node-dot.dt-node-creation    { background: var(--success); }
