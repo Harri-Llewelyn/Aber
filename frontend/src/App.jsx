@@ -100,7 +100,7 @@ export const TABS = [
  * be sent with curl, and what refuses it is the RLS policy. Nothing here is a security control,
  * and treating it as one is how a UI gate ends up being the ONLY gate.
  */
-function tabIsVisible(tabDef, hasPermission, userRole) {
+export function tabIsVisible(tabDef, hasPermission, userRole) {
   if (tabDef.role && userRole !== tabDef.role) return false
   if (!tabDef.permission) return true
   return hasPermission(tabDef.permission)
@@ -379,7 +379,30 @@ function Dashboard({ session, onSignOut }) {
   const { theme, toggleTheme } = useTheme()
   const { toast, showToast, clearToast } = useToast()
 
-  const { userRole, hasPermission } = usePermissions(session)
+  const { userRole, hasPermission, loadingPerms } = usePermissions(session)
+
+  /*
+   * LEAVE A TAB THAT IS NO LONGER VISIBLE TO THIS USER.
+   *
+   * `tab` outlives a session. Sign out from Settings as an Administrator, sign back in as an
+   * Operator, and the route is still `settings` -- a tab that is now absent from the nav and whose
+   * render is guarded, so the main area renders NOTHING. A blank page with a plausible URL and no
+   * message is the worst of the available failures: it reads as the app being broken rather than
+   * as a page this account cannot see, and there is no control on screen saying so.
+   *
+   * WAITS FOR `loadingPerms`, WHICH IS THE WHOLE DIFFICULTY. `userRole` is null while the
+   * permission fetch is in flight, so acting on it immediately would bounce an Administrator off
+   * Settings on every hard refresh -- a redirect that looks exactly like a permission failure and
+   * is a race.
+   *
+   * Overview, because it is the one tab with no gate at all.
+   */
+  useEffect(() => {
+    if (loadingPerms) return
+    const current = TABS.find(t => t.id === tab)
+    if (current && !tabIsVisible(current, hasPermission, userRole)) setTab('overview')
+  }, [tab, loadingPerms, userRole, hasPermission, setTab])
+
   useQuarantineAlerts(showToast)
 
   // Grafana's firing alerts, delivered through platform_alerts. Lifted to App rather than owned by a

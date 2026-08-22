@@ -17,7 +17,7 @@
  * constants.js.
  */
 import { describe, it, expect } from 'vitest'
-import { TABS } from '../App'
+import { TABS, tabIsVisible } from '../App'
 import { VALID_TABS } from '../constants'
 
 describe('the nav and the router agree', () => {
@@ -53,6 +53,37 @@ describe('the nav and the router agree', () => {
   it('declares no duplicate tab ids', () => {
     expect(new Set(TABS.map(t => t.id)).size).toBe(TABS.length)
     expect(new Set(VALID_TABS).size).toBe(VALID_TABS.length)
+  })
+
+  it('hides a role-gated tab from the wrong role and shows it to the right one', () => {
+    const settings = TABS.find(t => t.id === 'settings')
+    const never = () => false
+    expect(tabIsVisible(settings, never, 'Administrator')).toBe(true)
+    expect(tabIsVisible(settings, never, 'Operator')).toBe(false)
+    // Null while the permission fetch is in flight. The nav hiding it briefly is harmless; what
+    // must NOT happen is App redirecting on this, which is why that effect waits for loadingPerms.
+    expect(tabIsVisible(settings, never, null)).toBe(false)
+  })
+
+  it('leaves an ungated tab visible to everyone', () => {
+    // Overview is where App sends a user whose current tab became invisible, so it must never be
+    // gated -- a redirect target that can itself be hidden is a redirect loop.
+    const overview = TABS.find(t => t.id === 'overview')
+    expect(overview.role).toBeUndefined()
+    expect(overview.permission).toBeUndefined()
+    expect(tabIsVisible(overview, () => false, null)).toBe(true)
+  })
+
+  it('still honours a permission-gated tab, which was dead code until Settings was added', () => {
+    /*
+     * `tabIsVisible` existed and was never called, so `Archives` was visible to everyone
+     * regardless of ARCHIVE_MANAGE. Connecting it is what makes the role gate work at all, and
+     * this pins that the permission branch survived the change.
+     */
+    const archives = TABS.find(t => t.id === 'archives')
+    expect(archives.permission).toBeTruthy()
+    expect(tabIsVisible(archives, uuid => uuid === archives.permission, 'Operator')).toBe(true)
+    expect(tabIsVisible(archives, () => false, 'Operator')).toBe(false)
   })
 
   it('gates the Settings tab on the Administrator role rather than a permission', () => {
