@@ -33,8 +33,14 @@ DB_NAME = os.getenv("SUPABASE_DB_NAME", os.getenv("DB_NAME", "postgres"))
 DB_USER = os.getenv("SUPABASE_DB_USER", os.getenv("DB_USER", "postgres"))
 DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgres"))
 
-ADMIN_ID = "a0000000-0000-0000-0000-000000000001"
-OPERATOR_ID = "a0000000-0000-0000-0000-000000000003"
+# SELF-SEEDED, NOT THE DEMO PERSONAS, and that is not a stylistic choice. CI's RLS job applies the
+# migrations and deliberately NOT seed.sql -- the base image's legacy `auth.users` lacks columns
+# the seed writes -- so `admin@acs-cymru.local` does not exist there. A suite depending on it
+# passes locally against a seeded stack and fails in CI, which is the worst available direction:
+# the failure looks like the policy and is actually the fixture. Same approach as
+# test_user_roles_rls.py, which seeds its own rows for the same reason.
+ADMIN_ID = "5e771465-0000-4000-8000-00000000ad11"
+OPERATOR_ID = "5e771465-0000-4000-8000-00000000009e"
 
 SEEDED_KEY = "ui.digital_thread_lane_limit"
 
@@ -76,15 +82,31 @@ class SystemSettingsRLS(unittest.TestCase):
                 )
                 if cur.fetchone()[0] != 1:
                     raise RuntimeError(f"{SEEDED_KEY} is not seeded; 0031 did not run cleanly.")
-                # Which roles the seeded personas actually hold, so a failure here reads as
-                # "the fixture is wrong" rather than "the policy is wrong".
+                # BY NAME, not by a hardcoded id. `roles.id` is an integer assigned by 0001 and
+                # a suite that hardcodes 1 == Administrator is asserting a fact about a sequence.
+                cur.execute("SELECT id, name FROM public.roles WHERE name IN %s;",
+                            (("Administrator", "Operator"),))
+                by_name = {name: rid for rid, name in cur.fetchall()}
+                for needed in ("Administrator", "Operator"):
+                    if needed not in by_name:
+                        raise RuntimeError(f"role {needed!r} is missing; 0001 did not run cleanly.")
+
+                cur.execute(
+                    "INSERT INTO public.user_roles (user_id, role_id) VALUES (%s, %s), (%s, %s)"
+                    " ON CONFLICT (user_id, role_id) DO NOTHING;",
+                    (ADMIN_ID, by_name["Administrator"], OPERATOR_ID, by_name["Operator"]),
+                )
+                conn.commit()
+
+                # Asserted rather than assumed: if has_role() cannot see these rows, every write
+                # test below would "pass" by being denied for the wrong reason.
                 cur.execute(
                     "SELECT r.name FROM public.user_roles ur JOIN public.roles r ON r.id = ur.role_id"
                     " WHERE ur.user_id = %s;", (ADMIN_ID,)
                 )
                 roles = [row[0] for row in cur.fetchall()]
                 if "Administrator" not in roles:
-                    raise RuntimeError(f"seed user {ADMIN_ID} is not an Administrator: {roles}")
+                    raise RuntimeError(f"fixture user {ADMIN_ID} is not an Administrator: {roles}")
         finally:
             conn.close()
 

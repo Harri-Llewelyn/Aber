@@ -1068,6 +1068,66 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/DeviceAlert' } }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
+  /rest/v1/system_settings:
+    get:
+      tags: [Registry]
+      summary: Read the runtime configuration plane
+      description: |
+        Runtime settings an `Administrator` may change without a container restart — retention
+        windows, cold-storage endpoints, UI limits.
+
+        **The key set is closed.** RLS grants `UPDATE` and nothing else: there is no `INSERT`
+        policy and no `DELETE` policy, so `POST` and `DELETE` here are denied for every caller
+        except `service_role`. A new setting arrives by MIGRATION, declared beside the code that
+        reads it. A settings row exists so that code can read a value; a row nobody reads is a
+        note that looks like configuration.
+
+        **Readable by every authenticated user, and that is the design.** A setting shapes what a
+        page renders, so restricting reads to `Administrator` would break that page for everyone
+        else in a way that looks like a bug. The consequence is a hard rule: **nothing secret goes
+        in this table.** S3 access keys and OIDC client secrets belong in Supabase Vault, which is
+        a separate mechanism. When cold storage lands, the endpoint goes here and the credential
+        does not.
+
+        `value` is `jsonb` and `value_type` says what it holds; a CHECK constraint enforces the
+        pair, so a reader may trust the type. `anon` is revoked.
+      parameters:
+        - { name: key, in: query, schema: { type: string }, description: 'e.g. `eq.ui.digital_thread_lane_limit`' }
+        - { name: category, in: query, schema: { type: string }, description: 'e.g. `eq.Digital Thread`' }
+        - $ref: '#/components/parameters/Select'
+      responses:
+        '200':
+          description: Matching settings.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/SystemSetting' } }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+    patch:
+      tags: [Registry]
+      summary: Change a setting's value
+      description: |
+        `Administrator` only, and **`value` is the only writable column** — a column-level grant,
+        not merely a policy. `updated_by` is stamped by trigger from the JWT subject, so it is
+        provenance rather than a field the caller may dictate; `key` and `value_type` are
+        immutable because a reader was written against both.
+
+        A non-Administrator receives `204` with zero rows affected rather than an error: the row
+        is invisible to the UPDATE policy.
+      parameters:
+        - { name: key, in: query, required: true, schema: { type: string }, description: 'e.g. `eq.ui.digital_thread_lane_limit`' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                value: { description: 'Must match the row''s `value_type`.' }
+      responses:
+        '204': { description: 'Updated, or matched nothing because the caller is not an Administrator.' }
+        '400': { description: 'The value did not match `value_type`, or an immutable column was addressed.' }
+        '401': { description: 'Not authenticated; `anon` is revoked.' }
+
   /rest/v1/platform_alerts_active:
     get:
       tags: [Registry]
@@ -2453,6 +2513,51 @@ components:
         is_mandatory: { type: boolean, description: 'What the template requires. Descriptive only — the exporter does not claim the template.' }
         ordinal: { type: integer, description: 'Order in the published template.' }
 
+    SystemSetting:
+      type: object
+      description: |
+        One runtime configuration value. Declared by a migration, edited by an `Administrator`.
+      properties:
+        id: { type: string, format: uuid }
+        key:
+          type: string
+          description: |
+            Dotted, lowercase, `namespace.name`. IMMUTABLE: a key names the value some code reads,
+            so renaming one would silently disconnect it from that reader.
+          example: ui.digital_thread_lane_limit
+        value:
+          description: |
+            The value, as JSON. Its JSON type must match `value_type` — a CHECK constraint enforces
+            the pair, which is what lets a reader trust the type rather than re-validating it.
+          example: 30
+        value_type:
+          type: string
+          enum: [string, number, boolean, json]
+          description: 'IMMUTABLE. The reader was written against one type.'
+        category:
+          type: string
+          description: 'Grouping for the settings page.'
+          example: Digital Thread
+        label: { type: string, example: 'Lanes drawn before folding' }
+        description:
+          type: string
+          description: 'What changing this does, in an operator''s terms.'
+        fallback_source:
+          type: string
+          nullable: true
+          description: |
+            The environment variable or code constant this overrides, named so the fallback is
+            greppable from either end. An absent row means the fallback applies, which is what
+            keeps local boot zero-configuration.
+          example: DEFAULT_LANE_LIMIT in DigitalThreadTab.jsx
+        updated_at: { type: string, format: date-time }
+        updated_by:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            Stamped by trigger from the JWT subject; not writable by the caller. NULL for a change
+            made by `service_role` or by a migration, neither of which is a person.
     DeviceAlert:
       type: object
       description: |
