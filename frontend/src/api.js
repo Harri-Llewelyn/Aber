@@ -1128,6 +1128,24 @@ const apiMethods = {
       }));
     }
 
+    /*
+     * The runtime configuration plane (migration 0031).
+     *
+     * ORDERED BY CATEGORY THEN LABEL, so the settings page groups without sorting client-side and
+     * two administrators looking at the same install see the same order. `key` is deliberately not
+     * the sort: `ui.digital_thread_lane_limit` sorting next to `ui.digital_thread_poll_seconds` is
+     * a coincidence of naming, not a grouping anyone chose.
+     */
+    if (path.startsWith('/api/v1/settings')) {
+      const { data, error } = await supabase
+        .from('system_settings')
+        .select('id,key,value,value_type,category,label,description,fallback_source,updated_at,updated_by')
+        .order('category', { ascending: true })
+        .order('label', { ascending: true });
+      if (error) throw error;
+      return data || [];
+    }
+
     if (path.startsWith('/api/v1/directory')) {
       const { data, error } = await supabase.from('directory_services').select('*').order('service_name', { ascending: true });
       if (error) throw error;
@@ -1655,6 +1673,34 @@ const apiMethods = {
     }
 
     throw new Error('Unhandled API path: ' + path);
+  },
+
+  /*
+   * Change one setting's value.
+   *
+   * PATCH SEMANTICS THROUGH supabase-js `.update()`, not PUT: PostgREST's PUT requires the whole
+   * row and a primary-key match, and this caller may only write ONE column -- `value` is the only
+   * one `authenticated` holds a grant on (0031). Sending anything else is a 42501, which is the
+   * database refusing rather than this adapter being clever.
+   *
+   * `.select()` IS NOT OPTIONAL HERE. RLS makes a non-Administrator's update affect zero rows
+   * WITHOUT ERRORING -- the row is simply invisible to the UPDATE policy -- so a caller that only
+   * checked `error` would report success on a write that did nothing. Returning the row lets the
+   * page tell "saved" from "silently not saved".
+   */
+  patchSetting: async (key, value) => {
+    const { data, error } = await supabase
+      .from('system_settings')
+      .update({ value })
+      .eq('key', key)
+      .select('key,value,updated_at,updated_by');
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      throw new Error(
+        'That setting was not updated. Changing settings requires the Administrator role.'
+      );
+    }
+    return data[0];
   },
 
   delete: async (path, options = {}) => {

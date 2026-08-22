@@ -4,6 +4,7 @@ import { downloadCSV } from '../../utils/downloadCSV'
 import { ContextPanel } from '../common/ContextPanel'
 import { IconHistory, IconDownload, IconX, IconBuilding2, IconRadio, IconCpu, IconTrash } from '../common/Icons'
 import { DIGITAL_THREAD_ACTIONS } from '../../constants'
+import { useSetting } from '../../hooks/useSettings'
 
 /**
  * How a machine-originated change is described. `changed_by` names WHICH user and is NULL for
@@ -231,6 +232,15 @@ export function timeWindow(preset, customStart, customEnd) {
  * now happens when there is actually something to fold.
  */
 const DEFAULT_LANE_LIMIT = 30
+
+/**
+ * The poll interval, in seconds, when no setting overrides it.
+ *
+ * Named rather than inlined at the setInterval below, because it is now the FALLBACK half of a
+ * declared setting (`ui.digital_thread_poll_seconds`, migration 0031) and the two have to be
+ * findable from each other. The migration names this constant in its `fallback_source`.
+ */
+const DEFAULT_POLL_SECONDS = 60
 
 /*
  * MARKERS TOO CLOSE TO DRAW SEPARATELY BECOME ONE BADGE THAT SAYS HOW MANY THERE ARE.
@@ -720,6 +730,17 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
   const [selectedEventId, setSelectedEventId] = useState(null)
   const [showAllLanes, setShowAllLanes] = useState(false)
 
+  /*
+   * RUNTIME OVERRIDES (migration 0031), each falling back to the constant above.
+   *
+   * The constants are not dead: they are what applies on a stack whose administrator has never
+   * touched Settings, which is every fresh install and every local boot. That is the whole point
+   * of the fallback contract -- a setting that has never been changed behaves exactly as the page
+   * behaved before settings existed.
+   */
+  const laneLimit = useSetting('ui.digital_thread_lane_limit', DEFAULT_LANE_LIMIT)
+  const pollSeconds = useSetting('ui.digital_thread_poll_seconds', DEFAULT_POLL_SECONDS)
+
   useEffect(() => {
     // Cells and gateways join devices here so the audit log can be searched by the NAME an
     // operator knows an asset by. The log itself stores only entity_id -- names live on the
@@ -861,9 +882,13 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
    * schedule set by a query that is no longer running.
    */
   useEffect(() => {
-    const timer = setInterval(() => load(false), 60_000)
+    // Guarded: a setting of 0 or a negative would otherwise become an interval that fires as fast
+    // as the event loop allows, which is a settings page turning into a denial of service against
+    // the reader's own browser.
+    const seconds = Number(pollSeconds) > 0 ? Number(pollSeconds) : DEFAULT_POLL_SECONDS
+    const timer = setInterval(() => load(false), seconds * 1000)
     return () => clearInterval(timer)
-  }, [load])
+  }, [load, pollSeconds])
 
   /** event_id -> { diff, kind }. Computed once per fetch; both the markers and the CSV read it. */
   const analysis = useMemo(() => {
@@ -899,7 +924,7 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
         String(a.name || a.entityId).localeCompare(String(b.name || b.entityId)))
   }, [events, entityNames])
 
-  const visibleLanes = showAllLanes ? lanes : lanes.slice(0, DEFAULT_LANE_LIMIT)
+  const visibleLanes = showAllLanes ? lanes : lanes.slice(0, laneLimit)
   const hiddenLaneCount = lanes.length - visibleLanes.length
 
   /**
@@ -1438,11 +1463,11 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
                   Show all lanes (+{hiddenLaneCount})
                 </button>
               )}
-              {showAllLanes && lanes.length > DEFAULT_LANE_LIMIT && (
+              {showAllLanes && lanes.length > laneLimit && (
                 <button
                   className="btn btn-ghost btn-sm dt-lane-toggle"
                   onClick={() => setShowAllLanes(false)}
-                  title={`Collapse back to the ${DEFAULT_LANE_LIMIT} busiest assets`}
+                  title={`Collapse back to the ${laneLimit} busiest assets`}
                 >
                   Show fewer lanes
                 </button>

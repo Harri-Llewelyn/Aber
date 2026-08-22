@@ -3462,3 +3462,127 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   word-break: break-word;
   color: var(--text-primary);
 }
+
+/* ===== Settings ============================================================================= */
+
+/* THE PREAMBLE IS NOT DECORATION. Two things about this page surprise people, and both are
+   cheaper to say here than to discover: the list cannot be added to, and nothing secret may be
+   stored in it. Someone hunting for where to put an S3 key should meet that sentence BEFORE
+   putting it somewhere every signed-in user can read. */
+.settings-preamble {
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+.settings-preamble-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-secondary);
+}
+
+.settings-preamble p { margin-bottom: 6px; }
+.settings-preamble p:last-child { margin-bottom: 0; }
+
+/* --danger-text, not --danger: this is a sentence to read, and the bare signal colour measures
+   below AA as text on the card. */
+.settings-preamble-warning { color: var(--danger-text); }
+
+.settings-load-error {
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--danger-text);
+}
+
+.settings-group { padding: 0; margin-bottom: 12px; }
+
+.settings-group-title {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--text-secondary);
+}
+
+/* Label and control side by side, wrapping to stacked on a narrow viewport rather than
+   squeezing the input to unusability. */
+.setting-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.setting-row:last-child { border-bottom: none; }
+
+.setting-meta { flex: 1 1 320px; min-width: 0; }
+
+.setting-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 3px;
+}
+
+.setting-description {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+
+.setting-provenance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.setting-key { color: var(--text-dim); }
+
+/* What applies when the setting has never been changed. Dim, because it is context rather than
+   state -- but present, because "this setting appears to do nothing" is answered by it. */
+.setting-fallback { color: var(--text-dim); }
+
+.setting-control {
+  flex: 0 1 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.setting-json {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  resize: vertical;
+}
+
+/* Reserves its own height so a row does not jump when Save and Discard appear. The buttons are
+   shown only while there is an unsaved change -- a permanently enabled Save invites the click
+   that does nothing and then reports success. */
+.setting-actions {
+  display: flex;
+  gap: 6px;
+  min-height: 28px;
+}
+
+.setting-error {
+  font-size: 11px;
+  color: var(--danger-text);
+  line-height: 1.45;
+}
