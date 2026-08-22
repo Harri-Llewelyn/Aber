@@ -3,7 +3,6 @@ import { api } from '../../api'
 import { PERMISSION_UUIDS, POLL_INTERVAL_MS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { describeAuthFailure } from '../../utils/sessionError'
-import { StatusBadge } from '../common/StatusBadge'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { IconGitBranch, IconRefreshCw, IconExternalLink, IconCopy, IconCheck } from '../common/Icons'
 import { copyText } from '../common/CopyableId'
@@ -162,6 +161,28 @@ export function groupServices(services) {
  * column widths so the three tables line up as one list broken into sections instead of three
  * tables that each sized their columns from their own rows.
  */
+/*
+ * NO STATUS COLUMN AND NO LAST HEARTBEAT, AND BOTH WERE REMOVED FOR THE SAME REASON.
+ *
+ * NOTHING IN THIS STACK WRITES EITHER ONE. The only writes to `directory_services` anywhere are
+ * the seed INSERTs in migration 0002 -- there is no UPDATE, no probe, no heartbeat writer, and
+ * `fplus-directory` only SELECTs. So `status` was the literal string 'ACTIVE' on all fifteen rows,
+ * unconditionally, and `last_heartbeat` was the timestamp the row was seeded at.
+ *
+ * THE PILL WAS THE MORE DANGEROUS OF THE TWO, which is the opposite of how it looked. A stale date
+ * at least reads as stale -- someone seeing 02/08 grows suspicious. A green ACTIVE pill is
+ * believable, and it would have said ACTIVE for a service that had been down for a week.
+ *
+ * This page has already corrected exactly this once: the GitOps card above used to render a
+ * hardcoded SYNCED / a8f3e4b, removed because nothing in the stack can observe what Node-RED is
+ * running. Same fabrication, same file, two columns over.
+ *
+ * WHAT IS LEFT IS WHAT THIS PAGE HONESTLY IS: an inventory of what is deployed and how to reach it.
+ * The database columns stay -- `fplus-directory` serves `status` in its Factory+ contract response,
+ * so dropping them is a separate decision with an external consumer. Real liveness is tracked
+ * separately; Prometheus now knows the true `up` state of several of these, which is a path that
+ * did not exist before.
+ */
 function ServiceTable({ rows, onNotify }) {
   return (
     <div className="table-wrap">
@@ -171,8 +192,6 @@ function ServiceTable({ rows, onNotify }) {
             <th title="Service name">Service Name</th>
             <th title="Architecture category">Service Type</th>
             <th title="Web endpoints open in a new tab; everything else copies to the clipboard">Endpoint URL</th>
-            <th title="Heartbeat status">Status</th>
-            <th title="Last heartbeat timestamp">Last Heartbeat</th>
           </tr>
         </thead>
         <tbody>
@@ -183,10 +202,6 @@ function ServiceTable({ rows, onNotify }) {
               <td className="cell-endpoint">
                 <EndpointCell url={s.endpoint_url} onNotify={onNotify} />
               </td>
-              <td><StatusBadge status={s.status} /></td>
-              {/* .cell-meta rather than the inline 11px/muted pair this and the Archives
-                  table were each carrying their own copy of. */}
-              <td className="cell-meta">{new Date(s.last_heartbeat).toLocaleString()}</td>
             </tr>
           ))}
         </tbody>

@@ -307,12 +307,34 @@ describe('DirectoryTab service groups', () => {
     })
   })
 
-  // A heartbeat is only worth showing if its state is legible at a glance across three tables.
-  it('renders a live service as the standard online pill', async () => {
+  /*
+   * NO STATUS PILL AND NO LAST HEARTBEAT, and this test is the previous one inverted.
+   *
+   * It used to assert that a live service rendered as the standard online pill. Nothing in the
+   * stack writes `directory_services.status` -- the only writes anywhere are the seed INSERTs in
+   * migration 0002, and `fplus-directory` only SELECTs -- so the pill said ACTIVE on every row
+   * unconditionally, and would have said ACTIVE for a service down for a week.
+   *
+   * `last_heartbeat` went for the same reason, and the PILL was the more dangerous of the two: a
+   * stale date reads as stale, where a green pill is believed.
+   */
+  it('claims no liveness it cannot observe', async () => {
     await renderTab(vi.fn().mockReturnValue(true))
 
-    const pill = within(card(INGEST)).getAllByTitle(/Operational Status: ACTIVE/)[0]
-    expect(pill).toHaveClass('badge', 'badge-online')
+    expect(screen.queryByTitle(/Operational Status/)).not.toBeInTheDocument()
+    expect(document.querySelector('.badge-online')).toBeNull()
+    expect(screen.queryByText(/Last Heartbeat/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^Status$/)).not.toBeInTheDocument()
+  })
+
+  it('still lists what is deployed and how to reach it', async () => {
+    // What the page honestly IS, asserted so removing the two columns cannot quietly hollow it out.
+    await renderTab(vi.fn().mockReturnValue(true))
+
+    for (const svc of SERVICES) {
+      expect(screen.getByText(svc.service_name)).toBeInTheDocument()
+      expect(screen.getByText(svc.endpoint_url)).toBeInTheDocument()
+    }
   })
 
   it('says so when nothing is registered at all', async () => {
@@ -358,16 +380,23 @@ describe('DirectoryTab refresh', () => {
 
   // The poll is a setTimeout chain (see usePolling), so a fresh response only reaches the
   // component once the clock is advanced past the interval.
-  it('picks up a new heartbeat on the background poll, with nothing to press', async () => {
+  it('picks up a changed registration on the background poll, with nothing to press', async () => {
+    /*
+     * THE SUBJECT IS THE POLL, not what changed. This watched `status` flip to OFFLINE until that
+     * column was removed for being fabricated; the observable is now the endpoint, which is real
+     * data that a re-registration genuinely changes. Rewritten rather than deleted, because the
+     * behaviour under test -- the table refreshes itself with no button -- is unaffected.
+     */
     await renderTab(vi.fn().mockReturnValue(true))
     expect(api.get).toHaveBeenCalledTimes(1)
 
+    const moved = 'mqtt://broker.plant.local:8883'
     api.get.mockResolvedValue(
-      SERVICES.map(s => (s.service_type === 'MQTT_BROKER' ? { ...s, status: 'OFFLINE' } : s))
+      SERVICES.map(s => (s.service_type === 'MQTT_BROKER' ? { ...s, endpoint_url: moved } : s))
     )
     await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
 
     expect(api.get.mock.calls.length).toBeGreaterThan(1)
-    expect(await screen.findByTitle(/Operational Status: OFFLINE/)).toBeInTheDocument()
+    expect(await screen.findByText(moved)).toBeInTheDocument()
   })
 })
