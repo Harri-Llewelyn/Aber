@@ -15,10 +15,15 @@ So each entry below was verified against the pinned image before it was written:
   grafana         SERVES METRICS NATIVELY on its normal HTTP port at /metrics, unauthenticated.
                   (grafana 11.6.1: 1250 metric series.) Nothing to enable.
 
-  supabase-kong   SERVES METRICS ONLY WITH THE PLUGIN AND THE STATUS LISTENER BOTH ON. The
-                  `prometheus` plugin is declared globally in kong.yml and named in KONG_PLUGINS;
-                  `supabaseKong.metrics.enabled` adds KONG_STATUS_LISTEN and the port.
-                  (kong 2.8.1-alpine: 57 kong_* series on :8100/metrics.)
+  supabase-kong   SERVES METRICS ONLY WITH THE PLUGIN, THE STATUS LISTENER, AND -- SINCE KONG 3.x
+                  -- THREE PLUGIN FLAGS ALL ON. The `prometheus` plugin is declared globally in
+                  kong.yml and named in KONG_PLUGINS; `supabaseKong.metrics.enabled` adds
+                  KONG_STATUS_LISTEN and the port; and `status_code_metrics` / `latency_metrics` /
+                  `bandwidth_metrics` are set in kong.yml because 3.0 made them opt-in.
+                  WITHOUT THOSE FLAGS THIS TARGET IS A LIE OF EXACTLY THE KIND THIS HEADER IS
+                  ABOUT: it scrapes UP, answers 200, and carries only node-level nginx and memory
+                  gauges -- every per-service series silently absent.
+                  (kong 3.9.3: 106 kong_* series on :8100/metrics, measured on the live stack.)
                   THE MOST VALUABLE TARGET HERE, because every REST, Auth, Storage, Realtime and
                   edge-function request passes through it -- see the note on supabase-rest.
 
@@ -34,15 +39,21 @@ DELIBERATELY ABSENT, and this is the part worth reading:
                   serves /ready and /live and nothing else -- there is no metrics setting in the
                   configuration at all. A ServiceMonitor for it would be pure fiction.
                   It is not a real gap: every PostgREST request arrives through Kong, so
-                  `kong_http_status` and the `kong_latency_*` histograms already carry it, labelled
-                  by service and route. Gateway-side measurement is one hop removed from the
-                  process but it covers the entire HTTP tier from a single target -- which is also
-                  why enabling Kong's metrics matters more than any other switch in this file.
+                  `kong_http_requests_total` and the `kong_request_latency_ms_*` histograms already
+                  carry it, labelled by service and route. Gateway-side measurement is one hop
+                  removed from the process but it covers the entire HTTP tier from a single target
+                  -- which is also why enabling Kong's metrics matters more than any other switch
+                  in this file.
 
-                  THE METRIC NAME WAS WRONG HERE UNTIL A LIVE SCRAPE CHECKED IT. This said
-                  `kong_http_requests_total`, which is Kong 3.x; the pinned 2.8.1 plugin exposes
-                  `kong_http_status`. A panel built from the old name would have drawn an empty
-                  graph -- the exact failure this file's header is about.
+                  THIS METRIC NAME HAS NOW BEEN WRONG IN BOTH DIRECTIONS, WHICH IS THE LESSON.
+                  It first said `kong_http_requests_total`, written from documentation; a live
+                  scrape of the then-pinned 2.8.1 showed `kong_http_status`, so it was corrected.
+                  The 3.9.3 upgrade renamed it BACK -- 3.x really does expose
+                  `kong_http_requests_total`, `kong_bandwidth_bytes`, and three separate latency
+                  histograms (`kong_request_latency_ms_*`, `kong_upstream_latency_ms_*`,
+                  `kong_kong_latency_ms_*`) in place of 2.8's single `kong_latency_*`.
+                  Every name above was read off the running gateway, not off a changelog. A panel
+                  built from the wrong one draws an empty graph and reports nothing.
 
   supabase-db /   Postgres exposes nothing without postgres_exporter, which is a separate
   timescaledb     deployment with its own credentials and its own scrape story. Worth doing, and

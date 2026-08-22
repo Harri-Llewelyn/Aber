@@ -335,7 +335,7 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | `supabase-auth` | `acs-cymru_supabase_auth` | `supabase/gotrue:v2.189.0` | — |
 | `supabase-rest` | `acs-cymru_supabase_rest` | `postgrest/postgrest:v12.2.0` | — |
 | `supabase-kong-init` | `acs-cymru_supabase_kong_init` | `alpine:3.20` | — |
-| `supabase-kong` | `acs-cymru_supabase_kong` | `kong:2.8.1-alpine` | `54321:8000` |
+| `supabase-kong` | `acs-cymru_supabase_kong` | `kong:3.9.3` | `54321:8000` |
 | `supabase-functions` | `acs-cymru_supabase_functions` | `supabase/edge-runtime:v1.74.2` | — |
 | `supabase-realtime` | `acs-cymru_supabase_realtime` | `supabase/realtime:v2.34.47` | — |
 | `supabase-storage` | `acs-cymru_supabase_storage` | `supabase/storage-api:v1.11.13` | — |
@@ -655,14 +655,25 @@ Writes stay unimplemented. `PUT /objects/value` answers 405 and `/info` declares
 **Builds on:** [`templates/ingress.yaml`](deploy/helm/acs-cymru/templates/ingress.yaml) ·
 `acs-cymru.corsOrigins`
 
-Kong 2.8 is frozen: declarative config gained environment interpolation in 3.x, which is why
-`kong.yml` is a placeholder template substituted twice — once by `sed` on Compose, once by Helm.
+**This item used to open by blaming Kong 2.8, and that reason is gone**: the gateway is on
+`kong:3.9.3`, which interpolates `${{env.VAR}}` in declarative config. The two substituters stayed
+anyway, and deliberately — interpolation would move the service-role key into Kong's environment,
+whereas Compose writes it to an internal volume and Helm renders it into a Secret that never
+appears in a rendered manifest. So `kong.yml` is still a placeholder template substituted twice,
+but now because that is the narrower exposure rather than because Kong cannot do otherwise.
 
-Gateway API's `HTTPRoute` filters express **route-level CORS declaratively**, which would retire the
-`__CORS_ORIGINS__` placeholder and the two substituters along with it. That is worth pairing with
-this migration specifically, because the origin list is the stack's *only* statement of origin
-policy — the edge functions deliberately declare none — and the fewer places it is expressed, the
-fewer places it can be wrong.
+**What remains is the CORS half, and it is the half that was always the real argument.** Gateway
+API's `HTTPRoute` filters express **route-level CORS declaratively**, which would retire the
+`__CORS_ORIGINS__` placeholder specifically. That matters because the origin list is the stack's
+*only* statement of origin policy — the edge functions deliberately declare none — so it is load
+bearing on its own, with no second layer to fall back on. It has already failed once in exactly the
+way a single unenforced statement fails: four literal localhost origins that were correct on
+Compose and silently wrong on Kubernetes, presenting as a dashboard that logged in and then showed
+empty tables while the gateway reported 200 for every request.
+
+**Kubernetes-only, and worth saying so.** `HTTPRoute` does nothing for the Compose target, which
+keeps `kong.yml` and its `sed` either way — so this retires one placeholder on one target rather
+than the templating approach as a whole.
 
 ### 6 · A durable MCP credential, and the Digital Thread over MCP
 

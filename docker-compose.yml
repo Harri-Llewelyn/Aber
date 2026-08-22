@@ -590,10 +590,16 @@ services:
         condition: service_healthy
 
   # Renders supabase/kong.yml (a template) into the config volume with the real API keys and the
-  # Realtime upstream substituted. Kong 2.8 cannot read environment variables from declarative
-  # config, and committing the keys into the template would put a copy of the service-role key in
-  # git and make .env no longer authoritative. sed is safe here: a Supabase JWT is base64url, so
-  # it contains no character that could be read as a sed delimiter or backreference.
+  # Realtime upstream substituted, because committing the keys into the template would put a copy
+  # of the service-role key in git and make .env no longer authoritative. sed is safe here: a
+  # Supabase JWT is base64url, so it contains no character that could be read as a sed delimiter
+  # or backreference.
+  #
+  # KONG 3.x COULD DO THIS ITSELF (`${{env.VAR}}` in declarative config, which 2.8 could not) AND
+  # THIS SERVICE STAYS ANYWAY. Interpolation would move the service-role key into Kong's own
+  # ENVIRONMENT, where `docker inspect` prints it, in exchange for deleting a container that runs
+  # once for a second. A file on an internal volume is the narrower exposure, so the 3.x upgrade
+  # turns this from a workaround into a choice rather than making it obsolete.
   #
   # THIS SERVICE HAS NO KUBERNETES COUNTERPART -- Helm renders the same template into a Secret
   # directly. The template is shared; only the substituter differs. Adding a placeholder means
@@ -675,7 +681,7 @@ services:
 
   supabase-kong:
     container_name: acs-cymru_supabase_kong
-    image: kong:2.8.1-alpine
+    image: kong:3.9.3
     restart: always
     ports:
       - "${KONG_HTTP_PORT:-54321}:8000"

@@ -437,7 +437,9 @@ supabaseKong:
   enabled: true
   image:
     repository: kong
-    tag: 2.8.1-alpine
+    # NO `-alpine` SUFFIX, AND IT IS NOT AN OVERSIGHT. Kong stopped publishing alpine variants
+    # after 3.3.1; `kong:3.9.3-alpine` is a 404 on Docker Hub. The 3.x images are Debian-based.
+    tag: "3.9.3"
     pullPolicy: IfNotPresent
   replicas: 1
   # NAMING A PLUGIN HERE REPLACES THE DEFAULT `bundled` SET rather than adding to it. key-auth was

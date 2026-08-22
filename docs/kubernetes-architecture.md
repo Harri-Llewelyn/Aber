@@ -171,8 +171,12 @@ image so the Deployment needs no command override.
 
 ### 2.3 Kong config: template, don't `sed`
 
-`supabase-kong-init` exists solely because Kong 2.8 cannot read environment variables from
-declarative config and Compose has no templating. Helm does. `supabase/kong.yml` stays **one
+`supabase-kong-init` exists because Compose has no templating. It originally existed because Kong
+2.8 could not read environment variables from declarative config either; **on 3.x it can**
+(`${{env.VAR}}`), so that half of the reason is gone and the service is now kept deliberately —
+interpolation would move the service-role key into Kong's environment, where `docker inspect`
+prints it, in exchange for deleting a container that runs once for a second. Helm has templating
+anyway. `supabase/kong.yml` stays **one
 template serving both targets** — the `__UPPER_SNAKE__` placeholders are unchanged for Compose and
 are what Helm renders into a Secret mounted at `/usr/local/kong/declarative/kong.yml`.
 
@@ -195,13 +199,22 @@ Three changes made it usable from both:
 
 **The service and the `kong_config` volume both disappear on Kubernetes.** They stay on Compose.
 
-Related, and worth deciding separately: the stack is on `kong:2.8.1-alpine`, which is unmaintained.
-Kong 3.x interpolates env vars in declarative config natively and would delete `supabase-kong-init`
-on the Compose side too. See §11 — a **separate** piece of work, deliberately not bundled into a
-hosting change.
+**The gateway is on `kong:3.9.3`.** It was pinned to the unmaintained `2.8.1-alpine` until the
+upgrade; two things about that bump are worth carrying forward:
 
-**Rate limiting does not depend on that bump.** The stack has none anywhere, but `rate-limiting` is
-bundled in Kong 2.8 already; it is unavailable only because naming plugins in `KONG_PLUGINS`
+- **There is no 3.x `-alpine` image.** Kong stopped publishing alpine variants after `3.3.1`;
+  `kong:3.9.3-alpine` is a 404 on Docker Hub, so the tag drops the suffix and the image is
+  Debian-based.
+- **3.0 made the Prometheus plugin's per-entity metrics opt-in.** `status_code_metrics`,
+  `latency_metrics` and `bandwidth_metrics` all default to `false`, so a bare `- name: prometheus`
+  — which was the whole configuration on 2.8 — exports node-level gauges and nothing else. The
+  scrape target stays UP while every per-service series vanishes. They are set explicitly in
+  `kong.yml`; the metric names also changed, and `templates/obs/servicemonitors.yaml` carries the
+  new ones as read off the running gateway.
+
+**Rate limiting does not depend on the gateway version.** The stack has none anywhere, but
+`rate-limiting` is bundled in Kong already; it is unavailable only because naming plugins in
+`KONG_PLUGINS`
 *replaces* the bundled set rather than extending it. Adding it means a plugin block in `kong.yml`
 and the name added to both plugin lists, which CI already asserts agree. `policy: local` is the
 correct choice — `cluster` is unsupported in DB-less mode, and local counters are exact at one
@@ -1272,7 +1285,8 @@ oversights.
 - **Object storage stays on the `file` backend by default.** `supabaseStorage.backend: s3` is a
   supported switch (§4.4). With the durability gap closed (§10.5), what remains is a *scaling*
   question — the `file` backend is what pins that Deployment to one replica — not a data-loss one.
-- **The gateway is still Kong 2.8, which is unmaintained**, and nothing rate-limits anything. §2.3
-  covers the interim 3.x bump and why rate limiting does not depend on it; §7.1 covers the
-  longer-term Gateway API question. Neither belongs in a hosting change.
+- **Nothing rate-limits anything.** The gateway is now Kong 3.9.3 (§2.3), so the unmaintained-image
+  half of this entry is closed; the missing rate limiting is not, and does not depend on the
+  version — `rate-limiting` is bundled, and is unavailable only because `KONG_PLUGINS` replaces the
+  bundled set rather than extending it. §7.1 covers the longer-term Gateway API question.
 - **Backups are logical dumps, not PITR** (§10.3). The recovery floor is the last nightly run.

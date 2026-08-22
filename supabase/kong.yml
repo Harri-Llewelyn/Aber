@@ -4,10 +4,11 @@
 # THIS FILE IS A TEMPLATE, and ONE TEMPLATE SERVES BOTH DEPLOYMENT TARGETS.
 #
 #   * Docker Compose: `supabase-kong-init` substitutes the __PLACEHOLDERS__ with `sed` and writes
-#     the result to a volume Kong reads. Kong 2.8 has no environment interpolation in declarative
-#     config (that arrived in 3.x), and the alternative -- committing the literal keys here --
-#     would create a second source of truth that silently disagrees with .env the first time
-#     anyone rotates a key.
+#     the result to a volume Kong reads. Committing the literal keys here would create a second
+#     source of truth that silently disagrees with .env the first time anyone rotates a key.
+#     Kong 3.x can interpolate `${{env.VAR}}` itself, which 2.8 could not -- but that would put
+#     the service-role key in Kong's environment rather than on an internal volume, so the
+#     substituters stay by choice now rather than by necessity.
 #   * Kubernetes: Helm renders the same placeholders into a Secret mounted at the same path, and
 #     `supabase-kong-init` does not exist at all. See docs/kubernetes-architecture.md §2.3.
 #
@@ -29,7 +30,7 @@
 # do and do not expose:  supabase/README.md -> "API Gateway (kong.yml)"
 # =============================================================================================
 
-_format_version: "2.1"
+_format_version: "3.0"
 
 # ---------------------------------------------------------------------------------------------
 # API key consumers
@@ -267,8 +268,26 @@ plugins:
   # variable REPLACES the bundled set rather than adding to it, so a plugin referenced here but
   # missing there stops Kong dead at boot with `plugin 'prometheus' not enabled; add it to the
   # 'plugins' configuration property` -- which reads as a config-file error and is an env-var one.
+  #
+  # THE THREE FLAGS BELOW ARE THE WHOLE POINT OF THIS PLUGIN HERE, AND ON KONG 3.x THEY DEFAULT TO
+  # FALSE. Kong 2.8 emitted per-service status codes, latencies and bandwidth from a bare
+  # `- name: prometheus`; 3.0 made all three opt-in to control cardinality. The upgrade therefore
+  # SILENTLY REMOVES every series this target exists for -- `kong_http_status`, `kong_latency_*`
+  # and `kong_bandwidth` all disappear, leaving only node-level nginx and memory gauges.
+  #
+  # NOTHING FAILS WHEN THAT HAPPENS, which is why this comment is longer than the config. The
+  # scrape target stays UP, /metrics answers 200, and only a panel or an alert reading a
+  # per-service series goes quiet -- which reads as an idle gateway rather than an unmeasured one.
+  # Caught by querying the live scrape after the 2.8 -> 3.9 bump, not by reading the changelog.
+  #
+  # `upstream_health_metrics` is deliberately NOT enabled: it reports on `upstreams`/`targets`
+  # entities, and every service here is declared with a plain `url:`, so it would export nothing.
   # ---------------------------------------------------------------------------------------------
   - name: prometheus
+    config:
+      status_code_metrics: true
+      latency_metrics: true
+      bandwidth_metrics: true
   # ---------------------------------------------------------------------------------------------
   # THE ONLY STATEMENT OF ORIGIN POLICY IN THE STACK, which is why it is substituted rather than
   # written.

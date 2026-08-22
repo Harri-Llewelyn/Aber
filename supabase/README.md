@@ -619,10 +619,9 @@ authenticated `p_actor_id` explicitly and **re-checking that actor's role agains
 
 ## API Gateway (`kong.yml`)
 
-**This file is a template, and ONE template serves both deployment targets.** Kong 2.8 has no
-environment interpolation in declarative config, and committing literal keys would make `.env` no
-longer authoritative — so the `__UPPER_SNAKE__` placeholders are substituted outside the container on
-both paths:
+**This file is a template, and ONE template serves both deployment targets.** Committing literal
+keys would make `.env` no longer authoritative, so the `__UPPER_SNAKE__` placeholders are
+substituted outside the container on both paths:
 
 | | Substituted by | Notes |
 | :--- | :--- | :--- |
