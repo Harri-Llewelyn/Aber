@@ -1,0 +1,86 @@
+# =================================================================================================
+# Renovate, run from this repository rather than by the hosted app.
+#
+# WHY SELF-HOSTED. This repository is PRIVATE, and Mend's hosted Renovate app is free for public
+# repositories. Running the CLI here needs no third-party access to the code and no plan; the cost
+# is that this file exists and that the token below has to be provisioned by a person.
+#
+# IT DOES NOTHING UNTIL `RENOVATE_TOKEN` IS SET, and that is stated loudly rather than left to be
+# discovered. A scheduled workflow that fails silently every Monday is worse than no workflow: the
+# repository looks as though drift is being watched when it is not -- the same "green light over an
+# unmeasured thing" failure the ServiceMonitor and CVE-scan guards are both written about. The
+# first step therefore fails with an explanation rather than letting Renovate exit 0 having
+# authenticated as nobody.
+#
+# THE TOKEN. A classic PAT with `repo` scope, or a fine-grained PAT with Contents: read/write,
+# Pull requests: read/write and Issues: read/write on this repository (Issues is not optional --
+# the dependency dashboard IS an issue, and it is the main deliverable). GITHUB_TOKEN cannot be
+# used: pull requests it opens do not trigger workflow runs, so every Renovate PR would arrive
+# with no CI result, which on this repository is most of what tells you whether a bump is safe.
+#
+# ALL BEHAVIOUR LIVES IN renovate.json, not here -- including the schedule. This workflow runs
+# hourly and Renovate itself decides whether it is inside its configured window, which is how the
+# tool is meant to be driven; putting the cadence in the cron would mean two schedules to keep in
+# step and one of them invisible to the config validator.
+# =================================================================================================
+name: Renovate
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+    inputs:
+      logLevel:
+        description: "Renovate log level"
+        required: false
+        default: "info"
+        type: choice
+        options: [info, debug]
+      dryRun:
+        description: "Report what it would do, and change nothing"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renovate
+  cancel-in-progress: false
+
+jobs:
+  renovate:
+    name: Scan For Dependency Drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Require The Token
+        env:
+          RENOVATE_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
+        run: |
+          if [ -z "${RENOVATE_TOKEN}" ]; then
+            echo "::error::RENOVATE_TOKEN is not set, so this workflow cannot do anything."
+            echo "::error::Create a PAT with repo scope (or fine-grained: Contents, Pull requests"
+            echo "::error::and Issues read/write) and add it as an Actions secret named"
+            echo "::error::RENOVATE_TOKEN. Failing loudly on purpose -- a silent no-op here would"
+            echo "::error::leave the repository looking as though drift is being watched."
+            exit 1
+          fi
+
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      # Pinned. An unpinned action deciding what to do about unpinned dependencies is a joke that
+      # writes itself, and this one holds a token that can open pull requests.
+      - name: Renovate
+        uses: renovatebot/github-action@v46.2.2
+        with:
+          token: ${{ secrets.RENOVATE_TOKEN }}
+          configurationFile: renovate.json
+        env:
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          RENOVATE_PLATFORM: github
+          LOG_LEVEL: ${{ inputs.logLevel || 'info' }}
+          RENOVATE_DRY_RUN: ${{ inputs.dryRun && 'full' || '' }}
