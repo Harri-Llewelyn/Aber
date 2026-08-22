@@ -9,5 +9,5 @@
 # are a breaking change, and running the two consumers on different API versions would mean the
 # alias-handling code mirrored between them was no longer literally comparable.
 paho-mqtt==1.6.1
-protobuf==4.25.3
+protobuf==5.29.6
 requests==2.33.0
