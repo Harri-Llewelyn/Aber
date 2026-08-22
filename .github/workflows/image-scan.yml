@@ -20,9 +20,16 @@ name: Container Image CVE Scan
 
 on:
   schedule:
-    # Mondays, an hour after Renovate. Reading "this is out of date" and "this has a known
-    # vulnerability" in one sitting is what makes the second one actionable.
-    - cron: "0 7 * * 1"
+    # The first of the month, an hour after Renovate's routine window. Reading "this is out of
+    # date" and "this has a known vulnerability" in one sitting is what makes the second one
+    # actionable, so the two stay paired whatever the cadence.
+    #
+    # MONTHLY IS A WEAKER GUARANTEE THAN RENOVATE'S, and worth being honest about: a CVE published
+    # on the 2nd is not noticed here until the 1st of the next month. Renovate's daily run covers
+    # the dependencies it manages -- our own declared npm and pip packages -- but NOT a CVE inside
+    # a third-party image, which is exactly what this job is for. `workflow_dispatch` is the
+    # answer when something specific needs checking sooner.
+    - cron: "0 7 1 * *"
   workflow_dispatch:
 
 permissions:

@@ -10,13 +10,13 @@
 
     "THE DASHBOARD IS THE DELIVERABLE, more than the PRs are. It is one issue listing every available update including the ones deliberately held back, which is exactly the artefact the manual audit produced and then threw away.",
 
-    "SCHEDULING: weekly and early. Proactive currency work wants a cadence slow enough that PRs are not noise and fast enough that no single upgrade is ever frightening. Security updates ignore that schedule entirely -- see vulnerabilityAlerts, which is the reactive half."
+    "SCHEDULING IS MONTHLY, AND THE WORKFLOW CRON IS NOT. Routine currency work opens on the first of the month, because a weekly batch of pull requests is a standing tax on whoever has to read them and the thing being defended against moves over months, not days. The workflow that INVOKES Renovate still runs daily, and that is deliberate rather than sloppy: Renovate can only act while the process is running, so a monthly cron would silently make vulnerabilityAlerts monthly too -- and those are supposed to ignore the schedule entirely. Daily invocation plus a monthly window means routine noise once a month and a security advisory picked up within a day."
   ],
 
   "extends": ["config:recommended"],
 
   "timezone": "Europe/London",
-  "schedule": ["before 6am on Monday"],
+  "schedule": ["before 6am on the first day of the month"],
 
   "dependencyDashboard": true,
   "dependencyDashboardTitle": "Dependency Dashboard — version drift",

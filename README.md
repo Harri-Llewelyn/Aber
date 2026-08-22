@@ -500,11 +500,22 @@ version drift and published advisories move on the world's schedule, not on this
 
 | Workflow | Job | Asks |
 | :--- | :--- | :--- |
-| [`renovate.yml`](.github/workflows/renovate.yml) | **renovate** | *Is there a newer version?* — proactive, weekly |
-| [`image-scan.yml`](.github/workflows/image-scan.yml) | **scan** | *Does what we run have a known, **fixed** vulnerability?* — reactive, weekly |
+| [`renovate.yml`](.github/workflows/renovate.yml) | **renovate** | *Is there a newer version?* — routine PRs monthly, security PRs immediately |
+| [`image-scan.yml`](.github/workflows/image-scan.yml) | **scan** | *Does what we run have a known, **fixed** vulnerability?* — monthly |
 
 **The dependency dashboard is the deliverable**, more than the pull requests are: one issue listing
 every available update, including the ones deliberately held back.
+
+**Routine updates open on the first of the month**, because a weekly batch of pull requests is a
+standing tax on whoever reads them and the drift being defended against moves over months. **The
+`renovate.yml` cron is daily anyway, and that is not a contradiction**: Renovate can only act while
+it is running, so a monthly cron would silently make the security carve-out monthly too. Daily
+invocation against a monthly window is what keeps `vulnerabilityAlerts` meaning what it says —
+routine noise once a month, an advisory picked up within a day.
+
+The CVE scan is monthly with no such carve-out, which is a weaker guarantee and deliberately so: a
+CVE published inside a third-party image on the 2nd is not noticed until the 1st. `workflow_dispatch`
+is the answer when something specific needs checking sooner.
 
 **[`renovate.json`](renovate.json) exists mostly to stop good automation doing the wrong thing
 here.** The Supabase components are a coordinated set that upstream tests together — measured

@@ -18,16 +18,24 @@
 # used: pull requests it opens do not trigger workflow runs, so every Renovate PR would arrive
 # with no CI result, which on this repository is most of what tells you whether a bump is safe.
 #
-# ALL BEHAVIOUR LIVES IN renovate.json, not here -- including the schedule. This workflow runs
-# hourly and Renovate itself decides whether it is inside its configured window, which is how the
-# tool is meant to be driven; putting the cadence in the cron would mean two schedules to keep in
-# step and one of them invisible to the config validator.
+# ALL BEHAVIOUR LIVES IN renovate.json, not here -- including the schedule. This workflow just
+# runs Renovate; Renovate decides whether it is inside its configured window. Putting the cadence
+# in the cron would mean two schedules to keep in step and one of them invisible to the config
+# validator.
+#
+# DAILY, WHICH IS NOT THE CADENCE AND MUST NOT BE CONFUSED WITH IT. renovate.json opens routine
+# pull requests monthly. This runs every day because RENOVATE CAN ONLY ACT WHILE IT IS RUNNING:
+# `vulnerabilityAlerts` is configured to ignore the schedule and open a security fix immediately,
+# and a monthly cron would quietly make that monthly too -- the setting would still read "at any
+# time" and be worth nothing. Daily invocation is what makes the security carve-out real. Most
+# days it finds it is outside the routine window and exits having done nothing, which is the
+# intended and cheap case.
 # =================================================================================================
 name: Renovate
 
 on:
   schedule:
-    - cron: "0 * * * *"
+    - cron: "0 6 * * *"
   workflow_dispatch:
     inputs:
       logLevel:
