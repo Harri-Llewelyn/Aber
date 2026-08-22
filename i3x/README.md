@@ -188,33 +188,116 @@ browser mode would fail every request at the preflight. The same limitation is w
 
 ## MCP
 
-`cesmii/i3X-MCP-Server` is a **generic MCP client of any conformant i3X server** — it discovers
-everything through the spec's exploratory endpoints, so there is nothing to write here. Point it at
-this service:
+[`cesmii/i3X-MCP-Server`](https://github.com/cesmii/i3X-MCP-Server) is a **generic MCP client of any
+conformant i3X server** — it discovers everything through the spec's exploratory endpoints, so there
+is nothing to write here. It asks this service questions in English on behalf of a model.
+
+**Verified against this server on 2026-08-22** by driving the published package over stdio, as
+`operator@acs-cymru.local` so that RLS was actually in the path. Every claim below was observed, not
+inferred from the package's README — which matters, because the configuration this section used to
+carry named a package that does not exist.
+
+### Configuration
 
 ```jsonc
-// claude_desktop_config.json / any MCP host
+// claude_desktop_config.json, or any MCP host's equivalent
 {
   "mcpServers": {
     "acs-cymru": {
       "command": "npx",
-      "args": ["-y", "@cesmii/i3x-mcp-server"],
+      "args": ["-y", "i3x-mcp@0.1.0"],
       "env": {
         "I3X_BASE_URL": "http://localhost:8090/v1",
-        "I3X_AUTH_SCHEME": "Bearer",
-        "I3X_TOKEN": "<a Supabase access token>"
+        "I3X_AUTH_SCHEME": "bearer",
+        "I3X_TOKEN": "<a Supabase access token — see Connecting a client, above>"
       }
     }
   }
 }
 ```
 
-**It is stdio transport**, so it is spawned per-user as a subprocess — *not* a service to deploy in
-the cluster. A shared hosted MCP endpoint would need a remote-transport wrapper, which is a separate
-piece of work.
+**The package is `i3x-mcp`.** This section previously said `@cesmii/i3x-mcp-server`, which is a
+`404` on the npm registry — the config could never have resolved. The repository name and the
+package name differ, and only the package name is what `npx` takes.
 
-**The token is the user's own**, and that is the point: the MCP client inherits exactly that user's
-RLS scope. An operator asking a model about the shopfloor sees what an operator can see.
+**Pin the version.** The documented invocation upstream is `i3x-mcp@latest`, which resolves and
+executes freshly-published code on the operator's machine at every launch, holding a credential to
+this API. `0.1.0` is the only release as of writing, from a two-commit repository — early enough
+that "whatever is newest" is not a safe default.
+
+**`I3X_BASE_URL` must include `/v1`.** The client does not append it. Without it, `connect` fails in
+a way that looks like the server being down.
+
+`I3X_AUTH_SCHEME` is case-insensitive — `bearer` and `Bearer` both work. `none` is the default, and
+is what an omitted scheme gets you; see the troubleshooting note below for why that failure is not
+obvious.
+
+### What it can do here
+
+| Tool | Reads |
+| :--- | :--- |
+| `server_info` | `GET /info` — including `update.current: false` |
+| `list_root_objects`, `get_object`, `search_objects`, `refresh_catalog` | `GET /objects`, `POST /objects/list` |
+| `read_current_value` | `POST /objects/value` — values, `quality`, timestamp |
+| `get_history` | `POST /objects/history` — raw or aggregated, out of TimescaleDB |
+| `find_related` | `POST /objects/related` — `HasParent` / `HasChildren` / `HasComponent` |
+| `describe_type` | `GET /objecttypes` |
+| `watch_values` | the subscription set, capped by `I3X_WATCH_MAX_SEC` (default 300s) |
+
+`get_history` requires an explicit `startTime`; `read_current_value` and `get_history` take
+`elementIds` (plural, an array), not `elementId`. Those are the two shapes worth knowing before
+concluding the server is at fault.
+
+**What it cannot do is answer anything about the Digital Thread.** i3X models objects, values and
+history and has no audit concept, so *"what changed and who changed it"* is outside this client's
+reach entirely — not a gap in the address space, a gap in the protocol it speaks.
+
+### It is stdio, so it is not a service
+
+The package is spawned **per-user as a subprocess** by the MCP host, despite "Server" in the
+repository name. There is nothing to deploy in the cluster, nothing to add to `docker-compose.yml`,
+and nothing that belongs in the Directory page. A shared hosted MCP endpoint would need a
+remote-transport wrapper, which is a separate piece of work.
+
+### Writes are refused, and that was tested rather than assumed
+
+`update_value` and `write_history` are not exposed as tools at all unless the client is started with
+`--enable-writes`. Started **with** it, and asked to write anyway, the call reaches this server and
+comes back:
+
+```
+i3X PUT /objects/value failed: 405 Method Not Allowed — "This i3X server is read-only. Update is
+optional in i3X 1.0 and GET /info declares update.current and update.history false. Writes belong
+on the Sparkplug B command path, where they are audited."
+```
+
+That is the whole argument for [Writes are refused](#writes-are-refused) working end to end: the
+client-side flag is a convenience, and the durable control is that this server implements no write
+verb. A user who defeats the flag gets the refusal and the reason for it.
+
+### The token is the user's own
+
+The MCP client inherits exactly that user's RLS scope, because this server passes the bearer
+straight to PostgREST. An operator asking a model about the shopfloor sees what an operator can see.
+
+**It expires in an hour** (`GOTRUE_JWT_EXP: 3600`) — the same trap the Explorer note above
+describes. A host config is a *file*, so the token in it is stale by the next session, and the
+symptom is `401`s on a server that was working. A long-lived token for a dedicated read-only
+principal is the fix; `service_role` is not, because it bypasses the RLS scoping that makes the
+paragraph above true.
+
+### Troubleshooting: `server_info` succeeding proves nothing about your token
+
+`GET /info` is deliberately unauthenticated, so `server_info` answers happily with **no credential
+at all**. With `I3X_AUTH_SCHEME` unset or wrong, the first failure appears one tool later:
+
+```
+i3X GET /objecttypes failed: 401 Unauthorized — "Authorization header is required. Only
+GET /info is unauthenticated."
+```
+
+So "the connection works, but everything else 401s" is an auth-scheme or token problem, never a
+reachability one — check the scheme before re-minting the token.
 
 ## Testing
 

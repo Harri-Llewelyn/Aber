@@ -312,7 +312,7 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | **[`supabase/`](supabase/README.md)** | Migrations, RLS privilege matrix, triggers, audit immutability, edge functions, Kong |
 | **[`ingestion/`](ingestion/README.md)** | Sparkplug B parsing, identity resolution, gateway binding, TimescaleDB mapping, `validate.py` |
 | **[`simulators/`](simulators/README.md)** | Node-RED setup, flow provisioning, broker topics, onboarding walkthrough |
-| **[`i3x/`](i3x/README.md)** | i3X 1.0 server: address-space mapping, subscriptions, connecting a client |
+| **[`i3x/`](i3x/README.md)** | i3X 1.0 server: address-space mapping, subscriptions, connecting a client — including [an MCP host](i3x/README.md#mcp) |
 | **[`deploy/k8s/README.md`](deploy/k8s/README.md)** | Kubernetes runbook: install, upgrade, teardown, hardening, divergence table, releases |
 | [`deploy/helm/acs-cymru/`](deploy/helm/acs-cymru) | The Helm chart; `values.yaml` documents every setting |
 | [`docs/kubernetes-architecture.md`](docs/kubernetes-architecture.md) | Why the Kubernetes target is built the way it is. Source comments cite it by section |
@@ -663,18 +663,49 @@ this migration specifically, because the origin list is the stack's *only* state
 policy — the edge functions deliberately declare none — and the fewer places it is expressed, the
 fewer places it can be wrong.
 
-### 6 · MCP server
+### 6 · A durable MCP credential, and the Digital Thread over MCP
 
-**Builds on:** the i3X address space · `fplus-directory`
+**Builds on:** `i3x-mcp` against the i3X address space ([`i3x/README.md`](i3x/README.md#mcp)) ·
+`GOTRUE_JWT_EXP` · `digital_thread`
 
-Read-only shopfloor context and asset metadata over the Model Context Protocol: which machines
-exist, what they measure, what they are reporting now, and what the Digital Thread says changed.
+**This used to say "build an MCP server", and that turned out to be the wrong item.**
+[`cesmii/i3X-MCP-Server`](https://github.com/cesmii/i3X-MCP-Server) (`i3x-mcp` on npm, MIT) is a
+generic MCP client of *any* conformant i3X server. It runs against this one unmodified — verified
+2026-08-22 by driving the published package over stdio: object search, current values with
+`quality`, relationship traversal and history out of TimescaleDB all answer. Nothing needs writing.
 
-**The security posture is already decided**, which is most of why this is a small piece of work
-rather than a design exercise. i3X implements no write verb at all, so an MCP server over it inherits
-read-only by construction — not by configuration. An `--enable-writes` flag would be a client-side
-switch over a server that has nothing to enable. Writes belong on the Sparkplug/NCMD path, where
-they are auditable.
+**The security posture the old item asserted is now demonstrated rather than argued.** Writes are
+not even listed as tools by default; forced on with `--enable-writes`, `update_value` returns our
+`405` and the reason with it. That is the difference between read-only by *construction* and by
+configuration: a user who deliberately defeats the client-side guard still gets nothing.
+
+What is left is the two things pointing it at a real deployment exposes.
+
+#### A durable, low-privilege credential
+
+The client takes a **static** `I3X_TOKEN` from its host's config file, and `GOTRUE_JWT_EXP` is
+`3600`. A token pasted into `claude_desktop_config.json` stops working within the hour, and it fails
+the way [`i3x/README.md`](i3x/README.md#connecting-a-client) already describes for i3X Explorer —
+*as a broken server rather than a stale token*.
+
+The answer is a long-lived JWT for a dedicated read-only principal, signed with the same secret and
+carrying a role RLS already constrains. **What it must not be is `service_role`.** This server
+passes the caller's bearer straight through to PostgREST precisely so that it queries *as them*; a
+key that bypasses RLS would discard the single property that makes handing this to a model
+defensible — that an operator asking a question sees exactly what an operator can see.
+
+#### The Digital Thread has no surface here
+
+i3X models objects, values and history. It has **no audit concept**, and this server's address space
+contains no `digital_thread` — so *"what changed, when, and who changed it"* is the one question an
+i3X-shaped client cannot ask, and it is the clause the old item named that no external package will
+ever satisfy.
+
+Two honest options, and the choice is about audience rather than difficulty. A **second, small MCP
+server over PostgREST** would expose the audit trail with the caller's own token and the same RLS
+scope — which is the only reason it would be safe. Or **leave it**: the Digital Thread is a page
+built for reading a change with its diff and its causation siblings beside it, and a model
+summarising that trail is a different and weaker artefact than the page.
 
 ### 7 · Administrative Settings & Runtime Configuration
 
