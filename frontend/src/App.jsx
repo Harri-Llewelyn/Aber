@@ -40,6 +40,7 @@ import {
   IconClipboardList,
   IconFileCode,
   IconArchive,
+  IconSettings,
   IconBookOpen,
   IconHistory,
   IconSun,
@@ -66,8 +67,9 @@ const SchemasTab       = lazy(() => import('./components/tabs/SchemasTab').then(
 const VocabularyTab    = lazy(() => import('./components/tabs/VocabularyTab').then(m => ({ default: m.VocabularyTab })))
 const DirectoryTab     = lazy(() => import('./components/tabs/DirectoryTab').then(m => ({ default: m.DirectoryTab })))
 const ArchivesTab      = lazy(() => import('./components/tabs/ArchivesTab').then(m => ({ default: m.ArchivesTab })))
+const SettingsTab      = lazy(() => import('./components/tabs/SettingsTab').then(m => ({ default: m.SettingsTab })))
 
-const TABS = [
+export const TABS = [
   { id: 'overview',       label: 'Overview',          icon: <IconLayoutDashboard size={15} /> },
   { id: 'cells',          label: 'Cells',             icon: <IconFactory size={15} /> },
   { id: 'gateways',       label: 'Gateways',          icon: <IconRadio size={15} /> },
@@ -79,9 +81,27 @@ const TABS = [
   { id: 'vocabulary',     label: 'Vocabulary',        icon: <IconFileCode size={15} /> },
   { id: 'directory',      label: 'Directory',         icon: <IconBookOpen size={15} /> },
   { id: 'archives',       label: 'Archives',          icon: <IconArchive size={15} />, permission: PERMISSION_UUIDS.ARCHIVE_MANAGE },
+  // GATED ON THE ROLE, NOT ON A PERMISSION, because the DATABASE gates on the role: 0031's UPDATE
+  // policy is `has_role(ARRAY['Administrator'])`. Inventing a SETTINGS_MANAGE permission for the
+  // UI would mean two different predicates deciding the same question, and the day they disagree
+  // the page is visible and every save fails.
+  { id: 'settings',       label: 'Settings',          icon: <IconSettings size={15} />, role: 'Administrator' },
 ]
 
-function tabIsVisible(tabDef, hasPermission) {
+/**
+ * Whether a tab appears in the nav.
+ *
+ * THIS FUNCTION EXISTED AND WAS NEVER CALLED. `TABS.map` rendered every tab unconditionally, so
+ * `Archives` has been visible to everyone regardless of `ARCHIVE_MANAGE` since it was added -- the
+ * declaration read like a gate and gated nothing. Connecting it is what makes the Settings tab's
+ * role check mean anything, so it is fixed here rather than left for later.
+ *
+ * IT IS STILL ONLY A COURTESY. Hiding a tab removes a signpost, not an ability: the same PATCH can
+ * be sent with curl, and what refuses it is the RLS policy. Nothing here is a security control,
+ * and treating it as one is how a UI gate ends up being the ONLY gate.
+ */
+export function tabIsVisible(tabDef, hasPermission, userRole) {
+  if (tabDef.role && userRole !== tabDef.role) return false
   if (!tabDef.permission) return true
   return hasPermission(tabDef.permission)
 }
@@ -359,7 +379,30 @@ function Dashboard({ session, onSignOut }) {
   const { theme, toggleTheme } = useTheme()
   const { toast, showToast, clearToast } = useToast()
 
-  const { userRole, hasPermission } = usePermissions(session)
+  const { userRole, hasPermission, loadingPerms } = usePermissions(session)
+
+  /*
+   * LEAVE A TAB THAT IS NO LONGER VISIBLE TO THIS USER.
+   *
+   * `tab` outlives a session. Sign out from Settings as an Administrator, sign back in as an
+   * Operator, and the route is still `settings` -- a tab that is now absent from the nav and whose
+   * render is guarded, so the main area renders NOTHING. A blank page with a plausible URL and no
+   * message is the worst of the available failures: it reads as the app being broken rather than
+   * as a page this account cannot see, and there is no control on screen saying so.
+   *
+   * WAITS FOR `loadingPerms`, WHICH IS THE WHOLE DIFFICULTY. `userRole` is null while the
+   * permission fetch is in flight, so acting on it immediately would bounce an Administrator off
+   * Settings on every hard refresh -- a redirect that looks exactly like a permission failure and
+   * is a race.
+   *
+   * Overview, because it is the one tab with no gate at all.
+   */
+  useEffect(() => {
+    if (loadingPerms) return
+    const current = TABS.find(t => t.id === tab)
+    if (current && !tabIsVisible(current, hasPermission, userRole)) setTab('overview')
+  }, [tab, loadingPerms, userRole, hasPermission, setTab])
+
   useQuarantineAlerts(showToast)
 
   // Grafana's firing alerts, delivered through platform_alerts. Lifted to App rather than owned by a
@@ -408,7 +451,7 @@ function Dashboard({ session, onSignOut }) {
         </div>
 
         <nav className="topbar-nav" aria-label="Primary">
-          {TABS.map(t => (
+          {TABS.filter(t => tabIsVisible(t, hasPermission, userRole)).map(t => (
             <button
               key={t.id}
               className={`nav-tab ${tab === t.id ? 'active' : ''}`}
@@ -484,6 +527,9 @@ function Dashboard({ session, onSignOut }) {
           {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('schemas') }} />}
           {tab === 'directory'      && <DirectoryTab showToast={showToast} hasPermission={hasPermission} />}
           {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} />}
+          {/* The role is re-checked here, not only in the nav: routing can put `tab` on a value
+              the nav never offered. Still a courtesy -- RLS is what refuses the write. */}
+          {tab === 'settings' && userRole === 'Administrator' && <SettingsTab showToast={showToast} />}
         </Suspense>
       </main>
 

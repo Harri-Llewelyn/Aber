@@ -1206,6 +1206,16 @@ jobs:
           # firing. The suite also runs the naive predicate against the same fixture and asserts it
           # DOES destroy the row, so the other cases cannot pass vacuously.
           python supabase/migrations/test_platform_alerts_retention.py
+          # 0031's settings plane, and NONE OF THE INTERESTING TESTS ARE "an admin can edit a
+          # setting". Two properties are: the key set is CLOSED -- enforced by the ABSENCE of
+          # INSERT and DELETE policies, so a later migration could reopen it without failing
+          # anything else -- and `updated_by` cannot be supplied by the client. That second one
+          # was BROKEN when the migration was first applied: this database carries a Supabase
+          # default ACL granting every privilege on every new public table to authenticated, so
+          # the `GRANT UPDATE (value)` meant to confine an admin's write landed on top of a
+          # table-level UPDATE already held and did nothing. The settings page would have worked
+          # perfectly while provenance was forgeable.
+          python supabase/migrations/test_system_settings_rls.py
           # THE AUDIT SUPPRESSION RULES. 0005 suppresses the no-op UPDATE and the heartbeat-only
           # UPDATE, and ingestion.py relies on that being true -- a regression here does not fail
           # anything, it just resumes writing an audit row per heartbeat until the table is mostly

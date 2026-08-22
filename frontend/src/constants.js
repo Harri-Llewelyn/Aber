@@ -50,9 +50,21 @@ export const DIGITAL_THREAD_ACTIONS = {
   SCHEMA_REJECTION: 'Schema rejection',
 };
 
+/**
+ * Every tab id the router will accept.
+ *
+ * THIS LIST AND `TABS` IN App.jsx MUST AGREE, AND NOTHING USED TO CHECK THAT. `handleNavClick`
+ * returns early on an id that is not here, so a tab declared in `TABS` and forgotten here renders
+ * in the nav, highlights on hover, and does NOTHING when clicked -- no error, no console warning,
+ * no route change. That is exactly what happened when the Settings tab was added: it looked
+ * shipped and was unreachable.
+ *
+ * `appRouting.test.jsx` now asserts the two lists match in both directions, because the failure
+ * has no other symptom.
+ */
 export const VALID_TABS = [
   'overview', 'cells', 'gateways', 'devices', 'digital-thread', 'schemas', 'vocabulary', 'directory',
-  'archives'
+  'archives', 'settings'
 ];
 
 // Realtime rollout flag and the polling intervals paired with it.
