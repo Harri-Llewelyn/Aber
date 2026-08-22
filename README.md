@@ -431,6 +431,7 @@ python ingestion/test_audit_write_dedup.py
 python ingestion/test_payload_conformance.py
 # The Prometheus endpoint and the Sparkplug seq gap counters -- no stack, no broker
 python ingestion/test_metrics_endpoint.py
+python ingestion/test_entity_cache.py
 python ingestion/test_telemetry_batching.py
 python i3x/test_i3x_service.py
 python supabase/functions/approve-quarantine/test_approve_quarantine.py

@@ -3,6 +3,7 @@ import re
 import ssl
 import threading
 import time
+from collections import OrderedDict
 import psycopg2
 from psycopg2.extras import execute_values
 import paho.mqtt.client as mqtt
@@ -83,6 +84,31 @@ REBIRTH_REQUEST_INTERVAL_SECONDS = int(os.getenv("REBIRTH_REQUEST_INTERVAL_SECON
 # Bound on the per-node alias table. It is fed by whatever the broker delivers, so a gateway
 # looping births with fresh aliases would otherwise grow it without limit.
 MAX_ALIASES_PER_NODE = int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))
+
+# Bound on each entity resolution cache -- the same reasoning as MAX_ALIASES_PER_NODE, applied to
+# the caches that were missed when that one was written. They are keyed by the id observed ON THE
+# WIRE, so they are fed by exactly the same untrusted source (issue #23).
+#
+# A TTL IS NOT A BOUND. Expiry is only checked on read, so an entry nobody reads again is never
+# evicted no matter how stale it is -- a misconfigured gateway cycling ids, a fault loop, or an
+# enumeration attempt against the broker grows the dict forever. The TTL makes entries stale; only
+# a capacity limit makes them go away.
+#
+# 1000 is well above any plausible fleet and low enough to bound memory at a few megabytes. The
+# broker ACL constrains the EDGE NODE segment of a topic but not the DEVICE segment, so this is
+# defence in depth rather than the only thing standing in the way.
+MAX_ENTITIES_PER_CACHE = int(os.getenv("MAX_ENTITIES_PER_CACHE", "1000"))
+
+# A SHORTER TTL FOR NEGATIVE ENTRIES WAS CONSIDERED AND NOT TAKEN, because both arguments for it
+# turn out to be answered elsewhere:
+#
+#   * Freshness. A device that gets registered should not stay "unregistered" for the full TTL --
+#     but the write sites already handle that: the quarantine insert in process_dbirth() SETS the
+#     cache entry to the new row, and the re-quarantine path POPS it. Nothing waits for expiry.
+#   * Abuse. A negative entry is the one an unregistered publisher can create at will -- which is
+#     an argument for expiring it more SLOWLY, not more quickly. Re-resolving sooner means more
+#     PostgREST round trips during exactly the id flood the cap exists to absorb, so a shorter
+#     negative TTL would trade a bounded memory problem for an unbounded directory-load one.
 
 # Throughput counter reporting. Set to 0 to disable.
 #
@@ -378,11 +404,96 @@ RESERVED_GATEWAY_STATUSES = frozenset({"PENDING_ENROLLMENT", "AWAITING_BIRTH", "
 # status the message type already implies.
 MAX_GATEWAY_STATUS_LENGTH = 32
 
-# Device resolution TTL cache, keyed by the id seen on the wire.
-# Values are (device_row_or_None, cached_at).
-_device_cache = {}
-_gateway_cache = {}
 CACHE_TTL_SECONDS = 5
+
+
+class TTLCache:
+    """
+    A bounded, TTL'd, thread-safe LRU. Replaces the bare dicts these caches used to be (issue #23).
+
+    TWO PROPERTIES ARE LOAD-BEARING AND BOTH ARE EASY TO BREAK BY ACCIDENT.
+
+    1. `get` RETURNS THE STORED OBJECT, NEVER A COPY. resolve_device() caches a row dict and the
+       DBIRTH path then mutates THAT DICT IN PLACE -- `device.update(update_fields)` in
+       process_dbirth(), and `device["last_birth_metrics"] = declared` in
+       record_declared_metrics() -- specifically so the next lookup inside the TTL sees the new
+       state and does not re-detect the same change. A cache that returned copies would break that
+       silently, and the symptom would not look like a cache bug: it would be a duplicate UPDATE
+       and a duplicate digital_thread row on every rebirth, which is exactly what the write-only-
+       what-moved work exists to prevent.
+
+    2. `get` RETURNS `(hit, value)`, NOT A VALUE OR A DEFAULT. `None` is a legitimate cached value
+       here -- it is the NEGATIVE entry, "this wire id resolved to nothing". A `get` returning None
+       for both "absent" and "cached as unregistered" would conflate them, and the consequence is
+       not a crash: negative caching would quietly stop working, and every message from an
+       unregistered device would go back to the directory. `_schema_cache` has the same shape for
+       its own reason -- see attached_modelled_types() on why None and an empty map differ.
+
+    EVICTION IS LRU AND THAT IS NOT AN ARBITRARY CHOICE. The entry a TTL cannot reach is by
+    definition one nobody has read, and the least-recently-used entry is exactly that entry. So the
+    capacity bound removes the stale ones first without needing a sweep to find them.
+    """
+
+    def __init__(self, maxsize, ttl, name):
+        self._data = OrderedDict()
+        self._lock = threading.Lock()
+        self.maxsize = maxsize
+        self.ttl = ttl
+        self.name = name
+        # Not a counter() call: this module's registry is imported by tests that never start a
+        # daemon, and a cache should not need one to be constructible.
+        self.evictions = 0
+
+    def get(self, key):
+        """`(True, value)` on a live hit; `(False, None)` when absent or expired."""
+        with self._lock:
+            entry = self._data.get(key)
+            if entry is None:
+                return False, None
+            value, cached_at = entry
+            if time.time() - cached_at >= self.ttl:
+                # Dropped rather than left to age further: it can never be a hit again, and
+                # holding it would spend a capacity slot on a known-dead key.
+                del self._data[key]
+                return False, None
+            self._data.move_to_end(key)
+            return True, value
+
+    def set(self, key, value):
+        with self._lock:
+            if key in self._data:
+                # Refreshing an existing key cannot grow the cache, so no eviction is needed --
+                # the same distinction register_aliases() draws against MAX_ALIASES_PER_NODE.
+                self._data[key] = (value, time.time())
+                self._data.move_to_end(key)
+                return
+            while len(self._data) >= self.maxsize:
+                self._data.popitem(last=False)
+                self.evictions += 1
+            self._data[key] = (value, time.time())
+
+    def pop(self, key, default=None):
+        with self._lock:
+            entry = self._data.pop(key, None)
+            return default if entry is None else entry[0]
+
+    def clear(self):
+        with self._lock:
+            self._data.clear()
+
+    def __len__(self):
+        with self._lock:
+            return len(self._data)
+
+    def __contains__(self, key):
+        hit, _ = self.get(key)
+        return hit
+
+
+# Device and edge-node resolution caches, keyed by the id seen on the wire (the gateway one by the
+# (group, node) PAIR -- see resolve_gateway). Values are the row, or None for a negative entry.
+_device_cache = TTLCache(MAX_ENTITIES_PER_CACHE, CACHE_TTL_SECONDS, "device")
+_gateway_cache = TTLCache(MAX_ENTITIES_PER_CACHE, CACHE_TTL_SECONDS, "gateway")
 
 # Sparkplug B node-level (edge gateway) message types, as opposed to the device-level
 # DBIRTH/DDATA/DDEATH. Their topics carry no device component.
@@ -886,9 +997,11 @@ def resolve_device(wire_id: str, use_cache: bool = True):
             "Supabase client is not configured; cannot resolve device '%s'" % wire_id
         )
 
-    if use_cache and wire_id in _device_cache:
-        row, cached_at = _device_cache[wire_id]
-        if time.time() - cached_at < CACHE_TTL_SECONDS:
+    if use_cache:
+        hit, row = _device_cache.get(wire_id)
+        if hit:
+            # `row` may legitimately be None -- the negative entry. Returning it is the point:
+            # an unregistered device must not cost a directory round trip per message.
             return row
 
     # A well-formed platform id is never also a legacy name, so skip that round-trip.
@@ -928,10 +1041,10 @@ def resolve_device(wire_id: str, use_cache: bool = True):
                     wire_id, row.get("sparkplug_id")
                 )
 
-            _device_cache[wire_id] = (row, time.time())
+            _device_cache.set(wire_id, row)
             return row
 
-        _device_cache[wire_id] = (None, time.time())
+        _device_cache.set(wire_id, None)
         return None
     except Exception as e:
         # Not cached: a transient Supabase failure must not pin this device to "unregistered"
@@ -972,10 +1085,10 @@ def resolve_gateway(wire_id: str, group_id: str = None):
     # Keyed by the PAIR. A cache keyed on the node alone would hand a hit from one group to a
     # request from another, which is precisely the collision this change exists to close.
     cache_key = (group_id or "", wire_id)
-    if cache_key in _gateway_cache:
-        row, cached_at = _gateway_cache[cache_key]
-        if time.time() - cached_at < CACHE_TTL_SECONDS:
-            return row
+    hit, row = _gateway_cache.get(cache_key)
+    if hit:
+        # None here is the negative entry, not a miss. See TTLCache.get().
+        return row
 
     # `status` is read back so process_node_message() can tell a genuine ONLINE/OFFLINE transition
     # from the 119 heartbeats an hour that carry the same status as the last one. It does not gate
@@ -991,7 +1104,7 @@ def resolve_gateway(wire_id: str, group_id: str = None):
             if rows:
                 row = dict(rows[0])
                 row["_identity_source"] = SOURCE_SPARKPLUG_ID
-                _gateway_cache[cache_key] = (row, time.time())
+                _gateway_cache.set(cache_key, row)
                 return row
 
         # 2/3. Group-agnostic fallback, then the legacy name arm.
@@ -1030,10 +1143,10 @@ def resolve_gateway(wire_id: str, group_id: str = None):
                         group_id, row.get("sparkplug_group") or DEFAULT_SPARKPLUG_GROUP
                     )
 
-            _gateway_cache[cache_key] = (row, time.time())
+            _gateway_cache.set(cache_key, row)
             return row
 
-        _gateway_cache[cache_key] = (None, time.time())
+        _gateway_cache.set(cache_key, None)
         return None
     except Exception as e:
         # Raised rather than returned for the same reason as resolve_device: an unreachable
@@ -1297,7 +1410,7 @@ def quarantine_new_device(wire_id: str, gateway_wire_id: str, reason: str, paylo
         row = resolve_device(wire_id, use_cache=False)
     if row:
         row["_identity_source"] = SOURCE_REPORTED_IDENTITY
-        _device_cache[wire_id] = (row, time.time())
+        _device_cache.set(wire_id, row)
 
     logger.warning(
         "QUARANTINE ALERT: device '%s' announced DBIRTH via edge node '%s' but is not registered. "
@@ -1670,9 +1783,14 @@ _JSON_TYPES_FOR_VALUE = {
     "bool": frozenset({"boolean"}),
 }
 
-# {device_uuid: (modelled_types, fetched_at)}. Unbounded in principle, bounded in practice by the
-# device count -- the same shape and the same reasoning as _device_cache.
-_schema_cache = {}
+# device_uuid -> modelled_types (or None -- see attached_modelled_types).
+#
+# BOUNDED FOR CONSISTENCY RATHER THAN FOR SAFETY, and the difference is worth stating. This is keyed
+# on a RESOLVED uuid, which only exists because a `devices` row does, so no publisher can push
+# arbitrary keys into it the way it can into _device_cache -- it really is bounded by the fleet.
+# It gets the same container anyway: three caches with two different growth stories is how the
+# second one gets missed, which is how this one was missed when MAX_ALIASES_PER_NODE was written.
+_schema_cache = TTLCache(MAX_ENTITIES_PER_CACHE, SCHEMA_CACHE_TTL_SECONDS, "schema")
 
 
 def modelled_types(schema_definitions):
@@ -1746,9 +1864,11 @@ def device_modelled_types(device_uuid: str):
     state of a newly onboarded device. An empty map means a schema IS bound and models no metrics,
     which makes every metric unmodelled and is worth reporting.
     """
-    cached = _schema_cache.get(device_uuid)
-    if cached and time.time() - cached[1] < SCHEMA_CACHE_TTL_SECONDS:
-        return cached[0]
+    # `(hit, value)` rather than a default, because None is a real answer here -- "no schema is
+    # bound" -- and is exactly what the paragraph above distinguishes from an empty map.
+    hit, cached = _schema_cache.get(device_uuid)
+    if hit:
+        return cached
 
     if not supabase_client:
         return None
@@ -1776,7 +1896,7 @@ def device_modelled_types(device_uuid: str):
         )
         return None
 
-    _schema_cache[device_uuid] = (result, time.time())
+    _schema_cache.set(device_uuid, result)
     return result
 
 
@@ -2561,9 +2681,21 @@ def start_metrics_endpoint():
         return None
 
     def collect():
+        # CACHE OCCUPANCY IS READ AT SCRAPE TIME for the same reason db_connected is: it is a
+        # state, not an event. The evictions counter beside it is the one worth an alert -- a
+        # non-zero value means MAX_ENTITIES_PER_CACHE is actually being reached, which is either a
+        # fleet larger than the cap or the id churn the cap exists to absorb (issue #23). Until
+        # the bound existed there was nothing to count and no way to see either.
+        labelled = dict(labelled_snapshot())
+        for cache in (_device_cache, _gateway_cache, _schema_cache):
+            labelled[("acs_ingestion_cache_entries", (("cache", cache.name),))] = len(cache)
+            labelled[("acs_ingestion_cache_evictions_total", (("cache", cache.name),))] = (
+                cache.evictions
+            )
+
         return metrics.render_exposition(
             counters=counter_snapshot(),
-            labelled=labelled_snapshot(),
+            labelled=labelled,
             gauges={
                 "acs_ingestion_up": 1,
                 "acs_ingestion_db_connected":

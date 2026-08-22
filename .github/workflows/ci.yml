@@ -1240,6 +1240,20 @@ jobs:
         run: |
           python ingestion/test_metrics_endpoint.py
 
+      # The bounded entity caches (issue #23). Stubs the same heavy imports, so no stack either.
+      #
+      # THE EVICTION TESTS ARE NOT THE POINT OF RUNNING THIS IN CI. Bounding a cache is easy; the
+      # two contracts it can break are silent. `get` must return the STORED OBJECT rather than a
+      # copy, because process_dbirth() and record_declared_metrics() mutate the cached row in place
+      # so the next lookup inside the TTL sees the change -- a copying cache would resurrect the
+      # duplicate UPDATE and duplicate digital_thread row that the write-only-what-moved work
+      # exists to prevent, and nothing would point at the cache. And `get` must distinguish a
+      # cached `None` (the NEGATIVE entry) from a miss, or negative caching quietly stops working
+      # and every message from an unregistered device costs a directory round trip.
+      - name: Run Ingestion Entity Cache Unit Tests
+        run: |
+          python ingestion/test_entity_cache.py
+
       # Payload conformance -- the SCHEMA_REJECTION half of the digital thread. Same reasoning as
       # the suite above for why it runs here: it stubs protobuf/MQTT/psycopg2 before importing
       # ingestion.py, so it needs neither `protoc` nor a running stack.

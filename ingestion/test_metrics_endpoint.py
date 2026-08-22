@@ -135,6 +135,27 @@ class ExpositionTestCase(unittest.TestCase):
             'acs_ingestion_sequence_gaps_total{edge_node="a\\"b\\\\c"} 1', self.lines(out)
         )
 
+    def test_a_labelled_gauge_is_typed_as_a_gauge(self):
+        """
+        THE TYPE COMES FROM THE NAME, NOT FROM WHICH ARGUMENT THE SERIES ARRIVED ON. `gauges` takes
+        no label dimension, so the cache occupancy series has to come in through `labelled` -- and
+        it would silently export as a counter if TYPES were consulted only for `gauges` entries.
+        A counter that goes down is a scraper reporting a reset, so the wrong type here would turn
+        an ordinary eviction into a fabricated spike on every rate() over it.
+        """
+        out = metrics.render_exposition(
+            {}, labelled={("acs_ingestion_cache_entries", (("cache", "device"),)): 17}
+        )
+        self.assertIn("# TYPE acs_ingestion_cache_entries gauge", out)
+        self.assertIn('acs_ingestion_cache_entries{cache="device"} 17', self.lines(out))
+
+    def test_the_eviction_counter_stays_a_counter(self):
+        # It only ever rises, and "the cap was hit N times" is exactly a rate() question.
+        out = metrics.render_exposition(
+            {}, labelled={("acs_ingestion_cache_evictions_total", (("cache", "device"),)): 3}
+        )
+        self.assertIn("# TYPE acs_ingestion_cache_evictions_total counter", out)
+
     def test_every_exported_metric_carries_help(self):
         # An unhelped metric renders, but a reader meeting it in Grafana has nothing to go on.
         out = metrics.render_exposition(

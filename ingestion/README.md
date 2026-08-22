@@ -14,6 +14,7 @@ allowed to be heard at all.
 | [`test_gateway_binding.py`](test_gateway_binding.py) | Gateway↔device binding, telemetry sanity window, append-only historian |
 | [`test_declared_metrics.py`](test_declared_metrics.py) | Birth-metric observation, change-only writes, alias resolution, rebirth rate limit, device watchdog |
 | [`test_device_location.py`](test_device_location.py) | Invariant: the daemon never writes an asset's location |
+| [`test_entity_cache.py`](test_entity_cache.py) | The bounded resolution caches: LRU eviction, and the in-place-mutation and negative-entry contracts |
 
 ---
 
@@ -311,6 +312,7 @@ published default is a silent security downgrade, and the failure mode is silenc
 | `DEVICE_WATCHDOG_INTERVAL_SECONDS` | `30` | Sweep interval |
 | `REBIRTH_REQUEST_INTERVAL_SECONDS` | `300` | Minimum gap between rebirth requests to one edge node |
 | `MAX_ALIASES_PER_NODE` | `5000` | Cap on the per-node alias table |
+| `MAX_ENTITIES_PER_CACHE` | `1000` | Cap on each entity resolution cache. Same reasoning, applied to the caches keyed by the id seen on the wire |
 | `INGESTION_STATS_INTERVAL` | `60` | Seconds between `STATS` log lines. `0` disables the reporter |
 | `INGESTION_METRICS_PORT` | `9108` | Prometheus endpoint. `0` disables it — see [Metrics](#metrics) |
 
@@ -367,6 +369,8 @@ Prometheus, the log line is for whoever is reading `docker logs` at 3am with no 
 | `acs_ingestion_payload_violations_recorded_total` | — | A DDATA payload failed schema validation and was recorded in `digital_thread` (migration 0026). The telemetry was still written. |
 | `acs_ingestion_db_connected` | — | Gauge. 0 means telemetry is being dropped **now**. |
 | `acs_ingestion_up` | — | Gauge, always 1. Distinguishes a running daemon from a dead scrape target. |
+| `acs_ingestion_cache_entries` | `cache` | Gauge. Entries held in each resolution cache (`device`, `gateway`, `schema`), bounded by `MAX_ENTITIES_PER_CACHE`. |
+| `acs_ingestion_cache_evictions_total` | `cache` | **Non-zero is the interesting case.** The cap was reached, so either the fleet exceeds it or something is publishing ids that churn. |
 | `acs_ingestion_unmapped_counter_total` | `counter` | A counter exists in `ingestion.py` with no mapping in `metrics.py`. Not a data fault — a monitoring one. |
 
 `reason` on the drop counter: `gateway_binding` (a device published under a gateway that does not

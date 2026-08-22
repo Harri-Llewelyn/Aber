@@ -105,6 +105,14 @@ HELP = {
         "Messages implied lost by those gaps. One gap of 200 and 200 gaps of 1 are different "
         "faults and this is what separates them. A LOWER BOUND: seq is 8-bit, so a single gap "
         "larger than 255 wraps and is undercounted. Read it with the gap counter, never alone.",
+    "acs_ingestion_cache_entries":
+        "Entries currently held in each entity resolution cache. Bounded by MAX_ENTITIES_PER_CACHE.",
+    "acs_ingestion_cache_evictions_total":
+        "Entries dropped from a cache because it was at its capacity bound. NON-ZERO IS THE "
+        "INTERESTING CASE: either the fleet is larger than the cap, or something is publishing "
+        "ids that churn -- a misconfigured gateway, a fault loop, or enumeration. Read it beside "
+        "acs_ingestion_messages_dropped_total{reason=\"gateway_binding\"}, which is what an "
+        "enumeration attempt would also move.",
     "acs_ingestion_up": "1 while the daemon is serving this endpoint.",
     "acs_ingestion_db_connected":
         "1 when the historian connection is open. 0 means telemetry is being dropped now.",
@@ -116,6 +124,10 @@ HELP = {
 TYPES = {
     "acs_ingestion_up": "gauge",
     "acs_ingestion_db_connected": "gauge",
+    # A LABELLED GAUGE, which is why it arrives through `labelled` rather than through `gauges`.
+    # The TYPE is decided here by name, not by which argument a series came in on -- so a gauge
+    # that needs a label dimension has somewhere to go without a fourth parameter.
+    "acs_ingestion_cache_entries": "gauge",
 }
 
 
@@ -141,7 +153,9 @@ def render_exposition(counters, labelled=None, gauges=None):
     The text exposition format, built from a counter snapshot.
 
     @param counters  flat name -> int, from ingestion.counter_snapshot()
-    @param labelled  (metric, ((k, v), ...)) -> int, for series the flat registry cannot express
+    @param labelled  (metric, ((k, v), ...)) -> int, for series the flat registry cannot express.
+                     NOT COUNTERS ONLY: a series' TYPE comes from `TYPES` by metric name, so a
+                     labelled GAUGE belongs here too -- `gauges` below takes no label dimension.
     @param gauges    metric -> value
 
     SERIES ARE GROUPED UNDER ONE HELP/TYPE PAIR. Prometheus requires that a metric name's HELP and
