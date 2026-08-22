@@ -1,6 +1,10 @@
 FROM python:3.10-slim
 
-# Install system dependencies (protobuf-compiler for compiling .proto files, compatible with protobuf==4.25.3)
+# protobuf-compiler, to generate sparkplug_b_pb2.py from the .proto at build time.
+#
+# DELIBERATELY WHATEVER apt HAS (libprotoc 3.21.12 on this base), which is two majors behind the
+# protobuf runtime in requirements.txt. That is fine and is explained there: the 5.x runtime loads
+# 3.21 gencode, and Debian has no newer compiler to offer anyway.
 RUN apt-get update && apt-get install -y \
     protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*

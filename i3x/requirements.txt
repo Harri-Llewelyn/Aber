@@ -9,5 +9,7 @@
 # are a breaking change, and running the two consumers on different API versions would mean the
 # alias-handling code mirrored between them was no longer literally comparable.
 paho-mqtt==1.6.1
+# Kept in step with ingestion/requirements.txt, which carries the reasoning for the two-major gap
+# between this runtime and the protoc that generates the gencode it loads.
 protobuf==5.29.6
 requests==2.33.0
