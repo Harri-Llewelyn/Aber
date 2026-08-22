@@ -115,8 +115,14 @@ CREATE OR REPLACE FUNCTION public.system_settings_stamp()
     AS $fn$
 BEGIN
     NEW.updated_at := now();
+    -- `auth.uid()`, NOT `current_setting('request.jwt.claim.sub')`. That GUC is the PRE-v10
+    -- PostgREST convention and the pinned 12.2.0 does not set it -- it sets `request.jwt.claims`,
+    -- a JSON string. Reading the old name directly returned NULL for every real request while
+    -- looking perfectly correct in a test that set the GUC by hand. auth.uid() coalesces both
+    -- forms, which is why every other policy in this schema goes through it.
+    --
     -- NULL under service_role and during migrations, which is correct: neither is a person.
-    NEW.updated_by := NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid;
+    NEW.updated_by := auth.uid();
     -- The key is part of the closed set, so an UPDATE may not rename one out from under its
     -- reader. Blocked here rather than by a policy because a policy cannot see the OLD row's key
     -- and the NEW one at once in a USING clause that also has to permit ordinary edits.
@@ -134,6 +140,16 @@ BEGIN
     RETURN NEW;
 END;
 $fn$;
+
+-- REVOKED FROM anon AND authenticated, and this is not belt-and-braces. The same
+-- `supabase_admin` DEFAULT ACL that grants every table privilege also grants EXECUTE on every new
+-- FUNCTION in `public` to anon -- so a trigger function arrives callable by an unauthenticated
+-- caller unless it is taken away. `validate.py`'s anon privilege baseline asserts the empty set
+-- and caught this one; the self-check below now catches it here first.
+--
+-- Revoking EXECUTE does not stop the TRIGGER firing: Postgres checks that privilege when the
+-- trigger is created, not on each row.
+REVOKE ALL ON FUNCTION public.system_settings_stamp() FROM PUBLIC, anon, authenticated;
 
 DROP TRIGGER IF EXISTS system_settings_stamp_trg ON public.system_settings;
 CREATE TRIGGER system_settings_stamp_trg
@@ -305,7 +321,21 @@ BEGIN
         WHEN check_violation THEN NULL;   -- expected
     END;
 
-    RAISE NOTICE '0031 self-check passed: % setting(s), key set closed, value types enforced.',
-                 v_count;
+    -- ANON MUST HOLD EXECUTE ON NEITHER FUNCTION. Postgres grants it by default to every role
+    -- here, so each new function is exposed until revoked -- and nothing about the feature would
+    -- look wrong if one were missed.
+    IF EXISTS (
+        SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'public'
+           AND p.proname IN ('system_settings_stamp', 'seed_setting')
+           AND has_function_privilege('anon', p.oid, 'EXECUTE')
+    ) THEN
+        RAISE EXCEPTION
+          '0031 self-check: anon holds EXECUTE on a function this migration created. Postgres '
+          'grants that by default; it has to be revoked explicitly.';
+    END IF;
+
+    RAISE NOTICE '0031 self-check passed: % setting(s), key set closed, value types enforced, '
+                 'anon holds no EXECUTE.', v_count;
 END;
 $selfcheck$;

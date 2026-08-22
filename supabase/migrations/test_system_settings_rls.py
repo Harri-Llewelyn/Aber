@@ -54,15 +54,23 @@ def get_connection():
 
 
 def as_user(cur, user_id):
-    """Become `authenticated` with a JWT subject, the way PostgREST does."""
+    """
+    Become `authenticated` with a JWT subject, THE WAY PostgREST 12.2 ACTUALLY DOES IT.
+
+    ONLY `request.jwt.claims`. An earlier version of this helper also set the legacy
+    `request.jwt.claim.sub`, on the reasoning that setting both kept the test honest against
+    either convention. It did the opposite: the trigger read the legacy GUC directly, PostgREST
+    never sets it, and so `updated_by` was NULL for every real request while this suite reported
+    it stamped correctly. The fixture had been shaped to fit the implementation.
+
+    Setting only what the pinned PostgREST sets is what makes `auth.uid()` -- which coalesces both
+    -- the thing under test rather than a detail the fixture papers over.
+    """
     cur.execute("SET LOCAL ROLE authenticated;")
     cur.execute(
         'SET LOCAL "request.jwt.claims" = %s;',
         ('{"sub": "%s"}' % user_id,),
     )
-    # has_role() reads auth.uid(), which reads this claim rather than the one above on some
-    # GoTrue versions. Setting both keeps the test honest against either.
-    cur.execute('SET LOCAL "request.jwt.claim.sub" = %s;', (user_id,))
 
 
 class SystemSettingsRLS(unittest.TestCase):
