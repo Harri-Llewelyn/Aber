@@ -493,6 +493,38 @@ CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs five jobs:
 **The last two are the real drift control between deployment targets.** `validate.py` is
 topology-agnostic and runs against both; if both pass, the wiring agrees where it matters.
 
+### Keeping the pinned versions current
+
+Two scheduled workflows, and they answer different questions. Neither runs on a pull request:
+version drift and published advisories move on the world's schedule, not on this repository's.
+
+| Workflow | Job | Asks |
+| :--- | :--- | :--- |
+| [`renovate.yml`](.github/workflows/renovate.yml) | **renovate** | *Is there a newer version?* — proactive, weekly |
+| [`image-scan.yml`](.github/workflows/image-scan.yml) | **scan** | *Does what we run have a known, **fixed** vulnerability?* — reactive, weekly |
+
+**The dependency dashboard is the deliverable**, more than the pull requests are: one issue listing
+every available update, including the ones deliberately held back.
+
+**[`renovate.json`](renovate.json) exists mostly to stop good automation doing the wrong thing
+here.** The Supabase components are a coordinated set that upstream tests together — measured
+against Docker Hub, `gotrue` and `postgres-meta` look outdated when they are in fact the exact
+versions upstream pins, so an "upgrade" would move this stack *off* the tested combination. They
+are grouped into one pull request held for approval, as are all major bumps. Kong 3.0 is why:
+it silently switched off every per-service Prometheus metric while leaving the scrape target green.
+
+**Renovate is self-hosted because this repository is private**, and needs a `RENOVATE_TOKEN` secret
+(a PAT with `repo`, or fine-grained with Contents, Pull requests and Issues read/write). Without it
+the workflow fails on its first step by design — a scheduled job that silently does nothing leaves
+the repository looking as though drift is watched when it is not. `GITHUB_TOKEN` cannot be used:
+pull requests it opens trigger no workflow runs, so every bump would arrive with no CI result.
+
+**The scan reports only *fixable* HIGH and CRITICAL findings.** An unfixed CVE in a base image is
+not something this repository can act on, and failing on it would train everyone to ignore the job.
+Its image list is parsed out of `docker-compose.yml` rather than written in the workflow, and it
+refuses to run if it finds fewer than ten — "found nothing to scan" must not look like "found
+nothing wrong".
+
 ### Releases
 
 [`.github/workflows/release.yml`](.github/workflows/release.yml) runs on a **`v*` tag only** — never
