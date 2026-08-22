@@ -97,7 +97,7 @@ spec:
       {{- end }}
       initContainers:
         - name: render-config
-          image: alpine:3.20
+          image: alpine:3.24
           imagePullPolicy: IfNotPresent
           env:
             {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" (include "acs-cymru.secretName" .) "key" "SUPABASE_ANON_KEY") | nindent 12 }}

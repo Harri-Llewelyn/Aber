@@ -46,7 +46,7 @@ services:
   # ---------------------------------------------------------------------------
   timescaledb:
     container_name: acs-cymru_timescaledb
-    image: timescale/timescaledb:2.29.1-pg17
+    image: timescale/timescaledb:2.29.2-pg17
     restart: always
     environment:
       POSTGRES_DB: ${DB_NAME:-postgres}
@@ -84,7 +84,7 @@ services:
   # disables any individual policy.
   timescaledb-maintenance:
     container_name: acs-cymru_timescaledb_maintenance
-    image: timescale/timescaledb:2.29.1-pg17
+    image: timescale/timescaledb:2.29.2-pg17
     environment:
       PGPASSWORD: ${DB_PASSWORD}
       TS_DBNAME: ${DB_NAME:-postgres}
@@ -528,7 +528,7 @@ services:
   # columns this storage-api version's schema actually has. Idempotent -- see the script.
   supabase-storage-init:
     container_name: acs-cymru_supabase_storage_init
-    image: node:20-alpine
+    image: node:24-alpine
     environment:
       STORAGE_URL: http://supabase-storage:5000
       SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
@@ -606,7 +606,7 @@ services:
   # adding it here AND in the chart. See docs/kubernetes-architecture.md §2.3.
   supabase-kong-init:
     container_name: acs-cymru_supabase_kong_init
-    image: alpine:3.20
+    image: alpine:3.24
     environment:
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
@@ -901,7 +901,7 @@ services:
   # alongside the live spec PostgREST generates from the database schema.
   swagger-ui:
     container_name: acs-cymru_swagger_ui
-    image: swaggerapi/swagger-ui:v5.17.14
+    image: swaggerapi/swagger-ui:v5.32.14
     restart: always
     ports:
       - "${SWAGGER_PORT:-8088}:8080"
@@ -989,7 +989,7 @@ services:
 
   mosquitto-init:
     container_name: acs-cymru_mosquitto_init
-    image: eclipse-mosquitto:2.0.20
+    image: eclipse-mosquitto:2.0.22
     user: "0"
     environment:
       MQTT_INGESTION_USER: ${MQTT_INGESTION_USER:-factoryplus_ingestion}
@@ -1079,7 +1079,7 @@ services:
 
   mosquitto:
     container_name: acs-cymru_mosquitto
-    image: eclipse-mosquitto:2.0.20
+    image: eclipse-mosquitto:2.0.22
     restart: always
     ports:
       - "1883:1883"
@@ -1431,7 +1431,7 @@ services:
   # ===============================================================================================
   prometheus:
     container_name: acs-cymru_prometheus
-    image: prom/prometheus:v3.1.0
+    image: prom/prometheus:v3.14.0
     restart: always
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -1493,7 +1493,7 @@ services:
   # ===============================================================================================
   node-exporter:
     container_name: acs-cymru_node_exporter
-    image: prom/node-exporter:v1.8.2
+    image: prom/node-exporter:v1.12.1
     restart: always
     pid: host
     command:
@@ -1514,7 +1514,7 @@ services:
 
   grafana:
     container_name: acs-cymru_grafana
-    image: grafana/grafana:13.1.3
+    image: grafana/grafana:13.2.0
     restart: always
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}

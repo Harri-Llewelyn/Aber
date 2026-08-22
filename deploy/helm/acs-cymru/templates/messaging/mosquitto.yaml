@@ -49,7 +49,8 @@ once by hand expires in the middle of a shift 90 days later, and the failure is 
 refusing to connect at once with a hostname/expiry alert the broker does not log -- the fleet simply
 goes quiet. cert-manager renews at renewBefore and the reload sidecar SIGHUPs the broker, which
 re-reads the certificate WITHOUT dropping connected gateways (verified against eclipse-mosquitto
-2.0.20: swapping the files and sending SIGHUP changes the served certificate in place).
+2.0.20, and carried forward to the 2.0.22 pin unre-verified: swapping the files and sending
+SIGHUP changes the served certificate in place).
 
 THE SAN LIST IS THE WHOLE DIFFICULTY, and it is asymmetric in a way that hides the mistake:
 
@@ -526,7 +527,8 @@ spec:
               # verification at once -- weeks after the renewal that was supposed to prevent it,
               # with a healthy cert-manager reporting the certificate valid.
               #
-              # SIGHUP is enough: verified against eclipse-mosquitto 2.0.20 that swapping the files
+              # SIGHUP is enough: verified against eclipse-mosquitto 2.0.20 (not re-verified on the
+              # 2.0.22 pin, same 2.0.x line) that swapping the files
               # and sending SIGHUP changes the certificate served on an established listener, with
               # no restart and no disconnection. That is why this is a sidecar and not a
               # `kubectl rollout restart` on a schedule.

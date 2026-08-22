@@ -64,7 +64,7 @@ spec:
         {{- include "acs-cymru.waitFor" (dict "ctx" . "name" "wait-for-storage" "image" "curlimages/curl:8.10.1" "command" "curl -sf http://supabase-storage:5000/status >/dev/null 2>&1" "describe" "supabase-storage (it migrates the storage schema on boot)") | nindent 8 }}
       containers:
         - name: storage-init
-          image: node:20-alpine
+          image: node:24-alpine
           imagePullPolicy: IfNotPresent
           env:
             - name: STORAGE_URL

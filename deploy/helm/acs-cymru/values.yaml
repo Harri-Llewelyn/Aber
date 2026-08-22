@@ -221,7 +221,7 @@ timescaledb:
     # 2026-07-16 and will never move again. A floating tag that stops floating gives no signal at
     # all. Every other pin in this file states a version; this one now does too, and bumping it is
     # a decision someone makes rather than one that happens.
-    tag: 2.29.1-pg17
+    tag: 2.29.2-pg17
     pullPolicy: IfNotPresent
   database: postgres
   username: postgres
@@ -619,7 +619,7 @@ swaggerUi:
   enabled: true
   image:
     repository: swaggerapi/swagger-ui
-    tag: v5.17.14
+    tag: v5.32.14
     pullPolicy: IfNotPresent
   replicas: 1
   resources:
@@ -669,7 +669,7 @@ mosquitto:
   enabled: true
   image:
     repository: eclipse-mosquitto
-    tag: "2.0.20"
+    tag: "2.0.22"
     pullPolicy: IfNotPresent
   # ALWAYS ONE, AND NOT A TUNABLE. Mosquitto does not cluster: two brokers behind one Service split
   # the fleet in half, each seeing only the gateways that happened to land on it, and Sparkplug
@@ -748,8 +748,9 @@ mosquitto:
     secretName: mosquitto-tls
     # 90 days with 30 days' notice. Short on purpose: renewal is exercised four times a year
     # rather than being a thing that has never happened when it first matters. Mosquitto reloads
-    # certificates on SIGHUP (verified against 2.0.20), and the reload sidecar sends it, so a
-    # renewal does NOT restart the broker or drop a connected gateway.
+    # certificates on SIGHUP (verified against 2.0.20; the pin has since moved to 2.0.22, same
+    # 2.0.x line, not re-verified), and the reload sidecar sends it, so a renewal does NOT restart
+    # the broker or drop a connected gateway.
     duration: 2160h
     renewBefore: 720h
     # -----------------------------------------------------------------------------------------
@@ -1009,7 +1010,7 @@ grafana:
     # The pin holds a COUPLING, not a preference: grafana.ini depends on behaviour that has moved
     # between releases -- `use_pkce`, `auth_style`, and the env-override mapping this chart relies
     # on to replace auth_url without editing the file.
-    tag: "13.1.3"
+    tag: "13.2.0"
     pullPolicy: IfNotPresent
   persistence:
     enabled: true

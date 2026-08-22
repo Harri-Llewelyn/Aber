@@ -530,7 +530,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Ten extensions, ordered by how much of each already exists. None is speculative: every one names
+Eleven extensions, ordered by how much of each already exists. None is speculative: every one names
 the code it would build on, because the value of writing them down is that a reader can tell how far
 away each is.
 
@@ -846,6 +846,39 @@ The real work on that side is narrower and has two parts:
   keys. That is a real upstream deprecation with a real end date, and it touches Kong's key-auth
   consumers, the edge-function registry and `custom_access_token_hook`. It should be scoped against
   the pinned `supabase/gotrue` and `kong` versions before it is planned, not assumed to apply.
+
+### 11 · Kong → Envoy, following upstream Supabase
+
+**Builds on:** [`supabase/kong.yml`](supabase/kong.yml) · `supabase-kong-init` ·
+[`templates/supabase/kong.yaml`](deploy/helm/acs-cymru/templates/supabase/kong.yaml)
+
+**Upstream Supabase has dropped Kong.** Their self-hosted `docker-compose.yml` now fronts the stack
+with `envoyproxy/envoy`, so this fork's gateway is on a path upstream no longer maintains
+configuration for. Nothing is broken by that today — the gateway is on `kong:3.9.3` and does exactly
+four things — but every future Supabase change to routing, key handling or CORS will be expressed in
+Envoy config that has to be translated rather than copied.
+
+**What actually has to move** is small, and worth writing down because it is smaller than "replace
+the API gateway" sounds. `kong.yml` declares nine services, the `key-auth` plugin on four of them,
+four deliberate exemptions, one global CORS policy and one Prometheus plugin. That is the whole
+surface. Envoy expresses all of it, but none of it the same way: `key-auth` has no direct
+equivalent, and the closest arrangement is a Lua or ext_authz filter — which turns a declarative
+plugin into code the stack would then own.
+
+**The exemptions are the part to be careful with**, and they are the reason this is not a mechanical
+translation. Four routes are open by design — `/auth/v1/`, the two userinfo endpoints,
+`/storage/v1/object/public/`, and the Factory+ Directory's `/ping` and `/v1/`. Each is open for a
+stated reason and each is load bearing; a translation that quietly widened one would not fail any
+test that exists today, because `validate.py` asserts the 401s that SHOULD happen and cannot assert
+the absence of a route nobody wrote. Any migration needs the negative assertions first.
+
+**It interacts with §5 and should be sequenced against it.** Gateway API's `HTTPRoute` would retire
+the `__CORS_ORIGINS__` placeholder on Kubernetes; Envoy would restate CORS in its own filter on both
+targets. Doing both independently means expressing origin policy a third way before deleting the
+first — so whichever lands first should decide where that policy lives.
+
+**Not urgent, and deliberately not bundled with the 2.8 → 3.9.3 bump** that closed the unmaintained-
+image question. This is a divergence-from-upstream question, not a security one.
 
 ---
 
