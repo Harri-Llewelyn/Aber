@@ -397,14 +397,15 @@ That is worth knowing rather than smoothing away.
    divergence by re-declaring every metric. If `acs_ingestion_alias_unresolved_total` is also
    climbing, the node is not answering.
 
-### Alert rules — proposed, not shipped
+### Alert rules — shipped
 
-**Nothing scrapes this endpoint in the shipped stack.** There is no Prometheus in
-`docker-compose.yml`, and Grafana is provisioned with two Postgres datasources and no others. On
-Kubernetes a `ServiceMonitor` is rendered when `telemetry.serviceMonitor.enabled` is set, which
-needs the Prometheus Operator CRDs — so these rules are written for a deployment that has brought
-its own Prometheus, and are recorded here rather than added to
-`grafana/provisioning/alerting/alert-rules.yaml` where they could not be evaluated.
+**All five are provisioned**, in the `Ingestion Pipeline` group of
+[`grafana/provisioning/alerting/alert-rules.yaml`](../grafana/provisioning/alerting/alert-rules.yaml),
+reading the `prometheus` datasource the Compose stack now provides.
+
+**The table stays even though the rules shipped**, because a provisioned rule states its threshold
+and not its reasoning — and the reasoning is the part that has to survive someone deciding a number
+looks wrong.
 
 | Alert | Expression | For | Why this threshold |
 | :--- | :--- | :--- | :--- |
@@ -414,16 +415,25 @@ its own Prometheus, and are recorded here rather than added to
 | Historian unreachable | `acs_ingestion_db_connected == 0` | 2m | Telemetry is being dropped now. Short `for`, because the daemon already retries internally. |
 | Message loss | `increase(acs_ingestion_sequence_gaps_total[15m]) > 0` | — | Any increase is worth a warning: it is evidence a change was never recorded. A *sustained* rate — say `> 0.1/s` for 15m — is a page. |
 
-The first four are the set `README.md`'s roadmap item 1 refers to; **Binding rejections rising** is
-the fourth platform alert that item names as still outstanding, and it stays outstanding until a
-Prometheus exists to evaluate it.
+**Binding rejections rising is the one to read first.** It was the last outstanding rule of the
+platform alerting work: the other three platform rules — Gateway Stale, Enrolment Stuck, Quarantine
+Queue Depth — read *state* out of Supabase through `public.platform_health`, and this one reads a
+**counter**, which is why it could not exist until this endpoint did.
+
+**On Kubernetes they are provisioned but not necessarily evaluable.** The chart renders a
+`ServiceMonitor` when `telemetry.serviceMonitor.enabled` is set, and that needs the Prometheus
+Operator CRDs the chart deliberately does not install — so a cluster that brings no Prometheus of
+its own gets five rules against a datasource whose health check fails. That is stated at the URL
+placeholder in `grafana/provisioning/datasources/datasources.template.yml`, which is also why the
+datasource URL is substituted per deployment target rather than committed.
 
 ### Deliberately not implemented
 
 `acs_ingestion_write_seconds`, the histogram in #22's proposal. It needs a timing wrapper on the
 historian write, which is the one path in this daemon that runs per sample on the broker callback
-thread — the place least appropriate for casual overhead. It is worth doing with the batching work
-that roadmap item 3 covers, where there will be something to compare it against.
+thread — the place least appropriate for casual overhead. It is worth doing with the horizontal
+ingestion scaling work, which exists to unblock that same thread: a latency number is worth far
+more once there is a before-and-after to compare it against.
 
 ## Testing
 

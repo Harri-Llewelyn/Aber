@@ -280,7 +280,7 @@ describe('Digital Thread time range', () => {
 
   it('takes a window narrower than a day, which the date pickers could not express', async () => {
     /*
-     * THE WHOLE POINT OF THE CHANGE (roadmap item 12). `type="date"` bounded the narrowest
+     * THE WHOLE POINT OF THE SUB-DAY ZOOM WORK. `type="date"` bounded the narrowest
      * expressible window at 24 hours, so on a stack commissioned this morning "All time" and
      * "today" drew the same picture -- and a commissioning burst stayed in a few pixel columns
      * however the page was filtered.

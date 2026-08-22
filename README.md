@@ -416,7 +416,7 @@ Digital Nameplate; what each one covers and how its identity was verified is in
 ## Testing
 
 ```bash
-# Frontend — 1341 tests
+# Frontend — 1357 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required
@@ -529,45 +529,14 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Twelve extensions, ordered by how much of each already exists. None is speculative: every one names
+Ten extensions, ordered by how much of each already exists. None is speculative: every one names
 the code it would build on, because the value of writing them down is that a reader can tell how far
 away each is.
 
 **These are not open defects.** Known issues and accepted risks are
 [GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues).
 
-### 1 · A Prometheus to read the ingestion metrics
-
-**Builds on:** [`ingestion/metrics.py`](ingestion/metrics.py) · `templates/obs/servicemonitors.yaml`
-· `telemetry.serviceMonitor.enabled`
-
-**The endpoint shipped.** The daemon serves its counter registry at `:9108/metrics` in Prometheus
-text format — every drop reason as a `reason` label on one metric, message counts by `msg_type`,
-the historian connection as a gauge, and sequence gaps by `edge_node`. A headless Service and a
-`ServiceMonitor` are rendered on Kubernetes. See
-[`ingestion/README.md`](ingestion/README.md#metrics) for what each metric means and what a non-zero
-value tells you.
-
-**What remains is something to scrape it.** `docker-compose.yml` ships no Prometheus, and Grafana
-is provisioned with two Postgres datasources and no others — so on the Compose target the endpoint
-is an inspection surface (`curl localhost:9108/metrics`) rather than a monitored one. On Kubernetes
-the `ServiceMonitor` needs the Prometheus Operator CRDs, which the chart deliberately does not
-install.
-
-That is the actual remaining work, and it is a deployment decision rather than a code one: add
-Prometheus to the Compose stack and a third Grafana datasource, or document that a real deployment
-brings its own. **Five alert rules are already written** against these metrics, with thresholds and
-rationale, in `ingestion/README.md` — including *binding rejections rising*, which is the fourth
-platform rule the alerting work left outstanding. They are recorded rather than provisioned
-precisely because nothing could evaluate them today, and a rule that cannot be evaluated is worse
-than an absent one: it renders in the UI and reports nothing.
-
-**Also still open:** `acs_ingestion_write_seconds`, the latency histogram. It needs a timing
-wrapper on the per-sample historian write, which runs on the broker callback thread — the one path
-where casual overhead is least welcome. It belongs with §3's batching work, where there will be
-something to compare it against.
-
-### 2 · Automated edge gateway telemetry
+### 1 · Automated edge gateway telemetry
 
 **Builds on:** `process_node_message()` · `gateways.agent_version` / `enrolled_at` (`0025`) ·
 the appliance's Node-RED runtime ([`templates/physical-gateway/`](templates/physical-gateway)) ·
@@ -624,7 +593,7 @@ the appliance runs — one service alongside `node-red`, with the same `/proc`, 
 the central stack's exporter uses. The bundle is assembled by `gateway-bundle` from
 `GW_BUNDLE_COMPOSE`, so the template is the only file that changes.
 
-### 3 · Horizontal ingestion scaling
+### 2 · Horizontal ingestion scaling
 
 **Builds on:** the single-writer note in `get_timescaledb_connection()`
 
@@ -640,7 +609,15 @@ cacheable and per-message, and the historian write is idempotent (`ON CONFLICT D
 workers seeing a redelivery cannot corrupt a series. What it needs is per-worker connection
 ownership and a rebirth-request path that does not depend on a single node's alias table.
 
-### 4 · Computed ISO 22400 KPIs
+**It also carries the last piece of the ingestion metrics work.** Every counter that endpoint
+proposed now ships except one: `acs_ingestion_write_seconds`, the per-write latency histogram. It
+needs a timing wrapper on the historian write — which runs per sample on the broker callback
+thread, the one path in this daemon where casual overhead is least welcome. **That is the same
+thread this item exists to unblock**, and a latency number is worth far more once there is a
+before-and-after to compare it against, so it belongs here rather than as a measurement taken
+against a ceiling nobody has moved yet.
+
+### 3 · Computed ISO 22400 KPIs
 
 **Builds on:** [`timescaledb/aggregates.sql`](timescaledb/aggregates.sql) · the existing rollups ·
 `iso22400_vocabulary`
@@ -654,7 +631,7 @@ a KPI definition a setting rather than a constant fixed before the first row was
 This is the intermediate step that was previously deferred pending an MES. It does not replace one —
 it makes the vocabulary answer questions instead of only naming them.
 
-### 5 · i3X server optimisations
+### 4 · i3X server optimisations
 
 **Builds on:** `_load_address_space()` · `_build_objects()` · `MAX_BULK_ELEMENT_IDS`
 
@@ -672,7 +649,7 @@ against.
 Writes stay unimplemented. `PUT /objects/value` answers 405 and `/info` declares
 `update.current: false`; a server that does not implement the verb cannot be talked into it.
 
-### 6 · Ingress → Gateway API
+### 5 · Ingress → Gateway API
 
 **Builds on:** [`templates/ingress.yaml`](deploy/helm/acs-cymru/templates/ingress.yaml) ·
 `acs-cymru.corsOrigins`
@@ -686,7 +663,7 @@ this migration specifically, because the origin list is the stack's *only* state
 policy — the edge functions deliberately declare none — and the fewer places it is expressed, the
 fewer places it can be wrong.
 
-### 7 · MCP server
+### 6 · MCP server
 
 **Builds on:** the i3X address space · `fplus-directory`
 
@@ -699,7 +676,7 @@ read-only by construction — not by configuration. An `--enable-writes` flag wo
 switch over a server that has nothing to enable. Writes belong on the Sparkplug/NCMD path, where
 they are auditable.
 
-### 8 · Administrative Settings & Runtime Configuration
+### 7 · Administrative Settings & Runtime Configuration
 
 **Builds on:** `has_role('Administrator')` · PostgREST RLS · Supabase Vault
 
@@ -715,7 +692,7 @@ giving deployed shopfloor instances an operational management plane.
 
 ---
 
-### 9 · Cold Telemetry Archival & Query-in-Place
+### 8 · Cold Telemetry Archival & Query-in-Place
 
 **Builds on:** TimescaleDB retention policies · `telemetry` hypertable · Edge Functions · Apache Parquet
 
@@ -732,7 +709,7 @@ gigabytes of raw points back into TimescaleDB.
 
 ---
 
-### 10 · Deferred commit for Rearrange mode
+### 9 · Deferred commit for Rearrange mode
 
 **Builds on:** `handleDrop()` / `handleLaneDrop()` / `pendingZone` in
 [`OverviewTab.jsx`](frontend/src/components/tabs/OverviewTab.jsx) ·
@@ -776,7 +753,7 @@ Three things the present design gets right and a staged version must not lose:
 
 ---
 
-### 11 · Vestigial column and configuration audit
+### 10 · Vestigial column and configuration audit
 
 **Builds on:** [`scripts/check-docs-drift.mjs`](scripts/check-docs-drift.mjs) ·
 [`.env.example`](.env.example) · `0001_baseline_schema.sql`
@@ -796,7 +773,7 @@ damage.** On a freshly reset stack these are all NULL for every row:
 | `devices.quarantine_reason` | Only set when a device is quarantined | **Load-bearing** — ingestion writes it |
 | `devices.reported_identity` | Only set on an identity mismatch | **Load-bearing** — the spoofing diagnosis |
 | `devices.model_3d_path` | Only set once a model is uploaded | **Load-bearing** |
-| `gateways.agent_version` | Stamped at enrolment; every seeded gateway is simulated | **Load-bearing** — §2 builds on it |
+| `gateways.agent_version` | Stamped at enrolment; every seeded gateway is simulated | **Load-bearing** — §1 builds on it |
 | `devices.asset_type` | Never written by any code path | Candidate |
 | `cells.grafana_url` | Never written by any code path | Candidate |
 
@@ -826,34 +803,6 @@ The real work on that side is narrower and has two parts:
   keys. That is a real upstream deprecation with a real end date, and it touches Kong's key-auth
   consumers, the edge-function registry and `custom_access_token_hook`. It should be scoped against
   the pinned `supabase/gotrue` and `kong` versions before it is planned, not assumed to apply.
-
----
-
-### 12 · A time range the Digital Thread can actually zoom into
-
-**Builds on:** `timeWindow()` / `TIME_PRESETS` / the custom range inputs in
-[`DigitalThreadTab.jsx`](frontend/src/components/tabs/DigitalThreadTab.jsx)
-
-The custom range pickers are `type="date"`, so **the narrowest window expressible is one whole
-day** — `timeWindow()` reads them as 00:00 and 23:59 local. On a stack commissioned this morning
-that makes *All time* and *today* the same picture, and a burst of commissioning writes lands in a
-few pixel columns however the page is filtered.
-
-Markers that collide are now fanned vertically rather than being left on top of each other, which
-was the reported symptom. **That is a legibility fix, not a zoom**: it makes two or three
-simultaneous events countable, and it deliberately does nothing for a dense burst of twenty, where
-the honest answer is to narrow the axis rather than to fan markers into a column that no longer
-fits the lane.
-
-`datetime-local` inputs are most of the work. The rest is the boundary handling in `timeWindow()`,
-which currently appends the day's start and end to a bare date — a narrower range needs the value
-passed through as an instant instead, and the ISO conversion is the part that will get local time
-wrong if it is done casually.
-
-**The reason to want it is not zooming for its own sake.** The causation work made
-`digital_thread` legible as *acts* rather than rows, and an act is exactly the thing that happens
-inside one second — so the page's most interesting content is at the resolution the range control
-cannot currently reach.
 
 ---
 
