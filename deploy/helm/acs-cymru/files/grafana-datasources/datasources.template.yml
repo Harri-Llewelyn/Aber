@@ -57,3 +57,93 @@ datasources:
       sslmode: disable
       postgresVersion: 1500
       timescaledb: true
+
+  # ---------------------------------------------------------------------------------------------
+  # The Supabase database -- ONE VIEW, and the reason it is here at all.
+  # ---------------------------------------------------------------------------------------------
+  # The storage question spans two databases and neither can answer it alone. TimescaleDB knows
+  # what the telemetry costs and nothing about `digital_thread` -- the table this platform promises
+  # never to prune, and therefore the one whose growth actually needs watching. The postgres_fdw
+  # link runs Supabase -> TimescaleDB and nothing runs back, so `public.storage_footprint` (created
+  # by migration 0027, over `timescaledb/storage.sql`) can only live on this side. That is what
+  # makes a second datasource necessary rather than merely convenient.
+  #
+  # IT CONNECTS AS `grafana_reader`, WHICH MAY SELECT THAT ONE VIEW.
+  #
+  # Grafana used to hold the `postgres` superuser credential for the HISTORIAN and that was removed
+  # deliberately: a service fronted by browser SSO must not carry the key that owns the database.
+  # Repeating it here would be strictly worse, because the Supabase superuser bypasses RLS and can
+  # rewrite the audit trail. Migration 0027 creates the role, grants SELECT on the view, and then
+  # re-revokes everything else in the schema on every boot -- so the grant is reconciled rather
+  # than merely initial.
+  #
+  # SAME NAME AND SAME PASSWORD AS THE HISTORIAN'S `grafana_reader`, on purpose. It is the same
+  # tool, and a second secret to rotate for it is a second secret to forget. The two roles are
+  # unrelated objects in unrelated databases and share nothing but the credential; neither can
+  # reach anything in the other.
+  #
+  # AN EMPTY BI_READER_PASSWORD SKIPS THE ROLE, in 0027 exactly as in timescaledb/roles.sql -- so
+  # on a stack that never configured one, this datasource fails its health check with
+  # "password authentication failed". That is the honest failure: the alternative is falling back
+  # to a credential that can rewrite the digital thread.
+  - name: Supabase
+    uid: supabase
+    type: postgres
+    access: proxy
+    # In-network service name and the STANDARD port, not the host-published 54322. Identical on
+    # both targets, which is what lets this file be mirrored into a Helm ConfigMap verbatim -- the
+    # renderer substitutes the password and nothing else, so it cannot use a chart helper here.
+    url: supabase-db:5432
+    user: grafana_reader
+    database: postgres
+    # NOT default. The historian above stays default so that an existing panel, and any dashboard
+    # imported without an explicit datasource, keeps resolving to the telemetry it was written
+    # against.
+    isDefault: false
+    version: 1
+    secureJsonData:
+      password: __BI_READER_PASSWORD__
+    jsonData:
+      database: postgres
+      sslmode: disable
+      postgresVersion: 1700
+      # NOT a TimescaleDB connection, whatever the view underneath reaches over the FDW. Setting
+      # this true makes Grafana's query builder offer `time_bucket()` and friends against a server
+      # that has no TimescaleDB extension installed, and the resulting panel fails at run time with
+      # an undefined-function error that names neither cause.
+      timescaledb: false
+
+  # ===============================================================================================
+  # Prometheus -- the metrics store, and the only datasource here that is not a database.
+  #
+  # NO CREDENTIAL, AND NOTHING TO SUBSTITUTE. The two Postgres datasources above carry
+  # __BI_READER_PASSWORD__ because they authenticate; Prometheus is reachable on the compose network
+  # and serves reads to anything that can connect. That is also why the port is not published to the
+  # host for Grafana's benefit -- it does not need to be.
+  #
+  # THE URL IS A PLACEHOLDER BECAUSE THE TWO TARGETS REACH DIFFERENT PROMETHEUS INSTANCES. Compose
+  # runs its own and substitutes the compose service name; Kubernetes defers to the cluster's
+  # Operator-managed one and substitutes `grafana.prometheusUrl`, which defaults to
+  # kube-prometheus-stack's conventional service. Hardcoding `prometheus:9090` here would have put
+  # a name that means nothing on Kubernetes into the file both targets share.
+  #
+  # A CLUSTER WITH NO PROMETHEUS gets a datasource whose health check fails, and the five ingestion
+  # rules report DatasourceError. That is the same honest failure the Supabase datasource above
+  # makes when BI_READER_PASSWORD is unset -- a rule that cannot reach its data should say so rather
+  # than evaluate to OK.
+  # ===============================================================================================
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: __PROMETHEUS_URL__
+    # NOT default. The historian stays default so an existing panel, and any dashboard imported
+    # without an explicit datasource, keeps resolving to the telemetry it was written against.
+    isDefault: false
+    version: 1
+    jsonData:
+      # Matches `global.scrape_interval` in prometheus/prometheus.yml. Grafana uses it to choose a
+      # sensible minimum step, and a value larger than the real interval silently coarsens every
+      # graph drawn against this datasource.
+      timeInterval: 15s
+      httpMethod: POST

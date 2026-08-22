@@ -15,10 +15,15 @@ So each entry below was verified against the pinned image before it was written:
   grafana         SERVES METRICS NATIVELY on its normal HTTP port at /metrics, unauthenticated.
                   (grafana 11.6.1: 1250 metric series.) Nothing to enable.
 
-  supabase-kong   SERVES METRICS ONLY WITH THE PLUGIN AND THE STATUS LISTENER BOTH ON. The
-                  `prometheus` plugin is declared globally in kong.yml and named in KONG_PLUGINS;
-                  `supabaseKong.metrics.enabled` adds KONG_STATUS_LISTEN and the port.
-                  (kong 2.8.1-alpine: 57 kong_* series on :8100/metrics.)
+  supabase-kong   SERVES METRICS ONLY WITH THE PLUGIN, THE STATUS LISTENER, AND -- SINCE KONG 3.x
+                  -- THREE PLUGIN FLAGS ALL ON. The `prometheus` plugin is declared globally in
+                  kong.yml and named in KONG_PLUGINS; `supabaseKong.metrics.enabled` adds
+                  KONG_STATUS_LISTEN and the port; and `status_code_metrics` / `latency_metrics` /
+                  `bandwidth_metrics` are set in kong.yml because 3.0 made them opt-in.
+                  WITHOUT THOSE FLAGS THIS TARGET IS A LIE OF EXACTLY THE KIND THIS HEADER IS
+                  ABOUT: it scrapes UP, answers 200, and carries only node-level nginx and memory
+                  gauges -- every per-service series silently absent.
+                  (kong 3.9.3: 106 kong_* series on :8100/metrics, measured on the live stack.)
                   THE MOST VALUABLE TARGET HERE, because every REST, Auth, Storage, Realtime and
                   edge-function request passes through it -- see the note on supabase-rest.
 
@@ -34,19 +39,33 @@ DELIBERATELY ABSENT, and this is the part worth reading:
                   serves /ready and /live and nothing else -- there is no metrics setting in the
                   configuration at all. A ServiceMonitor for it would be pure fiction.
                   It is not a real gap: every PostgREST request arrives through Kong, so
-                  kong_http_requests_total and the latency histograms already carry it, labelled
-                  by service. Gateway-side measurement is one hop removed from the process but it
-                  covers the entire HTTP tier from a single target -- which is also why enabling
-                  Kong's metrics matters more than any other switch in this file.
+                  `kong_http_requests_total` and the `kong_request_latency_ms_*` histograms already
+                  carry it, labelled by service and route. Gateway-side measurement is one hop
+                  removed from the process but it covers the entire HTTP tier from a single target
+                  -- which is also why enabling Kong's metrics matters more than any other switch
+                  in this file.
+
+                  THIS METRIC NAME HAS NOW BEEN WRONG IN BOTH DIRECTIONS, WHICH IS THE LESSON.
+                  It first said `kong_http_requests_total`, written from documentation; a live
+                  scrape of the then-pinned 2.8.1 showed `kong_http_status`, so it was corrected.
+                  The 3.9.3 upgrade renamed it BACK -- 3.x really does expose
+                  `kong_http_requests_total`, `kong_bandwidth_bytes`, and three separate latency
+                  histograms (`kong_request_latency_ms_*`, `kong_upstream_latency_ms_*`,
+                  `kong_kong_latency_ms_*`) in place of 2.8's single `kong_latency_*`.
+                  Every name above was read off the running gateway, not off a changelog. A panel
+                  built from the wrong one draws an empty graph and reports nothing.
 
   supabase-db /   Postgres exposes nothing without postgres_exporter, which is a separate
   timescaledb     deployment with its own credentials and its own scrape story. Worth doing, and
                   worth doing properly rather than half-added here.
 
-  ingestion       A Python daemon with no HTTP server. Its liveness signal is the heartbeat file
-                  the kubelet probe reads (see apps/ingestion.yaml); making it serve metrics would
-                  mean adding an HTTP listener to a process whose whole design is a single MQTT
-                  loop.
+  (ingestion USED TO BE LISTED HERE, on the reasoning that it was "a Python daemon with no HTTP
+  server" and that giving it one would mean adding a listener to a process whose whole design is a
+  single MQTT loop. Issues #22 and #24 overturned that, and the second half of the argument turned
+  out to be the weaker one: the daemon ALREADY runs three background threads -- a device watchdog,
+  a liveness heartbeat and a stats reporter -- so a fourth serving a text endpoint fits the shape
+  it already had. What it is NOT is a re-instrumentation: the counters existed, and metrics.py
+  renders the registry they already fill. It is a target below.)
 
 REQUIRES THE PROMETHEUS OPERATOR CRDs. ServiceMonitor is not a core Kubernetes type; without
 kube-prometheus-stack (or at least its CRDs) installed, `helm install` fails with
@@ -76,6 +95,25 @@ Without it the targets are simply DOWN, which reads as the pods being unreachabl
       "port" "metrics"
       "path" "/metrics"
       "why" "the prometheus plugin on the status listener") -}}
+{{- end -}}
+{{/*
+  THE ONLY TARGET ON THE CRITICAL DATA PATH. Everything else here observes a request tier; this one
+  says whether telemetry is being recorded at all.
+
+  It scrapes `ingestion-metrics`, the headless Service in apps/ingestion.yaml, which exists solely
+  because a ServiceMonitor selects Services rather than Pods.
+
+  `acs_ingestion_messages_dropped_total` is the series worth a panel: any non-zero value is
+  telemetry that was NOT written, and under report-by-exception nothing ever restates it.
+*/}}
+{{- if and .Values.ingestion.enabled .Values.ingestion.metrics.enabled -}}
+{{- $targets = append $targets (dict
+      "name" "ingestion"
+      "component" "ingestion"
+      "service" "ingestion-metrics"
+      "port" "metrics"
+      "path" "/metrics"
+      "why" "the daemon's own counter registry, rendered by ingestion/metrics.py") -}}
 {{- end -}}
 {{- if and .Values.mosquitto.enabled .Values.mosquitto.metrics.enabled -}}
 {{- $targets = append $targets (dict

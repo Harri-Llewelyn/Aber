@@ -1033,7 +1033,7 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/IDTASubmodelTemplateElement' } }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
-  /rest/v1/device_alerts:
+  /rest/v1/platform_alerts:
     get:
       tags: [Registry]
       summary: Read the Grafana alert occurrence log
@@ -1068,7 +1068,7 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/DeviceAlert' } }
         '401': { description: 'Not authenticated; `anon` is revoked.' }
 
-  /rest/v1/device_alerts_active:
+  /rest/v1/platform_alerts_active:
     get:
       tags: [Registry]
       summary: Read only the alerts currently firing
@@ -1790,7 +1790,7 @@ paths:
       description: |
         The delivery target of Grafana's `ACS-Cymru Webhook` contact point. Accepts an
         Alertmanager-shaped payload and records each instance as an occurrence in
-        `public.device_alerts`, which the dashboard then receives over Realtime.
+        `public.platform_alerts`, which the dashboard then receives over Realtime.
 
         **Authenticated by a scoped bearer secret, not by a Supabase key.** Grafana presents
         `GRAFANA_ALERT_WEBHOOK_SECRET`; this function verifies it and then uses its own service-role

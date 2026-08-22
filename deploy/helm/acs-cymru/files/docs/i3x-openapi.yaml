@@ -1,7 +1,7 @@
 openapi: 3.0.3
 
 info:
-  title: Factory+ i3X 1.0 Server
+  title: ACS-Cymru i3X 1.0 Server
   version: "0.1.0"
   description: |
     A conformant [i3X](https://github.com/cesmii/i3X) (CESMII Industrial Information
@@ -61,6 +61,32 @@ info:
       the request itself succeeded. The top-level `success` is the AND of the items.
 
     Errors carry `responseDetail: {title, status, detail}`.
+
+    ### Availability, and what a restart costs you
+
+    **One replica, and subscriptions do not survive a restart.** This is a declared characteristic
+    of the service rather than a defect, and a client integrating against it has to build for it.
+
+    | | Commitment |
+    | :--- | :--- |
+    | Replicas | Exactly one, always. The service holds a plain `spBv1.0/#` broker subscription and its subscription state is in process memory; a second instance would answer `/subscriptions/sync` for ids it has never seen |
+    | Reachability during a restart | None — the old instance stops before the new one starts, so the endpoint is absent rather than degraded |
+    | Subscriptions across a restart | None. Queues, sequence numbers and open streams are lost |
+    | Current values just after a restart | Cold and **reported as cold**: `quality: "GoodNoData"` with a null value, until that device next publishes |
+    | Metadata and history | Unaffected — neither is held by this service |
+
+    `/subscriptions/sync` and `/subscriptions/stream` answer **404** for a subscriptionId this
+    instance has never seen, and the correct response is to create a new subscription. **The i3X
+    lifecycle already requires that path**, because `I3X_SUBSCRIPTION_TTL_SECONDS` deletes an idle
+    subscription anyway — a restart is the same recovery on the same code path.
+
+    What the server commits to is that it will not do anything subtler. There is no partially
+    restored queue and no sequence number that resumes from a value you never received: **a lost
+    subscription is reported as gone.** A subscription that lied about its continuity would be
+    worse than one that admits it is new.
+
+    Expect roughly one restart per platform release, plus cluster-operational events. See
+    [`i3x/README.md`](https://github.com/Harri-Llewelyn/ACS-Cymru/blob/main/i3x/README.md#availability).
 
     > ⚠️ **"Try it out" will not work from this page.** The i3X server sends no CORS headers
     > and answers `OPTIONS` with `501`, so a browser cannot call it cross-origin from Swagger

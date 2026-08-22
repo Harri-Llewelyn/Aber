@@ -1,0 +1,83 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+
+  "description": [
+    "AUTOMATED VERSION-DRIFT DETECTION.",
+
+    "This exists because the audit that produced it was a one-off: a person wondered how far behind the stack was, checked seventeen images by hand, and found swagger-ui two years old and PostgREST two majors back. Nothing would have raised either again. The point of this file is that the CHECK happens on a schedule. Deciding what to merge stays a human job, and several rules below exist to keep it that way.",
+
+    "WHAT A NAIVE CONFIGURATION WOULD GET WRONG HERE, and why packageRules is the long half: the Supabase components are a COORDINATED SET that upstream tests together. Measured against Docker Hub, gotrue v2.189.0 and postgres-meta v0.96.6 look outdated. They are in fact the exact versions upstream pins, and bumping them would move this stack OFF the tested combination. Renovate cannot read upstream's compose file, so it must not be trusted to propose those individually.",
+
+    "THE DASHBOARD IS THE DELIVERABLE, more than the PRs are. It is one issue listing every available update including the ones deliberately held back, which is exactly the artefact the manual audit produced and then threw away.",
+
+    "SCHEDULING: weekly and early. Proactive currency work wants a cadence slow enough that PRs are not noise and fast enough that no single upgrade is ever frightening. Security updates ignore that schedule entirely -- see vulnerabilityAlerts, which is the reactive half."
+  ],
+
+  "extends": ["config:recommended"],
+
+  "timezone": "Europe/London",
+  "schedule": ["before 6am on Monday"],
+
+  "dependencyDashboard": true,
+  "dependencyDashboardTitle": "Dependency Dashboard — version drift",
+
+  "labels": ["dependencies"],
+  "prConcurrentLimit": 6,
+  "prHourlyLimit": 3,
+
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "schedule": ["at any time"],
+    "labels": ["dependencies", "security"]
+  },
+
+  "packageRules": [
+    {
+      "description": "Images built from this repository. The tag is set at deploy time and is empty in values.yaml, so there is no upstream to track.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["/^ghcr\\.io\\/harri-llewelyn\\/acs-cymru\\//"],
+      "enabled": false
+    },
+    {
+      "description": "THE COORDINATED SET. One PR or none: these move together upstream and are tested together, and the correct target is usually upstream Supabase's own pin rather than the newest tag. dependencyDashboardApproval means Renovate lists them and waits to be asked, because the decision needs a person to compare against supabase/supabase docker/docker-compose.yml. See issue #49.",
+      "groupName": "Supabase component set",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": [
+        "supabase/gotrue",
+        "supabase/postgres",
+        "supabase/postgres-meta",
+        "supabase/realtime",
+        "supabase/storage-api",
+        "supabase/edge-runtime",
+        "supabase/studio",
+        "postgrest/postgrest"
+      ],
+      "dependencyDashboardApproval": true,
+      "labels": ["dependencies", "supabase-set"]
+    },
+    {
+      "description": "The historian. Not grouped with anything: a patch bump is usually safe and is still the one change that can take the telemetry store with it.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["timescale/timescaledb"],
+      "labels": ["dependencies", "data-path"]
+    },
+    {
+      "description": "A major version is a reading task before it is a merge task. Held on the dashboard so it is proposed deliberately -- Kong 3.0, for one, silently switched off every per-service Prometheus metric while leaving the scrape target green.",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true,
+      "labels": ["dependencies", "major"]
+    },
+    {
+      "description": "Security updates outrank everything else in the queue.",
+      "matchUpdateTypes": ["patch", "minor", "major"],
+      "isVulnerabilityAlert": true,
+      "prPriority": 10
+    },
+    {
+      "description": "Workflow actions: one PR, since they are independent of everything the stack runs.",
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions"
+    }
+  ]
+}

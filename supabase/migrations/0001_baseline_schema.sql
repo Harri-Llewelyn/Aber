@@ -2390,15 +2390,15 @@ END $$;
 -- ---------------------------------------------------------------------------------------------
 -- THE MEMBERSHIP IS NOW COMPUTED, AND THE ABSOLUTENESS ABOVE IS EXACTLY WHY IT HAD TO BE.
 --
--- `device_alerts` is created by 0023, which runs AFTER this file on every boot. A literal
--- `SET TABLE ..., public.device_alerts` therefore fails on a fresh database -- the table does not
+-- `platform_alerts` is created by 0023, which runs AFTER this file on every boot. A literal
+-- `SET TABLE ..., public.platform_alerts` therefore fails on a fresh database -- the table does not
 -- exist yet -- and ON_ERROR_STOP=1 makes that a failed boot. But listing it nowhere is worse: this
 -- statement is absolute, so the next replay of 0001 would silently DROP it from the publication
 -- again, and the frontend's alert subscription would go dead on the second boot with nothing
 -- logged. That is the 0030/0032 lesson arriving from the other direction.
 --
 -- So: the INTENDED set is declared here, and the statement publishes the intersection of that set
--- with the tables that actually exist. On a fresh database's first boot `device_alerts` is absent
+-- with the tables that actually exist. On a fresh database's first boot `platform_alerts` is absent
 -- and the publication comes up with three tables; 0023 then creates it and adds it itself, so
 -- realtime works on that same boot. Every later boot finds it present and keeps it.
 --
@@ -2408,7 +2408,7 @@ END $$;
 DO $$
 DECLARE
   -- Every table this platform intends to publish, in one place. Order is not significant.
-  intended CONSTANT text[] := ARRAY['cells', 'gateways', 'devices', 'device_alerts'];
+  intended CONSTANT text[] := ARRAY['cells', 'gateways', 'devices', 'platform_alerts'];
   members  text;
 BEGIN
   SELECT string_agg(format('public.%I', t), ', ' ORDER BY t)

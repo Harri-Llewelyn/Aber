@@ -466,9 +466,12 @@ function edgeFunctionNames() {
 
   /** name -> why a later migration is allowed to replace an earlier definition. */
   const INTENDED_REDECLARATIONS = {
-    'public.log_digital_thread_event': `0003 adds append-only enforcement and 0005 adds actor_source
-      attribution. 0005's body is the live one and MUST stay last -- a sixth declaration ordering
-      after it would silently drop the attribution, which is exactly why 0017 was never written.`,
+    'public.log_digital_thread_event': `0003 adds append-only enforcement, 0005 adds actor_source
+      attribution, and 0026 adds the causation_id stamp. 0026's body is the live one and reproduces
+      0005 IN FULL -- a later declaration that patched rather than reproduced would silently drop
+      the heartbeat suppression guard or the attribution, which is exactly why 0017 was never
+      written. 0026's own self-check asserts both survived, because this list checks that a
+      redeclaration was INTENDED and cannot check that it was COMPLETE.`,
     'public.ensure_gateway_status_view': `0025 widens public.gateway_status for the enrolment columns
       and adds the branch that short-circuits PENDING_ENROLLMENT / AWAITING_BIRTH ahead of the
       staleness test. g.* is expanded at CREATE time, so the view cannot be widened in place.`,
@@ -545,6 +548,17 @@ function edgeFunctionNames() {
       'RLS on with NO policy and the anon/authenticated grants revoked — reachable only by '
       + 'service_role, i.e. only by the enroll-gateway function. Publishing a path for it would '
       + 'document an endpoint that answers 401 to every caller a reader could actually be',
+  platform_health:
+      'Platform condition counts -- stale gateways, stuck enrolments, quarantine depth -- '
+      + 'granted to `grafana_reader` alone and revoked from anon/authenticated by 0029. It exists '
+      + 'so an alert rule can read a COUNT without the dashboard reader being granted the asset '
+      + 'inventory it would otherwise derive one from; the browser gets the same facts through '
+      + 'its own RLS-checked queries',
+  storage_footprint:
+      'Byte counts and chunk horizons for both databases, granted to `grafana_reader` alone and '
+      + 'revoked from anon/authenticated by 0027. It is read by the Grafana `supabase` datasource '
+      + 'over a direct connection, never over PostgREST, so a documented path would answer 403 to '
+      + 'every caller the OpenAPI spec describes',
   };
 
   const spec = read('docs/openapi.yaml');
@@ -628,7 +642,6 @@ function edgeFunctionNames() {
     'VITE_ENABLE_REALTIME',  // feature flag
     'VITE_GITHUB_REPO_URL',  // issue tracker URL
     'VITE_GRAFANA_URL',      // an endpoint, public
-    'VITE_ALLOW_SIGNUP',     // feature flag
     'VITE_MODEL_3D_BUCKET',       // a bucket name, public -- the objects in it are public-read
     'VITE_GATEWAY_BACKUP_BUCKET', // a bucket name; the bucket is PRIVATE, but its NAME is not a secret
   ]);
@@ -875,6 +888,181 @@ function edgeFunctionNames() {
     );
   } else {
     pass('the Grafana contact point holds only the scoped webhook secret');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 14. The product does not call itself Factory+.
+//
+// FOUND BY USERS, TWICE OVER: the Grafana login button read "Sign in with Factory+ SSO" and the
+// OAuth consent screen read "Authorize Factory+ Grafana ... access to your Factory+ identity",
+// long after the application was renamed. Migration 0014 renamed the SEMANTIC IDENTIFIERS
+// (factoryplus.local -> acs-cymru.local) and nothing renamed the prose, so the rename was half
+// done and no check could tell.
+//
+// THE DISTINCTION THIS ENFORCES IS THE WHOLE POINT, and it is the same one 0014 draws about
+// standards identifiers: Factory+ is a REAL EXTERNAL FRAMEWORK this stack implements, and every
+// reference to it AS a framework is correct and must survive. `fplus-directory` serves the Factory+
+// Directory contract, `metricGroup.js` validates the Factory+ metric-name format, ingestion.py reads
+// the Factory+ payload marker and Instance_UUID. Renaming those would be a lie about
+// interoperability -- the opposite of the problem being fixed.
+//
+// So this checks the narrow thing that is actually wrong: the product NAMING ITSELF Factory+, in
+// the strings a user reads. Scoped to the files that carry user-facing product identity, with a
+// per-file reason, rather than a repository-wide grep that would have to exempt most of the tree.
+//
+// WHAT IS DELIBERATELY NOT LISTED, because renaming it is not cosmetic:
+//   * deploy/k8s/internal-ca.yaml -- `commonName: Factory+ Internal CA`. Changing a cert-manager
+//     commonName RE-MINTS THE CA, and this repository already documents where that leads: the root
+//     is hand-distributed into every appliance's trust store, and re-minting succeeds silently and
+//     takes the whole fleet offline. Cosmetic text attached to a destructive operation.
+//   * `factoryplus_ingestion` / `factoryplus_i3x` / `factoryplus_monitor` -- MQTT usernames, which
+//     live in mosquitto.acl and in a password file the broker cannot read back. A rename is a
+//     re-provisioning of every principal, not a string change.
+// -------------------------------------------------------------------------------------------------
+{
+  /** file -> why this file's prose is product identity rather than a framework reference. */
+  const BRANDED_SURFACES = {
+    'grafana/grafana.ini':
+      'the [auth.generic_oauth] `name` is the literal text on the Grafana login button',
+    'frontend/src/pages/OAuthConsent.jsx':
+      'the OAuth consent screen, which names the identity a user is being asked to share',
+    'deploy/helm/acs-cymru/values.yaml':
+      'supabaseStudio.organizationName is displayed in Studio',
+    // Swagger UI renders info.title as the page heading, so this is the same surface as the Grafana
+    // login button: the product naming itself. It read "Factory+ i3X 1.0 Server" while contact.name
+    // in the same block already said ACS-Cymru. Whole-file, because every OTHER Factory+ reference
+    // in this repository is to the framework and belongs in docs/openapi.yaml -- which is why that
+    // file is deliberately not listed here and this one can be.
+    'docs/i3x-openapi.yaml':
+      'Swagger UI renders info.title as the heading of the published i3X specification',
+  };
+
+  const branded = [];
+  for (const [file, why] of Object.entries(BRANDED_SURFACES)) {
+    let text;
+    try {
+      text = read(file);
+    } catch {
+      branded.push(`${file} is listed as a branded surface but does not exist -- update the list`);
+      continue;
+    }
+    if (/Factory\+/.test(text)) {
+      const lines = text
+        .split('\n')
+        .map((line, i) => [i + 1, line])
+        .filter(([, line]) => /Factory\+/.test(line))
+        .map(([n]) => n);
+      branded.push(
+        `${file} still calls the product "Factory+" (line${lines.length > 1 ? 's' : ''} ` +
+          `${lines.join(', ')}) -- ${why}`
+      );
+    }
+  }
+
+  // The Grafana OAuth client's display name lives in the seed, not in a config file, and it is what
+  // the consent screen puts in its heading. DO UPDATE on client_name means the literal here IS the
+  // live value on every boot, so checking the literal checks what a user sees.
+  const seed = read('supabase/seed.sql') + read('supabase/migrations/0002_seed_data.sql');
+  const clientNames = [...seed.matchAll(/'((?:Factory\+|ACS-Cymru)[^']*)'/g)].map((m) => m[1]);
+  const misnamed = clientNames.filter((n) => n.startsWith('Factory+'));
+  if (misnamed.length) {
+    branded.push(
+      `an OAuth client is registered as ${misnamed.map((n) => `"${n}"`).join(', ')} -- that string ` +
+        'is the heading on the consent screen. Node-RED\'s client is already "ACS-Cymru Node-RED".'
+    );
+  }
+
+  if (branded.length) {
+    for (const b of branded) fail(b);
+    fail(
+      'Factory+ is a framework this stack IMPLEMENTS, and every reference to it as one is correct --\n' +
+        '      the Directory adapter, the metric-name format, the Sparkplug payload marker. What must not\n' +
+        '      survive is the product naming ITSELF Factory+ in text a user reads. Migration 0014 renamed\n' +
+        '      the semantic identifiers and left the prose behind; users reported the result twice.'
+    );
+  } else {
+    pass(
+      `all ${Object.keys(BRANDED_SURFACES).length} user-facing branded surfaces name the product ` +
+        'ACS-Cymru, with framework references left intact'
+    );
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 15. The alert retention window is declared once and cited consistently.
+//
+// `0030` gives `platform_alerts` a retention window, and the number lives in ONE place: the default
+// argument of `public.prune_platform_alerts(p_retain interval)`. Everything else -- two READMEs and
+// the migration's own header -- quotes it.
+//
+// A RETUNED WINDOW THAT ONLY MOVES IN THE FUNCTION is the failure this catches, and it is worse than
+// an ordinary stale number. The documentation is what an operator reads to answer "how far back do
+// alerts go"; a README saying 7 while the job deletes at 30 sends them looking for rows that were
+// never removed, or -- the other direction -- makes a support question about a missing alert
+// unanswerable.
+//
+// THE HEADER'S COUNTER-EXAMPLE IS CHECKED TOO. The migration explains at length why the obvious
+// one-line predicate is wrong, and prints it. If the window moved and that illustration did not,
+// the file would argue against a query nobody would have written.
+// -------------------------------------------------------------------------------------------------
+{
+  const MIGRATION = 'supabase/migrations/0030_platform_alerts_retention.sql';
+  const sql = read(MIGRATION);
+  const declared = sql.match(/p_retain\s+interval\s+DEFAULT\s+interval\s+'(\d+)\s+days?'/);
+
+  if (!declared) {
+    fail(
+      `${MIGRATION}: no \`p_retain interval DEFAULT interval 'N days'\` in ` +
+        'prune_platform_alerts(). That default IS the retention window and the single source ' +
+        'every other mention is checked against.'
+    );
+  } else {
+    const days = declared[1];
+
+    // Where the number is quoted, and what it would mean for each to be stale.
+    // SUBSTRING MATCHES, NOT REGEXES. The strings looked for below are full of characters a regex
+    // reserves -- asterisks, quotes, a trailing double-dash comment -- and an escaping slip in one
+    // built by template literal fails OPEN: it matches nothing and reports drift that is not there.
+    // A literal is what these citations actually are.
+    const CITATIONS = [
+      {
+        file: MIGRATION,
+        needle: `interval '${days} days';  -- NO`,
+        what: 'the header counter-example showing the predicate that must NOT be used',
+      },
+      {
+        file: 'README.md',
+        needle: `**${days}-day retention window**`,
+        what: 'the migration narrative',
+      },
+      {
+        file: 'supabase/README.md',
+        needle: `kept for ${days} days`,
+        what: 'the retention section headline',
+      },
+      {
+        file: 'supabase/README.md',
+        needle: `interval '${days} days';  -- WRONG`,
+        what: 'the counter-example in the retention section',
+      },
+    ];
+
+    const stale = CITATIONS.filter(({ file, needle }) => !read(file).includes(needle));
+
+    if (stale.length) {
+      for (const { file, what } of stale) {
+        fail(
+          `alert retention: prune_platform_alerts() declares ${days} days, but ${file} does not ` +
+            `state it where expected -- ${what}`
+        );
+      }
+    } else {
+      pass(
+        `the ${days}-day alert retention window is declared once in prune_platform_alerts() and ` +
+          `cited consistently in ${new Set(CITATIONS.map((c) => c.file)).size} files`
+      );
+    }
   }
 }
 

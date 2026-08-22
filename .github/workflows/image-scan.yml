@@ -1,0 +1,115 @@
+# =================================================================================================
+# Container CVE scan -- the REACTIVE half of keeping this stack current.
+#
+# renovate.json is the proactive half: it asks "is there a newer version" on a schedule. This asks
+# the different and more urgent question, "does the version we are running have a known, FIXED
+# vulnerability" -- which is what turns an upgrade from housekeeping into work with a date on it.
+#
+# WHY IT IS NOT PART OF ci.yml. It pulls every third-party image in the stack, several of which are
+# a gigabyte, so on a pull request it would add minutes to every push to answer a question that
+# does not change between two commits an hour apart. CVEs are published on the world's schedule,
+# not on this repository's.
+#
+# THE IMAGE LIST IS READ OUT OF docker-compose.yml RATHER THAN WRITTEN HERE, which is the same rule
+# every other guard in this repository follows: a hardcoded list is a second place for a version to
+# live, and it would go stale silently -- scanning the images this stack USED to run and reporting
+# green. Images built from this repository are excluded because they are built from these same
+# bases and have no upstream tag to look up.
+# =================================================================================================
+name: Container Image CVE Scan
+
+on:
+  schedule:
+    # Mondays, an hour after Renovate. Reading "this is out of date" and "this has a known
+    # vulnerability" in one sitting is what makes the second one actionable.
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Scan Pinned Third-Party Images
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Collect The Pinned Images
+        id: collect
+        run: |
+          set -euo pipefail
+          grep -hoE '^[[:space:]]+image:[[:space:]]+\S+' docker-compose.yml \
+            | awk '{print $2}' \
+            | grep -v '^ghcr\.io/harri-llewelyn/' \
+            | sort -u > /tmp/images.txt
+
+          COUNT=$(wc -l < /tmp/images.txt)
+          # A scan that finds nothing to scan must not report success. If the compose file is
+          # restructured so this grep stops matching, silence would look exactly like "no
+          # vulnerabilities" -- the same class of failure the ServiceMonitor guard is written about.
+          if [ "$COUNT" -lt 10 ]; then
+            echo "::error::Only $COUNT image(s) parsed out of docker-compose.yml, expected 10+."
+            echo "::error::The parser has probably drifted from the file's formatting."
+            exit 1
+          fi
+          echo "Scanning $COUNT image(s):"
+          sed 's/^/  /' /tmp/images.txt
+
+      - name: Install Trivy
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends wget gnupg
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key \
+            | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" \
+            | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
+          trivy --version
+
+      - name: Scan
+        run: |
+          set -uo pipefail   # NOT -e: one vulnerable image must not stop the other sixteen.
+          FAILED=0
+          echo "## Container CVE scan" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Image | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| :--- | :--- |" >> "$GITHUB_STEP_SUMMARY"
+
+          while read -r IMAGE; do
+            [ -z "$IMAGE" ] && continue
+            echo "::group::$IMAGE"
+            # --ignore-unfixed IS THE POLICY, and it is the difference between a signal and a
+            # standing red X. An unfixed CVE in a base image is not something this repository can
+            # act on: there is no version to move to, so failing on it would train everyone to
+            # ignore this job. HIGH and CRITICAL only, for the same reason.
+            trivy image \
+              --severity HIGH,CRITICAL \
+              --ignore-unfixed \
+              --exit-code 1 \
+              --no-progress \
+              --scanners vuln \
+              "$IMAGE"
+            STATUS=$?
+            echo "::endgroup::"
+
+            if [ "$STATUS" -ne 0 ]; then
+              FAILED=1
+              echo "| \`$IMAGE\` | **fixable HIGH/CRITICAL found** |" >> "$GITHUB_STEP_SUMMARY"
+              echo "::warning::$IMAGE has fixable HIGH/CRITICAL vulnerabilities"
+            else
+              echo "| \`$IMAGE\` | clean |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done < /tmp/images.txt
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$FAILED" -ne 0 ]; then
+            echo "Every finding above has a fixed version available upstream." >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::One or more images carry fixable HIGH/CRITICAL vulnerabilities."
+            exit 1
+          fi
+          echo "No fixable HIGH or CRITICAL vulnerabilities." >> "$GITHUB_STEP_SUMMARY"

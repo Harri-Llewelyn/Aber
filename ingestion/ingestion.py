@@ -3,12 +3,15 @@ import re
 import ssl
 import threading
 import time
+from collections import OrderedDict
 import psycopg2
 from psycopg2.extras import execute_values
 import paho.mqtt.client as mqtt
 import sparkplug_b_pb2
 from datetime import datetime, timezone
 from logging_config import get_logger
+import metrics
+from metrics import start_metrics_server
 
 logger = get_logger("ingestion")
 
@@ -82,6 +85,31 @@ REBIRTH_REQUEST_INTERVAL_SECONDS = int(os.getenv("REBIRTH_REQUEST_INTERVAL_SECON
 # looping births with fresh aliases would otherwise grow it without limit.
 MAX_ALIASES_PER_NODE = int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))
 
+# Bound on each entity resolution cache -- the same reasoning as MAX_ALIASES_PER_NODE, applied to
+# the caches that were missed when that one was written. They are keyed by the id observed ON THE
+# WIRE, so they are fed by exactly the same untrusted source (issue #23).
+#
+# A TTL IS NOT A BOUND. Expiry is only checked on read, so an entry nobody reads again is never
+# evicted no matter how stale it is -- a misconfigured gateway cycling ids, a fault loop, or an
+# enumeration attempt against the broker grows the dict forever. The TTL makes entries stale; only
+# a capacity limit makes them go away.
+#
+# 1000 is well above any plausible fleet and low enough to bound memory at a few megabytes. The
+# broker ACL constrains the EDGE NODE segment of a topic but not the DEVICE segment, so this is
+# defence in depth rather than the only thing standing in the way.
+MAX_ENTITIES_PER_CACHE = int(os.getenv("MAX_ENTITIES_PER_CACHE", "1000"))
+
+# A SHORTER TTL FOR NEGATIVE ENTRIES WAS CONSIDERED AND NOT TAKEN, because both arguments for it
+# turn out to be answered elsewhere:
+#
+#   * Freshness. A device that gets registered should not stay "unregistered" for the full TTL --
+#     but the write sites already handle that: the quarantine insert in process_dbirth() SETS the
+#     cache entry to the new row, and the re-quarantine path POPS it. Nothing waits for expiry.
+#   * Abuse. A negative entry is the one an unregistered publisher can create at will -- which is
+#     an argument for expiring it more SLOWLY, not more quickly. Re-resolving sooner means more
+#     PostgREST round trips during exactly the id flood the cap exists to absorb, so a shorter
+#     negative TTL would trade a bounded memory problem for an unbounded directory-load one.
+
 # Throughput counter reporting. Set to 0 to disable.
 #
 # SEPARATE FROM INGESTION_HEALTH_INTERVAL, and not folded into the liveness heartbeat, because
@@ -89,12 +117,23 @@ MAX_ALIASES_PER_NODE = int(os.getenv("MAX_ALIASES_PER_NODE", "5000"))
 # default. Counters reported from inside it would therefore never appear on the one target where
 # they are most likely to be read by hand.
 #
-# THIS IS A LOG REPORTER, NOT A METRICS ENDPOINT. It exists to establish a throughput baseline
-# before the telemetry write path is batched, and to make a stalled daemon legible in `docker
-# logs`. Prometheus exposition is issue #22 and is a different piece of work; the counters below
-# are deliberately shaped so that work is a new exporter over the same registry rather than a
-# re-instrumentation.
+# THIS IS A LOG REPORTER, AND IT IS NOT THE METRICS ENDPOINT. It exists to establish a throughput
+# baseline before the telemetry write path is batched, and to make a stalled daemon legible in
+# `docker logs`. The Prometheus endpoint below reads the same registry -- which is what the note
+# here predicted it would: "a new exporter over the same registry rather than a
+# re-instrumentation". Both remain, because they answer different questions: this one is what
+# somebody reads at 3am with no Prometheus to hand.
 INGESTION_STATS_INTERVAL = int(os.getenv("INGESTION_STATS_INTERVAL", "60"))
+
+# The Prometheus exposition endpoint (issues #22 and #24). 0 disables it.
+#
+# ITS OWN PORT, not a path on something that already listens, because the daemon listens for
+# nothing else -- it is an MQTT client and a database writer. 9108 is in the unassigned exporter
+# range and does not collide with the stack's published ports.
+#
+# NO CREDENTIAL, deliberately, and that decides what may appear on it: counters and nothing else.
+# No metric values, no device names, no payloads. See ingestion/metrics.py.
+INGESTION_METRICS_PORT = int(os.getenv("INGESTION_METRICS_PORT", "9108"))
 
 # How many telemetry rows go into one INSERT statement. A DDATA message is written as a single
 # batched statement; this caps how large that statement may get, so a pathological payload cannot
@@ -114,6 +153,29 @@ TELEMETRY_INSERT_PAGE_SIZE = int(os.getenv("TELEMETRY_INSERT_PAGE_SIZE", "500"))
 DB_CONNECT_MAX_ATTEMPTS = int(os.getenv("DB_CONNECT_MAX_ATTEMPTS", "3"))
 DB_CONNECT_BACKOFF_SECONDS = float(os.getenv("DB_CONNECT_BACKOFF_SECONDS", "0.25"))
 DB_CONNECT_BACKOFF_MAX_SECONDS = float(os.getenv("DB_CONNECT_BACKOFF_MAX_SECONDS", "2.0"))
+
+# -----------------------------------------------------------------------------
+# Payload conformance auditing
+# -----------------------------------------------------------------------------
+# ON BY DEFAULT, and switchable because it writes to an APPEND-ONLY table. Every other counter this
+# daemon keeps can be reset by restarting it; a digital_thread row cannot be removed by any
+# application role, by design. An operator commissioning a noisy new gateway needs a way to stop
+# the record filling with the same finding while they fix it, and the honest way to offer that is a
+# flag rather than a hope that the deduplication below is always enough.
+AUDIT_PAYLOAD_REJECTIONS = os.getenv("AUDIT_PAYLOAD_REJECTIONS", "true").lower() == "true"
+
+# How long a device's attached schemas are cached before being re-read.
+#
+# MUCH LONGER THAN CACHE_TTL_SECONDS (5s, for the device row), because the two answer different
+# questions. The device row carries `status` and `is_quarantined`, which change under the daemon's
+# own feet and must be near-live. A schema binding changes when an engineer edits it, which is a
+# human-scale event -- so re-reading it per message would be one PostgREST round trip per DDATA to
+# learn nothing, on the hottest path in the process.
+#
+# The cost of the staleness is bounded and worth stating: for up to this long after a schema edit,
+# conformance is judged against the previous definition. It cannot cause a wrong DROP, because
+# nothing is dropped for non-conformance -- see payload_violations().
+SCHEMA_CACHE_TTL_SECONDS = int(os.getenv("SCHEMA_CACHE_TTL_SECONDS", "300"))
 
 # -----------------------------------------------------------------------------
 # Supabase Client Initialization
@@ -342,11 +404,96 @@ RESERVED_GATEWAY_STATUSES = frozenset({"PENDING_ENROLLMENT", "AWAITING_BIRTH", "
 # status the message type already implies.
 MAX_GATEWAY_STATUS_LENGTH = 32
 
-# Device resolution TTL cache, keyed by the id seen on the wire.
-# Values are (device_row_or_None, cached_at).
-_device_cache = {}
-_gateway_cache = {}
 CACHE_TTL_SECONDS = 5
+
+
+class TTLCache:
+    """
+    A bounded, TTL'd, thread-safe LRU. Replaces the bare dicts these caches used to be (issue #23).
+
+    TWO PROPERTIES ARE LOAD-BEARING AND BOTH ARE EASY TO BREAK BY ACCIDENT.
+
+    1. `get` RETURNS THE STORED OBJECT, NEVER A COPY. resolve_device() caches a row dict and the
+       DBIRTH path then mutates THAT DICT IN PLACE -- `device.update(update_fields)` in
+       process_dbirth(), and `device["last_birth_metrics"] = declared` in
+       record_declared_metrics() -- specifically so the next lookup inside the TTL sees the new
+       state and does not re-detect the same change. A cache that returned copies would break that
+       silently, and the symptom would not look like a cache bug: it would be a duplicate UPDATE
+       and a duplicate digital_thread row on every rebirth, which is exactly what the write-only-
+       what-moved work exists to prevent.
+
+    2. `get` RETURNS `(hit, value)`, NOT A VALUE OR A DEFAULT. `None` is a legitimate cached value
+       here -- it is the NEGATIVE entry, "this wire id resolved to nothing". A `get` returning None
+       for both "absent" and "cached as unregistered" would conflate them, and the consequence is
+       not a crash: negative caching would quietly stop working, and every message from an
+       unregistered device would go back to the directory. `_schema_cache` has the same shape for
+       its own reason -- see attached_modelled_types() on why None and an empty map differ.
+
+    EVICTION IS LRU AND THAT IS NOT AN ARBITRARY CHOICE. The entry a TTL cannot reach is by
+    definition one nobody has read, and the least-recently-used entry is exactly that entry. So the
+    capacity bound removes the stale ones first without needing a sweep to find them.
+    """
+
+    def __init__(self, maxsize, ttl, name):
+        self._data = OrderedDict()
+        self._lock = threading.Lock()
+        self.maxsize = maxsize
+        self.ttl = ttl
+        self.name = name
+        # Not a counter() call: this module's registry is imported by tests that never start a
+        # daemon, and a cache should not need one to be constructible.
+        self.evictions = 0
+
+    def get(self, key):
+        """`(True, value)` on a live hit; `(False, None)` when absent or expired."""
+        with self._lock:
+            entry = self._data.get(key)
+            if entry is None:
+                return False, None
+            value, cached_at = entry
+            if time.time() - cached_at >= self.ttl:
+                # Dropped rather than left to age further: it can never be a hit again, and
+                # holding it would spend a capacity slot on a known-dead key.
+                del self._data[key]
+                return False, None
+            self._data.move_to_end(key)
+            return True, value
+
+    def set(self, key, value):
+        with self._lock:
+            if key in self._data:
+                # Refreshing an existing key cannot grow the cache, so no eviction is needed --
+                # the same distinction register_aliases() draws against MAX_ALIASES_PER_NODE.
+                self._data[key] = (value, time.time())
+                self._data.move_to_end(key)
+                return
+            while len(self._data) >= self.maxsize:
+                self._data.popitem(last=False)
+                self.evictions += 1
+            self._data[key] = (value, time.time())
+
+    def pop(self, key, default=None):
+        with self._lock:
+            entry = self._data.pop(key, None)
+            return default if entry is None else entry[0]
+
+    def clear(self):
+        with self._lock:
+            self._data.clear()
+
+    def __len__(self):
+        with self._lock:
+            return len(self._data)
+
+    def __contains__(self, key):
+        hit, _ = self.get(key)
+        return hit
+
+
+# Device and edge-node resolution caches, keyed by the id seen on the wire (the gateway one by the
+# (group, node) PAIR -- see resolve_gateway). Values are the row, or None for a negative entry.
+_device_cache = TTLCache(MAX_ENTITIES_PER_CACHE, CACHE_TTL_SECONDS, "device")
+_gateway_cache = TTLCache(MAX_ENTITIES_PER_CACHE, CACHE_TTL_SECONDS, "gateway")
 
 # Sparkplug B node-level (edge gateway) message types, as opposed to the device-level
 # DBIRTH/DDATA/DDEATH. Their topics carry no device component.
@@ -432,6 +579,32 @@ def counter_snapshot() -> dict:
     """A copy of the counters, safe to read while the callback thread is writing."""
     with _counters_lock:
         return dict(_counters)
+
+
+# LABELLED COUNTERS, kept beside the flat ones rather than replacing them.
+#
+# The flat registry is a name -> int dict, which cannot express "gaps, by edge node" without
+# encoding the node into the name and making the STATS line unreadable. This holds the few series
+# that genuinely need a dimension.
+#
+# CARDINALITY IS BOUNDED BY DESIGN. The only label in use is `edge_node`, which is one per gateway
+# on the site. Labelling by DEVICE would be unbounded -- and `seq` is an edge-node-scoped counter
+# anyway, so a device label would be describing the wrong thing.
+_labelled = {}
+
+
+def count_labelled(name: str, labels: dict, n: int = 1):
+    """Add to a monotonic counter carrying labels. Key order is normalised so it cannot split."""
+    if n <= 0:
+        return
+    key = (name, tuple(sorted(labels.items())))
+    with _counters_lock:
+        _labelled[key] = _labelled.get(key, 0) + n
+
+
+def labelled_snapshot() -> dict:
+    with _counters_lock:
+        return dict(_labelled)
 
 
 def diagnose_device_identity(wire_id: str):
@@ -667,6 +840,23 @@ def check_message_sequence(group_id, edge_node_id, msg_type, payload, client=Non
         return True
 
     missed = (seq - expected) % 256
+
+    # THE COUNTER IS THE WHOLE POINT OF ISSUE #24, and it changes nothing else here: the message is
+    # still processed, the rebirth is still requested, the rate limit is still honoured. A gap is
+    # evidence of loss, and discarding the message that carries the evidence would compound it.
+    #
+    # BOTH COUNTERS, because one gap of 200 and 200 gaps of 1 are different faults -- a single
+    # broker reconnect against a gateway that is dropping messages continuously. The rate of the
+    # first is what to alert on; the second is what says how much was lost.
+    #
+    # NEITHER LEGITIMATE NON-GAP REACHES HERE. The 255 -> 0 wrap is absorbed by `expected` being
+    # modulo 256, and the first message after a restart returns above on `previous is None`. Both
+    # are asserted in test_sequence_gap_metrics.py rather than re-checked here.
+    count_labelled("acs_ingestion_sequence_gaps_total", {"edge_node": edge_node_id})
+    count_labelled(
+        "acs_ingestion_sequence_messages_missed_total", {"edge_node": edge_node_id}, missed
+    )
+
     requested = request_node_rebirth(client, group_id, edge_node_id)
     logger.warning(
         "SEQUENCE GAP: edge node '%s' sent %s with seq %d, expected %d -- %d message(s) lost or "
@@ -807,9 +997,11 @@ def resolve_device(wire_id: str, use_cache: bool = True):
             "Supabase client is not configured; cannot resolve device '%s'" % wire_id
         )
 
-    if use_cache and wire_id in _device_cache:
-        row, cached_at = _device_cache[wire_id]
-        if time.time() - cached_at < CACHE_TTL_SECONDS:
+    if use_cache:
+        hit, row = _device_cache.get(wire_id)
+        if hit:
+            # `row` may legitimately be None -- the negative entry. Returning it is the point:
+            # an unregistered device must not cost a directory round trip per message.
             return row
 
     # A well-formed platform id is never also a legacy name, so skip that round-trip.
@@ -849,10 +1041,10 @@ def resolve_device(wire_id: str, use_cache: bool = True):
                     wire_id, row.get("sparkplug_id")
                 )
 
-            _device_cache[wire_id] = (row, time.time())
+            _device_cache.set(wire_id, row)
             return row
 
-        _device_cache[wire_id] = (None, time.time())
+        _device_cache.set(wire_id, None)
         return None
     except Exception as e:
         # Not cached: a transient Supabase failure must not pin this device to "unregistered"
@@ -893,10 +1085,10 @@ def resolve_gateway(wire_id: str, group_id: str = None):
     # Keyed by the PAIR. A cache keyed on the node alone would hand a hit from one group to a
     # request from another, which is precisely the collision this change exists to close.
     cache_key = (group_id or "", wire_id)
-    if cache_key in _gateway_cache:
-        row, cached_at = _gateway_cache[cache_key]
-        if time.time() - cached_at < CACHE_TTL_SECONDS:
-            return row
+    hit, row = _gateway_cache.get(cache_key)
+    if hit:
+        # None here is the negative entry, not a miss. See TTLCache.get().
+        return row
 
     # `status` is read back so process_node_message() can tell a genuine ONLINE/OFFLINE transition
     # from the 119 heartbeats an hour that carry the same status as the last one. It does not gate
@@ -912,7 +1104,7 @@ def resolve_gateway(wire_id: str, group_id: str = None):
             if rows:
                 row = dict(rows[0])
                 row["_identity_source"] = SOURCE_SPARKPLUG_ID
-                _gateway_cache[cache_key] = (row, time.time())
+                _gateway_cache.set(cache_key, row)
                 return row
 
         # 2/3. Group-agnostic fallback, then the legacy name arm.
@@ -951,10 +1143,10 @@ def resolve_gateway(wire_id: str, group_id: str = None):
                         group_id, row.get("sparkplug_group") or DEFAULT_SPARKPLUG_GROUP
                     )
 
-            _gateway_cache[cache_key] = (row, time.time())
+            _gateway_cache.set(cache_key, row)
             return row
 
-        _gateway_cache[cache_key] = (None, time.time())
+        _gateway_cache.set(cache_key, None)
         return None
     except Exception as e:
         # Raised rather than returned for the same reason as resolve_device: an unreachable
@@ -1218,7 +1410,7 @@ def quarantine_new_device(wire_id: str, gateway_wire_id: str, reason: str, paylo
         row = resolve_device(wire_id, use_cache=False)
     if row:
         row["_identity_source"] = SOURCE_REPORTED_IDENTITY
-        _device_cache[wire_id] = (row, time.time())
+        _device_cache.set(wire_id, row)
 
     logger.warning(
         "QUARANTINE ALERT: device '%s' announced DBIRTH via edge node '%s' but is not registered. "
@@ -1558,6 +1750,289 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
         logger.error("Error updating gateway heartbeat for '%s': %s", edge_node_id, e, exc_info=True)
 
 
+# -----------------------------------------------------------------------------
+# Payload conformance -- what the device sent against what its schema allows
+# -----------------------------------------------------------------------------
+# WHAT THIS DOES NOT DO, STATED FIRST BECAUSE IT IS THE DESIGN DECISION THAT MATTERS.
+#
+# It does not drop telemetry. A metric that no schema models, or whose type contradicts the one its
+# schema declares, is STILL WRITTEN to the historian exactly as before. That is not timidity about
+# changing behaviour; it is the same principle extract_declared_metrics() already states -- the
+# historian records what was observed, and whether an observation was supposed to happen is a
+# judgement made at read time, against a schema an engineer can edit afterwards. Refusing the row
+# would destroy the evidence of the very fault being reported, and would do it on the strength of a
+# schema that may itself be the thing that is wrong.
+#
+# What it adds is the RECORD. Until now a non-conforming payload produced nothing at all -- not a
+# counter, not a row -- so "this machine has been publishing a metric nobody modelled since
+# Tuesday" was unanswerable. Now it is one SCHEMA_REJECTION row in the digital thread.
+#
+# THE DROPPED METRICS ARE INCLUDED FOR THE SAME REASON. A metric skipped for an unresolvable alias
+# or a timestamp outside the sanity window IS genuinely lost, and those were `logger.warning` and a
+# counter -- both of which vanish on restart. Those two carry `dropped: true` so a reader can tell
+# a lost sample from a recorded-but-unmodelled one, which is the distinction that decides whether
+# anyone needs to go and look at the gateway.
+
+# JSON Schema type names satisfied by each Sparkplug value column. `integer` is accepted for a
+# double because Sparkplug has no integer wire type that survives this far -- process_ddata casts
+# int_value and long_value to float -- so rejecting `{"type": "integer"}` would flag every
+# correctly-modelled counter in the plant.
+_JSON_TYPES_FOR_VALUE = {
+    "double": frozenset({"number", "integer"}),
+    "string": frozenset({"string"}),
+    "bool": frozenset({"boolean"}),
+}
+
+# device_uuid -> modelled_types (or None -- see attached_modelled_types).
+#
+# BOUNDED FOR CONSISTENCY RATHER THAN FOR SAFETY, and the difference is worth stating. This is keyed
+# on a RESOLVED uuid, which only exists because a `devices` row does, so no publisher can push
+# arbitrary keys into it the way it can into _device_cache -- it really is bounded by the fleet.
+# It gets the same container anyway: three caches with two different growth stories is how the
+# second one gets missed, which is how this one was missed when MAX_ALIASES_PER_NODE was written.
+_schema_cache = TTLCache(MAX_ENTITIES_PER_CACHE, SCHEMA_CACHE_TTL_SECONDS, "schema")
+
+
+def modelled_types(schema_definitions):
+    """
+    Metric name -> the set of JSON Schema types it may carry, across every attached schema.
+
+    `None` as a value means "declared, but with no type constraint" -- a metric named in `required`
+    but absent from `properties`, or one whose `properties` entry omits `type`. That is a real and
+    legitimate schema, and it must not be read as "declares no types", which would make every
+    value it carries a mismatch.
+
+    THE UNION ACROSS SCHEMAS IS DELIBERATE and mirrors modelled_metrics_across() in validate.py: a
+    device may carry several submodels, and a metric modelled by any one of them is modelled. A
+    per-schema check would flag a device for publishing what another of its own submodels accounts
+    for.
+    """
+    result = {}
+
+    for definition in schema_definitions or []:
+        if not isinstance(definition, dict):
+            continue
+
+        properties = definition.get("properties")
+        properties = properties if isinstance(properties, dict) else {}
+
+        # RESOLVED PER SCHEMA BEFORE THE UNION, and the two steps cannot be collapsed. Within ONE
+        # schema, `required: ["M"]` alongside `properties: {"M": {"type": "number"}}` means M is
+        # required AND typed -- the `required` entry adds no type information and must not erase
+        # the one next to it. ACROSS schemas the opposite holds: a schema that declares M with no
+        # type permits any value, which widens the union to unconstrained.
+        #
+        # Folding both into a single pass gets the answer right only when the schemas happen to
+        # arrive in a convenient order, which is a bug that hides until a device gains a second
+        # submodel.
+        this_schema = {}
+
+        for name, spec in properties.items():
+            if not isinstance(name, str):
+                continue
+            declared = spec.get("type") if isinstance(spec, dict) else None
+            if isinstance(declared, str):
+                this_schema[name] = frozenset({declared})
+            elif isinstance(declared, list):
+                this_schema[name] = frozenset(t for t in declared if isinstance(t, str))
+            else:
+                this_schema[name] = None
+
+        for name in definition.get("required") or []:
+            if isinstance(name, str):
+                this_schema.setdefault(name, None)
+
+        for name, types in this_schema.items():
+            if name not in result:
+                result[name] = types
+            elif result[name] is None or types is None:
+                # Unconstrained wins: the union is what the device is PERMITTED to send, and the
+                # widest permission is the answer.
+                result[name] = None
+            else:
+                result[name] = result[name] | types
+
+    return result
+
+
+def device_modelled_types(device_uuid: str):
+    """
+    The cached type map for a device, or None when it has no schema attached at all.
+
+    NONE AND AN EMPTY MAP ARE DIFFERENT ANSWERS and the caller depends on it. None means no schema
+    is bound, so there is nothing to judge against and conformance is not evaluated -- the ordinary
+    state of a newly onboarded device. An empty map means a schema IS bound and models no metrics,
+    which makes every metric unmodelled and is worth reporting.
+    """
+    # `(hit, value)` rather than a default, because None is a real answer here -- "no schema is
+    # bound" -- and is exactly what the paragraph above distinguishes from an empty map.
+    hit, cached = _schema_cache.get(device_uuid)
+    if hit:
+        return cached
+
+    if not supabase_client:
+        return None
+
+    try:
+        links = supabase_client.table("device_schemas").select("schema_id").eq(
+            "device_id", device_uuid
+        ).execute()
+        ids = [row["schema_id"] for row in (links.data or []) if row.get("schema_id")]
+
+        if not ids:
+            result = None
+        else:
+            rows = supabase_client.table("schemas").select(
+                "id,schema_definition"
+            ).in_("id", ids).execute()
+            result = modelled_types([r.get("schema_definition") for r in (rows.data or [])])
+    except Exception as e:
+        # NOT CACHED, and returned as None so no violation is reported. A directory blip must not
+        # be able to write an audit row accusing a device of publishing something unmodelled --
+        # that row is permanent, and the accusation would be an artefact of our own outage.
+        logger.warning(
+            "Could not read schemas for device %s (%s); conformance not evaluated for this "
+            "message.", device_uuid, e
+        )
+        return None
+
+    _schema_cache.set(device_uuid, result)
+    return result
+
+
+def payload_violations(observed, dropped, modelled):
+    """
+    Everything wrong with one DDATA payload, as a list of audit-shaped dicts.
+
+    `observed` -- [(metric_name, value_kind)] for metrics that were written, where value_kind is a
+                  key of _JSON_TYPES_FOR_VALUE.
+    `dropped`  -- [(metric_name_or_None, code, detail)] for metrics the loop skipped.
+    `modelled` -- the map from device_modelled_types(), or None to skip the schema half entirely.
+
+    Pure, and that is the point: every branch below is reachable from a unit test with three
+    literals, which is not true of anything that has to be handed a protobuf and a live client.
+    """
+    violations = []
+
+    for name, code, detail in dropped:
+        violations.append({
+            "metric": name,
+            "code": code,
+            "detail": detail,
+            # The half that is genuinely lost. See the section header.
+            "dropped": True,
+        })
+
+    if modelled is None:
+        return violations
+
+    for name, value_kind in observed:
+        if name not in modelled:
+            violations.append({
+                "metric": name,
+                "code": "unmodelled_metric",
+                "detail": "no attached schema declares this metric",
+                "observed_type": value_kind,
+                "dropped": False,
+            })
+            continue
+
+        allowed = modelled[name]
+        if allowed is None:
+            continue  # Declared without a type constraint; any value conforms.
+
+        satisfied = _JSON_TYPES_FOR_VALUE.get(value_kind, frozenset())
+        if not (satisfied & allowed):
+            violations.append({
+                "metric": name,
+                "code": "type_mismatch",
+                "detail": "schema declares %s" % "/".join(sorted(allowed)),
+                "observed_type": value_kind,
+                "expected_types": sorted(allowed),
+                "dropped": False,
+            })
+
+    return violations
+
+
+def _violation_signature(violations):
+    """
+    A hashable summary of WHAT is wrong, ignoring how often and when.
+
+    Deliberately excludes `detail` and every count: a device publishing the same unmodelled metric
+    on every message has one problem, not one per message, and the audit trail should say so once.
+    """
+    return frozenset((v.get("metric"), v.get("code")) for v in violations)
+
+
+# {device_uuid: signature}. In-memory, so a daemon restart re-reports each distinct fault once --
+# which is the right trade: an operator who restarts ingestion to clear a fault wants to know
+# whether it came back.
+_last_violation_signature = {}
+
+
+def record_payload_violations(device: dict, violations, observed_at):
+    """
+    Write one SCHEMA_REJECTION row to the digital thread, but only when the fault is NEW.
+
+    THE CHANGE CHECK IS NOT AN OPTIMISATION -- it is the difference between a feature and an
+    outage. DDATA arrives continuously; under report-by-exception a busy cell publishes several
+    messages a second. Writing a row per non-conforming message would append tens of thousands of
+    rows a day to a table that is append-only and that NO application role can prune, and the first
+    symptom would be the disk filling. Migration 0005 made exactly this argument about heartbeat
+    UPDATEs; this is the same argument about a path 0005 cannot see, because these rows are written
+    through an RPC rather than by the audit trigger.
+
+    So: write when the SET of (metric, code) pairs changes, and never otherwise. A device whose
+    fault persists is recorded once; a device that develops a second fault is recorded again.
+    """
+    if not AUDIT_PAYLOAD_REJECTIONS or not supabase_client or not device:
+        return
+
+    device_id = device.get("id")
+    if not device_id:
+        return
+
+    signature = _violation_signature(violations)
+
+    if not violations:
+        # RECOVERY CLEARS THE MEMO, so a fault that returns after being fixed is recorded again.
+        # Without this, a device that was repaired and then regressed would stay silent forever --
+        # the worst possible failure for an audit trail, because it is indistinguishable from
+        # health.
+        _last_violation_signature.pop(device_id, None)
+        return
+
+    if _last_violation_signature.get(device_id) == signature:
+        count("payload_violations_suppressed", len(violations))
+        return
+
+    try:
+        supabase_client.rpc("record_ingestion_rejection", {
+            "p_device_id": device_id,
+            "p_violations": violations,
+            "p_observed_at": observed_at.isoformat(),
+        }).execute()
+
+        # Recorded only after the write SUCCEEDS. Marking it first would mean a transient PostgREST
+        # failure silently swallowed the fault until its signature happened to change -- the same
+        # trap test_audit_write_dedup.py already covers on the DBIRTH path.
+        _last_violation_signature[device_id] = signature
+        count("payload_violations_recorded", len(violations))
+
+        logger.warning(
+            "SCHEMA REJECTION: device '%s' -- %d violation(s): %s",
+            device.get("name") or device_id,
+            len(violations),
+            ", ".join(sorted({"%s (%s)" % (v.get("metric") or "?", v["code"]) for v in violations}))
+        )
+    except Exception as e:
+        count("payload_violation_write_failures")
+        logger.error(
+            "Could not record payload violations for '%s': %s", device.get("name"), e, exc_info=True
+        )
+
+
 def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = None, client=None):
     """
     On Sparkplug B DDATA:
@@ -1632,6 +2107,13 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     payload_ts = payload.timestamp if hasattr(payload, 'timestamp') and payload.timestamp > 0 else int(time.time() * 1000)
     payload_dt = datetime.fromtimestamp(payload_ts / 1000.0, timezone.utc)
 
+    # DECLARED OUT HERE so they survive the try, and so the conformance record is written only
+    # after the telemetry write has actually committed. An exception inside rolls the batch back
+    # and leaves these unread, which is correct: a message whose rows were never stored is not
+    # evidence about the device, it is evidence about the database.
+    observed = []
+    dropped = []
+
     try:
         with db_conn:
             with db_conn.cursor() as cur:
@@ -1658,6 +2140,13 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                 rejected_timestamps = 0
                 unresolved_aliases = 0
                 for metric in payload.metrics:
+                    # -----------------------------------------------------------------------
+                    # `observed` and `dropped` are filled alongside the decisions the loop was
+                    # already making -- never by a second pass. A separate conformance walk over
+                    # the payload would have to re-resolve every alias and re-derive every value
+                    # kind, and would then be free to disagree with what was actually written,
+                    # which is the one thing an audit record must not do.
+                    # -----------------------------------------------------------------------
                     # The alias is the only identity an optimised DATA metric carries. Resolve
                     # before every other test, including the identity-metric filter -- comparing
                     # an empty name against IDENTITY_METRICS never matches, so an aliased Asset_ID
@@ -1665,6 +2154,16 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                     metric_name = resolve_metric_name(group_id, gateway_wire_id, metric)
                     if metric_name is None:
                         unresolved_aliases += 1
+                        # NO NAME, and that is the whole condition being reported -- the metric
+                        # arrived as an alias no birth certificate explains. The alias number is
+                        # the only identity it has, so it is what the record carries.
+                        dropped.append((
+                            None,
+                            "unresolved_alias",
+                            "alias %s is not in edge node '%s' alias table" % (
+                                getattr(metric, "alias", None), gateway_wire_id
+                            ),
+                        ))
                         continue
 
                     if metric_name in IDENTITY_METRICS:
@@ -1682,26 +2181,57 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                     # key would collapse them into a single row anyway.
                     if not _timestamp_is_sane(metric_dt):
                         rejected_timestamps += 1
+                        dropped.append((
+                            metric_name,
+                            "timestamp_out_of_window",
+                            "timestamp %s is outside the sanity window (-%ds/+%ds)" % (
+                                metric_dt.isoformat(),
+                                TELEMETRY_MAX_AGE_SECONDS,
+                                TELEMETRY_MAX_FUTURE_SECONDS,
+                            ),
+                        ))
                         continue
 
                     val_double = None
                     val_string = None
                     val_bool = None
 
+                    # WHICH OF THE THREE COLUMNS THE VALUE LANDS IN is exactly what a JSON Schema
+                    # `type` constrains, so the conformance check reads this rather than
+                    # re-inspecting the protobuf. The four numeric wire types collapse to one kind
+                    # here for the same reason they collapse to one column.
+                    value_kind = None
+
                     if metric.HasField("int_value"):
                         val_double = float(metric.int_value)
+                        value_kind = "double"
                     elif metric.HasField("long_value"):
                         val_double = float(metric.long_value)
+                        value_kind = "double"
                     elif metric.HasField("float_value"):
                         val_double = float(metric.float_value)
+                        value_kind = "double"
                     elif metric.HasField("double_value"):
                         val_double = metric.double_value
+                        value_kind = "double"
                     elif metric.HasField("boolean_value"):
                         val_bool = metric.boolean_value
+                        value_kind = "bool"
                     elif metric.HasField("string_value"):
                         val_string = metric.string_value
+                        value_kind = "string"
                     else:
+                        # A metric carrying no recognised value field. Skipped before this change
+                        # too, and skipped in silence -- no counter, no log line, nothing. It is a
+                        # genuine loss and now says so.
+                        dropped.append((
+                            metric_name,
+                            "no_value",
+                            "metric carries no recognised Sparkplug value field",
+                        ))
                         continue
+
+                    observed.append((metric_name, value_kind))
 
                     rows.append(
                         (metric_dt, asset_id, metric_name, val_double, val_string, val_bool)
@@ -1773,6 +2303,28 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         # a write that fails once a minute is invisible in a log nobody is tailing.
         count("write_failures")
         logger.error("Error writing DDATA telemetry to TimescaleDB: %s", e, exc_info=True)
+        return
+
+    # -------------------------------------------------------------------------------------
+    # Conformance, AFTER the commit and OUTSIDE the transaction.
+    #
+    # Outside because this writes to Supabase over PostgREST, not to the historian: holding a
+    # TimescaleDB transaction open across an HTTP round trip would put network latency inside a
+    # lock on the hottest path in the process.
+    #
+    # After because a rejection row asserts something about the DEVICE. If the batch rolled back,
+    # the honest statement is that we know nothing about this message -- hence the early return
+    # above rather than falling through.
+    # -------------------------------------------------------------------------------------
+    # The flag is tested HERE as well as inside record_payload_violations, and the duplication is
+    # deliberate: device_modelled_types() can issue a PostgREST round trip on a cache miss, and a
+    # daemon with auditing switched off must not pay for a lookup whose only consumer is disabled.
+    if AUDIT_PAYLOAD_REJECTIONS:
+        record_payload_violations(
+            device,
+            payload_violations(observed, dropped, device_modelled_types(device["id"])),
+            payload_dt,
+        )
 
 
 def on_connect(client, userdata, flags, rc):
@@ -2111,6 +2663,49 @@ def start_stats_reporter():
     logger.info("Throughput counters reporting every %ss", INGESTION_STATS_INTERVAL)
 
 
+def start_metrics_endpoint():
+    """
+    Serve the counter registry in Prometheus exposition format (issues #22 and #24).
+
+    `db_connected` IS READ AT SCRAPE TIME rather than tracked as a counter, because it is a state
+    and not an event. `_ts_conn.closed` is psycopg2's own view: non-zero once the connection was
+    closed on this side. It cannot see a connection dropped by the server -- that still reports 0
+    and fails on first use -- so this gauge answers "did the daemon believe it had a connection",
+    which is the honest question. `acs_ingestion_db_connect_failures_total` rising while this reads
+    1 is the shape of a server-side drop.
+    """
+    if INGESTION_METRICS_PORT <= 0:
+        # The policy decision lives here rather than in metrics.py, where port 0 means "ask the OS
+        # for a free one" as it does everywhere else in the socket API.
+        logger.info("Metrics endpoint disabled (INGESTION_METRICS_PORT=%s).", INGESTION_METRICS_PORT)
+        return None
+
+    def collect():
+        # CACHE OCCUPANCY IS READ AT SCRAPE TIME for the same reason db_connected is: it is a
+        # state, not an event. The evictions counter beside it is the one worth an alert -- a
+        # non-zero value means MAX_ENTITIES_PER_CACHE is actually being reached, which is either a
+        # fleet larger than the cap or the id churn the cap exists to absorb (issue #23). Until
+        # the bound existed there was nothing to count and no way to see either.
+        labelled = dict(labelled_snapshot())
+        for cache in (_device_cache, _gateway_cache, _schema_cache):
+            labelled[("acs_ingestion_cache_entries", (("cache", cache.name),))] = len(cache)
+            labelled[("acs_ingestion_cache_evictions_total", (("cache", cache.name),))] = (
+                cache.evictions
+            )
+
+        return metrics.render_exposition(
+            counters=counter_snapshot(),
+            labelled=labelled,
+            gauges={
+                "acs_ingestion_up": 1,
+                "acs_ingestion_db_connected":
+                    1 if (_ts_conn is not None and not _ts_conn.closed) else 0,
+            },
+        )
+
+    start_metrics_server(INGESTION_METRICS_PORT, collect, logger)
+
+
 def main():
     logger.info("Initializing Supabase + TimescaleDB Ingestion Daemon...")
     _require_credentials()
@@ -2141,6 +2736,11 @@ def main():
     # Also before the connect loop, so a daemon that cannot reach the broker still reports "no
     # traffic" on a timer rather than going silent in a way that looks like a crash.
     start_stats_reporter()
+    # Same reasoning, and it matters more here: a daemon stuck retrying the broker must still be
+    # SCRAPEABLE, or the one condition worth alerting on is the one that takes the endpoint down
+    # with it. `acs_ingestion_up` is 1 and every throughput counter is flat -- which is exactly
+    # what "connected to nothing" looks like, and is distinguishable from a dead target.
+    start_metrics_endpoint()
 
     while True:
         try:

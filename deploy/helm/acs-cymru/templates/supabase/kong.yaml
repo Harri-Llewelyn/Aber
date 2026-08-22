@@ -24,8 +24,10 @@ rendered manifest entirely, and is the same mechanism `supabase-kong-init` uses 
 including the leftover-placeholder scan, which skips comment lines because kong.yml's header
 documents the placeholder convention by name.
 
-Kong 2.8 has no environment interpolation in declarative config (that arrived in 3.x), which is why
-substitution happens outside the process on both targets.
+Kong 3.x can interpolate `${{env.VAR}}` in declarative config, which 2.8 could not -- so this is
+now a choice rather than a constraint, and on THIS target it is clearly the right one: rendering
+into a Secret keeps the key material out of both the rendered manifest and the pod's environment,
+which env interpolation would not.
 */}}
 apiVersion: v1
 kind: ConfigMap
@@ -95,7 +97,7 @@ spec:
       {{- end }}
       initContainers:
         - name: render-config
-          image: alpine:3.20
+          image: alpine:3.24
           imagePullPolicy: IfNotPresent
           env:
             {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" (include "acs-cymru.secretName" .) "key" "SUPABASE_ANON_KEY") | nindent 12 }}

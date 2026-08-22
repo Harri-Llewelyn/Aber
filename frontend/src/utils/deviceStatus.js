@@ -74,6 +74,49 @@ export function deviceStatusChipClass(status) {
   return 'chip-offline';
 }
 
+/**
+ * The chip class for a device on the shopfloor map, alert state included (issue #34).
+ *
+ * WHY RED IS ALLOWED HERE AND NOWHERE ELSE IN THIS FILE. `deviceStatusChipClass` above will never
+ * return a danger treatment, and deviceStatus.test.js asserts that for every status: red on this
+ * dashboard would assert a PROCESS CONDITION it has no authority over, which is the whole reason
+ * threshold alerting was moved to Grafana. That rule is unchanged and this does not weaken it.
+ *
+ * An alert is the one case that is not a derivation. Grafana evaluated its own rules against the
+ * historian, posted the verdict to grafana-alert-webhook, and it landed in `platform_alerts`. Painting
+ * that red RELAYS a judgement rather than making one -- so this takes an alert, never a threshold,
+ * and there is no code path here that can turn a telemetry value into a colour.
+ *
+ * PRECEDENCE, AND EACH STEP EARNS ITS PLACE:
+ *   1. archived  -- a decommissioned machine reads inert whatever else is true of it. An alert
+ *                   still firing against something taken out of service is noise about a decision
+ *                   already made, and OverviewTab already dimmed archived rows for this reason.
+ *   2. alerting  -- above status, because an OFFLINE device with a firing alert is the most urgent
+ *                   thing on the page, not the least. Grey would bury it.
+ *   3. status    -- the existing online/quarantined/offline treatment, unchanged.
+ *
+ * @param {object} device  a device row
+ * @param {object|null} alert  the worst alert firing on it -- see utils/deviceAlerts.js
+ */
+export function deviceChipClass(device, alert) {
+  if (device?.is_archived) return 'chip-offline';
+  if (alert) return 'chip-danger';
+  return deviceStatusChipClass(deviceLifecycleStatus(device));
+}
+/**
+ * The status dot's colour for a device, alert state included (issue #34).
+ *
+ * The Cells and Gateways pages list their devices as a dot and a name rather than as chips, so
+ * this is the same decision as deviceChipClass() rendered in the other idiom -- same precedence,
+ * same reason red is permitted, stated once above. Two helpers rather than one because the two
+ * surfaces genuinely take different values (a class, a colour), and collapsing them would mean a
+ * caller mapping one to the other at every site.
+ */
+export function deviceDotColor(device, alert) {
+  if (device?.is_archived) return 'var(--text-muted)';
+  if (alert) return 'var(--danger)';
+  return deviceStatusDotColor(deviceLifecycleStatus(device));
+}
 /** Badge class for the Devices table and the context drawer. */
 export function deviceStatusBadgeClass(status) {
   if (status === DEVICE_STATUS.ONLINE) return 'badge-online';

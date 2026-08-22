@@ -139,6 +139,16 @@ spec:
                 An empty password makes roles.sql skip the role rather than create one with a
                 blank secret, so this needs no `if` around it.
               */}}
+              {{/*
+                BETWEEN aggregates.sql AND roles.sql, and both halves of that are load-bearing.
+                It reports on the rollups, so they must exist; roles.sql grants SELECT on the view
+                it creates, so it must precede that. Run out of order the failure is an empty
+                data-lifecycle panel on a fresh volume only -- which is why roles.sql asserts the
+                view exists rather than leaving it to be noticed.
+              */}}
+              echo 'Reconciling the storage footprint view...'
+              $PSQL -f /sql/storage.sql
+
               echo 'Reconciling read-only BI role...'
               $PSQL -v bi_reader_password="$BI_READER_PASSWORD" -f /sql/roles.sql
               {{- else }}

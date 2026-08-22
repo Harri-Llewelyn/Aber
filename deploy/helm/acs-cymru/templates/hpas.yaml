@@ -40,12 +40,29 @@ Deployments here are NOT release-prefixed, deliberately (see _helpers.tpl). An H
 prefixed name reports `FailedGetScale` and scales nothing.
 =================================================================================================
 */}}
+{{/*
+THIS TABLE AND THE ALLOW-LIST MUST NAME THE SAME FOUR, and the check below is what makes that true
+rather than merely intended.
+
+`acs-cymru.validateAutoscaling` refuses any component outside `acs-cymru.autoscalableWorkloads`
+(issue #31). If a name were added there and not here it would pass validation and then render no
+HPA -- which is exactly the silent failure that issue was about, reintroduced one level down. The
+reverse is quieter still: a name here and not there is unreachable code.
+
+Values lookups cannot be derived from a list of names -- `.Values.supabaseRest.enabled` is not
+spelled like its component -- so the mapping is written out and then ASSERTED, rather than being
+generated or trusted.
+*/}}
 {{- $enabledOf := dict
       "supabase-rest" .Values.supabaseRest.enabled
       "supabase-kong" .Values.supabaseKong.enabled
       "supabase-functions" .Values.supabaseFunctions.enabled
       "frontend" .Values.frontend.enabled
 -}}
+{{- $allowed := keys (include "acs-cymru.autoscalableWorkloads" . | fromYaml) -}}
+{{- if ne (join "," (sortAlpha $allowed)) (join "," (sortAlpha (keys $enabledOf))) -}}
+{{- fail (printf "\n\nacs-cymru: the HPA dispatch table and the autoscaling allow-list disagree.\n\n  allow-list (_helpers.tpl): %v\n  dispatch table (hpas.yaml): %v\n\nA name in the allow-list but not the table passes validation and then renders no HPA, silently --\nwhich is the failure issue #31 removed. Add it to both, or to neither.\n" (sortAlpha $allowed) (sortAlpha (keys $enabledOf))) -}}
+{{- end -}}
 {{- range .Values.autoscaling.components }}
 {{- if index $enabledOf . }}
 ---

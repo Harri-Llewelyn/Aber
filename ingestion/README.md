@@ -14,6 +14,7 @@ allowed to be heard at all.
 | [`test_gateway_binding.py`](test_gateway_binding.py) | Gateway↔device binding, telemetry sanity window, append-only historian |
 | [`test_declared_metrics.py`](test_declared_metrics.py) | Birth-metric observation, change-only writes, alias resolution, rebirth rate limit, device watchdog |
 | [`test_device_location.py`](test_device_location.py) | Invariant: the daemon never writes an asset's location |
+| [`test_entity_cache.py`](test_entity_cache.py) | The bounded resolution caches: LRU eviction, and the in-place-mutation and negative-entry contracts |
 
 ---
 
@@ -311,6 +312,9 @@ published default is a silent security downgrade, and the failure mode is silenc
 | `DEVICE_WATCHDOG_INTERVAL_SECONDS` | `30` | Sweep interval |
 | `REBIRTH_REQUEST_INTERVAL_SECONDS` | `300` | Minimum gap between rebirth requests to one edge node |
 | `MAX_ALIASES_PER_NODE` | `5000` | Cap on the per-node alias table |
+| `MAX_ENTITIES_PER_CACHE` | `1000` | Cap on each entity resolution cache. Same reasoning, applied to the caches keyed by the id seen on the wire |
+| `INGESTION_STATS_INTERVAL` | `60` | Seconds between `STATS` log lines. `0` disables the reporter |
+| `INGESTION_METRICS_PORT` | `9108` | Prometheus endpoint. `0` disables it — see [Metrics](#metrics) |
 
 The first three must match between `docker-compose.yml` and the chart's `ingestion.*` values —
 `validate.py`'s watchdog check reads them from its own environment to decide whether the window is
@@ -334,6 +338,106 @@ indistinguishable on the wire from a successful interception, and a daemon that 
 certificate would report a healthy TLS connection while talking to anything at all.
 
 ---
+
+## Metrics
+
+`GET :9108/metrics`, Prometheus text format, **no credential**. `INGESTION_METRICS_PORT=0` disables
+it. Issues #22 and #24.
+
+**It renders the counter registry the daemon already kept** — it is not a second instrumentation.
+Every `count()` sits at the site that already made the decision, one-to-one with an existing
+`logger.warning`, and [`metrics.py`](metrics.py) translates those flat names onto Prometheus names
+and labels at scrape time. That is why the counters and the log cannot disagree about what
+happened, and why adding a metric here is a mapping rather than a code change on the hot path.
+
+The `STATS` log line remains. The two answer different questions: this endpoint is for a
+Prometheus, the log line is for whoever is reading `docker logs` at 3am with no Prometheus to hand.
+
+### What each metric means, and what a non-zero value tells you
+
+| Metric | Labels | A non-zero value means |
+| :--- | :--- | :--- |
+| `acs_ingestion_messages_total` | `msg_type` | Messages acted on, after parsing and the command-topic filter. **Flat is the signal**: a running daemon consuming nothing. |
+| `acs_ingestion_metrics_written_total` | — | Metric samples written to the historian. |
+| `acs_ingestion_messages_dropped_total` | `reason` | **Telemetry that was NOT recorded.** Under report-by-exception nothing restates it. See the reasons below. |
+| `acs_ingestion_timestamps_rejected_total` | — | A metric's timestamp failed validation. The message was still processed; that metric was not. |
+| `acs_ingestion_alias_unresolved_total` | — | An alias arrived with no known name. Normal briefly after a restart, pending a rebirth; sustained means a node is not re-birthing. |
+| `acs_ingestion_sequence_gaps_total` | `edge_node` | **A message was lost between the edge node and the historian.** The only loss signal RBE offers. |
+| `acs_ingestion_sequence_messages_missed_total` | `edge_node` | How many, as a **lower bound** — see the caveat below. |
+| `acs_ingestion_write_failures_total` | — | A historian write raised. That telemetry is gone. |
+| `acs_ingestion_db_reconnects_total` / `_db_connect_failures_total` | — | Historian connection churn. Failures rising while `db_connected` reads 1 is the shape of a server-side drop. |
+| `acs_ingestion_payload_violations_recorded_total` | — | A DDATA payload failed schema validation and was recorded in `digital_thread` (migration 0026). The telemetry was still written. |
+| `acs_ingestion_db_connected` | — | Gauge. 0 means telemetry is being dropped **now**. |
+| `acs_ingestion_up` | — | Gauge, always 1. Distinguishes a running daemon from a dead scrape target. |
+| `acs_ingestion_cache_entries` | `cache` | Gauge. Entries held in each resolution cache (`device`, `gateway`, `schema`), bounded by `MAX_ENTITIES_PER_CACHE`. |
+| `acs_ingestion_cache_evictions_total` | `cache` | **Non-zero is the interesting case.** The cap was reached, so either the fleet exceeds it or something is publishing ids that churn. |
+| `acs_ingestion_unmapped_counter_total` | `counter` | A counter exists in `ingestion.py` with no mapping in `metrics.py`. Not a data fault — a monitoring one. |
+
+`reason` on the drop counter: `gateway_binding` (a device published under a gateway that does not
+own it), `quarantined_or_unregistered`, `directory_unavailable`, `db_unavailable`.
+
+### The sequence counters are a lower bound, and that is inherent
+
+`seq` is 8-bit and the gap size is computed modulo 256, so **a single gap larger than 255 is
+undercounted**. `acs_ingestion_sequence_messages_missed_total` is therefore a floor, not a
+measurement. Read it beside `acs_ingestion_sequence_gaps_total`: the gap count is exact, the missed
+count is "at least this many".
+
+Two things that are *not* gaps and never increment either counter — the 255 → 0 wrap, which is the
+specification, and the first message seen after a restart, which has no baseline. Counting the
+second would fire at every node on every deploy, which is how an alert becomes ignored.
+
+**A restart is itself lossy, and this makes it visible.** Messages published while the daemon is
+down are not replayed, so the first gap after a deploy is real telemetry that was never recorded.
+That is worth knowing rather than smoothing away.
+
+### First three things to check on a non-zero gap counter
+
+1. **Is it one edge node or all of them?** The `edge_node` label is there to answer this. One is a
+   flapping gateway or its network; all of them is the broker, or this daemon.
+2. **Did the daemon or the broker restart?** Cross-check `acs_ingestion_up` and the container's
+   start time. A gap concentrated at one instant is a restart; a steady rate is live loss.
+3. **Is a rebirth being answered?** A gap triggers an NCMD rebirth request, which repairs the
+   divergence by re-declaring every metric. If `acs_ingestion_alias_unresolved_total` is also
+   climbing, the node is not answering.
+
+### Alert rules — shipped
+
+**All five are provisioned**, in the `Ingestion Pipeline` group of
+[`grafana/provisioning/alerting/alert-rules.yaml`](../grafana/provisioning/alerting/alert-rules.yaml),
+reading the `prometheus` datasource the Compose stack now provides.
+
+**The table stays even though the rules shipped**, because a provisioned rule states its threshold
+and not its reasoning — and the reasoning is the part that has to survive someone deciding a number
+looks wrong.
+
+| Alert | Expression | For | Why this threshold |
+| :--- | :--- | :--- | :--- |
+| Ingestion consuming nothing | `rate(acs_ingestion_messages_total[5m]) == 0` | 10m | A running daemon with no traffic. On a plant that is always publishing this is the highest-value rule here, and it is the one the heartbeat file cannot express. |
+| Telemetry being dropped | `sum(rate(acs_ingestion_messages_dropped_total[5m])) > 0` | 5m | Any sustained drop rate. Not "above a threshold" — the correct number is zero, and `for: 5m` is what absorbs a restart. |
+| Binding rejections rising | `rate(acs_ingestion_messages_dropped_total{reason="gateway_binding"}[15m]) > 0` | 15m | **Not a health metric.** It is the signal that something published telemetry for a device it does not own. Worth its own rule at its own severity. |
+| Historian unreachable | `acs_ingestion_db_connected == 0` | 2m | Telemetry is being dropped now. Short `for`, because the daemon already retries internally. |
+| Message loss | `increase(acs_ingestion_sequence_gaps_total[15m]) > 0` | — | Any increase is worth a warning: it is evidence a change was never recorded. A *sustained* rate — say `> 0.1/s` for 15m — is a page. |
+
+**Binding rejections rising is the one to read first.** It was the last outstanding rule of the
+platform alerting work: the other three platform rules — Gateway Stale, Enrolment Stuck, Quarantine
+Queue Depth — read *state* out of Supabase through `public.platform_health`, and this one reads a
+**counter**, which is why it could not exist until this endpoint did.
+
+**On Kubernetes they are provisioned but not necessarily evaluable.** The chart renders a
+`ServiceMonitor` when `telemetry.serviceMonitor.enabled` is set, and that needs the Prometheus
+Operator CRDs the chart deliberately does not install — so a cluster that brings no Prometheus of
+its own gets five rules against a datasource whose health check fails. That is stated at the URL
+placeholder in `grafana/provisioning/datasources/datasources.template.yml`, which is also why the
+datasource URL is substituted per deployment target rather than committed.
+
+### Deliberately not implemented
+
+`acs_ingestion_write_seconds`, the histogram in #22's proposal. It needs a timing wrapper on the
+historian write, which is the one path in this daemon that runs per sample on the broker callback
+thread — the place least appropriate for casual overhead. It is worth doing with the horizontal
+ingestion scaling work, which exists to unblock that same thread: a latency number is worth far
+more once there is a before-and-after to compare it against.
 
 ## Testing
 

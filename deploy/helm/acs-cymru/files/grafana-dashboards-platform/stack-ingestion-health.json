@@ -394,6 +394,372 @@
           "rawSql": "SELECT backend_type AS \"Backend\", object AS \"Object\",\n       context AS \"Context\", hits AS \"Cache hits\", reads AS \"Disk reads\"\n  FROM pg_stat_io\n WHERE hits > 0 OR reads > 0\n ORDER BY reads DESC NULLS LAST LIMIT 20"
         }
       ]
+    },
+    {
+      "id": 10,
+      "datasource": null,
+      "type": "row",
+      "title": "Data Lifecycle & Storage",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      }
+    },
+    {
+      "id": 11,
+      "datasource": {
+        "type": "postgres",
+        "uid": "supabase"
+      },
+      "type": "stat",
+      "title": "Total Stored",
+      "description": "Every byte this platform holds, across both databases: the historian's hypertables and rollups over postgres_fdw, plus the Supabase public schema locally. Table, index and TOAST included.",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "supabase"
+          },
+          "rawSql": "SELECT sum(total_bytes) AS \"Total\" FROM public.storage_footprint"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 1,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 12,
+      "datasource": {
+        "type": "postgres",
+        "uid": "supabase"
+      },
+      "type": "stat",
+      "title": "Audit Trail (never pruned)",
+      "description": "public.digital_thread. THE ONE RELATION HERE WITH NO RETENTION POLICY BY DESIGN -- it is append-only to every application role and migration 0003 blocks UPDATE and DELETE, so this number only ever rises. Watching it is the point of separating it from `metadata`.",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "supabase"
+          },
+          "rawSql": "SELECT total_bytes AS \"Audit\" FROM public.storage_footprint\n WHERE source = 'platform' AND relation = 'digital_thread'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 1,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 13,
+      "datasource": {
+        "type": "postgres",
+        "uid": "supabase"
+      },
+      "type": "stat",
+      "title": "Raw Telemetry Compression",
+      "description": "Bytes after compression as a fraction of before, for the raw hypertable. Empty in TWO cases and they are not the same: TIMESCALE_COMPRESS_AFTER is 'never', or the policy is on and no chunk has aged past it yet. hypertable_compression_stats() reports NULL for both, so storage_footprint passes NULL through rather than inventing a zero -- 'compressed to nothing' and 'nothing compressed' must not render alike.",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "supabase"
+          },
+          "rawSql": "SELECT compressed_bytes::numeric / NULLIF(uncompressed_bytes, 0) AS \"Ratio\"\n  FROM public.storage_footprint\n WHERE tier = 'raw' AND uncompressed_bytes IS NOT NULL"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "noValue": "no compressed chunks yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 14,
+      "datasource": {
+        "type": "postgres",
+        "uid": "supabase"
+      },
+      "type": "stat",
+      "title": "Raw Retention Horizon",
+      "description": "How far back the raw hypertable's chunks reach. Read from chunk BOUNDARIES in the catalog, not from min(time) -- a storage dashboard must not be the reason for a full scan of the historian. Should track TIMESCALE_RETAIN_FOR; a horizon well past it means the retention policy is not running.",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "supabase"
+          },
+          "rawSql": "SELECT EXTRACT(EPOCH FROM (now() - oldest_data)) AS \"Age\"\n  FROM public.storage_footprint WHERE tier = 'raw'"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "noValue": "no chunks yet"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "value",
+        "colorMode": "none"
+      }
+    },
+    {
+      "id": 15,
+      "datasource": {
+        "type": "postgres",
+        "uid": "supabase"
+      },
+      "type": "barchart",
+      "title": "Storage by Tier",
+      "description": "Where the bytes are. 'Total stored is 4 GB' tells an operator nothing they can act on; '3.6 GB is raw telemetry retention will drop, 300 MB is an audit trail nothing will ever drop' tells them what to do next.",
+      "gridPos": {
+        "h": 9,
+        "w": 10,
+        "x": 0,
+        "y": 29
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "supabase"
+          },
+          "rawSql": "SELECT tier AS \"Tier\", sum(total_bytes) AS \"Bytes\"\n  FROM public.storage_footprint\n GROUP BY tier\n ORDER BY sum(total_bytes) DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "decimals": 1,
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "orientation": "horizontal",
+        "xTickLabelRotation": 0,
+        "showValue": "auto",
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 16,
+      "datasource": {
+        "type": "postgres",
+        "uid": "supabase"
+      },
+      "type": "table",
+      "title": "Relations by Size",
+      "description": "Every relation, both databases, largest first. `chunks` and the compression columns are empty for platform tables because those are hypertable concepts -- NULL rather than zero, since a plain table is not 'compressed to nothing', it is one the question does not apply to. `collected_at` advancing is what proves the FDW read is live rather than a cached foreign scan.",
+      "gridPos": {
+        "h": 9,
+        "w": 14,
+        "x": 10,
+        "y": 29
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "datasource": {
+            "type": "postgres",
+            "uid": "supabase"
+          },
+          "rawSql": "SELECT source        AS \"Database\",\n       tier          AS \"Tier\",\n       relation      AS \"Relation\",\n       total_bytes   AS \"Total\",\n       table_bytes   AS \"Table\",\n       index_bytes   AS \"Index\",\n       chunks        AS \"Chunks\",\n       oldest_data   AS \"Oldest\"\n  FROM public.storage_footprint\n ORDER BY total_bytes DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Total"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Table"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Index"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      }
     }
   ]
 }

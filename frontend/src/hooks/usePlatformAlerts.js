@@ -10,14 +10,20 @@ const POLL_INTERVAL_MS = 15000
 /**
  * The live set of firing Grafana alerts, and a toast on each transition.
  *
+ * MACHINE AND PLATFORM ALIKE. It was `useDeviceAlerts` while every rule was a machine condition;
+ * the platform alert rules added rules about a gateway going stale and about the fleet as a whole, so the
+ * row it reads now carries `entity_type` and the hook is named for what it actually holds. What a
+ * CONSUMER does with a non-device alert is the consumer's decision -- notably, the shopfloor map
+ * reddens a device only for a `device` alert; see utils/deviceAlerts.js.
+ *
  * WHERE THESE COME FROM. Grafana evaluates the rules in grafana/provisioning/alerting/ against the
  * historian, posts to the grafana-alert-webhook edge function, and that writes an occurrence into
- * `public.device_alerts`. This hook reads the `device_alerts_active` view and subscribes to the
+ * `public.platform_alerts`. This hook reads the `platform_alerts_active` view and subscribes to the
  * table. Nothing here evaluates anything -- the dashboard deliberately stopped deriving alarm state
  * from telemetry values (see utils/deviceStatus.js), and this is the other half of that change.
  *
  * SUBSCRIBES TO THE TABLE, READS THE VIEW. Postgres logical replication publishes TABLES; a view has
- * no replica identity and cannot be in a publication. So the socket watches `device_alerts` for any
+ * no replica identity and cannot be in a publication. So the socket watches `platform_alerts` for any
  * change and the authoritative "what is firing now" answer comes from re-reading the view, which
  * applies the newest-occurrence-wins rule a client would otherwise have to reimplement.
  *
@@ -25,7 +31,7 @@ const POLL_INTERVAL_MS = 15000
  * already-known alerts so a page load does not toast everything that was already firing. Without it
  * this is a list, not an alert.
  */
-export function useDeviceAlerts(showToast) {
+export function usePlatformAlerts(showToast) {
   const [active, setActive] = useState([])
   const knownRef = useRef(new Map())
   const primedRef = useRef(false)
@@ -44,8 +50,8 @@ export function useDeviceAlerts(showToast) {
    */
   const refresh = useCallback(async () => {
     const { data, error } = await supabase
-      .from('device_alerts_active')
-      .select('id, fingerprint, sparkplug_id, device_id, alert_name, severity, summary, starts_at')
+      .from('platform_alerts_active')
+      .select('id, fingerprint, entity_type, entity_id, sparkplug_id, alert_name, severity, summary, starts_at')
       .order('starts_at', { ascending: false })
 
     if (error) {
@@ -119,7 +125,7 @@ export function useDeviceAlerts(showToast) {
           .channel('device-alerts')
           .on(
             'postgres_changes',
-            { event: '*', schema: 'public', table: 'device_alerts' },
+            { event: '*', schema: 'public', table: 'platform_alerts' },
             fire
           )
           .subscribe((status, err) => {

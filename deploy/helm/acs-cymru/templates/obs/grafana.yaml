@@ -212,7 +212,16 @@ spec:
                 echo 'BI_READER_PASSWORD must be set -- Grafana would otherwise provision the TimescaleDB datasource with an empty password. It is the password of the read-only powerbi_reader role created by timescaledb/roles.sql.' >&2
                 exit 1
               fi
+              {{- /*
+                __PROMETHEUS_URL__ points at the CLUSTER'S OWN Prometheus, not at one this chart
+                ships. Compose runs its own and substitutes its service name; here the value comes
+                from `grafana.prometheusUrl`, defaulting to kube-prometheus-stack's conventional
+                service. The chart deliberately does not deploy a Prometheus -- a second one would
+                duplicate every series the Operator already collects through the ServiceMonitors
+                in obs/servicemonitors.yaml.
+              */}}
               sed -e "s|__BI_READER_PASSWORD__|$BI_READER_PASSWORD|g" \
+                  -e "s|__PROMETHEUS_URL__|{{ .Values.grafana.prometheusUrl }}|g" \
                   /config/datasources.template.yml > /datasources/datasources.yml
               # Comment lines excluded: the template's own header documents the placeholder
               # convention BY NAME, so a whole-file scan flags the documentation of the rule as a

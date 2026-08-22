@@ -29,6 +29,14 @@ jobs:
       - name: Run Vitest Unit Tests
         run: |
           cd frontend
+          # `set -o pipefail` IS LOAD-BEARING, and its absence hid a red suite for a whole run.
+          #
+          # A pipeline reports the exit status of its LAST command, which here is `tee` -- and tee
+          # succeeds whatever vitest did. So a failing test left this step GREEN, and the only
+          # thing that noticed was the count check below, which could not parse
+          # `Tests  1 failed | 1289 passed` and reported ITSELF broken. The job failed one step
+          # late, for the wrong reason, pointing at the wrong file.
+          set -o pipefail
           npm test 2>&1 | tee /tmp/vitest.log
 
       # The one documented count that cannot be derived statically -- so it is asserted HERE, where
@@ -41,8 +49,18 @@ jobs:
           #   ^[[2m      Tests ^[[22m ^[[1m^[[32m684 passed^[[39m…
           # and a naive `grep 'Tests +[0-9]+ passed'` matches NOTHING -- which would have failed this
           # step on a perfectly green build, and pointed at the README rather than at the grep.
-          ACTUAL=$(sed -r 's/\x1B\[[0-9;]*[mGKH]//g' /tmp/vitest.log \
-                   | grep -oE 'Tests +[0-9]+ passed' | grep -oE '[0-9]+' | tail -1)
+          # A FAILING SUITE IS NAMED AS SUCH. vitest writes `Tests  1 failed | 1289 passed` when
+          # anything is red, which matches neither pattern below -- so this check used to report
+          # "could not read the test count" and send the reader off to fix the grep. `set -o
+          # pipefail` above now fails the run before this step is reached, but the branch stays:
+          # a parser that cannot tell a broken CHECK from a broken SUITE is one bad day away from
+          # being believed.
+          STRIPPED=$(sed -r 's/\x1B\[[0-9;]*[mGKH]//g' /tmp/vitest.log)
+          if printf '%s' "$STRIPPED" | grep -qE 'Tests +[0-9]+ failed'; then
+            echo "::error::the frontend suite has failing tests; the documented count is not the problem"
+            exit 1
+          fi
+          ACTUAL=$(printf '%s' "$STRIPPED" | grep -oE 'Tests +[0-9]+ passed' | grep -oE '[0-9]+' | tail -1)
           CLAIMED=$(grep -oE 'Frontend — [0-9]+ tests' README.md | grep -oE '[0-9]+')
           echo "vitest reports ${ACTUAL:-<unparsed>}; README claims ${CLAIMED:-<absent>}"
           # An empty ACTUAL is a broken check, not a documentation problem -- say which.
@@ -351,22 +369,52 @@ jobs:
             --set mosquitto.metrics.enabled=true > /tmp/sm.yaml
           python3 - <<'PY'
           import sys, yaml
+          # RESOLVED BY LABEL SELECTOR AND THEN BY PORT, THE WAY THE OPERATOR ACTUALLY DOES IT.
+          #
+          # This used to look the Service up by NAME, keyed on the ServiceMonitor's component label --
+          # which worked only while every Service happened to be named after its component. The metrics
+          # Service added for issue #22 is `ingestion-metrics` on component `ingestion`, so the check
+          # reported a broken target for a pairing that resolves perfectly in a cluster.
+          #
+          # A SELECTOR MATCHING SEVERAL SERVICES IS NOT ITSELF AN ERROR, and assuming it was is the second
+          # thing this got wrong. `mosquitto` and `mosquitto-external` both carry the mosquitto component
+          # label, but only the first publishes a `metrics` port -- the Operator builds targets from the
+          # Endpoints of the named port, so the external LoadBalancer contributes none and nothing is
+          # duplicated. What matters is how many matched Services actually CARRY the port: none means no
+          # target at all, more than one means every sample is scraped twice.
           docs = [d for d in yaml.safe_load_all(open('/tmp/sm.yaml', encoding='utf-8')) if d]
-          svc = {d['metadata']['name']: {p['name'] for p in d['spec']['ports']}
-                 for d in docs if d['kind'] == 'Service'}
+          services = [d for d in docs if d['kind'] == 'Service']
           sms = [d for d in docs if d['kind'] == 'ServiceMonitor']
           if not sms:
               print('::error::no ServiceMonitors rendered with the feature enabled')
               sys.exit(1)
+
+          def ports_of(svc):
+              return {p['name'] for p in svc['spec']['ports'] if 'name' in p}
+
           errors = []
           for sm in sms:
-              comp = sm['spec']['selector']['matchLabels']['app.kubernetes.io/component']
+              want = sm['spec']['selector']['matchLabels']
+              name = sm['metadata']['name']
+              matched = [
+                  svc for svc in services
+                  if all((svc['metadata'].get('labels') or {}).get(k) == v for k, v in want.items())
+              ]
+              if not matched:
+                  errors.append(f"{name}: selector {want} matches no Service, so it would have no target")
+                  continue
               for ep in sm['spec']['endpoints']:
-                  if ep['port'] not in svc.get(comp, set()):
-                      errors.append(f"{sm['metadata']['name']}: port '{ep['port']}' is not a named "
-                                    f"port on Service '{comp}' (has {sorted(svc.get(comp, []))})")
+                  carrying = [svc for svc in matched if ep['port'] in ports_of(svc)]
+                  if not carrying:
+                      seen = {svc['metadata']['name']: sorted(ports_of(svc)) for svc in matched}
+                      errors.append(f"{name}: no Service matched by its selector publishes a port named "
+                                    f"'{ep['port']}' ({seen})")
+                  elif len(carrying) > 1:
+                      names = sorted(svc['metadata']['name'] for svc in carrying)
+                      errors.append(f"{name}: port '{ep['port']}' is published by {len(carrying)} matched "
+                                    f"Services ({names}) -- every sample would be scraped twice")
                   else:
-                      print(f"  ok  {sm['metadata']['name']} -> {comp}:{ep['port']}{ep['path']}")
+                      print(f"  ok  {name} -> {carrying[0]['metadata']['name']}:{ep['port']}{ep['path']}")
           for e in errors:
               print(f"::error::{e}")
           sys.exit(1 if errors else 0)
@@ -442,10 +490,55 @@ jobs:
           # is silent -- scaling `ingestion` duplicates every telemetry row, every quarantine decision
           # and every append-only audit row, with no error and no crash. An autoscaler does it under
           # load, which is the worst moment to find out.
-          for c in ingestion node-red mosquitto realtime supabase-storage grafana supabase-db timescaledb; do
+          #
+          # THE NAMES COME FROM THE CHART, not from a list retyped here. This loop used to name
+          # eight components; the guard it tests hardcoded the same eight; and the chart's own
+          # `singleWriterWorkloads` block named NINE. `i3x-service` was the extra one, so the
+          # guard let it through and this loop never noticed -- three lists, no comparison
+          # (issue #27).
+          SW=$(sed -n '/define "acs-cymru.singleWriterWorkloads"/,/{{- end -}}/p' \
+                 deploy/helm/acs-cymru/templates/_helpers.tpl \
+               | grep -E '^[a-z0-9-]+:' | cut -d: -f1)
+          if [ "$(echo $SW | wc -w)" -lt 9 ]; then
+            echo "::error::parsed only [$SW] from acs-cymru.singleWriterWorkloads. The guard"
+            echo "::error::this loop tests derives its refusal set from that same block, so a"
+            echo "::error::parse this thin means the guard is near-empty too."
+            exit 1
+          fi
+          for c in $SW; do
             expect_failure "autoscaling $c" "SINGLE-WRITER workload" \
               -f "$DEV" --set autoscaling.enabled=true --set "autoscaling.components[0]=$c"
           done
+
+          # A NAME THAT IS NEITHER ALLOWED NOR FORBIDDEN (issue #31). This was the third class and
+          # the unvalidated one: it rendered no HPA and no error, so a typo installed cleanly and
+          # then never scaled. The symptom arrives months later, under load, as a component that
+          # "should be autoscaling and isn't" -- with nothing logged at install time to search for.
+          #
+          # `superbase-rest` is the case from the issue, and it is the one worth pinning: it is one
+          # transposed letter from a legitimate value, so it is what an operator actually types.
+          for c in superbase-rest swagger-ui not-a-component; do
+            expect_failure "autoscaling unknown component $c" "not a component this chart can scale" \
+              -f "$DEV" --set autoscaling.enabled=true --set "autoscaling.components[0]=$c"
+          done
+
+          # THE ALLOW-LIST MUST STILL LET THE FOUR THROUGH, asserted here because every case above
+          # is a refusal -- a guard that refused EVERYTHING would satisfy all of them and break the
+          # feature completely. Rendered in one go, expecting exactly four HPAs.
+          HPAS=$(helm template acs-cymru deploy/helm/acs-cymru -f "$DEV" \
+                   --set autoscaling.enabled=true \
+                   --set autoscaling.components[0]=supabase-rest \
+                   --set autoscaling.components[1]=supabase-kong \
+                   --set autoscaling.components[2]=supabase-functions \
+                   --set autoscaling.components[3]=frontend \
+                 | grep -c '^kind: HorizontalPodAutoscaler' || true)
+          if [ "$HPAS" != "4" ]; then
+            echo "::error::expected 4 HorizontalPodAutoscalers for the four permitted components,"
+            echo "::error::rendered $HPAS. The allow-list added in issue #31 refuses anything it"
+            echo "::error::does not name, so an over-tight list breaks autoscaling outright."
+            exit 1
+          fi
+          echo "  ok: the four permitted components render an HPA each"
 
           # A nightly backup that writes nowhere is worse than none, because it looks like one.
           expect_failure "backup to s3 with no bucket" "backup.s3.bucket is empty" \
@@ -465,6 +558,88 @@ jobs:
             -f "$DEV" --set mosquitto.tls.enabled=true
 
           exit $fail
+
+      # ---------------------------------------------------------------------------------------
+      # The production example, rendered (issue #30).
+      #
+      # `values-prod.yaml.example` is the file an operator copies to stand up a real deployment,
+      # and nothing looked at it. Every other values file is exercised -- the chart lints and
+      # renders against values-dev.yaml, and the step above drives twenty-odd bad configurations
+      # through `helm template` -- but the one carrying the posture we actually RECOMMEND was
+      # never rendered.
+      #
+      # It is a worked example, so it is full of values the chart must still accept:
+      # `clusterIssuer`, `extraIpSans`, `internalClients`, `external.plaintext`,
+      # `metrics.enabled`. Any of them can be invalidated by a rename in values.yaml or by a new
+      # guard rail in _helpers.tpl, and the failure is otherwise deferred to the worst possible
+      # moment -- an operator's first `helm install`, against a real cluster, following our own
+      # documentation. It is also the only place several settings appear at all, so a rename
+      # applied mechanically to values.yaml and values-dev.yaml simply misses it.
+      #
+      # WHY `existingSecret` AND NOT A PILE OF THROWAWAY CREDENTIALS. The example deliberately
+      # carries no credentials -- pointing at an externally managed Secret is the whole point of
+      # it -- so a bare render fails the credential guard, correctly, and that guard must not be
+      # weakened to make a test pass.
+      #
+      # The obvious alternative, underlaying values-dev.yaml to supply credentials, DOES NOT WORK
+      # and is worth recording: the example pins `jwtSecret: ""`, `anonKey: ""` and the rest to
+      # empty strings, and an explicit empty string overrides an underlaid value rather than
+      # deferring to it. Setting `existingSecret` instead skips the credential block entirely --
+      # which is exactly what the External Secrets path the file recommends does in production.
+      # ---------------------------------------------------------------------------------------
+      - name: Render The Production Values Example
+        run: |
+          set -euo pipefail
+          PROD=deploy/helm/acs-cymru/values-prod.yaml.example
+
+          # RENDERED TO A FILE, and every check below reads the file rather than piping a variable.
+          #
+          # `printf '%s' "$OUT" | grep -q ...` is wrong under `set -o pipefail`, which this step
+          # needs so a helm failure is not swallowed. `grep -q` exits on the FIRST match, closing
+          # the pipe; printf is then killed by SIGPIPE; pipefail promotes that to the pipeline's
+          # status. The check fails precisely when the string IS present, which is the most
+          # confusing available direction. Found while writing this step.
+          helm template acs-cymru deploy/helm/acs-cymru \
+            -f "$PROD" --set secrets.existingSecret=ci-render-check > /tmp/prod-render.yaml
+
+          # A render that succeeds and emits nothing would satisfy a bare exit-code check.
+          COUNT=$(grep -c '^kind:' /tmp/prod-render.yaml || true)
+          if [ "$COUNT" -lt 40 ]; then
+            echo "::error::values-prod.yaml.example rendered only $COUNT objects, expected 40+."
+            echo "::error::A near-empty render usually means a top-level key was renamed and the"
+            echo "::error::example now disables far more than it means to."
+            exit 1
+          fi
+
+          # The posture the file exists to carry. These are not incidental -- each is a setting
+          # that appears in this file and nowhere else in the repository, so nothing else would
+          # notice if the chart stopped honouring it.
+          for want in 'kind: Ingress' 'cert-manager.io/cluster-issuer' 'kind: ServiceMonitor'; do
+            grep -q "$want" /tmp/prod-render.yaml || {
+              echo "::error::the production example rendered no '$want'."
+              echo "::error::That posture is what this file is FOR, so losing it silently is the"
+              echo "::error::failure mode this check exists to catch."
+              exit 1
+            }
+          done
+
+          # THE CHART'S OWN CREDENTIALS SECRET MUST NOT RENDER: `existingSecret` says one already
+          # exists, and shipping a second, empty copy alongside it is how the documented External
+          # Secrets path would quietly break -- pods reading the chart's blank Secret instead of
+          # the operator's real one.
+          #
+          # Matched on the TEMPLATE that produces it, not on `kind: Secret`. Mosquitto renders a
+          # Secret of its own regardless, so a bare kind check would fail here permanently and be
+          # "fixed" by deleting the assertion.
+          if grep -q 'templates/secret.yaml' /tmp/prod-render.yaml; then
+            echo "::error::the chart rendered its own credentials Secret despite"
+            echo "::error::secrets.existingSecret being set, so the External Secrets path in"
+            echo "::error::values-prod.yaml.example would ship an empty Secret over the real one."
+            exit 1
+          fi
+
+          echo "  ok: values-prod.yaml.example renders $COUNT objects with its TLS, ingress and"
+          echo "      metrics posture intact, and defers the Secret to the external one"
 
       # M4. The whole design of templates/networkpolicy.yaml is that the flow graph is declared ONCE
       # as edges and both directions are generated from it -- so allowing egress from A while
@@ -702,39 +877,78 @@ jobs:
       #
       # Recreate matters as much as the count: a RollingUpdate briefly runs two pods, which lands
       # duplicate telemetry on every single deploy.
+      #
+      # THE LIST IS READ FROM THE CHART, not restated here, and that is the point of this version.
+      # It used to be a dict in this file naming five workloads. `i3x-service` was not one of them --
+      # nor was `grafana` -- so the manifest could have been switched to RollingUpdate and CI would
+      # have agreed. i3x-service is the worst one to miss: its subscription state is in memory, so a
+      # second pod answers /subscriptions/sync with 404 for a subscription that is perfectly alive,
+      # intermittently, depending on which pod the Service picked (issue #27).
+      #
+      # A NAME THAT RESOLVES TO NOTHING IS AN ERROR, which is what makes this a check rather than a
+      # hopeful loop: a typo in the chart's list would otherwise silently protect nothing, in both
+      # this check and the autoscaling guard that reads the same block.
       - name: Verify Single-Writer Workloads Are Not Scaled Or Rolling
         run: |
           python3 - <<'PY'
-          import re, sys
-          SINGLE = {
-              'ingestion': 'plain paho subscribe: every replica consumes every message',
-              'node-red': 'single-writer /data (flows, credentials, sessions)',
-              'mosquitto': 'does not cluster; two brokers split the fleet',
-              'supabase-realtime': 'holds a logical replication slot',
-              'supabase-storage': 'file backend on a ReadWriteOnce PVC',
-          }
+          import re, sys, io
+
+          # The chart's own list, parsed out of the block that `acs-cymru.validateAutoscaling`
+          # derives its refusal set from. One source, so "which workloads must never be scaled" has
+          # one answer -- see the header on that define in _helpers.tpl.
+          tpl = io.open('deploy/helm/acs-cymru/templates/_helpers.tpl', encoding='utf-8').read()
+          block = re.search(
+              r'define "acs-cymru[.]singleWriterWorkloads" -}}(.*?){{- end -}}', tpl, re.S)
+          if not block:
+              print('::error::could not find acs-cymru.singleWriterWorkloads in _helpers.tpl')
+              sys.exit(1)
+          SINGLE = dict(re.findall(r'^([a-z0-9-]+): (.+)$', block.group(1), re.M))
+          if len(SINGLE) < 9:
+              print(f'::error::parsed only {len(SINGLE)} single-writer workloads: {sorted(SINGLE)}')
+              sys.exit(1)
+          print(f"chart declares {len(SINGLE)} single-writer workloads: {', '.join(sorted(SINGLE))}")
+
           docs = open('/tmp/rendered.yaml', encoding='utf-8').read().split('\n---\n')
-          bad = []
+          workloads = {}
           for d in docs:
               kind = re.search(r'^kind: (\S+)', d, re.M)
               name = re.search(r'^  name: (\S+)', d, re.M)
-              if not kind or kind.group(1) != 'Deployment' or not name:
+              if not kind or not name or kind.group(1) not in ('Deployment', 'StatefulSet'):
                   continue
-              n = name.group(1)
-              if n not in SINGLE:
+              workloads[name.group(1)] = (kind.group(1), d)
+
+          bad = []
+          for n, why in sorted(SINGLE.items()):
+              # The chart's list is keyed by the name `autoscaling.components` takes, which for the
+              # Supabase components is the unprefixed one -- `realtime`, not `supabase-realtime`.
+              # Resolving both spellings keeps ONE list serving both key spaces instead of pairing
+              # it with an alias table that is itself a place to drift.
+              resolved = n if n in workloads else f'supabase-{n}' if f'supabase-{n}' in workloads else None
+              if resolved is None:
+                  bad.append(f"{n}: named as single-writer but no Deployment or StatefulSet renders "
+                             f"under that name (or supabase-{n}) -- the chart's list protects nothing "
+                             f"for it")
                   continue
+              kind, d = workloads[resolved]
+              before = len(bad)
               reps = re.search(r'^  replicas: (\d+)', d, re.M)
-              strat = re.search(r'^    type: (\S+)', d, re.M)
               if not reps or reps.group(1) != '1':
-                  bad.append(f"{n}: replicas={reps.group(1) if reps else 'unset'} ({SINGLE[n]})")
-              if not strat or strat.group(1) != 'Recreate':
-                  bad.append(f"{n}: strategy={strat.group(1) if strat else 'unset'}, must be Recreate ({SINGLE[n]})")
-              print(f"  ok: {n} replicas=1 strategy=Recreate")
+                  bad.append(f"{resolved}: replicas={reps.group(1) if reps else 'unset'} ({why})")
+              # Recreate is a Deployment concern. A StatefulSet never runs two pods of the same
+              # ordinal, so RollingUpdate on a single-replica StatefulSet is not the same hazard.
+              if kind == 'Deployment':
+                  strat = re.search(r'^    type: (\S+)', d, re.M)
+                  if not strat or strat.group(1) != 'Recreate':
+                      bad.append(f"{resolved}: strategy={strat.group(1) if strat else 'unset'}, "
+                                 f"must be Recreate ({why})")
+              if len(bad) == before:
+                  print(f"  ok: {resolved} ({kind}) replicas=1"
+                        + (" strategy=Recreate" if kind == 'Deployment' else ""))
           if bad:
               for b in bad:
                   print(f"::error::{b}")
               sys.exit(1)
-          print("All single-writer workloads are pinned to one replica with Recreate.")
+          print("Every workload the chart calls single-writer is pinned to one replica.")
           PY
 
       # M5. local-path provisions a root-owned host directory and several of these images run as a
@@ -979,6 +1193,30 @@ jobs:
           # simulated JWT claims, because the immutability guard deliberately exempts the owner --
           # a suite connecting as `postgres` would pass against a database with the trigger dropped.
           python supabase/migrations/test_schema_versioning.py
+          # 0026's two halves: causation grouping, and -- the security one -- that `service_role`
+          # can no longer INSERT into digital_thread directly. That key ships in .env and is held
+          # by the daemon and every edge function; while it could insert, any holder could forge an
+          # audit row naming an operator who was not there. A later migration re-granting INSERT
+          # would restore that silently and nothing else here would notice.
+          python supabase/migrations/test_ingestion_rejection_rpc.py
+          # 0030's retention window. THE INVARIANT IS THAT A LONG-FIRING ALERT SURVIVES THE PRUNE:
+          # `recorded_at` is stamped on the first write and never refreshed, so an alert firing for
+          # longer than the window has one row, older than the cutoff, and a flat age cutoff deletes
+          # the current state of a live alert -- the pill disappears while Grafana still has it
+          # firing. The suite also runs the naive predicate against the same fixture and asserts it
+          # DOES destroy the row, so the other cases cannot pass vacuously.
+          python supabase/migrations/test_platform_alerts_retention.py
+          # THE AUDIT SUPPRESSION RULES. 0005 suppresses the no-op UPDATE and the heartbeat-only
+          # UPDATE, and ingestion.py relies on that being true -- a regression here does not fail
+          # anything, it just resumes writing an audit row per heartbeat until the table is mostly
+          # noise. Self-seeding and rolled back, so it needs no seed.sql; its one attribution test
+          # skips without a seeded account and the other 26 run.
+          python supabase/migrations/test_digital_thread_guard.py
+          # The vocabulary seed's PROVENANCE. A metric seeded with a missing or wrong semantic id
+          # breaks nothing at runtime -- it asserts an interoperability claim that is simply untrue,
+          # which no other check would notice. Reads rows seeded by migration 0018, which the loop
+          # above applies, so it needs no seed.sql either.
+          python supabase/migrations/test_metric_catalog_seed.py
           # No stack here, so this run covers the authorization ladder and the Sparkplug -> XSD
           # mapper parity guard; its live export checks skip themselves and run in e2e-validation.
           python supabase/functions/aas-export/test_aas_export.py
@@ -989,6 +1227,45 @@ jobs:
       - name: Run Ingestion Birth-Metric Observation Unit Tests
         run: |
           python ingestion/test_declared_metrics.py
+
+      # The Prometheus endpoint and the sequence-gap counters (issues #22, #24). Same reason this
+      # runs here rather than in e2e: `render_exposition` is a pure function, and the sequence
+      # tests stub protobuf/MQTT/psycopg2 before importing ingestion.py -- so neither `protoc` nor
+      # a running stack is needed.
+      #
+      # ONE ASSERTION IN IT READS ingestion.py's SOURCE: every `count("dropped_*")` must have a
+      # mapping in metrics.py, or the drop would be counted and never exported. That is the
+      # acceptance criterion from #22 expressed as a test rather than as a review step.
+      - name: Run Ingestion Metrics Endpoint Unit Tests
+        run: |
+          python ingestion/test_metrics_endpoint.py
+
+      # The bounded entity caches (issue #23). Stubs the same heavy imports, so no stack either.
+      #
+      # THE EVICTION TESTS ARE NOT THE POINT OF RUNNING THIS IN CI. Bounding a cache is easy; the
+      # two contracts it can break are silent. `get` must return the STORED OBJECT rather than a
+      # copy, because process_dbirth() and record_declared_metrics() mutate the cached row in place
+      # so the next lookup inside the TTL sees the change -- a copying cache would resurrect the
+      # duplicate UPDATE and duplicate digital_thread row that the write-only-what-moved work
+      # exists to prevent, and nothing would point at the cache. And `get` must distinguish a
+      # cached `None` (the NEGATIVE entry) from a miss, or negative caching quietly stops working
+      # and every message from an unregistered device costs a directory round trip.
+      - name: Run Ingestion Entity Cache Unit Tests
+        run: |
+          python ingestion/test_entity_cache.py
+
+      # Payload conformance -- the SCHEMA_REJECTION half of the digital thread. Same reasoning as
+      # the suite above for why it runs here: it stubs protobuf/MQTT/psycopg2 before importing
+      # ingestion.py, so it needs neither `protoc` nor a running stack.
+      #
+      # THE DEDUPLICATION IS WHAT THIS IS FOR. These rows go into `digital_thread`, which is
+      # append-only to every application role and which the application cannot prune at all. DDATA
+      # arrives continuously, so a regression that writes one row per message does not degrade --
+      # it fills the disk. Migration 0005 gave the audit TRIGGER a guard against exactly this; the
+      # RPC these rows go through is not a trigger, so the only guard is in Python.
+      - name: Run Ingestion Payload Conformance Tests
+        run: |
+          python ingestion/test_payload_conformance.py
 
       # The Python half of the modelled-metrics contract; the JavaScript half runs in
       # frontend-build. Both assert tests/fixtures/modelled-metrics.json, because the rule is
@@ -1674,6 +1951,100 @@ jobs:
           export MQTT_PORT=1883        # mosquitto    1883:1883
           export SUPABASE_URL=http://127.0.0.1:54321  # supabase-kong 54321:8000
           python ingestion/validate.py
+
+      # ---------------------------------------------------------------------------------------
+      # Every Prometheus target is actually UP.
+      #
+      # THE SAME FAILURE THE SERVICEMONITOR GUARD EXISTS FOR, one target lower. A scrape config
+      # naming an endpoint that serves nothing does not fail: Prometheus lists the target as DOWN,
+      # the dashboards built on it render empty panels, and someone concludes the component is
+      # idle. That is a monitoring stack lying about the thing it was installed to observe, which
+      # is worse than not monitoring it at all.
+      #
+      # It would have caught a real one: `kong` serves metrics only when the `prometheus` plugin
+      # AND `KONG_STATUS_LISTEN` are both set. With the plugin alone there is no endpoint, and
+      # nothing anywhere says so.
+      #
+      # Run after validate.py so the daemon has consumed traffic and its counters are non-empty --
+      # a target that is up but serving nothing is the next failure along, and the assertion on
+      # `acs_ingestion_messages_total` below is what separates them.
+      # ---------------------------------------------------------------------------------------
+      - name: Verify Every Prometheus Target Is Up
+        run: |
+          set -euo pipefail
+          PROM=http://127.0.0.1:9090
+
+          # Prometheus needs one scrape interval (15s) plus start-up before every target has been
+          # tried once; a target never yet scraped reports health "unknown", not "down".
+          for i in $(seq 1 20); do
+            if curl -sf "$PROM/-/ready" >/dev/null 2>&1; then break; fi
+            sleep 3
+          done
+          curl -sf "$PROM/-/ready" >/dev/null || { echo "::error::Prometheus never became ready"; exit 1; }
+          sleep 20
+
+          curl -sf "$PROM/api/v1/targets?state=active" > /tmp/targets.json
+
+          python3 - <<'PY'
+          import json, sys
+          targets = json.load(open('/tmp/targets.json'))['data']['activeTargets']
+          if not targets:
+              print('::error::Prometheus has no active targets at all')
+              sys.exit(1)
+          bad = []
+          for t in targets:
+              job = t['labels'].get('job', '?')
+              if t['health'] != 'up':
+                  bad.append(f"{job} ({t['scrapeUrl']}): {t['health']} -- {t.get('lastError') or 'no error reported'}")
+              else:
+                  print(f"  ok  {job} -> {t['scrapeUrl']}")
+          # Named explicitly rather than counted: a config that silently lost a job would still
+          # satisfy "every target listed is up", because the missing one is not listed.
+          jobs = {t['labels'].get('job') for t in targets}
+          for want in ('ingestion', 'node', 'kong', 'grafana', 'prometheus'):
+              if want not in jobs:
+                  bad.append(f"scrape job '{want}' is absent from prometheus.yml")
+          for b in bad:
+              print(f'::error::{b}')
+          sys.exit(1 if bad else 0)
+          PY
+
+          # The ingestion endpoint must be serving REAL counters, not just answering 200. validate.py
+          # has just published a run's worth of Sparkplug traffic through the daemon.
+          VALUE=$(curl -sf --get "$PROM/api/v1/query" \
+                    --data-urlencode 'query=sum(acs_ingestion_messages_total)' \
+                  | python3 -c 'import json,sys; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else "0")')
+          echo "  acs_ingestion_messages_total = $VALUE"
+          python3 -c "import sys; sys.exit(0 if float('$VALUE') > 0 else 1)" || {
+            echo "::error::Prometheus scraped the ingestion daemon but recorded no messages."
+            echo "::error::The target is up and the counters are empty, which means the endpoint"
+            echo "::error::is serving but the daemon consumed nothing during the validation run."
+            exit 1
+          }
+
+      # ---------------------------------------------------------------------------------------
+      # Enrolment-token secrecy, which can only be checked WHERE THE SEED EXISTS.
+      #
+      # This suite asserts that the raw token is never stored, that RLS is on with no policies, and
+      # that not even an Administrator can SELECT claim material. Every one of those assertions is
+      # made AS a seeded demo account, so it cannot run in the migrations-only job -- that one
+      # deliberately does not apply seed.sql, and the suite skips itself there.
+      #
+      # `REQUIRE_SEEDED_ACCOUNTS` IS WHAT MAKES RUNNING IT HERE WORTH ANYTHING. A fully-skipped
+      # unittest run reports `OK (skipped=6)` and exits 0, so without the flag a stack that had
+      # lost its seed would give this step a green tick while checking nothing -- on the suite
+      # covering a secrecy boundary, where "not checked" and "not broken" look identical from
+      # outside. The flag turns the absence into a failure, because here the seed is guaranteed.
+      # ---------------------------------------------------------------------------------------
+      - name: Enrolment Token Secrecy — Against The Seeded Stack
+        env:
+          SUPABASE_DB_HOST: localhost
+          SUPABASE_DB_PORT: '54322'
+          REQUIRE_SEEDED_ACCOUNTS: '1'
+        run: |
+          set -a && . ./.env && set +a
+          export SUPABASE_DB_PASSWORD="$POSTGRES_PASSWORD"
+          python supabase/migrations/test_gateway_enrollment.py
 
       # ---------------------------------------------------------------------------------------
       # i3X 1.0 conformance, run by CESMII'S OWN TEST SUITE rather than by assertions of ours.

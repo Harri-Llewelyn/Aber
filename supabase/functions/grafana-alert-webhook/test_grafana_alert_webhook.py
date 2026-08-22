@@ -114,7 +114,7 @@ class TestAuthorization(unittest.TestCase):
 
         Compared with `presented == expected`, an unset variable makes `Bearer ` (or a caller who
         also has nothing configured) match, and the endpoint becomes an unauthenticated write path
-        into device_alerts. A misconfiguration should be broken, never permissive.
+        into platform_alerts. A misconfiguration should be broken, never permissive.
         """
         for header in (None, "Bearer ", "Bearer anything", ""):
             status, message = authorize_alert_webhook(header, "")
@@ -187,7 +187,7 @@ class TestNormalisation(unittest.TestCase):
         self.assertIsNone(normalize_alert(alert(startsAt=None)))
 
     def test_unknown_severity_is_mapped_rather_than_allowed_to_fail_the_batch(self):
-        # device_alerts.severity has a CHECK. One odd label must not reject the other five instances
+        # platform_alerts.severity has a CHECK. One odd label must not reject the other five instances
         # in the same notification.
         row = normalize_alert(alert(labels={**alert()["labels"], "severity": "page-the-ceo"}))
         self.assertEqual(row["severity"], "warning")

@@ -8,9 +8,25 @@ import { useApiActivity } from './hooks/useApiActivity'
 import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
 import { clearInvalidSession, isSessionRejected } from './utils/sessionError'
 import { PERMISSION_UUIDS } from './constants'
-import { readFlag } from './config'
 
-const allowSignUp = readFlag('VITE_ALLOW_SIGNUP')
+/*
+ * THERE IS NO SIGN-UP PATH, and its absence is a decision rather than an omission.
+ *
+ * This screen used to offer one behind a `VITE_ALLOW_SIGNUP` flag that defaulted to false. Hiding
+ * the form was all that flag ever did: `POST /auth/v1/signup` stayed open on the gateway, because
+ * GoTrue was configured with `GOTRUE_DISABLE_SIGNUP: "false"` regardless. Anyone who could reach
+ * Kong could self-register and land on the default `Operator` role that handle_new_user() assigns
+ * -- past every RBAC decision in the database, none of which is reached until you hold a session.
+ *
+ * A client-side flag is not an access control, so it has been replaced by the server-side one:
+ * GOTRUE_DISABLE_SIGNUP now defaults to "true" and is the single switch. Accounts arrive by
+ * invitation, by admin provisioning, or from an upstream identity provider.
+ *
+ * The flag is gone rather than left pointing at the new setting, because two settings that must
+ * agree is a drift risk, and the one that can be edited in a browser's dev tools is not the one to
+ * keep. A stack that genuinely wants open registration sets GOTRUE_DISABLE_SIGNUP=false and
+ * provisions through the Auth API.
+ */
 
 // Must match GOTRUE_OAUTH_SERVER_AUTHORIZATION_PATH in docker-compose.yml. GoTrue appends it
 // to GOTRUE_SITE_URL when redirecting an OAuth client's user here to grant consent.
@@ -35,7 +51,7 @@ import {
 
 import { Toast } from './components/common/Toast'
 import { AlertPill } from './components/common/AlertPill'
-import { useDeviceAlerts } from './hooks/useDeviceAlerts'
+import { usePlatformAlerts } from './hooks/usePlatformAlerts'
 import { BugReportModal } from './components/modals/BugReportModal'
 
 // Lazy-load Tab components
@@ -73,7 +89,6 @@ function tabIsVisible(tabDef, hasPermission) {
 function AuthScreen({ onLoginSuccess, notice }) {
   const [email, setEmail] = useState('admin@acs-cymru.local')
   const [password, setPassword] = useState('acscymru123')
-  const [isSignUp, setIsSignUp] = useState(false)
   const [authError, setAuthError] = useState(null)
   const [loading, setLoading] = useState(false)
 
@@ -83,15 +98,9 @@ function AuthScreen({ onLoginSuccess, notice }) {
     setLoading(true)
 
     try {
-      if (allowSignUp && isSignUp) {
-        const { data, error } = await supabase.auth.signUp({ email, password })
-        if (error) throw error
-        if (data.session) onLoginSuccess(data.session)
-      } else {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-        if (error) throw error
-        if (data.session) onLoginSuccess(data.session)
-      }
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) throw error
+      if (data.session) onLoginSuccess(data.session)
     } catch (err) {
       setAuthError(err.message || 'Authentication failed')
     } finally {
@@ -168,22 +177,16 @@ function AuthScreen({ onLoginSuccess, notice }) {
             // to read on screen.
             style={{ width: '100%', padding: '12px', borderRadius: '8px', fontWeight: 600, fontSize: '14px', border: 'none', cursor: 'pointer' }}
           >
-            {loading ? 'Authenticating...' : allowSignUp && isSignUp ? 'Create Supabase Account' : 'Sign In'}
+            {loading ? 'Authenticating...' : 'Sign In'}
           </button>
         </form>
 
-        {allowSignUp && (
-        <div style={{ marginTop: '18px', textAlign: 'center' }}>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            style={{ fontSize: '12px', color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer' }}
-            onClick={() => setIsSignUp(!isSignUp)}
-          >
-            {isSignUp ? 'Already have an account? Sign In' : 'Need an account? Sign Up'}
-          </button>
-        </div>
-        )}
+        {/* WHERE THE SIGN-UP TOGGLE USED TO BE. A line of text rather than nothing, because an
+            operator who expected to register needs to be told the door is shut deliberately --
+            otherwise the report that arrives is "the sign-up button is broken". */}
+        <p style={{ marginTop: '18px', textAlign: 'center', fontSize: '12px', color: 'var(--text-muted)' }}>
+          Accounts are provisioned by an administrator. Contact your platform owner for access.
+        </p>
       </div>
     </div>
   )
@@ -359,11 +362,11 @@ function Dashboard({ session, onSignOut }) {
   const { userRole, hasPermission } = usePermissions(session)
   useQuarantineAlerts(showToast)
 
-  // Grafana's firing alerts, delivered through device_alerts. Lifted to App rather than owned by a
+  // Grafana's firing alerts, delivered through platform_alerts. Lifted to App rather than owned by a
   // tab because an excursion on the machining cell must be visible while somebody is reading the
   // Vocabulary page -- an alert scoped to the tab that happens to be open is an alert that arrives
   // only when it is not needed.
-  const firingAlerts = useDeviceAlerts(showToast)
+  const firingAlerts = usePlatformAlerts(showToast)
 
   // Fed by the counter every call through `api` increments, so it covers a save on a modal and a
   // tab's reconciliation poll alike without either having to report anything.
@@ -466,9 +469,9 @@ function Dashboard({ session, onSignOut }) {
       {/* Main Content */}
       <main className="content">
         <Suspense fallback={<div className="loading-wrap"><div className="spinner" /> Loading view…</div>}>
-          {tab === 'overview'       && <OverviewTab onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} showToast={showToast} hasPermission={hasPermission} onNavigateTab={t => setTab(t)} />}
-          {tab === 'cells'          && <CellsTab showToast={showToast} onViewThread={c => viewThreadFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
-          {tab === 'gateways'       && <GatewaysTab showToast={showToast} onViewThread={g => viewThreadFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
+          {tab === 'overview'       && <OverviewTab activeAlerts={firingAlerts} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} showToast={showToast} hasPermission={hasPermission} onNavigateTab={t => setTab(t)} />}
+          {tab === 'cells'          && <CellsTab activeAlerts={firingAlerts} showToast={showToast} onViewThread={c => viewThreadFor(c.cell_id, 'CELL')} onSelectDevice={showDevice} onSelectGateway={showGateway} hasPermission={hasPermission} initialSearchFilter={selectedCellFilter} onClearFilter={() => setSelectedCellFilter('')} />}
+          {tab === 'gateways'       && <GatewaysTab activeAlerts={firingAlerts} showToast={showToast} onViewThread={g => viewThreadFor(g.gateway_id, 'GATEWAY')} onSelectCell={showCell} onSelectDevice={showDevice} hasPermission={hasPermission} initialSearchFilter={selectedGatewayFilter} onClearFilter={() => setSelectedGatewayFilter('')} />}
           {tab === 'devices'        && <DevicesTab showToast={showToast} onSelectDevice={showDevice} onSelectGateway={showGateway} onSelectCell={showCell} onSelectSchema={showSchema} onViewThread={a => viewThreadFor(a.asset_id, 'DEVICE')} hasPermission={hasPermission} initialSearchFilter={selectedDeviceFilter} onClearFilter={() => setSelectedDeviceFilter('')} initialSchemaFilter={selectedSchemaFilter} onClearSchemaFilter={() => setSelectedSchemaFilter('')} activeAlerts={firingAlerts} />}
           {tab === 'digital-thread' && (
             <DigitalThreadTab

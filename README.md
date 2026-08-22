@@ -1,4 +1,4 @@
-# AMRC Connectivity Stack - Cymru
+﻿# AMRC Connectivity Stack - Cymru
 
 [![CI Pipeline](https://github.com/Harri-Llewelyn/acs-cymru/actions/workflows/ci.yml/badge.svg)](https://github.com/Harri-Llewelyn/acs-cymru/actions/workflows/ci.yml)
 
@@ -124,17 +124,36 @@ row's standard and published semantic id, `0019` adds the 223P supply-air-flow m
 shopfloor simulator needed, `0020` retires the introductory single-device simulator and moves its
 schema and IDTA nameplate onto `Sim_CNC_Mill_01`, `0021` gives each shopfloor cell an icon from a
 closed set, `0022` adds one schema per machine class and attaches it to every simulated device,
-`0023` adds the `device_alerts` occurrence log Grafana alerting writes into and publishes it for
+`0023` adds the `platform_alerts` occurrence log Grafana alerting writes into and publishes it for
 Realtime, `0024` adds an optional free-text `description` to devices and gateways, `0025` adds
 physical-gateway enrolment — a `gateway_enrollment_tokens` table reachable only by `service_role`,
 the RPCs that issue and atomically redeem a single-use token, and the `PENDING_ENROLLMENT` /
-`AWAITING_BIRTH` lifecycle states — plus demo accounts (`supabase/seed.sql`).
+`AWAITING_BIRTH` lifecycle states — `0026` stamps every audit row with the transaction that wrote
+it (`digital_thread.causation_id`, from `txid_current()`) so the several rows one operator action
+produces can be read back as one act, and adds `record_ingestion_rejection()` — the narrow
+SECURITY DEFINER gate through which the ingestion daemon records a payload it judged
+non-conforming, replacing `service_role`'s direct INSERT on the audit table — and `0027` maps the
+historian's storage footprint over `postgres_fdw` and unions it with Supabase's own table sizes as
+`public.storage_footprint`, read by Grafana's `supabase` datasource — `0028` generalises the alert
+table from `device_alerts` to `platform_alerts`, whose subject is `(entity_type, entity_id)` rather
+than a device, because the platform alert rules cover a gateway and the fleet and neither
+fits a row that must name a machine — `0029` adds `public.platform_health`, the narrow view
+those rules evaluate so the Grafana reader never needs the asset inventory — and `0030` gives that
+alert table a **7-day retention window**, pruned nightly by `pg_cron`, whose predicate ages out
+closed and superseded occurrences but never the newest firing row of a fingerprint — plus demo
+accounts (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because `0005` already implements one; a second declaration of `log_digital_thread_event()`
 > would win by filename order on every boot and would have regressed the `actor_source`
 > attribution `0005` adds. The gap in the numbering is deliberate and the reasoning is in
 > [`supabase/README.md`](supabase/README.md#audit-signal-and-attribution-0005).
+>
+> `0026` is that later declaration, written deliberately and on those terms: it reproduces `0005`'s
+> body **in full** and adds two lines, rather than patching it. Its self-check asserts that both the
+> heartbeat suppression guard and the causation stamp are present in the live definition, because
+> `check-docs-drift.mjs` can verify a redeclaration was *intended* and cannot verify it was
+> *complete*.
 
 | Interface | URL |
 | :--- | :--- |
@@ -143,6 +162,7 @@ the RPCs that issue and atomically redeem a single-use token, and the `PENDING_E
 | Swagger UI | http://localhost:8088 |
 | Node-RED | http://localhost:1880 |
 | Grafana | http://localhost:3002 |
+| Prometheus | http://localhost:9090 (loopback only — SSH-tunnel from another host) |
 
 **Sign in to the React dashboard first.** Node-RED and Grafana both federate to Supabase Auth, and
 the consent step needs your dashboard session — going straight to either shows a "sign in required"
@@ -292,7 +312,7 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | **[`supabase/`](supabase/README.md)** | Migrations, RLS privilege matrix, triggers, audit immutability, edge functions, Kong |
 | **[`ingestion/`](ingestion/README.md)** | Sparkplug B parsing, identity resolution, gateway binding, TimescaleDB mapping, `validate.py` |
 | **[`simulators/`](simulators/README.md)** | Node-RED setup, flow provisioning, broker topics, onboarding walkthrough |
-| **[`i3x/`](i3x/README.md)** | i3X 1.0 server: address-space mapping, subscriptions, connecting a client |
+| **[`i3x/`](i3x/README.md)** | i3X 1.0 server: address-space mapping, subscriptions, connecting a client — including [an MCP host](i3x/README.md#mcp) |
 | **[`deploy/k8s/README.md`](deploy/k8s/README.md)** | Kubernetes runbook: install, upgrade, teardown, hardening, divergence table, releases |
 | [`deploy/helm/acs-cymru/`](deploy/helm/acs-cymru) | The Helm chart; `values.yaml` documents every setting |
 | [`docs/kubernetes-architecture.md`](docs/kubernetes-architecture.md) | Why the Kubernetes target is built the way it is. Source comments cite it by section |
@@ -314,23 +334,25 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | `supabase-db-init` | `acs-cymru_supabase_db_init` | `supabase/postgres:17.6.1.160` | — |
 | `supabase-auth` | `acs-cymru_supabase_auth` | `supabase/gotrue:v2.189.0` | — |
 | `supabase-rest` | `acs-cymru_supabase_rest` | `postgrest/postgrest:v12.2.0` | — |
-| `supabase-kong-init` | `acs-cymru_supabase_kong_init` | `alpine:3.20` | — |
-| `supabase-kong` | `acs-cymru_supabase_kong` | `kong:2.8.1-alpine` | `54321:8000` |
+| `supabase-kong-init` | `acs-cymru_supabase_kong_init` | `alpine:3.24` | — |
+| `supabase-kong` | `acs-cymru_supabase_kong` | `kong:3.9.3` | `54321:8000` |
 | `supabase-functions` | `acs-cymru_supabase_functions` | `supabase/edge-runtime:v1.74.2` | — |
 | `supabase-realtime` | `acs-cymru_supabase_realtime` | `supabase/realtime:v2.34.47` | — |
 | `supabase-storage` | `acs-cymru_supabase_storage` | `supabase/storage-api:v1.11.13` | — |
-| `supabase-storage-init` | `acs-cymru_supabase_storage_init` | `node:20-alpine` | — |
+| `supabase-storage-init` | `acs-cymru_supabase_storage_init` | `node:24-alpine` | — |
 | `supabase-meta` | `acs-cymru_supabase_meta` | `supabase/postgres-meta:v0.96.6` | — |
 | `supabase-studio` | `acs-cymru_supabase_studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `54323:3000` |
-| `timescaledb` | `acs-cymru_timescaledb` | `timescale/timescaledb:2.29.1-pg17` | `5433:5432` |
-| `mosquitto-init` | `acs-cymru_mosquitto_init` | `eclipse-mosquitto:2.0.20` | — |
-| `mosquitto` | `acs-cymru_mosquitto` | `eclipse-mosquitto:2.0.20` | `1883`, `9001` |
+| `timescaledb` | `acs-cymru_timescaledb` | `timescale/timescaledb:2.29.2-pg17` | `5433:5432` |
+| `mosquitto-init` | `acs-cymru_mosquitto_init` | `eclipse-mosquitto:2.0.22` | — |
+| `mosquitto` | `acs-cymru_mosquitto` | `eclipse-mosquitto:2.0.22` | `1883`, `9001` |
 | `frontend` | `acs-cymru_frontend` | `./frontend/Dockerfile` | `3000:3000` |
-| `ingestion` | `acs-cymru_ingestion` | `./Dockerfile` | — |
+| `ingestion` | `acs-cymru_ingestion` | `./Dockerfile` | `9108:9108` |
 | `node-red-init` | `acs-cymru_node_red_init` | `./node-red/Dockerfile` | — |
 | `node-red` | `acs-cymru_node_red` | `./node-red/Dockerfile` | `1880:1880` |
-| `grafana` | `acs-cymru_grafana` | `grafana/grafana:13.1.3` | `3002:3000` |
-| `swagger-ui` | `acs-cymru_swagger_ui` | `swaggerapi/swagger-ui:v5.17.14` | `8088:8080` |
+| `grafana` | `acs-cymru_grafana` | `grafana/grafana:13.2.0` | `3002:3000` |
+| `swagger-ui` | `acs-cymru_swagger_ui` | `swaggerapi/swagger-ui:v5.32.14` | `8088:8080` |
+| `prometheus` | `acs-cymru_prometheus` | `prom/prometheus:v3.14.0` | `127.0.0.1:9090:9090` |
+| `node-exporter` | `acs-cymru_node_exporter` | `prom/node-exporter:v1.12.1` | — |
 
 ---
 
@@ -394,7 +416,7 @@ Digital Nameplate; what each one covers and how its identity was verified is in
 ## Testing
 
 ```bash
-# Frontend — 1225 tests
+# Frontend — 1357 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required
@@ -406,6 +428,10 @@ python ingestion/test_health_heartbeat.py
 python ingestion/test_rbe_telemetry.py
 python ingestion/test_mqtt_tls.py
 python ingestion/test_audit_write_dedup.py
+python ingestion/test_payload_conformance.py
+# The Prometheus endpoint and the Sparkplug seq gap counters -- no stack, no broker
+python ingestion/test_metrics_endpoint.py
+python ingestion/test_entity_cache.py
 python ingestion/test_telemetry_batching.py
 python i3x/test_i3x_service.py
 python supabase/functions/approve-quarantine/test_approve_quarantine.py
@@ -435,6 +461,8 @@ npm run test:lib
 python supabase/migrations/test_user_roles_rls.py
 python supabase/migrations/test_schema_versioning.py
 python supabase/migrations/test_digital_thread_guard.py
+python supabase/migrations/test_ingestion_rejection_rpc.py
+python supabase/migrations/test_platform_alerts_retention.py
 python supabase/migrations/test_metric_catalog_seed.py
 python supabase/migrations/test_gateway_enrollment.py
 # Needs the TimescaleDB historian (port 5433), not Supabase — the rollups live there
@@ -464,6 +492,38 @@ CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs five jobs:
 
 **The last two are the real drift control between deployment targets.** `validate.py` is
 topology-agnostic and runs against both; if both pass, the wiring agrees where it matters.
+
+### Keeping the pinned versions current
+
+Two scheduled workflows, and they answer different questions. Neither runs on a pull request:
+version drift and published advisories move on the world's schedule, not on this repository's.
+
+| Workflow | Job | Asks |
+| :--- | :--- | :--- |
+| [`renovate.yml`](.github/workflows/renovate.yml) | **renovate** | *Is there a newer version?* — proactive, weekly |
+| [`image-scan.yml`](.github/workflows/image-scan.yml) | **scan** | *Does what we run have a known, **fixed** vulnerability?* — reactive, weekly |
+
+**The dependency dashboard is the deliverable**, more than the pull requests are: one issue listing
+every available update, including the ones deliberately held back.
+
+**[`renovate.json`](renovate.json) exists mostly to stop good automation doing the wrong thing
+here.** The Supabase components are a coordinated set that upstream tests together — measured
+against Docker Hub, `gotrue` and `postgres-meta` look outdated when they are in fact the exact
+versions upstream pins, so an "upgrade" would move this stack *off* the tested combination. They
+are grouped into one pull request held for approval, as are all major bumps. Kong 3.0 is why:
+it silently switched off every per-service Prometheus metric while leaving the scrape target green.
+
+**Renovate is self-hosted because this repository is private**, and needs a `RENOVATE_TOKEN` secret
+(a PAT with `repo`, or fine-grained with Contents, Pull requests and Issues read/write). Without it
+the workflow fails on its first step by design — a scheduled job that silently does nothing leaves
+the repository looking as though drift is watched when it is not. `GITHUB_TOKEN` cannot be used:
+pull requests it opens trigger no workflow runs, so every bump would arrive with no CI result.
+
+**The scan reports only *fixable* HIGH and CRITICAL findings.** An unfixed CVE in a base image is
+not something this repository can act on, and failing on it would train everyone to ignore the job.
+Its image list is parsed out of `docker-compose.yml` rather than written in the workflow, and it
+refuses to run if it finds fewer than ten — "found nothing to scan" must not look like "found
+nothing wrong".
 
 ### Releases
 
@@ -502,37 +562,18 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Eight extensions, ordered by how much of each already exists. None is speculative: every one names
+Eleven extensions, ordered by how much of each already exists. None is speculative: every one names
 the code it would build on, because the value of writing them down is that a reader can tell how far
 away each is.
 
 **These are not open defects.** Known issues and accepted risks are
 [GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues).
 
-### 1 · Ingestion drop observability
-
-**Builds on:** `count()` / `counter_snapshot()` in [`ingestion/ingestion.py`](ingestion/ingestion.py)
-· Kong's `prometheus` plugin · `templates/obs/servicemonitors.yaml`
-
-The daemon already keeps a monotonic registry of drop counters —
-`dropped_gateway_binding`, `dropped_quarantined_or_unregistered`, `dropped_directory_unavailable`,
-`metrics_rejected_timestamp`, `metrics_unresolved_alias`, `write_failures`, `db_reconnects` and the
-rest. Today they are only reported to the log every 60 s, so **the fail-closed behaviour this stack
-is designed around is asserted but not visible.**
-
-The work is a Prometheus exposition endpoint over the existing registry — not re-instrumentation.
-The counters were deliberately shaped for it: each one is incremented at the site that already made
-the decision, one-to-one with an existing `logger.warning`, so the counters and the log cannot
-disagree about what happened. Kong already exposes `/metrics` on its status listener, and the chart
-already ships `ServiceMonitor` templates.
-
-`dropped_gateway_binding` is the one worth a panel of its own: it is not a health metric, it is the
-**signal that something published telemetry for a device it does not own.**
-
-### 2 · Automated edge gateway telemetry
+### 1 · Automated edge gateway telemetry
 
 **Builds on:** `process_node_message()` · `gateways.agent_version` / `enrolled_at` (`0025`) ·
-the appliance's Node-RED runtime ([`templates/physical-gateway/`](templates/physical-gateway))
+the appliance's Node-RED runtime ([`templates/physical-gateway/`](templates/physical-gateway)) ·
+`node_exporter`
 
 Enrolment stamps `agent_version` and `enrolled_at` once and never refreshes them, so "what is this
 appliance actually doing" is answerable only by getting a shell on it. The appliance already holds
@@ -547,25 +588,45 @@ every appliance's trust store, and
 A `Cert_Expires_At` metric plus one alert rule turns the single worst fleet-wide failure mode into a
 30-day warning.
 
-### 3 · Expanded platform alerting
+#### Use `node_exporter` as the collector, but do not scrape it from here
 
-**Builds on:** [`grafana/provisioning/alerting/`](grafana/provisioning/alerting) · `device_alerts`
-(`0023`) and its Realtime publication · `grafana-alert-webhook`
+The appliances are Ubuntu Server and the stack now runs a Prometheus, so the obvious move is to run
+`node_exporter` on each gateway and add it as a scrape target. **The collector half is right and the
+scrape half is wrong**, and the reason is the network shape this platform deliberately has:
 
-The three shipped rules — Thermal Excursion, Emergency Stop, Low OEE Availability — are all
-**machine** conditions. Nothing alerts on **platform** conditions, though the data exists:
+- **The appliance's connection is outbound only.** It dials `<broker>:8883`; nothing anywhere
+  assumes traffic in the other direction, and
+  [`templates/physical-gateway/README.md`](templates/physical-gateway/README.md) troubleshoots
+  exactly that way round.
+- **Scraping means an inbound path per gateway** through the plant firewall — the thing an
+  outbound-only design exists to avoid, and a separate conversation with someone's IT department
+  per site.
+- **Gateways are enrolled dynamically** with single-use tokens (`0025`), so a static scrape config
+  cannot know them. Pull would additionally need `http_sd` backed by the `gateways` table: a
+  discovery endpoint to build, secure and keep correct.
 
-| Rule | Reads |
-| :--- | :--- |
-| Gateway `STALE` > 5 min | `public.gateway_status.is_stale` |
-| Quarantine queue depth > *n* | `devices.is_quarantined` |
-| Enrolment stuck in `AWAITING_BIRTH` > 1 h | `gateways.status` + `enrolled_at` — a failed enrolment currently has no alarm at all |
-| Binding rejections rising | `dropped_gateway_binding` (needs §1) |
+So run `node_exporter` on the appliance and **scrape it locally**. A Node-RED flow polls
+`localhost:9100/metrics`, selects a handful of series — filesystem free, load, memory, uptime — and
+publishes them as Sparkplug metrics on the connection that is already open and already
+authenticated. `process_node_message()` writes them to the gateway's row exactly as this section
+already describes.
 
-Each is provisioning-only: the delivery path to the dashboard's toast and Topbar pill is already
-built and already carries the machine rules.
+That keeps `node_exporter`'s correctness — it collects host metrics properly, which hand-rolled
+disk and CPU reads in a Node-RED function node will not — while changing nothing about the network,
+the credential model, or discovery. It also makes this item substantially cheaper, because the
+collector was the part that had to be written.
 
-### 4 · Horizontal ingestion scaling
+**And it removes the Windows question.** `windows_exporter` (prometheus-community, formerly
+`wmi_exporter`) serves the same exposition format, so a Windows gateway differs only in which
+collector is installed; the transport, the flow and the database write are identical. Under a pull
+model it would have been a second scrape story.
+
+**Where it would go:** `templates/physical-gateway/docker-compose.yml`, which the bundle ships and
+the appliance runs — one service alongside `node-red`, with the same `/proc`, `/sys` and `/` mounts
+the central stack's exporter uses. The bundle is assembled by `gateway-bundle` from
+`GW_BUNDLE_COMPOSE`, so the template is the only file that changes.
+
+### 2 · Horizontal ingestion scaling
 
 **Builds on:** the single-writer note in `get_timescaledb_connection()`
 
@@ -581,7 +642,15 @@ cacheable and per-message, and the historian write is idempotent (`ON CONFLICT D
 workers seeing a redelivery cannot corrupt a series. What it needs is per-worker connection
 ownership and a rebirth-request path that does not depend on a single node's alias table.
 
-### 5 · Computed ISO 22400 KPIs
+**It also carries the last piece of the ingestion metrics work.** Every counter that endpoint
+proposed now ships except one: `acs_ingestion_write_seconds`, the per-write latency histogram. It
+needs a timing wrapper on the historian write — which runs per sample on the broker callback
+thread, the one path in this daemon where casual overhead is least welcome. **That is the same
+thread this item exists to unblock**, and a latency number is worth far more once there is a
+before-and-after to compare it against, so it belongs here rather than as a measurement taken
+against a ceiling nobody has moved yet.
+
+### 3 · Computed ISO 22400 KPIs
 
 **Builds on:** [`timescaledb/aggregates.sql`](timescaledb/aggregates.sql) · the existing rollups ·
 `iso22400_vocabulary`
@@ -595,7 +664,7 @@ a KPI definition a setting rather than a constant fixed before the first row was
 This is the intermediate step that was previously deferred pending an MES. It does not replace one —
 it makes the vocabulary answer questions instead of only naming them.
 
-### 6 · i3X server optimisations
+### 4 · i3X server optimisations
 
 **Builds on:** `_load_address_space()` · `_build_objects()` · `MAX_BULK_ELEMENT_IDS`
 
@@ -613,32 +682,235 @@ against.
 Writes stay unimplemented. `PUT /objects/value` answers 405 and `/info` declares
 `update.current: false`; a server that does not implement the verb cannot be talked into it.
 
-### 7 · Ingress → Gateway API
+### 5 · Ingress → Gateway API
 
 **Builds on:** [`templates/ingress.yaml`](deploy/helm/acs-cymru/templates/ingress.yaml) ·
 `acs-cymru.corsOrigins`
 
-Kong 2.8 is frozen: declarative config gained environment interpolation in 3.x, which is why
-`kong.yml` is a placeholder template substituted twice — once by `sed` on Compose, once by Helm.
+**This item used to open by blaming Kong 2.8, and that reason is gone**: the gateway is on
+`kong:3.9.3`, which interpolates `${{env.VAR}}` in declarative config. The two substituters stayed
+anyway, and deliberately — interpolation would move the service-role key into Kong's environment,
+whereas Compose writes it to an internal volume and Helm renders it into a Secret that never
+appears in a rendered manifest. So `kong.yml` is still a placeholder template substituted twice,
+but now because that is the narrower exposure rather than because Kong cannot do otherwise.
 
-Gateway API's `HTTPRoute` filters express **route-level CORS declaratively**, which would retire the
-`__CORS_ORIGINS__` placeholder and the two substituters along with it. That is worth pairing with
-this migration specifically, because the origin list is the stack's *only* statement of origin
-policy — the edge functions deliberately declare none — and the fewer places it is expressed, the
-fewer places it can be wrong.
+**What remains is the CORS half, and it is the half that was always the real argument.** Gateway
+API's `HTTPRoute` filters express **route-level CORS declaratively**, which would retire the
+`__CORS_ORIGINS__` placeholder specifically. That matters because the origin list is the stack's
+*only* statement of origin policy — the edge functions deliberately declare none — so it is load
+bearing on its own, with no second layer to fall back on. It has already failed once in exactly the
+way a single unenforced statement fails: four literal localhost origins that were correct on
+Compose and silently wrong on Kubernetes, presenting as a dashboard that logged in and then showed
+empty tables while the gateway reported 200 for every request.
 
-### 8 · MCP server
+**Kubernetes-only, and worth saying so.** `HTTPRoute` does nothing for the Compose target, which
+keeps `kong.yml` and its `sed` either way — so this retires one placeholder on one target rather
+than the templating approach as a whole.
 
-**Builds on:** the i3X address space · `fplus-directory`
+### 6 · A durable MCP credential, and the Digital Thread over MCP
 
-Read-only shopfloor context and asset metadata over the Model Context Protocol: which machines
-exist, what they measure, what they are reporting now, and what the Digital Thread says changed.
+**Builds on:** `i3x-mcp` against the i3X address space ([`i3x/README.md`](i3x/README.md#mcp)) ·
+`GOTRUE_JWT_EXP` · `digital_thread`
 
-**The security posture is already decided**, which is most of why this is a small piece of work
-rather than a design exercise. i3X implements no write verb at all, so an MCP server over it inherits
-read-only by construction — not by configuration. An `--enable-writes` flag would be a client-side
-switch over a server that has nothing to enable. Writes belong on the Sparkplug/NCMD path, where
-they are auditable.
+**This used to say "build an MCP server", and that turned out to be the wrong item.**
+[`cesmii/i3X-MCP-Server`](https://github.com/cesmii/i3X-MCP-Server) (`i3x-mcp` on npm, MIT) is a
+generic MCP client of *any* conformant i3X server. It runs against this one unmodified — verified
+2026-08-22 by driving the published package over stdio: object search, current values with
+`quality`, relationship traversal and history out of TimescaleDB all answer. Nothing needs writing.
+
+**The security posture the old item asserted is now demonstrated rather than argued.** Writes are
+not even listed as tools by default; forced on with `--enable-writes`, `update_value` returns our
+`405` and the reason with it. That is the difference between read-only by *construction* and by
+configuration: a user who deliberately defeats the client-side guard still gets nothing.
+
+What is left is the two things pointing it at a real deployment exposes.
+
+#### A durable, low-privilege credential
+
+The client takes a **static** `I3X_TOKEN` from its host's config file, and `GOTRUE_JWT_EXP` is
+`3600`. A token pasted into `claude_desktop_config.json` stops working within the hour, and it fails
+the way [`i3x/README.md`](i3x/README.md#connecting-a-client) already describes for i3X Explorer —
+*as a broken server rather than a stale token*.
+
+The answer is a long-lived JWT for a dedicated read-only principal, signed with the same secret and
+carrying a role RLS already constrains. **What it must not be is `service_role`.** This server
+passes the caller's bearer straight through to PostgREST precisely so that it queries *as them*; a
+key that bypasses RLS would discard the single property that makes handing this to a model
+defensible — that an operator asking a question sees exactly what an operator can see.
+
+#### The Digital Thread has no surface here
+
+i3X models objects, values and history. It has **no audit concept**, and this server's address space
+contains no `digital_thread` — so *"what changed, when, and who changed it"* is the one question an
+i3X-shaped client cannot ask, and it is the clause the old item named that no external package will
+ever satisfy.
+
+Two honest options, and the choice is about audience rather than difficulty. A **second, small MCP
+server over PostgREST** would expose the audit trail with the caller's own token and the same RLS
+scope — which is the only reason it would be safe. Or **leave it**: the Digital Thread is a page
+built for reading a change with its diff and its causation siblings beside it, and a model
+summarising that trail is a different and weaker artefact than the page.
+
+### 7 · Administrative Settings & Runtime Configuration
+
+**Builds on:** `has_role('Administrator')` · PostgREST RLS · Supabase Vault
+
+In-app configuration management allowing `Administrator` users to tune runtime parameters
+(cold storage endpoints, retention policies, OIDC provider metadata, alert thresholds) directly
+from the React dashboard without host-level `.env` edits or container restarts.
+
+**Settings override defaults dynamically at runtime rather than mutating disk.** Sensitive secrets
+(S3 keys, OIDC client secrets) land encrypted in Supabase Vault, while non-sensitive runtime
+flags live in a `system_settings` table gated strictly on `Administrator` via RLS. Host `.env`
+values remain the initial fallback, preserving deterministic, zero-configuration local boot while
+giving deployed shopfloor instances an operational management plane.
+
+---
+
+### 8 · Cold Telemetry Archival & Query-in-Place
+
+**Builds on:** TimescaleDB retention policies · `telemetry` hypertable · Edge Functions · Apache Parquet
+
+Tiering high-volume time-series telemetry out of the operational database into vendor-neutral
+Apache Parquet files on S3-compatible or Azure Blob storage once the hot hypertable retention
+window expires (e.g., >90 days).
+
+**Preserves long-horizon traceability without re-bloating the operational database.** A scheduled
+maintenance task exports date-partitioned chunks to compressed `.parquet` files, verifies storage,
+records a manifest row in `telemetry_archive_manifest`, and safely drops the raw chunk. The React
+Archives view renders the catalog and allows operators to query historical months in place via
+short-lived presigned URLs and DuckDB—rendering historical charts on demand without rehydrating
+gigabytes of raw points back into TimescaleDB.
+
+---
+
+### 9 · Deferred commit for Rearrange mode
+
+**Builds on:** `handleDrop()` / `handleLaneDrop()` / `pendingZone` in
+[`OverviewTab.jsx`](frontend/src/components/tabs/OverviewTab.jsx) ·
+`digital_thread.causation_id` (`0026`)
+
+Rearrange mode is a mode already — off by default, turned on deliberately, turned off by clicking
+**Rearranging — click to finish**. What it is not yet is a *transaction*: each drop issues its own
+`PUT /api/v1/devices/{id}` the moment the mouse is released, and the button's own tooltip says so
+("Every move is written immediately"). The work is to stage the moves and apply them when the
+operator finishes, so the mode has a beginning, an end, and one outcome.
+
+**The reason this is worth doing is not tidiness, it is the audit trail.** Reassigning six machines
+is one decision, and it currently lands as six independent `UPDATE`s — six transactions, six
+`causation_id`s, six unrelated-looking rows in the Digital Thread. Deferring the commit makes it one
+transaction, which is exactly what the "Same transaction" control in the event drawer exists to
+show. Today the only multi-entity act on a fresh stack is the one `supabase/seed.sql` commits
+deliberately so that control has something to demonstrate; this would make a real operator action
+produce one.
+
+**The crux is that atomicity has to come from the server.** Device writes go through PostgREST
+per-row (`supabase.from('devices').update(...).eq('id', ...)`), so staging in the browser and then
+firing six requests on finish would still be six transactions and would change nothing about the
+thread — it would only move when they happen. One `causation_id` needs a single SECURITY DEFINER RPC
+taking the whole batch, in the shape `fork_schema` and `publish_schema_version` already use. A
+half-applied batch also becomes possible without it, which is worse than the present behaviour.
+
+Three things the present design gets right and a staged version must not lose:
+
+- **`pendingZone` exists because a drop has no optimistic feedback**: the device keeps rendering in
+  its old tile until the reload lands, and on a slow link a silent drop is indistinguishable from a
+  refused one — which is how one move became two writes. Staging inverts this. The tile must move
+  immediately, and *staged* must then be visually distinct from *saved*, or the operator cannot tell
+  what is already durable.
+- **A discard path becomes necessary.** With immediate writes the only undo is dragging back, which
+  writes again. With staging, leaving the mode without committing has to mean something explicit —
+  and navigating away mid-rearrange must not lose the work silently.
+- **Unassigned is not settable**, and staging must keep that true: dropping there clears the
+  explicit cell and lets resolution run, so a device may visibly spring back. That is correct
+  behaviour, not a failed write, and a staged view that pretended the drop stuck would be telling
+  the one lie this location model exists to avoid.
+
+---
+
+### 10 · Vestigial column and configuration audit
+
+**Builds on:** [`scripts/check-docs-drift.mjs`](scripts/check-docs-drift.mjs) ·
+[`.env.example`](.env.example) · `0001_baseline_schema.sql`
+
+Columns and settings accumulate faster than they are retired. `devices.connection_method` is the
+clearest example: it is written by the device form and by the quarantine approval modal, exported
+into the AAS as `ConnectionMethod`, and classified as a governance field in the Digital Thread — and
+on a seeded stack **all six devices hold the same value**, `Sparkplug B`, because that is the only
+transport this platform ingests. It is not dead code. It is a field that carries no information,
+which is a harder thing to notice and a harder thing to justify keeping.
+
+**THE AUDIT'S WHOLE DIFFICULTY IS TELLING "UNUSED" FROM "EMPTY HERE", and a scan that cannot will do
+damage.** On a freshly reset stack these are all NULL for every row:
+
+| Column | Why it is empty | Verdict |
+| :--- | :--- | :--- |
+| `devices.quarantine_reason` | Only set when a device is quarantined | **Load-bearing** — ingestion writes it |
+| `devices.reported_identity` | Only set on an identity mismatch | **Load-bearing** — the spoofing diagnosis |
+| `devices.model_3d_path` | Only set once a model is uploaded | **Load-bearing** |
+| `gateways.agent_version` | Stamped at enrolment; every seeded gateway is simulated | **Load-bearing** — §1 builds on it |
+| `devices.asset_type` | Never written by any code path | Candidate |
+| `cells.grafana_url` | Never written by any code path | Candidate |
+
+Four of those six would be deleted by a "drop the columns that are always NULL" pass, and two of
+them are exactly the evidence the platform keeps for its own security decisions. The audit therefore
+has to be **reachability of the write path**, not occupancy of the column — which is a static
+question, and so a checkable one: a guard in `check-docs-drift.mjs` that fails when a `public`
+column is named by no migration other than its own `CREATE TABLE`, no frontend module, no edge
+function and no ingestion path, with the same stated-exception list `NOT_PUBLISHED` already uses for
+relations.
+
+**On the configuration half, the finding is the opposite of the suspicion.** All 66 variables in
+`.env.example` are referenced somewhere in the repository, and `SUPABASE_ANON_KEY` in particular is
+consumed by twelve files — Kong's key-auth, the Grafana alert contact point, the frontend bundle,
+the i3X service and both e2e Jobs. It is also **public by construction**: it is the `anon` role and
+is readable in any built bundle, which is why the chart renders it outside a Secret deliberately.
+Retiring it is not a cleanup, it is a migration.
+
+The real work on that side is narrower and has two parts:
+
+- **Drift between a working `.env` and the template**, which nothing checks in either direction. A
+  developer's file accumulates keys that were retired from the template (`VITE_ALLOW_SIGNUP` is one
+  today) and misses keys that were added to it, silently falling through to a Compose default. The
+  same one-pass comparison this entry was written from is the guard.
+- **Supabase's legacy API keys.** The `anon` / `service_role` JWTs this stack mints in
+  `scripts/setup.mjs` are the key format Supabase has since superseded with publishable and secret
+  keys. That is a real upstream deprecation with a real end date, and it touches Kong's key-auth
+  consumers, the edge-function registry and `custom_access_token_hook`. It should be scoped against
+  the pinned `supabase/gotrue` and `kong` versions before it is planned, not assumed to apply.
+
+### 11 · Kong → Envoy, following upstream Supabase
+
+**Builds on:** [`supabase/kong.yml`](supabase/kong.yml) · `supabase-kong-init` ·
+[`templates/supabase/kong.yaml`](deploy/helm/acs-cymru/templates/supabase/kong.yaml)
+
+**Upstream Supabase has dropped Kong.** Their self-hosted `docker-compose.yml` now fronts the stack
+with `envoyproxy/envoy`, so this fork's gateway is on a path upstream no longer maintains
+configuration for. Nothing is broken by that today — the gateway is on `kong:3.9.3` and does exactly
+four things — but every future Supabase change to routing, key handling or CORS will be expressed in
+Envoy config that has to be translated rather than copied.
+
+**What actually has to move** is small, and worth writing down because it is smaller than "replace
+the API gateway" sounds. `kong.yml` declares nine services, the `key-auth` plugin on four of them,
+four deliberate exemptions, one global CORS policy and one Prometheus plugin. That is the whole
+surface. Envoy expresses all of it, but none of it the same way: `key-auth` has no direct
+equivalent, and the closest arrangement is a Lua or ext_authz filter — which turns a declarative
+plugin into code the stack would then own.
+
+**The exemptions are the part to be careful with**, and they are the reason this is not a mechanical
+translation. Four routes are open by design — `/auth/v1/`, the two userinfo endpoints,
+`/storage/v1/object/public/`, and the Factory+ Directory's `/ping` and `/v1/`. Each is open for a
+stated reason and each is load bearing; a translation that quietly widened one would not fail any
+test that exists today, because `validate.py` asserts the 401s that SHOULD happen and cannot assert
+the absence of a route nobody wrote. Any migration needs the negative assertions first.
+
+**It interacts with §5 and should be sequenced against it.** Gateway API's `HTTPRoute` would retire
+the `__CORS_ORIGINS__` placeholder on Kubernetes; Envoy would restate CORS in its own filter on both
+targets. Doing both independently means expressing origin policy a third way before deleting the
+first — so whichever lands first should decide where that policy lives.
+
+**Not urgent, and deliberately not bundled with the 2.8 → 3.9.3 bump** that closed the unmaintained-
+image question. This is a divergence-from-upstream question, not a security one.
 
 ---
 

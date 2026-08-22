@@ -1,3 +1,4 @@
+import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import { api } from '../../api'
@@ -82,21 +83,21 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
    * Severity ordering matters: a device with a critical AND a warning is a device with a critical on
    * it, so the reduce keeps the worst rather than the last one seen.
    */
-  const alertsByDevice = React.useMemo(() => {
-    const worst = new Map()
-    const rank = { critical: 3, warning: 2, info: 1 }
-    for (const a of activeAlerts) {
-      for (const key of [a.sparkplug_id, a.device_id]) {
-        if (!key) continue
-        const held = worst.get(key)
-        if (!held || (rank[a.severity] || 0) > (rank[held.severity] || 0)) worst.set(key, a)
-      }
-    }
-    return worst
-  }, [activeAlerts])
+  /**
+   * Which devices have an alert firing on them.
+   *
+   * MOVED TO utils/deviceAlerts.js, not deleted (issue #34). This page resolved alerts against
+   * devices correctly long before Overview, Cells and Gateways were asked to do the same -- and
+   * copying the rules to three more call sites is how four pages end up disagreeing about which
+   * device an alert belongs to. The reasoning that used to sit here now sits with the helper: it
+   * indexes on BOTH `sparkplug_id` and `device_id` because a rename must not lose an alert and a
+   * nullable `device_id` must not be the only key, and it keeps the WORST severity rather than the
+   * last one seen.
+   */
+  const alertsByDevice = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
 
   const alertFor = React.useCallback(
-    (device) => alertsByDevice.get(effectiveSparkplugId(device)) || alertsByDevice.get(device?.asset_id) || null,
+    (device) => alertForDevice(alertsByDevice, device),
     [alertsByDevice]
   )
 

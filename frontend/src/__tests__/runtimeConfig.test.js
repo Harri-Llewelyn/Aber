@@ -87,9 +87,13 @@ describe('readFlag', () => {
   })
 
   it('uses the fallback only when the setting is absent from both sources', async () => {
+    // A NAME THAT IS NOT A SETTING, deliberately. This used to use VITE_ALLOW_SIGNUP, which was
+    // retired when the sign-up path was removed -- the server-side GOTRUE_DISABLE_SIGNUP is the
+    // only switch now. Naming a live setting here would make the case depend on whether the test
+    // environment happens to bake a value for it.
     const { readFlag } = await loadConfig({})
-    expect(readFlag('VITE_ALLOW_SIGNUP', true)).toBe(true)
-    expect(readFlag('VITE_ALLOW_SIGNUP')).toBe(false)
+    expect(readFlag('VITE_NOT_A_SETTING', true)).toBe(true)
+    expect(readFlag('VITE_NOT_A_SETTING')).toBe(false)
   })
 })
 

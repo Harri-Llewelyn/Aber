@@ -4,6 +4,7 @@ import { isUuid } from './utils/isUuid';
 import { deviceSparkplugId } from './utils/sparkplugId';
 import { resolveDeviceLocation, SCOPE_SITE_WIDE } from './utils/cellResolution';
 import { edgeFunctionErrorMessage } from './utils/edgeFunctionError';
+import { DIGITAL_THREAD_ACTIONS } from './constants';
 import { metricNameError } from './utils/metricGroup';
 import { readSetting } from './config';
 import {
@@ -345,7 +346,7 @@ const mapDigitalThreadRow = (t) => ({
 
 /**
  * The 3D-model bucket. Public-read by design -- an exported AAS `File` element has to be
- * dereferenceable by a viewer holding no Factory+ session, which a signed URL would not be.
+ * dereferenceable by a viewer holding no ACS-Cymru session, which a signed URL would not be.
  * Writes are gated by RLS to Administrator/Shopfloor_Manager (see the policies in
  * supabase/storage-policies.sql).
  *
@@ -397,6 +398,27 @@ export function gatewayBackupPath(sparkplugId, when = new Date()) {
 export function model3dPublicUrl(path) {
   if (!path) return null;
   return supabase.storage.from(MODEL_3D_BUCKET).getPublicUrl(path).data.publicUrl;
+}
+
+/**
+ * The same object, asked for as a DOWNLOAD rather than a navigation.
+ *
+ * THE `download` HTML ATTRIBUTE CANNOT DO THIS, and that is the whole reason this function exists
+ * rather than a one-word change on an anchor. The bucket is served from the storage origin and the
+ * dashboard from its own, so `<a download>` is CROSS-ORIGIN -- browsers ignore the attribute
+ * entirely in that case and navigate instead. What actually happened next depended on the file
+ * type: a .glb the browser cannot render downloads anyway, and a .gltf (which is JSON) renders in
+ * the tab. So the control would have worked for some models and silently not for others.
+ *
+ * `?download=` makes storage send `Content-Disposition: attachment`, which is a server-side
+ * instruction and therefore origin-independent. Passing the filename also names the saved file
+ * after the model instead of after its storage key.
+ */
+export function model3dDownloadUrl(path) {
+  if (!path) return null;
+  const name = path.split('/').pop() || 'model';
+  return supabase.storage.from(MODEL_3D_BUCKET).getPublicUrl(path, { download: name }).data
+    .publicUrl;
 }
 
 /**
@@ -879,7 +901,19 @@ const apiMethods = {
         query = query.eq('entity_type', stored || entityType);
       }
       if (entityIds) query = query.in('entity_id', entityIds);
-      if (['INSERT', 'UPDATE', 'DELETE'].includes(action)) query = query.eq('action', action);
+      // ALLOW-LISTED AGAINST THE SHARED ENUM, not a literal array. Written out by hand this read
+      // ['INSERT', 'UPDATE', 'DELETE'], so when 0026 added SCHEMA_REJECTION the filter silently
+      // stopped being able to select it -- and not by erroring: an unlisted action fell through
+      // and applied no predicate, so asking for one kind of event returned every kind. Same trap
+      // as the empty-entityIds guard above, and the same answer: a filter that matches nothing
+      // must return nothing.
+      if (action && Object.prototype.hasOwnProperty.call(DIGITAL_THREAD_ACTIONS, action)) {
+        query = query.eq('action', action);
+      } else if (action) {
+        // An action the client does not know about. Refusing beats widening: returning every row
+        // for an unrecognised filter is how a caller ends up believing it has seen a filtered set.
+        return [];
+      }
       // Bounds before the limit. PostgREST serialises the whole builder at await-time so the JS
       // call order does not itself decide anything -- but these are `where` and that is `limit`,
       // and writing them in that order is the point being made.

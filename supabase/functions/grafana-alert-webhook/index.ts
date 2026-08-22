@@ -6,7 +6,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
  *
  * Grafana evaluates the rules in grafana/provisioning/alerting/alert-rules.yaml against the
  * historian and POSTs an Alertmanager-shaped payload here. This function records each alert
- * instance as an OCCURRENCE in public.device_alerts, which Supabase Realtime then delivers to the
+ * instance as an OCCURRENCE in public.platform_alerts, which Supabase Realtime then delivers to the
  * dashboard's toast and Topbar pill.
  *
  * ---------------------------------------------------------------------------------------------
@@ -46,6 +46,8 @@ const RESOLVED = "resolved";
 const FIRING = "firing";
 
 const SEVERITIES = new Set(["critical", "warning", "info"]);
+/** Mirrors `platform_alerts_entity_type_valid` in 0023. Kept in step by test_grafana_alert_webhook.py. */
+const ENTITY_TYPES = new Set(["device", "gateway", "platform"]);
 
 interface GrafanaAlert {
   status?: string;
@@ -107,18 +109,29 @@ export function authorizeAlertWebhook(
 }
 
 /**
- * Normalise one Grafana alert instance into a device_alerts row.
+ * Normalise one Grafana alert instance into a platform_alerts row.
  *
- * Returns null when the alert cannot be attributed to a device. That is not an error condition: a
+ * THE SUBJECT IS (entity_type, entity_id), NOT A DEVICE. Until the platform rules arrived every
+ * alert was a machine condition, so an instance without a `sparkplug_id` label could only be
+ * malformed and was dropped. That is no longer true: a rule about the quarantine queue depth or
+ * the number of stuck enrolments is about the fleet, and has no asset to name.
+ *
+ * A rule therefore declares its own scope with an `entity_type` label -- `device` (the default,
+ * so the three shipped machine rules are unchanged), `gateway`, or `platform`.
+ *
+ * RETURNS NULL ONLY FOR A MALFORMED INSTANCE, and that is still not an error condition: a
  * DatasourceError notification (which `execErrState: Error` produces when a rule's query breaks)
- * carries no `sparkplug_id` label, and so does anything an operator adds through the Grafana UI. The
+ * carries no labels at all, and neither does anything an operator adds through the Grafana UI. The
  * caller counts these and reports the count, so a rule that has started erroring is visible in
- * Grafana's own delivery log rather than being written into the table as a device alert about a
- * device that does not exist.
+ * Grafana's own delivery log rather than being written in as an alert about nothing.
+ *
+ * AN ASSET SCOPE STILL REQUIRES A WIRE IDENTITY. `platform_alerts_asset_has_wire_id` enforces that
+ * in the schema; refusing it here as well means the batch is not failed by one bad instance.
  */
 export function normalizeAlert(alert: GrafanaAlert): {
   fingerprint: string;
-  sparkplug_id: string;
+  entity_type: string;
+  sparkplug_id: string | null;
   alert_name: string;
   severity: string;
   status: string;
@@ -130,10 +143,21 @@ export function normalizeAlert(alert: GrafanaAlert): {
   const labels = alert.labels ?? {};
   const annotations = alert.annotations ?? {};
 
-  const sparkplugId = labels.sparkplug_id?.trim();
+  const sparkplugId = labels.sparkplug_id?.trim() || null;
   const fingerprint = alert.fingerprint?.trim();
   const alertName = (labels.alertname ?? "").trim();
-  if (!sparkplugId || !fingerprint || !alertName || !alert.startsAt) return null;
+  if (!fingerprint || !alertName || !alert.startsAt) return null;
+
+  // DEFAULTS TO `device`, which is what keeps the three machine rules working untouched -- none of
+  // them carries this label. An unrecognised value is refused rather than coerced: the CHECK in
+  // 0023 would reject it anyway, and failing one instance here beats failing the whole batch's
+  // insert there.
+  const entityType = (labels.entity_type ?? "device").trim().toLowerCase();
+  if (!ENTITY_TYPES.has(entityType)) return null;
+
+  // Only a platform-scoped alert may omit the wire identity. Anything else claiming to be about an
+  // asset without naming it is the failure this function has always existed to prevent.
+  if (entityType !== "platform" && !sparkplugId) return null;
 
   // Grafana sends `status: "resolved"` on recovery and "firing" otherwise. Anything unrecognised is
   // treated as firing: a notification that arrived is evidence of a condition, and defaulting to
@@ -152,6 +176,7 @@ export function normalizeAlert(alert: GrafanaAlert): {
 
   return {
     fingerprint,
+    entity_type: entityType,
     sparkplug_id: sparkplugId,
     alert_name: alertName,
     // Constrained by a CHECK in 0023, so an unexpected label value is mapped rather than allowed to
@@ -203,7 +228,7 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   if (rows.length === 0) {
-    console.warn(`[grafana-alert-webhook] ${skipped} alert(s) carried no sparkplug_id label`);
+    console.warn(`[grafana-alert-webhook] ${skipped} alert(s) were not attributable`);
     return jsonResponse({ success: true, received: alerts.length, written: 0, skipped }, 200);
   }
 
@@ -211,29 +236,45 @@ export default async function handler(req: Request): Promise<Response> {
     auth: { persistSession: false },
   });
 
-  // ONE ROUND TRIP FOR THE DEVICE LOOKUP, not one per alert. A multi-dimensional rule can deliver
-  // six instances in a single notification, and `sparkplug_id` is indexed -- so an `in` filter is
-  // one query where a loop would be six.
-  const ids = [...new Set(rows.map((r) => r.sparkplug_id))];
-  const deviceBySparkplugId = new Map<string, string>();
-  const { data: devices, error: lookupError } = await supabaseAdmin
-    .from("devices")
-    .select("id, sparkplug_id")
-    .in("sparkplug_id", ids);
+  // ONE ROUND TRIP PER SUBJECT TABLE, not one per alert. A multi-dimensional rule can deliver six
+  // instances in a single notification, and `sparkplug_id` is indexed on both tables -- so an `in`
+  // filter is two queries where a loop would be twelve.
+  //
+  // THE TWO ARE LOOKED UP SEPARATELY BECAUSE A WIRE ID IS ONLY UNIQUE WITHIN ITS KIND. Device ids
+  // are `dev`-prefixed and gateway ids `gwy`-prefixed today, so one combined map would happen to
+  // work -- but it would be relying on a naming convention to keep two id spaces apart, and
+  // `entity_type` already says which space to look in. Resolving by the declared kind means a
+  // future prefix change cannot silently attribute a gateway alert to a device.
+  const idsFor = (kind: string) =>
+    [...new Set(rows.filter((r) => r.entity_type === kind && r.sparkplug_id).map((r) => r.sparkplug_id!))];
 
-  if (lookupError) {
-    // Recorded anyway, with a null device_id. The alert is the event worth keeping; the foreign key
-    // is a convenience for joining. Losing a real excursion because a metadata lookup failed would
-    // be the wrong trade.
-    console.error(`[grafana-alert-webhook] device lookup failed: ${lookupError.message}`);
-  } else {
-    for (const d of devices ?? []) deviceBySparkplugId.set(d.sparkplug_id, d.id);
+  const subjectId = new Map<string, string>();
+  const key = (kind: string, wireId: string) => `${kind}:${wireId}`;
+
+  for (const [kind, table] of [["device", "devices"], ["gateway", "gateways"]] as const) {
+    const ids = idsFor(kind);
+    if (ids.length === 0) continue;
+
+    const { data, error } = await supabaseAdmin
+      .from(table)
+      .select("id, sparkplug_id")
+      .in("sparkplug_id", ids);
+
+    if (error) {
+      // Recorded anyway, with a null entity_id. The alert is the event worth keeping; the id is a
+      // convenience for joining. Losing a real excursion because a metadata lookup failed would be
+      // the wrong trade.
+      console.error(`[grafana-alert-webhook] ${table} lookup failed: ${error.message}`);
+      continue;
+    }
+    for (const row of data ?? []) subjectId.set(key(kind, row.sparkplug_id), row.id);
   }
 
   const toWrite = rows.map((r) => ({
     fingerprint: r.fingerprint,
+    entity_type: r.entity_type,
+    entity_id: r.sparkplug_id ? subjectId.get(key(r.entity_type, r.sparkplug_id)) ?? null : null,
     sparkplug_id: r.sparkplug_id,
-    device_id: deviceBySparkplugId.get(r.sparkplug_id) ?? null,
     alert_name: r.alert_name,
     severity: r.severity,
     status: r.status,
@@ -251,7 +292,7 @@ export default async function handler(req: Request): Promise<Response> {
   // occurrence -- and because the resolve notification repeats the SAME startsAt, the resolve closes
   // the row it opened instead of inserting a second one.
   const { error: writeError } = await supabaseAdmin
-    .from("device_alerts")
+    .from("platform_alerts")
     .upsert(toWrite, { onConflict: "fingerprint,starts_at" });
 
   if (writeError) {

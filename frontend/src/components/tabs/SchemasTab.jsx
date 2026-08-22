@@ -22,7 +22,7 @@ import {
   mtconnectSemanticId, DEFAULT_SEMANTIC_ID_TYPE
 } from '../../utils/standards'
 import { kpis, kpiByName, iso22400Prefill } from '../../utils/iso22400'
-import { dataPointByName, opcuaSections, opcuaPrefill } from '../../utils/opcua'
+import { dataPointByName, opcuaSections, opcuaPrefill, suggestedGroup } from '../../utils/opcua'
 import { conceptByName, ashrae223Prefill } from '../../utils/ashrae223'
 
 // Sentinel for the "not in the list yet" option in the group picker. Not a valid group name --
@@ -266,6 +266,47 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
    * namespace a metric belongs to, so a stale value there is a wrong interoperability claim rather
    * than cosmetic. The group and description survive because they are the operator's own input.
    */
+  /**
+   * Changing the group can hide the data point that is currently selected.
+   *
+   * THE MIRROR OF handleStandardChange, and it exists for the identical reason. The Data Point
+   * picker now filters by group (issue #33), so moving the group to one the selected point does
+   * not belong to would leave `newMetric.type` holding a value that is absent from the options:
+   * the select renders blank while the form still composes a name from the hidden type, and the
+   * metric is created against a data point the form appears not to have selected.
+   *
+   * Clearing takes the whole prefill with it, not just `type`. Units, datatype, category and the
+   * semantic id were all written by opcuaPrefill() from that point -- keeping them would leave a
+   * metric carrying one data point's semantic id under another point's group, which is a wrong
+   * interoperability claim rather than a cosmetic leftover.
+   *
+   * MTConnect and ISO 22400 are untouched: neither picker filters by group, so neither can be
+   * orphaned by this. Narrowing the clear to the standard that can suffer it keeps a group change
+   * from silently discarding an MTConnect selection the operator still wants.
+   */
+  const handleGroupChange = (value) => {
+    const orphaned =
+      newMetric.standard === STANDARDS.OPCUA &&
+      newMetric.type &&
+      value && value !== NEW_GROUP &&
+      suggestedGroup(dataPointByName(opcuaVocabulary, null, newMetric.type)) !== value
+
+    setNewMetric(m => ({
+      ...m,
+      group: value,
+      ...(orphaned
+        ? {
+            type: '',
+            units: '',
+            datatype: '',
+            vocabCategory: '',
+            semanticId: '',
+            semanticIdType: '',
+            semanticIdManual: false
+          }
+        : {})
+    }))
+  }
   const handleStandardChange = (value) => {
     // The group survives a standard switch when the new standard still offers it -- the operator
     // typed it, and re-picking `Axes` after correcting the standard is pointless friction. But
@@ -560,7 +601,34 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   const typeGroups = typesByCategory(vocabulary)
   const availableSubTypes = subTypes(vocabulary)
   const isoKpis = kpis(isoVocabulary)
-  const opcuaGroups = opcuaSections(opcuaVocabulary)
+  /**
+   * The Data Point picker's sections, NARROWED TO THE SELECTED GROUP.
+   *
+   * Reported as issue #33: choosing a group left the picker offering every data point in the
+   * vocabulary, so a PackML group could be paired with an OPC 40001 Machinery point. The pairing
+   * did not survive -- picking the point re-derives the group and silently overwrites the choice --
+   * which is worse than a validation error, because the form ends up describing a metric the
+   * operator did not ask for and nothing says so.
+   *
+   * FILTERED ON suggestedGroup(), WHICH IS THE SAME FUNCTION opcuaPrefill() USES TO SET THE GROUP.
+   * That is what makes this self-consistent rather than a second rule to keep in step: whatever a
+   * point WOULD set the group to is exactly what it is matched on, so a visible point can never
+   * overwrite the group it was listed under. Matching against the group REGISTRY instead would
+   * couple this to metric_groups spelling and reintroduce the drift.
+   *
+   * The sentinel and the empty selection both mean 'no group decided yet', so both show
+   * everything -- the picker is only a filter once there is something to filter by.
+   */
+  const opcuaSectionsAll = opcuaSections(opcuaVocabulary)
+  const opcuaGroupFilter = newMetric.group && newMetric.group !== NEW_GROUP ? newMetric.group : null
+  const opcuaGroups = opcuaGroupFilter
+    ? opcuaSectionsAll
+        .map(section => ({
+          ...section,
+          entries: section.entries.filter(e => suggestedGroup(e) === opcuaGroupFilter)
+        }))
+        .filter(section => section.entries.length > 0)
+    : opcuaSectionsAll
   // The MTConnect UnitEnum, plus whatever the current selection prefilled if that is not in it.
   // ISO 22400 measures MTBF in HOUR and OPC UA carries UNECE codes, neither of which MTConnect
   // guarantees to list -- without this the select would silently show blank for a unit the
@@ -833,7 +901,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                 <select
                   className="form-control"
                   value={newMetric.group}
-                  onChange={e => setNewMetric(m => ({ ...m, group: e.target.value }))}
+                  onChange={e => handleGroupChange(e.target.value)}
                   title="The category this metric belongs to. Becomes the first segment of its name, so it is part of what the device publishes."
                 >
                   <option value="">— No group —</option>
@@ -924,6 +992,15 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                     title="The OPC UA companion specification data point. Selecting one fills in its group from the browse path, its datatype and its semantic id."
                   >
                     <option value="">— Select a data point —</option>
+                    {/* SAYS WHY IT IS EMPTY. With the list filtered by group, a group that no
+                        companion specification covers yields nothing -- and a picker that is
+                        simply blank reads as a failed load rather than as a filter doing its job.
+                        Disabled because it is a message, not a choice. */}
+                    {opcuaGroups.length === 0 && (
+                      <option value="" disabled>
+                        No OPC UA data points under &quot;{opcuaGroupFilter}&quot; — clear the group to see all
+                      </option>
+                    )}
                     {opcuaGroups.map(section => (
                       <optgroup key={section.key} label={`${section.title} (${section.entries.length})`}>
                         {section.entries.map(p => (

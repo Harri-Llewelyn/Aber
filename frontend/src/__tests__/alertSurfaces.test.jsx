@@ -9,7 +9,7 @@ import { grafanaAlertUrl, GRAFANA_URL } from '../constants'
 /**
  * Where an active alert SURFACES, once Grafana has raised it.
  *
- * Three places read the same `device_alerts_active` row -- the Topbar counter, a badge in the Devices
+ * Three places read the same `platform_alerts_active` row -- the Topbar counter, a badge in the Devices
  * table and a banner in the context drawer -- and the pill has its own file. What is pinned here is
  * the drawer banner and the one thing all three now share: NO EMOJI.
  */
@@ -196,7 +196,7 @@ describe('alert surfaces carry no emoji', () => {
     'components/common/ContextPanel.jsx',
     'components/common/AlertPill.jsx',
     'components/common/Icons.jsx',
-    'hooks/useDeviceAlerts.js',
+    'hooks/usePlatformAlerts.js',
     'utils/deviceStatus.js'
   ]
 

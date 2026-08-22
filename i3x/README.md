@@ -188,33 +188,116 @@ browser mode would fail every request at the preflight. The same limitation is w
 
 ## MCP
 
-`cesmii/i3X-MCP-Server` is a **generic MCP client of any conformant i3X server** — it discovers
-everything through the spec's exploratory endpoints, so there is nothing to write here. Point it at
-this service:
+[`cesmii/i3X-MCP-Server`](https://github.com/cesmii/i3X-MCP-Server) is a **generic MCP client of any
+conformant i3X server** — it discovers everything through the spec's exploratory endpoints, so there
+is nothing to write here. It asks this service questions in English on behalf of a model.
+
+**Verified against this server on 2026-08-22** by driving the published package over stdio, as
+`operator@acs-cymru.local` so that RLS was actually in the path. Every claim below was observed, not
+inferred from the package's README — which matters, because the configuration this section used to
+carry named a package that does not exist.
+
+### Configuration
 
 ```jsonc
-// claude_desktop_config.json / any MCP host
+// claude_desktop_config.json, or any MCP host's equivalent
 {
   "mcpServers": {
     "acs-cymru": {
       "command": "npx",
-      "args": ["-y", "@cesmii/i3x-mcp-server"],
+      "args": ["-y", "i3x-mcp@0.1.0"],
       "env": {
         "I3X_BASE_URL": "http://localhost:8090/v1",
-        "I3X_AUTH_SCHEME": "Bearer",
-        "I3X_TOKEN": "<a Supabase access token>"
+        "I3X_AUTH_SCHEME": "bearer",
+        "I3X_TOKEN": "<a Supabase access token — see Connecting a client, above>"
       }
     }
   }
 }
 ```
 
-**It is stdio transport**, so it is spawned per-user as a subprocess — *not* a service to deploy in
-the cluster. A shared hosted MCP endpoint would need a remote-transport wrapper, which is a separate
-piece of work.
+**The package is `i3x-mcp`.** This section previously said `@cesmii/i3x-mcp-server`, which is a
+`404` on the npm registry — the config could never have resolved. The repository name and the
+package name differ, and only the package name is what `npx` takes.
 
-**The token is the user's own**, and that is the point: the MCP client inherits exactly that user's
-RLS scope. An operator asking a model about the shopfloor sees what an operator can see.
+**Pin the version.** The documented invocation upstream is `i3x-mcp@latest`, which resolves and
+executes freshly-published code on the operator's machine at every launch, holding a credential to
+this API. `0.1.0` is the only release as of writing, from a two-commit repository — early enough
+that "whatever is newest" is not a safe default.
+
+**`I3X_BASE_URL` must include `/v1`.** The client does not append it. Without it, `connect` fails in
+a way that looks like the server being down.
+
+`I3X_AUTH_SCHEME` is case-insensitive — `bearer` and `Bearer` both work. `none` is the default, and
+is what an omitted scheme gets you; see the troubleshooting note below for why that failure is not
+obvious.
+
+### What it can do here
+
+| Tool | Reads |
+| :--- | :--- |
+| `server_info` | `GET /info` — including `update.current: false` |
+| `list_root_objects`, `get_object`, `search_objects`, `refresh_catalog` | `GET /objects`, `POST /objects/list` |
+| `read_current_value` | `POST /objects/value` — values, `quality`, timestamp |
+| `get_history` | `POST /objects/history` — raw or aggregated, out of TimescaleDB |
+| `find_related` | `POST /objects/related` — `HasParent` / `HasChildren` / `HasComponent` |
+| `describe_type` | `GET /objecttypes` |
+| `watch_values` | the subscription set, capped by `I3X_WATCH_MAX_SEC` (default 300s) |
+
+`get_history` requires an explicit `startTime`; `read_current_value` and `get_history` take
+`elementIds` (plural, an array), not `elementId`. Those are the two shapes worth knowing before
+concluding the server is at fault.
+
+**What it cannot do is answer anything about the Digital Thread.** i3X models objects, values and
+history and has no audit concept, so *"what changed and who changed it"* is outside this client's
+reach entirely — not a gap in the address space, a gap in the protocol it speaks.
+
+### It is stdio, so it is not a service
+
+The package is spawned **per-user as a subprocess** by the MCP host, despite "Server" in the
+repository name. There is nothing to deploy in the cluster, nothing to add to `docker-compose.yml`,
+and nothing that belongs in the Directory page. A shared hosted MCP endpoint would need a
+remote-transport wrapper, which is a separate piece of work.
+
+### Writes are refused, and that was tested rather than assumed
+
+`update_value` and `write_history` are not exposed as tools at all unless the client is started with
+`--enable-writes`. Started **with** it, and asked to write anyway, the call reaches this server and
+comes back:
+
+```
+i3X PUT /objects/value failed: 405 Method Not Allowed — "This i3X server is read-only. Update is
+optional in i3X 1.0 and GET /info declares update.current and update.history false. Writes belong
+on the Sparkplug B command path, where they are audited."
+```
+
+That is the whole argument for [Writes are refused](#writes-are-refused) working end to end: the
+client-side flag is a convenience, and the durable control is that this server implements no write
+verb. A user who defeats the flag gets the refusal and the reason for it.
+
+### The token is the user's own
+
+The MCP client inherits exactly that user's RLS scope, because this server passes the bearer
+straight to PostgREST. An operator asking a model about the shopfloor sees what an operator can see.
+
+**It expires in an hour** (`GOTRUE_JWT_EXP: 3600`) — the same trap the Explorer note above
+describes. A host config is a *file*, so the token in it is stale by the next session, and the
+symptom is `401`s on a server that was working. A long-lived token for a dedicated read-only
+principal is the fix; `service_role` is not, because it bypasses the RLS scoping that makes the
+paragraph above true.
+
+### Troubleshooting: `server_info` succeeding proves nothing about your token
+
+`GET /info` is deliberately unauthenticated, so `server_info` answers happily with **no credential
+at all**. With `I3X_AUTH_SCHEME` unset or wrong, the first failure appears one tool later:
+
+```
+i3X GET /objecttypes failed: 401 Unauthorized — "Authorization header is required. Only
+GET /info is unauthenticated."
+```
+
+So "the connection works, but everything else 401s" is an auth-scheme or token problem, never a
+reachability one — check the scheme before re-minting the token.
 
 ## Testing
 
@@ -251,13 +334,71 @@ clock.
 | `I3X_SUBSCRIPTION_QUEUE_LIMIT` | `10000` | Batches per subscription before 206 |
 | `SUPABASE_SERVICE_ROLE_KEY` | **must be absent** | Its presence is a startup refusal |
 
+## Availability
+
+**This is a declared characteristic, not a target being missed.** The service runs as a single
+replica and loses every subscription when it restarts. Both are deliberate, both are consequences of
+the design argued at the top of this document, and neither is going to change quietly. It is stated
+here as a commitment rather than as an aside because a client integrating against this endpoint has
+to build for it, and the bad outcome is not that they dislike the answer — it is that they never ask
+and discover it during their own integration.
+
+| | Commitment |
+| :--- | :--- |
+| Replicas | **Exactly one, always.** `replicas: 1` with `strategy: Recreate` is a correctness constraint, not tuning — see [`templates/apps/i3x-service.yaml`](../deploy/helm/acs-cymru/templates/apps/i3x-service.yaml) |
+| Endpoint reachability across a restart | **None.** `Recreate` stops the old pod before starting the new one, so there is a window with no i3X endpoint at all rather than a degraded one |
+| Subscription survival across a restart | **None.** Queues, sequence numbers and open SSE streams are process memory |
+| Current values immediately after a restart | **Cold, and reported as cold.** The MQTT cache refills from `spBv1.0/#` as devices publish; until a device next publishes, `/objects/value` answers `quality: "GoodNoData"` with a null value for it |
+| Metadata and history across a restart | **Unaffected.** Neither is held here — metadata is PostgREST's and history is TimescaleDB's, so a restart cannot lose either |
+| Client contract | `/subscriptions/sync` and `/subscriptions/stream` answer **404** for a subscriptionId this process has never seen. Create a new subscription |
+
+### Why 404-then-recreate is the contract and not a workaround
+
+The i3X subscription lifecycle already requires a client to handle a subscription disappearing — TTL
+expiry does exactly this to an idle subscription after `I3X_SUBSCRIPTION_TTL_SECONDS`, and that is a
+spec MUST rather than a local decision. A conformant client therefore has the recovery path already
+built, and a restart exercises it on the same code path as an expiry. What this section commits to is
+that the server will not do anything *else*: no partially-restored queue, no sequence number that
+resumes from a value the client never saw, no subscription that answers but has silently missed
+updates. **A dropped subscription is reported as gone.** That is the property worth guaranteeing,
+because a subscription that lies about its continuity is worse than one that admits it is new.
+
+### What causes a restart, and how often to expect one
+
+| Cause | Expected frequency | Detection-to-recovery |
+| :--- | :--- | :--- |
+| Chart upgrade that changes the pod spec | Every release that moves `appVersion` — the image tag is the chart's own, so in practice **once per release** | Immediate; bounded by image pull and the 10s readiness period |
+| Liveness probe failure on `/v1/info` | Unplanned, and rare enough that one is worth investigating | Up to **3 minutes** to detect — `periodSeconds: 30` × `failureThreshold: 6`, set deliberately high because a restart costs every open stream |
+| Node drain, eviction or loss | Cluster-operational, not application-driven | Reschedule time, which is the cluster's property rather than this service's |
+
+A `helm upgrade` that does not touch the i3X pod template does not restart it. The controlling number
+is therefore the release cadence, and **an operator who needs a quiet window should treat an i3X
+restart as a planned client-visible event** in the same way as any other rolling deployment — the
+difference being that here there is no rolling, by design.
+
+### Why subscriptions are not made to survive
+
+Backing subscription state with Redis is the obvious fix and is deliberately not being done. The
+reasons are the four rules in [Subscriptions](#subscriptions) above: every one of them is a property
+that is easy to hold inside one process and becomes a distributed-systems problem outside it.
+`/sync` acknowledgement has to stay exact under concurrent access; overflow has to drop and report a
+*computable* gap atomically; "one stream per subscription" becomes cross-replica coordination to
+close the displaced stream cleanly; and the MQTT value cache would have to move too, or replicas
+would disagree about current values. That is a substantial amount of machinery, and a hard Redis
+dependency, added to a service whose entire design argument is that it is a thin read-side adapter
+that owns no data.
+
+The trade is only worth making against a real requirement. It is tracked separately, and this
+section is what it would have to improve on.
+
 ## Known limitations
+
 
 - **HTTPS terminates at the ingress**, not here. The conformance suite raises this as an advisory
   warning (CORE-05) on a plain-HTTP endpoint; in-cluster the TLS edge is browser-only, as it is for
   every other service.
 - **`isExtended` reads `last_birth_metrics`**, so it reflects the device's most recent DBIRTH. A
   device that has never birthed reports `false` rather than unknown.
-- **Subscription state is in memory**, which is why the workload is pinned to one replica. A restart
-  drops every subscription; clients get 404 and must re-create, which the spec's lifecycle already
-  requires them to handle.
+- **Subscriptions do not survive a restart, and neither does the endpoint during one.** That is an
+  availability commitment rather than a limitation to be worked around, so it is stated in full
+  under [Availability](#availability) above.

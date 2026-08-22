@@ -92,9 +92,23 @@ const TARGET_SPECIFIC = new Map([
   [
     'sapcc/mosquitto-exporter',
     'Kubernetes only: the broker metrics sidecar. Mosquitto publishes its statistics to $SYS MQTT ' +
-      'topics and has no HTTP endpoint, so scraping it needs a translator -- and there is nothing ' +
-      'on the Compose path to scrape INTO. Adding it there would run a permanent extra container ' +
-      'serving an endpoint no one collects.',
+      'topics and has no HTTP endpoint, so scraping it needs a translator. This used to say there ' +
+      'was nothing on the Compose path to scrape INTO, which stopped being true when Prometheus ' +
+      'was added there -- so it is now a gap rather than a decision, and prometheus/prometheus.yml ' +
+      'records it as a follow-up rather than pretending otherwise.',
+  ],
+  [
+    'prom/prometheus',
+    'Compose only: the metrics store. Kubernetes defers to the cluster\'s own Operator-managed ' +
+      'Prometheus and ships ServiceMonitors instead -- a second one in the chart would duplicate ' +
+      'every series and give an operator two places to configure retention.',
+  ],
+  [
+    'prom/node-exporter',
+    'Compose only, for the same reason: a cluster running the Prometheus Operator already collects ' +
+      'node metrics from every node through its own DaemonSet, and this would be a second, ' +
+      'partial copy of that. On Compose the host IS the deployment -- typically a Debian VM under ' +
+      'Proxmox -- and nothing else is watching its disk.',
   ],
 ]);
 

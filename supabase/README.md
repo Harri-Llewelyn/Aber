@@ -464,7 +464,7 @@ All fail closed: missing or unrecognised role ⇒ `403`.
 | [`grafana-userinfo`](functions/grafana-userinfo) | any mapped role | OIDC userinfo for Grafana SSO |
 | [`nodered-userinfo`](functions/nodered-userinfo) | any mapped role | The same lookup in Node-RED's permission vocabulary |
 | [`fplus-directory`](functions/fplus-directory) | any authenticated user | Factory+ Directory adapter — see below |
-| [`grafana-alert-webhook`](functions/grafana-alert-webhook) | **no Supabase role at all** | Records a Grafana alert in `device_alerts` — see below |
+| [`grafana-alert-webhook`](functions/grafana-alert-webhook) | **no Supabase role at all** | Records a Grafana alert in `platform_alerts` — see below |
 
 ### `grafana-alert-webhook` — the one that authorises on a shared secret
 
@@ -486,6 +486,37 @@ this is the only thing standing in front of the table.
 
 **Alerts with no `sparkplug_id` label are counted and skipped.** A `DatasourceError` notification
 carries no device label; inventing one would attribute a broken query to a machine.
+
+### Alert retention (0030)
+
+**Alert occurrences are kept for 7 days and then deleted.** Not archived — nothing reads a historical
+alert. The dashboard reads `platform_alerts_active`, which is `DISTINCT ON (fingerprint)` filtered to
+`status = 'firing'`; no Grafana dashboard queries the table; and the Realtime subscription wants
+change *events*, not persistence. The telemetry that breached the threshold is retained
+independently in the historian, so the alert row is derived data whose evidence outlives it.
+
+That is the opposite answer to `digital_thread`, deliberately — one is an audit trail the platform
+sells as permanent, the other is a derived record of something already kept elsewhere.
+
+**The predicate is not a flat age cutoff, and this is the part worth reading before changing it.**
+`recorded_at` is stamped on the *first* write and never refreshed: the webhook upserts on
+`(fingerprint, starts_at)` and its payload omits the column, so Grafana's 12-hourly re-notification
+updates status and summary but not age. An alert firing continuously for longer than the window
+therefore has one row, older than the cutoff — and
+
+```sql
+DELETE FROM public.platform_alerts WHERE recorded_at < now() - interval '7 days';  -- WRONG
+```
+
+deletes the current state of a live alert. The pill disappears, the device stops being painted red,
+and Grafana still has it firing. `public.prune_platform_alerts()` instead ages out only **closed**
+occurrences (from `ends_at`) and **superseded** ones, so the newest row of a firing fingerprint
+survives at any age. `test_platform_alerts_retention.py` asserts that, and asserts the naive
+predicate would have destroyed the same fixture — so the suite cannot pass vacuously.
+
+Scheduled as `prune_platform_alerts` at 03:15 daily through `ensure_cron_job()`. A fingerprint stuck
+`firing` forever is kept forever, by design: growth is bounded by the number of distinct
+fingerprints, and a stuck row is a data-quality problem to surface rather than one to delete.
 
 ### The Factory+ Directory adapter
 
@@ -588,10 +619,9 @@ authenticated `p_actor_id` explicitly and **re-checking that actor's role agains
 
 ## API Gateway (`kong.yml`)
 
-**This file is a template, and ONE template serves both deployment targets.** Kong 2.8 has no
-environment interpolation in declarative config, and committing literal keys would make `.env` no
-longer authoritative — so the `__UPPER_SNAKE__` placeholders are substituted outside the container on
-both paths:
+**This file is a template, and ONE template serves both deployment targets.** Committing literal
+keys would make `.env` no longer authoritative, so the `__UPPER_SNAKE__` placeholders are
+substituted outside the container on both paths:
 
 | | Substituted by | Notes |
 | :--- | :--- | :--- |

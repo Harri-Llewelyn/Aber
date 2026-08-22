@@ -1072,6 +1072,27 @@ audit rows in an **append-only** table. `replicas` is deliberately not templated
 
 Scaling it out means adding MQTT v5 shared subscriptions to `ingestion.py` first.
 
+### The i3X endpoint is single-replica, and a restart is client-visible
+
+Same constraint, different consequence. `i3x-service` holds the same unshared `spBv1.0/#`
+subscription — but it also holds **its subscription state in process memory**: queues, sequence
+numbers and open SSE streams. A second replica would answer `/subscriptions/sync` with a 404 for a
+subscriptionId that is perfectly alive, intermittently, depending on which pod the Service picked.
+
+So `replicas: 1` and `strategy: Recreate` are correctness constraints here too, and `Recreate` means
+**the endpoint is absent during an upgrade rather than degraded** — there is no rolling window in
+which both the old and new pod serve.
+
+This is a declared availability characteristic with a stated client contract, not something to work
+around. It is written out in full in [`i3x/README.md`](../../i3x/README.md#availability) — what
+survives a restart, what does not, what causes one and how often to expect it — and repeated in the
+customer-facing [`docs/i3x-openapi.yaml`](../../docs/i3x-openapi.yaml), because a client integrating
+against this endpoint has to build the re-create-on-404 path that the i3X lifecycle already requires.
+
+**All nine single-writer workloads are enumerated once**, in `acs-cymru.singleWriterWorkloads` in
+`_helpers.tpl`. The autoscaling guard derives its refusal set from that block and CI parses the same
+block for its replica/strategy check, so neither keeps a copy that can fall behind it.
+
 ### Node-RED's init container must use the same image as the main container
 
 `settingsAreCorrect()` in `node-red-init.mjs` *evaluates* the settings.js it finds, and that file

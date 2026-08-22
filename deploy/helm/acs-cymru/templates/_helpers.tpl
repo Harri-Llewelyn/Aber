@@ -310,8 +310,18 @@ ingress.yaml simply renders nothing when there is nothing to render.
 {{/*
 The single-writer workloads, and why each one is.
 
-USED BY THREE THINGS: the autoscaling guard, the PDB template, and CI. One list, so "which workloads
-must never be scaled" has one answer rather than three that can drift.
+ONE LIST, READ RATHER THAN RESTATED. `acs-cymru.validateAutoscaling` below derives its refusal set
+from this block, and CI's replica/strategy check parses this same block out of the file. Neither
+keeps its own copy, because a copy is how this list came to be wrong: it named `i3x-service` from the
+day it was written, the guard hardcoded a duplicate that did not, and nothing compared them -- so the
+one workload whose in-memory state makes a second replica CLIENT-VISIBLE was the one the guard would
+have let through (issue #27).
+
+PARSED AS YAML, so the shape matters: `name: reason`, with continuation lines indented. The KEY is
+the name `autoscaling.components` takes, which for the Supabase components is the unprefixed one --
+`realtime`, not `supabase-realtime`. CI resolves both spellings against the rendered manifests and
+treats a name that matches NEITHER as an error rather than skipping it, because a name nothing
+resolves to protects nothing and would do so silently.
 */}}
 {{- define "acs-cymru.singleWriterWorkloads" -}}
 ingestion: a plain paho subscribe with no shared-subscription group -- every replica consumes every
@@ -332,19 +342,83 @@ timescaledb: likewise
 {{- end -}}
 
 {{/*
-An HPA on a single-writer workload.
+The workloads that MAY autoscale, and why each is safe to run more than one of.
 
-REFUSED, not warned about. Every one of those workloads is one replica for a reason recorded in its
-own manifest, and the damage from scaling them is SILENT -- no error, no crash, just duplicated
-telemetry, a split fleet, or two processes racing on one volume. An autoscaler makes that happen at
-3am under load, which is the worst possible moment to discover it.
+THE COMPLEMENT OF THE BLOCK ABOVE IS NOT AN ANSWER, which is why this is written out rather than
+derived. "Not single-writer" includes every name that does not exist -- a typo, a component that
+was renamed, a workload this chart has never shipped -- and issue #31 is precisely that those all
+used to pass. An allow-list is the only shape where an unrecognised name is wrong by default.
+
+Read by `acs-cymru.validateAutoscaling` and by hpas.yaml, which asserts its own dispatch table
+matches these keys -- so the set exists once and the two cannot drift apart.
+*/}}
+{{- define "acs-cymru.autoscalableWorkloads" -}}
+supabase-rest: PostgREST is stateless and holds a connection pool per replica
+supabase-kong: the gateway is configured declaratively and holds no state between requests
+supabase-functions: the edge runtime is a request router whose workers are per-request isolates
+frontend: NGINX serving static files
+{{- end -}}
+
+{{/*
+An HPA on a workload that must not have one.
+
+TWO REFUSALS, AND THE SECOND IS THE ONE ISSUE #31 WAS ABOUT.
+
+  1. A SINGLE-WRITER workload. Every one is one replica for a reason recorded in its own manifest,
+     and the damage from scaling it is SILENT -- no error, no crash, just duplicated telemetry, a
+     split fleet, or two processes racing on one volume. An autoscaler makes that happen at 3am
+     under load, which is the worst possible moment to discover it.
+
+  2. A name that is NEITHER allowed nor forbidden. This used to render no HPA and no error, so
+     `superbase-rest` -- a typo -- installed cleanly and simply never scaled. The symptom arrives
+     months later as a component that "should be autoscaling and isn't", with nothing logged at
+     install time to search for. It also meant the forbidden list was the only protection a
+     single-writer workload had, so any one missing from it was unguarded; `i3x-service` was
+     missing until #27.
+
+The order matters: forbidden is checked first so a single-writer workload keeps its specific
+explanation rather than being reported as merely unrecognised.
 */}}
 {{- define "acs-cymru.validateAutoscaling" -}}
 {{- if .Values.autoscaling.enabled -}}
-{{- $forbidden := list "ingestion" "node-red" "mosquitto" "realtime" "supabase-storage" "grafana" "supabase-db" "timescaledb" -}}
+{{- $single := include "acs-cymru.singleWriterWorkloads" . | fromYaml -}}
+{{- $forbidden := keys $single -}}
+{{- $allowed := keys (include "acs-cymru.autoscalableWorkloads" . | fromYaml) -}}
+{{- if lt (len $allowed) 4 -}}
+{{/*
+  THE SAME PARSE TRAP AS BELOW, in the direction that fails CLOSED rather than open: an
+  unparseable allow-list would leave `$allowed` empty and refuse every component, including the
+  four that are correct. Loud either way, but worth naming so the message points at the block
+  rather than at the operator's values file.
+*/}}
+{{- fail (printf "\n\nacs-cymru: the autoscalable workload list did not parse -- got %d entries: %v.\n\nThis guard derives its allow-list from `acs-cymru.autoscalableWorkloads` in _helpers.tpl, which\nis read as YAML. Check that block for a broken indent or a stray colon.\n" (len $allowed) $allowed) -}}
+{{- end -}}
+{{- if lt (len $forbidden) 9 -}}
+{{/*
+  A PARSE FAILURE MUST NOT READ AS "NOTHING IS FORBIDDEN". `fromYaml` answers a map carrying an
+  `Error` key rather than failing, so a typo in the block above would silently empty this guard and
+  every single-writer workload would become autoscalable with no error anywhere. Checked against a
+  floor rather than an exact count, so that adding a workload does not mean editing two places --
+  which is the whole point of deriving the list.
+*/}}
+{{- fail (printf "\n\nacs-cymru: the single-writer workload list did not parse -- got %d entries: %v.\n\nThis guard derives its refusal set from `acs-cymru.singleWriterWorkloads` in _helpers.tpl, which\nis read as YAML. An unparseable block would leave the guard EMPTY and every single-writer\nworkload autoscalable, with no error, so it fails here instead. Check that block for a broken\nindent or a stray colon.\n" (len $forbidden) $forbidden) -}}
+{{- end -}}
 {{- range .Values.autoscaling.components -}}
 {{- if has . $forbidden -}}
-{{- fail (printf "\n\nacs-cymru: autoscaling.components includes %q, which is a SINGLE-WRITER workload.\n\nRefused rather than warned about. The reasons are per-component and recorded in each manifest, but\nthey share a shape: the damage is SILENT. Scaling `ingestion` duplicates every telemetry row, every\nquarantine decision and every append-only audit row -- no error, no crash. An autoscaler makes that\nhappen under load, which is the worst moment to discover it.\n\nOnly these may autoscale: supabase-rest, supabase-kong, supabase-functions, frontend.\n" .) -}}
+{{/*
+  THE COMPONENT'S OWN REASON IS PRINTED, not a representative one. The message used to explain
+  `ingestion` whatever had been asked for, so someone who set `grafana` read an answer about
+  duplicated telemetry rows and had to work out for themselves that theirs was a SQLite file on a
+  ReadWriteOnce volume. The reasons are already written per-component one define up.
+*/}}
+{{- fail (printf "\n\nacs-cymru: autoscaling.components includes %q, which is a SINGLE-WRITER workload.\n\nWhy this one cannot be scaled:\n  %s\n\nRefused rather than warned about, because the damage is SILENT -- no error, no crash, just wrong\ndata or a split fleet. An autoscaler makes that happen under load, which is the worst moment to\ndiscover it.\n\nOnly these may autoscale: %s.\n" . (get $single .) (join ", " $allowed)) -}}
+{{- end -}}
+{{- if not (has . $allowed) -}}
+{{/*
+  ISSUE #31. Reached only when the name is in neither list, which is the case that used to render
+  nothing and say nothing.
+*/}}
+{{- fail (printf "\n\nacs-cymru: autoscaling.components includes %q, which is not a component this chart can scale.\n\nIt is neither in the allow-list nor among the single-writer workloads, so it would previously have\nrendered NO HPA AND NO ERROR -- indistinguishable from a correct value that happened to produce\nnothing. A typo such as `superbase-rest` installed cleanly and then never scaled, and the symptom\narrived months later under load with nothing logged at install time to search for.\n\nOnly these may autoscale: %s.\n\nIf %q is a real workload that SHOULD scale, add it to `acs-cymru.autoscalableWorkloads` in\n_helpers.tpl with the reason it is safe to run more than one of -- and to hpas.yaml's dispatch\ntable, which is checked against that same list.\n" . (join ", " $allowed) .) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

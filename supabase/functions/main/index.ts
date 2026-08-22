@@ -102,7 +102,7 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "STORAGE_MODEL_BUCKET",
   ],
 
-  // Records a Grafana alert notification in public.device_alerts.
+  // Records a Grafana alert notification in public.platform_alerts.
   //
   // TWO KEYS, AND THE ASYMMETRY IS THE WHOLE DESIGN. It holds the service-role key because it
   // writes to a table whose only write policy is service_role -- but the CALLER never sees that

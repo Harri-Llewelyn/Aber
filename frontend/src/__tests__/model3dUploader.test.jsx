@@ -10,7 +10,15 @@ vi.mock('../api', async () => {
     ...actual,
     api: { uploadDeviceModel: vi.fn(), removeDeviceModel: vi.fn() },
     model3dPublicUrl: (path) =>
-      path ? `http://localhost:54321/storage/v1/object/public/asset-3d-models/${path}` : null
+      path ? `http://localhost:54321/storage/v1/object/public/asset-3d-models/${path}` : null,
+    // The download variant carries `?download=<filename>`, which is what makes storage answer with
+    // `Content-Disposition: attachment`. Mocked separately from the plain URL because the two are
+    // used for different things -- the plain one for the size HEAD, this one for the button.
+    model3dDownloadUrl: (path) =>
+      path
+        ? `http://localhost:54321/storage/v1/object/public/asset-3d-models/${path}` +
+          `?download=${path.split('/').pop()}`
+        : null
   }
 })
 
@@ -142,5 +150,67 @@ describe('Model3DUploader', () => {
   it('warns that the bucket is public, since an export publishes the URL', () => {
     render(<Model3DUploader device={device()} canManage showToast={vi.fn()} />)
     expect(screen.getByText(/anyone with the link can read it/i)).toBeInTheDocument()
+  })
+
+  /*
+   * Getting the file out (issue #43).
+   *
+   * WHAT WAS REPORTED: the only way to reach the model was a small "Open" label beside the file
+   * size, while Replace and Remove sat below it as full-sized buttons -- so the control used most
+   * often was the least visible thing in the card, and the two destructive-ish ones were the most.
+   */
+  describe('downloading the attached model', () => {
+    it('offers Download as a button rather than a label beside the size', async () => {
+      render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
+      await waitFor(() => expect(screen.getByText(/12\.4 MB/)).toBeInTheDocument())
+
+      expect(screen.getByTitle(/Download this model file/i)).toBeInTheDocument()
+      // The old affordance is gone, not merely demoted -- two ways to fetch the same file, one of
+      // them 11px, is the state being fixed.
+      expect(screen.queryByText(/^Open$/)).not.toBeInTheDocument()
+    })
+
+    it('asks storage for an attachment, not a navigation', async () => {
+      /*
+       * `?download=` IS THE LOAD-BEARING PART. The bucket is a different origin from the dashboard,
+       * and browsers ignore the `download` attribute cross-origin -- so without the query parameter
+       * a .glb would download (the browser cannot render it) while a .gltf, being JSON, would open
+       * in the tab. The control would have worked for some models and not others.
+       */
+      render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
+      await waitFor(() => expect(screen.getByText(/12\.4 MB/)).toBeInTheDocument())
+
+      const link = screen.getByTitle(/Download this model file/i)
+      expect(link).toHaveAttribute('href', expect.stringContaining('?download=cnc.glb'))
+    })
+
+    it('is the first of the three controls', async () => {
+      // The issue asks for it first and visually strongest, because it is the one most used.
+      render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage showToast={vi.fn()} />)
+      await waitFor(() => expect(screen.getByText(/12\.4 MB/)).toBeInTheDocument())
+
+      const download = screen.getByTitle(/Download this model file/i)
+      const row = download.parentElement
+      expect(row.firstElementChild).toBe(download)
+      expect(download).toHaveClass('btn-primary')
+      expect(screen.getByTitle(/Upload a different model/i)).toHaveClass('btn-ghost')
+      expect(screen.getByTitle(/Detach this model/i)).toHaveClass('btn-ghost')
+    })
+
+    it('stays available to a role that cannot manage devices', async () => {
+      /*
+       * THE REGRESSION THIS PREVENTS. The "Open" link it replaces sat OUTSIDE the `canManage`
+       * gate, so every role could reach the file. Putting Download in the write-gated row would
+       * have quietly removed that -- from Operators and Auditors, who are the roles most likely to
+       * want a model and least likely to be replacing one. Reading a public-read object is not a
+       * write.
+       */
+      render(<Model3DUploader device={device(`${DEVICE_ID}/cnc.glb`)} canManage={false} showToast={vi.fn()} />)
+      await waitFor(() => expect(screen.getByText(/12\.4 MB/)).toBeInTheDocument())
+
+      expect(screen.getByTitle(/Download this model file/i)).toBeInTheDocument()
+      expect(screen.queryByTitle(/Upload a different model/i)).not.toBeInTheDocument()
+      expect(screen.queryByTitle(/Detach this model/i)).not.toBeInTheDocument()
+    })
   })
 })

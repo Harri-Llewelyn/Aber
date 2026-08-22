@@ -27,11 +27,14 @@ import {
   IconShieldAlert,
   IconX
 } from '../common/Icons'
-import { deviceLifecycleStatus, deviceStatusDotColor, deviceStatusTitle } from '../../utils/deviceStatus'
+import { deviceLifecycleStatus, deviceStatusDotColor, deviceStatusTitle, deviceDotColor } from '../../utils/deviceStatus'
+import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
 
-export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThread, hasPermission, initialSearchFilter, onClearFilter }) {
+export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThread, hasPermission, initialSearchFilter, onClearFilter, activeAlerts = [] }) {
+  /** Devices Grafana currently has an alert firing on -- see utils/deviceAlerts.js (issue #34). */
+  const alerts = React.useMemo(() => alertIndex(activeAlerts), [activeAlerts])
   /**
    * A cell handed over from the Overview shopfloor map arrives as `?search=<cell_id>`.
    *
@@ -621,9 +624,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
                         key={d.asset_id}
                         className="chip chip-link"
                         onClick={() => onSelectDevice?.(d.asset_id)}
-                        title={`Open ${d.asset_name} on the Devices page — ${deviceStatusTitle(status)}`}
+                        title={`Open ${d.asset_name} on the Devices page — ${alertForDevice(alerts, d) ? `ALERT: ${alertForDevice(alerts, d).alert_name}` : deviceStatusTitle(status)}`}
                       >
-                        <span className="badge-dot" style={{ background: deviceStatusDotColor(status) }} />
+                        <span className="badge-dot" style={{ background: deviceDotColor(d, alertForDevice(alerts, d)) }} />
                         <span className="chip-name">{d.asset_name}</span>
                       </button>
                     )

@@ -16,6 +16,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY sparkplug_b.proto .
 COPY ingestion/ingestion.py .
 COPY ingestion/logging_config.py .
+# The Prometheus exposition renderer and its HTTP thread (issues #22, #24). Imported by
+# ingestion.py at module scope, so a missing COPY here is a crash loop on start, not a
+# degraded endpoint.
+COPY ingestion/metrics.py .
 COPY ingestion/validate.py .
 
 # Compile the Sparkplug B protobuf definition

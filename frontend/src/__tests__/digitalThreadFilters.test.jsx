@@ -12,10 +12,23 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { DigitalThreadTab, classifyEvent, diffFields, tickFormatter, shortId } from '../components/tabs/DigitalThreadTab'
+import { DigitalThreadTab, classifyEvent, diffFields, tickFormatter, shortId, timeWindow } from '../components/tabs/DigitalThreadTab'
 import { api } from '../api'
 
-const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8')
+/*
+ * NEWLINES NORMALISED ON READ, because `cssRule()` below matches multi-line SELECTORS and its
+ * patterns are written with `\n`.
+ *
+ * .gitattributes normalises this file to LF in the repository and checks it out with the
+ * platform's native ending, so on Windows it arrives as CRLF and every one of those patterns
+ * silently matches nothing -- `cssRule()` returns undefined and the failure reads as
+ * ".toMatch() expects to receive a string". Three guards here were failing for that reason alone,
+ * on a working tree whose CSS was correct, while CI on Linux passed.
+ *
+ * Normalising is the right fix rather than teaching each pattern about \r?\n: the guards are about
+ * what the rules SAY, and line endings are not part of that.
+ */
+const APP_CSS = fs.readFileSync(path.resolve(__dirname, '../App.css'), 'utf8').replace(/\r\n/g, '\n')
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
@@ -111,6 +124,24 @@ const show = async () => {
   await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
 }
 
+/**
+ * Render with purged assets INCLUDED.
+ *
+ * Hiding them is the page default (issue #44). Several suites below are ABOUT the two purged
+ * entities in the fixture -- `cell-gone` carries the deleted-name fallback and the only DELETE,
+ * and the orphan uuid on event 6 is the only entity with no name anywhere -- so for those the
+ * toggle is the subject of the test rather than incidental setup.
+ *
+ * Turning it on here rather than relaxing each assertion is deliberate: the alternative was to
+ * expect the smaller numbers, which would have quietly converted tests about three sections and a
+ * DELETE marker into tests about two sections and no DELETE.
+ */
+const showAll = async () => {
+  await show()
+  fireEvent.click(screen.getByRole('button', { name: /Show deleted assets/i }))
+  await waitFor(() => expect(screen.getByTitle('Clear every filter')).toBeInTheDocument())
+}
+
 /** Every marker on the timeline, in DOM order. */
 const nodes = () => [...document.querySelectorAll('.dt-node')]
 const nodeFor = (pattern) => screen.getAllByRole('button', { name: pattern })[0]
@@ -132,7 +163,11 @@ describe('Digital Thread filter bar', () => {
     expect(document.querySelector('.filter-bar')).toBeTruthy()
     expect(screen.getByTitle(/Show only events against one kind of asset/)).toBeInTheDocument()
     expect(screen.getByPlaceholderText(/Search by entity name or ID/)).toBeInTheDocument()
-    expect(screen.getByTitle(/Show only one kind of audit event/)).toBeInTheDocument()
+    // The wording is load-bearing, not incidental. This control filters `digital_thread.action`,
+    // while the coloured markers below it show a DERIVED classification -- two taxonomies on one
+    // screen, which issue #37 reported as a single one with a missing option. See
+    // digitalThreadActionFilter.test.jsx.
+    expect(screen.getByTitle(/Filter by the database action/)).toBeInTheDocument()
     expect(rangeSelect()).toBeInTheDocument()
   })
 
@@ -145,7 +180,7 @@ describe('Digital Thread filter bar', () => {
 
   it('filters by audit event type', async () => {
     await show()
-    fireEvent.change(screen.getByTitle(/Show only one kind of audit event/), { target: { value: 'DELETE' } })
+    fireEvent.change(screen.getByTitle(/Filter by the database action/), { target: { value: 'DELETE' } })
 
     await waitFor(() => expect(lastThreadUrl()).toContain('action=DELETE'))
   })
@@ -169,7 +204,7 @@ describe('Digital Thread filter bar', () => {
 
   it('counts the active filters and clears them together, the time range included', async () => {
     await show()
-    fireEvent.change(screen.getByTitle(/Show only one kind of audit event/), { target: { value: 'UPDATE' } })
+    fireEvent.change(screen.getByTitle(/Filter by the database action/), { target: { value: 'UPDATE' } })
     fireEvent.change(screen.getByPlaceholderText(/Search by entity name or ID/), { target: { value: 'Press' } })
     fireEvent.change(rangeSelect(), { target: { value: '7d' } })
 
@@ -208,7 +243,7 @@ describe('Digital Thread time range', () => {
     two weeks old and must still render.
   */
   it('renders events far older than any rolling window, because the default is unbounded', async () => {
-    await show()
+    await showAll()
     expect(nodes().length).toBe(EVENTS.length)
   })
 
@@ -226,20 +261,78 @@ describe('Digital Thread time range', () => {
 
   it('sends both bounds for a custom range, and only shows the pickers in that mode', async () => {
     await show()
-    expect(screen.queryByLabelText('Range start date')).toBeNull()
+    expect(screen.queryByLabelText('Range start')).toBeNull()
 
     fireEvent.change(rangeSelect(), { target: { value: 'custom' } })
-    fireEvent.change(screen.getByLabelText('Range start date'), { target: { value: '2026-08-01' } })
-    fireEvent.change(screen.getByLabelText('Range end date'), { target: { value: '2026-08-03' } })
+    fireEvent.change(screen.getByLabelText('Range start'), { target: { value: '2026-08-01T09:30' } })
+    fireEvent.change(screen.getByLabelText('Range end'), { target: { value: '2026-08-01T09:45' } })
 
     await waitFor(() => expect(lastThreadUrl()).toContain('until='))
     const params = new URL(lastThreadUrl(), 'http://x').searchParams
-    // Local midnight through local end-of-day: the operator picking a date means their own day,
-    // not UTC's.
+    // LOCAL, not UTC: an operator choosing 09:30 means 09:30 where they are standing. The end
+    // bound is widened to the end of that MINUTE, or everything during 09:45 would be excluded by
+    // a range the operator read as including it.
     expect(new Date(params.get('since')).getTime())
-      .toBe(new Date('2026-08-01T00:00:00.000').getTime())
+      .toBe(new Date('2026-08-01T09:30:00.000').getTime())
     expect(new Date(params.get('until')).getTime())
-      .toBe(new Date('2026-08-03T23:59:59.999').getTime())
+      .toBe(new Date('2026-08-01T09:45:59.999').getTime())
+  })
+
+  it('takes a window narrower than a day, which the date pickers could not express', async () => {
+    /*
+     * THE WHOLE POINT OF THE SUB-DAY ZOOM WORK. `type="date"` bounded the narrowest
+     * expressible window at 24 hours, so on a stack commissioned this morning "All time" and
+     * "today" drew the same picture -- and a commissioning burst stayed in a few pixel columns
+     * however the page was filtered.
+     */
+    await show()
+    fireEvent.change(rangeSelect(), { target: { value: 'custom' } })
+    fireEvent.change(screen.getByLabelText('Range start'), { target: { value: '2026-08-01T16:11' } })
+    fireEvent.change(screen.getByLabelText('Range end'), { target: { value: '2026-08-01T16:12' } })
+
+    await waitFor(() => expect(lastThreadUrl()).toContain('until='))
+    const params = new URL(lastThreadUrl(), 'http://x').searchParams
+    const spanMs = new Date(params.get('until')) - new Date(params.get('since'))
+    expect(spanMs).toBeLessThan(2 * 60 * 1000)
+    expect(spanMs).toBeGreaterThan(0)
+  })
+
+  it('still understands a date-only bound, tested on the function rather than the input', () => {
+    /*
+     * A `datetime-local` input REFUSES a date-only value -- the browser and jsdom both leave the
+     * field empty rather than accept `2026-08-01` -- so this cannot be driven through the DOM, and
+     * a test that tried would be asserting that the input rejected it.
+     *
+     * The branch is kept because `timeWindow` is an exported pure function with its own contract:
+     * a bare date means the whole of that day. It is no longer reachable from this page's controls,
+     * which is why it is tested here and not through them.
+     */
+    const { since, until } = timeWindow('custom', '2026-08-01', '2026-08-03')
+    expect(new Date(since).getTime()).toBe(new Date('2026-08-01T00:00:00.000').getTime())
+    expect(new Date(until).getTime()).toBe(new Date('2026-08-03T23:59:59.999').getTime())
+  })
+
+  it('offers the sub-day presets, with All time still the default', async () => {
+    await show()
+    const values = [...rangeSelect().querySelectorAll('option')].map(o => o.value)
+
+    expect(values).toContain('15m')
+    expect(values).toContain('1h')
+    // All time stays first and stays selected: most arrivals here are a handover from a device
+    // row, and a rolling default would answer that click with an empty timeline.
+    expect(values[0]).toBe('all')
+    expect(rangeSelect().value).toBe('all')
+  })
+
+  it('asks for a 15-minute window when that preset is chosen', async () => {
+    await show()
+    fireEvent.change(rangeSelect(), { target: { value: '15m' } })
+
+    await waitFor(() => expect(lastThreadUrl()).toContain('since='))
+    const since = new URL(lastThreadUrl(), 'http://x').searchParams.get('since')
+    const ageMs = Date.now() - new Date(since).getTime()
+    expect(ageMs).toBeGreaterThan(14.5 * 60 * 1000)
+    expect(ageMs).toBeLessThan(15.5 * 60 * 1000)
   })
 
   it('says the range is why the timeline is empty, rather than blaming the filters', async () => {
@@ -275,7 +368,7 @@ describe('Digital Thread time range', () => {
  */
 describe('Digital Thread swimlanes', () => {
   it('draws one lane per entity, not one row per event', async () => {
-    await show()
+    await showAll()
 
     expect(document.querySelectorAll('.dt-lane:not(.dt-axis)').length).toBe(ENTITY_COUNT)
     expect(nodes().length).toBe(EVENTS.length)
@@ -315,7 +408,7 @@ describe('Digital Thread swimlanes', () => {
   })
 
   it('recovers a deleted entity name from its audit snapshot, and says it is deleted', async () => {
-    await show()
+    await showAll()
     const lane = screen.getByText('Decommissioned Line').closest('.dt-lane')
     expect(lane).toBeTruthy()
     // Flagged, or the name reads as a live asset that simply is not in the list.
@@ -323,7 +416,7 @@ describe('Digital Thread swimlanes', () => {
   })
 
   it('falls back to a truncated id only when no name exists anywhere', async () => {
-    await show()
+    await showAll()
     // Neither joinable nor recoverable from a snapshot: event 6 carries no payload at all.
     expect(screen.getByText('99999999…5555')).toBeInTheDocument()
     // Not flagged deleted -- nothing says it was; it is merely unidentifiable.
@@ -339,14 +432,14 @@ describe('Digital Thread swimlanes', () => {
     scrolling.
   */
   it('groups lanes under Cells, Gateways and Devices, in containment order', async () => {
-    await show()
+    await showAll()
     const headings = [...document.querySelectorAll('.dt-section .dt-section-name')]
       .map(h => h.textContent)
     expect(headings).toEqual(['Cells', 'Gateways', 'Devices'])
   })
 
   it('counts what it draws in each heading', async () => {
-    await show()
+    await showAll()
     const counts = [...document.querySelectorAll('.dt-section')]
       .map(s => s.textContent.replace(/[^0-9]/g, ''))
     // One cell, one gateway, three devices (dev-1, dev-2, the unnamed one).
@@ -373,21 +466,33 @@ describe('Digital Thread swimlanes', () => {
   })
 
   it('folds the long tail of lanes behind a toggle', async () => {
-    const many = Array.from({ length: 20 }, (_, i) => ({
+    /*
+     * FORTY LANES, against a cap of thirty. This used to build twenty against a cap of fifteen --
+     * which stopped demonstrating anything once the cap moved, because twenty no longer overflows.
+     *
+     * The bulk assets are also returned by the devices lookup, so none of them reads as purged.
+     * Without that they would all be hidden by default and the page would draw nothing at all,
+     * making this a test of the purge filter wearing a lane-fold test's clothes.
+     */
+    const many = Array.from({ length: 40 }, (_, i) => ({
       event_id: 100 + i, entity_type: 'devices', entity_id: `bulk-${i}`, event_type: 'UPDATE',
       timestamp: '2026-08-02T12:00:00Z', description: 'x', changed_by: null, actor_source: 'service'
     }))
+    const bulkDevices = Array.from({ length: 40 }, (_, i) => ({
+      asset_id: `bulk-${i}`, asset_name: `Bulk_${i}`, last_birth_metrics: []
+    }))
     api.get.mockImplementation((path) => {
       if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve(many)
+      if (path.startsWith('/api/v1/devices')) return Promise.resolve(bulkDevices)
       return Promise.resolve([])
     })
     render(<DigitalThreadTab />)
 
-    const toggle = await screen.findByText(/Show all lanes \(\+5\)/)
-    expect(document.querySelectorAll('.dt-lane:not(.dt-axis)').length).toBe(15)
+    const toggle = await screen.findByText(/Show all lanes \(\+10\)/)
+    expect(document.querySelectorAll('.dt-lane:not(.dt-axis)').length).toBe(30)
 
     fireEvent.click(toggle)
-    await waitFor(() => expect(document.querySelectorAll('.dt-lane:not(.dt-axis)').length).toBe(20))
+    await waitFor(() => expect(document.querySelectorAll('.dt-lane:not(.dt-axis)').length).toBe(40))
   })
 })
 
@@ -472,7 +577,7 @@ describe('Digital Thread event classification', () => {
   })
 
   it('paints a DELETE as lifecycle-critical', async () => {
-    await show()
+    await showAll()
     expect(classOf(/DELETE on Decommissioned Line/)).toContain('dt-node-critical')
   })
 
@@ -488,7 +593,7 @@ describe('Digital Thread event classification', () => {
   })
 
   it('paints an archival as critical, though its action is only UPDATE', async () => {
-    await show()
+    await showAll()
     // Two UPDATEs on Press_02; exactly one of them flipped is_archived to true.
     const critical = nodes().filter(n => n.className.includes('dt-node-critical'))
     // The DELETE, plus the archival.
@@ -584,7 +689,7 @@ describe('Digital Thread event drawer', () => {
   })
 
   it('renders a DELETE as the properties it was deleted with', async () => {
-    await show()
+    await showAll()
     await selectEvent(/DELETE on Decommissioned Line/)
 
     expect(screen.getByText('Final properties')).toBeInTheDocument()
@@ -784,7 +889,7 @@ describe('Digital Thread attribution', () => {
   })
 
   it('flags a row with no actor_source at all, so a real gap is visible', async () => {
-    await show()
+    await showAll()
     await selectEvent(/DELETE on Decommissioned Line/)
     // Rows written before 0005. After it, this should never appear -- which is the point of
     // making it loud rather than blank.
@@ -836,7 +941,7 @@ describe('Digital Thread — removed tag filter', () => {
     await waitFor(() => expect(controls().length).toBe(6))
   })
 
-  it('folds export and auto-refresh into the filter bar rather than a row of their own', async () => {
+  it('folds export into the filter bar rather than a row of its own', async () => {
     // What the export writes is decided by the filters, so the button belongs at the end of the
     // row that decides it. Removing the separate `.page-actions` row is also a whole band of
     // vertical space off the top of the page.
@@ -846,7 +951,325 @@ describe('Digital Thread — removed tag filter', () => {
     const actions = document.querySelector('.filter-bar .filter-bar-actions')
     expect(actions).toBeTruthy()
     expect(within(actions).getByTitle('Download audit events as CSV')).toBeInTheDocument()
-    expect(within(actions).getByTitle('Auto-refresh interval')).toBeInTheDocument()
+  })
+
+  it('no longer offers the auto-refresh control, having replaced it with a poll (issue #42)', async () => {
+    /*
+     * WHAT WAS REPORTED: the field was unneeded, because a default auto-update does the same job.
+     *
+     * It defaulted to Off, so the page was static until somebody noticed the control and picked a
+     * value -- and it then offered 1s and 5s against an audit log that only changes when an
+     * operator does something. Neither end of that range was useful.
+     */
+    await show()
+
+    expect(screen.queryByTitle('Auto-refresh interval')).not.toBeInTheDocument()
+    expect(screen.queryByTitle('Refresh now')).not.toBeInTheDocument()
+  })
+
+  it('polls every 60 seconds without blanking the timeline (issue #42)', async () => {
+    /*
+     * THE HALF THAT MATTERS. Removing a control and adding nothing would leave a page that never
+     * updates, and the assertion above -- that the control is gone -- would still pass.
+     *
+     * `load(false)`, not `load(true)`: the flag raises the loading state and swaps the timeline for
+     * a spinner, which is right on first paint and a flicker every minute afterwards. This asserts
+     * the refetch happens AND that the lanes are still on screen when it does.
+     */
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      render(<DigitalThreadTab />)
+      await vi.waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
+
+      const threadCalls = () =>
+        api.get.mock.calls.filter(c => String(c[0]).startsWith('/api/v1/digital-thread')).length
+      const before = threadCalls()
+
+      await vi.advanceTimersByTimeAsync(60_000)
+
+      expect(threadCalls()).toBe(before + 1)
+      // Still the timeline, not a spinner.
+      expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument()
+      expect(document.querySelector('.loading-wrap')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /*
+   * Hiding events whose asset is gone (issue #44).
+   *
+   * WHAT WAS REPORTED: a Test gateway created in error, never brought online, since deleted -- and
+   * still occupying the timeline. The reporter also proposed deleting the records outright; that
+   * half is deliberately NOT built here. `digital_thread` is append-only and 0026 revoked DELETE
+   * even from `service_role`, so removing rows is an administrative act, not a filter. Hiding is
+   * the part that answers the complaint without asserting anything about what was kept.
+   *
+   * THE FIXTURE ALREADY CONTAINED THE CASE: `cell-gone` and the orphan UUID on event 6 appear in
+   * EVENTS and in none of CELLS/GATEWAYS/DEVICES, which is exactly what a purged asset looks like.
+   */
+  describe('events for assets that no longer exist', () => {
+    const toggle = () => screen.getByRole('button', { name: /Show deleted assets/i })
+
+    it('counts distinct ASSETS, not the events belonging to them', async () => {
+      /*
+       * The reported bug: the control read "(54)" on a page whose own header said 16 assets, so the
+       * number could only be parsed as a count of something else. Two purged entities in the
+       * fixture -- `cell-gone` and the orphan uuid on event 6 -- so the answer is 2 however many
+       * rows they own between them.
+       */
+      await show()
+      expect(toggle()).toHaveTextContent('Show deleted assets (2)')
+    })
+
+    it('hides them by default, and that is not an active filter', async () => {
+      /*
+       * The resting view is the live plant. A deleted Test gateway is noise on every visit, and
+       * Clear filters must not appear merely because the page is in its default state -- the
+       * contract every other control in this bar has is that clearing restores the resting view.
+       */
+      await show()
+
+      expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (4)')
+      expect(screen.queryByTitle('Clear every filter')).not.toBeInTheDocument()
+    })
+
+    it('showing them is the deviation, so Clear filters appears', async () => {
+      await show()
+      fireEvent.click(toggle())
+
+      await waitFor(() =>
+        expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (6)'))
+      expect(screen.getByTitle('Clear every filter')).toHaveTextContent('Clear filters (1)')
+    })
+
+    it('Clear filters returns them to hidden', async () => {
+      await show()
+      fireEvent.click(toggle())
+      fireEvent.click(await screen.findByTitle('Clear every filter'))
+
+      await waitFor(() =>
+        expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (4)'))
+    })
+
+    it('is styled as the toggle Gateways and Cells already use', async () => {
+      /*
+       * Has quarantined devices (Gateways) and Empty (Cells) are both `btn btn-sm`, ghost at rest
+       * and primary when engaged, with an icon and a count. This was a bare checkbox -- the only
+       * control of its kind in the app. Unlit at rest is also why the label says Show rather than
+       * Hide: with hiding as the default, a Hide button would load already pressed.
+       */
+      await show()
+      expect(toggle()).toHaveClass('btn', 'btn-sm', 'btn-ghost')
+      expect(toggle()).not.toHaveClass('btn-primary')
+
+      fireEvent.click(toggle())
+      await waitFor(() => expect(toggle()).toHaveClass('btn-primary'))
+      expect(toggle()).not.toHaveClass('btn-ghost')
+    })
+
+    it('drops those events from the export as well as the timeline', async () => {
+      // The count on the button is the count the CSV writes -- both read the same derived list,
+      // which is why `events` is derived once rather than filtered at each call site.
+      await show()
+      expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (4)')
+
+      fireEvent.click(toggle())
+      await waitFor(() =>
+        expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (6)'))
+    })
+
+    it('hides the control when nothing would be hidden', async () => {
+      /*
+       * The overwhelmingly common case on a healthy stack. A permanent control reading "(0)" is one
+       * whose relationship to the page has to be guessed at -- the same reasoning that keeps the
+       * custom date inputs out of the bar until the custom preset is chosen.
+       */
+      api.get.mockImplementation((path) => {
+        if (path.startsWith('/api/v1/digital-thread')) {
+          return Promise.resolve(EVENTS.filter(e => ['dev-1', 'dev-2', 'gw-1'].includes(e.entity_id)))
+        }
+        if (path.startsWith('/api/v1/devices'))  return Promise.resolve(DEVICES)
+        if (path.startsWith('/api/v1/gateways')) return Promise.resolve(GATEWAYS)
+        if (path.startsWith('/api/v1/cells'))    return Promise.resolve(CELLS)
+        return Promise.resolve([])
+      })
+      await show()
+
+      expect(screen.queryByRole('button', { name: /Show deleted assets/i })).not.toBeInTheDocument()
+    })
+
+    it('hides nothing while the asset lookups are still outstanding', async () => {
+      /*
+       * THE BUG THIS PREVENTS, and it would have been silent. The purged test is absence from the
+       * three lookups, and before those resolve EVERY entity_id is absent -- so filtering eagerly
+       * would classify the whole page as deleted and, with hiding now the DEFAULT, blank it
+       * outright with no interaction at all.
+       *
+       * Lookups that never resolve are the same situation as lookups still in flight, so this also
+       * covers the failure path: unable to tell purged from live means hide nothing.
+       */
+      api.get.mockImplementation((path) => {
+        if (path.startsWith('/api/v1/digital-thread')) return Promise.resolve(EVENTS)
+        return new Promise(() => {})   // never resolves
+      })
+      render(<DigitalThreadTab />)
+
+      await waitFor(() =>
+        expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (6)'))
+      expect(screen.queryByRole('button', { name: /Show deleted assets/i })).not.toBeInTheDocument()
+    })
+
+    it('does not treat an ARCHIVED asset as deleted', async () => {
+      /*
+       * The distinction the whole filter rests on, and it matters more now that hiding is the
+       * default: /api/v1/devices does not filter is_archived, so an archived device is still in the
+       * lookup and is therefore still live as far as this filter is concerned. Getting it wrong
+       * would silently drop a retired -- but recoverable -- asset's whole history from the resting
+       * view.
+       */
+      api.get.mockImplementation((path) => {
+        if (path.startsWith('/api/v1/digital-thread')) {
+          return Promise.resolve(EVENTS.filter(e => e.entity_id === 'dev-2'))
+        }
+        if (path.startsWith('/api/v1/devices')) {
+          return Promise.resolve([{ ...DEVICES[1], is_archived: true, archived_at: '2026-08-01T00:00:00Z' }])
+        }
+        if (path.startsWith('/api/v1/gateways')) return Promise.resolve([])
+        if (path.startsWith('/api/v1/cells'))    return Promise.resolve([])
+        return Promise.resolve([])
+      })
+      render(<DigitalThreadTab />)
+      await waitFor(() => expect(screen.getByText('Press_02')).toBeInTheDocument())
+
+      expect(screen.queryByRole('button', { name: /Show deleted assets/i })).not.toBeInTheDocument()
+    })
+  })
+
+  /*
+   * The swimlane redesign: contained track cards rather than ruled rows.
+   *
+   * ASSERTED THROUGH THE STYLESHEET, using the `cssRule()` helper this file already uses for the
+   * other CSS guards. The rules are what make a lane read as one asset's stretch of time; jsdom
+   * applies no layout, so the DOM cannot answer whether a track has edges.
+   */
+  /** The rule body for a selector, from the stylesheet on disk. jsdom applies no layout, so a
+      question about whether a track has edges can only be asked of the CSS. Local to these two
+      describes; the diff-table guards further down carry their own. */
+  const ruleFor = (selector) => {
+    const escaped = selector.replace(/[.:()\-*+?^${}|[\]\\]/g, '\\$&')
+    return APP_CSS.match(new RegExp(`\\n${escaped} \\{([\\s\\S]*?)\\n\\}`))?.[1]
+  }
+
+  describe('swimlanes render as contained tracks', () => {
+    it('gives the track a container rather than a bare line', async () => {
+      const rule = ruleFor('.dt-track')
+      expect(rule).toMatch(/background:/)
+      expect(rule).toMatch(/border:/)
+      expect(rule).toMatch(/border-radius:/)
+    })
+
+    it('leaves the axis row unboxed, because a scale is not a lane', async () => {
+      // Boxing the tick labels like data would make the ruler read as another asset.
+      const rule = ruleFor('.dt-track.dt-axis-track')
+      expect(rule).toMatch(/background:\s*none/)
+      expect(rule).toMatch(/border:\s*none/)
+    })
+
+    it('keeps a centre guideline lighter than the container edge', async () => {
+      /*
+       * At the old 2px in the border colour, the guideline weighed the same as the track's own
+       * border and a lane read as three stacked rules. It says where the timeline runs; the
+       * markers are what the eye should find.
+       */
+      const rule = ruleFor('.dt-track::before')
+      expect(rule).toMatch(/height:\s*1px/)
+      expect(rule).toMatch(/opacity:/)
+    })
+
+    it('separates lanes with space rather than a divider', async () => {
+      // `border-bottom` made the page a stack of table rows: the eye followed the rules instead of
+      // the tracks, and a marker near one read as belonging to the boundary.
+      const rule = ruleFor('.dt-lane')
+      expect(rule).not.toMatch(/border-bottom/)
+      expect(rule).toMatch(/gap:/)
+    })
+
+    it('draws the label as a pill without breaking its scroll-under opacity', async () => {
+      /*
+       * TWO JOBS IN TENSION. The label is sticky so markers pass UNDER it, which needs an opaque
+       * background in the card's colour; it should also read as a container, which wants a lighter
+       * inset surface. The pill is therefore drawn by ::before, and the element itself stays
+       * opaque -- if that were swapped for a translucent pill background, dots would show through
+       * the asset name as they scrolled past.
+       */
+      expect(ruleFor('.dt-lane-label')).toMatch(/background:\s*var\(--bg-card\)/)
+      expect(ruleFor('.dt-lane-label::before')).toMatch(/border-radius:/)
+    })
+
+    it('renders the section heading as one badge', async () => {
+      await show()
+      const badge = document.querySelector('.dt-section-badge')
+      expect(badge).toBeTruthy()
+      // The count lives inside the badge, so it cannot drift away from the label it counts.
+      expect(badge.querySelector('.dt-section-count')).toBeTruthy()
+      expect(badge.querySelector('.dt-section-name')).toBeTruthy()
+    })
+  })
+
+  describe('the selected marker is findable among the ones it is stacked with', () => {
+    it('rings the active node in a solid accent rather than a halo', async () => {
+      /*
+       * `--accent-glow` alone is translucent: it reads well against the card background and almost
+       * disappears against the neighbours a dense stretch of track puts either side of it. The
+       * inner gap in the card colour is what separates the selected mark from what it sits among.
+       */
+      const rule = ruleFor('.dt-node-selected')
+      expect(rule).toMatch(/var\(--accent\)/)
+      expect(rule).toMatch(/var\(--bg-card\)/)
+    })
+
+    it('is shared with the cluster badge rather than being a .dt-node compound', async () => {
+      /*
+       * WHAT LETS A BADGE CARRY THE RING while the drawer steps through the events inside it. If
+       * this were written `.dt-node.dt-node-selected`, a selected group would show no highlight
+       * at all -- and the page would look, at exactly the densest moments, as though Previous and
+       * Next were doing nothing.
+       */
+      expect(APP_CSS).toContain('\n.dt-node-selected {')
+      expect(APP_CSS).not.toContain('.dt-node.dt-node-selected {')
+    })
+
+    it('paints the cluster badge outside the four-colour classification', async () => {
+      /*
+       * A BADGE IS NOT A KIND OF EVENT, it is a count -- and a group routinely holds two or three
+       * of the four kinds, so borrowing any one of their fills would assert a classification the
+       * group does not have. Guarded because the tempting shortcut is to reach for --accent.
+       */
+      const rule = ruleFor('.dt-cluster')
+      expect(rule).toMatch(/var\(--cluster/)
+      for (const kind of ['--accent', '--success', '--warning', '--danger']) {
+        expect(rule).not.toContain(`var(${kind})`)
+      }
+    })
+
+    it('marks the node the drawer is showing, and moves it with Previous/Next', async () => {
+      await show()
+      const nodes = () => [...document.querySelectorAll('.dt-node')]
+      const selected = () => document.querySelector('.dt-node-selected')
+
+      expect(selected()).toBeNull()
+      fireEvent.click(nodes()[0])
+      await waitFor(() => expect(selected()).toBeTruthy())
+
+      const first = selected()
+      const prev = screen.getByRole('button', { name: /Previous/ })
+      if (!prev.disabled) {
+        fireEvent.click(prev)
+        // The ring follows the drawer rather than staying where it was clicked.
+        await waitFor(() => expect(selected()).not.toBe(first))
+      }
+    })
   })
 
   it('no longer fetches schemas, which it needed only to derive tags', async () => {

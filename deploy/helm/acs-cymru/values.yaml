@@ -1,5 +1,5 @@
 # =============================================================================================
-# Factory+ — default values
+# ACS-Cymru — default values
 #
 # These defaults are deliberately NOT a working configuration: the four Supabase credentials in
 # `secrets` are empty and the chart REFUSES TO RENDER without them (see _helpers.tpl,
@@ -221,7 +221,7 @@ timescaledb:
     # 2026-07-16 and will never move again. A floating tag that stops floating gives no signal at
     # all. Every other pin in this file states a version; this one now does too, and bumping it is
     # a decision someone makes rather than one that happens.
-    tag: 2.29.1-pg17
+    tag: 2.29.2-pg17
     pullPolicy: IfNotPresent
   database: postgres
   username: postgres
@@ -405,10 +405,17 @@ supabaseAuth:
     tag: v2.189.0
     pullPolicy: IfNotPresent
   replicas: 1
-  # Allows self-registration through the auth API. Off is the safe default: a self-registered user
-  # has no row in public.user_roles, and every RLS policy and edge function then refuses them --
-  # an account that signs in and can do nothing reads as a broken deployment.
-  disableSignup: false
+  # Whether GoTrue REFUSES self-registration at POST /auth/v1/signup. True is closed.
+  #
+  # THE NAME IS NEGATIVE AND THE PREVIOUS DEFAULT DID NOT MATCH ITS OWN COMMENT: it read "off is
+  # the safe default" above a value of `false`, which disables the disabling and left the endpoint
+  # OPEN. Anyone who could reach the gateway could self-register and be handed the default
+  # 'Operator' role by handle_new_user(), past every RBAC decision in the database.
+  #
+  # The dashboard no longer offers a sign-up form at all, so setting this to false reopens the
+  # endpoint for API callers only. Accounts otherwise arrive from seed.sql, an admin invite through
+  # the Auth API, or an upstream identity provider.
+  disableSignup: true
   jwtExpiry: 3600
   resources:
     requests: { cpu: 50m, memory: 128Mi }
@@ -430,7 +437,9 @@ supabaseKong:
   enabled: true
   image:
     repository: kong
-    tag: 2.8.1-alpine
+    # NO `-alpine` SUFFIX, AND IT IS NOT AN OVERSIGHT. Kong stopped publishing alpine variants
+    # after 3.3.1; `kong:3.9.3-alpine` is a 404 on Docker Hub. The 3.x images are Debian-based.
+    tag: "3.9.3"
     pullPolicy: IfNotPresent
   replicas: 1
   # NAMING A PLUGIN HERE REPLACES THE DEFAULT `bundled` SET rather than adding to it. key-auth was
@@ -600,7 +609,7 @@ supabaseStudio:
     tag: 2026.07.07-sha-a6a04f2
     pullPolicy: IfNotPresent
   replicas: 1
-  organizationName: Factory+
+  organizationName: ACS-Cymru
   projectName: ACS-Cymru Asset Tracking
   resources:
     requests: { cpu: 100m, memory: 256Mi }
@@ -610,7 +619,7 @@ swaggerUi:
   enabled: true
   image:
     repository: swaggerapi/swagger-ui
-    tag: v5.17.14
+    tag: v5.32.14
     pullPolicy: IfNotPresent
   replicas: 1
   resources:
@@ -660,7 +669,7 @@ mosquitto:
   enabled: true
   image:
     repository: eclipse-mosquitto
-    tag: "2.0.20"
+    tag: "2.0.22"
     pullPolicy: IfNotPresent
   # ALWAYS ONE, AND NOT A TUNABLE. Mosquitto does not cluster: two brokers behind one Service split
   # the fleet in half, each seeing only the gateways that happened to land on it, and Sparkplug
@@ -739,8 +748,9 @@ mosquitto:
     secretName: mosquitto-tls
     # 90 days with 30 days' notice. Short on purpose: renewal is exercised four times a year
     # rather than being a thing that has never happened when it first matters. Mosquitto reloads
-    # certificates on SIGHUP (verified against 2.0.20), and the reload sidecar sends it, so a
-    # renewal does NOT restart the broker or drop a connected gateway.
+    # certificates on SIGHUP (verified against 2.0.20; the pin has since moved to 2.0.22, same
+    # 2.0.x line, not re-verified), and the reload sidecar sends it, so a renewal does NOT restart
+    # the broker or drop a connected gateway.
     duration: 2160h
     renewBefore: 720h
     # -----------------------------------------------------------------------------------------
@@ -823,6 +833,19 @@ ingestion:
   # the heartbeat is a no-op.
   healthFile: /tmp/ingestion-health
   healthIntervalSeconds: 15
+  # The Prometheus exposition endpoint (issues #22 and #24).
+  #
+  # ON BY DEFAULT, unlike telemetry.serviceMonitor below, and the two are deliberately separate.
+  # Serving counters on a pod-network port costs nothing and is how the daemon is inspected --
+  # `kubectl port-forward` and curl answers "is it dropping anything" without reading a log.
+  # Whether a Prometheus is told to SCRAPE it is a different question and depends on the cluster
+  # having an operator, which most do not by default.
+  #
+  # The endpoint takes no credential, so what may appear on it is decided here: counters only, no
+  # metric values, no device names. See ingestion/metrics.py.
+  metrics:
+    enabled: true
+    port: 9108
   # Device liveness watchdog. A device that stops publishing writes nothing and emits no DDEATH,
   # so without this it stays ONLINE forever. Gateway staleness is a read-time VIEW instead, for
   # reasons the 0024 migration header sets out; a device has no last-seen column to derive from,
@@ -946,10 +969,10 @@ frontend:
   # Where the Report Bug button files issues. A fork that leaves this at the default sends its
   # reports to the upstream tracker.
   githubRepoUrl: https://github.com/Harri-Llewelyn/ACS-Cymru
-  # Off by default: a self-registered user has no row in public.user_roles, and every RLS policy
-  # and edge function then refuses them -- an account that signs in and can do nothing reads as a
-  # broken deployment rather than a closed one.
-  allowSignup: false
+  #
+  # THERE IS DELIBERATELY NO `allowSignup` HERE ANY MORE. It gated the sign-up form in the browser
+  # while `supabaseAuth.disableSignup` left the endpoint behind it open, so it never controlled
+  # anything -- see that value. The server-side flag is the only switch.
   #
   # THERE IS DELIBERATELY NO `grafanaUrl` HERE. The dashboard's "View in Grafana" links on an active
   # alert are built from `publicUrls.grafana` (falling back to grafana.<publicBaseDomain>) -- the same
@@ -964,6 +987,19 @@ frontend:
 # ---------------------------------------------------------------------------------------------
 grafana:
   enabled: true
+  # WHERE THE CLUSTER'S PROMETHEUS LIVES. Substituted into the shared datasource template, which
+  # both targets render from -- Compose points it at the Prometheus it runs itself, this points it
+  # at the one the cluster already has.
+  #
+  # THIS CHART DOES NOT DEPLOY A PROMETHEUS, deliberately. It ships ServiceMonitors
+  # (obs/servicemonitors.yaml) and lets the Operator collect; a second Prometheus would duplicate
+  # every series and give an operator two places to configure retention.
+  #
+  # The default is kube-prometheus-stack's conventional service. On a cluster with no Prometheus,
+  # or one installed elsewhere, the datasource fails its health check and the five ingestion alert
+  # rules report DatasourceError -- the same honest failure the Supabase datasource makes with no
+  # BI_READER_PASSWORD, and better than a rule that cannot reach its data evaluating to OK.
+  prometheusUrl: http://prometheus-operated.monitoring.svc:9090
   image:
     repository: grafana/grafana
     # Pinned, AND PINNED TO THE SAME TAG COMPOSE USES -- check-image-tag-parity.mjs fails the build
@@ -974,7 +1010,7 @@ grafana:
     # The pin holds a COUPLING, not a preference: grafana.ini depends on behaviour that has moved
     # between releases -- `use_pkce`, `auth_style`, and the env-override mapping this chart relies
     # on to replace auth_url without editing the file.
-    tag: "13.1.3"
+    tag: "13.2.0"
     pullPolicy: IfNotPresent
   persistence:
     enabled: true

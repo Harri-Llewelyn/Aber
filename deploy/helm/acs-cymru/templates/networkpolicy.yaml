@@ -415,7 +415,7 @@ describe flows between components OF THIS CHART. Anything reaching in from outsi
 `from` component to name --
 
   * PROMETHEUS SCRAPING, the motivating case. Under default-deny every scrape is dropped, and the
-    symptom is a monitoring stack that reports every Factory+ target as down while the stack is
+    symptom is a monitoring stack that reports every ACS-Cymru target as down while the stack is
     entirely healthy. That reads as a monitoring fault, not a policy one -- the same shape of
     misdiagnosis the DNS and ingress-controller rules above are commented so heavily to prevent.
     With no seam here, turning `networkPolicy.enabled` on silently stopped all scraping.

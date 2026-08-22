@@ -54,6 +54,18 @@
      error toast is the message a user most needs to read. One step lighter clears it at 5.3:1
      while staying the same signal hue. */
   --danger-text:  #ff6b85;
+  /* ===== The cluster badge =====
+     A FIFTH COLOUR, DELIBERATELY OUTSIDE THE FOUR-COLOUR CLASSIFICATION. Green/blue/amber/red say
+     what KIND of event a marker is; a cluster badge says how MANY events are here, which is not a
+     kind at all -- and a group routinely holds two or three of the four, so painting it in any one
+     of them would assert a classification the group does not have. Violet is the nearest unused
+     hue to the accent without being mistakable for it.
+     The -text variant exists for the same reason --danger-text does: #a855f7 is a border tone, and
+     the fill is a 0.18 tint of it, so the label needs its own value. #d8b4fe on that tint over
+     --bg-surface measures 7.8:1. */
+  --cluster:      #a855f7;
+  --cluster-bg:   rgba(168, 85, 247, 0.18);
+  --cluster-text: #d8b4fe;
   /* The monospace stack, as a token. Every rule in this file spelled it out literally, which was
      fine until a call site wanted `var(--font-mono, monospace)` -- with no token defined that
      silently falls back to the bare generic and drops JetBrains Mono. Structural, not colour, so
@@ -104,6 +116,11 @@
   /* --danger (#e11d48) measures 4.72:1 on a white card -- a pass -- but drops to 3.94:1 once the
      0.15 rose tint lightens the surface under it. Rose-700 clears that at 5.21:1. */
   --danger-text:  #be123c;
+  /* The dark theme's #d8b4fe is a pale lavender: on a white card under a light violet tint it is
+     effectively invisible. Violet-700 on a 0.12 tint of violet-600 measures 7.4:1. */
+  --cluster:      #7e22ce;
+  --cluster-bg:   rgba(147, 51, 234, 0.12);
+  --cluster-text: #6b21a8;
   --shadow:       0 4px 20px rgba(0, 0, 0, 0.06);
 }
 
@@ -881,6 +898,44 @@ tbody tr:hover { background: var(--bg-glass); }
    column cannot break at a space. Without this it overruns its cell into STATUS. */
 .table-directory .cell-endpoint { overflow-wrap: anywhere; }
 
+/* An endpoint reads as a CONTROL, and its shape says which control it is.
+
+   The two used to render identically -- a bare monospace anchor -- so the only way to discover
+   that `mqtt://localhost:1883` was not a web page was to click it and watch a tab fail to load.
+   Both are now button-shaped, and the two variants differ in colour and icon: an accent-bordered
+   one opens, a muted one copies. Which of these can I open is answerable by looking. */
+.endpoint-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  text-decoration: none;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  text-align: left;
+  transition: var(--transition);
+}
+
+/* Openable: accent text and an accent border on hover, matching how every other navigation
+   affordance in the app signals that it goes somewhere. */
+.endpoint-open { color: var(--accent); }
+.endpoint-open:hover { border-color: var(--accent); background: var(--bg-surface); }
+
+/* Copyable: deliberately quieter. It is useful, but it is not a destination, and colouring it
+   like one would put the two back on equal footing. */
+.endpoint-copy { color: var(--text-secondary); font-family: inherit; }
+.endpoint-copy:hover { border-color: var(--text-secondary); background: var(--bg-surface); }
+
+/* Keyboard reachability is not optional here: the copy variant is the ONLY way to obtain a
+   broker or database address from this page. */
+.endpoint-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 /* Between the category cards. Deliberately not `.card + .card`: several pages stack cards that
    are meant to sit tight against each other. */
 .directory-group + .directory-group { margin-top: 16px; }
@@ -1007,6 +1062,11 @@ tbody tr:hover { background: var(--bg-glass); }
   cursor: pointer;
   transition: var(--transition);
   white-space: nowrap;
+  /* A `.btn` is sometimes an <a> -- a link that navigates to a file, like the model
+     download. Without this it renders underlined, so the row reads as one button and one
+     link rather than three controls. Previously worked around inline at the one call site
+     that hit it. */
+  text-decoration: none;
 }
 
 .btn-primary {
@@ -1025,6 +1085,22 @@ tbody tr:hover { background: var(--bg-glass); }
   border: 1px solid var(--border);
 }
 .btn-ghost:hover { border-color: var(--border-hover); color: var(--accent); }
+
+/* The count pill inside a SELECTED filter button (issue #32).
+ *
+ * `.section-count` paints --accent on --accent-dim, which is legible on a card and nearly invisible
+ * once the button it sits in turns into `.btn-primary` -- an --accent-strong fill. Reported on the
+ * Vocabulary filter bar, where every tab carries its own count.
+ *
+ * INVERTED FROM THE BUTTON'S OWN PAIRING rather than given colours of its own: the pill takes the
+ * button's ink as its fill and the button's fill as its ink. That yields exactly the contrast ratio
+ * of the button's label, which themeContrast.test.js already measures against AA and APCA in both
+ * themes -- so this cannot be legible in one theme and not the other, which is how the original
+ * got through. */
+.btn-primary .section-count {
+  background: var(--accent-contrast);
+  color: var(--accent-strong);
+}
 
 /* --danger-text, not --danger. This is TEXT on a rose-tinted fill, which is the exact case the
    -text tier exists for: --danger on the 0.2 hover tint measures 4.09:1 in dark and 3.69:1 in
@@ -2324,6 +2400,23 @@ tbody tr:hover { background: var(--bg-glass); }
    `visibility: hidden` on the closed state (not `display: none`) keeps the transition alive while
    still taking the panel out of the accessibility tree and hit testing. It is delayed until the
    width transition finishes so the panel does not vanish before it has finished sliding. */
+/* The context drawer's width, declared ONCE and referenced by both rules that need it.
+ *
+ * IT IS IN ITS OWN :root BLOCK, deliberately, and not in the themed one above. themeContrast.test.js
+ * builds its palette by scraping every `--x: y` out of `:root, [data-theme="dark"]` and comparing
+ * the result against the light block -- a layout length landing in that scrape would be measured
+ * for contrast, which is meaningless, and would read as a token missing from the light theme.
+ *
+ * clamp() RATHER THAN A FIXED 360px (issue #35). The drawer showed the same column on a 13-inch
+ * laptop and a 34-inch monitor, so the tables inside it -- the Digital Thread diff, the document
+ * list -- wrapped on hardware with room to spare. The floor is what the diff table needs to stay
+ * three readable columns; the ceiling stops it from eating the list it is meant to sit beside on a
+ * very wide screen, because a drawer that dominates the page has stopped being a drawer.
+ */
+:root {
+  --context-panel-width: clamp(320px, 28vw, 560px);
+}
+
 .context-panel {
   flex-shrink: 0;
   width: 0;
@@ -2338,13 +2431,13 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 .context-panel-open {
-  width: 360px;
+  width: var(--context-panel-width);
   visibility: visible;
   transition: width 0.25s ease, visibility 0s;
 }
 
 .context-panel-inner {
-  width: 360px;
+  width: var(--context-panel-width);
   max-height: calc(100vh - 84px);
   display: flex;
   flex-direction: column;
@@ -2567,7 +2660,10 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
     top: 52px;
     right: 0;
     bottom: 0;
-    width: 360px;
+    /* NOT the desktop clamp, and not a bare 360px either. As an overlay it is measured against
+       the whole viewport rather than against the space left over, so vw is the wrong basis for
+       its width -- but a flat 360px overflows a 320px phone. A cap, not a proportion. */
+    width: min(360px, 90vw);
     max-height: none;
     z-index: 90;
   }
@@ -2751,13 +2847,19 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   min-width: 620px;
 }
 
+/* A lane is a ROW OF TWO CARDS, not a ruled line.
+
+   It used to be separated from its neighbours by `border-bottom`, which made the page a stack of
+   table rows: the eye followed the horizontal rules rather than the tracks, and a marker sitting
+   near a divider read as belonging to the boundary rather than to its lane. Giving the label and
+   the track each a container, and separating lanes by SPACE, makes each asset's history a thing
+   with edges. */
 .dt-lane {
   display: flex;
   align-items: stretch;
-  border-bottom: 1px solid var(--border);
+  gap: 10px;
+  padding: 3px 0;
 }
-
-.dt-lane:last-child { border-bottom: none; }
 
 /* The section rule: Cells, then Gateways, then Devices -- a plant's own containment order.
 
@@ -2771,12 +2873,24 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   z-index: 2;
   display: flex;
   align-items: center;
-  gap: 6px;
   width: 210px;
-  padding: 12px 10px 5px 0;
+  padding: 14px 10px 6px 0;
   background: var(--bg-card);
-  border-bottom: 1px solid var(--border);
   color: var(--text-muted);
+}
+
+/* The heading as a BADGE rather than three loose items on a ruled row. The rule that used to sit
+   under it was the same weight as the lane dividers, so a section heading and an asset lane were
+   separated by identical lines and the hierarchy had to be inferred from the text. */
+.dt-section-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
 }
 
 /* The first heading sits flush under the axis; the rest earn their space from the lanes above. */
@@ -2789,28 +2903,53 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   letter-spacing: 0.7px;
 }
 
+/* No parentheses: inside a badge the count is already visually separate, and `( 6 )` was
+   punctuation doing a job the container now does. */
 .dt-section-count {
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   color: var(--text-dim);
+  padding-left: 5px;
+  border-left: 1px solid var(--border);
 }
 
 /* Sticky, and opaque in the card's own colour: markers scroll UNDER the labels rather than over
    them, so the asset a lane belongs to stays readable at any scroll offset. A transparent label
    here would let a dozen dots slide through the text. */
+/* THE LABEL IS A PILL, and it has two jobs that pull in opposite directions.
+
+   It is STICKY, so markers scroll underneath it -- which needs an opaque background in the CARD's
+   colour, or dots show through the name as they pass. It should also read as a container, which
+   wants a lighter surface and a border, inset from the edges.
+
+   So the element stays opaque and the pill is drawn by `::before` inside it. The children sit
+   above that layer; nothing else changes. */
 .dt-lane-label {
   position: sticky;
   left: 0;
   z-index: 2;
   flex: 0 0 210px;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
-  padding: 4px 10px 4px 0;
+  padding: 0 17px 0 9px;
   background: var(--bg-card);
   font-size: 12px;
 }
+
+.dt-lane-label::before {
+  content: '';
+  position: absolute;
+  inset: 1px 8px 1px 0;
+  border-radius: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  pointer-events: none;
+}
+
+/* Above the pill layer. Without this the children paint under it and vanish. */
+.dt-lane-label > * { position: relative; z-index: 1; }
 
 /* The one element allowed to lose characters. Everything else in the label -- the icon, the
    deleted flag -- is fixed width or must stay whole, so a long asset name is what gives. */
@@ -2849,11 +2988,24 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   opacity: 0.85;
 }
 
+/* THE TRACK IS A CONTAINER, not an area of card background with a line through it.
+
+   Given edges, a lane reads as one asset's stretch of time, and a marker is unambiguously IN that
+   lane rather than floating between two rows of card background. */
 .dt-track {
   position: relative;
   flex: 1;
   min-width: 380px;
   height: 32px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+/* The axis row is a scale, not a lane. Left bare so the tick labels are not boxed like data. */
+.dt-track.dt-axis-track {
+  background: none;
+  border: none;
 }
 
 /* The lane's rule, inset by the same 14px the markers are padded with so it starts and stops
@@ -2864,16 +3016,28 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   left: 14px;
   right: 14px;
   top: 50%;
-  height: 2px;
-  margin-top: -1px;
+  height: 1px;
+  margin-top: -0.5px;
+  /* ONE PIXEL, AND LIGHTER THAN THE BORDER IT SITS INSIDE. At 2px in the border colour the
+     guideline was the same weight as the container edge, so a track read as three stacked rules.
+     It exists to say where the timeline runs, which a hairline does; the markers on it are what the
+     eye should be finding. */
   background: var(--border);
+  opacity: 0.7;
 }
 
+/* The axis has no timeline to mark. */
+.dt-track.dt-axis-track::before { display: none; }
+
+/* The axis corner is a caption, not an asset. No pill: boxing "16 assets - 102 events" like a lane
+   label would put a count where a name goes. */
 .dt-axis .dt-lane-label {
   font-size: 11px;
   color: var(--text-muted);
   font-weight: 600;
+  padding-left: 0;
 }
+.dt-axis .dt-lane-label::before { display: none; }
 
 .dt-axis-track { height: 24px; }
 .dt-axis-track::before { display: none; }
@@ -2903,30 +3067,104 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   height: 13px;
   padding: 0;
   border-radius: 50%;
+  /* The ring is what keeps two ADJACENT markers from reading as one blob. Clustering removes the
+     overlapping case, but not the near miss -- two events 20px apart are separate dots that still
+     touch. In the CARD's colour rather than the track's: it has to separate a marker from its
+     NEIGHBOUR, and a ring matching the surface behind would only separate it from the background. */
   border: 2px solid var(--bg-card);
   cursor: pointer;
   transform: translate(-50%, -50%);
   transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
-/* Markers pile up where activity is dense -- a burst of edits within a minute is a handful of
-   overlapping dots. Raising the hovered one is what makes the underneath reachable; the tooltip
-   and the drawer are what tell them apart. */
+/* Markers crowd where activity is dense. A pile is a badge now, but a near miss is still two dots
+   with barely a gap, so raising the hovered one keeps its neighbour reachable; the tooltip and the
+   drawer are what tell them apart. */
 .dt-node:hover,
 .dt-node:focus-visible {
   transform: translate(-50%, -50%) scale(1.4);
   z-index: 3;
 }
 
+/* THE ACTIVE MARKER, and it has to survive being surrounded.
+
+   `--accent-glow` is a translucent halo, which reads well against the card background and almost
+   disappears against the neighbours a dense stretch of the track puts either side of it. A solid
+   accent ring with a dark gap inside it separates the selected marker from whatever it sits among
+   -- which is the point, because this is the one the drawer is showing.
+
+   SHARED WITH `.dt-cluster`, not a `.dt-node` compound, and that is what lets a badge carry the
+   ring while the drawer steps through the events inside it. `box-shadow` follows the element's own
+   border-radius, so the same rule draws a circle round a dot and a rounded rectangle round a
+   pill. */
 .dt-node-selected {
-  box-shadow: 0 0 0 3px var(--accent-glow);
-  z-index: 3;
+  box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 4px var(--accent), 0 0 10px var(--accent-glow);
+  z-index: 4;
 }
 
 .dt-node-creation,    .dt-node-dot.dt-node-creation    { background: var(--success); }
 .dt-node-operational, .dt-node-dot.dt-node-operational { background: var(--accent); }
 .dt-node-governance,  .dt-node-dot.dt-node-governance  { background: var(--warning); }
 .dt-node-critical,    .dt-node-dot.dt-node-critical    { background: var(--danger); }
+
+/* THE CLUSTER BADGE: several events too close together to draw separately, replaced by their
+   count. See the header on clusterEvents() in DigitalThreadTab.jsx for why this replaced a
+   vertical fan -- briefly, a fan held three and could not be counted.
+
+   VIOLET, which is not one of the four classification fills, because a badge is not a KIND of
+   event. See --cluster in the token block.
+
+   POSITIONING IS SEPARATE FROM THE LOOK. This rule is the pill; the `.dt-track` rule below places
+   it. That split is what lets the legend render a real `.dt-cluster` as an inline sample instead
+   of describing the badge in a second, driftable set of values. */
+.dt-cluster {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--cluster-bg);
+  border: 1px solid var(--cluster);
+  color: var(--cluster-text);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+/* On a track it is a marker. 18px inside a 32px lane, centred on the same rule the dots sit on.
+   Above them in the stack, because a badge that a stray single dot painted over would be the
+   overlap problem again in a new colour. */
+.dt-track .dt-cluster {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+  z-index: 3;
+}
+
+.dt-track .dt-cluster:hover,
+.dt-track .dt-cluster:focus-visible {
+  /* A smaller lift than a dot's 1.4x: the badge is already 18px, and at 1.4 it would overhang the
+     lane it belongs to. */
+  transform: translate(-50%, -50%) scale(1.15);
+  background: var(--cluster);
+  color: var(--accent-contrast);
+  z-index: 5;
+}
+
+/* The legend's sample. Not clickable, and a notch smaller so it sits on the 11px key line beside
+   the four 9px dots rather than setting the row's height on its own. */
+.dt-legend-cluster {
+  cursor: default;
+  height: 16px;
+  min-width: 16px;
+  line-height: 16px;
+  padding: 0 5px;
+}
 
 .dt-lane-toggle { margin-top: 10px; }
 
@@ -2976,6 +3214,89 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 2px;
+}
+
+/* ===== Digital Thread: the other changes one transaction made =====
+   Sits ABOVE the diff in the drawer, so the reader learns this row was part of a larger act before
+   they finish reading the row. Same top border and rhythm as .dt-diff, because the two are peers:
+   one says what THIS change did, the other says what else the same act did. */
+.dt-causation {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* THE CAVEAT IS PART OF THE CONTROL, not a tooltip. The sibling list is drawn from the fetched and
+   filtered set, so it is a lower bound rather than a count -- and a reader who takes it for a count
+   will conclude a transaction did less than it did. That is exactly the kind of claim this page
+   exists to get right, so it is on screen rather than on hover. */
+.dt-causation-hint {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  margin: 0 0 8px 0;
+}
+
+.dt-causation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* A BUTTON, not a link or a bare row. It changes what the drawer is showing without navigating,
+   so it must be reachable and activatable from the keyboard -- and `button` gets Enter, Space and
+   the focus ring for free, where a click-handled <div> gets none of them and needs three
+   attributes to imitate each one badly. */
+.dt-causation-item {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dt-causation-item:hover {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+/* Fixed width so the three columns line up down the list rather than stepping in and out with
+   whichever entity kind each row happens to be. DEVICE is the longest of the three. */
+.dt-causation-kind {
+  flex: 0 0 auto;
+  min-width: 58px;
+  /* NO font-size OF ITS OWN: it inherits 11px from .dt-causation-item, which is the floor
+     themeContrast.test.js enforces across App.css. These read as secondary through weight,
+     letter-spacing and --text-muted rather than by shrinking below the scale. */
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+}
+
+/* Takes the slack, and wraps rather than truncating: an asset name is the thing the reader is
+   scanning for, and an ellipsis in the middle of `Sim_Gateway_Cell1_Machining` hides the half that
+   distinguishes it from the other three. */
+.dt-causation-name {
+  flex: 1 1 auto;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.dt-causation-action {
+  flex: 0 0 auto;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
 }
 
 /* ===== Digital Thread: the diff inspector inside the drawer ===== */
