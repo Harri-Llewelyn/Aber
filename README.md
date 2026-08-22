@@ -162,7 +162,7 @@ accounts (`supabase/seed.sql`).
 | Swagger UI | http://localhost:8088 |
 | Node-RED | http://localhost:1880 |
 | Grafana | http://localhost:3002 |
-| Prometheus | http://localhost:9090 |
+| Prometheus | http://localhost:9090 (loopback only — SSH-tunnel from another host) |
 
 **Sign in to the React dashboard first.** Node-RED and Grafana both federate to Supabase Auth, and
 the consent step needs your dashboard session — going straight to either shows a "sign in required"
@@ -351,7 +351,7 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | `node-red` | `acs-cymru_node_red` | `./node-red/Dockerfile` | `1880:1880` |
 | `grafana` | `acs-cymru_grafana` | `grafana/grafana:13.1.3` | `3002:3000` |
 | `swagger-ui` | `acs-cymru_swagger_ui` | `swaggerapi/swagger-ui:v5.17.14` | `8088:8080` |
-| `prometheus` | `acs-cymru_prometheus` | `prom/prometheus:v3.1.0` | `9090:9090` |
+| `prometheus` | `acs-cymru_prometheus` | `prom/prometheus:v3.1.0` | `127.0.0.1:9090:9090` |
 | `node-exporter` | `acs-cymru_node_exporter` | `prom/node-exporter:v1.8.2` | — |
 
 ---
@@ -416,7 +416,7 @@ Digital Nameplate; what each one covers and how its identity was verified is in
 ## Testing
 
 ```bash
-# Frontend — 1322 tests
+# Frontend — 1328 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required

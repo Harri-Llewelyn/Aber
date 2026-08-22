@@ -2573,9 +2573,21 @@ ON CONFLICT (service_name) DO NOTHING;
 -- inserted on the next replay. 0016 needed its own file because it RENAMED and REMOVED, which
 -- ON CONFLICT DO NOTHING cannot express.
 --
--- TWO ROWS, AND ONLY ONE OF THEM IS SOMEWHERE TO GO. Prometheus serves a browsable expression
--- browser on a published port. node_exporter does not: it is bound to the compose network with no
--- host port, deliberately, because nothing outside has any business reading host metrics.
+-- THREE ROWS, AND ONLY TWO OF THEM ARE SOMEWHERE TO GO. Prometheus serves a browsable expression
+-- browser, and the ingestion endpoint answers on a published port. node_exporter does not: it is
+-- bound to the compose network with no host port, deliberately, because nothing outside has any
+-- business reading host metrics.
+--
+-- `METRICS_EXPORTER` RATHER THAN `MONITORING`, so it groups with the infrastructure it describes
+-- rather than beside Grafana under "Applications & User Interfaces". Grafana and Prometheus are
+-- things an operator OPENS; an exporter is a component of the backend that happens to speak HTTP.
+-- The type is free text and DirectoryTab's SERVICE_GROUPS decides the section.
+--
+-- PROMETHEUS IS PUBLISHED ON LOOPBACK ONLY, so this link resolves for a browser running ON the
+-- deployment host and nowhere else. That is a stronger version of something already true of every
+-- `http://localhost:...` row here -- they are written for someone browsing on the host -- but it
+-- is worth saying, because for Prometheus a remote browser cannot be made to work by using the
+-- right hostname. It needs an SSH tunnel, which is the point of the binding.
 --
 -- It is listed anyway, at the address it actually answers on. The directory is an inventory of what
 -- is DEPLOYED -- `mqtt://localhost:1883` and `postgres://localhost:5433` are already here and
@@ -2585,7 +2597,7 @@ ON CONFLICT (service_name) DO NOTHING;
 -- ---------------------------------------------------------------------------------------------
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000e', 'Prometheus Metrics Store', 'MONITORING', 'http://localhost:9090', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
 ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000f', 'Host Metrics Exporter (node_exporter)', 'MONITORING', 'http://node-exporter:9100/metrics', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000f', 'Host Metrics Exporter (node_exporter)', 'METRICS_EXPORTER', 'http://node-exporter:9100/metrics', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
 ON CONFLICT (service_name) DO NOTHING;
 INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000010', 'Ingestion Metrics Endpoint', 'INGESTION', 'http://localhost:9108/metrics', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
 ON CONFLICT (service_name) DO NOTHING;

@@ -1451,9 +1451,20 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     ports:
-      # Published for inspection -- the expression browser is how you find out what a rule would
-      # match before writing it. Grafana reaches it over the compose network, not through this.
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      # LOOPBACK ONLY, and the only published port in this file that is. Prometheus has no
+      # authentication -- that is a deliberate decision, not an oversight -- so the control over who
+      # reads it is who can reach the port. Bound to all interfaces on the deployment VM, its
+      # expression browser would offer every metric here to anyone on the plant network: Kong
+      # request rates by route, host disk, every gateway's wire id.
+      #
+      # `127.0.0.1:` MAKES IT SSH-TUNNEL-ONLY AND COSTS NOTHING OPERATIONALLY. Grafana reaches it
+      # over the compose network rather than through this mapping, so the dashboards and the alert
+      # rules are unaffected; what changes is that a human wanting the expression browser tunnels
+      # in. That is the right shape for a debugging tool on a shopfloor host.
+      #
+      # Everything else here is published broadly because it either authenticates (Grafana, the
+      # frontend, Node-RED) or is a protocol endpoint that has to be reachable (the broker).
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     depends_on:
       ingestion:
         condition: service_started
