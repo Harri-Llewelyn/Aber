@@ -252,6 +252,19 @@ concluding the server is at fault.
 history and has no audit concept, so *"what changed and who changed it"* is outside this client's
 reach entirely — not a gap in the address space, a gap in the protocol it speaks.
 
+**AND IT IS NOT GOING TO BE CLOSED. That is a decision, not an omission.** The obvious fix is a
+second, small MCP server over PostgREST, exposing `digital_thread` with the caller's own token and
+the same RLS scope. It was considered and rejected on audience rather than difficulty: the Digital
+Thread page already reads a change with its diff and its causation siblings beside it, and a model
+summarising that trail produces a weaker artefact than the page it would be summarising. Building a
+second server to make an audit trail *less* legible is the wrong trade.
+
+**The cost, stated plainly so nobody reports it as a bug:** an assistant connected over MCP can ask
+what a machine *is* and what it is *reading*, and cannot ask what changed, when, or who changed it.
+Audit questions are answered on the Digital Thread page, by a person, with the diff in front of
+them. Do not extend the i3X address space to carry audit rows either — i3X has no audit concept,
+and bending objects and history into that shape would export a claim the protocol does not make.
+
 ### It is stdio, so it is not a service
 
 The package is spawned **per-user as a subprocess** by the MCP host, despite "Server" in the

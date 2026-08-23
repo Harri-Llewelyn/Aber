@@ -723,10 +723,10 @@ empty tables while the gateway reported 200 for every request.
 keeps `kong.yml` and its `sed` either way — so this retires one placeholder on one target rather
 than the templating approach as a whole.
 
-### 4 · A durable MCP credential, and the Digital Thread over MCP
+### 4 · A durable, low-privilege MCP credential
 
 **Builds on:** `i3x-mcp` against the i3X address space ([`i3x/README.md`](i3x/README.md#mcp)) ·
-`GOTRUE_JWT_EXP` · `digital_thread`
+`GOTRUE_JWT_EXP`
 
 **This used to say "build an MCP server", and that turned out to be the wrong item.**
 [`cesmii/i3X-MCP-Server`](https://github.com/cesmii/i3X-MCP-Server) (`i3x-mcp` on npm, MIT) is a
@@ -739,14 +739,12 @@ not even listed as tools by default; forced on with `--enable-writes`, `update_v
 `405` and the reason with it. That is the difference between read-only by *construction* and by
 configuration: a user who deliberately defeats the client-side guard still gets nothing.
 
-What is left is the two things pointing it at a real deployment exposes.
-
-#### A durable, low-privilege credential
-
-The client takes a **static** `I3X_TOKEN` from its host's config file, and `GOTRUE_JWT_EXP` is
-`3600`. A token pasted into `claude_desktop_config.json` stops working within the hour, and it fails
-the way [`i3x/README.md`](i3x/README.md#connecting-a-client) already describes for i3X Explorer —
-*as a broken server rather than a stale token*.
+**One thing is left, and it is the only reason this is still an item.** The client takes a
+**static** `I3X_TOKEN` from its host's config file, and `GOTRUE_JWT_EXP` is `3600`. A token pasted
+into `claude_desktop_config.json` stops working within the hour, and it fails the way
+[`i3x/README.md`](i3x/README.md#connecting-a-client) already describes for i3X Explorer — *as a
+broken server rather than a stale token*. Nothing in the failure points at the credential, which is
+what makes it worth fixing rather than documenting.
 
 The answer is a long-lived JWT for a dedicated read-only principal, signed with the same secret and
 carrying a role RLS already constrains. **What it must not be is `service_role`.** This server
@@ -754,18 +752,15 @@ passes the caller's bearer straight through to PostgREST precisely so that it qu
 key that bypasses RLS would discard the single property that makes handing this to a model
 defensible — that an operator asking a question sees exactly what an operator can see.
 
-#### The Digital Thread has no surface here
+**The Digital Thread half of this item is retired rather than deferred.** It proposed a second,
+small MCP server over PostgREST so a model could ask *"what changed, when, and who changed it"* —
+the one question i3X cannot carry, because it models objects, values and history and has no audit
+concept. Rejected on audience rather than difficulty: the Digital Thread page already reads a change
+with its diff and its causation siblings beside it, and a model summarising that trail is a weaker
+artefact than the page. The consequence, and the reason it is written down in
+[`i3x/README.md`](i3x/README.md#mcp) rather than only here, is that an assistant over MCP can ask
+what a machine *is* and what it is *reading*, and cannot ask what changed.
 
-i3X models objects, values and history. It has **no audit concept**, and this server's address space
-contains no `digital_thread` — so *"what changed, when, and who changed it"* is the one question an
-i3X-shaped client cannot ask, and it is the clause the old item named that no external package will
-ever satisfy.
-
-Two honest options, and the choice is about audience rather than difficulty. A **second, small MCP
-server over PostgREST** would expose the audit trail with the caller's own token and the same RLS
-scope — which is the only reason it would be safe. Or **leave it**: the Digital Thread is a page
-built for reading a change with its diff and its causation siblings beside it, and a model
-summarising that trail is a different and weaker artefact than the page.
 
 ### 5 · Cold Telemetry Archival & Query-in-Place
 
