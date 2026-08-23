@@ -690,6 +690,83 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 10c. The roadmap is a contiguous list, and all of it is inside the roadmap section.
+//
+// Retiring an item means deleting it, renumbering the rest and updating the count claim, which is
+// three edits that must agree and which are made by hand. Four items have been retired recently and
+// each renumbered everything below it.
+//
+// THE FAILURE THIS EXISTS FOR HAS ALREADY HAPPENED. Splitting the legacy-API-key work into its own
+// entry appended it to the END OF THE FILE rather than to the end of its section, so it landed
+// after `## Contributing`: correctly numbered, fully written, and outside the roadmap. It read as
+// "item 8 is missing" to someone scrolling the section, and nothing here noticed -- the link check
+// passed, the prose was intact, and no count was wrong. A heading under the wrong parent is
+// invisible to every check that looks at content rather than at structure.
+//
+// Three assertions, because the three ways this drifts are independent: an item outside the
+// section, a gap or duplicate in the numbering, and a count sentence left behind by a retirement.
+// -------------------------------------------------------------------------------------------------
+{
+  const readme = read('README.md');
+  const lines = readme.split('\n');
+
+  const sectionStart = lines.findIndex((l) => /^## Roadmap/.test(l));
+  if (sectionStart < 0) {
+    fail('README.md has no "## Roadmap" section heading');
+  } else {
+    // The section runs to the next `## ` heading, or to the end of the file.
+    let sectionEnd = lines.length;
+    for (let i = sectionStart + 1; i < lines.length; i += 1) {
+      if (/^## /.test(lines[i])) { sectionEnd = i; break; }
+    }
+
+    const items = [];
+    const strays = [];
+    lines.forEach((line, i) => {
+      const m = /^### (\d+) · /.exec(line);
+      if (!m) return;
+      if (i > sectionStart && i < sectionEnd) items.push(Number(m[1]));
+      else strays.push(`line ${i + 1}: ${line.trim()}`);
+    });
+
+    if (strays.length) {
+      fail(
+        `${strays.length} numbered roadmap item(s) sit OUTSIDE the "## Roadmap" section:\n` +
+          strays.map((s) => `        ${s}`).join('\n') +
+          '\n      They are in the file and not in the roadmap, which reads to a person as the item\n' +
+          '      being missing. Move them above the next "## " heading.'
+      );
+    }
+
+    const expected = items.map((_, i) => i + 1);
+    if (items.join(',') !== expected.join(',')) {
+      fail(
+        `the roadmap items are numbered ${items.join(', ') || '(none)'} -- expected ` +
+          `${expected.join(', ')}. Retiring an item means renumbering every item below it.`
+      );
+    } else if (!strays.length) {
+      // The count claim in the section's opening sentence, written as a word.
+      const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight',
+        'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen'];
+      const claim = /^(\w+) extensions,/im.exec(lines.slice(sectionStart, sectionEnd).join('\n'));
+      const claimed = claim ? WORDS.indexOf(claim[1].toLowerCase()) : -1;
+      if (claimed < 0) {
+        fail(
+          'the roadmap section does not open with a "<Word> extensions," count claim, which this ' +
+            'check reads to catch a retirement that renumbered without recounting.'
+        );
+      } else if (claimed !== items.length) {
+        fail(
+          `README.md claims "${claim[1]} extensions" but the roadmap lists ${items.length}.`
+        );
+      } else {
+        pass(`the roadmap lists ${items.length} contiguously numbered items, all inside its section`);
+      }
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 11a. Every public column is reachable from something that reads or writes it.
 //
 // Columns accumulate faster than they are retired, and a column that carries no information is
