@@ -19,6 +19,12 @@ spec:
       port: 3000
       targetPort: http
       protocol: TCP
+    # Scraped by Prometheus, reachable from nothing else. See the PGRST_ADMIN_SERVER_PORT note on
+    # the Deployment for why this is not routed.
+    - name: admin
+      port: 3001
+      targetPort: admin
+      protocol: TCP
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -55,6 +61,8 @@ spec:
           ports:
             - name: http
               containerPort: 3000
+            - name: admin
+              containerPort: 3001
               protocol: TCP
           env:
             - name: POSTGRES_PASSWORD
@@ -83,6 +91,17 @@ spec:
               value: pgrst
             - name: PGRST_SERVER_PORT
               value: "3000"
+            # The admin listener, which is the only place PostgREST serves /metrics. Off unless
+            # this is set -- no admin server is bound at all by default, which is why the metrics
+            # gap existed rather than being a missing ServiceMonitor.
+            #
+            # NEW WITH v14.12. On v12.2.0 this port served /ready and /live and nothing else.
+            #
+            # NOT in the Ingress and NOT routed by Kong. The admin server has NO AUTHENTICATION,
+            # and its readiness endpoints describe the database connection -- so it is a
+            # ClusterIP-only port for Prometheus, in the same shape as the ingestion daemon's.
+            - name: PGRST_ADMIN_SERVER_PORT
+              value: "3001"
             # An unauthenticated liveness probe needs SOMETHING to answer. The OpenAPI root is
             # served to `anon` and is the cheapest endpoint that proves the schema cache is loaded.
             - name: PGRST_OPENAPI_MODE
