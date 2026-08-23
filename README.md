@@ -611,7 +611,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Six extensions, ordered by how much of each already exists. None is speculative: every one names
+Seven extensions, ordered by how much of each already exists. None is speculative: every one names
 the code it would build on, because the value of writing them down is that a reader can tell how far
 away each is.
 
@@ -867,6 +867,80 @@ repository.
 run the stack with both key formats accepted and confirm every consumer still works before the old
 ones are withdrawn. Without it this is a flag day across twelve files, an ingestion daemon and nine
 edge functions.
+
+---
+
+### 7 · MQTT 5 on the publishing side, for one reason
+
+**Builds on:** `protocolVersion` in
+[`flows.template.json`](templates/physical-gateway/flows.template.json) and
+[`generate-simulator-flow.mjs`](scripts/generate-simulator-flow.mjs) · the `%u` ACL pattern in
+[`mosquitto.acl`](mosquitto.acl)
+
+**The smallest item on this list, and it is here for a single failure mode rather than for the
+feature set.** Most of MQTT 5 buys this stack nothing: topic aliases duplicate what Sparkplug metric
+aliases already do, user properties would sit outside a payload Sparkplug fully defines, and
+request/response restates NCMD. This entry is about the reason code on `PUBACK`.
+
+#### A gateway can be told its telemetry succeeded when the broker discarded it
+
+Gateways enrol dynamically and the ACL is `pattern readwrite spBv1.0/+/+/%u/#` — the gateway's
+username must match the edge-node id in its own topic. When it does not, measured against the
+running broker with a real gateway credential publishing to another node's topic:
+
+| protocol | what the gateway is told |
+| :--- | :--- |
+| **MQTT 3.1.1** | `PUBACK RC:0` — **success.** The message was discarded by the ACL. |
+| **MQTT 5** | `PUBACK RC:135` — `Not authorized` |
+
+**Nothing in this stack would show the 3.1.1 case.** The messages never reach the daemon, so
+`acs_ingestion_messages_dropped_total` cannot move — a drop counter only counts what arrives. The
+device watchdog sweeps only devices it has *already seen*, so a newly enrolled gateway that never
+published successfully is never swept. Under report-by-exception nothing restates the missing data.
+The only evidence is absence, which is the hardest thing to notice and the slowest to diagnose from
+the far end.
+
+**§1 cannot cover this, which is why it is a separate item.** Its periodic health payload would
+publish to `spBv1.0/<group>/NDATA/<node>` — the same ACL pattern, denied identically. A gateway
+silenced this way has its health telemetry silenced with it, so the mechanism meant to report
+appliance faults is blind to exactly this one.
+
+#### The chain is verified, not assumed
+
+The concern with this item was that the broker might report a reason code Node-RED then swallows,
+delivering nothing. It does not:
+
+```
+broker PUBACK RC:135
+  -> mqtt.js  handlers/ack.js   pubackRC > 0 && !== 16 -> ErrorWithReasonCode("Publish error: Not authorized")
+  -> node-red 10-mqtt.js:1210   node.error(err, msg)
+```
+
+So it reaches the debug sidebar, the appliance's log, and a `Catch` node. (`!== 16` is mqtt.js
+correctly declining to treat "No matching subscribers" as an error.) Node-RED 5.0.2 with mqtt.js
+5.15.2, read from the running image.
+
+**What it cannot do, stated plainly:** carry the news back to the centre. A connection whose writes
+the ACL denies cannot publish its own denial — that is what the ACL is for. The value is that an
+engineer at the appliance, or reading its log, sees the cause immediately instead of debugging
+"no data is arriving" from the other end of the plant.
+
+#### Why it is cheap
+
+- **Publisher-side only.** The payoff is in the `PUBACK`, and the daemon is a subscriber; its one
+  publish (`request_node_rebirth`) is QoS 0, which has no `PUBACK` under either version. **So
+  `ingestion.py` does not move and paho's v1 callbacks do not have to be migrated.**
+- **No flag day.** Protocol version is per connection. Verified: an MQTT 5 subscriber received DDATA
+  published by the simulator running as 3.1.1, so gateways can move one at a time.
+- **The setting already exists.** Node-RED's MQTT node takes `protocolVersion: "5"`; both generators
+  currently write `"4"`.
+
+#### The trap
+
+**Do not adopt v5's session-expiry or will-delay intervals.** NDEATH *is* the Last Will, and
+`process_node_message()` marks the edge node OFFLINE on it. A will delay would leave dead gateways
+reading ONLINE and every device beneath them apparently live. Take the diagnostics; leave the
+timing knobs alone, because Sparkplug's state model is built on that will firing promptly.
 
 ---
 
