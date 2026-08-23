@@ -50,9 +50,11 @@ import logging
 import os
 import re
 import select
+import hashlib
 import sys
 import threading
 import time
+from collections import OrderedDict
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, List, Optional
@@ -174,14 +176,112 @@ class PostgrestClient:
 # =================================================================================================
 # Address space assembly
 # =================================================================================================
+"""
+Short-TTL address-space cache, KEYED BY THE CALLER'S TOKEN.
+
+The address space was reassembled from scratch on every request -- six PostgREST reads, and
+several endpoints load it two or three times in one call (`/types/{id}` builds types and then
+objects; the bulk value reads rebuild it per request), so a single conformance client polling in a
+loop was costing 12-18 queries a tick. Fine for a demonstrator, wrong for anything watching.
+
+THE KEY IS THE TOKEN AND THAT IS NOT NEGOTIABLE. The space is deliberately assembled from reads
+made AS THE CALLER, so RLS decides what it contains -- a cache shared across identities would hand
+one user another's view of the plant, which is exactly the hole the MQTT value cache is guarded
+against. The key is a SHA-256 of the Authorization header rather than the header itself: this dict
+outlives the request, and a process dump or a stray log of it should not be a wallet of live
+bearer tokens.
+
+BOUNDED, because it is keyed on something a client controls. An unbounded dict keyed by bearer is
+a memory-exhaustion vector -- anyone who can reach the port can mint distinct keys by varying the
+header -- so entries are capped and evicted least-recently-used. That bound is the reason this is
+an OrderedDict rather than a plain one.
+
+THE CACHED DICT IS SHARED, NOT COPIED, and that is safe for a specific reason worth stating.
+`_build_objects()` decorates the space in place: `_gateways_by_sid` / `_devices_by_sid` on the
+space, and `_gateway_sparkplug_id` / `_is_extended` on each device row. Every one of those is a
+deterministic function of the space itself and is written with the same value each time, so two
+threads racing on a hit recompute identical results and one harmlessly overwrites the other. They
+are also all underscore-prefixed derived fields -- nothing here mutates source data, and nothing
+mutating it would be correct. A deep copy per request would defeat most of the point; if a future
+change writes REQUEST-SPECIFIC state into the space, this becomes cross-request corruption and the
+copy becomes mandatory.
+
+A HIT CAN OUTLIVE A REVOKED GRANT by up to the TTL, which is why the TTL is seconds rather than
+minutes. Setting it to 0 disables the cache outright, which is the escape hatch if that window is
+ever unacceptable.
+"""
+ADDRESS_SPACE_TTL_SECONDS = float(os.getenv("I3X_ADDRESS_SPACE_TTL_SECONDS", "2"))
+ADDRESS_SPACE_CACHE_MAX = int(os.getenv("I3X_ADDRESS_SPACE_CACHE_MAX", "64"))
+
+_space_cache: "OrderedDict[str, tuple]" = OrderedDict()
+_space_lock = threading.RLock()
+
+
+def _space_cache_key(bearer: str) -> str:
+    return hashlib.sha256(bearer.encode("utf-8")).hexdigest()
+
+
+def _space_cache_clear() -> None:
+    """Drop every entry. For tests, and for anything that needs a cold read."""
+    with _space_lock:
+        _space_cache.clear()
+
+
 def _load_address_space(pg: PostgrestClient) -> dict:
     """
-    Read the whole visible address space in five queries.
+    The caller-facing loader: a cached read of the address space for THIS bearer.
 
-    Five reads rather than one per object: the object graph needs cross-references (a cell's
+    `monotonic()` rather than `time()` so a clock adjustment cannot strand an entry as
+    permanently-fresh or permanently-stale.
+    """
+    if ADDRESS_SPACE_TTL_SECONDS <= 0:
+        return _read_address_space(pg)
+
+    key = _space_cache_key(pg.bearer)
+    now = time.monotonic()
+
+    with _space_lock:
+        entry = _space_cache.get(key)
+        if entry is not None:
+            expires_at, space = entry
+            if expires_at > now:
+                _space_cache.move_to_end(key)
+                return space
+            # Expired. Dropped here rather than left for the LRU bound, so a stale view cannot be
+            # returned by a later branch that forgot to check the clock.
+            del _space_cache[key]
+
+    # DELIBERATELY OUTSIDE THE LOCK. The read is six network round trips; holding the lock across
+    # it would serialise every caller in the process behind the slowest PostgREST response, which
+    # is a worse property than the duplicate read that two simultaneous misses can now cause. A
+    # duplicate read is wasteful; a global stall is an outage.
+    space = _read_address_space(pg)
+
+    with _space_lock:
+        _space_cache[key] = (time.monotonic() + ADDRESS_SPACE_TTL_SECONDS, space)
+        _space_cache.move_to_end(key)
+        while len(_space_cache) > ADDRESS_SPACE_CACHE_MAX:
+            _space_cache.popitem(last=False)
+
+    return space
+
+
+def _read_address_space(pg: PostgrestClient) -> dict:
+    """
+    Read the whole visible address space in six queries.
+
+    Six reads rather than one per object: the object graph needs cross-references (a cell's
     children, a gateway's devices) that no single embed expresses, and the Overview tab already
     established that fetching a table twice per refresh is the thing to avoid. Everything is joined
     in memory here.
+
+    (It said "five" until this was counted: cells, gateways, devices, device_locations, schemas and
+    metric_catalog. The number is the whole reason `_load_address_space()` above exists, so a
+    docstring undercounting it was the one place a reader would go to decide the cache was not
+    worth building.)
+
+    UNCACHED. Every caller should go through `_load_address_space()`; this is the cold read behind
+    it, separated so the cache has something to call and so a test can measure the difference.
     """
     # ARCHIVED ROWS ARE EXCLUDED EVERYWHERE. A soft-deleted asset is not part of the live address
     # space -- it is restorable history, and the Archives tab is where it lives. Including it would

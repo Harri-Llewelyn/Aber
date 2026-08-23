@@ -679,3 +679,128 @@ class BulkElementIdsCapTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAddressSpaceCache(unittest.TestCase):
+    """
+    The short-TTL address-space cache (roadmap item 4).
+
+    THE ONLY TEST HERE THAT IS ABOUT SECURITY RATHER THAN SPEED is
+    `test_two_tokens_never_share_an_entry`, and it is the reason the others exist at all. The
+    address space is assembled from reads made AS THE CALLER so that RLS decides what it contains.
+    A cache that keyed on anything else -- or on nothing -- would serve one operator another's view
+    of the plant, and it would do so silently and only on a hit, which is the worst way for a
+    permissions bug to behave.
+    """
+
+    class FakePg:
+        """Counts cold reads. `bearer` is what the cache keys on, so it is the whole fixture."""
+
+        def __init__(self, bearer, marker):
+            self.bearer = bearer
+            self.marker = marker
+
+        def get(self, *_args, **_kwargs):
+            return []
+
+    def setUp(self):
+        self.reads = []
+
+        def fake_read(pg):
+            self.reads.append(pg.bearer)
+            # A distinguishable payload per caller, so a leak across identities shows up as the
+            # WRONG CONTENT rather than only as a suspicious read count.
+            return {"cells": [], "gateways": [], "devices": [], "locations": {},
+                    "schemas": [], "standards": set(), "_marker": pg.marker}
+
+        self._real_read = i3x_service._read_address_space
+        i3x_service._read_address_space = fake_read
+        self._real_ttl = i3x_service.ADDRESS_SPACE_TTL_SECONDS
+        self._real_max = i3x_service.ADDRESS_SPACE_CACHE_MAX
+        i3x_service._space_cache_clear()
+
+    def tearDown(self):
+        i3x_service._read_address_space = self._real_read
+        i3x_service.ADDRESS_SPACE_TTL_SECONDS = self._real_ttl
+        i3x_service.ADDRESS_SPACE_CACHE_MAX = self._real_max
+        i3x_service._space_cache_clear()
+
+    def test_two_tokens_never_share_an_entry(self):
+        i3x_service.ADDRESS_SPACE_TTL_SECONDS = 60
+        alice = i3x_service._load_address_space(self.FakePg("Bearer alice", "alice"))
+        bob = i3x_service._load_address_space(self.FakePg("Bearer bob", "bob"))
+
+        self.assertEqual(alice["_marker"], "alice")
+        self.assertEqual(
+            bob["_marker"], "bob",
+            "Bob was served Alice's address space. The cache is not keyed by the caller's token, "
+            "and RLS no longer decides what an operator can see."
+        )
+        self.assertEqual(self.reads, ["Bearer alice", "Bearer bob"])
+
+    def test_a_second_request_on_one_token_is_a_hit(self):
+        i3x_service.ADDRESS_SPACE_TTL_SECONDS = 60
+        first = i3x_service._load_address_space(self.FakePg("Bearer alice", "alice"))
+        second = i3x_service._load_address_space(self.FakePg("Bearer alice", "alice"))
+
+        self.assertEqual(len(self.reads), 1, "the second request re-read the address space")
+        # The SAME object, not an equal one: several endpoints load the space two or three times
+        # in one request, and the in-place index decoration on the first load is what the second
+        # is meant to reuse.
+        self.assertIs(first, second)
+
+    def test_the_raw_token_is_not_a_key(self):
+        # The dict outlives the request. A process dump of it should not be a wallet of live
+        # bearer tokens.
+        i3x_service.ADDRESS_SPACE_TTL_SECONDS = 60
+        i3x_service._load_address_space(self.FakePg("Bearer supersecret", "a"))
+        self.assertNotIn("Bearer supersecret", i3x_service._space_cache)
+        self.assertIn(
+            i3x_service._space_cache_key("Bearer supersecret"), i3x_service._space_cache
+        )
+
+    def test_an_expired_entry_is_re_read(self):
+        # A negative TTL makes every entry already stale on arrival, which tests the clock branch
+        # without a sleep. TTL <= 0 is the disable switch, so this also covers that path.
+        i3x_service.ADDRESS_SPACE_TTL_SECONDS = 60
+        i3x_service._load_address_space(self.FakePg("Bearer alice", "alice"))
+        # Force the stored entry into the past rather than waiting for it.
+        key = i3x_service._space_cache_key("Bearer alice")
+        _expires, space = i3x_service._space_cache[key]
+        i3x_service._space_cache[key] = (0.0, space)
+
+        i3x_service._load_address_space(self.FakePg("Bearer alice", "alice"))
+        self.assertEqual(len(self.reads), 2, "an expired entry was served")
+
+    def test_ttl_of_zero_disables_the_cache(self):
+        i3x_service.ADDRESS_SPACE_TTL_SECONDS = 0
+        for _ in range(3):
+            i3x_service._load_address_space(self.FakePg("Bearer alice", "alice"))
+        self.assertEqual(len(self.reads), 3)
+        self.assertEqual(len(i3x_service._space_cache), 0,
+                         "the disable switch still populated the cache")
+
+    def test_the_cache_is_bounded_against_a_token_flood(self):
+        """
+        The key is CLIENT-CONTROLLED. Anyone who can reach the port can mint distinct entries by
+        varying the Authorization header, so an unbounded dict here is a memory-exhaustion vector
+        rather than merely untidy.
+        """
+        i3x_service.ADDRESS_SPACE_TTL_SECONDS = 60
+        i3x_service.ADDRESS_SPACE_CACHE_MAX = 4
+        for n in range(50):
+            i3x_service._load_address_space(self.FakePg(f"Bearer t{n}", f"m{n}"))
+        self.assertLessEqual(len(i3x_service._space_cache), 4)
+
+    def test_eviction_is_least_recently_used(self):
+        i3x_service.ADDRESS_SPACE_TTL_SECONDS = 60
+        i3x_service.ADDRESS_SPACE_CACHE_MAX = 2
+        i3x_service._load_address_space(self.FakePg("Bearer a", "a"))
+        i3x_service._load_address_space(self.FakePg("Bearer b", "b"))
+        # Touch A so B becomes the least recently used.
+        i3x_service._load_address_space(self.FakePg("Bearer a", "a"))
+        i3x_service._load_address_space(self.FakePg("Bearer c", "c"))
+
+        keys = set(i3x_service._space_cache)
+        self.assertIn(i3x_service._space_cache_key("Bearer a"), keys)
+        self.assertNotIn(i3x_service._space_cache_key("Bearer b"), keys)

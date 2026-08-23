@@ -600,7 +600,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Nine extensions, ordered by how much of each already exists. None is speculative: every one names
+Eight extensions, ordered by how much of each already exists. None is speculative: every one names
 the code it would build on, because the value of writing them down is that a reader can tell how far
 away each is.
 
@@ -702,25 +702,7 @@ a KPI definition a setting rather than a constant fixed before the first row was
 This is the intermediate step that was previously deferred pending an MES. It does not replace one —
 it makes the vocabulary answer questions instead of only naming them.
 
-### 4 · i3X server optimisations
-
-**Builds on:** `_load_address_space()` · `_build_objects()` · `MAX_BULK_ELEMENT_IDS`
-
-Bulk breadth is now capped and the value-path indexes are built once per request rather than per
-element. What remains is the **six PostgREST queries per request**: the address space is reassembled
-from scratch every time, which is fine for a demonstrator and is the wrong shape for a conformance
-client polling in a loop.
-
-A short TTL cache would fix it, and the constraint on that work is already known and must not be
-lost: the cache **must be keyed by the caller's token**. The address space is deliberately assembled
-from reads made as the caller so RLS decides what it contains, and a cache shared across identities
-would hand one user another's view — re-creating exactly the hole the MQTT value cache is guarded
-against.
-
-Writes stay unimplemented. `PUT /objects/value` answers 405 and `/info` declares
-`update.current: false`; a server that does not implement the verb cannot be talked into it.
-
-### 5 · Ingress → Gateway API
+### 4 · Ingress → Gateway API
 
 **Builds on:** [`templates/ingress.yaml`](deploy/helm/acs-cymru/templates/ingress.yaml) ·
 `acs-cymru.corsOrigins`
@@ -745,7 +727,7 @@ empty tables while the gateway reported 200 for every request.
 keeps `kong.yml` and its `sed` either way — so this retires one placeholder on one target rather
 than the templating approach as a whole.
 
-### 6 · A durable MCP credential, and the Digital Thread over MCP
+### 5 · A durable MCP credential, and the Digital Thread over MCP
 
 **Builds on:** `i3x-mcp` against the i3X address space ([`i3x/README.md`](i3x/README.md#mcp)) ·
 `GOTRUE_JWT_EXP` · `digital_thread`
@@ -789,7 +771,7 @@ scope — which is the only reason it would be safe. Or **leave it**: the Digita
 built for reading a change with its diff and its causation siblings beside it, and a model
 summarising that trail is a different and weaker artefact than the page.
 
-### 7 · Cold Telemetry Archival & Query-in-Place
+### 6 · Cold Telemetry Archival & Query-in-Place
 
 **Builds on:** TimescaleDB retention policies · `telemetry` hypertable · Edge Functions · Apache
 Parquet · `public.system_settings` (`0031`, `0032`)
@@ -816,7 +798,7 @@ gigabytes of raw points back into TimescaleDB.
 
 ---
 
-### 8 · Vestigial column and configuration audit
+### 7 · Vestigial column and configuration audit
 
 **Builds on:** [`scripts/check-docs-drift.mjs`](scripts/check-docs-drift.mjs) ·
 [`.env.example`](.env.example) · `0001_baseline_schema.sql`
@@ -867,7 +849,7 @@ The real work on that side is narrower and has two parts:
   consumers, the edge-function registry and `custom_access_token_hook`. It should be scoped against
   the pinned `supabase/gotrue` and `kong` versions before it is planned, not assumed to apply.
 
-### 9 · Kong → Envoy, following upstream Supabase
+### 8 · Kong → Envoy, following upstream Supabase
 
 **Builds on:** [`supabase/kong.yml`](supabase/kong.yml) · `supabase-kong-init` ·
 [`templates/supabase/kong.yaml`](deploy/helm/acs-cymru/templates/supabase/kong.yaml)
@@ -892,7 +874,7 @@ stated reason and each is load bearing; a translation that quietly widened one w
 test that exists today, because `validate.py` asserts the 401s that SHOULD happen and cannot assert
 the absence of a route nobody wrote. Any migration needs the negative assertions first.
 
-**It interacts with §5 and should be sequenced against it.** Gateway API's `HTTPRoute` would retire
+**It interacts with §4 and should be sequenced against it.** Gateway API's `HTTPRoute` would retire
 the `__CORS_ORIGINS__` placeholder on Kubernetes; Envoy would restate CORS in its own filter on both
 targets. Doing both independently means expressing origin policy a third way before deleting the
 first — so whichever lands first should decide where that policy lives.
