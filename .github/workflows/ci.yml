@@ -193,6 +193,23 @@ jobs:
       - name: Verify Documentation Matches The Repository
         run: node scripts/check-docs-drift.mjs
 
+      # THE HALF OF THIS THAT CI CAN ACTUALLY SEE. The script's other check compares a developer's
+      # working `.env` against the template in both directions, and it CANNOT run here: `.env` is
+      # gitignored because it holds real credentials, so there is nothing to compare. That check
+      # skips loudly rather than reporting ok on something it did not examine.
+      #
+      # What runs here is the committed half: every variable docker-compose.yml requires WITH NO
+      # DEFAULT must be declared in .env.example. Scoped to required variables on purpose -- 88 are
+      # referenced and 66 declared, and almost all of the difference is internal knobs with safe
+      # defaults (I3X_PORT, PROMETHEUS_PORT). A bare `${VAR}` is different in kind: Compose
+      # substitutes empty and the stack comes up misconfigured instead of refusing to start.
+      #
+      # It passes today with zero violations, which is the point. It is an invariant that already
+      # holds, and the ordinary way to break it is to add a required variable and forget the
+      # template -- at which point a fresh clone fails somewhere far from the cause.
+      - name: Verify Environment Template Covers Every Required Variable
+        run: node scripts/check-env-drift.mjs
+
       # vite.config.js fails fast if these are unset. Docker passes them as build
       # args; a bare `npm run build` in CI has to supply them explicitly. These are
       # the local-dev demo values from .env.example and are baked into a throwaway

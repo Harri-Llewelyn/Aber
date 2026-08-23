@@ -482,6 +482,14 @@ MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credent
 # The credential merge, in isolation — the one piece of it whose failure is silent
 npm run test:lib
 
+# Configuration drift — no services needed, and the ONE check here that reads your own .env.
+# Compares docker-compose.yml against .env.example (enforced in CI) and, when a .env exists,
+# your working file against the template in BOTH directions: keys the template gained and you
+# never copied, keys retired from the template still sitting in your file, and keys Compose
+# reads that the template forgot. All three fail silently otherwise -- Compose substitutes its
+# own default and the stack comes up looking correct on a value nobody chose.
+node scripts/check-env-drift.mjs
+
 # Database suites — need Postgres
 python supabase/migrations/test_user_roles_rls.py
 python supabase/migrations/test_schema_versioning.py
