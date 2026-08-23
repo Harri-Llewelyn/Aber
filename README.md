@@ -806,58 +806,7 @@ gigabytes of raw points back into TimescaleDB.
 
 ---
 
-### 7 · Vestigial column and configuration audit
-
-**Builds on:** [`scripts/check-docs-drift.mjs`](scripts/check-docs-drift.mjs) ·
-[`.env.example`](.env.example) · `0001_baseline_schema.sql`
-
-Columns and settings accumulate faster than they are retired. `devices.connection_method` is the
-clearest example: it is written by the device form and by the quarantine approval modal, exported
-into the AAS as `ConnectionMethod`, and classified as a governance field in the Digital Thread — and
-on a seeded stack **all six devices hold the same value**, `Sparkplug B`, because that is the only
-transport this platform ingests. It is not dead code. It is a field that carries no information,
-which is a harder thing to notice and a harder thing to justify keeping.
-
-**THE AUDIT'S WHOLE DIFFICULTY IS TELLING "UNUSED" FROM "EMPTY HERE", and a scan that cannot will do
-damage.** On a freshly reset stack these are all NULL for every row:
-
-| Column | Why it is empty | Verdict |
-| :--- | :--- | :--- |
-| `devices.quarantine_reason` | Only set when a device is quarantined | **Load-bearing** — ingestion writes it |
-| `devices.reported_identity` | Only set on an identity mismatch | **Load-bearing** — the spoofing diagnosis |
-| `devices.model_3d_path` | Only set once a model is uploaded | **Load-bearing** |
-| `gateways.agent_version` | Stamped at enrolment; every seeded gateway is simulated | **Load-bearing** — §1 builds on it |
-| `devices.asset_type` | Never written by any code path | Candidate |
-| `cells.grafana_url` | Never written by any code path | Candidate |
-
-Four of those six would be deleted by a "drop the columns that are always NULL" pass, and two of
-them are exactly the evidence the platform keeps for its own security decisions. The audit therefore
-has to be **reachability of the write path**, not occupancy of the column — which is a static
-question, and so a checkable one: a guard in `check-docs-drift.mjs` that fails when a `public`
-column is named by no migration other than its own `CREATE TABLE`, no frontend module, no edge
-function and no ingestion path, with the same stated-exception list `NOT_PUBLISHED` already uses for
-relations.
-
-**On the configuration half, the finding is the opposite of the suspicion.** All 66 variables in
-`.env.example` are referenced somewhere in the repository, and `SUPABASE_ANON_KEY` in particular is
-consumed by twelve files — Kong's key-auth, the Grafana alert contact point, the frontend bundle,
-the i3X service and both e2e Jobs. It is also **public by construction**: it is the `anon` role and
-is readable in any built bundle, which is why the chart renders it outside a Secret deliberately.
-Retiring it is not a cleanup, it is a migration.
-
-The real work on that side is narrower and has two parts:
-
-- **Drift between a working `.env` and the template**, which nothing checks in either direction. A
-  developer's file accumulates keys that were retired from the template (`VITE_ALLOW_SIGNUP` is one
-  today) and misses keys that were added to it, silently falling through to a Compose default. The
-  same one-pass comparison this entry was written from is the guard.
-- **Supabase's legacy API keys.** The `anon` / `service_role` JWTs this stack mints in
-  `scripts/setup.mjs` are the key format Supabase has since superseded with publishable and secret
-  keys. That is a real upstream deprecation with a real end date, and it touches Kong's key-auth
-  consumers, the edge-function registry and `custom_access_token_hook`. It should be scoped against
-  the pinned `supabase/gotrue` and `kong` versions before it is planned, not assumed to apply.
-
-### 8 · Kong → Envoy, following upstream Supabase
+### 7 · Kong → Envoy, following upstream Supabase
 
 **Builds on:** [`supabase/kong.yml`](supabase/kong.yml) · `supabase-kong-init` ·
 [`templates/supabase/kong.yaml`](deploy/helm/acs-cymru/templates/supabase/kong.yaml)
@@ -939,3 +888,46 @@ The recipient runs `npm run setup` themselves — that is what makes the credent
 than a copy of yours. `.env.example` carries working development secrets so the stack still starts
 without it, which is a convenience and **not** a supported state for anything another person can
 reach.
+
+---
+
+### 8 · Supabase's legacy API keys
+
+**Builds on:** [`scripts/setup.mjs`](scripts/setup.mjs) · `kong.yml`'s `key-auth` consumers ·
+`custom_access_token_hook` (`0001`) · the edge-function registry
+
+The `anon` and `service_role` JWTs this stack mints in `setup.mjs` are the key format Supabase has
+since superseded with **publishable and secret keys**. This is a real upstream deprecation with a
+real end date, and it is the only item on this list whose timing is set by somebody else.
+
+**It was split out of the configuration audit deliberately.** It arrived there as a bullet under a
+cleanup entry, and it is not a cleanup — it is a migration through the authentication path, which is
+the wrong thing to leave filed under "tidying" where its deadline is invisible. Nothing about it is
+started.
+
+**The surface is wider than "rotate two keys".** `SUPABASE_ANON_KEY` alone is consumed by twelve
+files — Kong's `key-auth`, the Grafana alert contact point, the frontend bundle, the i3X service and
+both e2e Jobs — and the two keys are structurally different things rather than two of the same
+thing:
+
+- **`anon` is public by construction.** It is the `anon` role, readable in any built bundle, which
+  is why the chart renders it outside a Secret deliberately. Replacing it is a change to what Kong
+  accepts as a registered key, not a secret rotation.
+- **`service_role` is not.** It is held by the ingestion daemon and every edge function, and
+  `0026`'s whole premise is that a holder of it must not be able to forge an audit row. Anything
+  that changes how it is minted has to leave that property intact.
+- **`custom_access_token_hook` shapes the claims** the rest of the stack reads. PostgREST resolves
+  RLS from them, and `grafana-userinfo` maps a role out of `public.user_roles` beside them.
+
+**Scope it against the pinned versions before planning it, not against the current documentation.**
+This stack runs specific `supabase/gotrue` and `kong` tags; whether the new format is supported, and
+what it changes about `key-auth` consumer registration, is a question about those tags. The upstream
+guidance describes a hosted platform whose components move independently of a self-hosted compose
+file — the same reasoning that makes "latest on Docker Hub" the wrong upgrade yardstick for this
+repository.
+
+**The migration has no rehearsal path today**, which is the first thing to build: there is no way to
+run the stack with both key formats accepted and confirm every consumer still works before the old
+ones are withdrawn. Without it this is a flag day across twelve files, an ingestion daemon and nine
+edge functions.
+

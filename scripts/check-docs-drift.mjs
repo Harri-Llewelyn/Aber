@@ -690,6 +690,124 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 11a. Every public column is reachable from something that reads or writes it.
+//
+// Columns accumulate faster than they are retired, and a column that carries no information is
+// harder to notice than dead code: it is written, exported, classified as a governance field, and
+// says nothing. `devices.connection_method` is the worked example -- all six seeded devices hold
+// `Sparkplug B`, because that is the only transport this platform ingests.
+//
+// THE WHOLE DIFFICULTY IS TELLING "UNUSED" FROM "EMPTY HERE", AND OCCUPANCY CANNOT.
+// `devices.quarantine_reason`, `devices.reported_identity`, `devices.model_3d_path` and
+// `gateways.agent_version` are NULL for every row on a freshly reset stack, and two of them are
+// the evidence this platform keeps for its own security decisions. A "drop the columns that are
+// always NULL" pass would delete them. So this asks a static question instead -- is there a write
+// path or a read path anywhere -- which is checkable and cannot be fooled by an empty demo.
+//
+// STRIP THE DECLARING STATEMENT, NOT THE DECLARING FILE. A column consumed entirely inside its own
+// migration's functions is reachable: `gateway_enrollment_tokens.token_hash` is hashed into by
+// issue_gateway_token() and read by redeem_gateway_token(), both in 0025, and nothing outside that
+// file ever names it. Excluding whole files reported it and `created_by` as dead, which is exactly
+// the kind of false positive that gets a guard switched off.
+//
+// WHAT IT CANNOT SEE, stated because a check whose limits are unwritten gets trusted too far: this
+// is a substring search over 3.6 MB, so a SHORT OR COMMON name is unfalsifiable -- `devices.status`
+// could lose every consumer and still match the word `status` somewhere. It catches distinctively
+// named dead columns, which is the class that actually accumulates. It also cannot see through
+// `SELECT *` or `to_jsonb(NEW)`, both of which reach every column without naming one; that
+// direction is safe, since it only ever makes the check MORE willing to call something reachable.
+//
+// It reports zero today -- including `devices.asset_type` and `cells.grafana_url`, which the
+// roadmap entry that commissioned this listed as candidates on evidence that had since gone stale.
+// That is the point: the invariant holds now, and the ordinary way to break it is to add a column
+// and never wire it up, or to remove the last consumer of one and leave the column behind.
+// -------------------------------------------------------------------------------------------------
+{
+  const migFiles = readdirSync(join(REPO, 'supabase/migrations'))
+    .filter((f) => /^\d{4}_.*\.sql$/.test(f))
+    .sort();
+  const migSrc = migFiles.map((f) => [f, read(`supabase/migrations/${f}`)]);
+
+  const CREATE_TABLE = /CREATE TABLE (?:IF NOT EXISTS )?public\.([a-z0-9_]+)\s*\(([\s\S]*?)\n\);/gi;
+  const ADD_COLUMN =
+    /ALTER TABLE (?:ONLY )?public\.([a-z0-9_]+)\s+ADD COLUMN (?:IF NOT EXISTS )?([a-z][a-z0-9_]*)/gi;
+
+  const columns = new Map();
+  for (const [file, sql] of migSrc) {
+    for (const m of sql.matchAll(CREATE_TABLE)) {
+      for (const line of m[2].split('\n')) {
+        // Four-space indent is how this schema writes a column; a constraint continuation or a
+        // CASE arm inside a generated-column expression is not one.
+        const cm = /^\s{4}([a-z][a-z0-9_]*)\s+[a-z]/i.exec(line);
+        if (!cm) continue;
+        if (/^(constraint|primary|unique|foreign|check|else|when|then)$/i.test(cm[1])) continue;
+        if (!columns.has(`${m[1]}.${cm[1]}`)) columns.set(`${m[1]}.${cm[1]}`, cm[1]);
+      }
+    }
+    for (const m of sql.matchAll(ADD_COLUMN)) {
+      if (!columns.has(`${m[1]}.${m[2]}`)) columns.set(`${m[1]}.${m[2]}`, m[2]);
+    }
+  }
+
+  // Everything that could name a column, minus the statements that declare one.
+  let searchable = '';
+  for (const [, sql] of migSrc) {
+    searchable +=
+      sql
+        .replace(CREATE_TABLE, '')
+        .replace(
+          /ALTER TABLE (?:ONLY )?public\.[a-z0-9_]+\s+ADD COLUMN (?:IF NOT EXISTS )?[a-z][a-z0-9_]*[^;]*;/gi,
+          ''
+        ) + '\n';
+  }
+  const walkInto = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(join(REPO, dir), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const rel = `${dir}/${e.name}`;
+      if (e.isDirectory()) {
+        if (!/^(node_modules|__pycache__|dist|\.git)$/.test(e.name)) walkInto(rel);
+      } else if (/\.(js|jsx|ts|tsx|py|sql|mjs|json|ya?ml)$/.test(e.name)) {
+        searchable += read(rel) + '\n';
+      }
+    }
+  };
+  for (const d of [
+    'frontend/src', 'supabase/functions', 'ingestion', 'i3x', 'timescaledb',
+    'scripts', 'grafana', 'node-red', 'tests', 'docs',
+  ]) {
+    walkInto(d);
+  }
+
+  // Stated exceptions, the same arrangement NOT_PUBLISHED uses for relations: a column that is
+  // deliberately write-only or reserved goes here WITH ITS REASON, so the next reader meets an
+  // argument rather than an empty allow-list.
+  const UNREACHABLE_BY_DESIGN = new Map([]);
+
+  const orphans = [...columns]
+    .filter(([key, col]) => !UNREACHABLE_BY_DESIGN.has(key) && !new RegExp(`\\b${col}\\b`).test(searchable))
+    .map(([key]) => key)
+    .sort();
+
+  if (orphans.length) {
+    fail(
+      `${orphans.length} public column(s) are named by nothing that reads or writes them: ` +
+        `${orphans.join(', ')}.\n` +
+        '      Either wire the column up, drop it in a migration, or -- if it is deliberately\n' +
+        '      write-only or reserved -- add it to UNREACHABLE_BY_DESIGN in this script WITH the\n' +
+        '      reason. Do not assume it is dead because it is empty: several columns here are NULL\n' +
+        '      for every row on a fresh stack and are load-bearing when they are not.'
+    );
+  } else {
+    pass(`all ${columns.size} public columns are reachable from a read or write path`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 11b. No seeded credential is compiled into the browser bundle.
 //
 // The sign-in form shipped PRE-FILLED with `admin@acs-cymru.local` and the seeded Administrator
