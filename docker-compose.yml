@@ -853,7 +853,28 @@ services:
     image: supabase/studio:2026.07.07-sha-a6a04f2
     restart: always
     ports:
-      - "${STUDIO_PORT:-54323}:3000"
+      # LOOPBACK ONLY, AND THIS IS THE MOST IMPORTANT BINDING IN THE FILE.
+      #
+      # STUDIO HAS NO AUTHENTICATION OF ITS OWN. Self-hosted Supabase Studio ships no login, no
+      # roles and no session -- the official stack puts it behind Kong with a basic-auth pair, and
+      # this stack does not run that. So whoever reaches this port gets the SQL editor, the table
+      # editor and the Vault UI, as the database owner, with nothing in the way. It is not a
+      # dashboard with admin features; it is a database console.
+      #
+      # It was published on 0.0.0.0. Anyone on the same network as a shopfloor host -- a plant LAN
+      # is not a trusted network -- had unauthenticated ownership of the entire platform, and the
+      # only thing standing in the way was that nobody had tried port 54323. RLS is irrelevant
+      # here: Studio connects as the owner, for whom row level security is not enforced.
+      #
+      # `127.0.0.1:` costs nothing operationally, exactly as it does for Prometheus below: the
+      # frontend and the API never touch this mapping, only a human at a keyboard does. Reaching
+      # it from elsewhere is an SSH tunnel, which is the correct amount of friction for a tool
+      # that can drop a table.
+      #
+      # THE SEEDED DIRECTORY ENTRY ALREADY SAID SO. `0002` lists Supabase Studio at
+      # `http://127.0.0.1:54323` -- the documentation asserted host-only while the binding did not,
+      # and the documentation was right.
+      - "127.0.0.1:${STUDIO_PORT:-54323}:3000"
     environment:
       # Without this Next.js binds only the container's own interface, so the
       # image's bundled localhost healthcheck fails with ECONNREFUSED.

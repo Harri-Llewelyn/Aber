@@ -623,6 +623,34 @@ jobs:
             }
           done
 
+          # SUPABASE STUDIO MUST NOT BE ON THE INGRESS, and this is the assertion most worth
+          # having in this step. Studio has NO AUTHENTICATION -- no login, no roles, no session --
+          # and connects as the database owner, for whom RLS is not enforced. Routing it publishes
+          # an unauthenticated SQL editor, table editor and Vault UI at studio.<publicBaseDomain>.
+          #
+          # It defaulted to ON until a review noticed, with a comment in values.yaml recommending
+          # it be turned off. A default that has to be READ to be safe is not a safe default, and
+          # a comment is not a control. This is the control.
+          if grep -qE '^\s+- host: studio\.' /tmp/prod-render.yaml; then
+            echo "::error::the production example routes Supabase Studio on the Ingress."
+            echo "::error::Studio has no authentication and connects as the database owner, so"
+            echo "::error::that publishes an unauthenticated database console. If this is"
+            echo "::error::deliberate, it belongs behind an authenticating proxy -- and this"
+            echo "::error::check should be changed to assert THAT, not deleted."
+            exit 1
+          fi
+
+          # And the Compose target's equivalent: published on loopback rather than 0.0.0.0. Checked
+          # here rather than in a compose-only job because the two targets' posture has to move
+          # together -- fixing one and forgetting the other is the drift this repository is built
+          # around catching.
+          if ! grep -qE '^\s+- "127\.0\.0\.1:\$\{STUDIO_PORT:-54323\}:3000"' docker-compose.yml; then
+            echo "::error::docker-compose.yml does not publish Supabase Studio on 127.0.0.1."
+            echo "::error::On 0.0.0.0 it is an unauthenticated database console reachable by"
+            echo "::error::anyone on the host's network."
+            exit 1
+          fi
+
           # THE CHART'S OWN CREDENTIALS SECRET MUST NOT RENDER: `existingSecret` says one already
           # exists, and shipping a second, empty copy alongside it is how the documented External
           # Secrets path would quietly break -- pods reading the chart's blank Secret instead of

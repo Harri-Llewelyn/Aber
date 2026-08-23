@@ -347,7 +347,7 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | `supabase-storage` | `acs-cymru_supabase_storage` | `supabase/storage-api:v1.11.13` | — |
 | `supabase-storage-init` | `acs-cymru_supabase_storage_init` | `node:24-alpine` | — |
 | `supabase-meta` | `acs-cymru_supabase_meta` | `supabase/postgres-meta:v0.96.6` | — |
-| `supabase-studio` | `acs-cymru_supabase_studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `54323:3000` |
+| `supabase-studio` | `acs-cymru_supabase_studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `127.0.0.1:54323:3000` (loopback only — see below) |
 | `timescaledb` | `acs-cymru_timescaledb` | `timescale/timescaledb:2.29.2-pg17` | `5433:5432` |
 | `mosquitto-init` | `acs-cymru_mosquitto_init` | `eclipse-mosquitto:2.0.22` | — |
 | `mosquitto` | `acs-cymru_mosquitto` | `eclipse-mosquitto:2.0.22` | `1883`, `9001` |
@@ -376,6 +376,23 @@ unrecognised role produces `403`.
 | **Database** | `has_role()` reads `user_roles` directly, so revocation is immediate; `digital_thread` is append-only against `service_role` too |
 | **Edge functions** | Explicit router allow-list; per-function secret scoping; role resolved from the database, never a stale JWT claim |
 | **Edge automation** | Node-RED's editor, admin API and webhook receiver each authenticate separately |
+| **Supabase Studio** | **No authentication of its own — reachable only from the host.** Bound to `127.0.0.1` on Compose and off the Ingress by default on Kubernetes |
+
+**Supabase Studio is a database console, not a dashboard with admin features**, and it is the one
+component here with no login, no roles and no session. The official Supabase stack fronts it with a
+basic-auth pair on Kong; this stack does not run that, so whatever can reach it holds the SQL
+editor, the table editor and the Vault UI **as the database owner** — for whom RLS is not enforced.
+Every control in the table above is downstream of that.
+
+So it is reachable from the host and nowhere else. `127.0.0.1:54323` on Compose; on Kubernetes
+`ingress.routes.studio` defaults to `false`, and reaching it is a port-forward:
+
+```bash
+kubectl -n <ns> port-forward svc/<release>-acs-cymru-supabase-studio 54323:3000
+```
+
+Turning that route on publishes an unauthenticated database console at `studio.<publicBaseDomain>`
+and should be paired with an authenticating proxy in front of it.
 
 Two consequences worth stating on the front page; both are detailed in
 [`supabase/README.md`](supabase/README.md):
