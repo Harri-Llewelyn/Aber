@@ -113,6 +113,14 @@ HELP = {
         "ids that churn -- a misconfigured gateway, a fault loop, or enumeration. Read it beside "
         "acs_ingestion_messages_dropped_total{reason=\"gateway_binding\"}, which is what an "
         "enumeration attempt would also move.",
+    "acs_ingestion_write_seconds":
+        "Wall time one DDATA message spends occupying the historian write path, from acquiring "
+        "the connection to after the commit. THE SINGLE-WRITER CEILING IS THIS SERIES: every "
+        "write happens on the one paho callback thread, so a slow write stalls every other "
+        "device rather than only its own. Committed writes only -- a write that raised is "
+        "counted by acs_ingestion_write_failures_total and excluded here, so that a p99 spike "
+        "unambiguously means a slow database and never an absent one. Observations at or above "
+        "0.25s are the bounded reconnect running, not the INSERT.",
     "acs_ingestion_up": "1 while the daemon is serving this endpoint.",
     "acs_ingestion_db_connected":
         "1 when the historian connection is open. 0 means telemetry is being dropped now.",
@@ -148,7 +156,54 @@ def _line(name, labels, value):
     return f"{name} {value}"
 
 
-def render_exposition(counters, labelled=None, gauges=None):
+def _format_le(value) -> str:
+    """
+    A bucket boundary as Prometheus expects to read it back.
+
+    `repr` is what makes this correct rather than `str(round(...))`: the boundary in the `le`
+    label is compared textually by anything joining series across scrapes, so 0.0025 must render
+    as "0.0025" and never as "0.003" or "2.5e-03".
+    """
+    if value == float("inf"):
+        return "+Inf"
+    return repr(float(value))
+
+
+def _render_histogram(out, metric, state):
+    """
+    One histogram family: cumulative `_bucket` series, then `_sum` and `_count`.
+
+    BUCKETS ARE EMITTED IN EXPLICIT NUMERIC ORDER AND NEVER THROUGH THE SHARED SORT. The generic
+    path below orders a metric's samples by their label items, which is a LEXICAL comparison --
+    and lexically "10.0" < "2.5" and "+Inf" sorts before every digit. Routing buckets through it
+    would emit a monotonically increasing sequence in the wrong order, which histogram_quantile()
+    reads as a malformed histogram and answers with silently wrong quantiles. This function exists
+    for that one reason.
+
+    THE COUNTS ARRIVE PER BUCKET AND LEAVE CUMULATIVE. Prometheus defines `le` as "observations
+    less than or equal to", so each bucket must include every bucket below it; ingestion.py stores
+    the un-accumulated counts because that is one increment per observation on the callback thread
+    instead of thirteen.
+    """
+    help_text = HELP.get(metric)
+    if help_text:
+        out.append(f"# HELP {metric} {help_text}")
+    out.append(f"# TYPE {metric} histogram")
+
+    running = 0
+    for upper, n in state["buckets"]:
+        running += n
+        out.append(_line(f"{metric}_bucket", {"le": _format_le(upper)}, running))
+
+    # +Inf IS THE TOTAL, NOT THE LAST FINITE BUCKET REPEATED. An observation above the top
+    # boundary increments no bucket in ingestion.py, so taking it from `count` is what keeps it
+    # present -- and Prometheus requires _bucket{le="+Inf"} to equal _count exactly.
+    out.append(_line(f"{metric}_bucket", {"le": "+Inf"}, state["count"]))
+    out.append(_line(f"{metric}_sum", {}, state["sum"]))
+    out.append(_line(f"{metric}_count", {}, state["count"]))
+
+
+def render_exposition(counters, labelled=None, gauges=None, histograms=None):
     """
     The text exposition format, built from a counter snapshot.
 
@@ -157,6 +212,9 @@ def render_exposition(counters, labelled=None, gauges=None):
                      NOT COUNTERS ONLY: a series' TYPE comes from `TYPES` by metric name, so a
                      labelled GAUGE belongs here too -- `gauges` below takes no label dimension.
     @param gauges    metric -> value
+    @param histograms  metric -> {"buckets": ((upper, count), ...), "sum": float, "count": int},
+                     from ingestion.histogram_snapshot(). Rendered by _render_histogram, which
+                     does NOT share the sorting path -- see the note there.
 
     SERIES ARE GROUPED UNDER ONE HELP/TYPE PAIR. Prometheus requires that a metric name's HELP and
     TYPE appear once, before its samples; repeating them for each label combination is a parse
@@ -201,6 +259,10 @@ def render_exposition(counters, labelled=None, gauges=None):
         out.append(f"# TYPE {metric} {TYPES.get(metric, 'counter')}")
         for labels, value in sorted(series[metric], key=lambda s: sorted(s[0].items())):
             out.append(_line(metric, labels, value))
+
+    for metric in sorted(histograms or {}):
+        _render_histogram(out, metric, histograms[metric])
+
     return "\n".join(out) + "\n"
 
 

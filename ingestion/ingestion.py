@@ -607,6 +607,75 @@ def labelled_snapshot() -> dict:
         return dict(_labelled)
 
 
+# ---------------------------------------------------------------------------------------------
+# THE HISTORIAN WRITE LATENCY HISTOGRAM.
+#
+# WHY A DISTRIBUTION AND NOT A COUNTER. Every other series here answers "how many"; this one
+# answers "how long", and the two cannot be the same shape. A mean would be actively misleading
+# on this path -- the interesting write is the slow one that stalls every OTHER device behind it,
+# and a mean is precisely the statistic that hides it.
+#
+# THIS IS THE MEASUREMENT THE SINGLE-WRITER CEILING IS ASSERTED WITHOUT. get_timescaledb_connection()
+# states the ceiling in a docstring; nobody has ever measured it. Fitting the instrument BEFORE
+# anything moves is the whole point -- a latency number taken after a rewrite has nothing to be
+# compared against, which is the wrong way round from how the roadmap first put it.
+#
+# BUCKETS SPAN THE THREE REGIMES THIS PATH ACTUALLY HAS, rather than being copied from
+# prometheus_client's defaults: sub-millisecond to a few milliseconds is a healthy local insert,
+# tens to hundreds of milliseconds is contention or a saturated disk, and anything at or above
+# 0.25s means the bounded reconnect in get_timescaledb_connection() ran -- DB_CONNECT_BACKOFF_SECONDS
+# is 0.25 and DB_CONNECT_MAX_ATTEMPTS is 3, so the retry path lands in the top three buckets and
+# nowhere else. That makes a reconnect stall READABLE OFF THE HISTOGRAM instead of inferable only
+# by correlating with acs_ingestion_db_reconnects_total.
+WRITE_SECONDS_BUCKETS = (
+    0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+)
+
+# COUNTS PER BUCKET, NOT CUMULATIVE. Prometheus wants cumulative `le` buckets and metrics.py
+# accumulates them at render time, because this list is written on the callback thread and read
+# once per scrape: one increment per observation is the right trade against thirteen.
+_write_seconds_buckets = [0] * len(WRITE_SECONDS_BUCKETS)
+_write_seconds_sum = 0.0
+_write_seconds_count = 0
+
+
+def observe_write_seconds(seconds: float):
+    """
+    Record one committed historian write.
+
+    ONLY COMMITTED WRITES ARE OBSERVED, and that is a deliberate exclusion rather than an
+    oversight. A write that raised has its own counter (`write_failures`), and its duration
+    describes the failure -- a connection timing out -- not the daemon's capacity to keep up. Let
+    the two share a histogram and a p99 spike stops being readable: it could mean a slow database
+    or an absent one, which call for opposite responses.
+
+    Shares _counters_lock rather than taking a second one: it is held for a handful of integer
+    increments, and one lock cannot deadlock against itself.
+    """
+    global _write_seconds_sum, _write_seconds_count
+    with _counters_lock:
+        _write_seconds_count += 1
+        _write_seconds_sum += seconds
+        for i, upper in enumerate(WRITE_SECONDS_BUCKETS):
+            if seconds <= upper:
+                _write_seconds_buckets[i] += 1
+                return
+        # Above the last finite bucket. Nothing to increment -- +Inf is derived from the total at
+        # render time, so an outlier is still counted in `_count` and still moves `_sum`.
+
+
+def histogram_snapshot() -> dict:
+    """Histogram state, in the shape metrics.render_exposition() takes."""
+    with _counters_lock:
+        return {
+            "acs_ingestion_write_seconds": {
+                "buckets": tuple(zip(WRITE_SECONDS_BUCKETS, _write_seconds_buckets)),
+                "sum": _write_seconds_sum,
+                "count": _write_seconds_count,
+            }
+        }
+
+
 def diagnose_device_identity(wire_id: str):
     """
     Explain how `wire_id` fails the wire-identity contract, or return None if it is acceptable.
@@ -2098,6 +2167,13 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     asset_id = device["sparkplug_id"]
     asset_name = device.get("name") or asset_id
 
+    # THE CLOCK STARTS BEFORE THE CONNECTION IS ACQUIRED, not at the INSERT. What bounds this
+    # daemon is how long the one callback thread is occupied per message, and a reconnect occupies
+    # it for up to DB_CONNECT_MAX_ATTEMPTS * DB_CONNECT_BACKOFF_SECONDS while the whole fleet
+    # waits -- the stall get_timescaledb_connection() accepts on purpose. Timing only the INSERT
+    # would make that stall invisible in the one series meant to expose it.
+    write_started = time.perf_counter()
+
     db_conn = get_timescaledb_connection()
     if not db_conn:
         count("dropped_db_unavailable")
@@ -2297,6 +2373,13 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                     )
 
                 logger.info("INGESTED DDATA: Ingested %d metrics for asset '%s' into TimescaleDB", metric_count, asset_id)
+
+        # OUTSIDE `with db_conn`, WHICH IS THE POINT: the block commits on exit, and on a
+        # hypertable the commit is where the write becomes durable. An observation taken at the
+        # end of the cursor block would report everything except the part that touches the disk.
+        # Reached only when the commit itself succeeded -- a commit that raises goes to `except`
+        # below and is deliberately not observed.
+        observe_write_seconds(time.perf_counter() - write_started)
     except Exception as e:
         # The whole message is lost: `with db_conn` rolled the transaction back, so none of the
         # batch landed. Counted so the loss is visible in STATS rather than only in the log --
@@ -2696,6 +2779,7 @@ def start_metrics_endpoint():
         return metrics.render_exposition(
             counters=counter_snapshot(),
             labelled=labelled,
+            histograms=histogram_snapshot(),
             gauges={
                 "acs_ingestion_up": 1,
                 "acs_ingestion_db_connected":

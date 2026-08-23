@@ -410,5 +410,191 @@ class SequenceGapTestCase(unittest.TestCase):
         )
 
 
+# =================================================================================================
+# The historian write latency histogram (roadmap item 2's measurement half)
+#
+# WHY THIS IS TESTED HARDER THAN THE COUNTERS. A counter that renders wrongly is obviously wrong --
+# a wrong number in a place a human reads. A histogram that renders wrongly still LOOKS like a
+# histogram: Prometheus ingests it, the panels draw, and histogram_quantile() returns a number that
+# is simply not the quantile. There is no error anywhere in that chain, so the only place the
+# mistake can be caught is here.
+# =================================================================================================
+class HistogramRenderingTestCase(unittest.TestCase):
+    METRIC = "acs_ingestion_write_seconds"
+
+    def render(self, buckets, total, total_sum=1.0):
+        return metrics.render_exposition(
+            {}, histograms={self.METRIC: {"buckets": buckets, "sum": total_sum, "count": total}}
+        )
+
+    def bucket_labels(self, out):
+        """The `le` values in the order they were EMITTED, which is the property under test."""
+        found = []
+        for line in out.splitlines():
+            if line.startswith(f"{self.METRIC}_bucket{{le="):
+                found.append(line.split('"')[1])
+        return found
+
+    def sample(self, out, suffix, le=None):
+        want = (
+            f'{self.METRIC}_{suffix}{{le="{le}"}} ' if le is not None
+            else f"{self.METRIC}_{suffix} "
+        )
+        for line in out.splitlines():
+            if line.startswith(want):
+                return line[len(want):]
+        self.fail(f"no {want.strip()} sample in:\n{out}")
+
+    # ---------------------------------------------------------------------------------------
+    # The ordering trap
+    # ---------------------------------------------------------------------------------------
+    def test_emitted_bucket_order_is_numeric_not_lexical(self):
+        """
+        THE ONE THAT WOULD CATCH THE REGRESSION. render_exposition orders a normal metric's
+        samples by their label items, which compares STRINGS: lexically "10.0" sorts before "2.5"
+        and "+Inf" sorts before every digit, because '+' is 0x2B and '0' is 0x30. Routing buckets
+        through that path yields a histogram Prometheus accepts and answers wrong quantiles from.
+
+        So this asserts two things at once: that the emitted order is numerically increasing, and
+        that it is NOT the lexical order -- the second half is what makes the first half a real
+        test rather than one that would pass under the bug.
+        """
+        buckets = tuple((b, 1) for b in (0.001, 0.0025, 2.5, 10.0))
+        emitted = self.bucket_labels(self.render(buckets, 4))
+
+        self.assertEqual(["0.001", "0.0025", "2.5", "10.0", "+Inf"], emitted)
+
+        numeric = [float("inf") if v == "+Inf" else float(v) for v in emitted]
+        self.assertEqual(sorted(numeric), numeric, "buckets are not in increasing `le` order")
+        self.assertNotEqual(
+            sorted(emitted), emitted,
+            "this fixture no longer distinguishes lexical from numeric order, so it would pass "
+            "even if buckets were routed back through the shared sorting path"
+        )
+
+    def test_the_real_bucket_boundaries_also_defeat_a_lexical_sort(self):
+        """
+        The test above proves the renderer; this proves the CONFIGURATION is one the renderer's
+        guarantee matters for. WRITE_SECONDS_BUCKETS spans 0.001 to 10.0, and a set whose lexical
+        and numeric orders happened to agree would make the property untested in practice.
+        """
+        ing = _load_ingestion()
+        labels = [repr(float(b)) for b in ing.WRITE_SECONDS_BUCKETS] + ["+Inf"]
+        self.assertNotEqual(sorted(labels), labels)
+
+    # ---------------------------------------------------------------------------------------
+    # Cumulativeness
+    # ---------------------------------------------------------------------------------------
+    def test_buckets_accumulate(self):
+        # Per-bucket 1,2,3 is cumulative 1,3,6 -- `le` means "less than or equal to", so a bucket
+        # that reported only its own count would understate every quantile.
+        out = self.render(((0.001, 1), (0.01, 2), (0.1, 3)), 6)
+        self.assertEqual("1", self.sample(out, "bucket", "0.001"))
+        self.assertEqual("3", self.sample(out, "bucket", "0.01"))
+        self.assertEqual("6", self.sample(out, "bucket", "0.1"))
+
+    def test_inf_equals_count(self):
+        # Prometheus requires this exactly; a mismatch is a malformed histogram.
+        out = self.render(((0.001, 1), (0.01, 2)), 3)
+        self.assertEqual(self.sample(out, "count"), self.sample(out, "bucket", "+Inf"))
+
+    def test_an_observation_above_the_top_boundary_is_only_in_inf(self):
+        """
+        An 11-second write increments no finite bucket. It must still appear, or the series that
+        exists to expose stalls would hide the worst one it ever saw.
+        """
+        out = self.render(((0.001, 1), (10.0, 0)), 2, total_sum=11.5)
+        self.assertEqual("1", self.sample(out, "bucket", "10.0"))
+        self.assertEqual("2", self.sample(out, "bucket", "+Inf"))
+        self.assertEqual("11.5", self.sample(out, "sum"))
+
+    # ---------------------------------------------------------------------------------------
+    # Format
+    # ---------------------------------------------------------------------------------------
+    def test_boundaries_render_exactly_and_never_in_scientific_notation(self):
+        # "2.5e-03" is a different label value from "0.0025", so a scrape that changed format
+        # mid-life would silently start a NEW series and break every rate() across the boundary.
+        self.assertEqual("0.0025", metrics._format_le(0.0025))
+        self.assertEqual("+Inf", metrics._format_le(float("inf")))
+        for boundary in _load_ingestion().WRITE_SECONDS_BUCKETS:
+            self.assertNotIn("e", metrics._format_le(boundary))
+
+    def test_type_is_histogram_and_help_is_present(self):
+        out = self.render(((0.001, 1),), 1)
+        self.assertIn(f"# TYPE {self.METRIC} histogram", out)
+        self.assertIn(f"# HELP {self.METRIC} ", out)
+        self.assertIn(self.METRIC, metrics.HELP)
+
+    def test_the_help_and_type_pair_appears_once_for_the_whole_family(self):
+        # _bucket, _sum and _count are one metric family. A HELP line before each suffix is a
+        # parse error in strict scrapers -- the same rule the counter path already observes.
+        out = self.render(((0.001, 1), (0.01, 1)), 2)
+        self.assertEqual(1, out.count(f"# TYPE {self.METRIC} "))
+        self.assertEqual(1, out.count(f"# HELP {self.METRIC} "))
+
+    def test_absent_histograms_change_nothing(self):
+        # The parameter is optional, so every existing caller and every existing test keeps its
+        # exact output.
+        self.assertEqual("\n", metrics.render_exposition({}))
+        self.assertEqual("\n", metrics.render_exposition({}, histograms={}))
+
+
+class WriteLatencyRegistryTestCase(unittest.TestCase):
+    """observe_write_seconds itself, against the real module."""
+
+    def setUp(self):
+        self.ing = _load_ingestion()
+        # Module-level state, so each test starts from a known point rather than from whatever
+        # the previous one left.
+        with self.ing._counters_lock:
+            self.ing._write_seconds_buckets[:] = [0] * len(self.ing.WRITE_SECONDS_BUCKETS)
+            self.ing._write_seconds_sum = 0.0
+            self.ing._write_seconds_count = 0
+
+    def snapshot(self):
+        return self.ing.histogram_snapshot()["acs_ingestion_write_seconds"]
+
+    def test_an_observation_lands_in_the_lowest_bucket_that_contains_it(self):
+        self.ing.observe_write_seconds(0.003)
+        landed = [b for b, n in self.snapshot()["buckets"] if n]
+        # 0.003 is above 0.0025 and at or below 0.005.
+        self.assertEqual([0.005], landed)
+
+    def test_a_boundary_value_lands_in_its_own_bucket_not_the_next(self):
+        # `le` is inclusive. An observation of exactly 0.01 belongs to le="0.01".
+        self.ing.observe_write_seconds(0.01)
+        self.assertEqual([0.01], [b for b, n in self.snapshot()["buckets"] if n])
+
+    def test_sum_and_count_track_every_observation_including_outliers(self):
+        for v in (0.001, 0.5, 99.0):
+            self.ing.observe_write_seconds(v)
+        snap = self.snapshot()
+        self.assertEqual(3, snap["count"])
+        self.assertAlmostEqual(99.501, snap["sum"], places=6)
+        # 99.0 exceeds every boundary, so the finite buckets hold only two of the three.
+        self.assertEqual(2, sum(n for _, n in snap["buckets"]))
+
+    def test_the_reconnect_stall_is_readable_off_the_top_buckets(self):
+        """
+        DB_CONNECT_MAX_ATTEMPTS * DB_CONNECT_BACKOFF_SECONDS is the stall the whole fleet waits
+        behind, and the bucket boundaries were chosen so it cannot hide inside a bucket that also
+        holds healthy writes. A healthy local insert and a reconnect must not share a bucket.
+        """
+        worst = self.ing.DB_CONNECT_MAX_ATTEMPTS * self.ing.DB_CONNECT_BACKOFF_SECONDS
+        self.assertGreaterEqual(worst, 0.25, "backoff no longer reaches the bucket it was sized for")
+        self.ing.observe_write_seconds(0.002)          # healthy
+        self.ing.observe_write_seconds(worst)          # a full reconnect
+        landed = [b for b, n in self.snapshot()["buckets"] if n]
+        self.assertEqual(2, len(landed))
+        self.assertLess(landed[0], 0.25)
+        self.assertGreaterEqual(landed[1], 0.25)
+
+    def test_it_renders_through_the_endpoint_path(self):
+        self.ing.observe_write_seconds(0.004)
+        out = metrics.render_exposition({}, histograms=self.ing.histogram_snapshot())
+        self.assertIn('acs_ingestion_write_seconds_bucket{le="0.005"} 1', out)
+        self.assertIn("acs_ingestion_write_seconds_count 1", out)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

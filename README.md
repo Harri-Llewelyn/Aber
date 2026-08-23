@@ -677,27 +677,65 @@ the central stack's exporter uses. The bundle is assembled by `gateway-bundle` f
 
 ### 2 · Horizontal ingestion scaling
 
-**Builds on:** the single-writer note in `get_timescaledb_connection()`
+**Builds on:** the single-writer note in `get_timescaledb_connection()` ·
+`acs_ingestion_write_seconds` · `_alias_map` / `_last_seq`
 
-The current ceiling is stated in the code rather than discovered: *"one connection, not a pool.
-Every write happens on the paho callback thread, so there is exactly one writer — and that is the
-thing to revisit first if a worker thread is ever introduced."* Three properties bound throughput on
-that thread: the 5-second directory cache, the per-message PostgREST resolution round trips, and the
-bounded DB retry that deliberately stalls the whole fleet rather than one device.
+#### The ceiling has now been measured, and it is not close
 
-The honest path is an **MQTT 5 shared subscription** (`$share/<group>/spBv1.0/#`) across clustered
-workers, each holding its own connection. The daemon is already shaped for it — resolution is
-cacheable and per-message, and the historian write is idempotent (`ON CONFLICT DO NOTHING`), so two
-workers seeing a redelivery cannot corrupt a series. What it needs is per-worker connection
-ownership and a rebirth-request path that does not depend on a single node's alias table.
+This item used to open by quoting the ceiling out of a docstring — *"one connection, not a pool.
+Every write happens on the paho callback thread, so there is exactly one writer"* — which is an
+assertion, not a measurement. `acs_ingestion_write_seconds` now ships, so there is a number:
 
-**It also carries the last piece of the ingestion metrics work.** Every counter that endpoint
-proposed now ships except one: `acs_ingestion_write_seconds`, the per-write latency histogram. It
-needs a timing wrapper on the historian write — which runs per sample on the broker callback
-thread, the one path in this daemon where casual overhead is least welcome. **That is the same
-thread this item exists to unblock**, and a latency number is worth far more once there is a
-before-and-after to compare it against, so it belongs here rather than as a measurement taken
-against a ceiling nobody has moved yet.
+| | |
+|---|---|
+| mean write | **≈ 4.1 ms** (0.0744 s over 18 writes) |
+| p90 | **12.6 ms**, via `histogram_quantile` |
+| implied single-thread ceiling | **≈ 240 msg/s**, and this is an *upper* bound |
+| current fleet rate | **≈ 0.95 msg/s** |
+
+An upper bound because the histogram starts when the write path is entered: device resolution and
+protobuf decode occupy the same thread beforehand and are outside it. Even so, the headroom is
+**two orders of magnitude**. This item is real but it is not urgent, and that is now a
+measurement rather than an opinion — which is the whole reason the instrument was fitted before
+anything moved rather than after.
+
+#### `$share` does not do what this entry used to claim
+
+The previous text called an MQTT 5 shared subscription "the honest path" and said the daemon was
+"already shaped for it", needing only per-worker connection ownership and a rebirth path. **Tested
+against the live broker, that is wrong.** Two subscribers in one share group, 20 seconds of fleet
+traffic:
+
+```
+worker A: 11 msgs    worker B: 11 msgs
+seen by BOTH: DDATA/gwy12…/dev22…  DDATA/gwy12…/dev23…
+              DDATA/gwy12…/dev27…  DDATA/gwy13…/dev24…
+only A: NDATA/gwy13…, NDATA/gwy15…
+only B: NDATA/gwy12…, NDATA/gwy14…, DDATA/gwy15…/dev26…
+```
+
+Round-robin **per message, with no edge-node affinity** — and Sparkplug state is per edge node.
+Two in-memory tables are keyed `(group_id, edge_node_id)`:
+
+- **`_alias_map`.** A birth certificate is *one message*, so it reaches *one worker*. Above,
+  `gwy12…`'s NDATA went only to B while its devices' DDATA went to both — so worker A would resolve
+  alias-only metrics against an empty table. The failure mode is already documented at the
+  declaration: *"ingests nothing at all from an alias-optimised gateway, and reports no error while
+  doing it."*
+- **`_last_seq`.** Each worker sees a fraction of the sequence numbers, so gap detection fires
+  permanently. `request_node_rebirth()` does not rescue it: the rebirth is also one message, and
+  lands on one worker.
+
+So the blocker is **the data path, not the rebirth path**. What would actually be required is
+either shared state for those two tables — a round trip on the hottest path, which is what this item
+exists to make faster — or partitioning the topic space by edge node, which is not what `$share`
+does and fights dynamic enrolment, since gateways arrive with single-use tokens and a static
+partition cannot know them.
+
+**One prerequisite that turned out not to exist:** the daemon speaks MQTT 3.1.1 (`mqtt.Client()`
+with paho 1.6.1's v1 callbacks), and `$share` is an MQTT 5 feature — but Mosquitto 2.0.22 honours
+shared subscriptions for 3.1.1 clients regardless, verified above. **No protocol upgrade and no
+callback migration is needed.** That was expected to be the hard part and it is not the problem.
 
 ---
 
