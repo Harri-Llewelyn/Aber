@@ -841,6 +841,48 @@ image question. This is a divergence-from-upstream question, not a security one.
 
 ---
 
+### 8 · Supabase's legacy API keys
+
+**Builds on:** [`scripts/setup.mjs`](scripts/setup.mjs) · `kong.yml`'s `key-auth` consumers ·
+`custom_access_token_hook` (`0001`) · the edge-function registry
+
+The `anon` and `service_role` JWTs this stack mints in `setup.mjs` are the key format Supabase has
+since superseded with **publishable and secret keys**. This is a real upstream deprecation with a
+real end date, and it is the only item on this list whose timing is set by somebody else.
+
+**It was split out of the configuration audit deliberately.** It arrived there as a bullet under a
+cleanup entry, and it is not a cleanup — it is a migration through the authentication path, which is
+the wrong thing to leave filed under "tidying" where its deadline is invisible. Nothing about it is
+started.
+
+**The surface is wider than "rotate two keys".** `SUPABASE_ANON_KEY` alone is consumed by twelve
+files — Kong's `key-auth`, the Grafana alert contact point, the frontend bundle, the i3X service and
+both e2e Jobs — and the two keys are structurally different things rather than two of the same
+thing:
+
+- **`anon` is public by construction.** It is the `anon` role, readable in any built bundle, which
+  is why the chart renders it outside a Secret deliberately. Replacing it is a change to what Kong
+  accepts as a registered key, not a secret rotation.
+- **`service_role` is not.** It is held by the ingestion daemon and every edge function, and
+  `0026`'s whole premise is that a holder of it must not be able to forge an audit row. Anything
+  that changes how it is minted has to leave that property intact.
+- **`custom_access_token_hook` shapes the claims** the rest of the stack reads. PostgREST resolves
+  RLS from them, and `grafana-userinfo` maps a role out of `public.user_roles` beside them.
+
+**Scope it against the pinned versions before planning it, not against the current documentation.**
+This stack runs specific `supabase/gotrue` and `kong` tags; whether the new format is supported, and
+what it changes about `key-auth` consumer registration, is a question about those tags. The upstream
+guidance describes a hosted platform whose components move independently of a self-hosted compose
+file — the same reasoning that makes "latest on Docker Hub" the wrong upgrade yardstick for this
+repository.
+
+**The migration has no rehearsal path today**, which is the first thing to build: there is no way to
+run the stack with both key formats accepted and confirm every consumer still works before the old
+ones are withdrawn. Without it this is a flag day across twelve files, an ingestion daemon and nine
+edge functions.
+
+---
+
 ## Contributing
 
 **The reasoning lives next to the thing it constrains**, not in one design document. A migration's
@@ -888,46 +930,3 @@ The recipient runs `npm run setup` themselves — that is what makes the credent
 than a copy of yours. `.env.example` carries working development secrets so the stack still starts
 without it, which is a convenience and **not** a supported state for anything another person can
 reach.
-
----
-
-### 8 · Supabase's legacy API keys
-
-**Builds on:** [`scripts/setup.mjs`](scripts/setup.mjs) · `kong.yml`'s `key-auth` consumers ·
-`custom_access_token_hook` (`0001`) · the edge-function registry
-
-The `anon` and `service_role` JWTs this stack mints in `setup.mjs` are the key format Supabase has
-since superseded with **publishable and secret keys**. This is a real upstream deprecation with a
-real end date, and it is the only item on this list whose timing is set by somebody else.
-
-**It was split out of the configuration audit deliberately.** It arrived there as a bullet under a
-cleanup entry, and it is not a cleanup — it is a migration through the authentication path, which is
-the wrong thing to leave filed under "tidying" where its deadline is invisible. Nothing about it is
-started.
-
-**The surface is wider than "rotate two keys".** `SUPABASE_ANON_KEY` alone is consumed by twelve
-files — Kong's `key-auth`, the Grafana alert contact point, the frontend bundle, the i3X service and
-both e2e Jobs — and the two keys are structurally different things rather than two of the same
-thing:
-
-- **`anon` is public by construction.** It is the `anon` role, readable in any built bundle, which
-  is why the chart renders it outside a Secret deliberately. Replacing it is a change to what Kong
-  accepts as a registered key, not a secret rotation.
-- **`service_role` is not.** It is held by the ingestion daemon and every edge function, and
-  `0026`'s whole premise is that a holder of it must not be able to forge an audit row. Anything
-  that changes how it is minted has to leave that property intact.
-- **`custom_access_token_hook` shapes the claims** the rest of the stack reads. PostgREST resolves
-  RLS from them, and `grafana-userinfo` maps a role out of `public.user_roles` beside them.
-
-**Scope it against the pinned versions before planning it, not against the current documentation.**
-This stack runs specific `supabase/gotrue` and `kong` tags; whether the new format is supported, and
-what it changes about `key-auth` consumer registration, is a question about those tags. The upstream
-guidance describes a hosted platform whose components move independently of a self-hosted compose
-file — the same reasoning that makes "latest on Docker Hub" the wrong upgrade yardstick for this
-repository.
-
-**The migration has no rehearsal path today**, which is the first thing to build: there is no way to
-run the stack with both key formats accepted and confirm every consumer still works before the old
-ones are withdrawn. Without it this is a flag day across twelve files, an ingestion daemon and nine
-edge functions.
-
