@@ -35,15 +35,32 @@ So each entry below was verified against the pinned image before it was written:
 
 DELIBERATELY ABSENT, and this is the part worth reading:
 
-  supabase-rest   POSTGREST 12.2.0 EXPOSES NO METRICS. Its admin server (`admin-server-port`)
-                  serves /ready and /live and nothing else -- there is no metrics setting in the
-                  configuration at all. A ServiceMonitor for it would be pure fiction.
-                  It is not a real gap: every PostgREST request arrives through Kong, so
-                  `kong_http_requests_total` and the `kong_request_latency_ms_*` histograms already
-                  carry it, labelled by service and route. Gateway-side measurement is one hop
-                  removed from the process but it covers the entire HTTP tier from a single target
-                  -- which is also why enabling Kong's metrics matters more than any other switch
-                  in this file.
+  supabase-rest   NO LONGER TRUE AS OF v14.12, AND THE OLD TEXT IS KEPT BELOW BECAUSE THE REASON
+                  IT WAS WRONG IS THE USEFUL PART. It read:
+
+                    "POSTGREST 12.2.0 EXPOSES NO METRICS. Its admin server (`admin-server-port`)
+                     serves /ready and /live and nothing else -- there is no metrics setting in
+                     the configuration at all. A ServiceMonitor for it would be pure fiction."
+
+                  That was accurate for 12.2.0 and stopped being accurate the moment the pin
+                  moved. Current PostgREST serves Prometheus text on the admin server at
+                  /metrics. Read off a running v14.12 rather than off a changelog:
+                  `pgrst_db_pool_max`, `pgrst_db_pool_waiting`, `pgrst_schema_cache_loads_total`,
+                  `pgrst_schema_cache_query_time_seconds`, and the three
+                  `pgrst_jwt_cache_*_total` counters.
+
+                  THOSE ARE EXACTLY THE THINGS KONG CANNOT SEE. Every PostgREST request does
+                  arrive through Kong, so `kong_http_requests_total` and the
+                  `kong_request_latency_ms_*` histograms cover the HTTP tier -- but a gateway-side
+                  200 says nothing about a schema cache reload or a connection pool with requests
+                  queued behind it. Those are process-internal and one hop removed.
+
+                  STILL ABSENT AS A TARGET, deliberately and temporarily: the admin server is not
+                  enabled on either deployment yet (`PGRST_ADMIN_SERVER_PORT` is unset), so there
+                  is nothing to scrape. Enabling it and adding the target is the follow-on to the
+                  version bump, tracked on the issue that raised it. This entry is corrected now
+                  rather than then, because leaving a paragraph asserting "exposes no metrics"
+                  beside a pin that does is the drift this file exists to argue against.
 
                   THIS METRIC NAME HAS NOW BEEN WRONG IN BOTH DIRECTIONS, WHICH IS THE LESSON.
                   It first said `kong_http_requests_total`, written from documentation; a live

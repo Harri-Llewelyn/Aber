@@ -425,7 +425,7 @@ supabaseRest:
   enabled: true
   image:
     repository: postgrest/postgrest
-    tag: v12.2.0
+    tag: v14.12
     pullPolicy: IfNotPresent
   # Stateless and horizontally scalable -- one of the three sensible HPA candidates.
   replicas: 1

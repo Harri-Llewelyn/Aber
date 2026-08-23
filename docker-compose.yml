@@ -389,7 +389,7 @@ services:
 
   supabase-rest:
     container_name: acs-cymru_supabase_rest
-    image: postgrest/postgrest:v12.2.0
+    image: postgrest/postgrest:v14.12
     restart: always
     environment:
       PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD:-postgres}@supabase-db:5432/postgres
