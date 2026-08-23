@@ -258,6 +258,105 @@ class SystemSettingsRLS(unittest.TestCase):
                     (SEEDED_KEY,),
                 )
 
+    # -- bounds (0032) -----------------------------------------------------------------------
+
+    def test_a_bounded_setting_refuses_a_value_below_its_floor(self):
+        """
+        THE VALUE THIS EXISTS FOR IS ZERO. A retention of 0 days is a NUMBER, so the type CHECK
+        passes it, the page would report saved, and the next nightly prune would delete every
+        alert in the database. Defending inside prune_platform_alerts() instead -- clamp, warn,
+        carry on -- would have made the write succeed while the setting silently did not mean what
+        it said.
+        """
+        with self.conn.cursor() as cur:
+            as_user(cur, ADMIN_ID)
+            with self.assertRaises(psycopg2.errors.CheckViolation):
+                cur.execute(
+                    "UPDATE public.system_settings SET value = to_jsonb(0)"
+                    " WHERE key = 'alerts.retention_days';"
+                )
+
+    def test_a_bounded_setting_refuses_a_value_above_its_ceiling(self):
+        # Not a real limit, a typo guard: 36500 for 3650 is a century for a decade.
+        with self.conn.cursor() as cur:
+            as_user(cur, ADMIN_ID)
+            with self.assertRaises(psycopg2.errors.CheckViolation):
+                cur.execute(
+                    "UPDATE public.system_settings SET value = to_jsonb(36500)"
+                    " WHERE key = 'alerts.retention_days';"
+                )
+
+    def test_a_bounded_setting_accepts_its_endpoints(self):
+        """Inclusive at both ends -- a floor nobody can actually select is a floor off by one."""
+        with self.conn.cursor() as cur:
+            as_user(cur, ADMIN_ID)
+            for edge in (1, 3650):
+                cur.execute(
+                    "UPDATE public.system_settings SET value = to_jsonb(%s)"
+                    " WHERE key = 'alerts.retention_days';", (edge,)
+                )
+                self.assertEqual(cur.rowcount, 1)
+
+    def test_an_unbounded_setting_is_unaffected_by_the_bounds_check(self):
+        """
+        The constraint is generic and applies to every number setting, so it must be inert where
+        min_value and max_value are NULL. Otherwise adding bounds for one key would quietly
+        constrain all the others.
+        """
+        with self.conn.cursor() as cur:
+            as_user(cur, ADMIN_ID)
+            cur.execute(
+                "UPDATE public.system_settings SET value = to_jsonb(100000) WHERE key = %s;",
+                (SEEDED_KEY,),
+            )
+            self.assertEqual(cur.rowcount, 1)
+
+    def test_the_retention_reader_uses_the_setting(self):
+        """
+        THE POINT OF 0032, ASSERTED END TO END. prune_platform_alerts() with no argument must read
+        `alerts.retention_days` rather than a literal -- otherwise the page shows a number that
+        changes nothing, which is the exact failure the closed key set exists to prevent.
+
+        Driven by moving the setting and observing the cutoff through what the function DELETES,
+        because the interval it computed is not otherwise observable. Rolled back by tearDown.
+        """
+        with self.conn.cursor() as cur:
+            # As owner: pg_cron runs this, not an end user, and the fixture needs to write alerts.
+            # Column list taken from 0030's self-check. `alert_name` is NOT NULL, and omitting it
+            # here failed this test the same way it failed the migration -- the same wrong list
+            # written twice, because the second was copied from the first rather than from the
+            # working original.
+            cur.execute(
+                "INSERT INTO public.platform_alerts"
+                " (fingerprint, entity_type, sparkplug_id, alert_name, severity, status,"
+                "  summary, starts_at, ends_at, recorded_at)"
+                " VALUES ('t-0032-old', 'platform', NULL, 'Self Check', 'info', 'resolved',"
+                "         'fixture', now() - interval '20 days', now() - interval '20 days',"
+                "         now() - interval '20 days');"
+            )
+
+            # 30 days: the 20-day-old resolved alert is INSIDE the window and must survive.
+            cur.execute(
+                "UPDATE public.system_settings SET value = to_jsonb(30)"
+                " WHERE key = 'alerts.retention_days';"
+            )
+            cur.execute("SELECT public.prune_platform_alerts();")
+            cur.execute(
+                "SELECT count(*) FROM public.platform_alerts WHERE fingerprint = 't-0032-old';"
+            )
+            self.assertEqual(cur.fetchone()[0], 1, "a 20-day-old alert was pruned at a 30-day window")
+
+            # 7 days: the same row is now outside it. Nothing changed but the setting.
+            cur.execute(
+                "UPDATE public.system_settings SET value = to_jsonb(7)"
+                " WHERE key = 'alerts.retention_days';"
+            )
+            cur.execute("SELECT public.prune_platform_alerts();")
+            cur.execute(
+                "SELECT count(*) FROM public.platform_alerts WHERE fingerprint = 't-0032-old';"
+            )
+            self.assertEqual(cur.fetchone()[0], 0, "the setting did not move the cutoff")
+
     def test_value_type_cannot_be_changed_to_make_a_bad_value_fit(self):
         """The obvious way around the test above, if value_type were writable."""
         with self.conn.cursor() as cur:

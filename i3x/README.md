@@ -332,6 +332,8 @@ clock.
 | `MQTT_TLS_ENABLED` / `MQTT_TLS_CA_FILE` | off | Fails closed: a missing CA stops startup |
 | `I3X_SUBSCRIPTION_TTL_SECONDS` | `300` | Spec MUST — abandoned subscriptions are deleted |
 | `I3X_SUBSCRIPTION_QUEUE_LIMIT` | `10000` | Batches per subscription before 206 |
+| `I3X_ADDRESS_SPACE_TTL_SECONDS` | `2` | Address-space cache lifetime. `0` disables it |
+| `I3X_ADDRESS_SPACE_CACHE_MAX` | `64` | Cached address spaces retained, evicted LRU |
 | `SUPABASE_SERVICE_ROLE_KEY` | **must be absent** | Its presence is a startup refusal |
 
 ## Availability
@@ -391,6 +393,28 @@ that owns no data.
 The trade is only worth making against a real requirement. It is tracked separately, and this
 section is what it would have to improve on.
 
+## The address-space cache
+
+Assembling the address space costs **six PostgREST reads**, and several endpoints load it two or
+three times in one request — `/types/{id}` builds types and then objects; the bulk value reads
+rebuild it per call. A conformance client polling in a loop was therefore spending 12–18 queries a
+tick rebuilding a graph that had not changed.
+
+It is now cached for `I3X_ADDRESS_SPACE_TTL_SECONDS`, **keyed by the caller's bearer token**.
+
+That key is the important part. The space is deliberately assembled from reads made *as the
+caller*, so RLS decides what it contains — a cache shared across identities would serve one
+operator another's view of the plant, silently and only on a hit. The stored key is a SHA-256 of
+the `Authorization` header rather than the header itself, because the cache outlives the request
+and a dump of it should not be a wallet of live tokens.
+
+It is **bounded and evicted least-recently-used**, because the key is client-controlled: anyone who
+can reach the port can mint distinct entries by varying the header, so an unbounded map here would
+be a memory-exhaustion vector rather than merely untidy.
+
+**A hit can outlive a revoked grant by up to the TTL.** That is why the default is seconds rather
+than minutes, and why `0` disables the cache outright.
+
 ## Known limitations
 
 
@@ -399,6 +423,12 @@ section is what it would have to improve on.
   every other service.
 - **`isExtended` reads `last_birth_metrics`**, so it reflects the device's most recent DBIRTH. A
   device that has never birthed reports `false` rather than unknown.
+- **The address space can be up to `I3X_ADDRESS_SPACE_TTL_SECONDS` stale**, including with
+  respect to a permission that has just been revoked. See
+  [The address-space cache](#the-address-space-cache).
+- **Writes are not implemented, and that is a decision rather than a gap.** `PUT /objects/value`
+  answers 405 and `/info` declares `update.current: false`. A server that does not implement the
+  verb cannot be talked into it.
 - **Subscriptions do not survive a restart, and neither does the endpoint during one.** That is an
   availability commitment rather than a limitation to be worked around, so it is stated in full
   under [Availability](#availability) above.

@@ -3581,6 +3581,13 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   min-height: 28px;
 }
 
+/* The permitted range, stated rather than left to a spinner's limits. Dim: it is a constraint on
+   the field above, not a value in its own right. */
+.setting-bounds {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
 .setting-error {
   font-size: 11px;
   color: var(--danger-text);

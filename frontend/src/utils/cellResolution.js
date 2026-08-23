@@ -192,6 +192,52 @@ export function groupDevicesByCell(devices) {
 }
 
 /**
+ * Overlay a set of staged, uncommitted relocations onto a device list.
+ *
+ * Rearrange mode stages drops and applies them as one transaction (migration 0033), so between
+ * the drop and the Apply there is a view of the shopfloor that exists only in the browser. This
+ * builds it.
+ *
+ * IT RE-RESOLVES RATHER THAN JUST OVERWRITING THE TWO COLUMNS, and that is the whole subtlety.
+ * api.js merges `device_locations` onto every device row, and deviceLocationOf() PREFERS that
+ * server-supplied `location_source` over local derivation -- correctly, because the server is the
+ * authority. A staged device still carries the server's answer about where it used to be, so
+ * setting `cell_id` alone leaves every consumer (groupDevicesByCell, the lane filters) reading
+ * the stale resolution and the chip does not move. The view fields have to be recomputed from the
+ * staged values, which is exactly what resolveDeviceLocation() does.
+ *
+ * THIS IS ALSO WHAT MAKES THE UNASSIGNED LANE HONEST BEFORE THE COMMIT RATHER THAN AFTER IT.
+ * Dropping onto Unassigned stages `cell_id: null` with cell scope, and a device whose gateway
+ * serves a cell then re-inherits that cell and visibly springs back the moment it is dropped --
+ * not once a write has completed. Unassigned is the resolution running out of arms, so it is not
+ * settable, and a staged view that showed the device sitting in the lane would be telling the one
+ * lie this location model exists to avoid.
+ *
+ * `staged: true` rides along so the caller can render pending differently from durable. With
+ * immediate writes the tile did not move until the reload landed; now it moves at once, and
+ * without that distinction an operator cannot tell what is already saved.
+ *
+ * @param devices  rows as the page holds them, carrying merged `device_locations` fields
+ * @param gateways rows keyed by `gateway_id` or `id`
+ * @param staged   Map of device id -> { cell_id, location_scope }
+ */
+export function applyStagedMoves(devices, gateways, staged) {
+  if (!staged || staged.size === 0) return devices || []
+  const byId = new Map((gateways || []).map(g => [g.gateway_id ?? g.id, g]))
+  return (devices || []).map(device => {
+    const move = staged.get(device?.asset_id ?? device?.id)
+    if (!move) return device
+    const moved = {
+      ...device,
+      cell_id: move.cell_id || null,
+      location_scope: move.location_scope === SCOPE_SITE_WIDE ? SCOPE_SITE_WIDE : SCOPE_CELL
+    }
+    const gateway = byId.get(device?.active_gateway_id ?? device?.gateway_id ?? null) || null
+    return { ...moved, ...resolveDeviceLocation(moved, gateway), staged: true }
+  })
+}
+
+/**
  * Resolve a whole list at once, returning a Map keyed by device id.
  *
  * Callers that already loaded `device_locations` should merge that instead; this is for the

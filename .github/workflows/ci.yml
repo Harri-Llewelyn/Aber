@@ -623,6 +623,34 @@ jobs:
             }
           done
 
+          # SUPABASE STUDIO MUST NOT BE ON THE INGRESS, and this is the assertion most worth
+          # having in this step. Studio has NO AUTHENTICATION -- no login, no roles, no session --
+          # and connects as the database owner, for whom RLS is not enforced. Routing it publishes
+          # an unauthenticated SQL editor, table editor and Vault UI at studio.<publicBaseDomain>.
+          #
+          # It defaulted to ON until a review noticed, with a comment in values.yaml recommending
+          # it be turned off. A default that has to be READ to be safe is not a safe default, and
+          # a comment is not a control. This is the control.
+          if grep -qE '^\s+- host: studio\.' /tmp/prod-render.yaml; then
+            echo "::error::the production example routes Supabase Studio on the Ingress."
+            echo "::error::Studio has no authentication and connects as the database owner, so"
+            echo "::error::that publishes an unauthenticated database console. If this is"
+            echo "::error::deliberate, it belongs behind an authenticating proxy -- and this"
+            echo "::error::check should be changed to assert THAT, not deleted."
+            exit 1
+          fi
+
+          # And the Compose target's equivalent: published on loopback rather than 0.0.0.0. Checked
+          # here rather than in a compose-only job because the two targets' posture has to move
+          # together -- fixing one and forgetting the other is the drift this repository is built
+          # around catching.
+          if ! grep -qE '^\s+- "127\.0\.0\.1:\$\{STUDIO_PORT:-54323\}:3000"' docker-compose.yml; then
+            echo "::error::docker-compose.yml does not publish Supabase Studio on 127.0.0.1."
+            echo "::error::On 0.0.0.0 it is an unauthenticated database console reachable by"
+            echo "::error::anyone on the host's network."
+            exit 1
+          fi
+
           # THE CHART'S OWN CREDENTIALS SECRET MUST NOT RENDER: `existingSecret` says one already
           # exists, and shipping a second, empty copy alongside it is how the documented External
           # Secrets path would quietly break -- pods reading the chart's blank Secret instead of
@@ -1216,6 +1244,18 @@ jobs:
           # table-level UPDATE already held and did nothing. The settings page would have worked
           # perfectly while provenance was forgeable.
           python supabase/migrations/test_system_settings_rls.py
+          # 0033's batch relocation, and the property it defends is NOT "an admin can move
+          # devices". It is that one rearrangement is ONE transaction, so six machines reassigned
+          # in one gesture carry one causation_id instead of six -- a property that does not live
+          # in 0033 at all, but in log_digital_thread_event() stamping txid_current(). A later
+          # migration could re-declare that trigger without it and 0033 would keep working in
+          # every visible way while quietly going back to six unrelated audit rows.
+          #
+          # The other half is the hole atomicity opens: the RPC is SECURITY DEFINER, so RLS does
+          # not apply inside it and `devices_update_privileged` never runs. If its own has_role()
+          # check were dropped, ANY authenticated user could relocate the whole shopfloor and no
+          # policy anywhere would refuse. This is the only thing that would notice.
+          python supabase/migrations/test_relocate_devices.py
           # THE AUDIT SUPPRESSION RULES. 0005 suppresses the no-op UPDATE and the heartbeat-only
           # UPDATE, and ingestion.py relies on that being true -- a regression here does not fail
           # anything, it just resumes writing an audit row per heartbeat until the table is mostly

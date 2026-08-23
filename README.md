@@ -143,8 +143,13 @@ alert table a **7-day retention window**, pruned nightly by `pg_cron`, whose pre
 closed and superseded occurrences but never the newest firing row of a fingerprint — and `0031`
 adds `public.system_settings`, the runtime configuration plane an `Administrator` edits from the
 dashboard instead of a host `.env`, whose **key set is closed**: RLS grants UPDATE and nothing
-else, so a new setting arrives by migration beside the code that reads it — plus demo accounts
-(`supabase/seed.sql`).
+else, so a new setting arrives by migration beside the code that reads it — and `0032` gives that
+table **numeric bounds** and moves the alert retention window into it as `alerts.retention_days`,
+replacing `prune_platform_alerts()` with a version that reads the setting, so the answer to "how
+long do we keep alerts" is on a page rather than in a migration — and `0033` adds
+`relocate_devices()`, which applies a whole shopfloor rearrangement in **one transaction** so the
+six machines an operator files in one gesture carry one `causation_id` instead of six, and so a
+batch that fails partway leaves nothing behind — plus demo accounts (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because `0005` already implements one; a second declaration of `log_digital_thread_event()`
@@ -344,7 +349,7 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | `supabase-storage` | `acs-cymru_supabase_storage` | `supabase/storage-api:v1.11.13` | — |
 | `supabase-storage-init` | `acs-cymru_supabase_storage_init` | `node:24-alpine` | — |
 | `supabase-meta` | `acs-cymru_supabase_meta` | `supabase/postgres-meta:v0.96.6` | — |
-| `supabase-studio` | `acs-cymru_supabase_studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `54323:3000` |
+| `supabase-studio` | `acs-cymru_supabase_studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `127.0.0.1:54323:3000` (loopback only — see below) |
 | `timescaledb` | `acs-cymru_timescaledb` | `timescale/timescaledb:2.29.2-pg17` | `5433:5432` |
 | `mosquitto-init` | `acs-cymru_mosquitto_init` | `eclipse-mosquitto:2.0.22` | — |
 | `mosquitto` | `acs-cymru_mosquitto` | `eclipse-mosquitto:2.0.22` | `1883`, `9001` |
@@ -373,6 +378,23 @@ unrecognised role produces `403`.
 | **Database** | `has_role()` reads `user_roles` directly, so revocation is immediate; `digital_thread` is append-only against `service_role` too |
 | **Edge functions** | Explicit router allow-list; per-function secret scoping; role resolved from the database, never a stale JWT claim |
 | **Edge automation** | Node-RED's editor, admin API and webhook receiver each authenticate separately |
+| **Supabase Studio** | **No authentication of its own — reachable only from the host.** Bound to `127.0.0.1` on Compose and off the Ingress by default on Kubernetes |
+
+**Supabase Studio is a database console, not a dashboard with admin features**, and it is the one
+component here with no login, no roles and no session. The official Supabase stack fronts it with a
+basic-auth pair on Kong; this stack does not run that, so whatever can reach it holds the SQL
+editor, the table editor and the Vault UI **as the database owner** — for whom RLS is not enforced.
+Every control in the table above is downstream of that.
+
+So it is reachable from the host and nowhere else. `127.0.0.1:54323` on Compose; on Kubernetes
+`ingress.routes.studio` defaults to `false`, and reaching it is a port-forward:
+
+```bash
+kubectl -n <ns> port-forward svc/<release>-acs-cymru-supabase-studio 54323:3000
+```
+
+Turning that route on publishes an unauthenticated database console at `studio.<publicBaseDomain>`
+and should be paired with an authenticating proxy in front of it.
 
 Two consequences worth stating on the front page; both are detailed in
 [`supabase/README.md`](supabase/README.md):
@@ -419,7 +441,7 @@ Digital Nameplate; what each one covers and how its identity was verified is in
 ## Testing
 
 ```bash
-# Frontend — 1381 tests
+# Frontend — 1411 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required
@@ -467,6 +489,7 @@ python supabase/migrations/test_digital_thread_guard.py
 python supabase/migrations/test_ingestion_rejection_rpc.py
 python supabase/migrations/test_platform_alerts_retention.py
 python supabase/migrations/test_system_settings_rls.py
+python supabase/migrations/test_relocate_devices.py
 python supabase/migrations/test_metric_catalog_seed.py
 python supabase/migrations/test_gateway_enrollment.py
 # Needs the TimescaleDB historian (port 5433), not Supabase — the rollups live there
@@ -577,7 +600,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Eleven extensions, ordered by how much of each already exists. None is speculative: every one names
+Eight extensions, ordered by how much of each already exists. None is speculative: every one names
 the code it would build on, because the value of writing them down is that a reader can tell how far
 away each is.
 
@@ -679,25 +702,7 @@ a KPI definition a setting rather than a constant fixed before the first row was
 This is the intermediate step that was previously deferred pending an MES. It does not replace one —
 it makes the vocabulary answer questions instead of only naming them.
 
-### 4 · i3X server optimisations
-
-**Builds on:** `_load_address_space()` · `_build_objects()` · `MAX_BULK_ELEMENT_IDS`
-
-Bulk breadth is now capped and the value-path indexes are built once per request rather than per
-element. What remains is the **six PostgREST queries per request**: the address space is reassembled
-from scratch every time, which is fine for a demonstrator and is the wrong shape for a conformance
-client polling in a loop.
-
-A short TTL cache would fix it, and the constraint on that work is already known and must not be
-lost: the cache **must be keyed by the caller's token**. The address space is deliberately assembled
-from reads made as the caller so RLS decides what it contains, and a cache shared across identities
-would hand one user another's view — re-creating exactly the hole the MQTT value cache is guarded
-against.
-
-Writes stay unimplemented. `PUT /objects/value` answers 405 and `/info` declares
-`update.current: false`; a server that does not implement the verb cannot be talked into it.
-
-### 5 · Ingress → Gateway API
+### 4 · Ingress → Gateway API
 
 **Builds on:** [`templates/ingress.yaml`](deploy/helm/acs-cymru/templates/ingress.yaml) ·
 `acs-cymru.corsOrigins`
@@ -722,7 +727,7 @@ empty tables while the gateway reported 200 for every request.
 keeps `kong.yml` and its `sed` either way — so this retires one placeholder on one target rather
 than the templating approach as a whole.
 
-### 6 · A durable MCP credential, and the Digital Thread over MCP
+### 5 · A durable MCP credential, and the Digital Thread over MCP
 
 **Builds on:** `i3x-mcp` against the i3X address space ([`i3x/README.md`](i3x/README.md#mcp)) ·
 `GOTRUE_JWT_EXP` · `digital_thread`
@@ -766,25 +771,19 @@ scope — which is the only reason it would be safe. Or **leave it**: the Digita
 built for reading a change with its diff and its causation siblings beside it, and a model
 summarising that trail is a different and weaker artefact than the page.
 
-### 7 · Administrative Settings & Runtime Configuration
+### 6 · Cold Telemetry Archival & Query-in-Place
 
-**Builds on:** `has_role('Administrator')` · PostgREST RLS · Supabase Vault
+**Builds on:** TimescaleDB retention policies · `telemetry` hypertable · Edge Functions · Apache
+Parquet · `public.system_settings` (`0031`, `0032`)
 
-In-app configuration management allowing `Administrator` users to tune runtime parameters
-(cold storage endpoints, retention policies, OIDC provider metadata, alert thresholds) directly
-from the React dashboard without host-level `.env` edits or container restarts.
-
-**Settings override defaults dynamically at runtime rather than mutating disk.** Sensitive secrets
-(S3 keys, OIDC client secrets) land encrypted in Supabase Vault, while non-sensitive runtime
-flags live in a `system_settings` table gated strictly on `Administrator` via RLS. Host `.env`
-values remain the initial fallback, preserving deterministic, zero-configuration local boot while
-giving deployed shopfloor instances an operational management plane.
-
----
-
-### 8 · Cold Telemetry Archival & Query-in-Place
-
-**Builds on:** TimescaleDB retention policies · `telemetry` hypertable · Edge Functions · Apache Parquet
+**Its configuration has somewhere to live, and the split is already decided.** The settings plane
+shipped, so the S3 **endpoint**, bucket and tiering threshold are declared here by this item's own
+migration, beside the code that reads them — that is what the closed key set means. The S3
+**credential** is not: every authenticated user can read `system_settings`, so it goes in Supabase
+Vault and is managed through **Supabase Studio**, which already ships that UI on both deployment
+targets. No secrets interface is to be built for it. See
+[`supabase/README.md`](supabase/README.md#runtime-configuration-system_settings), including the note
+that Studio sits on a different trust boundary from an `Administrator` in the dashboard.
 
 Tiering high-volume time-series telemetry out of the operational database into vendor-neutral
 Apache Parquet files on S3-compatible or Azure Blob storage once the hot hypertable retention
@@ -799,51 +798,7 @@ gigabytes of raw points back into TimescaleDB.
 
 ---
 
-### 9 · Deferred commit for Rearrange mode
-
-**Builds on:** `handleDrop()` / `handleLaneDrop()` / `pendingZone` in
-[`OverviewTab.jsx`](frontend/src/components/tabs/OverviewTab.jsx) ·
-`digital_thread.causation_id` (`0026`)
-
-Rearrange mode is a mode already — off by default, turned on deliberately, turned off by clicking
-**Rearranging — click to finish**. What it is not yet is a *transaction*: each drop issues its own
-`PUT /api/v1/devices/{id}` the moment the mouse is released, and the button's own tooltip says so
-("Every move is written immediately"). The work is to stage the moves and apply them when the
-operator finishes, so the mode has a beginning, an end, and one outcome.
-
-**The reason this is worth doing is not tidiness, it is the audit trail.** Reassigning six machines
-is one decision, and it currently lands as six independent `UPDATE`s — six transactions, six
-`causation_id`s, six unrelated-looking rows in the Digital Thread. Deferring the commit makes it one
-transaction, which is exactly what the "Same transaction" control in the event drawer exists to
-show. Today the only multi-entity act on a fresh stack is the one `supabase/seed.sql` commits
-deliberately so that control has something to demonstrate; this would make a real operator action
-produce one.
-
-**The crux is that atomicity has to come from the server.** Device writes go through PostgREST
-per-row (`supabase.from('devices').update(...).eq('id', ...)`), so staging in the browser and then
-firing six requests on finish would still be six transactions and would change nothing about the
-thread — it would only move when they happen. One `causation_id` needs a single SECURITY DEFINER RPC
-taking the whole batch, in the shape `fork_schema` and `publish_schema_version` already use. A
-half-applied batch also becomes possible without it, which is worse than the present behaviour.
-
-Three things the present design gets right and a staged version must not lose:
-
-- **`pendingZone` exists because a drop has no optimistic feedback**: the device keeps rendering in
-  its old tile until the reload lands, and on a slow link a silent drop is indistinguishable from a
-  refused one — which is how one move became two writes. Staging inverts this. The tile must move
-  immediately, and *staged* must then be visually distinct from *saved*, or the operator cannot tell
-  what is already durable.
-- **A discard path becomes necessary.** With immediate writes the only undo is dragging back, which
-  writes again. With staging, leaving the mode without committing has to mean something explicit —
-  and navigating away mid-rearrange must not lose the work silently.
-- **Unassigned is not settable**, and staging must keep that true: dropping there clears the
-  explicit cell and lets resolution run, so a device may visibly spring back. That is correct
-  behaviour, not a failed write, and a staged view that pretended the drop stuck would be telling
-  the one lie this location model exists to avoid.
-
----
-
-### 10 · Vestigial column and configuration audit
+### 7 · Vestigial column and configuration audit
 
 **Builds on:** [`scripts/check-docs-drift.mjs`](scripts/check-docs-drift.mjs) ·
 [`.env.example`](.env.example) · `0001_baseline_schema.sql`
@@ -894,7 +849,7 @@ The real work on that side is narrower and has two parts:
   consumers, the edge-function registry and `custom_access_token_hook`. It should be scoped against
   the pinned `supabase/gotrue` and `kong` versions before it is planned, not assumed to apply.
 
-### 11 · Kong → Envoy, following upstream Supabase
+### 8 · Kong → Envoy, following upstream Supabase
 
 **Builds on:** [`supabase/kong.yml`](supabase/kong.yml) · `supabase-kong-init` ·
 [`templates/supabase/kong.yaml`](deploy/helm/acs-cymru/templates/supabase/kong.yaml)
@@ -919,7 +874,7 @@ stated reason and each is load bearing; a translation that quietly widened one w
 test that exists today, because `validate.py` asserts the 401s that SHOULD happen and cannot assert
 the absence of a route nobody wrote. Any migration needs the negative assertions first.
 
-**It interacts with §5 and should be sequenced against it.** Gateway API's `HTTPRoute` would retire
+**It interacts with §4 and should be sequenced against it.** Gateway API's `HTTPRoute` would retire
 the `__CORS_ORIGINS__` placeholder on Kubernetes; Envoy would restate CORS in its own filter on both
 targets. Doing both independently means expressing origin policy a third way before deleting the
 first — so whichever lands first should decide where that policy lives.

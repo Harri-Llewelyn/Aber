@@ -1048,10 +1048,23 @@ ingress:
       clusterIssuer: ""
   # Per-route overrides, keyed by the route names in acs-cymru.ingressRoutes: frontend, supabase,
   # nodered, grafana, studio, docs, mqtt. Set one to false to keep a service off the ingress while
-  # leaving it running in-cluster -- studio and docs are the usual candidates on a public deployment,
-  # since neither is meant for anyone outside the operations team.
-  routes: {}
-  #  studio: false
+  # leaving it running in-cluster.
+  #
+  # STUDIO IS OFF BY DEFAULT, AND THAT IS A SECURITY DEFAULT RATHER THAN A PREFERENCE. Supabase
+  # Studio has NO AUTHENTICATION of its own -- no login, no roles, no session. The official stack
+  # fronts it with a basic-auth pair on Kong; this chart does not. So anything that can reach it
+  # gets the SQL editor, the table editor and the Vault UI as the database owner, and RLS does not
+  # apply because the owner is exempt from it.
+  #
+  # It used to default to ON, with a comment recommending it be turned off. A default that has to
+  # be read to be safe is not a safe default: it publishes an unauthenticated database console at
+  # `studio.<publicBaseDomain>` for anyone who installs the chart without editing this file.
+  # Turning it on is now a deliberate act, and belongs with an authenticating proxy in front.
+  #
+  # Reach it without the ingress the same way Compose does -- a port-forward:
+  #   kubectl -n <ns> port-forward svc/<release>-acs-cymru-supabase-studio 54323:3000
+  routes:
+    studio: false
   #  docs: false
 
 # ---------------------------------------------------------------------------------------------

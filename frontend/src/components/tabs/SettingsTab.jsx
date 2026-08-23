@@ -18,13 +18,27 @@ import { IconSettings, IconX } from '../common/Icons'
  * nothing, and a page that only checked for an exception would report success.
  */
 
-/** Cast a form field back to the JSON type the row is declared to hold. */
-export function coerceValue(raw, valueType) {
+/**
+ * Cast a form field back to the JSON type the row is declared to hold, and check its bounds.
+ *
+ * THE BOUNDS ARE CHECKED HERE *AND* BY A CHECK CONSTRAINT, which is not redundancy for its own
+ * sake. The constraint is what makes the rule true -- a curl request never reaches this function.
+ * This exists so the operator is told before the round trip, in the words the setting uses, rather
+ * than reading `new row for relation "system_settings" violates check constraint
+ * "system_settings_value_within_bounds"` and having to work out which number was wrong.
+ */
+export function coerceValue(raw, valueType, bounds = {}) {
   if (valueType === 'number') {
     // NOT parseFloat: it stops at the first non-numeric character, so "30abc" becomes 30 and the
     // operator's typo is silently accepted as a different number than they typed.
     const n = Number(raw)
     if (raw === '' || Number.isNaN(n)) throw new Error('Enter a number.')
+
+    // `!= null` catches undefined as well, and deliberately admits 0 as a bound -- `if (min)`
+    // would treat a floor of zero as "no floor", which is the one value a floor most needs to say.
+    const { min_value: min, max_value: max } = bounds
+    if (min != null && n < Number(min)) throw new Error(`Must be ${min} or more.`)
+    if (max != null && n > Number(max)) throw new Error(`Must be ${max} or less.`)
     return n
   }
   if (valueType === 'boolean') return raw === true || raw === 'true'
@@ -73,7 +87,7 @@ function SettingRow({ setting, onSaved, showToast }) {
     setError(null)
     let coerced
     try {
-      coerced = coerceValue(draft, setting.value_type)
+      coerced = coerceValue(draft, setting.value_type, setting)
     } catch (e) {
       setError(e.message)
       return
@@ -139,7 +153,24 @@ function SettingRow({ setting, onSaved, showToast }) {
             type={setting.value_type === 'number' ? 'number' : 'text'}
             value={draft}
             onChange={e => setDraft(e.target.value)}
+            {...(setting.value_type === 'number' && setting.min_value != null
+              ? { min: setting.min_value } : {})}
+            {...(setting.value_type === 'number' && setting.max_value != null
+              ? { max: setting.max_value } : {})}
           />
+        )}
+
+        {/* THE RANGE IS SHOWN, NOT ONLY ENFORCED. `min`/`max` on the input give a browser its
+            spinner limits and nothing a reader can see; an operator who types 0 and is told
+            "Must be 1 or more" should have been able to know that before typing. */}
+        {setting.value_type === 'number' && (setting.min_value != null || setting.max_value != null) && (
+          <div className="setting-bounds">
+            {setting.min_value != null && setting.max_value != null
+              ? `Between ${setting.min_value} and ${setting.max_value}`
+              : setting.min_value != null
+                ? `${setting.min_value} or more`
+                : `${setting.max_value} or less`}
+          </div>
         )}
 
         <div className="setting-actions">

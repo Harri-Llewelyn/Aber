@@ -20,7 +20,8 @@ import {
   unassignedHint,
   locationSourceLabel,
   resolveDeviceLocations,
-  groupDevicesByCell
+  groupDevicesByCell,
+  applyStagedMoves
 } from '../utils/cellResolution';
 
 /**
@@ -205,5 +206,104 @@ describe('labels and bulk resolution', () => {
     const devices = [{ id: 'd1', gateway_id: 'gw-1', cell_id: null }];
     const resolved = resolveDeviceLocations(devices, [{ id: 'gw-1', cell_id: CELL_A }]);
     expect(resolved.get('d1').effective_cell_id).toBe(CELL_A);
+  });
+});
+
+/**
+ * Staged, uncommitted relocations (Rearrange mode's deferred commit, migration 0033).
+ *
+ * The case that actually needed a test is the FIRST one: every device on the Overview page
+ * carries `location_source` merged from `device_locations`, and deviceLocationOf() prefers that
+ * server answer over local derivation. So overwriting `cell_id` alone leaves the stale resolution
+ * in place and the chip does not move -- which looks exactly like a drop that was refused, the
+ * one failure this whole mode was reshaped to avoid.
+ */
+describe('applyStagedMoves', () => {
+  const withServerAnswer = (overrides = {}) => ({
+    asset_id: 'd1',
+    active_gateway_id: 'gw-1',
+    cell_id: null,
+    location_scope: SCOPE_CELL,
+    // What api.js merges in from the view. Present on every real row.
+    effective_cell_id: CELL_A,
+    location_source: SOURCE_INHERITED,
+    ...overrides
+  });
+
+  const gateways = [{ gateway_id: 'gw-1', cell_id: CELL_A, location_scope: SCOPE_CELL }];
+
+  it('re-resolves the view fields rather than only setting cell_id', () => {
+    const staged = new Map([['d1', { cell_id: CELL_B, location_scope: SCOPE_CELL }]]);
+    const [moved] = applyStagedMoves([withServerAnswer()], gateways, staged);
+    expect(moved.cell_id).toBe(CELL_B);
+    // Both of these came from the server and would otherwise still say CELL_A / inherited.
+    expect(moved.effective_cell_id).toBe(CELL_B);
+    expect(moved.location_source).toBe(SOURCE_EXPLICIT);
+  });
+
+  it('groups a staged device under its new cell immediately', () => {
+    const staged = new Map([['d1', { cell_id: CELL_B, location_scope: SCOPE_CELL }]]);
+    const byCell = groupDevicesByCell(applyStagedMoves([withServerAnswer()], gateways, staged));
+    expect(byCell.get(CELL_B)).toHaveLength(1);
+    expect(byCell.has(CELL_A)).toBe(false);
+  });
+
+  it('marks staged rows so pending can render differently from durable', () => {
+    const staged = new Map([['d1', { cell_id: CELL_B, location_scope: SCOPE_CELL }]]);
+    const [moved] = applyStagedMoves([withServerAnswer()], gateways, staged);
+    expect(moved.staged).toBe(true);
+  });
+
+  it('leaves untouched devices exactly as they were, by identity', () => {
+    const device = withServerAnswer({ asset_id: 'd2' });
+    const staged = new Map([['d1', { cell_id: CELL_B, location_scope: SCOPE_CELL }]]);
+    const [same] = applyStagedMoves([device], gateways, staged);
+    expect(same).toBe(device);
+  });
+
+  it('returns the original list when nothing is staged', () => {
+    const devices = [withServerAnswer()];
+    expect(applyStagedMoves(devices, gateways, new Map())).toBe(devices);
+  });
+
+  it('springs a device back to its gateway cell when staged onto Unassigned', () => {
+    /*
+     * UNASSIGNED IS NOT SETTABLE. Dropping there clears the explicit cell and lets resolution
+     * run, so a device whose gateway serves a cell re-inherits it. Under immediate writes this
+     * only became visible once the reload landed; staged, it is visible at the moment of the
+     * drop, which is the honest version of the same behaviour.
+     */
+    const device = withServerAnswer({ cell_id: CELL_B, location_source: SOURCE_EXPLICIT, effective_cell_id: CELL_B });
+    const staged = new Map([['d1', { cell_id: null, location_scope: SCOPE_CELL }]]);
+    const [moved] = applyStagedMoves([device], gateways, staged);
+    expect(moved.location_source).toBe(SOURCE_INHERITED);
+    expect(moved.effective_cell_id).toBe(CELL_A);
+  });
+
+  it('leaves a device unassigned when staged onto Unassigned with no gateway cell to inherit', () => {
+    const device = withServerAnswer({ cell_id: CELL_B, location_source: SOURCE_EXPLICIT, effective_cell_id: CELL_B });
+    const staged = new Map([['d1', { cell_id: null, location_scope: SCOPE_CELL }]]);
+    const [moved] = applyStagedMoves([device], [{ gateway_id: 'gw-1', cell_id: null }], staged);
+    expect(moved.location_source).toBe(SOURCE_UNASSIGNED);
+  });
+
+  it('clears the cell when staged Site-Wide, mirroring devices_site_wide_has_no_cell', () => {
+    const staged = new Map([['d1', { cell_id: CELL_B, location_scope: SCOPE_SITE_WIDE }]]);
+    const [moved] = applyStagedMoves([withServerAnswer()], gateways, staged);
+    expect(moved.location_scope).toBe(SCOPE_SITE_WIDE);
+    expect(moved.effective_cell_id).toBeNull();
+    expect(moved.location_source).toBe(SOURCE_SITE_WIDE);
+  });
+
+  it('keeps a Site-Wide staged device out of every cell bucket', () => {
+    const staged = new Map([['d1', { cell_id: null, location_scope: SCOPE_SITE_WIDE }]]);
+    const byCell = groupDevicesByCell(applyStagedMoves([withServerAnswer()], gateways, staged));
+    expect(byCell.size).toBe(0);
+  });
+
+  it('does not touch the gateway, because a drop is not a data-path change', () => {
+    const staged = new Map([['d1', { cell_id: CELL_B, location_scope: SCOPE_CELL }]]);
+    const [moved] = applyStagedMoves([withServerAnswer()], gateways, staged);
+    expect(moved.active_gateway_id).toBe('gw-1');
   });
 });
