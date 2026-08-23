@@ -690,6 +690,61 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 11b. No seeded credential is compiled into the browser bundle.
+//
+// The sign-in form shipped PRE-FILLED with `admin@acs-cymru.local` and the seeded Administrator
+// password. Convenient while the stack was being built; a credential disclosure once deployed,
+// because everything under frontend/src is compiled into the production JavaScript served to
+// anyone who can reach the page -- before authenticating, and whether or not they ever do.
+//
+// THE PASSWORD IS READ OUT OF seed.sql RATHER THAN REPEATED HERE, so rotating the seed rotates
+// the thing this refuses. A guard carrying its own copy of the value it is guarding goes stale
+// silently the moment the real one changes, and then passes against a bundle that leaks the new
+// password -- which is the same failure shape as every other drift this file exists to catch.
+//
+// Scoped to frontend/src ON PURPOSE. The password legitimately appears in seed.sql, .env.example,
+// the README and every backend suite that authenticates: it is a demo credential and it is
+// published deliberately. What must not happen is it reaching an UNAUTHENTICATED browser. Tests
+// under frontend/src are in scope too -- a frontend test has no need of the real password, and
+// exempting them would leave the obvious place to reintroduce it unguarded.
+// -------------------------------------------------------------------------------------------------
+{
+  const seed = read('supabase/seed.sql');
+  const seeded = /extensions\.crypt\('([^']+)'/.exec(seed);
+  if (!seeded) {
+    fail(
+      'could not read the seeded password out of supabase/seed.sql. This check derives the value\n' +
+        '      it refuses from that file; if the seed no longer uses extensions.crypt(), update the\n' +
+        '      pattern here rather than hardcoding a password into this script.'
+    );
+  } else {
+    const password = seeded[1];
+    const offenders = [];
+    const walk = (dir) => {
+      for (const entry of readdirSync(join(REPO, dir), { withFileTypes: true })) {
+        const rel = `${dir}/${entry.name}`;
+        if (entry.isDirectory()) walk(rel);
+        else if (/\.(jsx?|tsx?|css|html)$/.test(entry.name)) {
+          if (readFileSync(join(REPO, rel), 'utf8').includes(password)) offenders.push(rel);
+        }
+      }
+    };
+    walk('frontend/src');
+    if (offenders.length) {
+      fail(
+        `the seeded account password appears in ${offenders.length} frontend source file(s): ` +
+          `${offenders.join(', ')}.\n` +
+          '      Everything under frontend/src is compiled into the browser bundle, which is served\n' +
+          '      unauthenticated. The sign-in form shipped this way once; see the comment on\n' +
+          '      AuthScreen in frontend/src/App.jsx.'
+      );
+    } else {
+      pass('no seeded account password appears in any frontend source file');
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 12. The seeded demonstrator asset agrees with provision-gateways.mjs.
 //
 // `0002_seed_data.sql` and `scripts/provision-gateways.mjs` both register the machining cell's

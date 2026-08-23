@@ -107,8 +107,31 @@ export function tabIsVisible(tabDef, hasPermission, userRole) {
 }
 
 function AuthScreen({ onLoginSuccess, notice }) {
-  const [email, setEmail] = useState('admin@acs-cymru.local')
-  const [password, setPassword] = useState('acscymru123')
+  /**
+   * EMPTY, AND THEY MUST STAY EMPTY.
+   *
+   * These two fields shipped pre-filled with `admin@acs-cymru.local` / the seeded Administrator
+   * password. That was a debugging convenience during development and it is a credential
+   * disclosure in a deployed stack: the values are baked into the production JavaScript bundle,
+   * which is served to ANYONE who can reach the page -- before authenticating, and regardless of
+   * whether they ever sign in. Reading them takes no more than opening the login screen, and the
+   * account they unlock is the one that can edit settings, manage devices and read every table
+   * the dashboard exposes.
+   *
+   * It is worth being precise about why this is not merely untidy. The seeded password is public
+   * -- it is in `supabase/seed.sql` and in the README, deliberately, because a demo stack needs
+   * reproducible accounts. The defect is not that the string exists; it is that the LOGIN FORM
+   * offered it, so a stack whose seeded accounts had never been rotated was one click from
+   * administrator access by design rather than by oversight. Rotating the seeded password would
+   * not have fixed this, and leaving these blank does fix it even when the password has not been
+   * rotated.
+   *
+   * `__tests__/authScreenCredentials.test.jsx` asserts both fields render empty, and
+   * scripts/check-docs-drift.mjs refuses the seeded password anywhere under frontend/src --
+   * because a comment is not a control.
+   */
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [authError, setAuthError] = useState(null)
   const [loading, setLoading] = useState(false)
 
@@ -164,25 +187,41 @@ function AuthScreen({ onLoginSuccess, notice }) {
 
         <form onSubmit={handleAuth}>
           <div className="form-group" style={{ marginBottom: '16px' }}>
-            <label className="form-label" style={{ marginBottom: '6px' }}>Email Address</label>
+            {/* htmlFor/id, because the label was associated with NOTHING. A screen reader
+                announced two unlabelled text boxes, and clicking the word "Password" did not
+                focus the field under it. Added here rather than filed separately because the
+                empty fields make it matter more: there is now nothing in either box to
+                disambiguate them by. */}
+            <label className="form-label" htmlFor="auth-email" style={{ marginBottom: '6px' }}>Email Address</label>
+            {/* autoComplete and autoFocus are what REPLACE the pre-filled value, rather than
+                simply doing without it. The prefill's only legitimate purpose was saving an
+                operator from typing the same credential every time; a password manager does that
+                properly -- per user, per browser, never in the bundle -- but only if the fields
+                are annotated for it. Without these the change is a pure usability regression, and
+                a usability regression is what gets reverted. */}
             <input
+              id="auth-email"
               type="email"
               className="form-control"
               style={{ borderRadius: '8px' }}
               value={email}
               onChange={e => setEmail(e.target.value)}
+              autoComplete="username"
+              autoFocus
               required
             />
           </div>
 
           <div className="form-group" style={{ marginBottom: '24px' }}>
-            <label className="form-label" style={{ marginBottom: '6px' }}>Password</label>
+            <label className="form-label" htmlFor="auth-password" style={{ marginBottom: '6px' }}>Password</label>
             <input
+              id="auth-password"
               type="password"
               className="form-control"
               style={{ borderRadius: '8px' }}
               value={password}
               onChange={e => setPassword(e.target.value)}
+              autoComplete="current-password"
               required
             />
           </div>
