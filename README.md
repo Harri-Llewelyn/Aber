@@ -149,7 +149,10 @@ replacing `prune_platform_alerts()` with a version that reads the setting, so th
 long do we keep alerts" is on a page rather than in a migration — and `0033` adds
 `relocate_devices()`, which applies a whole shopfloor rearrangement in **one transaction** so the
 six machines an operator files in one gesture carry one `causation_id` instead of six, and so a
-batch that fails partway leaves nothing behind — plus demo accounts (`supabase/seed.sql`).
+batch that fails partway leaves nothing behind — and `0034` seeds the **read-only principal the MCP
+client authenticates as**, holding `Operator` so it reads the i3X address space, writes nothing and
+cannot see the audit trail (`scripts/mint-mcp-token.mjs` signs its long-lived token) — plus demo
+accounts (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because `0005` already implements one; a second declaration of `log_digital_thread_event()`
@@ -608,7 +611,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Seven extensions, ordered by how much of each already exists. None is speculative: every one names
+Six extensions, ordered by how much of each already exists. None is speculative: every one names
 the code it would build on, because the value of writing them down is that a reader can tell how far
 away each is.
 
@@ -723,46 +726,9 @@ empty tables while the gateway reported 200 for every request.
 keeps `kong.yml` and its `sed` either way — so this retires one placeholder on one target rather
 than the templating approach as a whole.
 
-### 4 · A durable, low-privilege MCP credential
+---
 
-**Builds on:** `i3x-mcp` against the i3X address space ([`i3x/README.md`](i3x/README.md#mcp)) ·
-`GOTRUE_JWT_EXP`
-
-**This used to say "build an MCP server", and that turned out to be the wrong item.**
-[`cesmii/i3X-MCP-Server`](https://github.com/cesmii/i3X-MCP-Server) (`i3x-mcp` on npm, MIT) is a
-generic MCP client of *any* conformant i3X server. It runs against this one unmodified — verified
-2026-08-22 by driving the published package over stdio: object search, current values with
-`quality`, relationship traversal and history out of TimescaleDB all answer. Nothing needs writing.
-
-**The security posture the old item asserted is now demonstrated rather than argued.** Writes are
-not even listed as tools by default; forced on with `--enable-writes`, `update_value` returns our
-`405` and the reason with it. That is the difference between read-only by *construction* and by
-configuration: a user who deliberately defeats the client-side guard still gets nothing.
-
-**One thing is left, and it is the only reason this is still an item.** The client takes a
-**static** `I3X_TOKEN` from its host's config file, and `GOTRUE_JWT_EXP` is `3600`. A token pasted
-into `claude_desktop_config.json` stops working within the hour, and it fails the way
-[`i3x/README.md`](i3x/README.md#connecting-a-client) already describes for i3X Explorer — *as a
-broken server rather than a stale token*. Nothing in the failure points at the credential, which is
-what makes it worth fixing rather than documenting.
-
-The answer is a long-lived JWT for a dedicated read-only principal, signed with the same secret and
-carrying a role RLS already constrains. **What it must not be is `service_role`.** This server
-passes the caller's bearer straight through to PostgREST precisely so that it queries *as them*; a
-key that bypasses RLS would discard the single property that makes handing this to a model
-defensible — that an operator asking a question sees exactly what an operator can see.
-
-**The Digital Thread half of this item is retired rather than deferred.** It proposed a second,
-small MCP server over PostgREST so a model could ask *"what changed, when, and who changed it"* —
-the one question i3X cannot carry, because it models objects, values and history and has no audit
-concept. Rejected on audience rather than difficulty: the Digital Thread page already reads a change
-with its diff and its causation siblings beside it, and a model summarising that trail is a weaker
-artefact than the page. The consequence, and the reason it is written down in
-[`i3x/README.md`](i3x/README.md#mcp) rather than only here, is that an assistant over MCP can ask
-what a machine *is* and what it is *reading*, and cannot ask what changed.
-
-
-### 5 · Cold Telemetry Archival & Query-in-Place
+### 4 · Cold Telemetry Archival & Query-in-Place
 
 **Builds on:** TimescaleDB retention policies · `telemetry` hypertable · Edge Functions · Apache
 Parquet · `public.system_settings` (`0031`, `0032`)
@@ -789,7 +755,7 @@ gigabytes of raw points back into TimescaleDB.
 
 ---
 
-### 6 · Kong → Envoy, following upstream Supabase
+### 5 · Kong → Envoy, following upstream Supabase
 
 **Builds on:** [`supabase/kong.yml`](supabase/kong.yml) · `supabase-kong-init` ·
 [`templates/supabase/kong.yaml`](deploy/helm/acs-cymru/templates/supabase/kong.yaml)
@@ -824,7 +790,7 @@ image question. This is a divergence-from-upstream question, not a security one.
 
 ---
 
-### 7 · Supabase's legacy API keys
+### 6 · Supabase's legacy API keys
 
 **Builds on:** [`scripts/setup.mjs`](scripts/setup.mjs) · `kong.yml`'s `key-auth` consumers ·
 `custom_access_token_hook` (`0001`) · the edge-function registry

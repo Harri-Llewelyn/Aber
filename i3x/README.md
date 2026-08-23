@@ -293,11 +293,37 @@ verb. A user who defeats the flag gets the refusal and the reason for it.
 The MCP client inherits exactly that user's RLS scope, because this server passes the bearer
 straight to PostgREST. An operator asking a model about the shopfloor sees what an operator can see.
 
-**It expires in an hour** (`GOTRUE_JWT_EXP: 3600`) — the same trap the Explorer note above
-describes. A host config is a *file*, so the token in it is stale by the next session, and the
-symptom is `401`s on a server that was working. A long-lived token for a dedicated read-only
-principal is the fix; `service_role` is not, because it bypasses the RLS scoping that makes the
-paragraph above true.
+**A token copied out of a browser session expires in an hour** (`GOTRUE_JWT_EXP: 3600`) — the same
+trap the Explorer note above describes. A host config is a *file*, so the token in it is stale by
+the next session, and the symptom is `401`s on a server that was working.
+
+**Mint a durable one instead:**
+
+```bash
+node scripts/mint-mcp-token.mjs            # 90 days, prints the token
+node scripts/mint-mcp-token.mjs --json     # a ready-to-paste mcpServers block
+```
+
+It signs a JWT for `b0000000-0000-4000-8000-000000000001`, the read-only principal seeded by
+migration `0034`, using the same HS256 secret the rest of the stack shares — so PostgREST validates
+it exactly as it validates a GoTrue token and there is no second trust path. `GOTRUE_JWT_EXP`
+governs what GoTrue *issues* and does not apply.
+
+**The principal holds `Operator`, and the choice of role is deliberate.** Every write policy in this
+schema names `Administrator` or `Shopfloor_Manager`, so `Operator` writes nothing — but so does
+`Auditor`. The difference is `digital_thread_select_privileged_or_auditor`: an Auditor can read the
+audit trail. This client has no surface for the Digital Thread and deliberately never will, so
+granting Auditor would leave a capability sitting on a long-lived credential that nothing can use
+and someone might later find. `0034`'s self-check asserts all three properties on every boot.
+
+**It is not `service_role`**, which would be the one-line answer and would bypass the RLS scoping
+that makes the paragraph above true.
+
+**There is no revocation.** PostgREST checks the signature, not a session table, so withdrawing a
+minted token means rotating `SUPABASE_JWT_SECRET` — which invalidates every token in the stack,
+including the anon and service-role keys. The expiry is the only bound that exists. That is why
+`--days` is a real decision and why a laptop leaving the building takes a working credential with
+it.
 
 ### Troubleshooting: `server_info` succeeding proves nothing about your token
 
