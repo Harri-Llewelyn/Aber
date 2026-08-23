@@ -40,6 +40,14 @@ const SETTINGS = [
     description: 'How often the Digital Thread re-reads the audit log.',
     fallback_source: 'the 60_000 ms interval in DigitalThreadTab.jsx',
     updated_at: '2026-08-22T10:00:00Z', updated_by: null
+  },
+  {
+    id: '3', key: 'alerts.retention_days', value: 7, value_type: 'number',
+    category: 'Retention', label: 'Alert history kept for (days)',
+    description: 'How long a resolved alert occurrence is kept.',
+    fallback_source: 'the p_retain default in prune_platform_alerts()',
+    min_value: 1, max_value: 3650,
+    updated_at: '2026-08-22T10:00:00Z', updated_by: null
   }
 ]
 
@@ -57,6 +65,38 @@ describe('value coercion', () => {
      */
     expect(() => coerceValue('30abc', 'number')).toThrow(/number/i)
     expect(() => coerceValue('', 'number')).toThrow(/number/i)
+  })
+
+  it('refuses a number below its floor or above its ceiling', () => {
+    /*
+     * CHECKED HERE *AND* BY A CHECK CONSTRAINT, and neither is redundant. The constraint is what
+     * makes the rule true -- curl never reaches this function. This exists so the operator is told
+     * before the round trip, in the setting's own words, rather than reading
+     * `violates check constraint "system_settings_value_within_bounds"` and working out which
+     * number was wrong.
+     */
+    const bounds = { min_value: 1, max_value: 3650 }
+    expect(() => coerceValue('0', 'number', bounds)).toThrow(/1 or more/)
+    expect(() => coerceValue('-5', 'number', bounds)).toThrow(/1 or more/)
+    expect(() => coerceValue('36500', 'number', bounds)).toThrow(/3650 or less/)
+    expect(coerceValue('7', 'number', bounds)).toBe(7)
+    // Inclusive at both ends.
+    expect(coerceValue('1', 'number', bounds)).toBe(1)
+    expect(coerceValue('3650', 'number', bounds)).toBe(3650)
+  })
+
+  it('treats a floor of zero as a floor, not as an absent bound', () => {
+    /*
+     * `if (min)` would be falsy for 0 and let a negative through -- and zero is the one value a
+     * floor most often needs to express. The check is `!= null`.
+     */
+    expect(() => coerceValue('-1', 'number', { min_value: 0 })).toThrow(/0 or more/)
+    expect(coerceValue('0', 'number', { min_value: 0 })).toBe(0)
+  })
+
+  it('accepts any number when the setting declares no bounds', () => {
+    expect(coerceValue('-999', 'number', {})).toBe(-999)
+    expect(coerceValue('999999', 'number', { min_value: null, max_value: null })).toBe(999999)
   })
 
   it('parses a json setting and refuses malformed json', () => {
@@ -182,6 +222,31 @@ describe('the page', () => {
 
     expect(input.value).toBe('30')
     expect(screen.queryByRole('button', { name: /^Save$/ })).toBeNull()
+  })
+
+  it('shows the permitted range rather than hiding it in the input attributes', async () => {
+    /*
+     * `min`/`max` give a browser its spinner limits and a reader nothing. An operator who types 0
+     * and is told "Must be 1 or more" should have been able to know that beforehand.
+     */
+    await show()
+    expect(screen.getByText('Between 1 and 3650')).toBeInTheDocument()
+  })
+
+  it('refuses an out-of-range value before sending it', async () => {
+    await show()
+    fireEvent.change(screen.getByLabelText('Alert history kept for (days)'), { target: { value: '0' } })
+    fireEvent.click(screen.getAllByRole('button', { name: /^Save$/ })[0])
+
+    await waitFor(() => expect(screen.getByText(/1 or more/)).toBeInTheDocument())
+    expect(api.patchSetting).not.toHaveBeenCalled()
+  })
+
+  it('groups the retention setting apart from the UI ones', async () => {
+    // Category drives the page's sections, and a retention window is not a Digital Thread control.
+    await show()
+    expect(screen.getByText('Retention')).toBeInTheDocument()
+    expect(screen.getByText('Digital Thread')).toBeInTheDocument()
   })
 
   it('says plainly that nothing secret belongs here', async () => {

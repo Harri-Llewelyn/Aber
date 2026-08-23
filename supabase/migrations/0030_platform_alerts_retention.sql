@@ -6,6 +6,19 @@
 -- Idempotent: db-init replays every /migrations/*.sql on every boot.
 --
 -- ---------------------------------------------------------------------------------------------
+-- THE FUNCTION BELOW IS SUPERSEDED BY 0032 ON EVERY BOOT. Read this file for WHY the predicate is
+-- shaped the way it is -- that reasoning is unchanged and is the reason this header is long -- but
+-- NOT for the retention window itself. `p_retain interval DEFAULT interval '7 days'` below is no
+-- longer the live default: 0032 replaces this function with one whose default is NULL and which
+-- reads `alerts.retention_days` from `public.system_settings`, so an Administrator can see and
+-- change the window from the dashboard.
+--
+-- Migrations replay in order, so 0030 creates this version and 0032 immediately replaces it. That
+-- is invisible from inside this file, which is why it is said here: a reader who stops at 0030
+-- would take the default argument below for the running configuration.
+-- ---------------------------------------------------------------------------------------------
+--
+-- ---------------------------------------------------------------------------------------------
 -- WHY ALERTS GET DELETED RATHER THAN ARCHIVED.
 --
 -- `platform_alerts` is the second unbounded append-only table in this database, and it grows on

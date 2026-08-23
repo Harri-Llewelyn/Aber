@@ -466,6 +466,14 @@ function edgeFunctionNames() {
 
   /** name -> why a later migration is allowed to replace an earlier definition. */
   const INTENDED_REDECLARATIONS = {
+    'public.prune_platform_alerts': `0030 declares it with the window as a literal default; 0032
+      replaces it with one whose default is NULL and which reads alerts.retention_days from
+      system_settings, so an Administrator can see and change the window without a shell. THE
+      PREDICATE IS REPRODUCED IN FULL rather than patched -- the superseded-occurrence clause is
+      what keeps a long-firing alert alive past its own age, and a redeclaration that dropped it
+      would delete the CURRENT state of a live alert while every test about ordinary pruning still
+      passed. 0032's self-check fabricates a 400-day-old firing alert and asserts it survives,
+      because this list can check that a redeclaration was INTENDED and not that it was COMPLETE.`,
     'public.log_digital_thread_event': `0003 adds append-only enforcement, 0005 adds actor_source
       attribution, and 0026 adds the causation_id stamp. 0026's body is the live one and reproduces
       0005 IN FULL -- a later declaration that patched rather than reproduced would silently drop
@@ -1008,16 +1016,26 @@ function edgeFunctionNames() {
 // -------------------------------------------------------------------------------------------------
 {
   const MIGRATION = 'supabase/migrations/0030_platform_alerts_retention.sql';
-  const sql = read(MIGRATION);
-  const declared = sql.match(/p_retain\s+interval\s+DEFAULT\s+interval\s+'(\d+)\s+days?'/);
+  const SETTING = 'supabase/migrations/0032_alert_retention_setting.sql';
 
-  if (!declared) {
+  // THE SOURCE OF TRUTH MOVED, AND THIS RULE HAD TO MOVE WITH IT. It used to read the default
+  // argument of prune_platform_alerts() in 0030. 0032 makes that default NULL and reads the window
+  // from `alerts.retention_days` instead, so the old regex would have gone on matching 0030's
+  // unchanged TEXT -- passing happily while pointing at a number the running system no longer uses.
+  // A guard that keeps agreeing with a superseded source is worse than no guard: it is a green
+  // check asserting the wrong thing.
+  const seeded = read(SETTING).match(
+    /seed_setting\(\s*'alerts\.retention_days',\s*to_jsonb\((\d+)\)/
+  );
+
+  if (!seeded) {
     fail(
-      `${MIGRATION}: no \`p_retain interval DEFAULT interval 'N days'\` in ` +
-        'prune_platform_alerts(). That default IS the retention window and the single source ' +
-        'every other mention is checked against.'
+      `${SETTING}: no \`seed_setting('alerts.retention_days', to_jsonb(N)\` call. That seeded ` +
+        'value IS the retention window now, and is the single source every other mention is ' +
+        'checked against.'
     );
   } else {
+    const declared = seeded;
     const days = declared[1];
 
     // Where the number is quoted, and what it would mean for each to be stale.
@@ -1050,16 +1068,26 @@ function edgeFunctionNames() {
 
     const stale = CITATIONS.filter(({ file, needle }) => !read(file).includes(needle));
 
+    // 0030 STILL CONTAINS THE OLD DEFAULT and must say so, or it reads as the live definition.
+    // Its function body is replaced by 0032 on every boot, which is invisible from inside 0030.
+    if (!read(MIGRATION).includes('0032')) {
+      fail(
+        `${MIGRATION} does not mention 0032. Its prune_platform_alerts() is superseded on every ` +
+          'boot by the version that reads alerts.retention_days, so a reader who stops at 0030 ' +
+          'takes its default argument for the live retention window.'
+      );
+    }
+
     if (stale.length) {
       for (const { file, what } of stale) {
         fail(
-          `alert retention: prune_platform_alerts() declares ${days} days, but ${file} does not ` +
-            `state it where expected -- ${what}`
+          `alert retention: alerts.retention_days is seeded at ${days} days, but ${file} does ` +
+            `not state it where expected -- ${what}`
         );
       }
     } else {
       pass(
-        `the ${days}-day alert retention window is declared once in prune_platform_alerts() and ` +
+        `the ${days}-day alert retention window is declared once in 0032's seed_setting() and ` +
           `cited consistently in ${new Set(CITATIONS.map((c) => c.file)).size} files`
       );
     }

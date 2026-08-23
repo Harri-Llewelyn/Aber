@@ -143,7 +143,10 @@ alert table a **7-day retention window**, pruned nightly by `pg_cron`, whose pre
 closed and superseded occurrences but never the newest firing row of a fingerprint — and `0031`
 adds `public.system_settings`, the runtime configuration plane an `Administrator` edits from the
 dashboard instead of a host `.env`, whose **key set is closed**: RLS grants UPDATE and nothing
-else, so a new setting arrives by migration beside the code that reads it — plus demo accounts
+else, so a new setting arrives by migration beside the code that reads it — and `0032` gives that
+table **numeric bounds** and moves the alert retention window into it as `alerts.retention_days`,
+replacing `prune_platform_alerts()` with a version that reads the setting, so the answer to "how
+long do we keep alerts" is on a page rather than in a migration — plus demo accounts
 (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
@@ -419,7 +422,7 @@ Digital Nameplate; what each one covers and how its identity was verified is in
 ## Testing
 
 ```bash
-# Frontend — 1381 tests
+# Frontend — 1387 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required
@@ -768,17 +771,40 @@ summarising that trail is a different and weaker artefact than the page.
 
 ### 7 · Administrative Settings & Runtime Configuration
 
-**Builds on:** `has_role('Administrator')` · PostgREST RLS · Supabase Vault
+**Builds on:** `public.system_settings` (`0031`) · `has_role('Administrator')` · Supabase Vault
 
-In-app configuration management allowing `Administrator` users to tune runtime parameters
-(cold storage endpoints, retention policies, OIDC provider metadata, alert thresholds) directly
-from the React dashboard without host-level `.env` edits or container restarts.
+**The plane is built.** `0031` added `public.system_settings` and the Settings page reads and writes
+it: values an `Administrator` changes without a host `.env` edit or a container restart, with the
+compiled-in default as the fallback so a fresh install and a local boot are unchanged. **The key
+set is closed** — RLS grants `UPDATE` and nothing else, so a setting arrives by migration beside the
+code that reads it, and a row nobody reads cannot exist.
 
-**Settings override defaults dynamically at runtime rather than mutating disk.** Sensitive secrets
-(S3 keys, OIDC client secrets) land encrypted in Supabase Vault, while non-sensitive runtime
-flags live in a `system_settings` table gated strictly on `Administrator` via RLS. Host `.env`
-values remain the initial fallback, preserving deterministic, zero-configuration local boot while
-giving deployed shopfloor instances an operational management plane.
+What remains is the settings themselves. The original item named four; **two of them have been
+removed rather than deferred**, because neither can be delivered this way and leaving them in would
+make this item impossible to finish.
+
+| Parameter | Where it went |
+| :--- | :--- |
+| **Retention policies** | **The remaining work here.** See below. |
+| Cold storage endpoints | **§8**, with the code that reads them. The endpoint belongs in this table; the S3 *credential* does not |
+| ~~Alert thresholds~~ | **Removed. Grafana's responsibility, not the dashboard's.** Rules are file-provisioned and read-only in the UI, and the five Prometheus-backed rules cannot read a database value at all. A settings page that appeared to set a threshold Grafana never consults would be worse than no control |
+| ~~OIDC provider metadata~~ | **Removed.** This platform federates to no external identity provider — the only `GOTRUE_EXTERNAL_*` key in the stack is `EMAIL_ENABLED`. GoTrue reads provider configuration from the environment at boot, so a settings row could not override it *without a restart*, which is this item's whole premise. The Node-RED OIDC client is our own GoTrue and is internal plumbing, not operator-facing configuration |
+
+**Retention is the right next slice, and the reason is READING it, not only setting it.** The window
+is currently a literal inside `prune_platform_alerts()`; an administrator asking "how long do we
+keep alerts" has to open a `.env` or a migration to find out. Surfacing it makes the answer visible
+to the person accountable for it, and editable is the smaller half of that.
+
+It is also the first **backend** consumer: everything reading settings today is React. The reader
+here is SQL in the same database, which is the cheapest possible place to prove the pattern —
+`check-docs-drift.mjs` asserts that window is cited consistently across three files, so the guard
+moves with it.
+
+**Vault is not started, and is deliberately last.** Secrets cannot live in `system_settings` —
+every authenticated user can read it. The mechanism already exists in this schema (`0006` and
+`0002` store the Node-RED webhook secret and admin token through `vault.create_secret`), so what is
+missing is a way for an Administrator to *set* one from the UI. Driven by §8's real need for an S3
+credential rather than built speculatively.
 
 ---
 
