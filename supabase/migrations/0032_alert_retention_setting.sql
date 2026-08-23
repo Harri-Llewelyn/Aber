@@ -193,12 +193,14 @@ BEGIN
     -- THE INVARIANT 0030 EXISTS FOR, RE-ASSERTED THROUGH THE NEW READER. A long-firing alert must
     -- survive its own age. Fabricated and rolled back so the running stack is untouched.
     BEGIN
+        -- Column list copied from 0030's self-check rather than written from memory: `alert_name`
+        -- is NOT NULL and was missing on the first attempt, which failed the whole migration.
         INSERT INTO public.platform_alerts
-            (fingerprint, status, severity, summary, entity_type, entity_id,
-             starts_at, ends_at, recorded_at)
+            (fingerprint, entity_type, sparkplug_id, alert_name, severity, status,
+             summary, starts_at, ends_at, recorded_at)
         VALUES
-            ('selfcheck-0032', 'firing', 'critical', '0032 self-check', 'gateway', NULL,
-             now() - interval '400 days', NULL, now() - interval '400 days');
+            ('selfcheck-0032', 'platform', NULL, 'Self Check', 'info', 'firing',
+             'fixture', now() - interval '400 days', NULL, now() - interval '400 days');
 
         PERFORM public.prune_platform_alerts();
 

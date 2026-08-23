@@ -580,7 +580,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Eleven extensions, ordered by how much of each already exists. None is speculative: every one names
+Ten extensions, ordered by how much of each already exists. None is speculative: every one names
 the code it would build on, because the value of writing them down is that a reader can tell how far
 away each is.
 
@@ -769,48 +769,19 @@ scope — which is the only reason it would be safe. Or **leave it**: the Digita
 built for reading a change with its diff and its causation siblings beside it, and a model
 summarising that trail is a different and weaker artefact than the page.
 
-### 7 · Administrative Settings & Runtime Configuration
+### 7 · Cold Telemetry Archival & Query-in-Place
 
-**Builds on:** `public.system_settings` (`0031`) · `has_role('Administrator')` · Supabase Vault
+**Builds on:** TimescaleDB retention policies · `telemetry` hypertable · Edge Functions · Apache
+Parquet · `public.system_settings` (`0031`, `0032`)
 
-**The plane is built.** `0031` added `public.system_settings` and the Settings page reads and writes
-it: values an `Administrator` changes without a host `.env` edit or a container restart, with the
-compiled-in default as the fallback so a fresh install and a local boot are unchanged. **The key
-set is closed** — RLS grants `UPDATE` and nothing else, so a setting arrives by migration beside the
-code that reads it, and a row nobody reads cannot exist.
-
-What remains is the settings themselves. The original item named four; **two of them have been
-removed rather than deferred**, because neither can be delivered this way and leaving them in would
-make this item impossible to finish.
-
-| Parameter | Where it went |
-| :--- | :--- |
-| **Retention policies** | **The remaining work here.** See below. |
-| Cold storage endpoints | **§8**, with the code that reads them. The endpoint belongs in this table; the S3 *credential* does not |
-| ~~Alert thresholds~~ | **Removed. Grafana's responsibility, not the dashboard's.** Rules are file-provisioned and read-only in the UI, and the five Prometheus-backed rules cannot read a database value at all. A settings page that appeared to set a threshold Grafana never consults would be worse than no control |
-| ~~OIDC provider metadata~~ | **Removed.** This platform federates to no external identity provider — the only `GOTRUE_EXTERNAL_*` key in the stack is `EMAIL_ENABLED`. GoTrue reads provider configuration from the environment at boot, so a settings row could not override it *without a restart*, which is this item's whole premise. The Node-RED OIDC client is our own GoTrue and is internal plumbing, not operator-facing configuration |
-
-**Retention is the right next slice, and the reason is READING it, not only setting it.** The window
-is currently a literal inside `prune_platform_alerts()`; an administrator asking "how long do we
-keep alerts" has to open a `.env` or a migration to find out. Surfacing it makes the answer visible
-to the person accountable for it, and editable is the smaller half of that.
-
-It is also the first **backend** consumer: everything reading settings today is React. The reader
-here is SQL in the same database, which is the cheapest possible place to prove the pattern —
-`check-docs-drift.mjs` asserts that window is cited consistently across three files, so the guard
-moves with it.
-
-**Vault is not started, and is deliberately last.** Secrets cannot live in `system_settings` —
-every authenticated user can read it. The mechanism already exists in this schema (`0006` and
-`0002` store the Node-RED webhook secret and admin token through `vault.create_secret`), so what is
-missing is a way for an Administrator to *set* one from the UI. Driven by §8's real need for an S3
-credential rather than built speculatively.
-
----
-
-### 8 · Cold Telemetry Archival & Query-in-Place
-
-**Builds on:** TimescaleDB retention policies · `telemetry` hypertable · Edge Functions · Apache Parquet
+**Its configuration has somewhere to live, and the split is already decided.** The settings plane
+shipped, so the S3 **endpoint**, bucket and tiering threshold are declared here by this item's own
+migration, beside the code that reads them — that is what the closed key set means. The S3
+**credential** is not: every authenticated user can read `system_settings`, so it goes in Supabase
+Vault and is managed through **Supabase Studio**, which already ships that UI on both deployment
+targets. No secrets interface is to be built for it. See
+[`supabase/README.md`](supabase/README.md#runtime-configuration-system_settings), including the note
+that Studio sits on a different trust boundary from an `Administrator` in the dashboard.
 
 Tiering high-volume time-series telemetry out of the operational database into vendor-neutral
 Apache Parquet files on S3-compatible or Azure Blob storage once the hot hypertable retention
@@ -825,7 +796,7 @@ gigabytes of raw points back into TimescaleDB.
 
 ---
 
-### 9 · Deferred commit for Rearrange mode
+### 8 · Deferred commit for Rearrange mode
 
 **Builds on:** `handleDrop()` / `handleLaneDrop()` / `pendingZone` in
 [`OverviewTab.jsx`](frontend/src/components/tabs/OverviewTab.jsx) ·
@@ -869,7 +840,7 @@ Three things the present design gets right and a staged version must not lose:
 
 ---
 
-### 10 · Vestigial column and configuration audit
+### 9 · Vestigial column and configuration audit
 
 **Builds on:** [`scripts/check-docs-drift.mjs`](scripts/check-docs-drift.mjs) ·
 [`.env.example`](.env.example) · `0001_baseline_schema.sql`
@@ -920,7 +891,7 @@ The real work on that side is narrower and has two parts:
   consumers, the edge-function registry and `custom_access_token_hook`. It should be scoped against
   the pinned `supabase/gotrue` and `kong` versions before it is planned, not assumed to apply.
 
-### 11 · Kong → Envoy, following upstream Supabase
+### 10 · Kong → Envoy, following upstream Supabase
 
 **Builds on:** [`supabase/kong.yml`](supabase/kong.yml) · `supabase-kong-init` ·
 [`templates/supabase/kong.yaml`](deploy/helm/acs-cymru/templates/supabase/kong.yaml)

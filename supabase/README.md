@@ -688,6 +688,54 @@ and binds everyone: history that can be re-opened is not history.
 
 ---
 
+## Runtime configuration (`system_settings`)
+
+Values an `Administrator` changes from the dashboard instead of editing a host `.env` and
+restarting a container. On a plant the person who needs a retention window changed is rarely the
+person with a shell on the machine.
+
+**The key set is closed, and that is the decision the rest follows from.** RLS grants `UPDATE` and
+nothing else — no `INSERT` policy, no `DELETE` policy — so a new setting arrives by **migration**,
+declared beside the code that reads it. A settings table exists so that *code can read a value*; a
+row nobody reads is not configuration, it is a note that looks like configuration. Someone sets
+`telemetry_retenton_days`, the page accepts it, nothing changes, and nothing anywhere says why.
+
+It is enforced by the **absence** of policies rather than by a rule someone remembers, so `0031`'s
+self-check asserts that absence directly.
+
+| Column | Notes |
+| :--- | :--- |
+| `key` | Dotted `namespace.name`. **Immutable** — it names the value some code reads |
+| `value` / `value_type` | `jsonb` with a CHECK that the pair agrees, so a reader may trust the type |
+| `min_value` / `max_value` | Inclusive bounds for a number. NULL means unbounded (`0032`) |
+| `fallback_source` | The env var or constant that applies when the row was never changed |
+| `updated_by` | Stamped by trigger from `auth.uid()`; **not writable by the caller** |
+
+**Nothing secret goes in this table — that is a rule, not a convention.** Every row is readable by
+every authenticated user, deliberately: a setting shapes what a page renders, so an
+Administrator-only `SELECT` would break that page for everyone else in a way that reads as a bug.
+
+**Secrets belong in Supabase Vault, managed through Supabase Studio.** The mechanism is already in
+use here — `0002` and `0006` store the Node-RED admin token and webhook secret through
+`vault.create_secret()` — and Studio ships a Vault UI on both deployment targets. Building a second
+secrets interface would duplicate a maintained upstream component and put a security-sensitive
+surface into this codebase to own. **Note the trust boundary:** Studio is not gated by this
+schema's RLS or `user_roles`. It is protected by network placement and grants database-level
+access well beyond what an `Administrator` in the dashboard holds, so the two are not the same
+permission and are not necessarily the same person.
+
+**The fallback contract keeps a local boot zero-configuration.** An absent row, an unreadable
+table, or a database that has not run `0031` all mean *use the compiled-in default* — so a fresh
+install behaves exactly as it did before settings existed. `useSetting()` in the frontend swallows
+read errors for that reason; the Settings page itself surfaces them, because there the read is the
+subject.
+
+**Adding one** means a migration calling `public.seed_setting(...)` beside the consumer that reads
+it. Seeds on first boot and refreshes only the metadata afterwards, so an operator's value survives
+every replay — `value` is the one column an operator owns.
+
+---
+
 ## Backup and Recovery
 
 Two tiers, and they answer different questions. **Tier 1 recovers data; tier 2 recovers a machine.**

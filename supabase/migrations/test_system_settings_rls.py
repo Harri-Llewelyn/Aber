@@ -322,12 +322,16 @@ class SystemSettingsRLS(unittest.TestCase):
         """
         with self.conn.cursor() as cur:
             # As owner: pg_cron runs this, not an end user, and the fixture needs to write alerts.
+            # Column list taken from 0030's self-check. `alert_name` is NOT NULL, and omitting it
+            # here failed this test the same way it failed the migration -- the same wrong list
+            # written twice, because the second was copied from the first rather than from the
+            # working original.
             cur.execute(
                 "INSERT INTO public.platform_alerts"
-                " (fingerprint, status, severity, summary, entity_type, entity_id,"
-                "  starts_at, ends_at, recorded_at)"
-                " VALUES ('t-0032-old', 'resolved', 'warning', 'x', 'gateway', NULL,"
-                "         now() - interval '20 days', now() - interval '20 days',"
+                " (fingerprint, entity_type, sparkplug_id, alert_name, severity, status,"
+                "  summary, starts_at, ends_at, recorded_at)"
+                " VALUES ('t-0032-old', 'platform', NULL, 'Self Check', 'info', 'resolved',"
+                "         'fixture', now() - interval '20 days', now() - interval '20 days',"
                 "         now() - interval '20 days');"
             )
 
