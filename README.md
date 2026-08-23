@@ -608,7 +608,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Eight extensions, ordered by how much of each already exists. None is speculative: every one names
+Seven extensions, ordered by how much of each already exists. None is speculative: every one names
 the code it would build on, because the value of writing them down is that a reader can tell how far
 away each is.
 
@@ -696,21 +696,9 @@ thread this item exists to unblock**, and a latency number is worth far more onc
 before-and-after to compare it against, so it belongs here rather than as a measurement taken
 against a ceiling nobody has moved yet.
 
-### 3 · Computed ISO 22400 KPIs
+---
 
-**Builds on:** [`timescaledb/aggregates.sql`](timescaledb/aggregates.sql) · the existing rollups ·
-`iso22400_vocabulary`
-
-ISO 22400 is registered as a vocabulary, but its KPIs are by definition **computed** — that is
-exactly what MTConnect and OPC UA exclude and why the standard exists. Availability, Performance and
-Quality can be continuous aggregates over the rollups already in the historian, with **no external
-MES dependency**: `aggregates.sql` is reconciled on every boot on both targets, which is what makes
-a KPI definition a setting rather than a constant fixed before the first row was written.
-
-This is the intermediate step that was previously deferred pending an MES. It does not replace one —
-it makes the vocabulary answer questions instead of only naming them.
-
-### 4 · Ingress → Gateway API
+### 3 · Ingress → Gateway API
 
 **Builds on:** [`templates/ingress.yaml`](deploy/helm/acs-cymru/templates/ingress.yaml) ·
 `acs-cymru.corsOrigins`
@@ -735,7 +723,7 @@ empty tables while the gateway reported 200 for every request.
 keeps `kong.yml` and its `sed` either way — so this retires one placeholder on one target rather
 than the templating approach as a whole.
 
-### 5 · A durable MCP credential, and the Digital Thread over MCP
+### 4 · A durable MCP credential, and the Digital Thread over MCP
 
 **Builds on:** `i3x-mcp` against the i3X address space ([`i3x/README.md`](i3x/README.md#mcp)) ·
 `GOTRUE_JWT_EXP` · `digital_thread`
@@ -779,7 +767,7 @@ scope — which is the only reason it would be safe. Or **leave it**: the Digita
 built for reading a change with its diff and its causation siblings beside it, and a model
 summarising that trail is a different and weaker artefact than the page.
 
-### 6 · Cold Telemetry Archival & Query-in-Place
+### 5 · Cold Telemetry Archival & Query-in-Place
 
 **Builds on:** TimescaleDB retention policies · `telemetry` hypertable · Edge Functions · Apache
 Parquet · `public.system_settings` (`0031`, `0032`)
@@ -806,7 +794,7 @@ gigabytes of raw points back into TimescaleDB.
 
 ---
 
-### 7 · Kong → Envoy, following upstream Supabase
+### 6 · Kong → Envoy, following upstream Supabase
 
 **Builds on:** [`supabase/kong.yml`](supabase/kong.yml) · `supabase-kong-init` ·
 [`templates/supabase/kong.yaml`](deploy/helm/acs-cymru/templates/supabase/kong.yaml)
@@ -831,7 +819,7 @@ stated reason and each is load bearing; a translation that quietly widened one w
 test that exists today, because `validate.py` asserts the 401s that SHOULD happen and cannot assert
 the absence of a route nobody wrote. Any migration needs the negative assertions first.
 
-**It interacts with §4 and should be sequenced against it.** Gateway API's `HTTPRoute` would retire
+**It interacts with §3 and should be sequenced against it.** Gateway API's `HTTPRoute` would retire
 the `__CORS_ORIGINS__` placeholder on Kubernetes; Envoy would restate CORS in its own filter on both
 targets. Doing both independently means expressing origin policy a third way before deleting the
 first — so whichever lands first should decide where that policy lives.
@@ -841,7 +829,7 @@ image question. This is a divergence-from-upstream question, not a security one.
 
 ---
 
-### 8 · Supabase's legacy API keys
+### 7 · Supabase's legacy API keys
 
 **Builds on:** [`scripts/setup.mjs`](scripts/setup.mjs) · `kong.yml`'s `key-auth` consumers ·
 `custom_access_token_hook` (`0001`) · the edge-function registry
