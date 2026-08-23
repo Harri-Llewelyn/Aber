@@ -146,8 +146,10 @@ dashboard instead of a host `.env`, whose **key set is closed**: RLS grants UPDA
 else, so a new setting arrives by migration beside the code that reads it — and `0032` gives that
 table **numeric bounds** and moves the alert retention window into it as `alerts.retention_days`,
 replacing `prune_platform_alerts()` with a version that reads the setting, so the answer to "how
-long do we keep alerts" is on a page rather than in a migration — plus demo accounts
-(`supabase/seed.sql`).
+long do we keep alerts" is on a page rather than in a migration — and `0033` adds
+`relocate_devices()`, which applies a whole shopfloor rearrangement in **one transaction** so the
+six machines an operator files in one gesture carry one `causation_id` instead of six, and so a
+batch that fails partway leaves nothing behind — plus demo accounts (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because `0005` already implements one; a second declaration of `log_digital_thread_event()`
@@ -439,7 +441,7 @@ Digital Nameplate; what each one covers and how its identity was verified is in
 ## Testing
 
 ```bash
-# Frontend — 1387 tests
+# Frontend — 1405 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required
@@ -487,6 +489,7 @@ python supabase/migrations/test_digital_thread_guard.py
 python supabase/migrations/test_ingestion_rejection_rpc.py
 python supabase/migrations/test_platform_alerts_retention.py
 python supabase/migrations/test_system_settings_rls.py
+python supabase/migrations/test_relocate_devices.py
 python supabase/migrations/test_metric_catalog_seed.py
 python supabase/migrations/test_gateway_enrollment.py
 # Needs the TimescaleDB historian (port 5433), not Supabase — the rollups live there
@@ -597,7 +600,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Ten extensions, ordered by how much of each already exists. None is speculative: every one names
+Nine extensions, ordered by how much of each already exists. None is speculative: every one names
 the code it would build on, because the value of writing them down is that a reader can tell how far
 away each is.
 
@@ -813,51 +816,7 @@ gigabytes of raw points back into TimescaleDB.
 
 ---
 
-### 8 · Deferred commit for Rearrange mode
-
-**Builds on:** `handleDrop()` / `handleLaneDrop()` / `pendingZone` in
-[`OverviewTab.jsx`](frontend/src/components/tabs/OverviewTab.jsx) ·
-`digital_thread.causation_id` (`0026`)
-
-Rearrange mode is a mode already — off by default, turned on deliberately, turned off by clicking
-**Rearranging — click to finish**. What it is not yet is a *transaction*: each drop issues its own
-`PUT /api/v1/devices/{id}` the moment the mouse is released, and the button's own tooltip says so
-("Every move is written immediately"). The work is to stage the moves and apply them when the
-operator finishes, so the mode has a beginning, an end, and one outcome.
-
-**The reason this is worth doing is not tidiness, it is the audit trail.** Reassigning six machines
-is one decision, and it currently lands as six independent `UPDATE`s — six transactions, six
-`causation_id`s, six unrelated-looking rows in the Digital Thread. Deferring the commit makes it one
-transaction, which is exactly what the "Same transaction" control in the event drawer exists to
-show. Today the only multi-entity act on a fresh stack is the one `supabase/seed.sql` commits
-deliberately so that control has something to demonstrate; this would make a real operator action
-produce one.
-
-**The crux is that atomicity has to come from the server.** Device writes go through PostgREST
-per-row (`supabase.from('devices').update(...).eq('id', ...)`), so staging in the browser and then
-firing six requests on finish would still be six transactions and would change nothing about the
-thread — it would only move when they happen. One `causation_id` needs a single SECURITY DEFINER RPC
-taking the whole batch, in the shape `fork_schema` and `publish_schema_version` already use. A
-half-applied batch also becomes possible without it, which is worse than the present behaviour.
-
-Three things the present design gets right and a staged version must not lose:
-
-- **`pendingZone` exists because a drop has no optimistic feedback**: the device keeps rendering in
-  its old tile until the reload lands, and on a slow link a silent drop is indistinguishable from a
-  refused one — which is how one move became two writes. Staging inverts this. The tile must move
-  immediately, and *staged* must then be visually distinct from *saved*, or the operator cannot tell
-  what is already durable.
-- **A discard path becomes necessary.** With immediate writes the only undo is dragging back, which
-  writes again. With staging, leaving the mode without committing has to mean something explicit —
-  and navigating away mid-rearrange must not lose the work silently.
-- **Unassigned is not settable**, and staging must keep that true: dropping there clears the
-  explicit cell and lets resolution run, so a device may visibly spring back. That is correct
-  behaviour, not a failed write, and a staged view that pretended the drop stuck would be telling
-  the one lie this location model exists to avoid.
-
----
-
-### 9 · Vestigial column and configuration audit
+### 8 · Vestigial column and configuration audit
 
 **Builds on:** [`scripts/check-docs-drift.mjs`](scripts/check-docs-drift.mjs) ·
 [`.env.example`](.env.example) · `0001_baseline_schema.sql`
@@ -908,7 +867,7 @@ The real work on that side is narrower and has two parts:
   consumers, the edge-function registry and `custom_access_token_hook`. It should be scoped against
   the pinned `supabase/gotrue` and `kong` versions before it is planned, not assumed to apply.
 
-### 10 · Kong → Envoy, following upstream Supabase
+### 9 · Kong → Envoy, following upstream Supabase
 
 **Builds on:** [`supabase/kong.yml`](supabase/kong.yml) · `supabase-kong-init` ·
 [`templates/supabase/kong.yaml`](deploy/helm/acs-cymru/templates/supabase/kong.yaml)

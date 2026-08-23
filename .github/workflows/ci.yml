@@ -1244,6 +1244,18 @@ jobs:
           # table-level UPDATE already held and did nothing. The settings page would have worked
           # perfectly while provenance was forgeable.
           python supabase/migrations/test_system_settings_rls.py
+          # 0033's batch relocation, and the property it defends is NOT "an admin can move
+          # devices". It is that one rearrangement is ONE transaction, so six machines reassigned
+          # in one gesture carry one causation_id instead of six -- a property that does not live
+          # in 0033 at all, but in log_digital_thread_event() stamping txid_current(). A later
+          # migration could re-declare that trigger without it and 0033 would keep working in
+          # every visible way while quietly going back to six unrelated audit rows.
+          #
+          # The other half is the hole atomicity opens: the RPC is SECURITY DEFINER, so RLS does
+          # not apply inside it and `devices_update_privileged` never runs. If its own has_role()
+          # check were dropped, ANY authenticated user could relocate the whole shopfloor and no
+          # policy anywhere would refuse. This is the only thing that would notice.
+          python supabase/migrations/test_relocate_devices.py
           # THE AUDIT SUPPRESSION RULES. 0005 suppresses the no-op UPDATE and the heartbeat-only
           # UPDATE, and ingestion.py relies on that being true -- a regression here does not fail
           # anything, it just resumes writing an audit row per heartbeat until the table is mostly

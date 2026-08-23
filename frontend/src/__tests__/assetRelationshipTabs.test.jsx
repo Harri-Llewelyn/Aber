@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { CellsTab } from '../components/tabs/CellsTab'
 import { GatewaysTab } from '../components/tabs/GatewaysTab'
@@ -11,7 +11,7 @@ vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
   return {
     ...actual,
-    api: { get: vi.fn(), post: vi.fn(), put: vi.fn() }
+    api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), relocateDevices: vi.fn() }
   }
 })
 
@@ -40,6 +40,23 @@ const gateway = {
       gateway_cell_id: 'cell-1', location_source: 'inherited', cell_mismatch: false
     }
   ]
+}
+
+/*
+ * A device whose cell is its OWN, not its gateway's.
+ *
+ * Needed because dropping onto Unassigned CLEARS the explicit cell, and the default fixture above
+ * has none to clear -- it inherits cell-1 from gw-1. Staging compares each move against the
+ * device's committed row and drops the ones that change nothing, so the default device staged
+ * onto Unassigned correctly stages nothing at all. The old immediate-write path could not tell
+ * the difference: it issued the PUT regardless, so a drag payload that CLAIMED to be explicit was
+ * never checked against the row being rendered. These tests were passing that contradiction.
+ */
+const explicitlyFiledDevice = {
+  ...gateway.devices[0],
+  cell_id: 'cell-1',
+  explicit_cell_id: 'cell-1',
+  location_source: 'explicit'
 }
 
 const staleGateway = {
@@ -84,6 +101,25 @@ afterEach(() => {
 // page that is mostly read cannot relocate an asset. Every drop test has to enter that mode first
 // -- which is exactly what a user now does.
 const enableRearrange = () => fireEvent.click(screen.getByRole('button', { name: /Rearrang/i }))
+
+/*
+ * A DROP NO LONGER WRITES. Moves are staged and applied together as one transaction (migration
+ * 0033), so a test that wants to see the write has to press Apply -- which is exactly what a user
+ * now does, and is the reason these assertions moved from api.put to api.relocateDevices.
+ *
+ * The distinction is load-bearing rather than cosmetic: six drops used to be six transactions and
+ * therefore six unrelated-looking rows in the Digital Thread. `relocateDevices` is called ONCE
+ * with the whole batch, and the tests below assert that shape rather than just that something was
+ * written.
+ */
+const applyRearrange = async () => {
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: /Apply \d+ move/ }))
+  })
+}
+
+/** The single batch the page sent, as an array of moves. */
+const sentBatch = () => api.relocateDevices.mock.calls[0][0]
 
 // The shopfloor grid now holds the two derived lanes AND the physical cells, so "a tile" is no
 // longer "the first .shopfloor-zone". Cells carry .shopfloor-cell; lanes carry .shopfloor-lane.
@@ -322,13 +358,18 @@ describe('OverviewTab shopfloor map', () => {
       dataTransfer: { getData: () => JSON.stringify({ asset_id: 'dev-1', asset_name: 'Simulated_CNC_01' }) }
     })
 
-    await waitFor(() => expect(api.put).toHaveBeenCalled())
-    expect(api.put.mock.calls[0][0]).toBe('/api/v1/devices/dev-1')
-    expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: 'cell-1', location_scope: 'cell' })
-    // The data path is not touched: dragging a machine across the floor plan says where it is,
-    // not which connector reaches it.
-    expect('active_gateway_id' in api.put.mock.calls[0][1]).toBe(false)
+    // Staged, not written -- the toast says so at the drop, which is when the operator can still
+    // change their mind.
+    expect(api.relocateDevices).not.toHaveBeenCalled()
     expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Assembly Line 1'), 'success')
+
+    await applyRearrange()
+    expect(sentBatch()).toEqual([
+      { device_id: 'dev-1', cell_id: 'cell-1', location_scope: 'cell' }
+    ])
+    // The data path is not touched: dragging a machine across the floor plan says where it is,
+    // not which connector reaches it. The move carries no gateway at all.
+    expect('active_gateway_id' in sentBatch()[0]).toBe(false)
   })
 
   describe('Rearrange mode gates drag-and-drop', () => {
@@ -353,6 +394,10 @@ describe('OverviewTab shopfloor map', () => {
 
       await new Promise(r => setTimeout(r, 20))
       expect(api.put).not.toHaveBeenCalled()
+      expect(api.relocateDevices).not.toHaveBeenCalled()
+      // Nothing staged either: a drop outside the mode must not quietly accumulate work that a
+      // later Apply would write.
+      expect(screen.queryByRole('button', { name: /Apply/ })).not.toBeInTheDocument()
     })
 
     it('leaves device chips undraggable until it is on', async () => {
@@ -378,7 +423,10 @@ describe('OverviewTab shopfloor map', () => {
         dataTransfer: { getData: () => JSON.stringify({ asset_id: 'dev-1', asset_name: 'Simulated_CNC_01', location_source: 'inherited' }) }
       })
 
-      await waitFor(() => expect(api.put).toHaveBeenCalled())
+      // Accepted means STAGED. The commit bar appearing is the page saying it took the drop --
+      // which is now the immediate feedback, where it used to be a write completing.
+      expect(await screen.findByRole('button', { name: /Apply 1 move/ })).toBeInTheDocument()
+      expect(api.relocateDevices).not.toHaveBeenCalled()
     })
 
     it('can be switched back off', async () => {
@@ -394,15 +442,19 @@ describe('OverviewTab shopfloor map', () => {
 
       await new Promise(r => setTimeout(r, 20))
       expect(api.put).not.toHaveBeenCalled()
+      expect(api.relocateDevices).not.toHaveBeenCalled()
+      // Nothing staged either: a drop outside the mode must not quietly accumulate work that a
+      // later Apply would write.
+      expect(screen.queryByRole('button', { name: /Apply/ })).not.toBeInTheDocument()
     })
 
     it('explains the consequence only while the mode is on', async () => {
       renderMap()
       await waitFor(() => expect(screen.getByText('Site-Wide')).toBeInTheDocument())
 
-      expect(screen.queryByText(/recorded in the digital thread/i)).not.toBeInTheDocument()
+      expect(screen.queryByText(/Nothing is written until you apply/i)).not.toBeInTheDocument()
       enableRearrange()
-      expect(screen.getByText(/recorded in the digital thread/i)).toBeInTheDocument()
+      expect(screen.getByText(/Nothing is written until you apply/i)).toBeInTheDocument()
     })
 
     it('is not offered at all without device:manage', async () => {
@@ -538,7 +590,7 @@ describe('OverviewTab shopfloor map', () => {
       // An empty queue is exactly when someone wants to drag something into it.
       // Default fixture: the only gateway serves a cell, so nothing is stranded.
       const showToast = vi.fn()
-      api.get.mockImplementation(routeGet())
+      api.get.mockImplementation(routeGet({ devices: [explicitlyFiledDevice] }))
       api.put.mockResolvedValue({})
 
       render(
@@ -560,8 +612,10 @@ describe('OverviewTab shopfloor map', () => {
         }
       })
 
-      await waitFor(() => expect(api.put).toHaveBeenCalled())
-      expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: '', location_scope: 'cell' })
+      await applyRearrange()
+      expect(sentBatch()).toEqual([
+        { device_id: 'dev-1', cell_id: null, location_scope: 'cell' }
+      ])
     })
 
     it('fills with the stranded asset as soon as there is one', async () => {
@@ -643,8 +697,8 @@ describe('OverviewTab shopfloor map', () => {
         dataTransfer: { getData: () => JSON.stringify({ asset_id: 'dev-1', asset_name: 'Simulated_CNC_01', effective_cell_id: 'cell-1' }) }
       })
 
-      await waitFor(() => expect(api.put).toHaveBeenCalled())
-      expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: 'cell-empty' })
+      await applyRearrange()
+      expect(sentBatch()[0]).toMatchObject({ device_id: 'dev-1', cell_id: 'cell-empty' })
     })
 
     it('fills a cell that has a gateway but no devices', async () => {
@@ -796,16 +850,19 @@ describe('OverviewTab shopfloor map', () => {
       dataTransfer: { getData: () => JSON.stringify({ asset_id: 'dev-1', asset_name: 'Simulated_CNC_01', location_source: 'inherited' }) }
     })
 
-    await waitFor(() => expect(api.put).toHaveBeenCalled())
-    expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: '', location_scope: 'site_wide' })
     expect(showToast).toHaveBeenCalledWith(expect.stringContaining('Site-Wide'), 'success')
+
+    await applyRearrange()
+    expect(sentBatch()).toEqual([
+      { device_id: 'dev-1', cell_id: null, location_scope: 'site_wide' }
+    ])
   })
 
   it('clears the explicit cell when dropped on Unassigned, and says what it inherited instead', async () => {
     // Unassigned is derived: it cannot be set. The drop clears the override and reports where
     // the device actually landed rather than pretending it moved.
     const showToast = vi.fn()
-    api.get.mockImplementation(routeGet())
+    api.get.mockImplementation(routeGet({ devices: [explicitlyFiledDevice] }))
     api.put.mockResolvedValue({})
 
     render(
@@ -824,19 +881,27 @@ describe('OverviewTab shopfloor map', () => {
       }
     })
 
-    await waitFor(() => expect(api.put).toHaveBeenCalled())
-    expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: '', location_scope: 'cell' })
-    // The gateway serves Assembly Line 1, so the device inherits it rather than going unassigned.
+    // The gateway serves Assembly Line 1, so the device inherits it rather than going unassigned
+    // -- and it says so at the DROP, because the local re-resolution has already sprung the chip
+    // back into that cell where the operator can see it.
     expect(showToast).toHaveBeenCalledWith(
       expect.stringContaining("inherits 'Assembly Line 1'"), 'warning'
     )
+
+    await applyRearrange()
+    expect(sentBatch()).toEqual([
+      { device_id: 'dev-1', cell_id: null, location_scope: 'cell' }
+    ])
     // And the data path is untouched.
-    expect('active_gateway_id' in api.put.mock.calls[0][1]).toBe(false)
+    expect('active_gateway_id' in sentBatch()[0]).toBe(false)
   })
 
   it('reports a plain move to Unassigned when no gateway supplies a cell', async () => {
     const showToast = vi.fn()
-    api.get.mockImplementation(routeGet({ gateways: [{ ...gateway, cell_id: null }] }))
+    api.get.mockImplementation(routeGet({
+      gateways: [{ ...gateway, cell_id: null }],
+      devices: [{ ...explicitlyFiledDevice, gateway_cell_id: null }]
+    }))
     api.put.mockResolvedValue({})
 
     render(
@@ -856,8 +921,155 @@ describe('OverviewTab shopfloor map', () => {
     })
 
     await waitFor(() => expect(showToast).toHaveBeenCalledWith(
-      expect.stringContaining('moved to Unassigned'), 'success'
+      expect.stringContaining('→ Unassigned'), 'success'
     ))
+  })
+
+  /*
+   * DEFERRED COMMIT (roadmap item 8, migration 0033).
+   *
+   * Staging buys atomicity and a single causation_id, and it costs three things the immediate
+   * writes never had to think about. Each of these is one of them.
+   */
+  describe('staged moves are a transaction, not a queue of writes', () => {
+    const renderMap = (showToast = vi.fn()) => {
+      api.get.mockImplementation(routeGet({ devices: [explicitlyFiledDevice] }))
+      api.relocateDevices.mockResolvedValue({
+        causation_id: 7, requested: 1, applied: 1, unchanged: 0, devices: []
+      })
+      return render(
+        <OverviewTab onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} showToast={showToast}
+          hasPermission={() => true} onNavigateTab={vi.fn()} />
+      )
+    }
+
+    const dragTo = (title) => fireEvent.drop(screen.getByTitle(title), {
+      dataTransfer: {
+        getData: () => JSON.stringify({
+          asset_id: 'dev-1', asset_name: 'Simulated_CNC_01',
+          active_gateway_id: 'gw-1', cell_id: 'cell-1',
+          effective_cell_id: 'cell-1', location_source: 'explicit'
+        })
+      }
+    })
+
+    it('sends every staged move in ONE call, which is the whole point', async () => {
+      api.get.mockImplementation(routeGet({
+        cells: [cell, { cell_id: 'cell-9', cell_name: 'Paint Shop', is_archived: false, gateways: [], gateway_count: 0 }],
+        devices: [
+          explicitlyFiledDevice,
+          { ...explicitlyFiledDevice, asset_id: 'dev-2', asset_name: 'Simulated_CNC_02' }
+        ]
+      }))
+      api.relocateDevices.mockResolvedValue({
+        causation_id: 7, requested: 2, applied: 2, unchanged: 0, devices: []
+      })
+      render(
+        <OverviewTab onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} showToast={vi.fn()}
+          hasPermission={() => true} onNavigateTab={vi.fn()} />
+      )
+      await waitFor(() => expect(screen.getByText('Paint Shop')).toBeInTheDocument())
+      enableRearrange()
+
+      const paintShop = /Zone #cell-9: Drag device node here to reassign/
+      fireEvent.drop(screen.getByTitle(paintShop), {
+        dataTransfer: { getData: () => JSON.stringify({ asset_id: 'dev-1', asset_name: 'A', effective_cell_id: 'cell-1' }) }
+      })
+      fireEvent.drop(screen.getByTitle(paintShop), {
+        dataTransfer: { getData: () => JSON.stringify({ asset_id: 'dev-2', asset_name: 'B', effective_cell_id: 'cell-1' }) }
+      })
+
+      await applyRearrange()
+
+      // TWO MOVES, ONE CALL. Two calls would be two transactions and therefore two causation_ids
+      // -- exactly the behaviour this replaced, just relocated to a later moment.
+      expect(api.relocateDevices).toHaveBeenCalledTimes(1)
+      expect(sentBatch()).toHaveLength(2)
+      expect(sentBatch().map(m => m.device_id).sort()).toEqual(['dev-1', 'dev-2'])
+    })
+
+    it('UNSTAGES a device dragged back where it started', async () => {
+      // With immediate writes the only undo was dragging back, which wrote AGAIN -- two audit
+      // rows for a decision that was reversed before it ever took effect. Staged, the round trip
+      // has to cancel out and leave nothing to apply.
+      renderMap()
+      await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
+      enableRearrange()
+
+      dragTo(/permanent home, not a queue/i)
+      expect(await screen.findByRole('button', { name: /Apply 1 move/ })).toBeInTheDocument()
+
+      fireEvent.drop(screen.getByTitle(/Zone #cell-1: Drag device node here to reassign/), {
+        dataTransfer: {
+          getData: () => JSON.stringify({
+            asset_id: 'dev-1', asset_name: 'Simulated_CNC_01',
+            active_gateway_id: 'gw-1', effective_cell_id: null, location_source: 'site_wide'
+          })
+        }
+      })
+
+      await waitFor(() => expect(screen.queryByRole('button', { name: /Apply/ })).not.toBeInTheDocument())
+      expect(api.relocateDevices).not.toHaveBeenCalled()
+    })
+
+    it('asks before discarding, and writes nothing when it does', async () => {
+      const showToast = vi.fn()
+      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+      renderMap(showToast)
+      await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
+      enableRearrange()
+      dragTo(/permanent home, not a queue/i)
+
+      fireEvent.click(await screen.findByRole('button', { name: /Discard/ }))
+
+      expect(confirmSpy).toHaveBeenCalled()
+      expect(screen.queryByRole('button', { name: /Apply/ })).not.toBeInTheDocument()
+      expect(api.relocateDevices).not.toHaveBeenCalled()
+      confirmSpy.mockRestore()
+    })
+
+    it('keeps the batch when the discard is declined', async () => {
+      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+      renderMap()
+      await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
+      enableRearrange()
+      dragTo(/permanent home, not a queue/i)
+
+      fireEvent.click(await screen.findByRole('button', { name: /Discard/ }))
+
+      expect(screen.getByRole('button', { name: /Apply 1 move/ })).toBeInTheDocument()
+      confirmSpy.mockRestore()
+    })
+
+    it('refuses to leave the mode silently with work staged', async () => {
+      // Leaving has to MEAN something. Silently discarding is the one thing it must not mean.
+      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+      renderMap()
+      await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
+      enableRearrange()
+      dragTo(/permanent home, not a queue/i)
+
+      enableRearrange()   // click "Rearranging — click to finish"
+
+      expect(confirmSpy).toHaveBeenCalledWith(expect.stringMatching(/not been applied/))
+      // Declined, so the mode stays on AND the work is still there.
+      expect(screen.getByRole('button', { name: /Apply 1 move/ })).toBeInTheDocument()
+      confirmSpy.mockRestore()
+    })
+
+    it('leaves the mode and drops the work when that is confirmed', async () => {
+      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+      renderMap()
+      await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
+      enableRearrange()
+      dragTo(/permanent home, not a queue/i)
+
+      enableRearrange()
+
+      expect(screen.queryByRole('button', { name: /Apply/ })).not.toBeInTheDocument()
+      expect(api.relocateDevices).not.toHaveBeenCalled()
+      confirmSpy.mockRestore()
+    })
   })
 
   it('ignores a drop onto the lane a device is already in', async () => {
@@ -908,7 +1120,7 @@ describe('OverviewTab shopfloor map', () => {
     // for, but nothing on screen would otherwise show it.
     await waitFor(() =>
       expect(showToast).toHaveBeenCalledWith(
-        expect.stringContaining('stays there regardless of its gateway'), 'success'
+        expect.stringContaining('will stay there regardless of its gateway'), 'success'
       )
     )
   })

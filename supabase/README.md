@@ -615,6 +615,46 @@ It is now one `SECURITY DEFINER` RPC — atomic, granted to `service_role` only,
 authenticated `p_actor_id` explicitly and **re-checking that actor's role against
 `public.user_roles`** so authorisation does not rest solely on the caller's check.
 
+### `relocate_devices()` — one rearrangement, one causation
+
+`0033`. Takes the WHOLE batch of staged moves as a `jsonb` array and applies it in one
+transaction, which is the only reason it exists.
+
+**The audit trail is the point, not the request count.** Device writes go through PostgREST per
+row, so reassigning six machines on the Overview page used to be six `UPDATE`s: six transactions,
+six `causation_id`s, and six rows in `digital_thread` describing one decision an operator took
+once. Nothing in `0033` stamps an audit row — `log_digital_thread_event()` already writes
+`txid_current()` on every row, and the shared causation is a *consequence* of the updates sharing
+a transaction. That is deliberate: a causation a caller could supply would be an assertion rather
+than a fact.
+
+Four properties that are easy to lose and hard to notice losing:
+
+- **Authority is re-derived, not inherited.** `SECURITY DEFINER` means RLS does not apply inside
+  the function, so `devices_update_privileged` is never consulted. Its own
+  `has_role(ARRAY['Administrator','Shopfloor_Manager'])` check is the *only* thing standing
+  between an Operator and the whole shopfloor — a much larger hole than the per-row path ever
+  had, created by the very thing that buys atomicity.
+- **The batch is all or nothing.** An unknown device or cell anywhere in the array rolls back the
+  moves already applied in the same call. A half-applied rearrangement — three machines moved,
+  three not, no record the other three were intended — is worse than the immediate writes this
+  replaced, not better.
+- **`location_scope` is required, never defaulted.** Defaulting to `'cell'` would let a caller
+  that omitted the key silently clear `site_wide` off an asset an operator deliberately asserted
+  has no single cell.
+- **A no-op is reported as `unchanged`, not `applied`.** `0005` suppresses the no-op `UPDATE`, so
+  counting it would promise a thread row that deliberately does not exist — and the UI would
+  offer a "Same transaction" link into an empty result. The returned `causation_id` is `NULL`
+  when nothing changed, for the same reason.
+
+The gateway is deliberately untouched. A drop says where a machine **is**; it says nothing about
+which connector reaches it, and expressing location by rewiring the data path is the coupling
+archived migration `0036` removed.
+
+`supabase/migrations/test_relocate_devices.py` covers all four, plus the grant baseline — the
+`supabase_admin` default ACL grants `EXECUTE` on every new public function to `anon`, so the
+`REVOKE` is the only thing narrowing it.
+
 ---
 
 ## API Gateway (`kong.yml`)

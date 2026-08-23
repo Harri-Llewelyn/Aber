@@ -1688,6 +1688,42 @@ const apiMethods = {
    * checked `error` would report success on a write that did nothing. Returning the row lets the
    * page tell "saved" from "silently not saved".
    */
+  /*
+   * Apply a whole rearrangement at once.
+   *
+   * AN RPC, NOT N CALLS TO api.put, and the difference is the audit trail rather than the request
+   * count. Device writes go through PostgREST per row, so firing six updates from here -- however
+   * carefully sequenced -- is six transactions and therefore six `causation_id`s: six unrelated
+   * rows in the Digital Thread describing one decision an operator made once. `relocate_devices`
+   * (0033) does the whole batch in one transaction, so the trigger stamps one causation across
+   * all of them and the drawer's "Same transaction" control has something true to show.
+   *
+   * It also means there is no half-applied batch. Six sequential PUTs can fail on the fourth and
+   * leave three machines moved with no record the other three were ever meant to be -- which is
+   * worse than the immediate per-drop writes this replaced, not better.
+   *
+   * `location_scope` is sent on EVERY move, never omitted. The RPC refuses a move without one
+   * rather than defaulting to 'cell', because defaulting would let an omission here silently
+   * clear `site_wide` off an asset an operator deliberately asserted has no single cell.
+   */
+  relocateDevices: async (moves) => {
+    const payload = (moves || []).map(m => ({
+      device_id: m.device_id,
+      cell_id: m.cell_id || null,
+      location_scope: m.location_scope === SCOPE_SITE_WIDE ? SCOPE_SITE_WIDE : 'cell'
+    }));
+    if (payload.length === 0) throw new Error('No moves to apply.');
+    const { data, error } = await supabase.rpc('relocate_devices', { p_moves: payload });
+    if (error) throw error;
+    return {
+      causation_id: data?.causation_id ?? null,
+      requested: data?.requested ?? payload.length,
+      applied: data?.applied ?? 0,
+      unchanged: data?.unchanged ?? 0,
+      devices: data?.devices ?? []
+    };
+  },
+
   patchSetting: async (key, value) => {
     const { data, error } = await supabase
       .from('system_settings')

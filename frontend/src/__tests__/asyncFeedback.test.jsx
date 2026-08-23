@@ -15,7 +15,7 @@ import { api } from '../api'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual('../api')
-  return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn() } }
+  return { ...actual, api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), relocateDevices: vi.fn() } }
 })
 
 /**
@@ -407,12 +407,22 @@ describe('shopfloor drop feedback', () => {
     dataTransfer: { getData: () => JSON.stringify(dropDevice) }
   })
 
-  // Between the mouse release and the api.put resolving the map looks exactly as it did before the
-  // drag -- the device is still drawn where it came from. That is indistinguishable from a refused
-  // drop, and the reliable response to a refused drop is to drag it again.
-  it('marks the destination tile pending until the write resolves', async () => {
-    let release
-    api.put.mockImplementation(() => new Promise(resolve => { release = resolve }))
+  /*
+   * WHAT THE PENDING MARK MEANS NOW.
+   *
+   * It used to mean "an api.put for this tile is in flight", because a drop WAS a write and the
+   * map showed nothing at all until it came back -- indistinguishable from a refused drop, and
+   * the reliable response to a refused drop is to drag it again, which is how one move became two
+   * writes.
+   *
+   * A drop is no longer a write. Moves are staged and applied as one transaction (migration
+   * 0033), so the chip moves the instant it is released and there is no in-flight request to
+   * report. The problem inverts: the risk is no longer that a real move looks like it failed, it
+   * is that a STAGED move looks like it succeeded. So the mark now says "this tile holds moves
+   * that have not been written", which is the question an operator actually has to answer before
+   * leaving the page.
+   */
+  it('marks the destination tile as holding unapplied moves, and writes nothing', async () => {
     renderMap()
 
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
@@ -422,17 +432,14 @@ describe('shopfloor drop feedback', () => {
     fireEvent.drop(zone, payload())
 
     await waitFor(() => expect(zone.className).toMatch(/shopfloor-zone-pending/))
-    expect(zone).toHaveAttribute('aria-busy', 'true')
-    // The resting hint invites another drag, which is the one thing this tile will not now take.
-    expect(zone.getAttribute('title')).toMatch(/Saving this move/)
+    expect(zone.getAttribute('title')).toMatch(/staged moves that have not been applied/)
 
-    await act(async () => { release({}) })
-    await waitFor(() => expect(zone.className).not.toMatch(/shopfloor-zone-pending/))
+    // THE POINT OF THE WHOLE CHANGE. A drop must not write.
+    expect(api.put).not.toHaveBeenCalled()
+    expect(api.relocateDevices).not.toHaveBeenCalled()
   })
 
   it('marks only the destination, not every tile', async () => {
-    let release
-    api.put.mockImplementation(() => new Promise(resolve => { release = resolve }))
     renderMap()
 
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
@@ -441,14 +448,52 @@ describe('shopfloor drop feedback', () => {
     fireEvent.drop(screen.getByTitle(/Drag device node here to reassign/), payload())
 
     await waitFor(() => expect(document.querySelectorAll('.shopfloor-zone-pending')).toHaveLength(1))
-
-    await act(async () => { release({}) })
   })
 
-  it('clears the pending mark when the write fails', async () => {
+  it('applies the staged batch in ONE call and clears the marks', async () => {
     const showToast = vi.fn()
-    let reject
-    api.put.mockImplementation(() => new Promise((_, rej) => { reject = rej }))
+    api.relocateDevices.mockResolvedValue({ causation_id: 42, requested: 1, applied: 1, unchanged: 0, devices: [] })
+    renderMap(showToast)
+
+    await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Rearrang/i }))
+    fireEvent.drop(screen.getByTitle(/Drag device node here to reassign/), payload())
+
+    const apply = await screen.findByRole('button', { name: /Apply 1 move/ })
+    await act(async () => { fireEvent.click(apply) })
+
+    expect(api.relocateDevices).toHaveBeenCalledTimes(1)
+    expect(api.relocateDevices).toHaveBeenCalledWith([
+      { device_id: 'dev-1', cell_id: 'cell-1', location_scope: 'cell' }
+    ])
+    // The message names the transaction, because that is the thing the batch bought.
+    expect(showToast).toHaveBeenCalledWith(
+      expect.stringMatching(/one transaction/), 'success'
+    )
+  })
+
+  it('disables Apply while the batch is in flight', async () => {
+    let release
+    api.relocateDevices.mockImplementation(() => new Promise(resolve => { release = resolve }))
+    renderMap()
+
+    await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Rearrang/i }))
+    fireEvent.drop(screen.getByTitle(/Drag device node here to reassign/), payload())
+
+    fireEvent.click(await screen.findByRole('button', { name: /Apply 1 move/ }))
+
+    // Same reasoning as every other pending button here: a dead-looking button gets clicked
+    // again, and a second click would send the same batch twice.
+    expect(await screen.findByRole('button', { name: /Applying…/ })).toBeDisabled()
+    expect(api.relocateDevices).toHaveBeenCalledTimes(1)
+
+    await act(async () => { release({ causation_id: 1, requested: 1, applied: 1, unchanged: 0, devices: [] }) })
+  })
+
+  it('KEEPS the batch staged when the apply fails', async () => {
+    const showToast = vi.fn()
+    api.relocateDevices.mockRejectedValue(new Error('Row level security'))
     renderMap(showToast)
 
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
@@ -456,20 +501,23 @@ describe('shopfloor drop feedback', () => {
 
     const zone = screen.getByTitle(/Drag device node here to reassign/)
     fireEvent.drop(zone, payload())
-    await waitFor(() => expect(zone.className).toMatch(/shopfloor-zone-pending/))
 
-    await act(async () => { reject(new Error('Row level security')) })
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: /Apply 1 move/ })) })
 
-    await waitFor(() => expect(zone.className).not.toMatch(/shopfloor-zone-pending/))
+    // THE WORK SURVIVES ITS OWN FAILURE. The RPC refuses a batch in full, so the floor is exactly
+    // as it was -- discarding the operator's staged moves here would lose work the database never
+    // touched, which is the outcome staging exists to prevent.
+    expect(await screen.findByRole('button', { name: /Apply 1 move/ })).toBeInTheDocument()
+    expect(zone.className).toMatch(/shopfloor-zone-pending/)
     // The exact failure, not a generic one -- an RLS refusal and a dropped connection need
     // different responses from the operator.
-    expect(showToast).toHaveBeenCalledWith('Row level security', 'error')
+    expect(showToast).toHaveBeenCalledWith(
+      expect.stringMatching(/Row level security.*still staged/), 'error'
+    )
   })
 
   // A lane is a drop target too, and it is keyed by the lane name rather than by a cell_id.
   it('marks a derived lane the same way', async () => {
-    let release
-    api.put.mockImplementation(() => new Promise(resolve => { release = resolve }))
     renderMap()
 
     await waitFor(() => expect(screen.getByText('Site-Wide')).toBeInTheDocument())
@@ -479,9 +527,7 @@ describe('shopfloor drop feedback', () => {
     fireEvent.drop(lane, payload())
 
     await waitFor(() => expect(lane.className).toMatch(/shopfloor-zone-pending/))
-
-    await act(async () => { release({}) })
-    await waitFor(() => expect(lane.className).not.toMatch(/shopfloor-zone-pending/))
+    expect(api.put).not.toHaveBeenCalled()
   })
 })
 

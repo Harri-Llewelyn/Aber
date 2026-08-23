@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react'
+import React, { useState, useCallback, useMemo, useEffect } from 'react'
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, STALENESS_TICK_MS, refreshInterval } from '../../constants'
@@ -7,7 +7,8 @@ import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
 import { gatewayLiveStatus, isGatewayOnline, isGatewayPending, formatHeartbeat } from '../../utils/gatewayStatus'
 import {
-  SCOPE_CELL, SCOPE_SITE_WIDE, SOURCE_UNASSIGNED, SOURCE_SITE_WIDE, groupDevicesByCell
+  SCOPE_CELL, SCOPE_SITE_WIDE, SOURCE_UNASSIGNED, SOURCE_SITE_WIDE, groupDevicesByCell,
+  applyStagedMoves
 } from '../../utils/cellResolution'
 import { cellIconComponent } from '../../utils/cellIcon'
 import {
@@ -108,22 +109,67 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   }
 
   /**
-   * The tile a drop is currently being written to, keyed by the tile's own id -- a cell_id for a
-   * bay, or the lane key for one of the two derived lanes.
+   * The moves an operator has made but not yet applied: device id -> { cell_id, location_scope }.
    *
-   * Needed because a drop is the one mutation here with NO optimistic feedback of its own: the
-   * device keeps rendering in the tile it came from until the reload lands, so between the mouse
-   * release and the api.put resolving the map looks exactly as it did before the drag. On a slow
-   * link that is indistinguishable from a refused drop, and the reliable response is to drag it
-   * again -- which is how one move became two writes.
+   * REARRANGE MODE IS NOW A TRANSACTION, not just a mode. Every drop used to issue its own
+   * `PUT /api/v1/devices/{id}` on mouse release, so reassigning six machines -- one decision,
+   * taken once -- landed as six independent UPDATEs: six transactions, six `causation_id`s, six
+   * rows in the Digital Thread that look like six unrelated acts. Staging them here and applying
+   * the batch through `relocate_devices` (0033) makes it one transaction and therefore one
+   * causation, which is exactly what the event drawer's "Same transaction" control exists to show.
+   *
+   * KEYED BY DEVICE, so dragging the same chip three times before applying collapses to one
+   * entry rather than three conflicting instructions -- and the RPC refuses a batch naming a
+   * device twice, so this is the guard rather than a convenience.
    */
-  const [pendingZone, setPendingZone] = useState(null)
+  const [staged, setStaged] = useState(() => new Map())
+  const [applying, setApplying] = useState(false)
 
-  const handleDrop = async (e, targetCellId) => {
+  /**
+   * The floor as it would look once applied.
+   *
+   * Every consumer below -- the cell buckets, both lanes, the tile dots -- reads this rather than
+   * `assets`, so a staged device moves the instant it is dropped. That inverts what `pendingZone`
+   * used to compensate for: a drop had NO optimistic feedback, the chip stayed put until the
+   * reload landed, and on a slow link that was indistinguishable from a refused drop -- which is
+   * how one move became two writes. Now the chip moves immediately and nothing has been written,
+   * so the burden moves the other way: staged must be visibly distinct from saved, which is what
+   * the `staged` flag applyStagedMoves() sets is for.
+   */
+  const stagedAssets = useMemo(
+    () => applyStagedMoves(assets, gwList, staged),
+    [assets, gwList, staged]
+  )
+
+  /**
+   * Stage one move, or UNSTAGE it if it puts the device back where it already is.
+   *
+   * The comparison is against the device's committed row in `assets`, never against the staged
+   * view -- dragging a chip out to another cell and then back again must leave nothing staged at
+   * all. Without this the batch carries a move the RPC correctly reports as `unchanged`, the
+   * commit bar offers to apply work that does nothing, and the operator is told N moves were
+   * applied when the thread recorded fewer.
+   */
+  const stageMove = useCallback((assetId, cellId, scope) => {
+    setStaged(prev => {
+      const next = new Map(prev)
+      const committed = assets.find(a => a.asset_id === assetId)
+      // `explicit_cell_id` first: `cell_id` on these rows is the device's own column, but the
+      // view fields merged alongside it are the ones that survive a re-resolution.
+      const wasCell = committed?.explicit_cell_id ?? committed?.cell_id ?? null
+      const wasScope = committed?.location_scope || SCOPE_CELL
+      const nowCell = cellId || null
+      if (nowCell === wasCell && scope === wasScope) next.delete(assetId)
+      else next.set(assetId, { cell_id: nowCell, location_scope: scope })
+      return next
+    })
+  }, [assets])
+
+  const handleDrop = (e, targetCellId) => {
     e.preventDefault()
     if (!canRearrange) return
-    // Read BEFORE the first await: the drag event's dataTransfer is cleared once the handler
-    // yields, so parsing after setting the pending state would read an empty payload.
+    // The drag event's dataTransfer is cleared once the handler yields, so this is read first
+    // even though nothing here awaits any more.
     let assetData
     try {
       assetData = JSON.parse(e.dataTransfer.getData('application/json'))
@@ -132,57 +178,46 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
       return
     }
 
-    setPendingZone(targetCellId)
-    try {
-      // Where it currently resolves to, not its explicit override -- a device inheriting the
-      // target cell is already there and dropping it again should stay a no-op.
-      if (assetData.effective_cell_id === targetCellId) return
+    // Where it currently resolves to, not its explicit override -- a device inheriting the target
+    // cell is already there, and dropping it again should stay a no-op. `assetData` comes off the
+    // STAGED view, so this is correct for a chip that has already been moved once.
+    if (assetData.effective_cell_id === targetCellId) return
 
-      const targetCellName = cells.find(c => c.cell_id === targetCellId)?.cell_name || 'the target cell'
+    const targetCellName = cells.find(c => c.cell_id === targetCellId)?.cell_name || 'the target cell'
 
-      // A drop writes devices.cell_id directly (archived migration 0036). It used to have to rewire the
-      // device's GATEWAY to express a move, because location was only inheritable -- which meant
-      // the drop was refused outright when the target cell had no gateway or more than one, and
-      // when it did work it changed the data path to say something about geography. Dragging a
-      // machine across the floor plan says where the machine is; it says nothing about which
-      // connector reaches it, so the gateway is deliberately left alone.
-      await api.put(`/api/v1/devices/${assetData.asset_id}`, {
-        asset_name: assetData.asset_name,
-        cell_id: targetCellId,
-        location_scope: SCOPE_CELL,
-      })
+    // A move sets devices.cell_id directly (archived migration 0036). It used to have to rewire
+    // the device's GATEWAY to express a move, because location was only inheritable -- which meant
+    // the drop was refused outright when the target cell had no gateway or more than one, and
+    // when it did work it changed the data path to say something about geography. Dragging a
+    // machine across the floor plan says where the machine is; it says nothing about which
+    // connector reaches it, so the gateway is deliberately left alone.
+    stageMove(assetData.asset_id, targetCellId, SCOPE_CELL)
 
-      await loadAll()
-
-      // Worth saying out loud: the device is now pinned to this cell and will no longer follow
-      // its gateway. That is what the drop asked for, but it is not visible in the result.
-      const servingGateway = gwList.find(g => g.gateway_id === assetData.active_gateway_id)
-      const detached = servingGateway && servingGateway.cell_id && servingGateway.cell_id !== targetCellId
-      showToast(
-        detached
-          ? `Device '${assetData.asset_name}' moved to '${targetCellName}' — it now stays there regardless of its gateway`
-          : `Device '${assetData.asset_name}' moved to '${targetCellName}'`,
-        'success'
-      )
-    } catch (err) {
-      showToast(err.message, 'error')
-    } finally {
-      setPendingZone(null)
-    }
+    // Said at STAGING time, not on apply, because this is when the operator can still change
+    // their mind. The device will be pinned to this cell and will stop following its gateway --
+    // what the drop asked for, but not something the result makes visible.
+    const servingGateway = gwList.find(g => g.gateway_id === assetData.active_gateway_id)
+    const detached = servingGateway && servingGateway.cell_id && servingGateway.cell_id !== targetCellId
+    showToast(
+      detached
+        ? `Staged: '${assetData.asset_name}' → '${targetCellName}' — it will stay there regardless of its gateway`
+        : `Staged: '${assetData.asset_name}' → '${targetCellName}'`,
+      'success'
+    )
   }
 
   // Cell membership, resolved from the device list this page already holds. See
   // groupDevicesByCell() for why the cells endpoint does not supply this.
-  const devicesByCell = useMemo(() => groupDevicesByCell(assets), [assets])
+  const devicesByCell = useMemo(() => groupDevicesByCell(stagedAssets), [stagedAssets])
 
   // The two derived lanes. Neither is a row in `cells` -- Unassigned is the absence of a decision
   // and Site-Wide is an operator's assertion that an asset has no single cell, and a magic cell
   // row would put both meanings in a free-text name. They are rendered beside the cells because
   // that is where an operator looks for an asset, and because a queue nobody can see never drains.
   const laneDevices = useMemo(() => ({
-    [SOURCE_UNASSIGNED]: assets.filter(a => a.location_source === SOURCE_UNASSIGNED),
-    [SOURCE_SITE_WIDE]: assets.filter(a => a.location_source === SOURCE_SITE_WIDE)
-  }), [assets])
+    [SOURCE_UNASSIGNED]: stagedAssets.filter(a => a.location_source === SOURCE_UNASSIGNED),
+    [SOURCE_SITE_WIDE]: stagedAssets.filter(a => a.location_source === SOURCE_SITE_WIDE)
+  }), [stagedAssets])
 
   /**
    * Drop onto one of the two derived lanes.
@@ -198,10 +233,9 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
    * gateway to force it would express a location intent by changing the DATA PATH -- exactly the
    * coupling archived migration 0036 removed.
    */
-  const handleLaneDrop = async (e, lane) => {
+  const handleLaneDrop = (e, lane) => {
     e.preventDefault()
     if (!canRearrange) return
-    // Parsed before the first await, for the reason given in handleDrop.
     let assetData
     try {
       assetData = JSON.parse(e.dataTransfer.getData('application/json'))
@@ -210,40 +244,102 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
       return
     }
 
-    setPendingZone(lane)
+    if (assetData.location_source === lane) return
+
+    const siteWide = lane === SOURCE_SITE_WIDE
+    stageMove(assetData.asset_id, null, siteWide ? SCOPE_SITE_WIDE : SCOPE_CELL)
+
+    if (siteWide) {
+      showToast(`Staged: '${assetData.asset_name}' → Site-Wide — it will belong to no single cell`, 'success')
+      return
+    }
+
+    // AND THE SPRING-BACK IS NOW VISIBLE AT THE DROP, not after a write. Staging clears the
+    // explicit cell and re-runs the resolution locally, so a device whose gateway serves a cell
+    // re-inherits it and the chip lands back in that cell immediately. Under the old immediate
+    // write the operator saw the chip stay put, then jump somewhere unexpected once the reload
+    // arrived. The message explains what they just watched happen.
+    const gateway = gwList.find(g => g.gateway_id === assetData.active_gateway_id)
+    const inheritedName = gateway?.cell_id
+      ? (cells.find(c => c.cell_id === gateway.cell_id)?.cell_name || 'its gateway\'s cell')
+      : null
+
+    showToast(
+      inheritedName
+        ? `Staged: cleared the explicit cell on '${assetData.asset_name}' — it inherits '${inheritedName}' from gateway '${gateway.gateway_name}'. To leave it unassigned, clear that gateway's cell or mark the device Site-Wide.`
+        : `Staged: '${assetData.asset_name}' → Unassigned`,
+      inheritedName ? 'warning' : 'success'
+    )
+  }
+
+  /**
+   * Apply the whole rearrangement as one transaction.
+   *
+   * ONE RPC, not one request per staged move. Firing them separately from here would still be one
+   * transaction each -- the thread would look exactly as it did before this work -- and it would
+   * reintroduce the half-applied batch: a failure on the fourth of six leaves three machines
+   * moved with no record the other three were ever meant to be.
+   */
+  const applyStaged = async () => {
+    if (staged.size === 0 || applying) return
+    setApplying(true)
     try {
-      if (assetData.location_source === lane) return
-
-      const siteWide = lane === SOURCE_SITE_WIDE
-      await api.put(`/api/v1/devices/${assetData.asset_id}`, {
-        asset_name: assetData.asset_name,
-        cell_id: '',
-        location_scope: siteWide ? SCOPE_SITE_WIDE : SCOPE_CELL,
-      })
+      const moves = [...staged.entries()].map(([device_id, move]) => ({ device_id, ...move }))
+      const result = await api.relocateDevices(moves)
+      // Cleared only AFTER the RPC resolves. Clearing optimistically would drop the operator's
+      // work on a failed apply, which is the one outcome staging exists to prevent.
+      setStaged(new Map())
       await loadAll()
-
-      if (siteWide) {
-        showToast(`Device '${assetData.asset_name}' marked Site-Wide — it now belongs to no single cell`, 'success')
-        return
-      }
-
-      const gateway = gwList.find(g => g.gateway_id === assetData.active_gateway_id)
-      const inheritedName = gateway?.cell_id
-        ? (cells.find(c => c.cell_id === gateway.cell_id)?.cell_name || 'its gateway\'s cell')
-        : null
-
+      const unchanged = result.unchanged
+        ? ` ${result.unchanged} move(s) changed nothing and were not recorded.`
+        : ''
       showToast(
-        inheritedName
-          ? `Cleared the explicit cell on '${assetData.asset_name}' — it now inherits '${inheritedName}' from gateway '${gateway.gateway_name}'. To leave it unassigned, clear that gateway's cell or mark the device Site-Wide.`
-          : `Device '${assetData.asset_name}' moved to Unassigned`,
-        inheritedName ? 'warning' : 'success'
+        `Applied ${result.applied} move(s) as one transaction — they share a single entry in the digital thread.${unchanged}`,
+        'success'
       )
     } catch (err) {
-      showToast(err.message, 'error')
+      // The batch is left staged. It was refused in full, so the floor is exactly as it was and
+      // the operator can fix the cause or discard.
+      showToast(`${err.message} — no moves were applied; they are still staged.`, 'error')
     } finally {
-      setPendingZone(null)
+      setApplying(false)
     }
   }
+
+  const discardStaged = () => {
+    if (staged.size === 0) return
+    if (!window.confirm(`Discard ${staged.size} staged move(s)? The shopfloor returns to how it is saved.`)) return
+    setStaged(new Map())
+    showToast('Staged moves discarded — nothing was written.', 'success')
+  }
+
+  /**
+   * Leaving the mode with work staged has to MEAN something, and silently discarding is the one
+   * thing it must not mean. With immediate writes the only undo was dragging the device back,
+   * which wrote again; staging replaces that with an explicit choice, so the exit asks.
+   */
+  const toggleRearrange = () => {
+    if (rearranging && staged.size > 0) {
+      if (!window.confirm(
+        `${staged.size} staged move(s) have not been applied. Leave Rearrange mode and discard them?`
+      )) return
+      setStaged(new Map())
+    }
+    setRearranging(v => !v)
+  }
+
+  /**
+   * The browser-level half of "must not lose the work silently". A reload or a closed tab throws
+   * the staged batch away with no server state to recover it from, so the browser is asked to
+   * confirm. In-app navigation is covered differently -- this component keeps its state while the
+   * tab is mounted, and the commit bar below is what stops the batch being forgotten.
+   */
+  useEffect(() => {
+    if (staged.size === 0) return undefined
+    const warn = (e) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [staged.size])
 
   // The per-asset telemetry index that used to live here is GONE, along with the only thing that
   // read it. Nothing on this page inspects metric VALUES any more -- `telemetry` is still fetched,
@@ -299,8 +395,17 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
         draggable={canRearrange && !isInactive}
         onDragStart={(e) => handleDragStart(e, a)}
         onClick={() => onSelectDevice(a.asset_id)}
-        style={{ cursor: isInactive ? 'pointer' : canRearrange ? 'grab' : 'pointer', userSelect: 'none', opacity: isArch ? 0.7 : 1 }}
-        title={`${a.asset_name} [${a.asset_id}] — ${isArch ? 'Device Archived (Out of Commission)' : alert ? `ALERT: ${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''}` : deviceStatusTitle(status)} — ${canRearrange && !isInactive ? 'Drag to reassign Cell, or click' : 'Click'} to view on Devices page`}
+        style={{
+          cursor: isInactive ? 'pointer' : canRearrange ? 'grab' : 'pointer',
+          userSelect: 'none',
+          opacity: isArch ? 0.7 : 1,
+          // STAGED MUST NOT LOOK SAVED. The chip moves the moment it is dropped now, so without
+          // a mark the only difference between "moved" and "moved and durable" is whether the
+          // operator remembers pressing Apply. A dashed outline reads as provisional in a way a
+          // colour change would not -- colour on these chips already means device status.
+          ...(a.staged ? { outline: '1px dashed var(--accent)', outlineOffset: '1px' } : null)
+        }}
+        title={`${a.asset_name} [${a.asset_id}] — ${isArch ? 'Device Archived (Out of Commission)' : alert ? `ALERT: ${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''}` : deviceStatusTitle(status)}${a.staged ? ' — STAGED: this move has not been applied yet' : ''} — ${canRearrange && !isInactive ? 'Drag to reassign Cell, or click' : 'Click'} to view on Devices page`}
       >
         {isArch ? <IconArchive size={11} /> : <IconCog size={11} />}
         {/* NAME ONLY. The UUID used to sit inline beside it, capped at ~72px, and it was buying
@@ -308,6 +413,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
             device by, and they were the reason a name as ordinary as "Sim_CNC_Mill_01" clipped.
             The full id is on the `title` above, where it is actually readable. */}
         <span className="chip-name">{a.asset_name}</span>
+        {a.staged && <span className="chip-flag" style={{ color: 'var(--accent)' }} title="Staged move — not applied yet">STAGED</span>}
         {isArch && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>ARCH</span>}
         {/* QUARANTINED AND OFFLINE GET DIFFERENT FLAGS. Both are "not running", but only one of
             them is waiting on a decision somebody has to make, and labelling a pending device OFF
@@ -365,20 +471,19 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
    * of dragging a device from one into the other -- so they now differ only in the props below.
    */
   const floorTile = ({ key, className, name, nameTitle, Icon, status, gateways, devices, counts, hint, onDrop, onNameClick, headerRight, empty, badge }) => {
-    // Every tile is a drop target, so `key` doubles as the identity a pending drop is tracked
-    // under -- there is no second id to invent.
-    const pending = pendingZone !== null && pendingZone === key
+    // A TILE IS PENDING WHEN SOMETHING STAGED IS SITTING IN IT, which is a different question
+    // from the one this used to answer. It used to track the single tile with an outstanding
+    // `api.put` -- a drop is no longer a write, so there is nothing outstanding to track. What
+    // there is instead is a tile holding devices that only look like they are there, and that is
+    // the thing an operator must be able to see at a glance before applying the batch.
+    const pending = devices.some(d => d.staged)
     return (
     <div
       key={key}
       className={`shopfloor-zone${className ? ' ' + className : ''}${pending ? ' shopfloor-zone-pending' : ''}`}
       onDragOver={handleDragOver}
       onDrop={onDrop}
-      // Replaces the hint outright while the write is outstanding: the resting hint invites a
-      // drag ("Drag device node here to reassign"), which is the one thing this tile will not
-      // accept right now.
-      title={pending ? 'Saving this move…' : hint}
-      aria-busy={pending || undefined}
+      title={pending ? `${hint} — contains staged moves that have not been applied yet` : hint}
     >
       <div className="zone-header">
         <span className={`tile-dot tile-dot-${status}`} title={STATUS_LABEL[status]} />
@@ -566,10 +671,10 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
                 <button
                   className={`btn btn-sm ${rearranging ? 'btn-primary' : 'btn-ghost'}`}
                   style={{ marginLeft: '10px' }}
-                  onClick={() => setRearranging(v => !v)}
+                  onClick={toggleRearrange}
                   aria-pressed={rearranging}
                   title={rearranging
-                    ? 'Rearrange mode is ON — drag devices between cells and lanes. Every move is written immediately and recorded in the digital thread. Click to finish.'
+                    ? 'Rearrange mode is ON — drag devices between cells and lanes. Moves are staged and applied together as one transaction. Click to finish.'
                     : 'Turn on Rearrange to drag devices between cells and lanes. Off by default so a stray drag cannot relocate an asset.'}
                 >
                   <IconPencil size={12} /> {rearranging ? 'Rearranging — click to finish' : 'Rearrange'}
@@ -585,11 +690,43 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
           {/* Shown only while the mode is on, so the page carries no standing instruction about a
               gesture that is usually unavailable — and so it is obvious the map is live. */}
           {canRearrange && (
-            <div style={{ marginBottom: '16px', fontSize: '11px', color: 'var(--warning-text)', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ marginBottom: '16px', fontSize: '11px', color: 'var(--warning-text)', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius-sm)', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <IconPencil size={12} />
-              <span>
-                Drag a device onto a cell or lane to move it. Each move is recorded in the digital thread.
-              </span>
+              {/* THE COUNT AND THE ACTIONS LIVE IN THE SAME BANNER the mode already showed, rather
+                  than in a new floating bar. This banner is the thing that says the map is live;
+                  a second element saying the map is also unsaved would be two places to look for
+                  one answer, and the one that scrolled off screen would be the one that mattered. */}
+              {staged.size === 0 ? (
+                <span>
+                  Drag a device onto a cell or lane to stage a move. Nothing is written until you apply.
+                </span>
+              ) : (
+                <>
+                  <span style={{ flex: 1, minWidth: '260px' }}>
+                    <strong>{staged.size} staged move{staged.size === 1 ? '' : 's'}</strong> — not yet
+                    written. Applying sends them as one transaction, so they share a single entry in
+                    the digital thread.
+                  </span>
+                  <span style={{ display: 'flex', gap: '6px' }}>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={applyStaged}
+                      disabled={applying}
+                      title="Write every staged move in one transaction"
+                    >
+                      {applying ? 'Applying…' : `Apply ${staged.size} move${staged.size === 1 ? '' : 's'}`}
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={discardStaged}
+                      disabled={applying}
+                      title="Throw the staged moves away — nothing has been written"
+                    >
+                      Discard
+                    </button>
+                  </span>
+                </>
+              )}
             </div>
           )}
 
