@@ -38,13 +38,20 @@ DB_NAME = os.getenv("SUPABASE_DB_NAME", os.getenv("DB_NAME", "postgres"))
 DB_USER = os.getenv("SUPABASE_DB_USER", os.getenv("DB_USER", "postgres"))
 DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgres"))
 
-# The window the migration declares. Read from the database rather than hardcoded, so retuning the
-# function does not silently invalidate every fixture below -- the ages here are expressed as
-# multiples of whatever it actually is.
+# The window, in seconds. Read from the database rather than hardcoded, so retuning it does not
+# silently invalidate every fixture below -- the ages here are expressed as multiples of whatever
+# it actually is.
+#
+# READ FROM THE SETTING, NOT FROM THE FUNCTION SIGNATURE. This used to call
+# `pg_get_function_arg_default(p.oid, 1)`, because 0030 carried the window in
+# `prune_platform_alerts(p_retain interval DEFAULT interval '7 days')`. 0032 moved it into
+# `alerts.retention_days` and made that default NULL, so the old query returned NULL and the suite
+# died on `float(None)` -- which is the RIGHT failure: a fixture keyed to a source of truth that
+# moved should break loudly rather than quietly test a window nothing uses.
 RETAIN_SQL = """
-    SELECT pg_get_function_arg_default(p.oid, 1)
-      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-     WHERE n.nspname = 'public' AND p.proname = 'prune_platform_alerts'
+    SELECT (value #>> '{}')::numeric * 86400
+      FROM public.system_settings
+     WHERE key = 'alerts.retention_days'
 """
 
 
@@ -199,17 +206,21 @@ class RetentionTestCase(unittest.TestCase):
         self.assertEqual(self.survives("t-new-firing"), 1)
         self.assertEqual(self.survives("t-new-closed"), 1)
 
-    def test_the_window_is_the_one_declared_in_the_signature(self):
+    def test_the_window_is_the_one_the_setting_declares(self):
         """
-        A row just inside the declared window survives and one just outside it does not, so the
-        default argument is genuinely the window rather than a decorative comment.
+        A row just inside the window survives and one just outside it does not, so
+        `alerts.retention_days` is genuinely what the prune reads rather than a number on a page
+        that changes nothing.
+
+        THAT IS A STRONGER CLAIM THAN THIS TEST USED TO MAKE. Reading the function's default
+        argument proved the signature agreed with itself; reading the SETTING proves the value an
+        administrator can actually edit reaches the predicate.
         """
         self.cur.execute(RETAIN_SQL)
-        default = self.cur.fetchone()[0]
-        self.assertIsNotNone(default, "prune_platform_alerts has no default retention argument")
+        row = self.cur.fetchone()
+        self.assertIsNotNone(row, "alerts.retention_days is not seeded -- 0032 did not run")
 
-        self.cur.execute(f"SELECT EXTRACT(EPOCH FROM ({default})::interval)")
-        window_seconds = float(self.cur.fetchone()[0])
+        window_seconds = float(row[0])
         self.assertGreater(window_seconds, 0)
 
         inside = window_seconds / 86400.0 * 0.5
