@@ -19,10 +19,33 @@ collectors it does not want, and a second place for a counter to live. The expos
 documented text protocol -- name, labels, value, newline -- and rendering it is the smaller and
 more auditable half of what the library would do.
 
-WHAT THIS ENDPOINT MUST NOT BECOME. It serves counters and nothing else: no metric values, no
-device names, no payloads. The one label carrying asset identity is `edge_node` on the sequence
-counters, which is a gateway's Sparkplug node id and is already public on the broker. It needs no
-credential, so anything it exposes is exposed to whatever can reach the port.
+WHAT THIS ENDPOINT MUST NOT BECOME, and the line has moved once -- deliberately, and this records
+where it now sits.
+
+IT NEEDS NO CREDENTIAL AND IS PUBLISHED TO THE HOST (`9108:9108`), so anything here is exposed to
+whatever can reach that port. Every addition is a decision, not a detail.
+
+IT USED TO SERVE COUNTERS AND NOTHING ELSE. It now also serves FIVE GAUGES DESCRIBING THE
+APPLIANCES THEMSELVES -- uptime, load, available memory, free disk, and when each last reported --
+labelled by `edge_node`. The reason is that `gateways.disk_free_bytes` and its neighbours hold a
+LATEST VALUE AND NO HISTORY (migration 0035 says so in its own header), so "is that appliance's
+disk filling" is answerable here and nowhere else in the stack. A dashboard reading the database
+can only ever draw a flat line at `now`.
+
+WHAT IS DELIBERATELY NOT HERE, because the exposure is unauthenticated:
+
+  * NO DEVICE DATA OF ANY KIND -- no asset telemetry, no device names, no payloads. That half of
+    the original rule is unchanged and is the half that matters most.
+  * `agent_version` and `flow_hash` stay in the database. A flow hash is a fingerprint of an
+    appliance's deployed configuration and a version string says which vulnerabilities it has;
+    neither needs a trend line, so neither pays for the exposure.
+  * `cert_expires_at` stays in the database too, and its alert rule reads it there. It is a fixed
+    date that changes only at re-enrolment, so it gains nothing from a time series -- and it is
+    the most useful single fact an attacker on this port could learn, being the day the whole
+    fleet's trust anchor dies.
+
+The one label carrying asset identity remains `edge_node`, a gateway's Sparkplug node id, which is
+already public on the broker.
 """
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -68,6 +91,9 @@ COUNTER_MAP = {
     "payload_violations_suppressed": ("acs_ingestion_payload_violations_suppressed_total", {}),
     "payload_violation_write_failures": (
         "acs_ingestion_payload_violation_write_failures_total", {}),
+    # Appliance health (migration 0035).
+    "gateway_health_metrics_rejected": (
+        "acs_ingestion_gateway_health_rejected_total", {}),
 }
 
 HELP = {
@@ -127,6 +153,28 @@ HELP = {
     "acs_ingestion_unmapped_counter_total":
         "An internal counter with no Prometheus mapping. Non-zero means metrics.py's COUNTER_MAP "
         "has fallen behind ingestion.py -- the counter is still being kept, just not named here.",
+    "acs_ingestion_gateway_health_rejected_total":
+        "Appliance health metrics dropped as unusable -- negative, non-finite, over-length, or "
+        "carrying the wrong value type. The heartbeat that carried them still landed; migration "
+        "0035 records why that trade is made in the daemon rather than at a CHECK constraint.",
+    "acs_ingestion_gateway_uptime_seconds":
+        "Seconds since an appliance's Node-RED runtime started, as last reported by it. Process "
+        "uptime, not host uptime: a restarted container resets it while the machine stays up.",
+    "acs_ingestion_gateway_load1":
+        "An appliance's host 1-minute load average, as last reported by it. NOT normalised by core "
+        "count -- compare a gateway against itself over time, never against another.",
+    "acs_ingestion_gateway_mem_available_bytes":
+        "An appliance's host MemAvailable. Available, not free: it counts reclaimable cache, which "
+        "is the number that predicts whether an allocation will succeed.",
+    "acs_ingestion_gateway_disk_free_bytes":
+        "Free bytes on an appliance's root filesystem. THE SERIES THIS ENDPOINT GAINED A GAUGE "
+        "FOR: gateways.disk_free_bytes holds the latest value and no history, so 'is the disk "
+        "filling' is answerable here and nowhere else.",
+    "acs_ingestion_gateway_health_reported_timestamp_seconds":
+        "When each appliance last reported any health metric, as unix seconds. Read the four "
+        "gauges above BESIDE this one: they hold their last value indefinitely, so a stale "
+        "timestamp is the only thing that distinguishes a steady disk figure from a dead "
+        "collector.",
 }
 
 TYPES = {
@@ -136,6 +184,14 @@ TYPES = {
     # The TYPE is decided here by name, not by which argument a series came in on -- so a gauge
     # that needs a label dimension has somewhere to go without a fourth parameter.
     "acs_ingestion_cache_entries": "gauge",
+    # The appliance health gauges, labelled by edge node. Same mechanism as the cache gauge above:
+    # read at scrape time from the daemon's last-seen state, because they are states rather than
+    # events. See the header for what is deliberately NOT among them.
+    "acs_ingestion_gateway_uptime_seconds": "gauge",
+    "acs_ingestion_gateway_load1": "gauge",
+    "acs_ingestion_gateway_mem_available_bytes": "gauge",
+    "acs_ingestion_gateway_disk_free_bytes": "gauge",
+    "acs_ingestion_gateway_health_reported_timestamp_seconds": "gauge",
 }
 
 

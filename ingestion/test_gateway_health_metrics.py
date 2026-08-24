@@ -257,5 +257,89 @@ class ProcessNodeMessageHealthTests(unittest.TestCase):
         self.assertEqual(update["status"], "ONLINE")
 
 
+class GatewayHealthGaugeTests(unittest.TestCase):
+    """
+    The scrapeable half. These gauges exist because the columns hold a latest value and no history,
+    so "is the disk filling" is answerable here and nowhere else.
+
+    THE EXCLUSIONS ARE THE ASSERTION THAT MATTERS. The metrics endpoint needs no credential and is
+    published to the host, so `agent_version`, `flow_hash` and `cert_expires_at` must never appear
+    on it -- the first two fingerprint an appliance's deployed configuration, and the third is the
+    day the whole fleet's trust anchor dies. A future edit that "completes" the gauge set by adding
+    them would be a real widening of an unauthenticated surface, and this is what says so.
+    """
+
+    def setUp(self):
+        ingestion._gateway_health_gauges.clear()
+
+    def _record(self, health, when=None):
+        from datetime import datetime, timezone
+        ingestion.record_gateway_health_gauges(
+            NODE, health, when or datetime(2026, 8, 24, 12, 0, tzinfo=timezone.utc))
+        return ingestion.gateway_health_gauge_snapshot()[NODE]
+
+    def test_the_four_trend_readings_are_exported(self):
+        got = self._record({
+            'uptime_seconds': 4210, 'load_1m': 0.42,
+            'mem_available_bytes': 6423183360, 'disk_free_bytes': 52428288000,
+        })
+        self.assertEqual(got['acs_ingestion_gateway_uptime_seconds'], 4210)
+        self.assertEqual(got['acs_ingestion_gateway_load1'], 0.42)
+        self.assertEqual(got['acs_ingestion_gateway_mem_available_bytes'], 6423183360)
+        self.assertEqual(got['acs_ingestion_gateway_disk_free_bytes'], 52428288000)
+
+    def test_the_unauthenticated_endpoint_never_sees_the_other_three(self):
+        got = self._record({
+            'disk_free_bytes': 4096,
+            'agent_version': '1.4.0',
+            'flow_hash': 'd' * 64,
+            'cert_expires_at': '2027-09-28T09:30:14+00:00',
+        })
+        exported = ' '.join(got)
+        for forbidden in ('agent', 'version', 'flow_hash', 'cert', 'expires'):
+            self.assertNotIn(forbidden, exported)
+        self.assertNotIn('1.4.0', [str(v) for v in got.values()])
+        # And the one that should be there still is, so this is not passing by exporting nothing.
+        self.assertEqual(got['acs_ingestion_gateway_disk_free_bytes'], 4096)
+
+    def test_a_partial_payload_merges_rather_than_zeroing_the_rest(self):
+        self._record({'load_1m': 1.5, 'disk_free_bytes': 100})
+        got = self._record({'disk_free_bytes': 90})
+        self.assertEqual(got['acs_ingestion_gateway_load1'], 1.5)
+        self.assertEqual(got['acs_ingestion_gateway_disk_free_bytes'], 90)
+
+    def test_the_reported_timestamp_moves_with_every_recognised_payload(self):
+        from datetime import datetime, timedelta, timezone
+        first = datetime(2026, 8, 24, 12, 0, tzinfo=timezone.utc)
+        a = self._record({'disk_free_bytes': 1}, first)[ingestion.HEALTH_REPORTED_GAUGE]
+        b = self._record({'disk_free_bytes': 1}, first + timedelta(minutes=5))[
+            ingestion.HEALTH_REPORTED_GAUGE]
+        self.assertEqual(b - a, 300)
+
+    def test_they_render_as_labelled_gauges(self):
+        self._record({'disk_free_bytes': 52428288000})
+        labelled = {
+            (metric, (("edge_node", NODE),)): value
+            for node, values in ingestion.gateway_health_gauge_snapshot().items()
+            for metric, value in values.items()
+        }
+        text = ingestion.metrics.render_exposition(counters={}, labelled=labelled)
+        self.assertIn('# TYPE acs_ingestion_gateway_disk_free_bytes gauge', text)
+        self.assertIn(
+            'acs_ingestion_gateway_disk_free_bytes{edge_node="%s"} 52428288000' % NODE, text)
+        # A metric with no TYPES entry renders as a counter, which for a disk figure would be
+        # wrong in a way only a rate() query would reveal.
+        self.assertNotIn('# TYPE acs_ingestion_gateway_disk_free_bytes counter', text)
+
+    def test_the_rejection_counter_is_mapped(self):
+        # An unmapped counter still reaches a scraper, but as
+        # acs_ingestion_unmapped_counter_total{counter="..."} -- which no dashboard or alert would
+        # be written against. This is the assertion that it was named properly.
+        text = ingestion.metrics.render_exposition(
+            counters={'gateway_health_metrics_rejected': 3})
+        self.assertIn('acs_ingestion_gateway_health_rejected_total 3', text)
+        self.assertNotIn('unmapped', text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

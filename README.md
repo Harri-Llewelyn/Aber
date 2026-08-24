@@ -154,8 +154,11 @@ client authenticates as**, holding `Operator` so it reads the i3X address space,
 cannot see the audit trail (`scripts/mint-mcp-token.mjs` signs its long-lived token) — and `0035`
 gives `gateways` the columns an appliance **reports about itself** on the heartbeat it already
 publishes, chiefly `cert_expires_at`: the internal CA is hand-distributed into every appliance's
-trust store, so re-minting it takes the whole fleet offline at once with no other signal — plus
-demo accounts (`supabase/seed.sql`).
+trust store, so re-minting it takes the whole fleet offline at once with no other signal — and
+`0036` adds `public.gateway_health`, the **third** narrow view the Grafana reader may select,
+after `0027`'s and `0029`'s: it backs the gateway dashboard and the certificate alert while
+leaving the asset inventory `0029` deliberately withheld exactly where it is — plus demo
+accounts (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because `0005` already implements one; a second declaration of `log_digital_thread_event()`

@@ -567,6 +567,14 @@ function edgeFunctionNames() {
       + 'revoked from anon/authenticated by 0027. It is read by the Grafana `supabase` datasource '
       + 'over a direct connection, never over PostgREST, so a documented path would answer 403 to '
       + 'every caller the OpenAPI spec describes',
+  gateway_health:
+      'Per-gateway identity, heartbeat freshness and the appliance health 0035 records, granted '
+      + 'to `grafana_reader` alone and revoked from anon/authenticated by 0036 -- the third view '
+      + 'in the same arrangement as platform_health and storage_footprint above. It backs the '
+      + 'Gateway Fleet Health dashboard and the certificate-expiry alert rule over a direct '
+      + 'connection, never over PostgREST. The browser reads the same facts from `gateways` and '
+      + '`gateway_status` with RLS applied, which is why publishing a second, RLS-free path to '
+      + 'them would be a downgrade rather than a convenience',
   };
 
   const spec = read('docs/openapi.yaml');
@@ -763,6 +771,68 @@ function edgeFunctionNames() {
         pass(`the roadmap lists ${items.length} contiguously numbered items, all inside its section`);
       }
     }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 10d. Every migration that adds a `gateways` column rebuilds the view that is supposed to expose it.
+//
+// `public.gateway_status` is declared `SELECT g.*`, and POSTGRES EXPANDS THAT STAR AT CREATION TIME
+// into a frozen column list. A column added to `gateways` afterwards is not in the view, and
+// nothing errors -- the view goes on returning the columns it was born with, so the failure is a
+// dashboard field that is silently absent rather than a query that fails.
+//
+// REPLAY ORDER MAKES IT PERMANENT. db-init replays every migration on every boot in filename order,
+// so 0025's own `ensure_gateway_status_view()` call runs BEFORE any later migration's ALTER and
+// rebuilds the view without it, every single boot. There is no state in which it self-corrects.
+//
+// 0001, 0004, 0008 and 0025 each end with the call and the view's comment says to make it. 0035
+// added seven columns and did not, which is what this exists to have caught.
+// -------------------------------------------------------------------------------------------------
+{
+  const ADDS_COLUMN = /ALTER TABLE (?:ONLY )?public\.gateways\s+ADD COLUMN/i;
+  const REBUILDS = /SELECT\s+public\.ensure_gateway_status_view\(\)/i;
+
+  // STATEMENTS ONLY. Both regexes would otherwise match the prose ABOUT them -- 0035's own header
+  // explains the replay-order trap by name, and a migration that merely discusses the rebuild
+  // would satisfy a check looking for it. Found by breaking this assertion: removing the real call
+  // from 0035 left the check passing on the strength of its comment.
+  const statements = (sql) => sql.split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
+
+  const migrations = readdirSync(join(REPO, 'supabase/migrations'))
+    .filter((f) => /^\d{4}_.*\.sql$/.test(f))
+    .sort()
+    .map((f) => [f, statements(read(`supabase/migrations/${f}`))]);
+
+  // A REBUILD IN A LATER MIGRATION COVERS AN EARLIER ADD, because db-init replays them in filename
+  // order on every boot: 0024 adds `description` and never rebuilds, but 0025 rebuilds afterwards
+  // and the column arrives in the view regardless. What actually breaks is an add that NOTHING
+  // after it rebuilds -- which is exactly the position the newest migration is always in.
+  const offenders = [];
+  let checked = 0;
+  for (let i = 0; i < migrations.length; i += 1) {
+    if (!ADDS_COLUMN.test(migrations[i][1])) continue;
+    checked += 1;
+    const coveredBy = migrations.slice(i).find(([, sql]) => REBUILDS.test(sql));
+    if (!coveredBy) offenders.push(migrations[i][0]);
+  }
+
+  if (!checked) {
+    fail('no migration appears to add a `gateways` column, which cannot be true -- 0008, 0024, '
+      + '0025 and 0035 all do.\n      This check examined nothing.');
+  } else if (offenders.length) {
+    fail(
+      `${offenders.length} migration(s) add a public.gateways column that NOTHING after them `
+      + `rebuilds public.gateway_status for: ${offenders.join(', ')}.\n`
+      + '      The view is `SELECT g.*`, which Postgres freezes at creation, so the column is\n'
+      + '      invisible through it and nothing errors -- the view goes on returning what it was\n'
+      + '      born with. db-init replays migrations in filename order on every boot, so an\n'
+      + '      earlier rebuild never picks it up and the state does not self-correct. End the\n'
+      + '      migration with:\n'
+      + '        SELECT public.ensure_gateway_status_view();'
+    );
+  } else {
+    pass(`all ${checked} migrations adding a gateways column rebuild gateway_status`);
   }
 }
 

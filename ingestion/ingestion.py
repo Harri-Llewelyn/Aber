@@ -1837,6 +1837,60 @@ def extract_gateway_health(group_id, edge_node_id, payload):
     return health
 
 
+# -----------------------------------------------------------------------------
+# The same readings, as Prometheus gauges -- because the columns have no history
+# -----------------------------------------------------------------------------
+# WHY BOTH. `gateways.disk_free_bytes` and its neighbours hold a LATEST VALUE AND NO HISTORY, which
+# migration 0035 states plainly. So a dashboard reading the database can answer "how full is that
+# disk" and can never answer "is it filling" -- the question an operator actually acts on. These
+# gauges are that second answer, at the scrape interval, over the Prometheus the stack already runs.
+#
+# FOUR OF THE SEVEN, AND THE OMISSIONS ARE THE POINT. The metrics endpoint needs no credential and
+# is published to the host, so `agent_version`, `flow_hash` and `cert_expires_at` stay in the
+# database: the first two are a fingerprint of an appliance's deployed configuration, the third is
+# a fixed date that gains nothing from a time series and is the single most useful fact an attacker
+# on that port could learn. metrics.py's header carries the full argument.
+GATEWAY_HEALTH_GAUGES = {
+    "uptime_seconds":      "acs_ingestion_gateway_uptime_seconds",
+    "load_1m":             "acs_ingestion_gateway_load1",
+    "mem_available_bytes": "acs_ingestion_gateway_mem_available_bytes",
+    "disk_free_bytes":     "acs_ingestion_gateway_disk_free_bytes",
+}
+
+HEALTH_REPORTED_GAUGE = "acs_ingestion_gateway_health_reported_timestamp_seconds"
+
+# Last-seen values per edge node. BOUNDED BY THE FLEET WITHOUT NEEDING A CAP: this is written only
+# after resolve_gateway() has matched a REGISTERED gateway, so an unknown or forged edge node id
+# cannot add an entry -- which is the same argument the cache bound makes, arrived at for free.
+# An archived gateway's series lingers until the daemon restarts; its reported-at timestamp is
+# what says so.
+_gateway_health_gauges = {}
+_gateway_health_gauges_lock = threading.Lock()
+
+
+def record_gateway_health_gauges(edge_node_id, health, at):
+    """
+    Merge one payload's readings into this edge node's gauge set.
+
+    MERGED, NOT REPLACED, so a payload carrying only what its collector could produce does not
+    silently zero the rest. The reported-at gauge moves whenever anything was recognised, which is
+    what lets a reader tell a steady disk figure from a dead collector -- a gauge holds its last
+    value forever and says nothing about its own age.
+    """
+    exported = {metric: health[column]
+                for column, metric in GATEWAY_HEALTH_GAUGES.items() if column in health}
+    with _gateway_health_gauges_lock:
+        entry = _gateway_health_gauges.setdefault(edge_node_id, {})
+        entry.update(exported)
+        entry[HEALTH_REPORTED_GAUGE] = at.timestamp()
+
+
+def gateway_health_gauge_snapshot() -> dict:
+    """A copy, safe to read while the paho callback thread is writing."""
+    with _gateway_health_gauges_lock:
+        return {node: dict(values) for node, values in _gateway_health_gauges.items()}
+
+
 def _reject_health(edge_node_id, metric_name, reason):
     """Drop one health metric, loudly enough to find and quietly enough to live with."""
     count("gateway_health_metrics_rejected")
@@ -1940,6 +1994,8 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
         # `health_reported_at` NULL, which reads as "does not report health" rather than as "has
         # stopped reporting it". The two need different responses.
         update["health_reported_at"] = heartbeat_dt.isoformat()
+        # The scrapeable half, for the readings that need a trend rather than a current value.
+        record_gateway_health_gauges(edge_node_id, health, heartbeat_dt)
 
     try:
         supabase_client.table("gateways").update(update).eq("id", gateway["id"]).execute()
@@ -2922,6 +2978,14 @@ def start_metrics_endpoint():
             labelled[("acs_ingestion_cache_evictions_total", (("cache", cache.name),))] = (
                 cache.evictions
             )
+
+        # APPLIANCE HEALTH, read at scrape time for the same reason the cache gauges are: these
+        # are states rather than events. Four readings plus the timestamp that says how old they
+        # are -- a gauge holds its last value indefinitely, so without that timestamp a dead
+        # collector and a steady disk are the same picture.
+        for edge_node, values in gateway_health_gauge_snapshot().items():
+            for metric, value in values.items():
+                labelled[(metric, (("edge_node", edge_node),))] = value
 
         return metrics.render_exposition(
             counters=counter_snapshot(),

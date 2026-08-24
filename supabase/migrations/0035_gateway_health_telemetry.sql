@@ -118,3 +118,21 @@ COMMENT ON COLUMN public.gateways.agent_version IS
   'the Agent_Version metric on every node-level message that carries one, so an appliance upgraded '
   'in place is visible without re-enrolment. Lets the fleet''s vintage be seen without reaching '
   'into every appliance. NULL for a virtual gateway and for one that has never enrolled.';
+
+
+-- ---------------------------------------------------------------------------------------------
+-- 3. Rebuild the derived view, because `SELECT g.*` DOES NOT MEAN WHAT IT LOOKS LIKE
+-- ---------------------------------------------------------------------------------------------
+-- `public.gateway_status` is declared `SELECT g.*`, and PostgreSQL EXPANDS THAT STAR AT CREATION
+-- TIME into a frozen column list. A column added to `gateways` afterwards is simply not in the
+-- view, and nothing errors -- the view keeps working, returning the columns it was born with.
+--
+-- REPLAY ORDER MAKES IT PERMANENT RATHER THAN TRANSIENT. db-init replays every migration on every
+-- boot in filename order, so 0025's own `SELECT public.ensure_gateway_status_view()` runs BEFORE
+-- the ALTERs above and rebuilds the view without them, every time. Without this call the seven
+-- columns would be invisible through `gateway_status` on a freshly booted stack, in perpetuity.
+--
+-- 0001, 0004, 0008 and 0025 each end this way for the same reason, and the view's own comment says
+-- to: "call it after adding a gateways column". `check-docs-drift.mjs` now asserts that every
+-- migration adding one does.
+SELECT public.ensure_gateway_status_view();
