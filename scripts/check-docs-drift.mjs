@@ -466,6 +466,14 @@ function edgeFunctionNames() {
 
   /** name -> why a later migration is allowed to replace an earlier definition. */
   const INTENDED_REDECLARATIONS = {
+    'public.consume_gateway_enrollment_token': `0025 declares it testing only the token hash,
+      consumed_at and expires_at; 0037 replaces it with one that ALSO refuses an archived gateway.
+      THE BODY IS REPRODUCED IN FULL rather than patched, because this function is the security
+      boundary for enrolment and a reader should see all of it at once -- a redeclaration that
+      patched only the WHERE clause would leave the hash shape-check and the identity SELECT in a
+      different migration from the rule they protect. 0037's self-check runs the reproduction it
+      exists to close: archive a gateway holding a live bundle, then attempt redemption. This list
+      can check that a redeclaration was INTENDED and not that it was COMPLETE.`,
     'public.prune_platform_alerts': `0030 declares it with the window as a literal default; 0032
       replaces it with one whose default is NULL and which reads alerts.retention_days from
       system_settings, so an Administrator can see and change the window without a shell. THE

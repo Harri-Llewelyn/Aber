@@ -157,8 +157,11 @@ publishes, chiefly `cert_expires_at`: the internal CA is hand-distributed into e
 trust store, so re-minting it takes the whole fleet offline at once with no other signal — and
 `0036` adds `public.gateway_health`, the **third** narrow view the Grafana reader may select,
 after `0027`'s and `0029`'s: it backs the gateway dashboard and the certificate alert while
-leaving the asset inventory `0029` deliberately withheld exactly where it is — plus demo
-accounts (`supabase/seed.sql`).
+leaving the asset inventory `0029` deliberately withheld exactly where it is — and `0037`
+makes **archiving a gateway withdraw its outstanding enrolment bundle**, and enrolment refuse
+an archived gateway at all: a bundle downloaded and never instantiated was still redeemable
+after the gateway was archived, which issued a real broker credential and resurrected the row
+to `ONLINE` — plus demo accounts (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because `0005` already implements one; a second declaration of `log_digital_thread_event()`
