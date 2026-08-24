@@ -2542,6 +2542,12 @@ tbody tr:hover { background: var(--bg-glass); }
   color: var(--text-primary);
 }
 
+/* A field whose VALUE is the problem -- a gateway CA inside its expiry window. Colour only, no
+   weight change and no icon: this list is scanned, and a second visual language for "bad" beside
+   the alert block at the top of the panel would compete with it. The label stays neutral because
+   the field is not at fault, the reading is. */
+.context-field-value.context-field-danger { color: var(--danger); }
+
 .context-field-empty { color: var(--text-muted); font-style: italic; }
 
 .context-panel-actions {

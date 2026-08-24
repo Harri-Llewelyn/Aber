@@ -450,7 +450,7 @@ Digital Nameplate; what each one covers and how its identity was verified is in
 ## Testing
 
 ```bash
-# Frontend — 1411 tests
+# Frontend — 1417 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required
@@ -618,71 +618,14 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Six extensions, ordered by how much of each already exists. None is speculative: every one names
+Five extensions, ordered by how much of each already exists. None is speculative: every one names
 the code it would build on, because the value of writing them down is that a reader can tell how far
 away each is.
 
 **These are not open defects.** Known issues and accepted risks are
 [GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues).
 
-### 1 · Automated edge gateway telemetry
-
-**Builds on:** `process_node_message()` · `gateways.agent_version` / `enrolled_at` (`0025`) ·
-the appliance's Node-RED runtime ([`templates/physical-gateway/`](templates/physical-gateway)) ·
-`node_exporter`
-
-Enrolment stamps `agent_version` and `enrolled_at` once and never refreshes them, so "what is this
-appliance actually doing" is answerable only by getting a shell on it. The appliance already holds
-an authenticated MQTT connection and already publishes `NDATA`, so a periodic health payload —
-uptime, container and disk metrics, the deployed flow's hash — needs no new transport, no new
-credential and no new table: `process_node_message()` resolves the gateway and writes to its row
-today.
-
-**The case that justifies it on its own is CA expiry.** The internal CA is distributed by hand into
-every appliance's trust store, and
-[re-minting it does not fail loudly — it succeeds and takes the whole fleet offline](docs/incidents.md).
-A `Cert_Expires_At` metric plus one alert rule turns the single worst fleet-wide failure mode into a
-30-day warning.
-
-#### Use `node_exporter` as the collector, but do not scrape it from here
-
-The appliances are Ubuntu Server and the stack now runs a Prometheus, so the obvious move is to run
-`node_exporter` on each gateway and add it as a scrape target. **The collector half is right and the
-scrape half is wrong**, and the reason is the network shape this platform deliberately has:
-
-- **The appliance's connection is outbound only.** It dials `<broker>:8883`; nothing anywhere
-  assumes traffic in the other direction, and
-  [`templates/physical-gateway/README.md`](templates/physical-gateway/README.md) troubleshoots
-  exactly that way round.
-- **Scraping means an inbound path per gateway** through the plant firewall — the thing an
-  outbound-only design exists to avoid, and a separate conversation with someone's IT department
-  per site.
-- **Gateways are enrolled dynamically** with single-use tokens (`0025`), so a static scrape config
-  cannot know them. Pull would additionally need `http_sd` backed by the `gateways` table: a
-  discovery endpoint to build, secure and keep correct.
-
-So run `node_exporter` on the appliance and **scrape it locally**. A Node-RED flow polls
-`localhost:9100/metrics`, selects a handful of series — filesystem free, load, memory, uptime — and
-publishes them as Sparkplug metrics on the connection that is already open and already
-authenticated. `process_node_message()` writes them to the gateway's row exactly as this section
-already describes.
-
-That keeps `node_exporter`'s correctness — it collects host metrics properly, which hand-rolled
-disk and CPU reads in a Node-RED function node will not — while changing nothing about the network,
-the credential model, or discovery. It also makes this item substantially cheaper, because the
-collector was the part that had to be written.
-
-**And it removes the Windows question.** `windows_exporter` (prometheus-community, formerly
-`wmi_exporter`) serves the same exposition format, so a Windows gateway differs only in which
-collector is installed; the transport, the flow and the database write are identical. Under a pull
-model it would have been a second scrape story.
-
-**Where it would go:** `templates/physical-gateway/docker-compose.yml`, which the bundle ships and
-the appliance runs — one service alongside `node-red`, with the same `/proc`, `/sys` and `/` mounts
-the central stack's exporter uses. The bundle is assembled by `gateway-bundle` from
-`GW_BUNDLE_COMPOSE`, so the template is the only file that changes.
-
-### 2 · Horizontal ingestion scaling
+### 1 · Horizontal ingestion scaling
 
 **Builds on:** the single-writer note in `get_timescaledb_connection()` ·
 `acs_ingestion_write_seconds` · `_alias_map` / `_last_seq`
@@ -746,7 +689,7 @@ callback migration is needed.** That was expected to be the hard part and it is 
 
 ---
 
-### 3 · Ingress → Gateway API
+### 2 · Ingress → Gateway API
 
 **Builds on:** [`templates/ingress.yaml`](deploy/helm/acs-cymru/templates/ingress.yaml) ·
 `acs-cymru.corsOrigins`
@@ -773,7 +716,7 @@ than the templating approach as a whole.
 
 ---
 
-### 4 · Cold Telemetry Archival & Query-in-Place
+### 3 · Cold Telemetry Archival & Query-in-Place
 
 **Builds on:** TimescaleDB retention policies · `telemetry` hypertable · Edge Functions · Apache
 Parquet · `public.system_settings` (`0031`, `0032`)
@@ -800,7 +743,7 @@ gigabytes of raw points back into TimescaleDB.
 
 ---
 
-### 5 · Kong → Envoy, following upstream Supabase
+### 4 · Kong → Envoy, following upstream Supabase
 
 **Builds on:** [`supabase/kong.yml`](supabase/kong.yml) · `supabase-kong-init` ·
 [`templates/supabase/kong.yaml`](deploy/helm/acs-cymru/templates/supabase/kong.yaml)
@@ -825,7 +768,7 @@ stated reason and each is load bearing; a translation that quietly widened one w
 test that exists today, because `validate.py` asserts the 401s that SHOULD happen and cannot assert
 the absence of a route nobody wrote. Any migration needs the negative assertions first.
 
-**It interacts with §3 and should be sequenced against it.** Gateway API's `HTTPRoute` would retire
+**It interacts with §2 and should be sequenced against it.** Gateway API's `HTTPRoute` would retire
 the `__CORS_ORIGINS__` placeholder on Kubernetes; Envoy would restate CORS in its own filter on both
 targets. Doing both independently means expressing origin policy a third way before deleting the
 first — so whichever lands first should decide where that policy lives.
@@ -835,7 +778,7 @@ image question. This is a divergence-from-upstream question, not a security one.
 
 ---
 
-### 6 · Supabase's legacy API keys
+### 5 · Supabase's legacy API keys
 
 **Builds on:** [`scripts/setup.mjs`](scripts/setup.mjs) · `kong.yml`'s `key-auth` consumers ·
 `custom_access_token_hook` (`0001`) · the edge-function registry

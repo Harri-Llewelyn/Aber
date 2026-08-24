@@ -4,7 +4,10 @@ import { PERMISSION_UUIDS, REALTIME_ENABLED, STALENESS_TICK_MS, refreshInterval 
 import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
-import { gatewayLiveStatus, isGatewayPending, formatHeartbeat } from '../../utils/gatewayStatus'
+import {
+  gatewayLiveStatus, isGatewayPending, formatHeartbeat,
+  formatCertExpiry, isCertExpiring, formatBytes, CERT_EXPIRY_WARN_DAYS
+} from '../../utils/gatewayStatus'
 import { gatewaySparkplugId } from '../../utils/sparkplugId'
 import { deviceLifecycleStatus, deviceStatusDotColor, deviceStatusTitle, deviceDotColor } from '../../utils/deviceStatus'
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
@@ -668,6 +671,79 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               : 'Devices served by this gateway resolve to this cell unless they carry one of their own.'
           },
           { label: 'Last Heartbeat', value: formatHeartbeat(selected.last_heartbeat), title: 'Age of the last NBIRTH/NDATA/NDEATH. STALE after 90 seconds of silence.' },
+          /**
+           * WHAT THE APPLIANCE SAYS ABOUT ITSELF (migration 0035).
+           *
+           * SHOWN ONLY WHEN IT HAS REPORTED, and `health_reported_at` is what decides -- not the
+           * individual values. A gateway that has never reported health is a virtual one or an
+           * appliance on an older bundle, and six rows of "--" would read as six faults rather than
+           * as a capability it does not have. A gateway that reported once and stopped keeps its
+           * last values AND its reporting age, which is the pair that says so.
+           *
+           * These are CURRENT VALUES WITH NO HISTORY -- the trend lives in Grafana's Gateway Fleet
+           * Health dashboard, off Prometheus gauges. So there is deliberately no sparkline here:
+           * one drawn from a single value would be a straight line implying a stability nothing
+           * measured.
+           */
+          ...(selected.health_reported_at ? [
+            {
+              label: 'Health Reported',
+              value: formatHeartbeat(selected.health_reported_at),
+              title: 'Age of the last heartbeat that carried appliance health. Separate from Last '
+                + 'Heartbeat on purpose: a gateway can keep beating while its collector has stopped.'
+            },
+            {
+              label: 'CA Expires',
+              value: formatCertExpiry(selected.cert_expires_at),
+              danger: isCertExpiring(selected.cert_expires_at),
+              title: 'When the broker CA THIS appliance trusts expires, as it reported. The CA is '
+                + 'distributed by hand into every trust store, so re-issuing it is a fleet '
+                + `operation -- Grafana alerts at ${CERT_EXPIRY_WARN_DAYS} days.`
+            },
+            {
+              label: 'Disk Free',
+              value: formatBytes(selected.disk_free_bytes),
+              title: 'Free space on the appliance\'s root filesystem, from node_exporter. An '
+                + 'appliance that fills its disk stops publishing and reports nothing about why.'
+            },
+            {
+              label: 'Memory Available',
+              value: formatBytes(selected.mem_available_bytes),
+              title: 'Host MemAvailable -- available rather than free, so it counts reclaimable '
+                + 'cache. That is the number that predicts whether an allocation will succeed.'
+            },
+            {
+              label: 'Load (1m)',
+              value: selected.load_1m === null || selected.load_1m === undefined
+                ? null
+                : Number(selected.load_1m).toFixed(2),
+              title: 'Host 1-minute load average. NOT normalised by core count -- compare this '
+                + 'gateway against itself over time, not against another gateway.'
+            },
+            {
+              label: 'Runtime Uptime',
+              value: selected.uptime_seconds === null || selected.uptime_seconds === undefined
+                ? null
+                : formatHeartbeat(new Date(Date.now() - selected.uptime_seconds * 1000).toISOString())
+                  .replace(' ago', ''),
+              title: 'How long the appliance\'s Node-RED runtime has been up. PROCESS uptime, not '
+                + 'host uptime: a restarted container resets it while the machine stays up.'
+            },
+            {
+              label: 'Bundle',
+              value: selected.agent_version || null,
+              title: 'The bundle version the appliance reports. Refreshed on every heartbeat since '
+                + '0035, so an appliance upgraded in place shows its new version without '
+                + 're-enrolling.'
+            },
+            {
+              label: 'Flow',
+              value: selected.flow_hash ? selected.flow_hash.slice(0, 12) : null,
+              title: 'First 12 characters of the SHA-256 of the flow this appliance was '
+                + 'provisioned with. Identifies which bundle\'s flow is installed; it does NOT '
+                + 'detect edits made afterwards in the Node-RED editor.'
+            },
+          ] : []),
           {
             label: 'Description',
             value: selected.description || null,

@@ -837,6 +837,53 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 10e. The CA-expiry warning window is one decision, declared twice.
+//
+// Grafana's `acs-gateway-ca-expiring` rule fires below 30 days; the Gateways page colours the same
+// field with CERT_EXPIRY_WARN_DAYS. They are the SAME number for the same reason -- long enough to
+// schedule a fleet-wide trust-store update through a plant's change process, which is a visit to
+// every appliance rather than a command.
+//
+// DRIFT HERE IS WORSE THAN A WRONG NUMBER. A UI that warns at 14 days while the rule fires at 30
+// sends an operator looking for an alert that has not been raised; one that warns at 60 while the
+// rule fires at 30 trains them to ignore the colour. Either way the two disagree about a date
+// somebody is going to act on, and neither side is obviously the wrong one to a reader.
+//
+// Same arrangement as the alert-retention window below: declared where each consumer needs it,
+// asserted equal here.
+// -------------------------------------------------------------------------------------------------
+{
+  const rules = read('grafana/provisioning/alerting/alert-rules.yaml');
+  const util = read('frontend/src/utils/gatewayStatus.js');
+
+  // The threshold node of the CA rule, found by walking forward from its uid so a `params: [30]`
+  // belonging to some other rule cannot answer for it.
+  const ruleAt = rules.indexOf('uid: acs-gateway-ca-expiring');
+  const ruleBody = ruleAt === -1 ? '' : rules.slice(ruleAt, ruleAt + 4000);
+  const ruleDays = ruleBody.match(/type:\s*lt\s*\n\s*params:\s*\[(\d+)\]/);
+  const uiDays = util.match(/CERT_EXPIRY_WARN_DAYS\s*=\s*(\d+)/);
+
+  if (ruleAt === -1) {
+    fail('grafana alert rule `acs-gateway-ca-expiring` is gone. It is the only warning that a '
+      + 'gateway\'s\n      hand-distributed CA is about to expire, which takes the whole fleet '
+      + 'offline at once.');
+  } else if (!ruleDays || !uiDays) {
+    fail('could not read the CA-expiry window from '
+      + `${ruleDays ? 'frontend/src/utils/gatewayStatus.js' : 'the Grafana rule'}, so the two were `
+      + 'not compared.');
+  } else if (ruleDays[1] !== uiDays[1]) {
+    fail(
+      `the CA-expiry warning window disagrees: the Grafana rule fires below ${ruleDays[1]} days, `
+      + `the Gateways page warns below ${uiDays[1]}.\n`
+      + '      An operator seeing one without the other goes looking for an alert that was never\n'
+      + '      raised, or learns to ignore a colour that means nothing.'
+    );
+  } else {
+    pass(`the CA-expiry window is ${ruleDays[1]} days in both the Grafana rule and the Gateways page`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 11a. Every public column is reachable from something that reads or writes it.
 //
 // Columns accumulate faster than they are retired, and a column that carries no information is
