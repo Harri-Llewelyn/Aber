@@ -133,6 +133,39 @@ log(`${flow.length} nodes, ${functions.length} function node(s)`);
 }
 
 // -------------------------------------------------------------------------------------------------
+// 2b. ON MQTT 5, THE SESSION-EXPIRY TRAP IS REACHABLE, so it is asserted shut.
+//
+// v5 lets a client keep its session alive across a disconnect (`sessionExpiry`) and lets the broker
+// hold its Last Will back for a while (will delay). Both look like resilience settings and both are
+// wrong here, for the same reason: NDEATH *IS* THE LAST WILL. process_node_message() marks the edge
+// node OFFLINE the moment it arrives, so delaying it leaves a dead gateway reading ONLINE with every
+// device beneath it apparently live -- the platform confidently reporting the opposite of the truth.
+//
+// Under 3.1.1 the fields did nothing and this check was unnecessary. It became necessary the moment
+// the template moved to protocolVersion 5, which is the sort of consequence a version bump has and
+// nobody remembers.
+// -------------------------------------------------------------------------------------------------
+{
+  const brokers = flow.filter((n) => n.type === 'mqtt-broker');
+  const offenders = brokers.filter((b) =>
+    (b.sessionExpiry !== undefined && String(b.sessionExpiry).trim() !== '')
+    || (b.willDelay !== undefined && String(b.willDelay).trim() !== '')
+  );
+
+  if (offenders.length) {
+    fail(
+      `${offenders.length} broker node(s) set an MQTT 5 session-expiry or will-delay interval: `
+      + `${offenders.map((b) => b.name || b.id).join(', ')}.\n`
+      + '         NDEATH IS the Last Will. Delaying it, or letting a session outlive the\n'
+      + '         connection, leaves a dead gateway reading ONLINE and every device beneath it\n'
+      + '         apparently live. Take the v5 diagnostics; leave its timing knobs alone.'
+    );
+  } else if (brokers.length) {
+    pass(`no broker node sets a v5 session-expiry or will-delay interval (${brokers.length} checked)`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 3. Placeholders are exactly what bootstrap substitutes.
 // -------------------------------------------------------------------------------------------------
 {

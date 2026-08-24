@@ -294,7 +294,24 @@ if (mqttTlsEnabled || mqttPortEnv || mqttHostEnv) {
     setField(broker, 'tls', '');
   };
 
+  // THE PROTOCOL VERSION IS RECONCILED, NOT SEEDED, and finding that out is the whole reason this
+  // line exists. Moving the generators to MQTT 5 changed the SEED; an existing Node-RED volume
+  // keeps its own flows.json, because that file is user content and is deliberately never
+  // overwritten. So the broker reported `p5` for the ingestion daemon and the i3X server and `p2`
+  // for all four simulated gateways -- a half-migrated stack, with nothing to indicate it.
+  //
+  // It belongs here for the same reason host, port and TLS do: it is TRANSPORT, not user content.
+  // An operator who rewires a flow in the editor has an opinion about topics and payloads, not
+  // about which MQTT version the platform speaks.
+  //
+  // NOT AN ENVIRONMENT VARIABLE, unlike its neighbours. The daemon's protocol is a constant in
+  // Python (`mqtt.Client(protocol=mqtt.MQTTv5)`), so this is a code-level decision about what the
+  // whole platform speaks rather than a per-deployment setting -- and a knob that let one client
+  // drift from the others would only produce a combination nobody tests.
+  const PROTOCOL_VERSION = '5';
+
   for (const broker of brokers) {
+    setField(broker, 'protocolVersion', PROTOCOL_VERSION);
     if (mqttHostEnv) setField(broker, 'broker', mqttHostEnv);
     // Node-RED stores the port as a STRING. A number works at runtime but shows as empty in the
     // editor's port field, so the node looks misconfigured to whoever opens it next.

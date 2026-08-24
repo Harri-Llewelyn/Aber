@@ -1151,7 +1151,12 @@ services:
       # mosquitto-tls-init leaves ca.key root-owned and 0600.
       - mosquitto_certs:/mosquitto/certs:ro
     healthcheck:
-      test: ["CMD-SHELL", "mosquitto_sub -u $${MQTT_MONITOR_USER:-factoryplus_monitor} -P $${MQTT_MONITOR_PASSWORD} -t '$$SYS/broker/version' -C 1 || exit 1"]
+      # -V mqttv5, BECAUSE THAT IS WHAT THE FLEET SPEAKS. Every application client on this stack
+      # -- the daemon, the i3X server and all four simulated gateways -- connects as MQTT 5, so a
+      # probe that only exercised 3.1.1 would report the broker healthy while the protocol
+      # everything actually depends on was broken. A liveness probe should use the transport the
+      # thing it protects uses.
+      test: ["CMD-SHELL", "mosquitto_sub -V mqttv5 -u $${MQTT_MONITOR_USER:-factoryplus_monitor} -P $${MQTT_MONITOR_PASSWORD} -t '$$SYS/broker/version' -C 1 || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5

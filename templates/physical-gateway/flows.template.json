@@ -32,7 +32,7 @@
     "autoConnect": true,
     "usetls": true,
     "verifyservercert": true,
-    "protocolVersion": "4",
+    "protocolVersion": "5",
     "keepalive": "60",
     "cleansession": true,
     "birthTopic": "",

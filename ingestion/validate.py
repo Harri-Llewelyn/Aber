@@ -756,10 +756,11 @@ def seed_supabase():
 
 def run_simulation():
     print("Connecting validation publisher to MQTT broker...")
-    # Note: Intentionally using paho-mqtt==1.6.1 v1 callback signatures.
-    # If upgrading to paho-mqtt 2.x+, callbacks must be migrated to CallbackAPIVersion.VERSION2
-    # signatures (e.g. on_connect(client, userdata, flags, reason_code, properties)).
-    client = mqtt.Client()
+    # MQTT 5, matching the daemon and the i3X server. THE VALIDATOR HAS TO SPEAK WHAT THE FLEET
+    # SPEAKS: it stands in for a physical edge node, so a validator left on 3.1.1 would be
+    # exercising a transport no gateway uses and would not notice a v5-only regression at all.
+    # paho 1.6.1's v1 callback API is unchanged -- only paho 2.x forces VERSION2 signatures.
+    client = mqtt.Client(protocol=mqtt.MQTTv5)
     # Connects as ITS OWN GATEWAY, exactly as a physical edge node does -- username ==
     # VAL_GW_SPARKPLUG_ID, confined by mosquitto.acl to its own edge-node subtree. There is no
     # wildcard account to fall back on any more, so a mismatch between this credential and
@@ -810,7 +811,10 @@ def run_simulation():
     # naming the cause was in the BROKER's log, not this one.
     connack = []
 
-    def on_connect(c, _userdata, _flags, rc):
+    # `properties` is the v5 signature, defaulted so this stays callable under either protocol.
+    # `rc` is a ReasonCodes under v5; `== 0` still holds and `connack` keeps recording the object,
+    # which prints as its reason string ("Success", "Not authorized") rather than as a bare number.
+    def on_connect(c, _userdata, _flags, rc, properties=None):
         connack.append(rc)
         if rc == 0:
             c.subscribe("spBv1.0/+/NCMD/+")
@@ -820,7 +824,7 @@ def run_simulation():
     connected = False
     for attempt in range(5):
         try:
-            client.connect(MQTT_HOST, MQTT_PORT, 60)
+            client.connect(MQTT_HOST, MQTT_PORT, 60, clean_start=True)
             connected = True
             break
         except Exception as e:

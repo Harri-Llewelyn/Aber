@@ -2688,13 +2688,78 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         )
 
 
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, userdata, flags, rc, properties=None):
+    """
+    Subscribe once the broker has accepted the connection.
+
+    `properties` IS THE MQTT 5 SIGNATURE, and it is optional so the function is callable under
+    either protocol -- paho passes five arguments for a v5 client and four for a 3.1.1 one. Keeping
+    the default means this is not the thing that breaks if the protocol is ever moved back.
+
+    `rc` is a `ReasonCodes` under v5 rather than an int, and `== 0` still works: paho's
+    ReasonCodes.__eq__ compares against int. Verified against the pinned 1.6.1 rather than assumed,
+    because a comparison that silently became False would leave the daemon connected and
+    subscribed to nothing.
+    """
     if rc == 0:
         logger.info("Connected to MQTT Broker successfully.")
         client.subscribe("spBv1.0/#")
         logger.info("Subscribed to 'spBv1.0/#'")
     else:
         logger.error("Failed to connect to MQTT Broker, return code %s", rc)
+
+
+def on_disconnect(client, userdata, rc, properties=None):
+    """
+    Say that the connection ended, and say why WHEN THE LIBRARY GIVES US A WHY -- which, on the
+    pinned paho, it does not for the case anyone cares about.
+
+    BEFORE THIS THERE WAS NO on_disconnect AT ALL, so an involuntary disconnect was entirely silent
+    and the only evidence was a "Connected to MQTT Broker successfully." arriving twice. That much
+    is a real improvement and is why this exists.
+
+    WHAT MQTT 5 WAS EXPECTED TO ADD, AND DOES NOT HERE. v5 lets the broker state a reason in its
+    DISCONNECT, and mosquitto does: a session takeover, measured against this stack with mqtt.js,
+    arrives as 142 `Session taken over`. paho 1.6.1 RECEIVES THAT PACKET AND DISCARDS THE REASON --
+    `_handle_disconnect()` only decodes one when `remaining_length > 2`, and mosquitto's carries a
+    reason code with zero-length properties, which is shorter than that. Enabling paho's protocol
+    log against the same event shows it plainly:
+
+        Received DISCONNECT None None
+
+    and this callback is then reached with paho's own `MQTT_ERR_CONN_LOST` (7) instead. So the
+    branch below that renders a `ReasonCodes` is not dead code -- a newer paho, or a broker sending
+    properties, would take it -- but on the pinned version it does not fire, and claiming otherwise
+    in a comment would be worse than not logging at all.
+
+    IT IS A LOG LINE AND NOT A DECISION. paho's loop_forever() reconnects on its own and should:
+    every reason a broker sends here is either transient or an operator's deliberate act, and a
+    daemon that gave up on one would turn a reconnect into an outage.
+
+    rc == 0 is a disconnect this daemon asked for, which is not worth a line.
+    """
+    if rc == 0:
+        return
+
+    # TWO DIFFERENT THINGS ARRIVE HERE AND CONFLATING THEM WOULD BE WORSE THAN NOT LOGGING.
+    #
+    #   a ReasonCodes  the BROKER said why -- it sent a DISCONNECT packet. This is the v5 gain:
+    #                  "Session taken over", "Server shutting down", "Administrative action".
+    #   a bare int     PAHO said why, and the broker said nothing. 7 is MQTT_ERR_CONN_LOST: the
+    #                  socket went away. A hard broker restart looks like this, because the process
+    #                  dies before it can send anything -- which is exactly the case v5 CANNOT
+    #                  improve, and printing paho's number as though it were a protocol reason code
+    #                  would misrepresent what was learned.
+    if isinstance(rc, int):
+        logger.warning(
+            "Disconnected from MQTT Broker: the connection dropped (paho rc=%s); the broker sent "
+            "no reason. Reconnecting.", rc
+        )
+    else:
+        logger.warning(
+            "Disconnected from MQTT Broker by the broker: %s (reason code %s). Reconnecting. "
+            "Under MQTT 3.1.1 this line could only have said 'unexpected'.", rc, int(rc.value)
+        )
 
 
 def parse_sparkplug_payload(msg):
@@ -3086,14 +3151,21 @@ def main():
         )
         raise SystemExit(1)
 
-    # Note: Intentionally using paho-mqtt==1.6.1 v1 callback signatures.
-    # If upgrading to paho-mqtt 2.x+, callbacks must be migrated to CallbackAPIVersion.VERSION2
-    # signatures (e.g. on_connect(client, userdata, flags, reason_code, properties)).
-    client = mqtt.Client()
+    # MQTT 5, and paho-mqtt==1.6.1's v1 callback API. Those are separate choices: the PROTOCOL is
+    # v5 and the CALLBACK STYLE is still v1, which 1.6.1 supports. Upgrading to paho 2.x is what
+    # would force CallbackAPIVersion.VERSION2, and that is a different change.
+    #
+    # WHAT v5 BUYS THIS DAEMON TODAY: nothing measurable, and that is recorded rather than
+    # glossed. The broker's DISCONNECT reason code -- the one benefit that survived review -- is
+    # sent by mosquitto and DISCARDED BY paho 1.6.1 before it reaches on_disconnect(); see the
+    # measurement there. The daemon is on v5 because the platform is, and a stack speaking two
+    # protocol versions is a combination nobody tests.
+    client = mqtt.Client(protocol=mqtt.MQTTv5)
     client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
     # Before connect(), necessarily: paho applies the TLS context when the socket is opened.
     configure_mqtt_tls(client)
     client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
     client.on_message = on_message
 
     # Started before the connect loop, not after: the connect loop below retries indefinitely, so
@@ -3115,7 +3187,13 @@ def main():
     while True:
         try:
             logger.info("Connecting to MQTT Broker at %s:%s...", MQTT_HOST, MQTT_PORT)
-            client.connect(MQTT_HOST, MQTT_PORT, 60)
+            # `clean_start=True` is v5's spelling of 3.1.1's clean_session, and it is passed
+            # explicitly rather than left to paho's MQTT_CLEAN_START_FIRST_ONLY default so the
+            # session semantics are the ones this daemon already had. NO SESSION EXPIRY
+            # INTERVAL IS SET, deliberately: Sparkplug's NDEATH is the Last Will, and a
+            # surviving session would delay it -- leaving dead edge nodes reading ONLINE with
+            # every device beneath them apparently live.
+            client.connect(MQTT_HOST, MQTT_PORT, 60, clean_start=True)
             break
         except Exception as e:
             logger.warning("MQTT Broker connection failed: %s. Retrying in 2 seconds...", e)

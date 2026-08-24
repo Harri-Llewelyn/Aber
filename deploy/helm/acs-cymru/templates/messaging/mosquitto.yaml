@@ -433,7 +433,7 @@ spec:
               command:
                 - /bin/sh
                 - -c
-                - mosquitto_sub -u "$MQTT_USER" -P "$MQTT_PASSWORD" -t '$SYS/broker/version' -C 1 -W 3
+                - mosquitto_sub -V mqttv5 -u "$MQTT_USER" -P "$MQTT_PASSWORD" -t '$SYS/broker/version' -C 1 -W 3
             periodSeconds: 5
             timeoutSeconds: 5
             failureThreshold: 12
@@ -442,7 +442,7 @@ spec:
               command:
                 - /bin/sh
                 - -c
-                - mosquitto_sub -u "$MQTT_USER" -P "$MQTT_PASSWORD" -t '$SYS/broker/version' -C 1 -W 3
+                - mosquitto_sub -V mqttv5 -u "$MQTT_USER" -P "$MQTT_PASSWORD" -t '$SYS/broker/version' -C 1 -W 3
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
@@ -451,7 +451,7 @@ spec:
               command:
                 - /bin/sh
                 - -c
-                - mosquitto_sub -u "$MQTT_USER" -P "$MQTT_PASSWORD" -t '$SYS/broker/version' -C 1 -W 3
+                - mosquitto_sub -V mqttv5 -u "$MQTT_USER" -P "$MQTT_PASSWORD" -t '$SYS/broker/version' -C 1 -W 3
             periodSeconds: 20
             timeoutSeconds: 5
             failureThreshold: 4
