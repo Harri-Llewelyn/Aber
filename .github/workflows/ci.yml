@@ -210,6 +210,32 @@ jobs:
       - name: Verify Environment Template Covers Every Required Variable
         run: node scripts/check-env-drift.mjs
 
+      # THE ONE ASSERTION NOTHING ELSE IN THIS REPOSITORY CAN MAKE. validate.py asserts the 401s
+      # that SHOULD happen -- the Directory's /v1/device, i3X's /objects, Node-RED's admin API.
+      # Those are positive claims about routes somebody wrote. Nothing can assert the ABSENCE of a
+      # route nobody wrote, because absence is not probeable: there is no request that shows a
+      # route was never added, and no test fails when one is.
+      #
+      # kong.yml fronts nine services, gates four with key-auth, and leaves six routes open across
+      # four deliberate exemptions. A route added here and gated nowhere passes every other check in
+      # this file. So does a translation that quietly widened an exemption -- which is precisely the
+      # risk roadmap §5 (Kong -> Envoy) names when it says "any migration needs the negative
+      # assertions first". This is them, and it is deliberately written against the SURFACE rather
+      # than against Kong, so it survives the gateway being replaced.
+      #
+      # Each of the eleven assertions was verified by breaking it: an unreviewed route, key-auth
+      # removed from the functions catch-all, a literal JWT over a placeholder, literal CORS
+      # origins, a lost prometheus flag, a flipped strip_path, a placeholder taught to neither
+      # substituter, a deleted exemption bullet, a stale count claim in each of the two documents
+      # that carry the argument, an open route dropped from the README table, and a services block
+      # the scanner could not read.
+      #
+      # It found one drift on its first clean run: supabase/README.md -- the document kong.yml's
+      # header sends readers to for the full reasoning -- listed TWO deliberately open routes when
+      # there were six, and had done since the userinfo and Directory exemptions were added.
+      - name: Verify The Gateway Surface Matches What Was Reviewed
+        run: node scripts/check-gateway-surface.mjs
+
       # vite.config.js fails fast if these are unset. Docker passes them as build
       # args; a bare `npm run build` in CI has to supply them explicitly. These are
       # the local-dev demo values from .env.example and are baked into a throwaway
