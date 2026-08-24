@@ -776,7 +776,7 @@ mosquitto:
     extraDnsSans: []
     #  - mqtt.plant.example.com
     # -----------------------------------------------------------------------------------------
-    # Put the IN-CLUSTER clients (the ingestion daemon and Node-RED) on 8883 as well.
+    # Put the IN-CLUSTER clients (the ingestion daemon, the i3X server and Node-RED) on 8883 too.
     #
     # OFF BY DEFAULT, and that is a considered position rather than laziness. Those two reach the
     # broker over the pod network, which never leaves the cluster; the exposure TLS exists to close
@@ -784,10 +784,11 @@ mosquitto:
     # an attacker already inside the pod network, and costs a CA file becoming a hard startup
     # dependency of both workloads.
     #
-    # It is ONE switch for both, not one each: they sit in the same trust domain and share the
-    # certificate, so a partial migration would only create a configuration nobody tests.
+    # It is ONE switch for all three, not one each: they sit in the same trust domain and share
+    # the certificate, so a partial migration would only create a configuration nobody tests --
+    # which is exactly what Compose had until the switch was wired to Node-RED there as well.
     #
-    # Both clients FAIL CLOSED if this is on and the CA is unreadable -- they refuse to start
+    # All three FAIL CLOSED if this is on and the CA is unreadable -- they refuse to start
     # rather than fall back to plaintext or to unverified TLS. That is the intended behaviour: a
     # silent downgrade to an unverified connection is indistinguishable from an interception.
     # -----------------------------------------------------------------------------------------

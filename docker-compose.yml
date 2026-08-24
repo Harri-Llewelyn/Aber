@@ -1299,6 +1299,13 @@ services:
       # loop by the mechanism meant to recover it.
       REBIRTH_REQUEST_INTERVAL_SECONDS: ${REBIRTH_REQUEST_INTERVAL_SECONDS:-300}
       PYTHONUNBUFFERED: "1"
+    # THE CA, READ-ONLY. Mounted unconditionally so that MQTT_TLS_ENABLED is the ONLY thing an
+    # operator changes -- the note in .env.example used to list "the CA has to be mounted into both
+    # containers" as the cost of turning TLS on, which meant editing this file, which meant the
+    # switch was not really a switch. mosquitto-tls-init leaves ca.crt world-readable and ca.key
+    # root-owned at 0600, so this reads the root of trust and not the key that signs with it.
+    volumes:
+      - mosquitto_certs:/etc/acs-cymru/broker-ca:ro
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -1364,6 +1371,13 @@ services:
       I3X_SUBSCRIPTION_TTL_SECONDS: ${I3X_SUBSCRIPTION_TTL_SECONDS:-300}
       I3X_SUBSCRIPTION_QUEUE_LIMIT: ${I3X_SUBSCRIPTION_QUEUE_LIMIT:-10000}
       PYTHONUNBUFFERED: "1"
+    # THE CA, READ-ONLY. Mounted unconditionally so that MQTT_TLS_ENABLED is the ONLY thing an
+    # operator changes -- the note in .env.example used to list "the CA has to be mounted into both
+    # containers" as the cost of turning TLS on, which meant editing this file, which meant the
+    # switch was not really a switch. mosquitto-tls-init leaves ca.crt world-readable and ca.key
+    # root-owned at 0600, so this reads the root of trust and not the key that signs with it.
+    volumes:
+      - mosquitto_certs:/etc/acs-cymru/broker-ca:ro
     depends_on:
       mosquitto:
         condition: service_healthy
@@ -1420,9 +1434,33 @@ services:
       # Seeding is first-run only, so editor changes survive `docker compose up`.
       # Set to true for a deliberate reset back to the repo's flow.
       NODE_RED_FORCE_SEED: ${NODE_RED_FORCE_SEED:-false}
+      # ---------------------------------------------------------------------------------------
+      # THE SIMULATED GATEWAYS' TRANSPORT, and until now the one MQTT client on this target that
+      # the TLS switch did not reach.
+      #
+      # node-red-init.mjs has always known how to do this -- it reconciles every `mqtt-broker`
+      # node onto TLS, attaches the CA, and fails closed when the file is missing. It simply never
+      # received the variables here, so `MQTT_TLS_ENABLED=true` moved the ingestion daemon and the
+      # i3X server onto 8883 and left the simulated gateways publishing in clear on 1883 --
+      # silently, because nothing was configured wrongly, the switch just did not arrive.
+      #
+      # The chart has covered all three since the option existed
+      # (`mosquitto.tls.internalClients`). This is Compose catching up.
+      # ---------------------------------------------------------------------------------------
+      MQTT_HOST: ${MQTT_HOST:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_TLS_ENABLED: ${MQTT_TLS_ENABLED:-}
+      MQTT_TLS_CA_FILE: ${MQTT_TLS_CA_FILE:-}
     volumes:
       - nodered_data:/data
       - ./node_red_flow.json:/seed/flows.json:ro
+      # READ-ONLY, AND FOR ca.crt ALONE. mosquitto-tls-init leaves ca.crt world-readable and
+      # ca.key root-owned at 0600, so a container that does not run as root can read the root of
+      # trust and not the key that signs with it -- the same property the gateway-credential
+      # service relies on for the same volume. Mounted unconditionally: an unused certificate
+      # costs nothing, and making the mount conditional would put the operator back to editing
+      # this file, which is what `.env` exists to avoid.
+      - mosquitto_certs:/etc/acs-cymru/broker-ca:ro
       - ./scripts/node-red-init.mjs:/seed/node-red-init.mjs:ro
     # Writes flows_cred.json encrypted at rest. The script fails closed if it
     # cannot produce ciphertext, rather than silently emitting plaintext secrets.
@@ -1447,6 +1485,12 @@ services:
       - "1880:1880"
     volumes:
       - nodered_data:/data
+      # The RUNTIME needs the file too, not only the init container: node-red-init writes the CA
+      # PATH into the tls-config node, and 05-tls.js reads that path when the flow deploys. An
+      # init container that could see the CA and a runtime that could not would produce a flow
+      # that reconciles cleanly and then fails every connection with a generic
+      # "Connection failed to broker" that never mentions certificates.
+      - mosquitto_certs:/etc/acs-cymru/broker-ca:ro
     depends_on:
       node-red-init:
         condition: service_completed_successfully
