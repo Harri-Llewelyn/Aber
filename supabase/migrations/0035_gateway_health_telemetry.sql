@@ -99,9 +99,11 @@ COMMENT ON COLUMN public.gateways.cert_expires_at IS
   'fleet offline at once with no other signal -- this is what makes that a dated warning instead '
   'of an outage. Reported, not observed: it is what the appliance HAS, which is the question.';
 COMMENT ON COLUMN public.gateways.flow_hash IS
-  'Hash of the flow the appliance is running, reported by it. Answers "is this gateway running '
-  'what we deployed" without a shell on it. An appliance whose operator edited the flow in the '
-  'Node-RED editor reports a hash matching nothing that was ever deployed, which is the point.';
+  'SHA-256 of the flow this appliance was provisioned with, computed by its bootstrap at '
+  'enrolment. Answers "which bundle''s flow is on that gateway" without a shell on it. It does NOT '
+  'detect local edits: an operator who changes the flow in the Node-RED editor keeps reporting the '
+  'hash of what was installed, because the appliance has no way to hash its own running flow '
+  'without the admin API and a credential to call it with.';
 
 
 -- ---------------------------------------------------------------------------------------------

@@ -1,0 +1,248 @@
+#!/usr/bin/env node
+/**
+ * Assert the physical gateway's flow template is one an appliance can actually run.
+ *
+ * WHY THIS EXISTS. `flows.template.json` is the only file in this repository that is JavaScript
+ * inside JSON inside a template, shipped to hardware that nobody here can log into. Nothing
+ * compiles it, nothing lints it, and the two things that read it both do so too late to help:
+ * `bootstrap.mjs` parses it on the APPLIANCE, after the enrolment token has been spent, and
+ * Node-RED evaluates a function node's body at the FIRST TICK rather than at deploy.
+ *
+ * THE FAILURE THAT PROMPTED IT WAS SILENT IN BOTH DIRECTIONS. Every metric in this flow was
+ * encoded `{ name, type: 'String', value: 'ONLINE' }`. The daemon's JSON parser reads
+ * `string_value` / `double_value` / `boolean_value` / `int_value`, so each metric arrived with a
+ * NAME AND NO VALUE and every reading was discarded. It went unnoticed because the only metric it
+ * mattered for was `Gateway_Status`, and a discarded status falls back to the one the message type
+ * implies -- which for an NDATA is `ONLINE`, the same answer. The appliance appeared to report its
+ * own state while the platform was inferring it, and would have swallowed every health metric
+ * added afterwards the same way.
+ *
+ * The flow's own comments record a second one of the same shape: `process.uptime()` in a function
+ * node throws `ReferenceError: process is not defined` at the first tick, BEFORE the first publish,
+ * leaving an enrolled appliance in AWAITING_BIRTH with the only evidence in its own logs.
+ *
+ * WHAT IT CHECKS:
+ *
+ *   1. every function node's body compiles, in the wrapper Node-RED puts around it
+ *   2. no metric uses the `{ type, value }` encoding the daemon discards
+ *   3. every placeholder is one `bootstrap.mjs` substitutes -- it dies on any survivor, on the
+ *      appliance, after the token is spent
+ *   4. every wire resolves, the heartbeat is driven only by its injects, and the host-metric
+ *      branch terminates in the cache instead of reaching the broker
+ *   5. every `env.get()` the flow reads is a variable `bootstrap.mjs` actually writes into
+ *      /data/gateway.env. A metric sourced from a variable nobody exports is simply absent, which
+ *      on this path looks identical to an appliance that has nothing to report.
+ *
+ * WHAT IT DOES NOT CHECK: whether the flow WORKS. That needs a broker, an enrolment and hardware.
+ * This is the class of fault that is invisible until it is on someone's shopfloor.
+ *
+ * Usage:
+ *   node scripts/check-gateway-flow-template.mjs
+ *   node scripts/check-gateway-flow-template.mjs --verbose
+ */
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join, resolve } from 'node:path';
+import vm from 'node:vm';
+
+const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const verbose = process.argv.includes('--verbose');
+const read = (p) => readFileSync(join(REPO, p), 'utf8');
+const log = (m) => verbose && console.log(`       ${m}`);
+
+const problems = [];
+const ok = [];
+const fail = (m) => problems.push(m);
+const pass = (m) => ok.push(m);
+
+const TEMPLATE = 'templates/physical-gateway/flows.template.json';
+const BOOTSTRAP = 'templates/physical-gateway/bootstrap.mjs';
+
+const raw = read(TEMPLATE);
+let flow;
+try {
+  flow = JSON.parse(raw);
+} catch (e) {
+  console.error(`\n${TEMPLATE} is not valid JSON: ${e.message}\n`);
+  console.error('Node-RED starts with NO FLOWS on an unparseable file, which presents as an\n'
+    + 'appliance that enrolled successfully and publishes nothing.\n');
+  process.exit(1);
+}
+
+const byId = Object.fromEntries(flow.map((n) => [n.id, n]));
+const functions = flow.filter((n) => n.type === 'function');
+log(`${flow.length} nodes, ${functions.length} function node(s)`);
+
+// -------------------------------------------------------------------------------------------------
+// 1. Every function body compiles, in the wrapper Node-RED builds around it.
+// -------------------------------------------------------------------------------------------------
+{
+  if (!functions.length) {
+    fail(`${TEMPLATE} declares no function nodes, which cannot be right -- the heartbeat is one.`);
+  }
+  let broken = 0;
+  for (const n of functions) {
+    try {
+      // The same parameter list the runtime supplies, so a body referencing `env` or `flow`
+      // compiles here exactly as it does there -- and one reaching for `process` or `require`
+      // still compiles, because that failure is a ReferenceError at run time and no parser can
+      // see it. Assertion 5 is what covers the reachable half of that.
+      new vm.Script(`(function (msg, node, context, flow, global, env, RED) {\n${n.func}\n})`);
+    } catch (e) {
+      broken += 1;
+      fail(
+        `function node '${n.name || n.id}' does not compile: ${e.message}\n`
+        + '         Node-RED evaluates a function body at its FIRST TICK, not at deploy, so this\n'
+        + '         reaches an appliance as "enrolled, connected, publishing nothing".'
+      );
+    }
+  }
+  if (!broken) pass(`all ${functions.length} function nodes compile`);
+}
+
+// -------------------------------------------------------------------------------------------------
+// 2. No metric uses the encoding the daemon cannot read.
+// -------------------------------------------------------------------------------------------------
+{
+  const legacy = [...raw.matchAll(/\{\s*name:\s*'([^']+)',\s*type:\s*'(String|Int64|Int32|Float|Double|Boolean)'/g)];
+  if (legacy.length) {
+    fail(
+      `${legacy.length} metric(s) use the \`{ name, type, value }\` encoding: `
+      + `${legacy.map((m) => m[1]).join(', ')}.\n`
+      + '         parse_sparkplug_payload()\'s JSON branch reads `string_value`, `double_value`,\n'
+      + '         `boolean_value` or `int_value`. A metric carrying none of them arrives with a\n'
+      + '         name and NO VALUE, and is discarded without an error at either end.'
+    );
+  } else {
+    pass('no metric uses the { name, type, value } encoding the daemon discards');
+  }
+
+  // `int_value` is a uint32 in Sparkplug -- 4.29 GB -- and the daemon's JSON branch does not read
+  // `long_value` at all, so any byte count has to travel as a double. This catches the fix for
+  // that being undone by someone making the encoding "more correct".
+  const ints = [...raw.matchAll(/name:\s*'([A-Za-z_]*(?:Bytes|_s))',[^}]*int_value/g)];
+  if (ints.length) {
+    fail(
+      `${ints.map((m) => m[1]).join(', ')} sent as \`int_value\`, which is a uint32 (max 4.29 GB)\n`
+      + '         and cannot hold a memory or disk figure. `long_value` is not read by the JSON\n'
+      + '         branch at all; use `double_value`, exact for integers to 2^53.'
+    );
+  } else {
+    pass('byte counts avoid int_value, which is a uint32 and too small for them');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 3. Placeholders are exactly what bootstrap substitutes.
+// -------------------------------------------------------------------------------------------------
+{
+  const bootstrap = read(BOOTSTRAP);
+  const substituted = [...new Set(
+    [...bootstrap.matchAll(/replaceAll\('(__[A-Z0-9_]+__)'/g)].map((m) => m[1])
+  )].sort();
+  const inTemplate = [...new Set(raw.match(/__[A-Z0-9_]+__/g) || [])].sort();
+  const orphans = inTemplate.filter((p) => !substituted.includes(p));
+
+  if (!substituted.length) {
+    fail(`no \`replaceAll('__…__')\` calls found in ${BOOTSTRAP}; the comparison examined nothing.`);
+  } else if (orphans.length) {
+    fail(
+      `${TEMPLATE} uses placeholder(s) bootstrap.mjs does not substitute: ${orphans.join(', ')}.\n`
+      + '         bootstrap dies on a survivor -- ON THE APPLIANCE, after the single-use enrolment\n'
+      + '         token has already been spent, so recovering means issuing a new bundle.'
+    );
+  } else {
+    pass(`all ${inTemplate.length} placeholders are ones bootstrap.mjs substitutes`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 4. The wiring: nothing dangling, and the collector cannot take the heartbeat down with it.
+// -------------------------------------------------------------------------------------------------
+{
+  const ids = new Set(flow.map((n) => n.id));
+  const dangling = [];
+  for (const n of flow) {
+    for (const port of n.wires || []) {
+      for (const target of port) if (!ids.has(target)) dangling.push(`${n.id} -> ${target}`);
+    }
+  }
+  if (dangling.length) fail(`wire(s) pointing at nothing: ${dangling.join(', ')}`);
+  else pass('every wire resolves to a declared node');
+
+  const HEARTBEAT = 'acs-node-msg';
+  if (!byId[HEARTBEAT]) {
+    fail(`the heartbeat node '${HEARTBEAT}' is gone; it is what makes a gateway show ONLINE.`);
+  } else {
+    // THE PROPERTY THAT MATTERS MOST HERE. Anything wired into the heartbeat can delay or fail it,
+    // and a gateway that stops beating is reported STALE and then OFFLINE. A host-metric collector
+    // must never be able to do that, which is why it writes to a cache the heartbeat reads instead
+    // of being chained into its path.
+    const feeds = flow.filter((n) => (n.wires?.[0] || []).includes(HEARTBEAT)).map((n) => n.id).sort();
+    const expected = ['acs-birth-tick', 'acs-data-tick'];
+    if (JSON.stringify(feeds) !== JSON.stringify(expected)) {
+      fail(
+        `the heartbeat is fed by [${feeds.join(', ')}]; expected only its two injects `
+        + `[${expected.join(', ')}].\n`
+        + '         Anything else on that path can delay or fail the heartbeat, and a gateway that\n'
+        + '         stops beating is reported STALE and then OFFLINE -- a worse failure than any\n'
+        + '         metric it could be collecting.'
+      );
+    } else {
+      pass('the heartbeat is driven by its two injects and nothing else');
+    }
+  }
+
+  const CACHE = 'acs-host-parse';
+  if (byId[CACHE] && JSON.stringify(byId[CACHE].wires) !== '[[]]') {
+    fail(`'${CACHE}' has an outgoing wire; it must terminate in the flow cache, not publish.`);
+  } else if (byId[CACHE]) {
+    pass('the host-metric branch terminates in the cache rather than reaching the broker');
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 5. Every env.get() the flow reads is a variable bootstrap actually exports.
+// -------------------------------------------------------------------------------------------------
+{
+  const bootstrap = read(BOOTSTRAP);
+  const wanted = [...new Set(
+    (raw.match(/env\.get\(\\?'([A-Z0-9_]+)\\?'\)/g) || [])
+      .map((m) => m.replace(/.*?([A-Z0-9_]{2,}).*/, '$1'))
+  )].sort();
+  const exported = [...new Set(
+    (bootstrap.match(/export ([A-Z0-9_]+)=/g) || []).map((m) => m.slice(7, -1))
+  )].sort();
+
+  const missing = wanted.filter((v) => !exported.includes(v));
+  if (!wanted.length) {
+    log('the flow reads no environment variables');
+    pass('the flow reads no environment variables');
+  } else if (missing.length) {
+    fail(
+      `the flow reads ${missing.join(', ')}, which bootstrap.mjs does not write to `
+      + '/data/gateway.env.\n         env.get() returns undefined and the metric is simply '
+      + 'omitted -- indistinguishable,\n         from the platform, from an appliance that has '
+      + 'nothing to report.'
+    );
+  } else {
+    pass(`all ${wanted.length} environment variables the flow reads are exported by bootstrap`);
+  }
+}
+
+// =================================================================================================
+for (const line of ok) console.log(`  ok   ${line}`);
+if (problems.length) {
+  console.error('\nThe gateway flow template would not do what it appears to:\n');
+  for (const p of problems) console.error(`  ${p}\n`);
+  console.error(
+    'This file is JavaScript inside JSON inside a template, running on hardware nobody here can\n'
+    + 'log into. Both readers see it too late to help: bootstrap parses it on the appliance after\n'
+    + 'the enrolment token is spent, and Node-RED evaluates a function body at its first tick.\n'
+  );
+  process.exit(1);
+}
+console.log(
+  `\n${TEMPLATE} compiles, uses an encoding the daemon reads, and is wired so the collector `
+  + 'cannot take the heartbeat with it.'
+);

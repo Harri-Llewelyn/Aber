@@ -29,7 +29,7 @@
  *   node /bundle/bootstrap.mjs --reset-admin-password    # new editor password, keeps enrolment
  *   node /bundle/bootstrap.mjs --force                   # re-enrol with a NEW token in .env
  */
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, X509Certificate } from 'node:crypto';
 import {
   chownSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync,
 } from 'node:fs';
@@ -384,6 +384,72 @@ JSON.parse(flow); // Refuse to write a flow Node-RED cannot parse; it would star
 writeFileSync(FLOWS, flow);
 log(`wrote ${FLOWS}`);
 
+// ---------------------------------------------------------------------------------------------
+// THE THREE FACTS THE HEARTBEAT REPORTS THAT NODE-RED CANNOT WORK OUT FOR ITSELF.
+//
+// A function node runs in a sandbox with no `require`, no `fs` and no `process` -- settings.js
+// declares `functionGlobalContext: {}` deliberately, and the flow's own comment records what
+// happens when something reaches past that (a ReferenceError thrown before the first publish,
+// leaving the appliance in AWAITING_BIRTH with the only evidence in its own logs). So these are
+// resolved HERE, where the files actually are, and handed to the flow as environment variables
+// that `env.get()` reads.
+//
+// ALL THREE ARE FIXED FOR THE LIFE OF AN ENROLMENT, which is what makes this the right place
+// rather than a periodic job: the CA, the flow and the bundle all change only by re-running this
+// script, and re-running it rewrites every one of these values.
+//
+// The caveat, stated because it is the one way these go stale: an operator who replaces
+// /data/certs/ca.crt or edits the flow in the Node-RED editor WITHOUT re-enrolling will keep
+// reporting the values recorded here. Re-enrolment is the supported path for both.
+// ---------------------------------------------------------------------------------------------
+
+// The flow AS DELIVERED. Identifies which bundle's flow was installed -- not whether it has since
+// been edited in the editor, which would need the admin API and a credential to ask.
+const FLOW_HASH = createHash('sha256').update(flow).digest('hex');
+
+/**
+ * `ACS_AGENT_VERSION` COMES FROM THE OPERATOR'S .env AND IS ABOUT TO ENTER A SHELL FILE.
+ *
+ * gateway.env is written as `export NAME='value'` and SOURCED by the node-red service's command.
+ * A single quote in this value therefore closes the string and the rest becomes shell -- which at
+ * best stops the appliance starting with a syntax error naming a file the operator has never
+ * heard of, and at worst runs. Nothing else written below has this exposure: the hash is hex, the
+ * expiry is digits, and the remaining values come from the platform's own enrolment response.
+ *
+ * Restricted rather than escaped, and capped at 64 to match what the daemon accepts for the
+ * column: a version string is a label, and anything outside this set is not one.
+ */
+const SAFE_AGENT_VERSION = AGENT_VERSION.replace(/[^A-Za-z0-9._+-]/g, '').slice(0, 64) || 'unknown';
+if (SAFE_AGENT_VERSION !== AGENT_VERSION) {
+  log(`ACS_AGENT_VERSION contained characters that cannot go in gateway.env; reporting `
+    + `'${SAFE_AGENT_VERSION}'`);
+}
+
+/**
+ * The CA's notAfter, in epoch milliseconds.
+ *
+ * WHY THIS ONE MATTERS MOST. The CA is distributed by hand into every appliance's trust store, so
+ * re-minting it does not fail loudly -- it succeeds, and the whole fleet drops off at once with no
+ * signal but absence. Reporting the date this appliance actually holds is what turns that into a
+ * warning with a month's notice.
+ *
+ * A CA THAT CANNOT BE PARSED IS NOT FATAL. The appliance still enrols, still connects and still
+ * reports every other health metric; it simply does not claim an expiry date. Refusing to boot
+ * over an unreadable date would trade a monitoring gap for an outage.
+ */
+let caExpiresMs = '';
+try {
+  caExpiresMs = String(Date.parse(new X509Certificate(enrolment.ca_cert).validTo));
+  if (!Number.isFinite(Number(caExpiresMs))) caExpiresMs = '';
+} catch {
+  caExpiresMs = '';
+}
+if (caExpiresMs) {
+  log(`broker CA expires ${new Date(Number(caExpiresMs)).toISOString()}`);
+} else {
+  log('WARNING: could not read the broker CA expiry; Cert_Expires_At will not be reported.');
+}
+
 // 3. The broker credential, encrypted.
 await writeEncryptedCredentials(BROKER_NODE_ID, enrolment.mqtt_username, enrolment.mqtt_password);
 log(`wrote ${CREDS} (encrypted)`);
@@ -402,6 +468,11 @@ writeFileSync(
     `export GATEWAY_MQTT_TLS_PORT='${enrolment.mqtt_tls_port}'`,
     `export GATEWAY_SPARKPLUG_ID='${enrolment.sparkplug_id}'`,
     `export GATEWAY_SPARKPLUG_GROUP='${enrolment.sparkplug_group}'`,
+    // Read by the flow's `build node-level message` function through env.get(), and reported on
+    // the heartbeat. See the block above for why they are resolved here rather than in the flow.
+    `export GATEWAY_AGENT_VERSION='${SAFE_AGENT_VERSION}'`,
+    `export GATEWAY_FLOW_HASH='${FLOW_HASH}'`,
+    `export GATEWAY_CA_EXPIRES_MS='${caExpiresMs}'`,
     `export NODERED_CREDENTIAL_SECRET='${CREDENTIAL_SECRET}'`,
     '',
   ].join('\n'),

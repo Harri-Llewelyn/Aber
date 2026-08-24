@@ -3,14 +3,19 @@
 #
 #   docker compose up -d
 #
-# TWO SERVICES, AND THE ORDER IS THE WHOLE DESIGN. `bootstrap` runs ONCE, exchanges the enrolment
-# token in .env for a broker credential, and provisions /data -- the CA, the flow, the encrypted
-# credentials and a settings.js with a locally generated admin password. `node-red` then starts
-# against that /data and does the actual work.
+# TWO SERVICES IN SEQUENCE, AND THAT ORDER IS THE WHOLE DESIGN. `bootstrap` runs ONCE, exchanges
+# the enrolment token in .env for a broker credential, and provisions /data -- the CA, the flow, the
+# encrypted credentials and a settings.js with a locally generated admin password. `node-red` then
+# starts against that /data and does the actual work.
 #
 # They cannot be one service: Node-RED reads settings.js at load time, and the MQTT credentials do
 # not exist until enrolment has happened. A single container would have to enrol and then restart
 # itself, which is the same two steps with nothing to look at when the first one fails.
+#
+# A THIRD SERVICE SITS OUTSIDE THAT SEQUENCE. `node-exporter` collects host metrics and depends on
+# nothing here -- not on enrolment, not on /data. The flow polls it locally and publishes a handful
+# of series on the connection it already holds; see its own block below for why it is not scraped
+# from the centre.
 #
 # WHERE THE PASSWORD GOES. `bootstrap` prints the Node-RED editor password ONCE, to its own logs:
 #
@@ -88,6 +93,57 @@ services:
         fi
         . /data/gateway.env
         exec npm --no-update-notifier --no-fund start --cache /data/.npm -- --userDir /data
+
+  # ===============================================================================================
+  # node_exporter -- HOST metrics for the machine this appliance runs on.
+  #
+  # THE COLLECTOR IS RIGHT AND SCRAPING IT FROM THE CENTRE WOULD BE WRONG, which is the whole
+  # reason it appears here rather than in the platform's Prometheus:
+  #
+  #   * THIS APPLIANCE'S CONNECTION IS OUTBOUND ONLY. It dials <broker>:8883 and nothing anywhere
+  #     assumes traffic in the other direction. Scraping would need an inbound path through the
+  #     plant firewall, per gateway -- the exact thing an outbound-only design exists to avoid, and
+  #     a separate conversation with somebody's IT department per site.
+  #   * GATEWAYS ENROL DYNAMICALLY, with single-use tokens, so a static scrape config cannot know
+  #     them. Pull would additionally need service discovery backed by the platform's gateway
+  #     table: an endpoint to build, secure and keep correct.
+  #
+  # So it is scraped LOCALLY, over this compose network, by the Node-RED flow -- which then
+  # publishes a handful of series as Sparkplug metrics on the MQTT connection that is already open
+  # and already authenticated. No new inbound path, no new credential, no discovery.
+  #
+  # WHY node_exporter AND NOT A FUNCTION NODE READING /proc. It collects host metrics correctly,
+  # which a hand-rolled disk and memory read in a Node-RED function will not -- and a function node
+  # has no `fs` to read /proc with in the first place. It also removes the Windows question
+  # entirely: `windows_exporter` serves the same exposition format, so a Windows gateway differs
+  # only in which collector is installed and this flow does not change at all.
+  #
+  # NOT PUBLISHED. No `ports:` -- host metrics have no business leaving the appliance except as the
+  # handful of values the flow selects and publishes. Read-only mounts and no capabilities: it
+  # reads /proc and /sys and reports numbers.
+  #
+  # THE HEARTBEAT DOES NOT DEPEND ON IT. The flow polls this on its own timer and caches the
+  # result; the 30s heartbeat publishes whatever is cached. A node_exporter that is down or slow
+  # costs three metrics, never the heartbeat -- see `poll host metrics` in the flow.
+  # ===============================================================================================
+  node-exporter:
+    container_name: acs-gateway-node-exporter
+    image: prom/node-exporter:v1.12.1
+    restart: unless-stopped
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      # Container and pseudo filesystems excluded, or every image layer and overlay mount appears
+      # as a separate "disk" and the one number that matters -- free space on the real volume -- is
+      # buried among dozens that are not disks at all. Same exclusions as the platform's own
+      # exporter, so a gateway's disk figure means what the central one means.
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|cgroup.*|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|mqueue|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$$'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
 
 volumes:
   # THE APPLIANCE'S STATE, and the thing to back up. It holds the flow, the encrypted credentials,

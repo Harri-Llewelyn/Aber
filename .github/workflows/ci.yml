@@ -236,6 +236,27 @@ jobs:
       - name: Verify The Gateway Surface Matches What Was Reviewed
         run: node scripts/check-gateway-surface.mjs
 
+      # THE ONLY FILE HERE THAT IS JAVASCRIPT INSIDE JSON INSIDE A TEMPLATE, shipped to hardware
+      # nobody on this project can log into. Nothing compiled it and nothing linted it, and both
+      # things that read it do so too late to help: bootstrap.mjs parses it ON THE APPLIANCE, after
+      # the single-use enrolment token has been spent, and Node-RED evaluates a function node's
+      # body at its FIRST TICK rather than at deploy.
+      #
+      # The failure that prompted this was silent in both directions. Every metric in the flow was
+      # encoded `{ name, type: 'String', value: 'ONLINE' }`, which the daemon's JSON parser does not
+      # read -- each metric arrived with a name and no value and was discarded. It went unnoticed
+      # because the one metric it mattered for was Gateway_Status, and a discarded status falls back
+      # to the one the message type implies: ONLINE for an NDATA, the same answer. The appliance
+      # appeared to report its own state while the platform inferred it.
+      #
+      # Eight assertions, each verified by breaking it: an uncompilable function body, the
+      # { type, value } encoding restored, a byte count sent as a uint32 int_value, a placeholder
+      # bootstrap does not substitute, a dangling wire, the collector wired into the heartbeat, the
+      # cache node publishing to the broker, bootstrap dropping a variable the flow reads -- plus a
+      # file Node-RED could not parse, which exits before comparing anything.
+      - name: Verify The Gateway Flow Template Runs As It Reads
+        run: node scripts/check-gateway-flow-template.mjs
+
       # vite.config.js fails fast if these are unset. Docker passes them as build
       # args; a bare `npm run build` in CI has to supply them explicitly. These are
       # the local-dev demo values from .env.example and are baked into a throwaway
