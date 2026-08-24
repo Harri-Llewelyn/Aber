@@ -1713,6 +1713,141 @@ def accept_reported_status(reported: str, edge_node_id: str = None):
     return candidate
 
 
+# -----------------------------------------------------------------------------
+# Appliance health, carried on the heartbeat that already exists
+# -----------------------------------------------------------------------------
+# WHAT AN APPLIANCE REPORTS ABOUT ITSELF, and where each value lands. Migration 0035 carries the
+# argument for the columns; this is the wire contract.
+#
+# NO NEW TRANSPORT, CREDENTIAL OR TABLE. These arrive as ordinary metrics on the node-level message
+# the appliance already publishes every 30s over a connection it already holds. `on_message()`
+# routes node-level topics here and returns before `process_ddata()`, so none of this reaches the
+# historian or `metric_catalog` -- which is what makes it cheap, and also why it is CURRENT STATE
+# WITH NO HISTORY.
+#
+# `Agent_Version` writes the column `0025` stamps at enrolment. That is the point rather than a
+# collision: enrolment was the only moment the platform ever heard which bundle an appliance runs,
+# so an in-place upgrade was invisible until the appliance re-enrolled.
+GATEWAY_HEALTH_METRICS = {
+    # metric name           column                  kind
+    "Uptime_s":            ("uptime_seconds",      "int"),
+    "Load_1m":             ("load_1m",             "float"),
+    "Mem_Available_Bytes": ("mem_available_bytes", "int"),
+    "Disk_Free_Bytes":     ("disk_free_bytes",     "int"),
+    "Cert_Expires_At":     ("cert_expires_at",     "epoch_ms"),
+    "Agent_Version":       ("agent_version",       "text"),
+    "Flow_Hash":           ("flow_hash",           "text"),
+}
+
+# A sha256 hex digest is 64 characters, which is the longest of these by design. Over-length is
+# dropped rather than truncated, for the same reason a status is: a truncated flow hash matches
+# nothing and would read as "this appliance is running something we never deployed".
+MAX_GATEWAY_HEALTH_TEXT_LENGTH = 64
+
+# Sanity bounds for `Cert_Expires_At`, in epoch milliseconds: 2000-01-01 to 2200-01-01.
+#
+# DELIBERATELY NOT "IN THE FUTURE". An ALREADY-EXPIRED CA is the exact condition this metric exists
+# to surface, so a notAfter in the past is a valid and important reading. Only values that cannot
+# be a certificate date at all are refused -- a zero, a seconds-vs-milliseconds mix-up, a garbled
+# parse.
+CERT_EPOCH_MS_MIN = 946684800000
+CERT_EPOCH_MS_MAX = 7258118400000
+
+# Throttle for refused health metrics, keyed by edge node id. An appliance publishing a bad value
+# publishes it on every heartbeat -- 119 an hour -- so the refusal has to be legible without being
+# the whole log. Same arrangement as the refused-status throttle above.
+_health_rejected_warned = {}
+HEALTH_REJECT_WARN_INTERVAL_SECONDS = 300
+
+
+def _numeric_metric_value(metric):
+    """The metric's numeric value whichever Sparkplug field carries it, or None."""
+    for field in ("int_value", "long_value", "float_value", "double_value"):
+        if metric.HasField(field):
+            return getattr(metric, field)
+    return None
+
+
+def extract_gateway_health(group_id, edge_node_id, payload):
+    """
+    The recognised health metrics in a node-level payload, as a column -> value dict.
+
+    VALIDATED HERE RATHER THAN BY A CHECK CONSTRAINT, and migration 0035 records why: these
+    columns are written in the SAME UPDATE as `status` and `last_heartbeat`. A constraint
+    violation would fail that whole statement, so one nonsensical disk figure would stop a live
+    gateway reporting ONLINE -- a cosmetic fault presenting as an outage. A metric that fails
+    validation is dropped and counted; every other metric in the payload, and the heartbeat
+    itself, still lands.
+
+    Returns {} when nothing recognised is present, which is the ordinary case for the platform's
+    own simulators and for any appliance on a bundle predating this.
+    """
+    health = {}
+    for metric in payload.metrics:
+        # Resolved, not read raw, for the same reason the status metric is: a node publishing
+        # alias-optimised NDATA carries no name, and a raw `metric.name` test would silently see
+        # an appliance as reporting nothing at all.
+        name = resolve_metric_name(group_id, edge_node_id, metric)
+        mapping = GATEWAY_HEALTH_METRICS.get(name)
+        if not mapping:
+            continue
+        column, kind = mapping
+
+        if kind == "text":
+            if not metric.HasField("string_value"):
+                _reject_health(edge_node_id, name, "not a string")
+                continue
+            candidate = metric.string_value.strip()
+            if not candidate or len(candidate) > MAX_GATEWAY_HEALTH_TEXT_LENGTH:
+                _reject_health(edge_node_id, name, "empty or over %d characters"
+                               % MAX_GATEWAY_HEALTH_TEXT_LENGTH)
+                continue
+            health[column] = candidate
+            continue
+
+        raw = _numeric_metric_value(metric)
+        if raw is None:
+            _reject_health(edge_node_id, name, "carries no numeric value")
+            continue
+        try:
+            number = float(raw)
+        except (TypeError, ValueError):
+            _reject_health(edge_node_id, name, "not a number")
+            continue
+        # NaN and the infinities are floats and would serialise into JSON the database refuses.
+        if number != number or number in (float("inf"), float("-inf")):
+            _reject_health(edge_node_id, name, "not finite")
+            continue
+
+        if kind == "epoch_ms":
+            if not (CERT_EPOCH_MS_MIN <= number <= CERT_EPOCH_MS_MAX):
+                _reject_health(edge_node_id, name, "outside any plausible certificate date")
+                continue
+            health[column] = datetime.fromtimestamp(number / 1000, timezone.utc).isoformat()
+            continue
+
+        # Uptime, load, memory and free space are all quantities that cannot be negative. A
+        # negative one is a counter that wrapped or a parse that went wrong, and recording it
+        # would put a number on a page that an operator would act on.
+        if number < 0:
+            _reject_health(edge_node_id, name, "negative")
+            continue
+        health[column] = int(number) if kind == "int" else number
+
+    return health
+
+
+def _reject_health(edge_node_id, metric_name, reason):
+    """Drop one health metric, loudly enough to find and quietly enough to live with."""
+    count("gateway_health_metrics_rejected")
+    if _throttled(_health_rejected_warned, edge_node_id or "", HEALTH_REJECT_WARN_INTERVAL_SECONDS):
+        logger.warning(
+            "Edge node '%s' reported an unusable health metric -- '%s': %s. Dropping that metric; "
+            "the heartbeat and every other metric in the payload are unaffected.",
+            edge_node_id, metric_name, reason
+        )
+
+
 def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: str = None):
     """
     On Sparkplug B node-level messages (NBIRTH / NDATA / NDEATH):
@@ -1791,11 +1926,23 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     previous_status = gateway.get("status")
     transitioned = previous_status is not None and previous_status != status
 
+    # AFTER the registration check, not before: an unregistered node is dropped either way, and
+    # validating its metrics first would log rejections for a gateway nothing is going to write.
+    update = {
+        "status": status,
+        "last_heartbeat": heartbeat_dt.isoformat(),
+    }
+    health = extract_gateway_health(group_id, edge_node_id, payload)
+    if health:
+        update.update(health)
+        # STAMPED ONLY WHEN SOMETHING WAS RECOGNISED, which is what makes the column mean what
+        # 0035 says it means: an appliance on a bundle predating this beats forever and leaves
+        # `health_reported_at` NULL, which reads as "does not report health" rather than as "has
+        # stopped reporting it". The two need different responses.
+        update["health_reported_at"] = heartbeat_dt.isoformat()
+
     try:
-        supabase_client.table("gateways").update({
-            "status": status,
-            "last_heartbeat": heartbeat_dt.isoformat()
-        }).eq("id", gateway["id"]).execute()
+        supabase_client.table("gateways").update(update).eq("id", gateway["id"]).execute()
 
         # Kept in step with the row resolve_gateway() cached, so the next heartbeat inside
         # CACHE_TTL_SECONDS compares against what was actually written rather than re-reporting
