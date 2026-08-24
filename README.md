@@ -11,7 +11,7 @@ management.
 
 > **Design ethos —** *use pre-existing components and standards; minimise custom code.*
 > Where upstream ACS ships bespoke microservices, this fork uses Supabase, TimescaleDB, Grafana and
-> Node-RED. The custom surface is one Python ingestion daemon, nine edge functions, an i3X server and
+> Node-RED. The custom surface is one Python ingestion daemon, ten edge functions, an i3X server and
 > a React dashboard.
 
 ---
@@ -40,7 +40,7 @@ flowchart TB
 
     subgraph Processing ["Ingestion & Serverless"]
         ING["Python Ingestion Engine<br/>identity - quarantine - binding"]
-        EF["Edge Functions<br/>approve-quarantine - deploy-nodered - aas-export<br/>grafana-userinfo - nodered-userinfo - fplus-directory<br/>grafana-alert-webhook - enroll-gateway - gateway-bundle"]
+        EF["Edge Functions<br/>approve-quarantine - deploy-nodered - aas-export<br/>grafana-userinfo - nodered-userinfo - fplus-directory<br/>grafana-alert-webhook - enroll-gateway - gateway-bundle<br/>revoke-gateway-credential"]
     end
 
     subgraph Supabase ["Supabase BaaS"]
@@ -157,7 +157,10 @@ publishes, chiefly `cert_expires_at`: the internal CA is hand-distributed into e
 trust store, so re-minting it takes the whole fleet offline at once with no other signal — and
 `0036` adds `public.gateway_health`, the **third** narrow view the Grafana reader may select,
 after `0027`'s and `0029`'s: it backs the gateway dashboard and the certificate alert while
-leaving the asset inventory `0029` deliberately withheld exactly where it is — and `0037`
+leaving the asset inventory `0029` deliberately withheld exactly where it is — and `0038` makes
+**archiving or deleting a gateway revoke its broker credential**, by rotating the account to a
+password nobody records: the credential service is add-only by design, so a delete verb there
+would turn "can mint one confined account" into "can stop the whole fleet publishing" — and `0037`
 makes **archiving a gateway withdraw its outstanding enrolment bundle**, and enrolment refuse
 an archived gateway at all: a bundle downloaded and never instantiated was still redeemable
 after the gateway was archived, which issued a real broker credential and resurrected the row

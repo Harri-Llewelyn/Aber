@@ -254,6 +254,11 @@ services:
       # the default stack, where Node-RED runs without adminAuth -- the migration then leaves
       # the secret unset and the webhook goes out unauthenticated.
       NODERED_ADMIN_TOKEN: ${NODERED_ADMIN_TOKEN:-}
+      # Read by 0038, which stores both in Vault so a trigger on `gateways` can reach the
+      # revoke-gateway-credential function through Kong. The anon key only gets past Kong's
+      # key-auth; GATEWAY_REVOKE_SECRET is what authorises the revocation.
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      GATEWAY_REVOKE_SECRET: ${GATEWAY_REVOKE_SECRET:-}
       # Hashed into auth.oauth_clients by 0002_seed_data.sql. Grafana
       # reads the same plaintext from its own environment via grafana.ini.
       GRAFANA_OAUTH_CLIENT_SECRET: ${GRAFANA_OAUTH_CLIENT_SECRET:-}
@@ -293,7 +298,7 @@ services:
           echo \"Executing migration $$f...\";
           attempt=1;
           while :; do
-            if psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v grafana_public_url=\"$$GRAFANA_PUBLIC_URL\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -h supabase-db -U postgres -d postgres -f \"$$f\" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi;
+            if psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v grafana_public_url=\"$$GRAFANA_PUBLIC_URL\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -v supabase_functions_url=\"http://supabase-kong:8000/functions/v1\" -v supabase_anon_key=\"$$SUPABASE_ANON_KEY\" -v gateway_revoke_secret=\"$$GATEWAY_REVOKE_SECRET\" -h supabase-db -U postgres -d postgres -f \"$$f\" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi;
             cat /tmp/migration.log;
             # RETRIED ONLY ON A DEADLOCK, never on anything else. Every migration here is
             # idempotent and is replayed on every boot already, so re-running one is safe by
@@ -781,6 +786,10 @@ services:
       # its own value and not shared with any other secret.
       MQTT_CREDENTIAL_SERVICE_URL: ${MQTT_CREDENTIAL_SERVICE_URL:-http://gateway-credential:9010}
       MQTT_CREDENTIAL_SERVICE_TOKEN: ${MQTT_CREDENTIAL_SERVICE_TOKEN:-}
+      # Verified by revoke-gateway-credential. The edge runtime boots with VERIFY_JWT=false, so a
+      # function that does not check its own secret is an open endpoint -- Kong's key-auth proves
+      # only that the caller holds the anon key, which ships in every browser bundle.
+      GATEWAY_REVOKE_SECRET: ${GATEWAY_REVOKE_SECRET:-}
       # Where an ENROLLED APPLIANCE dials the broker, returned in the enrolment response. NO
       # `mosquitto` DEFAULT ON PURPOSE: that resolves on this network and nowhere a gateway lives,
       # so a default would produce bundles that enrol perfectly and then connect to nothing.

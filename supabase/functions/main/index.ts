@@ -74,6 +74,22 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "MQTT_PUBLIC_TLS_PORT",
   ],
 
+  // Rotates a decommissioned gateway's broker account to a password nobody records, which is how
+  // this platform revokes -- the credential service is add-only by design (0038).
+  //
+  // CALLED BY THE DATABASE, not by a browser. A trigger on `gateways` reaches it through Kong with
+  // pg_net, because the NetworkPolicy admits only `supabase-functions` to the credential service
+  // and a trigger dialling that port itself would be a second edge into credential issuance.
+  //
+  // GATEWAY_REVOKE_SECRET must be listed here or the worker starts without it and answers 503 to
+  // every revocation: envForFunction() forwards ONLY what this registry names. Same failure the
+  // grafana-alert-webhook comment above describes.
+  "revoke-gateway-credential": [
+    "MQTT_CREDENTIAL_SERVICE_URL",
+    "MQTT_CREDENTIAL_SERVICE_TOKEN",
+    "GATEWAY_REVOKE_SECRET",
+  ],
+
   // Packages the physical gateway bootstrap bundle as a ZIP.
   //
   // NO SERVICE-ROLE KEY, and that is the design rather than an omission. It reads the gateway and

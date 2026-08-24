@@ -178,6 +178,13 @@ secrets:
   # REFUSES TO START if it is shorter than 32 characters; `npm run setup` generates one for Compose.
   mqttCredentialServiceToken: ""
 
+  # Authorises the gateways trigger's call to revoke-gateway-credential, which rotates a
+  # decommissioned gateway's broker account to a password nobody records (0038). SEPARATE from
+  # mqttCredentialServiceToken above: that one authorises minting an account for ANY edge node,
+  # this one only authorises revoking one. Empty leaves revocation inert -- archiving a gateway
+  # will not withdraw its broker credential.
+  gatewayRevokeSecret: ""
+
   grafanaAdminUser: admin
   grafanaAdminPassword: ""
   grafanaOAuthClientSecret: ""
