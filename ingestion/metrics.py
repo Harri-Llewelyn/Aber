@@ -65,6 +65,8 @@ COUNTER_MAP = {
     # that convention becomes a dimension a query can group by.
     "dropped_gateway_binding": (
         "acs_ingestion_messages_dropped_total", {"reason": "gateway_binding"}),
+    "dropped_gateway_archived": (
+        "acs_ingestion_messages_dropped_total", {"reason": "gateway_archived"}),
     "dropped_quarantined_or_unregistered": (
         "acs_ingestion_messages_dropped_total", {"reason": "quarantined_or_unregistered"}),
     "dropped_directory_unavailable": (

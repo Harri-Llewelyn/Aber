@@ -462,6 +462,7 @@ cd frontend && npm test
 # Python unit suites — no stack required
 python ingestion/test_gateway_binding.py
 python ingestion/test_gateway_health_metrics.py
+python ingestion/test_archived_gateway.py
 python ingestion/test_declared_metrics.py
 python ingestion/test_modelled_metrics_contract.py
 python ingestion/test_device_location.py

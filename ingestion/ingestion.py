@@ -1124,7 +1124,55 @@ def resolve_device(wire_id: str, use_cache: bool = True):
         raise DirectoryUnavailable(str(e)) from e
 
 
-def resolve_gateway(wire_id: str, group_id: str = None):
+# Throttle for traffic refused because its edge node is archived, keyed by edge node id. An
+# appliance that has not been switched off beats every 30s and publishes its devices besides, so
+# the refusal has to be legible without being the whole log.
+_archived_gateway_warned = {}
+ARCHIVED_GATEWAY_WARN_INTERVAL_SECONDS = 300
+
+
+def resolve_gateway(wire_id: str, group_id: str = None, include_archived: bool = False):
+    """
+    Resolve an edge node to its `gateways` row, refusing one that has been archived.
+
+    `include_archived` is for the two callers that must DESCRIBE the refusal rather than act on it
+    -- verify_gateway_binding() writes a quarantine reason an operator reads, and the quarantine
+    record needs to say which of the two refusals happened. They get the row and check
+    `is_archived` themselves. It is a parameter rather than a second public function so that
+    `resolve_gateway` stays the one seam every caller and every test patches.
+
+    ARCHIVED IS A REFUSAL, NOT A MATCH, and it is the application tier of the same two-tier
+    arrangement mosquitto.acl describes. Migration 0038 revokes a gateway's broker credential when
+    it is archived, so an archived appliance should not be able to connect at all -- but that
+    revocation is ASYNCHRONOUS (net.http_post queues it) and is INERT on a deployment that never
+    configured GATEWAY_REVOKE_SECRET. Both leave a window in which a decommissioned appliance still
+    holds a working credential, and without this it would go on stamping `last_heartbeat` and
+    `status` on a row an operator has retired -- resurrecting it to ONLINE on the dashboard.
+
+    IT REFUSES THE WHOLE EDGE NODE, devices included. A device published beneath an archived
+    gateway is telemetry from decommissioned hardware whichever asset it names, and process_ddata()
+    resolves the gateway before it writes.
+    """
+    row = _resolve_gateway_row(wire_id, group_id)
+    if row is None or include_archived or not row.get("is_archived"):
+        return row
+
+    # NAMED SEPARATELY FROM "unregistered", which is the whole reason this is not simply a filter
+    # in the query. "Received NDATA from unregistered edge node" sends an operator hunting a
+    # provisioning fault; the truth is that somebody archived it, and that is a different fix.
+    count("dropped_gateway_archived")
+    if _throttled(_archived_gateway_warned, wire_id, ARCHIVED_GATEWAY_WARN_INTERVAL_SECONDS):
+        logger.warning(
+            "Dropping traffic from edge node '%s' (%s): the gateway is ARCHIVED. Its broker "
+            "credential should have been revoked when it was archived (migration 0038) -- that it "
+            "can still publish means revocation has not landed, or GATEWAY_REVOKE_SECRET is unset "
+            "on this deployment. Un-archive the gateway to accept it again.",
+            wire_id, row.get("name")
+        )
+    return None
+
+
+def _resolve_gateway_row(wire_id: str, group_id: str = None):
     """
     Resolve an edge node to its `gateways` row.
 
@@ -1162,7 +1210,10 @@ def resolve_gateway(wire_id: str, group_id: str = None):
     # `status` is read back so process_node_message() can tell a genuine ONLINE/OFFLINE transition
     # from the 119 heartbeats an hour that carry the same status as the last one. It does not gate
     # the write -- see the comment there for why that write is not skippable.
-    columns = "id,name,sparkplug_id,sparkplug_group,status"
+    # `is_archived` is read so resolve_gateway() above can refuse a decommissioned edge node. It
+    # is fetched rather than filtered in the query on purpose: a WHERE clause would make an
+    # archived gateway indistinguishable from an unregistered one, and those need different fixes.
+    columns = "id,name,sparkplug_id,sparkplug_group,status,is_archived"
     try:
         # 1. Group-qualified.
         if group_id:
@@ -1280,13 +1331,27 @@ def verify_gateway_binding(device: dict, gateway_wire_id: str, group_id: str = N
     if not bound_gateway_id:
         return None
 
-    gateway = resolve_gateway(gateway_wire_id, group_id)
+    # THE UNFILTERED ROW, because this function's job is to DESCRIBE the mismatch and the
+    # description is what an operator acts on. resolve_gateway() refuses an archived edge node by
+    # answering None, which here would be indistinguishable from "never registered" -- and the
+    # quarantine reason below is written into `devices.quarantine_reason`, where a wrong one sends
+    # somebody looking for a provisioning fault on a gateway they themselves retired.
+    gateway = resolve_gateway(gateway_wire_id, group_id, include_archived=True)
 
     # An unregistered edge node speaking for a *registered, bound* device. resolve_gateway()'s
     # contract is that unregistered edge nodes are dropped; that was only ever enforced on the
     # node-level path, so a device message via an unknown edge node was accepted.
     if gateway is None:
         return "%s: device is bound to a gateway but the publishing edge node '%s' is not registered" % (
+            REASON_GATEWAY_MISMATCH, gateway_wire_id
+        )
+
+    # ARCHIVED IS A REFUSAL EVEN WHEN THE BINDING IS CORRECT, and it has to be checked before the
+    # id comparison below -- a device bound to the gateway that is publishing for it matches by
+    # construction, so without this the telemetry of a decommissioned appliance would be accepted
+    # on the strength of being correctly bound to the appliance that was decommissioned.
+    if gateway.get("is_archived"):
+        return "%s: the publishing edge node '%s' is ARCHIVED. Un-archive the gateway to accept its telemetry again" % (
             REASON_GATEWAY_MISMATCH, gateway_wire_id
         )
 
@@ -1445,8 +1510,18 @@ def quarantine_new_device(wire_id: str, gateway_wire_id: str, reason: str, paylo
     always discarded it, which is why approving a quarantined device previously required the
     operator to re-pick its gateway by hand.
     """
-    gateway = resolve_gateway(gateway_wire_id, group_id)
-    if gateway is None:
+    # Unfiltered, so the log can say WHICH of the two refusals this is. The device is still left
+    # with no gateway either way: attaching a newly discovered one to an archived appliance would
+    # resurrect a retired gateway's device list, and the operator picks a gateway at approval.
+    gateway = resolve_gateway(gateway_wire_id, group_id, include_archived=True)
+    if gateway is not None and gateway.get("is_archived"):
+        logger.warning(
+            "Quarantining device '%s' from ARCHIVED edge node '%s' (%s): it will have no gateway "
+            "assigned until one is chosen at approval.",
+            wire_id, gateway_wire_id, gateway.get("name")
+        )
+        gateway = None
+    elif gateway is None:
         logger.warning(
             "Quarantining device '%s' from unregistered edge node '%s': it will have no gateway "
             "assigned until one is chosen at approval.", wire_id, gateway_wire_id

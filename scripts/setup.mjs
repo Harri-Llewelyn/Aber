@@ -151,6 +151,16 @@ const generated = {
   // so a token shared with anything else would mean one leak grants forgery across the site.
   // The service REFUSES TO START if this is shorter than 32 characters.
   MQTT_CREDENTIAL_SERVICE_TOKEN: hex(32),
+  // The secret the `gateways` trigger presents to revoke-gateway-credential when a gateway is
+  // archived or deleted (0038). SEPARATE FROM THE ONE ABOVE, and the asymmetry is the point: that
+  // token authorises minting an account for ANY edge node, this one only authorises rotating a
+  // decommissioned gateway's account to a password nobody records. Merging them would hand the
+  // revocation path the issuance authority.
+  //
+  // GENERATED RATHER THAN LEFT EMPTY BECAUSE AN UNSET VALUE MAKES REVOCATION INERT -- archiving a
+  // gateway would silently leave its broker credential working, which is a security control whose
+  // default is "off". Every other secret on this list is generated for the same reason.
+  GATEWAY_REVOKE_SECRET: hex(32),
   // The read-only historian role external BI tools connect as, and the one Grafana uses. Generated
   // like the rest so a local stack never runs a reporting tool as the `postgres` superuser, which
   // is what the Grafana datasource did before this existed.
