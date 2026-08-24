@@ -359,6 +359,13 @@ exercise genuinely unknown device ids.
 message is **delivered**, not by exit status — a denied publish at QoS 0 exits 0 and tells the
 client nothing.
 
+**MQTT 5 does not lift that**, and it was proposed for exactly that reason. The `Not authorized`
+reason code rides on `PUBACK`, and QoS 0 has no `PUBACK` under either protocol version — while
+Sparkplug B *requires* QoS 0 and retain false for every message type on this wire, delegating loss
+detection to the `seq` counter and the rebirth request instead. So the silence is a property of the
+protocol combination Sparkplug mandates, not a setting anyone left unset, and delivery remains the
+only honest way to assert the ACL.
+
 ---
 
 ## Onboarding Your Own Device
