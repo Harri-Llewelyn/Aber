@@ -112,6 +112,28 @@ LIVE = TOKEN is not None and DEVICE is not None
 SKIP_REASON = f"no reachable stack, or device '{TARGET_DEVICE}' not registered"
 
 
+def target_shell_id() -> str | None:
+    """
+    The target device's shell identifier, ASKED FOR rather than composed.
+
+    It is tempting to build it -- `<AAS_BASE_IRI><sparkplug_id>/shell` is the rule shell.ts
+    follows -- and that was how this file first did it, with the DEFAULT base hard-coded. On any
+    deployment that sets AAS_BASE_IRI to something else, every test built on it would fail and
+    report a broken API while the API was answering correctly. The suite would be asserting its
+    own guess about configuration.
+
+    /shells already returns real identifiers, so the deployment's own answer is one request away.
+    """
+    _, body = get("/shells?limit=100", TOKEN)
+    for shell in body.get("result", []):
+        if shell.get("idShort") == TARGET_DEVICE:
+            return shell["id"]
+    return None
+
+
+SHELL_ID = target_shell_id() if LIVE else None
+
+
 # =================================================================================================
 # Offline
 # =================================================================================================
@@ -372,11 +394,11 @@ class TestShellRoutes(unittest.TestCase):
         self.assertEqual(status, 400)
 
 
-@unittest.skipUnless(LIVE, SKIP_REASON)
+@unittest.skipUnless(LIVE and SHELL_ID, SKIP_REASON)
 class TestSubmodelRoutes(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.shell_id = f"https://acs-cymru.local/ids/asset/{DEVICE['sparkplug_id']}/shell"
+        cls.shell_id = SHELL_ID
         _, refs = get(f"/shells/{b64url(cls.shell_id)}/submodel-refs", TOKEN)
         cls.ids = [r["keys"][0]["value"] for r in refs["result"]]
         cls.nameplate = next(i for i in cls.ids if i.endswith("/Nameplate"))
@@ -457,7 +479,7 @@ class TestSubmodelRoutes(unittest.TestCase):
         self.assertEqual(value, full["value"])
 
 
-@unittest.skipUnless(LIVE and HAVE_JSONSCHEMA, SKIP_REASON + ", or jsonschema is not installed")
+@unittest.skipUnless(LIVE and SHELL_ID and HAVE_JSONSCHEMA, SKIP_REASON + ", or jsonschema is not installed")
 class TestMetamodelConformance(unittest.TestCase):
     """
     What this endpoint serves has to satisfy the official metamodel, not merely look like it.
@@ -471,7 +493,7 @@ class TestMetamodelConformance(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.schema = json.loads(AAS_SCHEMA_PATH.read_text(encoding="utf-8"))
-        shell_id = f"https://acs-cymru.local/ids/asset/{DEVICE['sparkplug_id']}/shell"
+        shell_id = SHELL_ID
         _, cls.shell = get(f"/shells/{b64url(shell_id)}", TOKEN)
         _, refs = get(f"/shells/{b64url(shell_id)}/submodel-refs", TOKEN)
         cls.submodels = [
