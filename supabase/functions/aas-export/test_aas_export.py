@@ -29,11 +29,13 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 # The official IDTA metamodel schema, vendored verbatim. See tests/schemas/README.md for its
 # provenance and how to refresh it -- it is never hand-edited.
 AAS_SCHEMA_PATH = REPO_ROOT / "tests" / "schemas" / "AAS_V3_0_JSON_Schema.json"
-TS_MAPPER = REPO_ROOT / "supabase" / "functions" / "aas-export" / "sparkplugToXsd.ts"
+TS_MAPPER = REPO_ROOT / "supabase" / "functions" / "_shared" / "aas" / "sparkplugToXsd.ts"
 JS_MAPPER = REPO_ROOT / "frontend" / "src" / "utils" / "sparkplugDatatype.js"
-TS_MODEL_TYPES = REPO_ROOT / "supabase" / "functions" / "aas-export" / "model3dContentType.ts"
+TS_MODEL_TYPES = REPO_ROOT / "supabase" / "functions" / "_shared" / "aas" / "model3dContentType.ts"
 JS_MODEL_TYPES = REPO_ROOT / "frontend" / "src" / "utils" / "model3d.js"
-TS_INDEX = REPO_ROOT / "supabase" / "functions" / "aas-export" / "index.ts"
+# The mapping layer moved to _shared/aas/shell.ts when aas-api began sharing it; this is where
+# modelledMetrics() now lives, and it is still extracted and EXECUTED rather than grepped.
+TS_SHELL = REPO_ROOT / "supabase" / "functions" / "_shared" / "aas" / "shell.ts"
 MODELLED_METRICS_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "modelled-metrics.json"
 
 MODEL_BUCKET = os.getenv("STORAGE_MODEL_BUCKET", "asset-3d-models")
@@ -236,17 +238,17 @@ def run_modelled_metrics(schemas: list) -> list:
     `required`. The fixture is asserted by executing the code, in all four languages that
     implement it.
 
-    THE SOURCE IS EXTRACTED FROM index.ts rather than copied here. A copy would be a fifth
+    THE SOURCE IS EXTRACTED FROM _shared/aas/shell.ts rather than copied here. A copy would be a fifth
     implementation, and this file would then prove that the copy agrees with the fixture.
 
     Only three TypeScript-only tokens appear in the function, and each is stripped explicitly
     rather than by a general-purpose type stripper: a stripper that silently failed would leave a
     syntax error, which is loud, but one that silently succeeded on the WRONG text would not be.
     """
-    source = TS_INDEX.read_text(encoding="utf-8")
-    match = re.search(r"^function modelledMetrics\(.*?^\}", source, re.S | re.M)
+    source = TS_SHELL.read_text(encoding="utf-8")
+    match = re.search(r"^export function modelledMetrics\(.*?^\}", source, re.S | re.M)
     if not match:
-        raise AssertionError(f"modelledMetrics() not found in {TS_INDEX}")
+        raise AssertionError(f"modelledMetrics() not found in {TS_SHELL}")
 
     js = match.group(0)
     for ts_only, plain in (

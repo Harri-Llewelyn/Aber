@@ -118,6 +118,30 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
     "STORAGE_MODEL_BUCKET",
   ],
 
+  // The IDTA 02001/02002 read surface over the same mapping aas-export uses.
+  //
+  // NO SERVICE-ROLE KEY, AND THE CONTRAST WITH THE ENTRY ABOVE IS THE POINT. aas-export composes a
+  // document on request and hands it to a caller whose role it has already checked; this is a live
+  // API over the whole asset space, so it authenticates and then reads AS THE CALLER and lets RLS
+  // answer. Granting the key here would turn every authenticated user's submodel lookup into a
+  // privileged one -- the same argument fplus-directory's entry below makes.
+  //
+  // IT IS ALSO WHY THESE ARE TWO FUNCTIONS RATHER THAN TWO ROUTES. envForFunction() forwards only
+  // what a function's entry names, so one worker cannot hold a key the other is denied; sharing a
+  // service path would mean sharing the environment, and the separation would become a convention
+  // instead of a boundary.
+  //
+  // The AAS_* set is duplicated deliberately: the identifiers this serves must be the identifiers
+  // aas-export mints, and they are derived from these variables. A deployment that set them for one
+  // worker and not the other would publish shells under one namespace and fail to resolve them
+  // under the other. No STORAGE_MODEL_BUCKET or AAS_MAX_BUNDLED_MODEL_BYTES: both belong to AASX
+  // packaging, which this does not serve.
+  "aas-api": [
+    "AAS_BASE_IRI",
+    "AAS_HISTORIAN_ENDPOINT",
+    "AAS_MODEL_PUBLIC_BASE",
+  ],
+
   // Records a Grafana alert notification in public.platform_alerts.
   //
   // TWO KEYS, AND THE ASYMMETRY IS THE WHOLE DESIGN. It holds the service-role key because it

@@ -11,7 +11,7 @@ management.
 
 > **Design ethos —** *use pre-existing components and standards; minimise custom code.*
 > Where upstream ACS ships bespoke microservices, this fork uses Supabase, TimescaleDB, Grafana and
-> Node-RED. The custom surface is one Python ingestion daemon, ten edge functions, an i3X server and
+> Node-RED. The custom surface is one Python ingestion daemon, eleven edge functions, an i3X server and
 > a React dashboard.
 
 ---
@@ -40,7 +40,7 @@ flowchart TB
 
     subgraph Processing ["Ingestion & Serverless"]
         ING["Python Ingestion Engine<br/>identity - quarantine - binding"]
-        EF["Edge Functions<br/>approve-quarantine - deploy-nodered - aas-export<br/>grafana-userinfo - nodered-userinfo - fplus-directory<br/>grafana-alert-webhook - enroll-gateway - gateway-bundle<br/>revoke-gateway-credential"]
+        EF["Edge Functions<br/>approve-quarantine - deploy-nodered - aas-export<br/>aas-api - grafana-userinfo - nodered-userinfo<br/>fplus-directory - grafana-alert-webhook - enroll-gateway<br/>gateway-bundle - revoke-gateway-credential"]
     end
 
     subgraph Supabase ["Supabase BaaS"]
@@ -485,6 +485,7 @@ python supabase/functions/approve-quarantine/test_approve_quarantine.py
 python supabase/functions/deploy-nodered/test_deploy_nodered.py
 python supabase/functions/nodered-userinfo/test_nodered_userinfo.py
 python supabase/functions/aas-export/test_aas_export.py
+python supabase/functions/aas-api/test_aas_api.py
 python supabase/functions/grafana-alert-webhook/test_grafana_alert_webhook.py
 
 # Physical gateway enrolment — signs in as Administrator to mint tokens (issuing is a USER's act,
@@ -630,21 +631,27 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Sixteen extensions, none of them speculative: every one names the code it would build on, because
+Fifteen extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
 
-**Items 1-6 are this repository's own**, ordered by how much of each already exists. **Items 7-14
-arrive from feature requests** — 7-12 from GitHub issues
+**Items 1-6 are this repository's own**, ordered by how much of each already exists. **Items 7-15
+arrive from feature requests** — 7-11 from GitHub issues
 [#67](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/67),
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
-[#65](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/65),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63),
 [#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66) and
 [#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58), in that same order of how much already
-exists; 13-16 are not yet filed. Where an entry's heading differs from the issue's title, it is
+exists; 12-15 are not yet filed. Where an entry's heading differs from the issue's title, it is
 because the work that remains is narrower than the title claims.
+
+**One has been retired by being built.** [#65](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/65)
+asked for live IDTA 02001/02002 endpoints beside the static export, and `aas-api` now serves them —
+which is why the numbering below skips from 8 to 9 rather than the list having lost an entry. It was
+the item with the most existing code behind it, exactly as the entry predicted. What it left behind
+is one open question rather than one open task, and it is recorded in §4: whether a client with no
+Supabase apikey should become a fifth `key-auth` exemption.
 
 **None of these are open defects.** Feature requests live here once they have been checked against
 the code; known issues and accepted risks stay in
@@ -792,6 +799,16 @@ translation. Four routes are open by design — `/auth/v1/`, the two userinfo en
 stated reason and each is load bearing; a translation that quietly widened one would not fail any
 test that exists today, because `validate.py` asserts the 401s that SHOULD happen and cannot assert
 the absence of a route nobody wrote. Any migration needs the negative assertions first.
+
+**A fifth exemption is now an open question, and it should be answered here rather than drift in.**
+`aas-api` serves the IDTA REST surface to exactly the class of client that has no Supabase apikey
+and no way to acquire one — an ERP, a PLM, an AAS browser — which is the argument that already
+exempted the Factory+ Directory and both userinfo endpoints. It was deliberately NOT exempted when
+it landed: `functions-v1` routes it and `key-auth` gates it by default, so today those clients need
+a key. Widening the gateway's open surface is a decision to take deliberately and with the negative
+assertions in place, not one to make as a side effect of shipping an endpoint. Note the asymmetry if
+it is taken: `/description` is meant to be readable before a client holds any credential, exactly as
+the Directory's `/ping` is, while every other route authenticates the caller itself and fails closed.
 
 **It interacts with §2 and should be sequenced against it.** Gateway API's `HTTPRoute` would retire
 the `__CORS_ORIGINS__` placeholder on Kubernetes; Envoy would restate CORS in its own filter on both
@@ -956,43 +973,9 @@ carry the qualification, or the interoperability claim becomes false the moment 
 
 ---
 
-### 9 · Live IDTA REST endpoints beside the export
-
-**Builds on:** [`supabase/functions/aas-export/index.ts`](supabase/functions/aas-export/index.ts) ·
-`idta_submodel_templates` (`0011`) · `telemetry_latest` (`0010`) ·
-[`tests/schemas/AAS_V3_0_JSON_Schema.json`](tests/schemas/AAS_V3_0_JSON_Schema.json) ·
-[`scripts/aas-push-basyx.mjs`](scripts/aas-push-basyx.mjs) ·
-[issue #65](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/65)
-
-**The item with the most existing code behind it and the least new thinking required.** `aas-export`
-already builds a complete AAS V3 Environment — nameplate elements resolved against
-`idta_submodel_templates`, one Submodel per schema attached through `device_submodels`, `File`
-elements for 3D models and documents, and an `.aasx` OPC container assembled by hand. Conformance is
-already asserted against the vendored IDTA schema in `tests/`. What this asks for is the same object
-graph behind a different route table.
-
-**One decision in the exporter is exactly right for this and should not be revisited.** Telemetry
-values are *never* inlined: the Time Series submodel carries a `LinkedSegment` pointing at the
-historian, which is what IDTA 02008 defines that element for. A live REST API makes the temptation
-worse rather than better — `GET /submodel-elements/…` on a time-series submodel looks like it ought
-to return points. It should still return the link, with `telemetry_latest` (`0010`) supplying current
-values only where the submodel models a current value.
-
-**The split to settle is whether `aas-api` is a second function or a route on the first.** They share
-the whole mapping layer, and duplicating it is how the two drift — the `.aasx` a customer holds and
-the live endpoint their ERP queries would eventually disagree about the same asset, which is a worse
-failure than either being absent. Sharing it means the export becomes a serialisation of the API's own
-response rather than a parallel construction of the same thing.
-
-**The route surface is where the cost actually is.** IDTA 02001/02002 specifies base64url-encoded
-identifiers in paths, an `idShort` path syntax for nested elements, and pagination on every list —
-none of which the export needs, all of which conformance turns on. `aas-push-basyx.mjs` already proves
-this stack's shells load into a real AAS server, so there is a reference implementation to diff route
-behaviour against rather than only a specification to read.
-
 ---
 
-### 10 · GitOps edge sync: the pull half
+### 9 · GitOps edge sync: the pull half
 
 **Builds on:** [`supabase/functions/deploy-nodered/index.ts`](supabase/functions/deploy-nodered/index.ts) ·
 [`node_red_flow.json`](node_red_flow.json) · the `gateway-backups` bucket in
@@ -1032,7 +1015,7 @@ rather than borrow `service`.
 
 ---
 
-### 11 · An ISA-95 Unified Namespace bridge
+### 10 · An ISA-95 Unified Namespace bridge
 
 **Builds on:** the DDATA path in [`ingestion/ingestion.py`](ingestion/ingestion.py) ·
 `public.device_locations` (`0001`) · `cells` (`0001`, `0021`) · `devices.location_scope` ·
@@ -1068,7 +1051,7 @@ currently prevent.
 
 ---
 
-### 12 · Cassette: recording and replaying the broker
+### 11 · Cassette: recording and replaying the broker
 
 **Builds on:** the JSON fallback parser in [`ingestion/ingestion.py`](ingestion/ingestion.py) ·
 `_timestamp_is_sane()` · the `telemetry` hypertable's primary key ·
@@ -1116,7 +1099,7 @@ rather than let the import look like it failed.
 
 ---
 
-### 13 · Retiring the flow-backup bucket, and pointing at repositories instead
+### 12 · Retiring the flow-backup bucket, and pointing at repositories instead
 
 **Builds on:** [`frontend/src/components/common/FlowBackupUploader.jsx`](frontend/src/components/common/FlowBackupUploader.jsx) ·
 the `gateway-backups` bucket in [`scripts/storage-init.mjs`](scripts/storage-init.mjs) ·
@@ -1124,7 +1107,7 @@ the `gateway-backups` bucket in [`scripts/storage-init.mjs`](scripts/storage-ini
 [`EntityLinksModal.jsx`](frontend/src/components/modals/EntityLinksModal.jsx) and its tag vocabulary ·
 `digital_thread` (`0005`) · **not yet filed as an issue**
 
-**The other end of §10, and it should be sequenced against it rather than planned beside it.** §10
+**The other end of §9, and it should be sequenced against it rather than planned beside it.** §9
 adds the pull; this removes what the push made necessary. Doing the removal first would leave a
 physical gateway with no copy of its flow anywhere, which is the exact loss `FlowBackupUploader`
 exists to prevent — its header states the case plainly: the appliance is the only copy, and a failed
@@ -1160,7 +1143,7 @@ vocabulary should not be two separate migrations against the same column.
 
 ---
 
-### 14 · An Access Control page
+### 13 · An Access Control page
 
 **Builds on:** `issue_gateway_enrollment_token()` / `consume_…` / `release_…` (`0025`) ·
 `revoke_gateway_credential()` and its sweep (`0038`) ·
@@ -1192,7 +1175,7 @@ template exists as a live account rather than as a design. `Service_Ingestor` is
 one — and note it does not describe the current daemon, which holds the service-role key and writes
 telemetry directly.
 
-**§15 adds a subject this page should cover from the start.** A virtual gateway cannot be enrolled
+**§14 adds a subject this page should cover from the start.** A virtual gateway cannot be enrolled
 — `0025` and `gateway-bundle` both refuse one — so its broker credential is still minted by a shell
 script and carried to Node-RED by hand. Minting it through the same reveal-once component, authorised
 by role rather than by a single-use token, retires the last workflow that requires shell access to
@@ -1213,7 +1196,7 @@ Profiles are chosen from a list; nothing here builds a permission graph.
 
 ---
 
-### 15 · An opt-in simulator, and a fresh install with no simulated assets
+### 14 · An opt-in simulator, and a fresh install with no simulated assets
 
 **Builds on:** `0002_seed_data.sql` · `0020_cleanup_legacy_simulator_seed.sql` ·
 [`scripts/provision-gateways.mjs`](scripts/provision-gateways.mjs) ·
@@ -1290,7 +1273,7 @@ no service-role key of its own. That is a second caller of an existing verb, and
 second verb: the service's own header warns that *"it is not a general credential API and must not
 become one."*
 
-**So this belongs with §14** — a "Generate broker credential" action on a virtual gateway, minted
+**So this belongs with §13** — a "Generate broker credential" action on a virtual gateway, minted
 through the credential service and revealed once, with no token, no bundle and nothing downloaded.
 For the co-located case it could go further and never reach a human at all, since `node-red-init.mjs`
 already reconciles broker credentials out of env pairs named per node. The caveat worth stating: that
@@ -1299,7 +1282,7 @@ must not touch, so writing into a *running* Node-RED is a different mechanism fr
 boot, and needs its own path or a restart.
 
 **With that step built, the tour is the argument for the whole item**: Cells, Gateways, credential
-minting, Devices, Schemas and — with §14 — Access Control, which is most of the product.
+minting, Devices, Schemas and — with §13 — Access Control, which is most of the product.
 
 **Collapsing to one cell, one gateway, one device costs more than it looks**, and the cost is worth
 separating from the decision. The four seeded gateways are not four of the same thing: they carry
@@ -1320,7 +1303,7 @@ do belong in the new directory alongside the flow, exactly as proposed.
 
 ---
 
-### 16 · Three kinds of gateway, and a Simulated lane
+### 15 · Three kinds of gateway, and a Simulated lane
 
 **Builds on:** `gateways.is_virtual` (`0001`) · `location_scope` and its two CHECK constraints ·
 `public.device_locations` · [`frontend/src/utils/cellResolution.js`](frontend/src/utils/cellResolution.js) ·
@@ -1400,7 +1383,7 @@ same-row CHECK costing nothing, and **derive** the device rule, because a derive
 refuse.
 
 **Simulated telemetry is treated exactly like real telemetry, and that is a decision rather than an
-omission.** §12 depends on it: a cassette replays *as a device*, and its whole argument is that
+omission.** §11 depends on it: a cassette replays *as a device*, and its whole argument is that
 synthetic devices must roll up exactly like real ones, *"which is the behaviour under test"*. Shorter
 retention for simulated data would break the one feature that needs synthetic data to behave normally
 — and could not be built cheaply anyway, since retention is one policy on one hypertable dropping
@@ -1410,11 +1393,11 @@ answers the demonstration feedback where it was actually aimed — at what a rea
 is stored. `digital_thread` itself keeps receiving the rows, because someone standing up a simulator
 on a production stack is a governance event.
 
-**It sequences after §15, and the reason is a genuine cost rather than a technicality.** The seeded
+**It sequences after §14, and the reason is a genuine cost rather than a technicality.** The seeded
 `Sim_` gateways are deliberately assigned to real-looking cells — "Cell 1 — Precision Machining" and
 the rest — so that the shopfloor map looks like a shopfloor. `CHECK (NOT is_simulated OR cell_id IS
 NULL)` forbids exactly that, so it cannot land while the seed exists. And it prices the two artefacts
-§15 separates differently: **an onboarding simulator gains** from being visibly not-real, which is
+§14 separates differently: **an onboarding simulator gains** from being visibly not-real, which is
 what the demonstration feedback asked for, while **a demonstration fixture loses**, because a
 shopfloor map showing an empty plant beside one Simulated bucket demonstrates less than four
 populated cells did. Whichever way that resolves, it should be decided per artefact rather than

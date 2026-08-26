@@ -1675,6 +1675,310 @@ paths:
         '403': { description: 'Role is outside the allow-list.' }
         '404': { description: No such device. }
 
+  /functions/v1/aas-api:
+    get:
+      tags: [Edge Functions]
+      summary: AAS repository root — the routes this service serves
+      description: |
+        The IDTA 02001/02002 **read-only** repository surface, served live from the database over
+        the same mapping `aas-export` uses (`supabase/functions/_shared/aas/shell.ts`). A shipped
+        `.aasx` and this endpoint therefore cannot describe the same machine differently — the
+        agreement is asserted by `test_aas_api.py`.
+
+        **This path itself answers `404`**, because there is no resource at a repository root and
+        the specification defines no index. The body lists what *is* served, for the benefit of
+        somebody who found this URL in a config file. Start at `/description`.
+
+        **Reads as the caller and holds no service-role key**, unlike `aas-export`. RLS decides
+        what comes back, which is why it is a separate function: `main/index.ts` forwards only
+        the environment each worker's registry entry names, so the separation is enforced by the
+        runtime rather than by care.
+
+        Every route is a `GET`. Writes would bypass the dashboard's role model and its
+        `digital_thread` audit trail, so the advertised profiles are the read-only SSP-002 pair.
+      responses:
+        '404':
+          description: No resource at the root; the body names the routes that exist.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages: { type: array, items: { type: object } }
+                  served: { type: array, items: { type: string } }
+                  note: { type: string }
+        '401': { description: Missing or invalid Authorization header. }
+
+  /functions/v1/aas-api/description:
+    get:
+      tags: [Edge Functions]
+      summary: AAS repository self-description (IDTA 02002)
+      description: |
+        The service profiles this deployment implements. **Unauthenticated by specification** —
+        a client reads it to learn what it is talking to before it holds a credential, which is
+        the same argument that keeps the Factory+ Directory's `/ping` open. It reports profiles
+        and nothing about the fleet.
+
+        Both advertised profiles are **SSP-002, the read-only variants**. Every route below is a
+        `GET`; asset data is authored through the dashboard, which has the role model and writes
+        `digital_thread`, and a write here would bypass both.
+      responses:
+        '200':
+          description: The advertised profiles.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profiles: { type: array, items: { type: string } }
+
+  /functions/v1/aas-api/shells:
+    get:
+      tags: [Edge Functions]
+      summary: List Asset Administration Shells
+      description: |
+        Every shell this deployment publishes — one per non-archived device — built live from
+        the **same mapping `aas-export` uses** (`supabase/functions/_shared/aas/shell.ts`), so a
+        shipped `.aasx` and this endpoint cannot describe the same machine differently.
+
+        **Reads as the caller, and holds no service-role key.** RLS decides what comes back. That
+        is the difference from `aas-export`, which composes a document under the service role
+        after checking the caller's role, and it is why these are two functions rather than two
+        routes: `main/index.ts` forwards only the environment each worker's registry entry names.
+
+        **Pagination.** `limit` (default 20, capped at 100) and an opaque `cursor`. A cursor names
+        the next *device*, so a page carries every item belonging to the devices it covers — the
+        specification leaves cursor semantics to the server, and paging inside a document rebuilt
+        per request would only be stable while nothing changed.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+          description: Each device on a page costs seven queries and one shell construction.
+        - name: cursor
+          in: query
+          schema: { type: string }
+          description: Opaque. Echo back `paging_metadata.cursor` from the previous page.
+      responses:
+        '200':
+          description: A page of shells.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paging_metadata:
+                    type: object
+                    properties: { cursor: { type: string } }
+                    description: Empty object on the last page — the cursor is omitted, not nulled.
+                  result: { type: array, items: { type: object } }
+        '400': { description: Non-positive `limit`. }
+        '401': { description: Missing or invalid Authorization header. }
+
+  /functions/v1/aas-api/shells/{aasIdentifier}:
+    get:
+      tags: [Edge Functions]
+      summary: Get one Asset Administration Shell
+      description: |
+        **`aasIdentifier` is base64url-encoded**, as IDTA 02002 requires for every Identifier in
+        a path. Not plain base64: `/` is legal there and is a path separator, so an identifier
+        containing one would split across two segments and the route would silently not match.
+        Padding is optional.
+
+        Identifiers are **derived, not stored** — `<AAS_BASE_IRI><sparkplug_id>/shell` — so this
+        parses the identifier back to a wire id rather than consulting a mapping table that could
+        disagree with the exporter. A consequence worth knowing: changing `AAS_BASE_IRI` changes
+        every identifier this deployment has published, and older ones stop resolving.
+      parameters:
+        - name: aasIdentifier
+          in: path
+          required: true
+          schema: { type: string }
+          description: base64url of the shell's `id`.
+      responses:
+        '200':
+          description: The shell.
+          content:
+            application/json: { schema: { type: object } }
+        '400': { description: Identifier is not valid base64url. }
+        '401': { description: Missing or invalid Authorization header. }
+        '404': { description: No such shell. A *submodel* identifier is refused here too, even though it names a device that exists. }
+
+  /functions/v1/aas-api/shells/{aasIdentifier}/submodel-refs:
+    get:
+      tags: [Edge Functions]
+      summary: List a shell's submodel references
+      parameters:
+        - name: aasIdentifier
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated `ModelReference`s, in the same envelope as every other list.
+          content:
+            application/json: { schema: { type: object } }
+        '401': { description: Missing or invalid Authorization header. }
+        '404': { description: No such shell. }
+
+  /functions/v1/aas-api/shells/{aasIdentifier}/asset-information:
+    get:
+      tags: [Edge Functions]
+      summary: Get a shell's AssetInformation
+      description: |
+        `assetKind` and the `globalAssetId` — the identifier the whole shell hangs off, derived
+        as `<AAS_BASE_IRI><sparkplug_id>`.
+      parameters:
+        - name: aasIdentifier
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The AssetInformation object.
+          content:
+            application/json: { schema: { type: object } }
+        '401': { description: Missing or invalid Authorization header. }
+        '404': { description: No such shell. }
+
+  /functions/v1/aas-api/shells/{aasIdentifier}/submodels/{submodelIdentifier}:
+    get:
+      tags: [Edge Functions]
+      summary: Get a submodel through its shell
+      description: |
+        The same object as `/submodels/{submodelIdentifier}`, with one extra condition: the
+        submodel must belong to **this** shell. A submodel from another asset answers `404` here
+        even though it resolves perfectly well on the direct route.
+
+        The element routes hang off this path too, so
+        `/shells/{aasIdentifier}/submodels/{submodelIdentifier}/submodel-elements/{idShortPath}`
+        works exactly as the direct form does. Append `/$value` for ValueOnly.
+      parameters:
+        - name: aasIdentifier
+          in: path
+          required: true
+          schema: { type: string }
+        - name: submodelIdentifier
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The submodel.
+          content:
+            application/json: { schema: { type: object } }
+        '400': { description: Either identifier is not valid base64url. }
+        '401': { description: Missing or invalid Authorization header. }
+        '404': { description: No such shell, or that shell does not carry that submodel. }
+
+  /functions/v1/aas-api/submodels/{submodelIdentifier}/submodel-elements:
+    get:
+      tags: [Edge Functions]
+      summary: List a submodel's elements
+      description: |
+        Paginated in the same envelope as every other list, though one submodel's elements always
+        fit on a page — a client that reads `paging_metadata` everywhere must find it here too.
+
+        Append `/$value` for the ValueOnly form, which returns one `{idShort: value}` object per
+        element.
+      parameters:
+        - name: submodelIdentifier
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The submodel's elements.
+          content:
+            application/json: { schema: { type: object } }
+        '400': { description: Identifier is not valid base64url. }
+        '401': { description: Missing or invalid Authorization header. }
+        '404': { description: No such submodel. }
+
+  /functions/v1/aas-api/submodels:
+    get:
+      tags: [Edge Functions]
+      summary: List submodels
+      description: |
+        Every submodel across every shell. Same pagination as `/shells`.
+
+        Append **`/$value`** for IDTA 02002's ValueOnly serialisation — the metamodel stripped
+        down to values, which is the shape an ERP actually wants: `body.SerialNumber` rather than
+        a walk through `submodelElements[]` matching on `idShort`.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: A page of submodels.
+          content:
+            application/json: { schema: { type: object } }
+        '400': { description: Non-positive `limit`. }
+        '401': { description: Missing or invalid Authorization header. }
+
+  /functions/v1/aas-api/submodels/{submodelIdentifier}:
+    get:
+      tags: [Edge Functions]
+      summary: Get one submodel
+      description: |
+        base64url-encoded identifier, as above. Also reachable as
+        `/shells/{aasIdentifier}/submodels/{submodelIdentifier}`, which additionally requires the
+        submodel to belong to that shell.
+
+        **Telemetry values are still never inlined.** The Time Series submodel carries a
+        `LinkedSegment` naming the historian, exactly as the export does — a live API makes
+        inlining more tempting, not less, and an unbounded submodel is no better for arriving
+        over HTTP.
+
+        Append **`/$value`** for the ValueOnly form; collections nest as objects.
+      parameters:
+        - name: submodelIdentifier
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The submodel.
+          content:
+            application/json: { schema: { type: object } }
+        '400': { description: Identifier is not valid base64url. }
+        '401': { description: Missing or invalid Authorization header. }
+        '404': { description: No such submodel. }
+
+  /functions/v1/aas-api/submodels/{submodelIdentifier}/submodel-elements/{idShortPath}:
+    get:
+      tags: [Edge Functions]
+      summary: Get one submodel element by idShortPath
+      description: |
+        `idShortPath` is the specification's dotted form — `Metrics.Systems_TEMPERATURE`. A
+        slash-separated path is accepted too. Only collections are traversable; a path that runs
+        into a `Property` part-way answers `404`, because asking for the child of a leaf is a
+        client mistake rather than a server fault.
+
+        Omit `idShortPath` to list a submodel's elements, paginated. Append `/$value` at either
+        level for the ValueOnly form.
+      parameters:
+        - name: submodelIdentifier
+          in: path
+          required: true
+          schema: { type: string }
+        - name: idShortPath
+          in: path
+          required: true
+          schema: { type: string }
+          description: Dotted, e.g. `Metrics.Systems_TEMPERATURE`.
+      responses:
+        '200':
+          description: The element.
+          content:
+            application/json: { schema: { type: object } }
+        '401': { description: Missing or invalid Authorization header. }
+        '404': { description: No element at that path. }
+
   /functions/v1/deploy-nodered:
     post:
       tags: [Edge Functions]

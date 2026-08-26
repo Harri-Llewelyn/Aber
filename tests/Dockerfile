@@ -9,18 +9,25 @@
 # three real metamodel violations the hand-written structural tests had passed. A suite that skips
 # its most valuable assertions and still reports success is worse than one that fails.
 #
-# WHY THE REPO-SHAPED LAYOUT. test_aas_export.py resolves five files relative to
+# WHY THE REPO-SHAPED LAYOUT. Both AAS suites resolve their fixtures relative to
 # `Path(__file__).resolve().parents[3]`:
 #
 #   tests/schemas/AAS_V3_0_JSON_Schema.json                  the vendored IDTA metamodel schema
-#   supabase/functions/aas-export/sparkplugToXsd.ts          \  the two duplicated mappers, and
+#   supabase/functions/_shared/aas/sparkplugToXsd.ts         \  the two duplicated mappers, and
 #   frontend/src/utils/sparkplugDatatype.js                  /  the drift check between them
-#   supabase/functions/aas-export/model3dContentType.ts      \  likewise for the 3D model
+#   supabase/functions/_shared/aas/model3dContentType.ts     \  likewise for the 3D model
 #   frontend/src/utils/model3d.js                            /  content-type table
+#   supabase/functions/_shared/aas/shell.ts                  modelledMetrics(), EXECUTED not grepped
+#   supabase/functions/main/index.ts                         the registry test_aas_api.py asserts
+#   supabase/functions/aas-api/index.ts                      its own source-level checks
+#   docs/openapi.yaml                                        every served route must be documented
 #
 # Those parity checks are the reason the mappers may be duplicated at all (an edge worker cannot
 # import the frontend bundle), so they have to travel with the suite. Flattening the layout would
 # make parents[3] resolve somewhere else and every one of them would fail on a missing file.
+#
+# THE TWO MAPPERS MOVED to _shared/aas/ when aas-api began sharing the mapping layer with
+# aas-export. They are copied from there now; their parity contract with the frontend is unchanged.
 #
 # BUILD CONTEXT IS THE REPOSITORY ROOT:
 #   docker build -f tests/Dockerfile -t ghcr.io/harri-llewelyn/acs-cymru/test-runner:<tag> .
@@ -44,12 +51,24 @@ WORKDIR /app
 RUN pip install --no-cache-dir jsonschema==4.23.0
 
 # parents[3] of /app/supabase/functions/aas-export/test_aas_export.py is /app -- so these paths, and
-# only these paths, make the suite's five lookups resolve.
+# only these paths, make the suites' lookups resolve.
 COPY tests/schemas /app/tests/schemas
+# test_aas_api.py asserts that every route the service advertises is documented, so the spec is a
+# fixture of the suite rather than only a deliverable.
+COPY docs/openapi.yaml /app/docs/openapi.yaml
 COPY supabase/functions/aas-export/test_aas_export.py \
-     supabase/functions/aas-export/sparkplugToXsd.ts \
-     supabase/functions/aas-export/model3dContentType.ts \
      /app/supabase/functions/aas-export/
+COPY supabase/functions/aas-api/test_aas_api.py \
+     supabase/functions/aas-api/index.ts \
+     /app/supabase/functions/aas-api/
+# The registry, not the handler, is where the service-role key would be granted -- which is the
+# invariant test_aas_api.py exists to hold.
+COPY supabase/functions/main/index.ts \
+     /app/supabase/functions/main/
+COPY supabase/functions/_shared/aas/sparkplugToXsd.ts \
+     supabase/functions/_shared/aas/model3dContentType.ts \
+     supabase/functions/_shared/aas/shell.ts \
+     /app/supabase/functions/_shared/aas/
 COPY frontend/src/utils/sparkplugDatatype.js \
      frontend/src/utils/model3d.js \
      /app/frontend/src/utils/

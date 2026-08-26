@@ -1,34 +1,43 @@
 /**
- * AAS export: emit an Asset Administration Shell (IEC 63278) V3 JSON document for one device.
+ * AAS export: emit an Asset Administration Shell (IEC 63278) V3 document for one device, as JSON
+ * or as an `.aasx` package.
  *
  * An *adapter*, not a migration: the database keeps its own shape and this function projects it
  * into AAS on the way out. Nothing upstream knows AAS exists. Archived migration 0029's header records why
  * a native AAS metamodel was rejected (recursive RLS, a third identifier namespace, a fourth type
  * system).
  *
- * THREE EMISSION RULES, each of which produces an invalid or unbounded shell if broken:
+ * THE MAPPING ITSELF NO LONGER LIVES HERE. It moved to `../_shared/aas/shell.ts` when `aas-api`
+ * began serving the same object graph over the IDTA 02001/02002 REST surface. Two constructions of
+ * one shell would eventually disagree, and the disagreement would be invisible: the `.aasx` a
+ * customer holds and the endpoint their ERP queries would describe the same machine differently,
+ * both reporting success. What remains here is what is genuinely export-only -- the role ladder,
+ * the OPC packaging, and the decision about what to do when a bundled model cannot be reached.
  *
- *   * Telemetry VALUES are never inlined. The Time Series submodel carries a `LinkedSegment`
- *     pointing at the historian -- what IDTA 02008 defines that element for. Embedding history
- *     would make a shell unbounded in size.
- *   * A missing `semanticId` is OMITTED, never emitted as an empty Reference. `semantic_id` is
- *     nullable on purpose ("unmapped" is legitimate for a local extension), and an empty Reference
- *     asserts a mapping exists and then fails to name it. The response reports the unmapped count
- *     instead, so the gap is visible without being fabricated.
- *   * One Submodel per schema attached through `device_submodels`, keyed by provenance
- *     (`metric_catalog.standard`). `device_schemas` unions that join with the legacy 1:1
- *     `devices.schema_id`, so both shapes export.
+ * The three emission rules that shape the document (telemetry linked rather than inlined, an
+ * unmapped semanticId omitted rather than emptied, one Submodel per attached schema) are stated
+ * and enforced in the shared module, beside the code that applies them.
  *
  * SECURITY. The caller's own JWT resolves their role; the service-role client is used only after
  * that check passes. Broader disclosure than any single table it reads -- a shell aggregates
- * nameplate, configuration and documentation into one payload.
+ * nameplate, configuration and documentation into one payload. `aas-api` deliberately does NOT
+ * hold that key: see its header for why a live REST surface must read as the caller.
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { zipSync, strToU8 } from "https://esm.sh/fflate@0.8.2";
-import { sparkplugToXsd } from "./sparkplugToXsd.ts";
-import { modelContentType, modelFileName } from "./model3dContentType.ts";
+import { modelContentType } from "../_shared/aas/model3dContentType.ts";
+import {
+  buildEnvironment,
+  loadDeviceRecord,
+  MAX_BUNDLED_MODEL_BYTES,
+  MODEL_BASE_ADVICE,
+  MODEL_BASE_IS_LOOPBACK,
+  MODEL_BUCKET,
+  toIdShort,
+  UUID_RE,
+} from "../_shared/aas/shell.ts";
 import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
@@ -39,188 +48,8 @@ const jsonHeaders = { ...corsHeaders, "Content-Type": "application/json" };
 // allow-list, so an unmapped role is refused rather than defaulted.
 const ALLOWED_ROLES = ["Administrator", "Shopfloor_Manager", "Operator", "Auditor"];
 
-/** Namespace for asset and submodel ids. Configurable because an IRI must be resolvable for the
- *  organisation publishing it, and `acs-cymru.local` is only right for this stack. */
-const BASE_IRI = (Deno.env.get("AAS_BASE_IRI") ?? "https://acs-cymru.local/ids/asset/")
-  .replace(/\/+$/, "") + "/";
-
-/** Where a consumer fetches the actual samples. The shell points at this; it never embeds them. */
-const HISTORIAN_ENDPOINT =
-  Deno.env.get("AAS_HISTORIAN_ENDPOINT") ?? "http://localhost:54321/rest/v1/telemetry";
-
-/**
- * Public base for 3D model objects. `devices.model_3d_path` stores an object KEY, never a URL, so
- * the absolute URL is composed here -- the same arrangement as the historian endpoint above, and
- * for the same reason: a URL baked into a row is wrong the moment the deployment moves.
- *
- * It cannot be derived from SUPABASE_URL. Inside the compose network that is
- * `http://supabase-kong:8000`, which resolves for this worker and for nothing outside Docker; a
- * shell handed to a partner would carry an unreachable link. So it defaults to the published
- * gateway address and is overridden per deployment, exactly like AAS_BASE_IRI.
- */
-const MODEL_PUBLIC_BASE = (
-  Deno.env.get("AAS_MODEL_PUBLIC_BASE") ??
-    "http://localhost:54321/storage/v1/object/public/asset-3d-models"
-).replace(/\/+$/, "");
-
-/** The bucket 3D models live in. Matches scripts/storage-init.mjs and archived migration 0035's policies. */
-const MODEL_BUCKET = Deno.env.get("STORAGE_MODEL_BUCKET") ?? "asset-3d-models";
-
-/**
- * The IDTA Digital Nameplate template whose element semanticIds this exporter attaches.
- *
- * NOT an environment variable, and not on the exported submodel either -- it selects rows from
- * `idta_submodel_templates` (seeded by migration 0011) and nothing more. The version is part of
- * the identifier: 2.0 lives under admin-shell.io/zvei, 3.0 under admin-shell.io/idta, and a shell
- * that mixed them would name two different templates.
- */
-const NAMEPLATE_TEMPLATE_ID = "https://admin-shell.io/idta/nameplate/3/0/Nameplate";
-
-/**
- * Cap on a model bundled into an AASX. The bucket's own limit is 50 MB, but that governs what may
- * be *stored*; this governs what may be held in memory, deflated and concatenated inside a single
- * edge worker. Over the cap the export falls back to the URL reference, which is still a valid
- * shell -- degraded, not failed.
- */
-const MAX_BUNDLED_MODEL_BYTES = Number.parseInt(
-  Deno.env.get("AAS_MAX_BUNDLED_MODEL_BYTES") ?? "33554432",
-  10,
-);
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * Whether a base URL points at the loopback interface.
- *
- * WHY THIS MATTERS AT ALL. `AAS_MODEL_PUBLIC_BASE` defaults to `http://localhost:54321/...`, which
- * is correct for a developer clicking Export on their own machine and wrong for every other
- * consumer of the resulting shell. Inside an Eclipse BaSyx container, `localhost` is BaSyx; on a
- * partner's laptop it is their laptop. The reference resolves to nothing and the failure reads as
- * a broken export rather than as an unset variable.
- *
- * `0.0.0.0` is included because it is a bind address that people paste into a base URL by mistake;
- * it is never routable as a destination.
- */
-function isLoopbackBase(base: string): boolean {
-  try {
-    const host = new URL(base).hostname.toLowerCase();
-    return host === "localhost" || host === "127.0.0.1" || host === "::1" ||
-      host === "[::1]" || host === "0.0.0.0" || host.endsWith(".localhost");
-  } catch {
-    // An unparseable base is a different misconfiguration and is not this function's to report.
-    return false;
-  }
-}
-
-const MODEL_BASE_IS_LOOPBACK = isLoopbackBase(MODEL_PUBLIC_BASE);
-
-/**
- * What to tell an operator whose model URL will not resolve anywhere but this host.
- *
- * Names the variable AND what to set it to, because "configure the public base" is advice nobody
- * can action without knowing it means the address other machines use to reach this host.
- */
-const MODEL_BASE_ADVICE =
-  `AAS_MODEL_PUBLIC_BASE is '${MODEL_PUBLIC_BASE}', which resolves only on this host. ` +
-  "Set it to the address other machines use to reach this stack's Storage endpoint -- the LAN IP " +
-  "or DNS name, e.g. http://10.20.0.50:54321/storage/v1/object/public/asset-3d-models -- and " +
-  "verify it resolves from inside the container that will consume the shell.";
-
 const json = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), { status, headers: jsonHeaders });
-
-/**
- * An AAS `Reference` to an external concept, or undefined when the concept is unmapped.
- *
- * Returning undefined rather than a placeholder is the whole point: `JSON.stringify` drops an
- * undefined property, so an unmapped metric simply has no `semanticId` key.
- */
-function semanticReference(semanticId?: string | null) {
-  if (!semanticId) return undefined;
-  return {
-    type: "ExternalReference",
-    keys: [{ type: "GlobalReference", value: semanticId }],
-  };
-}
-
-/**
- * AAS idShort: a restricted identifier. The metamodel's pattern is
- *
- *     ^[a-zA-Z][a-zA-Z0-9_-]*[a-zA-Z0-9_]+$
- *
- * which is stricter than "letters, digits and underscore" in two ways that are easy to miss and
- * that the official schema rejects outright:
- *
- *   * it must START WITH A LETTER. Prefixing a digit-leading name with `_` is NOT a valid fix --
- *     the result is still invalid, just differently.
- *     Entirely reachable here: a device called "3-Axis Mill" or "3D Printer 01" is ordinary.
- *   * it is at least TWO characters, so a one-character name needs padding rather than passing
- *     through.
- */
-function toIdShort(value: string, fallback: string): string {
-  let cleaned = (value || "").replace(/[^A-Za-z0-9_]/g, "_").replace(/^_+|_+$/g, "");
-  if (!cleaned) return fallback;
-  if (!/^[A-Za-z]/.test(cleaned)) cleaned = `Id_${cleaned}`;
-  if (cleaned.length < 2) cleaned = `${cleaned}_`;
-  return cleaned;
-}
-
-function property(
-  idShort: string,
-  valueType: string,
-  value: unknown,
-  opts: { semanticId?: string | null; description?: string | null } = {},
-) {
-  return {
-    modelType: "Property",
-    idShort,
-    valueType,
-    // AAS serialises every Property value as a STRING, whatever its valueType says -- the schema
-    // declares `value: { type: "string" }`. A raw number or boolean fails validation, and so does
-    // `null`: the metamodel has no "exists but unset" value, it expresses that by the field being
-    // absent. So an unpublished metric omits `value` entirely rather than carrying null.
-    value: value === null || value === undefined ? undefined : String(value),
-    semanticId: semanticReference(opts.semanticId),
-    description: opts.description
-      ? [{ language: "en", text: String(opts.description).slice(0, 1023) }]
-      : undefined,
-  };
-}
-
-/**
- * A SubmodelElementCollection, or undefined when it would be empty.
- *
- * `SubmodelElementCollection.value` is `minItems: 1` in the schema, so an empty collection is not
- * merely useless -- it is invalid. Same shape of rule as `conceptDescriptions` and the reason both
- * are omitted rather than emitted hollow.
- */
-function collection(idShort: string, value: unknown[], description?: string) {
-  if (!value || value.length === 0) return undefined;
-  return {
-    modelType: "SubmodelElementCollection",
-    idShort,
-    description: description ? [{ language: "en", text: description }] : undefined,
-    value,
-  };
-}
-
-/**
- * An AAS `File` submodel element -- a reference to a document or artefact held outside the shell.
- *
- * `contentType` is not optional in practice even though the schema does not require it: it is how
- * a consumer picks a loader, and a 3D model whose type it cannot determine is a model it will not
- * render. Derived from the extension rather than from whatever MIME type the browser reported at
- * upload time -- see model3dContentType.ts for why those disagree across machines.
- */
-function file(idShort: string, value: string, contentType: string, description?: string) {
-  return {
-    modelType: "File",
-    idShort,
-    contentType,
-    value,
-    description: description ? [{ language: "en", text: description }] : undefined,
-  };
-}
 
 /**
  * AAS Part 5 media type for an AASX package. The `+xml` suffix looks wrong for a ZIP and is not --
@@ -320,45 +149,6 @@ ${
   return zipSync(entries);
 }
 
-/**
- * The metric names a schema models -- the union of `properties` keys and `required`.
- *
- * The FOURTH implementation of one rule, with `modelledMetrics()` in
- * frontend/src/utils/deviceTags.js, `modelled_metrics()` in ingestion/validate.py and
- * `_modelled_metrics()` in i3x/i3x_service.py. None can import another, so
- * `tests/fixtures/modelled-metrics.json` is the seam and all four assert against it --
- * `test_aas_export.py` runs this one through Node rather than grepping it, because the rule is
- * behaviour and a grep proves only that both files spell the word `required`.
- *
- * `!Array.isArray` IS LOAD-BEARING, and its absence here was a live divergence rather than a
- * hypothetical one -- this copy was the last to still carry it. `typeof [] === "object"`, so an
- * array reached `Object.keys`, which yields its INDICES: a schema with
- * `properties: ["Temp","Pressure"]` was read as modelling two metrics named "0" and "1".
- *
- * WORSE HERE THAN IN THE BROWSER. These names become Submodel Property idShorts in an exported AAS
- * shell -- a document handed to a third party, asserting metrics no device ever published -- and
- * "0" does not satisfy the AAS idShort pattern, which requires a leading letter. So the shell
- * fails validation at the CONSUMER while this function reports success. An array is not a valid
- * JSON Schema `properties` object; it contributes nothing.
- *
- * RETURNS A SORTED ARRAY where the mirrors return a set. That is a rendering choice, not a
- * semantic one: Submodel elements are emitted in this order, and sorting makes two exports of the
- * same device byte-comparable. The contract compares the two as sets.
- */
-function modelledMetrics(definition: Record<string, unknown> | null): string[] {
-  if (!definition || typeof definition !== "object" || Array.isArray(definition)) return [];
-  const props = definition.properties;
-  const required = definition.required;
-  const names = new Set<string>();
-  if (props && typeof props === "object" && !Array.isArray(props)) {
-    for (const key of Object.keys(props as Record<string, unknown>)) names.add(key);
-  }
-  if (Array.isArray(required)) {
-    for (const key of required) if (typeof key === "string") names.add(key);
-  }
-  return [...names].sort();
-}
-
 export default async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -417,341 +207,15 @@ export default async function handler(req: Request): Promise<Response> {
 
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 
-    const { data: deviceRows, error: deviceError } = await supabaseAdmin
-      .from("devices")
-      .select("*")
-      .eq("id", device_id);
+    const record = await loadDeviceRecord(supabaseAdmin, String(device_id));
+    if (!record) return json({ error: "Device not found" }, 404);
 
-    if (deviceError) return json({ error: deviceError.message }, 500);
-
-    const device = deviceRows?.[0];
-    if (!device) return json({ error: "Device not found" }, 404);
-
-    // asset_config is keyed by sparkplug_id, not by the row id -- it is written by ingestion from
-    // the DBIRTH payload, which only knows the wire identity.
-    //
-    // `device_schemas` (archived migration 0034) is the union of the device_submodels join and the legacy
-    // 1:1 devices.schema_id, so this resolves for a device provisioned by either path.
-    const [
-      { data: configRows },
-      { data: linkRows },
-      { data: catalogRows },
-      { data: gatewayRows },
-      { data: nameplateRows },
-      { data: templateRows },
-    ] = await Promise.all([
-      supabaseAdmin.from("asset_config").select("*").eq("asset_id", device.sparkplug_id),
-      supabaseAdmin.from("device_schemas").select("schema_id, submodel_key").eq("device_id", device.id),
-      supabaseAdmin.from("metric_catalog").select("*"),
-      device.gateway_id
-        ? supabaseAdmin.from("gateways").select("name,sparkplug_id").eq("id", device.gateway_id)
-        : Promise.resolve({ data: [] }),
-      supabaseAdmin.from("device_nameplate").select("*").eq("device_id", device.id),
-      supabaseAdmin.from("idta_submodel_templates").select("id_short, semantic_id")
-        .eq("template_id", NAMEPLATE_TEMPLATE_ID),
-    ]);
-
-    const links = linkRows ?? [];
-    const schemaIds = links.map((l) => l.schema_id).filter(Boolean);
-    const { data: schemaRows } = schemaIds.length > 0
-      ? await supabaseAdmin.from("schemas").select("*").in("id", schemaIds)
-      : { data: [] };
-
-    const schemas = schemaRows ?? [];
-    const keyBySchema = new Map<string, string | null>(
-      links.map((l) => [String(l.schema_id), (l.submodel_key as string | null) ?? null]),
-    );
-
-    const gateway = gatewayRows?.[0] ?? null;
-    const config = configRows ?? [];
-    const catalog = catalogRows ?? [];
-
-    const catalogByName = new Map<string, Record<string, unknown>>();
-    for (const metric of catalog) catalogByName.set(String(metric.name), metric);
-
-    const configByName = new Map<string, Record<string, unknown>>();
-    for (const entry of config) configByName.set(String(entry.metric_name), entry);
-
-    /** The birth value for a metric, in whichever column ingestion put it. */
-    const valueFor = (name: string): unknown => {
-      const row = configByName.get(name);
-      if (!row) return null;
-      if (row.val_double !== null && row.val_double !== undefined) return row.val_double;
-      if (row.val_bool !== null && row.val_bool !== undefined) return row.val_bool;
-      if (row.val_string !== null && row.val_string !== undefined) return row.val_string;
-      return null;
-    };
-
-    const globalAssetId = `${BASE_IRI}${device.sparkplug_id}`;
-    const shellIdShort = toIdShort(device.name, "Device");
-    const submodelId = (suffix: string) => `${globalAssetId}/submodel/${suffix}`;
-
-    let unmappedCount = 0;
-
-    /** One AAS Property per catalogued metric name. */
-    const propertyFor = (name: string) => {
-      const metric = catalogByName.get(name);
-      const semanticId = (metric?.semantic_id as string | null) ?? null;
-      if (!semanticId) unmappedCount += 1;
-      return {
-        metric,
-        element: property(
-          toIdShort(name, "Metric"),
-          sparkplugToXsd(metric?.datatype as number | undefined),
-          valueFor(name),
-          { semanticId, description: (metric?.description as string | null) ?? null },
-        ),
-      };
-    };
-
-    // ---- Submodel 1: Digital Nameplate -------------------------------------------------------
-    //
-    // ELEMENT-LEVEL semanticIds ONLY, and the submodel deliberately carries NONE.
-    //
-    // Putting https://admin-shell.io/idta/nameplate/3/0/Nameplate on the submodel would assert
-    // conformance to IDTA 02006, whose mandatory elements include URIOfTheProduct,
-    // ManufacturerName and an AddressInformation collection -- none of which this platform can
-    // guarantee for a device somebody registered this morning. Claiming the template id and then
-    // omitting its mandatory elements is the AAS version of minting an id under mtconnect.org:
-    // it asserts an interoperability nobody agreed to, and a consumer that trusts the id gets a
-    // shell that fails validation against the template it names. The IRDIs below say what each
-    // property MEANS, which is the useful half and is true.
-    //
-    // Values are resolved device-first: where a device publishes its own identification, that is
-    // what the shell reports, and `device_nameplate` is the fallback for the many devices that
-    // publish none. The join is on SEMANTIC ID, not on metric name -- a device may call its serial
-    // number anything, and the catalog's semantic_id is precisely the assertion that two
-    // differently-named metrics mean the same concept.
-    const nameplate = nameplateRows?.[0] ?? null;
-    const nameplateSemanticId = new Map<string, string>(
-      (templateRows ?? []).map((row) => [String(row.id_short), String(row.semantic_id)]),
-    );
-
-    const catalogBySemanticId = new Map<string, Record<string, unknown>>();
-    for (const metric of catalog) {
-      const id = metric.semantic_id as string | null;
-      if (id && !catalogBySemanticId.has(id)) catalogBySemanticId.set(id, metric);
-    }
-    /** The device's own answer for a concept, or null when it publishes nothing for it. */
-    const publishedValue = (semanticId: string): unknown => {
-      const metric = catalogBySemanticId.get(semanticId);
-      return metric ? valueFor(String(metric.name)) : null;
-    };
-
-    /**
-     * One nameplate property, sourced device-first and carrying its published IRDI.
-     *
-     * `source` is recorded in the description rather than as a sibling property: an AAS consumer
-     * reading ManufacturerName wants the name, and a second element next to it saying where the
-     * name came from would be indistinguishable from a second nameplate field.
-     */
-    const nameplateProperty = (
-      idShort: string,
-      operatorValue: unknown,
-      opcSemanticId?: string,
-    ) => {
-      const published = opcSemanticId ? publishedValue(opcSemanticId) : null;
-      const value = published ?? operatorValue ?? null;
-      if (value === null || value === undefined || value === "") return null;
-      return property(idShort, "xs:string", value, {
-        semanticId: nameplateSemanticId.get(idShort) ?? null,
-        description: published !== null
-          ? "Published by the device at DBIRTH."
-          : "Recorded against the asset by an operator.",
-      });
-    };
-
-    const OPC_MACHINERY = "http://opcfoundation.org/UA/Machinery/";
-    const nameplateProps = [
-      nameplateProperty("URIOfTheProduct", nameplate?.uri_of_the_product, `${OPC_MACHINERY}ProductInstanceUri`),
-      nameplateProperty("ManufacturerName", nameplate?.manufacturer_name, `${OPC_MACHINERY}Manufacturer`),
-      // Falls back to the device's own name, which is the only designation that always exists.
-      nameplateProperty(
-        "ManufacturerProductDesignation",
-        nameplate?.manufacturer_product_designation ?? device.name,
-        `${OPC_MACHINERY}Model`,
-      ),
-      nameplateProperty("ManufacturerProductType", nameplate?.manufacturer_product_type),
-      // SERIAL_NUMBER by name is the pre-semantic-id fallback: the demo schema publishes it under
-      // that literal name, and metrics created before 0029 carry no semantic id to join on.
-      nameplateProperty(
-        "SerialNumber",
-        nameplate?.serial_number ?? valueFor("SERIAL_NUMBER"),
-        `${OPC_MACHINERY}SerialNumber`,
-      ),
-      nameplateProperty("YearOfConstruction", nameplate?.year_of_construction, `${OPC_MACHINERY}YearOfConstruction`),
-      nameplateProperty("DateOfManufacture", nameplate?.date_of_manufacture),
-      nameplateProperty("HardwareVersion", nameplate?.hardware_version),
-      nameplateProperty("FirmwareVersion", nameplate?.firmware_version ?? valueFor("Controller/FIRMWARE")),
-      nameplateProperty("SoftwareVersion", nameplate?.software_version, `${OPC_MACHINERY}SoftwareRevision`),
-      nameplateProperty("CountryOfOrigin", nameplate?.country_of_origin),
-
-      // Factory+ concepts. No semanticId, because IDTA defines none for them and inventing one
-      // under admin-shell.io would be a forgery -- see supabase/migrations/archive/20260101000029_semantic_identifiers.sql's header.
-      property("AssetSparkplugId", "xs:string", device.sparkplug_id, {
-        description: "Immutable wire identity; the same value keys telemetry in the historian.",
-      }),
-      property("ConnectionMethod", "xs:string", device.connection_method),
-      property("EdgeGatewayName", "xs:string", gateway?.name ?? null),
-      property("EdgeGatewaySparkplugId", "xs:string", gateway?.sparkplug_id ?? null),
-      property("Status", "xs:string", device.status),
-    ].filter((element): element is Record<string, unknown> => element !== null);
-
-    const submodels: Record<string, unknown>[] = [
-      {
-        modelType: "Submodel",
-        id: submodelId("Nameplate"),
-        idShort: "DigitalNameplate",
-        kind: "Instance",
-        submodelElements: nameplateProps,
-      },
-    ];
-
-    // Per IDTA 02008: a segment whose records live outside the shell, named by an endpoint. This is
-    // the standard's own answer to bulk history, and the reason none of it is inlined.
-    const linkedSegment = collection(
-      "LinkedSegment",
-      [
-        property("Endpoint", "xs:anyURI", HISTORIAN_ENDPOINT),
-        property("Query", "xs:string", `asset_id=eq.${device.sparkplug_id}`),
-      ],
-      "Historical samples for this asset. Query the endpoint filtered by asset_id.",
-    );
-
-    // ---- One Submodel per attached schema -------------------------------------------
-    // Before device_submodels existed this was a single schema split by provenance into a fixed
-    // pair of submodels. Each attachment is now its own aspect, which is what an AAS Submodel
-    // means -- and a schema whose metrics are all ISO 22400 becomes a KPI submodel rather than a
-    // telemetry one carrying a KPI section.
-    //
-    // A schema is still split by `metric_catalog.standard` when it mixes provenances, because the
-    // demo schema deliberately does: one schema, three standards. Splitting keeps
-    // KeyPerformanceIndicators meaningful without forcing operators to maintain two schemas.
-    let telemetryTotal = 0;
-    let kpiTotal = 0;
-
-    for (const schema of schemas) {
-      const modelled = modelledMetrics(schema.schema_definition ?? null);
-      const telemetryProps: unknown[] = [];
-      const kpiProps: unknown[] = [];
-
-      for (const name of modelled) {
-        const { metric, element } = propertyFor(name);
-        if (metric?.standard === "ISO 22400") kpiProps.push(element);
-        else telemetryProps.push(element);
-      }
-
-      telemetryTotal += telemetryProps.length;
-      kpiTotal += kpiProps.length;
-
-      // The operator's chosen idShort where device_submodels carries one, otherwise derived from
-      // the schema name. Derived rather than stored by default, so it cannot drift from the name.
-      const declaredKey = keyBySchema.get(String(schema.id));
-      const baseKey = declaredKey || toIdShort(String(schema.schema_name || ""), "Submodel");
-      const single = schemas.length === 1;
-
-      if (telemetryProps.length > 0) {
-        const elements = [collection("Metrics", telemetryProps)];
-        if (linkedSegment) elements.push(collection("Segments", [linkedSegment]));
-        submodels.push({
-          modelType: "Submodel",
-          id: submodelId(`${baseKey}/OperationalTelemetry`),
-          // Keeps the well-known idShort while only one schema is attached, so a consumer looking
-          // for OperationalTelemetry still finds it; qualifies it once there is more than one.
-          idShort: single ? "OperationalTelemetry" : `${baseKey}_OperationalTelemetry`,
-          kind: "Instance",
-          semanticId: semanticReference(schema.semantic_id ?? null),
-          submodelElements: elements.filter(Boolean),
-        });
-      }
-
-      if (kpiProps.length > 0) {
-        submodels.push({
-          modelType: "Submodel",
-          id: submodelId(`${baseKey}/KeyPerformanceIndicators`),
-          idShort: single ? "KeyPerformanceIndicators" : `${baseKey}_KeyPerformanceIndicators`,
-          kind: "Instance",
-          submodelElements: kpiProps,
-        });
-      }
-    }
-
-    // ---- Submodel: VisualRepresentation (3D model) -------------------------------------------
-    // Emitted only when the device actually carries a model. An empty submodel would assert the
-    // aspect exists and then fail to describe it -- the same rule as the omitted `semanticId` and
-    // the omitted empty collection, and the reason `submodelElements` is not padded with a blank
-    // File element instead.
-    //
-    // `model_3d_path` holds an object KEY. The absolute URL is composed here from a configurable
-    // base, so the same row exports a localhost link on a dev stack and a real one in production
-    // without the database knowing which it is.
-    const modelPath = (device.model_3d_path as string | null) ?? null;
-    const modelUrl = modelPath ? `${MODEL_PUBLIC_BASE}/${modelPath}` : null;
-
-    if (modelPath && modelUrl) {
-      submodels.push({
-        modelType: "Submodel",
-        id: submodelId("VisualRepresentation"),
-        idShort: "VisualRepresentation",
-        kind: "Instance",
-        submodelElements: [
-          file(
-            // NOT "3DModel", which is what it reads as and what the AAS metamodel forbids: an
-            // idShort must start with a letter. The official schema rejects "3DModel" and equally
-            // rejects "_3DModel", so there is no prefixing fix -- the name has to lead with a letter.
-            "Model3D",
-            modelUrl,
-            modelContentType(modelPath),
-            `3D visual model for this asset (${modelFileName(modelPath)}).`,
-          ),
-        ],
-      });
-    }
-
-    const environment = {
-      // AAS Part 5 "Environment": the container serialisation, which is what an AASX package holds
-      // and what every AAS tool accepts as a JSON drop-in.
-      assetAdministrationShells: [
-        {
-          modelType: "AssetAdministrationShell",
-          id: `${globalAssetId}/shell`,
-          idShort: shellIdShort,
-          assetInformation: {
-            assetKind: "Instance",
-            globalAssetId,
-          },
-          submodels: submodels.map((s) => ({
-            type: "ModelReference",
-            keys: [{ type: "Submodel", value: s.id as string }],
-          })),
-        },
-      ],
-      submodels,
-      // `conceptDescriptions` is minItems:1 in the schema, so an empty array is INVALID -- the key
-      // is omitted instead. Nothing is lost: every semanticId here is already a resolvable
-      // identifier, and empty ConceptDescriptions would be noise rather than interoperability.
-    };
-
-    const stats = {
-      submodels: submodels.length,
-      attached_schemas: schemas.length,
-      telemetry_metrics: telemetryTotal,
-      kpi_metrics: kpiTotal,
-      unmapped_semantic_ids: unmappedCount,
-      has_3d_model: Boolean(modelPath),
-      // Surfaced rather than left to be discovered by a consumer who cannot fetch the model.
-      // A WARNING here and not a refusal: in the JSON export the URL is visible to the caller,
-      // and a developer exporting on their own machine is the case the localhost default exists
-      // to serve. The AASX path below treats the same condition as fatal, because there the
-      // package claims to be self-contained and is not.
-      ...(modelPath && MODEL_BASE_IS_LOOPBACK
-        ? { model_url_resolves_only_on_this_host: true }
-        : {}),
-    };
+    const { device } = record;
+    const { environment, stats, modelPath, modelUrl } = buildEnvironment(record);
 
     // ---- AASX packaging (Open Packaging Conventions / ISO 29500) ------------------------------
     if (format === "aasx") {
-      const filename = `${toIdShort(device.name, "device")}.aasx`;
+      const filename = `${toIdShort(String(device.name ?? ""), "device")}.aasx`;
       const supplements: SupplementaryFile[] = [];
       let bundled3dModel = false;
 
@@ -785,9 +249,9 @@ export default async function handler(req: Request): Promise<Response> {
           // Environment deliberately differs from the JSON export: a package-relative path is what
           // makes the bundle self-contained, and is what AAS Part 5 specifies for a supplementary
           // file. The test asserts that this is the only difference.
-          for (const submodel of environment.submodels) {
-            if ((submodel as { idShort?: string }).idShort !== "VisualRepresentation") continue;
-            for (const element of (submodel as { submodelElements: { idShort: string; value: string }[] }).submodelElements) {
+          for (const submodel of environment.submodels as { idShort?: string }[]) {
+            if (submodel.idShort !== "VisualRepresentation") continue;
+            for (const element of (submodel as unknown as { submodelElements: { idShort: string; value: string }[] }).submodelElements) {
               if (element.idShort === "Model3D") element.value = `/${part}`;
             }
           }
