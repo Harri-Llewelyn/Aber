@@ -27,6 +27,8 @@ import {
   IconLock,
   IconPencil,
   IconShieldAlert,
+  IconAlertTriangle,
+  IconAlertCircle,
   IconZap,
   IconCog
 } from '../common/Icons'
@@ -371,7 +373,12 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   const STATUS_LABEL = {
     attention: 'Needs attention — a device here is quarantined, waiting to be admitted',
     normal: 'Normal — at least one device here is online',
-    idle: 'Nothing live — no device here is currently reporting'
+    idle: 'Nothing live — no device here is currently reporting',
+    // Says WHO raised it, because that is the difference between this red and the red this
+    // dashboard withdrew. The map relays a Grafana verdict; it does not evaluate a threshold of
+    // its own. See deviceChipClass() for why that distinction is what permits red at all.
+    alert: 'Alert firing — Grafana has raised an alert against a device in this tile. The device '
+      + 'chip turns red and is flagged ALARM or WARN'
   }
 
   // One renderer for cell cards and both lanes. A device dragged out of Unassigned has to look
@@ -423,6 +430,27 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
         )}
         {!isArch && status === DEVICE_STATUS.OFFLINE && (
           <span className="chip-flag" style={{ color: 'var(--text-muted)' }}>OFF</span>
+        )}
+        {/* AN ALERT IS THE ONE CHIP STATE THAT WAS COLOUR ALONE. Every other treatment on this map
+            carries a mark as well as a hue -- ARCH, QUAR, OFF, STAGED, and the tile dot's `title` --
+            because `.tile-dot` states the rule outright: never colour alone. A red chip with no
+            flag broke it, and issue #59 asks the legend to name a category the map could not
+            actually spell out.
+
+            ARCHIVED WINS, matching deviceChipClass()'s precedence exactly rather than restating it:
+            the chip is already grey by then, and a flag contradicting its own colour is worse than
+            no flag. The glyph and wording are DevicesTab's -- circle/ALARM for critical, triangle
+            for anything else -- so a device does not answer to two different names on two pages. */}
+        {!isArch && alert && (
+          <span
+            className="chip-flag"
+            style={{ color: 'var(--danger)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+            title={`${alert.alert_name}${alert.summary ? ` — ${alert.summary}` : ''} (raised by Grafana)`}
+          >
+            {alert.severity === 'critical'
+              ? <><IconAlertCircle size={10} /> ALARM</>
+              : <><IconAlertTriangle size={10} /> WARN</>}
+          </span>
         )}
       </span>
     )
@@ -667,6 +695,15 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
                   today's one cause. The title says which. */}
               <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.attention}><span className="tile-dot tile-dot-attention" /> Needs attention</span>
               <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.idle}><span className="tile-dot tile-dot-idle" /> Nothing live</span>
+              {/* THE FOURTH CATEGORY IS A CHIP, NOT A DOT (issue #59), and the swatch says so.
+                  Red arrived on this map with issue #34 and the legend never grew an entry for it,
+                  so the one colour that means "somebody look now" was the only one undocumented.
+
+                  It is drawn as a miniature chip rather than a fourth dot on purpose: the dots roll
+                  up CONNECTIVITY for a whole tile, and an alert belongs to one device inside it. A
+                  red dot in this row would promise a tile-level state the grid does not paint --
+                  see rollupDeviceStatus(), which has no alert input and deliberately none. */}
+              <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }} title={STATUS_LABEL.alert}><span className="legend-chip legend-chip-danger" /> Alert firing</span>
               {canManageDevice ? (
                 <button
                   className={`btn btn-sm ${rearranging ? 'btn-primary' : 'btn-ghost'}`}

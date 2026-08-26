@@ -1831,6 +1831,24 @@ tbody tr:hover { background: var(--bg-glass); }
 /* No glow: "nothing live in here" should not draw the eye the way something actionable does. */
 .tile-dot-idle      { background: var(--text-dim); }
 
+/* ===== Legend chip swatch =====
+   The legend's fourth entry (issue #59) describes a CHIP, not a dot: an alert fires against one
+   device, while the dots above roll up a whole tile. A rounded rectangle rather than a circle is
+   what makes that readable without a sentence -- it is the shape of the thing it stands for, so
+   the eye matches it to a chip in the grid and not to a dot in a tile header.
+
+   Sized to sit on the same 8px optical line as `.tile-dot` so the row does not step. */
+.legend-chip {
+  width: 14px;
+  height: 9px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  flex-shrink: 0;
+}
+/* The same border and fill as `.chip-danger`, quoted rather than shared: a swatch that drifts from
+   the chip it describes is a legend that lies. */
+.legend-chip-danger { border-color: var(--danger); background: rgba(255, 77, 109, 0.15); }
+
 .zone-body {
   padding: 8px 10px;
   display: flex;
