@@ -42,7 +42,7 @@ export function datatypeToJsonSchemaType(code) {
  * is a plain INT with no constraint, so an unrecognised code is reachable and must degrade rather
  * than emit `undefined`.
  *
- * MUST stay in step with supabase/functions/aas-export/sparkplugToXsd.ts -- the edge function
+ * MUST stay in step with supabase/functions/_shared/aas/sparkplugToXsd.ts -- the edge function
  * cannot import from this bundle. `test_aas_export.py` parses both files and fails if they drift,
  * the same keep-in-step discipline utils/metricGroup.js has against its SQL.
  */

@@ -12,7 +12,7 @@
  * is also what the database can enforce: `devices.model_3d_path`'s CHECK constrains the extension
  * because that is the only part of an upload that survives into the stored row.
  *
- * Mirrored by `supabase/functions/aas-export/model3dContentType.ts` -- an edge worker cannot import
+ * Mirrored by `supabase/functions/_shared/aas/model3dContentType.ts` -- an edge worker cannot import
  * the frontend bundle. `test_aas_export.py` parses both files and fails on drift, the same
  * discipline `sparkplugToXsd` and `metricGroup.js` are held to.
  */

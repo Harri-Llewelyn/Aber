@@ -54,8 +54,8 @@ would stay wrong until the device's next birth, and rebirths are rare.
 | `utils/gatewayStatus.js` | `public.gateway_status` (90 s threshold) |
 | `utils/schemaVersion.js` | `public.schema_version_base_name()` |
 | `utils/deviceTags.js` | `ingestion/validate.py`'s Python mirror |
-| `utils/sparkplugDatatype.js` | `functions/aas-export/sparkplugToXsd.ts` |
-| `utils/model3d.js` | `functions/aas-export/model3dContentType.ts` |
+| `utils/sparkplugDatatype.js` | `functions/_shared/aas/sparkplugToXsd.ts` |
+| `utils/model3d.js` | `functions/_shared/aas/model3dContentType.ts` |
 
 All eight are now guarded, by `scripts/check-mirror-drift.mjs`, a CI step, or
 `test_aas_export.py`. `sparkplugId.js` matters most — it derives an **immutable wire identity**, so
