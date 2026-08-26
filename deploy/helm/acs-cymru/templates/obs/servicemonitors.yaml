@@ -113,6 +113,31 @@ Without it the targets are simply DOWN, which reads as the pods being unreachabl
       "why" "the prometheus plugin on the status listener") -}}
 {{- end -}}
 {{/*
+  ENVOY'S SCRAPE IS A DIFFERENT PORT AND A DIFFERENT PATH, and carrying Kong's over unchanged is
+  the failure this whole file exists to prevent: Prometheus reports the target UP while every
+  scrape 404s, so the gateway reads as idle rather than as unmeasured.
+
+  Kong served /metrics on a dedicated status listener that only existed when KONG_STATUS_LISTEN
+  was set. Envoy serves /stats/prometheus on its ADMIN listener, which also answers the readiness
+  probe -- one port for both.
+
+  THE SERIES NAMES DIFFER TOO (`kong_http_status` -> `envoy_http_downstream_rq_xx`). Nothing in
+  this repository graphs the kong_* series, so no panel breaks; verify against a live scrape before
+  building one, as the note above this block records having had to do once already.
+
+  `component` comes from the same helper NetworkPolicy uses, because a ServiceMonitor selects POD
+  LABELS and the promoted Service name does not change them.
+*/}}
+{{- if and .Values.supabaseEnvoy.enabled .Values.supabaseEnvoy.metrics.enabled -}}
+{{- $targets = append $targets (dict
+      "name" "supabase-envoy"
+      "component" (include "acs-cymru.gatewayComponent" .)
+      "service" .Values.supabaseEnvoy.serviceName
+      "port" "metrics"
+      "path" "/stats/prometheus"
+      "why" "Envoy's admin listener, which serves the scrape and the readiness probe") -}}
+{{- end -}}
+{{/*
   THE ONLY TARGET ON THE CRITICAL DATA PATH. Everything else here observes a request tier; this one
   says whether telemetry is being recorded at all.
 
