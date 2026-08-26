@@ -809,7 +809,7 @@ services:
       - ./supabase/functions:/home/deno/functions:ro
       # The canonical Node-RED flow - the "git" side of the GitOps sync that
       # deploy-nodered pushes to the running Node-RED.
-      - ./node_red_flow.json:/home/deno/flows/node_red_flow.json:ro
+      - ./simulation/node_red_flow.json:/home/deno/flows/node_red_flow.json:ro
       # The physical gateway bundle template gateway-bundle zips and serves. Read in the entrypoint
       # below for the same reason as the flow -- an edge worker cannot see this mount.
       - ./templates/physical-gateway:/home/deno/templates/physical-gateway:ro
@@ -1467,7 +1467,7 @@ services:
       MQTT_TLS_CA_FILE: ${MQTT_TLS_CA_FILE:-}
     volumes:
       - nodered_data:/data
-      - ./node_red_flow.json:/seed/flows.json:ro
+      - ./simulation/node_red_flow.json:/seed/flows.json:ro
       # READ-ONLY, AND FOR ca.crt ALONE. mosquitto-tls-init leaves ca.crt world-readable and
       # ca.key root-owned at 0600, so a container that does not run as root can read the root of
       # trust and not the key that signs with it -- the same property the gateway-credential
@@ -1696,7 +1696,13 @@ services:
           echo 'SUPABASE_ANON_KEY must be set -- it is what gets the alert webhook past Kong key-auth. Run: node scripts/setup.mjs' >&2
           exit 1
         fi
-        cp /tmp/alerting-template/policies.yaml /tmp/alerting-template/alert-rules.yaml \
+        # GLOBBED ON THE SUFFIX, not named outright. `shopfloor-alert-rules.yaml` is the
+        # demonstrator's three machine rules, which roadmap §14 moved into simulation/ and does
+        # NOT provision by default -- a reader enables them by copying the file in here. Copying
+        # by explicit name would have silently ignored it, and the symptom would be an alert rule
+        # that is present in the repository, present in the provisioning directory, and absent
+        # from Grafana.
+        cp /tmp/alerting-template/policies.yaml /tmp/alerting-template/*alert-rules.yaml \
            /etc/grafana/provisioning/alerting/
         sed -e "s|__GRAFANA_ALERT_WEBHOOK_SECRET__|$$GRAFANA_ALERT_WEBHOOK_SECRET|g" \
             -e "s|__SUPABASE_ANON_KEY__|$$SUPABASE_ANON_KEY|g" \

@@ -1331,8 +1331,21 @@ function edgeFunctionNames() {
 // how a guard stops being trusted.
 // -------------------------------------------------------------------------------------------------
 {
-  const RULES = 'grafana/provisioning/alerting/alert-rules.yaml';
-  const rules = read(RULES);
+  // BOTH RULE FILES, and reading only the first would have quietly emptied this check. Roadmap §14
+  // split the three MACHINE rules out into simulation/ -- and those are the only rules that name a
+  // metric at all, because the platform and ingestion groups count rows and read views. Pointed at
+  // the provisioning directory alone it finds zero metric names and reports the absence as a shape
+  // change rather than as what it is: the rules moved. (It did exactly that, once, on the commit
+  // that moved them.)
+  //
+  // The demonstrator's file is NOT provisioned by default, and it is checked anyway. A rule is
+  // wrong in the same way whether or not it is currently loaded, and the whole point of keeping it
+  // in the repository is that enabling it is a copy rather than a rewrite.
+  const RULES = [
+    'grafana/provisioning/alerting/alert-rules.yaml',
+    'simulation/grafana/alerting/shopfloor-alert-rules.yaml',
+  ];
+  const rules = RULES.map(read).join('\n');
 
   // `metric_name = 'X'` and `metric_name IN ('X', 'Y')` are the only two shapes the rules use.
   const named = new Set();
@@ -1342,7 +1355,7 @@ function edgeFunctionNames() {
 
   if (named.size === 0) {
     fail(
-      `no metric names found in ${RULES}. The rules changed shape, so the catalog agreement is no\n` +
+      `no metric names found in ${RULES.join(' or ')}. The rules changed shape, so the catalog agreement is no\n` +
         '      longer being checked -- and a misspelled metric evaluates an empty series in silence.'
     );
   } else {

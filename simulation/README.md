@@ -1,15 +1,102 @@
-# Simulators & Edge Automation
+# The simulated shopfloor
 
-Node-RED runs the **Gateway Simulator** — a self-contained, zero-dependency flow that publishes the
-full Sparkplug B lifecycle so the platform can be exercised end to end with no physical hardware.
+Everything simulated lives here, and **none of it runs unless you ask for it.**
+
+That is roadmap §14, and the request behind it was specific: a participant at a demonstration asked
+whether the simulated devices appear on every start, said they polluted the Digital Thread, and
+wanted running them to be a choice. A fresh install now comes up with no cells, no gateways and no
+devices at all.
+
+Node-RED still runs the **Gateway Simulator** — a self-contained, zero-dependency flow that
+publishes the full Sparkplug B lifecycle so the platform can be exercised end to end with no
+physical hardware. It just has nothing to publish about until the assets exist.
 
 | Artefact | Location |
 | :--- | :--- |
-| Flow definition | [`../node_red_flow.json`](../node_red_flow.json) |
+| Flow definition | [`node_red_flow.json`](node_red_flow.json) |
+| Shopfloor dashboard | [`grafana/dashboards/manufacturing-cells.json`](grafana/dashboards/manufacturing-cells.json) |
+| Machine alert rules | [`grafana/alerting/shopfloor-alert-rules.yaml`](grafana/alerting/shopfloor-alert-rules.yaml) |
+| Topology and credentials | [`../scripts/provision-gateways.mjs`](../scripts/provision-gateways.mjs) |
+| Retirement of the old seed | [`../supabase/migrations/0040_retire_demonstration_seed.sql`](../supabase/migrations/0040_retire_demonstration_seed.sql) |
 | Provisioning script | [`../scripts/node-red-init.mjs`](../scripts/node-red-init.mjs) |
 | Broker config | [`../mosquitto.conf`](../mosquitto.conf), [`../mosquitto.acl`](../mosquitto.acl) |
 | Gateway credential tool | [`../scripts/mosquitto-provision-gateway.mjs`](../scripts/mosquitto-provision-gateway.mjs) |
 | Editor | `http://localhost:1880` |
+
+---
+
+## Turning the demonstrator on
+
+Three things are opt-in, and they are separate because they fail separately.
+
+### 1. The assets — four cells, four gateways, six devices
+
+```bash
+npm run provision:gateways
+```
+
+This is the only step that **must** happen, and the only one nothing else can do: a gateway row is
+useless without a Mosquitto account, and the account has to be issued against the `sparkplug_id` the
+database generates from the row's pinned UUID. The script creates the cells, the gateways and the
+devices, attaches each device's schema, issues a broker credential per gateway and writes them to
+`.env.gateways` (mode 0600).
+
+**The passwords are not recoverable** — `mosquitto_passwd` stores a hash. Fold them into `.env` and
+restart Node-RED, or the four brokers will log `Connection failed to broker` with no CONNACK code:
+
+```bash
+docker compose restart node-red     # after updating .env from .env.gateways
+```
+
+`npm run stack:reset` does all of this for you, including replaying the seed afterwards so the
+Digital Thread's causation demonstration has a subject.
+
+### 2. The Grafana dashboard
+
+Not provisioned by default, because its panels hardcode `Sim_CNC_Mill_01` — on an install running
+real plant it named a machine that does not exist, in a folder an operator would reasonably read as
+describing their floor.
+
+```bash
+cp simulation/grafana/dashboards/*.json grafana/provisioning/dashboards/shopfloor/
+docker compose restart grafana
+```
+
+### 3. The machine alert rules
+
+Thermal Excursion, Emergency Stop Engaged and Low OEE Availability. They evaluate machine telemetry
+at a 10-second interval, which the group's own comment has always admitted is a demonstrator setting
+— *"because someone is standing in front of a fault-injection button"*.
+
+```bash
+cp simulation/grafana/alerting/*.yaml grafana/provisioning/alerting/
+docker compose restart grafana
+```
+
+The init step globs `*alert-rules.yaml`, so dropping the file in is all that is needed.
+
+**These are not simulator-specific in their queries**, and that is the honest cost of moving them:
+each groups by `asset_id` and matches whatever publishes the metric, so a real machining centre
+publishing `Systems/TEMPERATURE` is covered by rule 1 exactly as the simulator is. Somebody
+onboarding real plant wants them — they just should not arrive before there is any plant.
+
+### On Kubernetes
+
+Steps 2 and 3 are one values flag, because the chart bakes its files in rather than mounting them:
+
+```bash
+helm upgrade acs-cymru deploy/helm/acs-cymru --reuse-values \
+  --set simulation.grafana.enabled=true
+```
+
+Step 1 is unchanged — `npm run provision:gateways -- --target=k8s`.
+
+### What you get instead if you skip all three
+
+An empty shopfloor and a working quarantine queue. Publish under any well-formed `dev`-prefixed id
+and the device is held for approval, which is the zero-touch onboarding path and is now the **first**
+thing a new user meets rather than a footnote. That is better teaching than a floor that was already
+there when you arrived.
 
 ---
 
@@ -38,7 +125,7 @@ To inspect, reset, or re-import by hand:
    session is needed first because GoTrue ships no consent UI. Import and Deploy need
    Administrator or Shopfloor_Manager — Operator and Auditor get a read-only editor.
 2. **☰ menu → Import**.
-3. Paste the contents of [`../node_red_flow.json`](../node_red_flow.json).
+3. Paste the contents of [`node_red_flow.json`](node_red_flow.json).
 4. **Import**, then **Deploy**.
 
 To force a re-seed over editor changes, set `NODE_RED_FORCE_SEED=true` and restart, or use the

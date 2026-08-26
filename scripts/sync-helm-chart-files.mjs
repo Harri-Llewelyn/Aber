@@ -123,7 +123,11 @@ const MIRRORS = [
     why: 'Broker config, topic ACL and the optional MQTTS listener; repository-managed policy, mounted read-only on both targets',
   },
   {
-    source: '.',
+    // MOVED OUT OF THE REPOSITORY ROOT into simulation/, with the walkthrough and the demonstration
+    // dashboard, by roadmap §14. The MIRROR path is unchanged -- the chart still reads
+    // files/node-red/node_red_flow.json -- because what moved is where the source lives, not what
+    // the chart is handed.
+    source: 'simulation',
     dest: 'node-red',
     match: (name) => name === 'node_red_flow.json',
     why: 'The canonical flow node-red-init seeds and deploy-nodered pushes',
@@ -191,7 +195,16 @@ const MIRRORS = [
     // ConfigMap. A contact point holds a bearer token; the rules and the policy do not.
     source: join('grafana', 'provisioning', 'alerting'),
     dest: 'grafana-alerting',
-    match: (name) => name.endsWith('.yaml'),
+    // NAMED, NOT GLOBBED, and the glob was a real bug rather than a tidier spelling. Roadmap §14
+    // made the demonstrator's machine rules opt-in by COPYING `shopfloor-alert-rules.yaml` into
+    // this directory -- so on any machine where somebody had enabled them, a `*.yaml` match swept
+    // that copy into the chart's UNCONDITIONAL alerting ConfigMap. The rules would then ship to
+    // every cluster regardless of `simulation.grafana.enabled`, and the flag would have nothing to
+    // switch. Caught by running the sync on a stack with the demonstrator turned on.
+    match: (name) =>
+      name === 'alert-rules.yaml' ||
+      name === 'policies.yaml' ||
+      name === 'contact-points.template.yaml',
     why: 'Alert rules, notification policy and the webhook contact point Grafana provisions at start',
   },
   {
@@ -201,10 +214,24 @@ const MIRRORS = [
     why: 'Platform Infrastructure folder -- stack and ingestion health',
   },
   {
-    source: join('grafana', 'provisioning', 'dashboards', 'shopfloor'),
+    // MOVED INTO simulation/ BY ROADMAP §14, along with the flow and the walkthrough. It is still
+    // MIRRORED unconditionally -- the chart decides at render time whether to build a ConfigMap
+    // from it, gated on `simulation.grafana.enabled`, and a missing file would fail that render
+    // instead of turning the dashboard off. Same arrangement as mosquitto-tls.conf above.
+    source: join('simulation', 'grafana', 'dashboards'),
     dest: 'grafana-dashboards-shopfloor',
     match: (name) => name.endsWith('.json'),
-    why: 'Shopfloor Operations folder -- manufacturing cells and telemetry',
+    why: 'Shopfloor Operations folder -- manufacturing cells and telemetry, opt-in with the demonstrator',
+  },
+  {
+    // The demonstrator's three MACHINE alert rules, split out of grafana/provisioning/alerting/
+    // by §14. A SEPARATE mirror rather than a second file in `grafana-alerting`, because that
+    // ConfigMap is unconditional and this content is not: merging them would put the rules on
+    // every install and leave the flag with nothing to switch.
+    source: join('simulation', 'grafana', 'alerting'),
+    dest: 'grafana-alerting-simulation',
+    match: (name) => name.endsWith('.yaml'),
+    why: "The demonstrator's machine alert rules, added to the alerting ConfigMap when simulation.grafana.enabled",
   },
 ];
 

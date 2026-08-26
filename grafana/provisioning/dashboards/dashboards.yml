@@ -28,6 +28,16 @@ providers:
     options:
       path: /etc/grafana/provisioning/dashboards/platform
 
+  # THIS PROVIDER LEGITIMATELY HAS NOTHING TO PROVISION on a default install, and that is not a
+  # fault to be fixed by deleting it. Roadmap §14 moved `manufacturing-cells.json` into
+  # `simulation/grafana/dashboards/` because its panels hardcode `Sim_CNC_Mill_01` -- a machine that
+  # does not exist on an install running real plant, in a folder an operator would reasonably read
+  # as describing their floor. A reader who wants it copies it back in; see the README in the
+  # directory below, which is also what keeps that directory present in a fresh clone.
+  #
+  # The provider stays declared either way. Grafana creates the folder empty and says nothing, which
+  # is the correct outcome -- and it means enabling the demonstrator is a copy rather than a copy
+  # plus an edit to this file.
   - name: 'acs-cymru-shopfloor'
     orgId: 1
     folder: 'ACS-Cymru - Shopfloor Operations'

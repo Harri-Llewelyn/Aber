@@ -343,7 +343,7 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | **[`frontend/`](frontend/README.md)** | React 18 architecture, Vite, Realtime integration, derived state, theming |
 | **[`supabase/`](supabase/README.md)** | Migrations, RLS privilege matrix, triggers, audit immutability, edge functions, Kong |
 | **[`ingestion/`](ingestion/README.md)** | Sparkplug B parsing, identity resolution, gateway binding, TimescaleDB mapping, `validate.py` |
-| **[`simulators/`](simulators/README.md)** | Node-RED setup, flow provisioning, broker topics, onboarding walkthrough |
+| **[`simulation/`](simulation/README.md)** | Everything simulated, and none of it automatic: the Node-RED flow, the shopfloor dashboard, the machine alert rules, and how to turn each on |
 | **[`i3x/`](i3x/README.md)** | i3X 1.0 server: address-space mapping, subscriptions, connecting a client — including [an MCP host](i3x/README.md#mcp) |
 | **[`deploy/k8s/README.md`](deploy/k8s/README.md)** | Kubernetes runbook: install, upgrade, teardown, hardening, divergence table, releases |
 | [`deploy/helm/acs-cymru/`](deploy/helm/acs-cymru) | The Helm chart; `values.yaml` documents every setting |
@@ -630,7 +630,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
   come up with a four-cell simulated shopfloor seeded by `0002`, which meant every install began
   with assets nobody had asked for and a Digital Thread already describing them. The floor is now
   opt-in: `npm run provision:gateways` creates it, and
-  [`simulators/README.md`](simulators/README.md) walks through building one machine by hand
+  [`simulation/README.md`](simulation/README.md) walks through building one machine by hand
   instead. `0040` retires it from databases that already have it, once.
 - **An unrecognised device appears in the quarantine queue, not on the shopfloor map.** That is the
   zero-touch onboarding path working: a device that announces itself under an id nobody registered
@@ -991,7 +991,7 @@ carry the qualification, or the interoperability claim becomes false the moment 
 ### 9 · GitOps edge sync: the pull half
 
 **Builds on:** [`supabase/functions/deploy-nodered/index.ts`](supabase/functions/deploy-nodered/index.ts) ·
-[`node_red_flow.json`](node_red_flow.json) · the `gateway-backups` bucket in
+[`simulation/node_red_flow.json`](simulation/node_red_flow.json) · the `gateway-backups` bucket in
 [`scripts/storage-init.mjs`](scripts/storage-init.mjs) · `digital_thread` (`0005`, `0026`) ·
 [issue #63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63)
 
@@ -1211,48 +1211,73 @@ Profiles are chosen from a list; nothing here builds a permission graph.
 
 ### 14 · An opt-in simulator, and a fresh install with no simulated assets
 
-**Builds on:** `0002_seed_data.sql` · `0020_cleanup_legacy_simulator_seed.sql` ·
-[`scripts/provision-gateways.mjs`](scripts/provision-gateways.mjs) ·
-[`ingestion/validate.py`](ingestion/validate.py) · [`node_red_flow.json`](node_red_flow.json) ·
-[`simulators/README.md`](simulators/README.md) · **not yet filed as an issue**
+**Mostly built.** `0040_retire_demonstration_seed.sql` ·
+[`simulation/`](simulation/README.md) · [`scripts/provision-gateways.mjs`](scripts/provision-gateways.mjs) ·
+`0033_relocate_devices.sql` · [`supabase/seed.sql`](supabase/seed.sql) ·
+**what remains is the one-machine walkthrough and the broker credential, and the second belongs to §13**
 
-**The request came out of the demonstration and is specific**: a participant asked whether the
+**The request came out of the demonstration and was specific**: a participant asked whether the
 simulated devices appear on every start, felt they polluted the Digital Thread, and wanted running
-them to be a choice. The proposal is a `simulation/` directory holding a README, a Node-RED flow and
-the Grafana dashboard and alert rules, so a fresh install starts empty and a reader who wants a live
-machine follows the README — creating a cell, a gateway, a device and a schema through the UI, then
-importing the flow and pointing its nodes at what they made.
+them to be a choice. A fresh install now comes up with **no cells, no gateways and no devices**, and
+the four-cell floor is `npm run provision:gateways`.
 
-**One correction that changes what can be promised.** Retiring the seed does **not** make an existing
-Digital Thread quieter. `0020` retired a simulator seed once already and states the outcome: the
-deletes *append* to `digital_thread`, because the table is immutable by design and
+**What shipped.** `0002_seed_data.sql` no longer seeds any asset, `0040` retires what it seeded from
+databases that already have it, and everything simulated moved into
+[`simulation/`](simulation/README.md) — the Node-RED flow, the Shopfloor Operations dashboard and the
+three machine alert rules, each independently opt-in because each fails independently. Provisioning
+gained the schema attachments, so a device is complete the moment it is created rather than at the
+next boot. The two conformance suites had already been moved onto their own fixture in the commit
+before, which is what made the seed removable at all.
+
+**The one-shot problem was the substance of it, and is worth recording because it recurs.** Every
+migration here is replayed on every boot with no applied-migrations ledger, so the house rule is
+that a second run must match no rows. `0020` satisfied that trivially — it deleted assets that were
+dead. **This delete is different in kind**: the rows it removes are rows an operator may deliberately
+want back, which is the entire point. Replayed every boot it would make provisioning *useless* —
+provision the floor, restart, gone, with the migration reporting success both times. "Idempotent"
+satisfied, feature destroyed. Two ways of inferring it from state were tried and both are wrong, for
+reasons `0040`'s header records; the answer is an explicit `public.one_shot_migrations` ledger where
+**the claim is what branches**, inside the same transaction as the work it guards.
+
+**Two things broke that only break on the path this created**, and neither was visible in the diff.
+`0033`'s self-check bounded "the rows this batch just wrote" with a one-minute time window — and the
+documented way to get a floor is now *provision, then restart*, so db-init reached that check seconds
+after six devices were created, counted four causation ids and failed with *"relocate_devices() is no
+longer one transaction"* on a stack where it is. It is bounded on the audit table's sequence now.
+And `seed.sql`'s causation demonstration RAISEd when no group existed, which is a failed db-init; on
+a fresh install that is not a broken demonstration, it is an empty shopfloor working as intended. It
+distinguishes the two cases rather than relaxing the assertion, because both look like an empty
+drawer from outside and only one is a bug.
+
+**`0022`'s self-check was a latent landmine and is disarmed.** It scanned every device named
+`Sim\_%`, which was equivalent while the only such devices were seeded. `Sim_` is a convention
+readers follow now, so the first person to create `Sim_MyMachine` in the UI would have failed
+db-init on the next boot, blamed by a migration with nothing to do with their device.
+
+**One promise that could not be kept, stated rather than quietly dropped.** Retiring the seed does
+**not** make an existing Digital Thread quieter. `0020` retired a simulator seed once already and
+recorded the outcome: the deletes *append*, because the table is immutable by design and
 `trg_devices_digital_thread` fires on DELETE — *"the purge is itself recorded"*. So this is a
 fresh-install improvement, and on a stack that has already run it makes the log slightly longer
-before it makes it shorter. That is still exactly what the participant asked for; it just cannot be
-sold as cleaning up after the fact.
+before it makes it shorter.
 
-**`0020` is also the playbook, and it should be followed rather than rediscovered.** It records why
-this is a migration and not an edit to `0002` — that file is `ON CONFLICT … DO NOTHING` throughout,
-so deleting rows from it builds a fresh database correctly and leaves every existing one untouched,
-with nothing in the repository explaining where the leftovers came from. It records the dependency
-order (attach before delete, device before gateway on the foreign key) and the trap at the end:
-`asset_config` is keyed by the TEXT `sparkplug_id` and not by a foreign key, so birth parameters do
-not cascade and outlive the device invisibly.
+**Collapsing to one cell, one gateway, one device would have cost more than it looks**, which is why
+it was not done. The four gateways are not four of the same thing: they carry MTConnect, OPC
+40010/40001-4 Robotics and Energy, ISO 22400 KPIs and ASHRAE 223P respectively, and
+`Sim_Gateway_Site_BMS` is the only working demonstration of `location_scope = 'site_wide'`. A single
+device exercises none of that, nor cell filtering, nor `relocate_devices()` (`0033`). So the existing
+topology was kept whole and made non-automatic, which is the cheaper half of the two-artefact split.
 
-**The blocker is the AAS conformance suite, and it must be re-pointed first.** `Sim_CNC_Mill_01` is
-targeted by name from three places — `test_aas_export.py`, the chart's `e2e-aas-export` Job, and the
-CI step whose comment states the dependency outright: *"0002 registers Sim_CNC_Mill_01
-unquarantined, 0020 attaches its schema and its nameplate"*. `check-docs-drift.mjs` asserts that
-coupling in three separate checks, so those rewrite rather than delete. **The pattern to copy is
-already in the repository**: `validate.py` seeds its own gateway at a pinned UUID and creates its own
-`VALIDATE_*` devices at runtime, which is why CI can say the AAS suite *"has no data dependency on
-validate.py at all"*. A conformance suite that provisions its own subject is a solved problem here —
-the AAS one simply has not been moved onto it yet. And `0020` exists precisely because this coupling
-bit once before: a device the suite still targeted by name had quietly stopped receiving a DBIRTH.
+---
 
-**The plan has one missing step, and it is the interesting one: the broker credential.** A gateway
-created in the UI gets a random UUID, so its `sparkplug_id` is not known in advance — which is
-exactly the property `mosquitto.acl` relies on for the seeded credentials: *"pin the UUID and the
+**What is left is the other half: a walkthrough for building ONE machine by hand** — creating a cell,
+a gateway, a device and a schema through the UI, then importing a flow and pointing its nodes at what
+was made. [`simulation/README.md`](simulation/README.md) currently documents the four-cell floor and
+the flow it ships with; it does not yet walk a reader through making their own.
+
+**And that walkthrough has a missing step, which is the interesting one: the broker credential.** A
+gateway created in the UI gets a random UUID, so its `sparkplug_id` is not known in advance — which
+is exactly the property `mosquitto.acl` relies on for the seeded credentials: *"pin the UUID and the
 wire identity is known in advance."* No ACL edit is needed, because `pattern readwrite
 spBv1.0/+/+/%u/#` already confines any username to its own edge-node subtree. But a **broker password
 has to be minted after the row exists**, and `.env.gateways` will not have one.
@@ -1261,9 +1286,8 @@ has to be minted after the row exists**, and `.env.gateways` will not have one.
 `is_virtual = true`, and both `gateway-bundle` and `issue_gateway_enrollment_token()` (`0025`) refuse
 a virtual gateway outright, for the reason the RPC states: *"a bundle for one would produce a broker
 credential nothing could ever present."* That refusal is correct — there is no appliance to install
-anything on, and the bundle exists to travel to hardware. So the simulator README cannot walk a
-reader through enrolment without first telling them to untick **Mark as Virtual Gateway**, which
-would be a false statement about what the row is.
+anything on. So the walkthrough cannot route a reader through enrolment without first telling them to
+untick **Mark as Virtual Gateway**, which would be a false statement about what the row is.
 
 **What is left is the workflow `0025` was written to eliminate, still in place for virtual
 gateways.** Its header describes the pre-enrolment world exactly: *"create a row in the UI, then have
@@ -1286,33 +1310,16 @@ no service-role key of its own. That is a second caller of an existing verb, and
 second verb: the service's own header warns that *"it is not a general credential API and must not
 become one."*
 
-**So this belongs with §13** — a "Generate broker credential" action on a virtual gateway, minted
-through the credential service and revealed once, with no token, no bundle and nothing downloaded.
-For the co-located case it could go further and never reach a human at all, since `node-red-init.mjs`
-already reconciles broker credentials out of env pairs named per node. The caveat worth stating: that
-reconciliation runs at **init** and deliberately exits early rather than overwriting credentials it
-must not touch, so writing into a *running* Node-RED is a different mechanism from seeding one at
-boot, and needs its own path or a restart.
+**So that step belongs with §13** — a "Generate broker credential" action on a virtual gateway,
+minted through the credential service and revealed once, with no token, no bundle and nothing
+downloaded. For the co-located case it could go further and never reach a human at all, since
+`node-red-init.mjs` already reconciles broker credentials out of env pairs named per node. The caveat
+worth stating: that reconciliation runs at **init** and deliberately exits early rather than
+overwriting credentials it must not touch, so writing into a *running* Node-RED is a different
+mechanism from seeding one at boot, and needs its own path or a restart.
 
 **With that step built, the tour is the argument for the whole item**: Cells, Gateways, credential
 minting, Devices, Schemas and — with §13 — Access Control, which is most of the product.
-
-**Collapsing to one cell, one gateway, one device costs more than it looks**, and the cost is worth
-separating from the decision. The four seeded gateways are not four of the same thing: they carry
-MTConnect, OPC 40010/40001-4 Robotics and Energy, ISO 22400 KPIs and ASHRAE 223P respectively, and
-`Sim_Gateway_Site_BMS` is the only working demonstration of `location_scope = 'site_wide'`. A single
-device exercises none of that, nor cell filtering, nor `relocate_devices()` (`0033`). **So this is
-probably two artefacts and not one** — a minimal opt-in simulator whose job is onboarding, and the
-existing four-cell topology retained as an opt-in demonstration fixture whose job is showing the
-vocabularies. Only the first needs to be simple; the second already exists and merely needs to stop
-being automatic.
-
-**Two smaller consequences to handle rather than discover.** The **Expected behaviour** section above
-tells the reader that the `Sim_` devices are pre-registered and so bypass the quarantine queue, and
-to publish under another id to see it work — with no seed, quarantine becomes the *first* thing a new
-user meets instead of a footnote, which is better teaching but needs that paragraph rewritten rather
-than deleted. And `manufacturing-cells.json` hardcodes `Sim_CNC_Mill_01`, so the dashboards genuinely
-do belong in the new directory alongside the flow, exactly as proposed.
 
 ---
 

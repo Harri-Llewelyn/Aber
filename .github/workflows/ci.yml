@@ -1560,7 +1560,7 @@ jobs:
           V: ${{ steps.appversion.outputs.version }}
         run: |
           set -eu
-          # Context is the REPOSITORY ROOT for these two: node_red_flow.json and sparkplug_b.proto
+          # Context is the REPOSITORY ROOT for these two: simulation/node_red_flow.json and sparkplug_b.proto
           # both live there.
           docker build -f supabase/functions/Dockerfile -t "$IMG_NS/edge-runtime:$V" .
           docker build -f Dockerfile                    -t "$IMG_NS/ingestion:$V" .

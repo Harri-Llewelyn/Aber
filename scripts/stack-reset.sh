@@ -333,5 +333,5 @@ else
   printf '\nThe shopfloor is EMPTY, which is the default since roadmap §14: no cells, no gateways,\n'
   printf 'no devices, and a Digital Thread describing only what you do next. Run\n'
   printf '`npm run provision:gateways` for the four-cell demonstration floor, or follow\n'
-  printf 'simulators/README.md to build one machine by hand.\n'
+  printf 'simulation/README.md to build one machine by hand.\n'
 fi

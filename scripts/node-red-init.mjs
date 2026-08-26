@@ -14,7 +14,7 @@
  * load-bearing, why `_credentialSecret` silently defeats the seed, why settings.js is LOADED
  * rather than grepped, and how to tell an auth failure from a network one -- are documented in:
  *
- *   simulators/README.md -> "Flow provisioning" and "Node-RED authentication"
+ *   simulation/README.md -> "Flow provisioning" and "Node-RED authentication"
  *
  * Verified against Node-RED 5.0.1 (nodered/node-red:latest).
  */
@@ -113,7 +113,7 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 //
 // THE GUARD IS A MARKER FILE, NOT `flows.json` EXISTING: the image ships a placeholder flows.json
 // and Docker pre-populates a fresh volume from it, so that file exists before this script has ever
-// run. A marker records what this script DID. (simulators/README.md -> "Flow provisioning")
+// run. A marker records what this script DID. (simulation/README.md -> "Flow provisioning")
 const SEED_MARKER = path.join(DATA_DIR, '.factoryplus-seeded');
 const seededBefore = fs.existsSync(SEED_MARKER);
 const seededFlow = !seededBefore || forceSeed;
@@ -339,7 +339,7 @@ if (mqttTlsEnabled || mqttPortEnv || mqttHostEnv) {
 // `credentialSecret` in a commented-out example, so a substring test passes a file that declares
 // nothing. It checks the AUTH keys and SETTINGS_VERSION too, which is what lets a volume from
 // before authentication existed be repaired rather than left with an open admin API.
-// (simulators/README.md -> "Flow provisioning")
+// (simulation/README.md -> "Flow provisioning")
 function settingsAreCorrect() {
   if (!fs.existsSync(settingsPath)) return false;
   try {
@@ -659,7 +659,7 @@ module.exports = {
      * map above. The last-resort branch returns a bare username to keep an unknown session alive;
      * that is safe because enforcement reads the token's stored scope, not this object.
      *
-     * (simulators/README.md -> "Node-RED authentication")
+     * (simulation/README.md -> "Node-RED authentication")
      */
     users: async function (username) {
       const permissions = editorUsers.get(username);
@@ -950,7 +950,7 @@ if (missingCredential && !brokerIdentityChanged) {
 // The broker node ends up with no username and Mosquitto refuses it with CONNACK 5.
 //
 // Guarded by writeCredentials, not by the seed path -- the question is "is there ciphertext only
-// this key can open", not "is this volume fresh". (simulators/README.md -> "Flow provisioning")
+// this key can open", not "is this volume fresh". (simulation/README.md -> "Flow provisioning")
 if (writeCredentials && fs.existsSync(runtimeConfigPath)) {
   try {
     const runtimeConfig = JSON.parse(fs.readFileSync(runtimeConfigPath, 'utf8'));
