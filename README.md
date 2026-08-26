@@ -630,11 +630,24 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Six extensions, ordered by how much of each already exists. None is speculative: every one names
-the code it would build on, because the value of writing them down is that a reader can tell how far
-away each is.
+Sixteen extensions, none of them speculative: every one names the code it would build on, because
+the value of writing them down is that a reader can tell how far away each is — and several turned
+out to be much closer than the request for them assumed, which is stated here rather than left to be
+discovered later.
 
-**These are not open defects.** Known issues and accepted risks are
+**Items 1-6 are this repository's own**, ordered by how much of each already exists. **Items 7-14
+arrive from feature requests** — 7-12 from GitHub issues
+[#67](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/67),
+[#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
+[#65](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/65),
+[#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63),
+[#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66) and
+[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58), in that same order of how much already
+exists; 13-16 are not yet filed. Where an entry's heading differs from the issue's title, it is
+because the work that remains is narrower than the title claims.
+
+**None of these are open defects.** Feature requests live here once they have been checked against
+the code; known issues and accepted risks stay in
 [GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues).
 
 ### 1 · Horizontal ingestion scaling
@@ -862,6 +875,559 @@ roles 1 and 2), and `PERMISSION_UUIDS.DOCUMENT_MANAGE` in the frontend is that s
 tag vocabulary lives only in the frontend, so no enum has to migrate with the column — the stored
 values (`health_and_safety`, `asset_register`, …) are already the values the renamed column would
 hold.
+
+---
+
+### 7 · Enforcing the schema, not just recording the breach
+
+**Builds on:** `payload_violations()` · `modelled_types()` / `device_modelled_types()` ·
+`record_ingestion_rejection()` (`0026`) · `schemas.schema_definition` ·
+[`ingestion/test_payload_conformance.py`](ingestion/test_payload_conformance.py) ·
+[issue #67](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/67)
+
+**The issue opens by saying non-conforming payloads "pass through the ingestion layer", and the
+first half of the work it proposes is already running.** The daemon reads each device's attached
+schemas through `device_submodels`, caches them for `SCHEMA_CACHE_TTL_SECONDS`, evaluates every
+DDATA metric against them in `payload_violations()`, and writes the findings to `digital_thread`
+via `record_ingestion_rejection()` — deduplicated by `_violation_signature()`, so a device with one
+persistent fault records one finding rather than one per message. `schemas.schema_definition` is
+already a JSON Schema document: `properties`, `required`, `type`.
+
+**The real gap is that nothing is rejected**, and the code says so in as many words. The docstring
+on `SCHEMA_CACHE_TTL_SECONDS` justifies a five-minute staleness window by observing that it *"cannot
+cause a wrong DROP, because nothing is dropped for non-conformance"*. So `record_ingestion_rejection()`
+records an observation, and its name is aspirational. The second gap is depth: `modelled_types()`
+extracts a metric-name → JSON-type map and nothing else, so `enum`, `minimum`, `pattern` and
+`additionalProperties` in a stored schema are read past in silence. A real validator closes that half
+cheaply — the documents are already there and already Draft-shaped.
+
+**Two decisions have to be made first, and neither is in the issue.** The issue names **DBIRTH**;
+the code judges **DDATA**, and they are different jobs — DBIRTH declares the metric *set*
+(`extract_declared_metrics()`), while DDATA carries the values a `type` or `enum` constraint is about.
+And "validate against their declared `schema_uuid`" would mean resolving a schema *from the payload*:
+`Schema_UUID` is in `IDENTITY_METRICS`, which the daemon receives and deliberately discards under the
+stated rule that **the topic identifies the asset and a self-declared marker is not evidence**.
+Validating against the *bound* schema keeps that rule; validating against the declared one reverses it.
+
+**Enforcement is a policy change, not a library change**, and that is the part to be careful with.
+The moment a violation drops a metric, editing a schema can silence a live machine — and it does so
+through a cache with a five-minute TTL, so the effect arrives after the edit rather than with it.
+`AUDIT_PAYLOAD_REJECTIONS` exists because writing to an append-only table needed an off switch;
+dropping telemetry needs one too, and needs it per device rather than per daemon.
+
+---
+
+### 8 · The Directory's MQTT half, and the one lookup it still lacks
+
+**Builds on:** [`supabase/functions/fplus-directory/index.ts`](supabase/functions/fplus-directory/index.ts) ·
+`directory_services` (`0001`) · `gateways.sparkplug_group` (`0008`) · `relocate_devices()` (`0033`) ·
+[issue #64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64)
+
+**The issue calls `fplus-directory` "a stubbed Edge Function", and it is not.** It serves six routes
+— `/ping`, `/v1/device`, `/v1/device/{uuid}`, `/v1/address/{group}/{node}`, `/v1/schema` and
+`/v1/service` — including two of the three the issue proposes to add. It reads as the **caller**
+rather than the service role, deliberately and with no `SUPABASE_SERVICE_ROLE_KEY` in its registry
+entry, because a Directory is a live read across the whole address space and the service key would
+hand every authenticated user a view their RLS policies do not grant. That property is the thing any
+expansion must not quietly drop.
+
+**What is genuinely missing is smaller, and worth naming exactly.** `GET /v1/schema` lists the schema
+UUIDs in use, but there is **no `/v1/schema/{uuid}`** — the reverse lookup, *which devices implement
+this schema*, is the one route in the issue that does not exist. UUID-to-topic resolution already
+works, and already survives relocation, because the address is composed from
+`(sparkplug_group, sparkplug_id)` at read time rather than stored: `relocate_devices()` moves a device
+between cells without touching either, so continuity is a property of the schema rather than something
+the Directory has to maintain.
+
+**The MQTT interface is the real new surface, and the file already argues with itself about it.** Its
+header states what this deliberately is not: *"It does not consume Sparkplug births to build its own
+registry, it has no change-notify metrics, and it does not register itself with a Configuration Store,
+because there is no ConfigDB here to register with."* The issue's first implementation step — have the
+ingestion daemon write dynamic topic bindings on NBIRTH/DBIRTH — is precisely that registry, and it
+would move the Directory from *deriving* addresses out of the enrolment record to *accumulating* them
+from what devices claim about themselves. Given §7's rule on self-declared markers, that is a trust
+decision, not a plumbing one.
+
+**And the local-namespace caveats are load bearing.** Both `/v1/schema` and `/v1/service` return
+`namespace: "local"` with a note that these are not registered Factory+ UUIDs. Publishing the same
+values to a well-known MQTT topic strips that note off them — a headless subscriber receives bare
+UUIDs with no way to know they were locally minted. Whatever the topic payload looks like, it has to
+carry the qualification, or the interoperability claim becomes false the moment it leaves HTTP.
+
+---
+
+### 9 · Live IDTA REST endpoints beside the export
+
+**Builds on:** [`supabase/functions/aas-export/index.ts`](supabase/functions/aas-export/index.ts) ·
+`idta_submodel_templates` (`0011`) · `telemetry_latest` (`0010`) ·
+[`tests/schemas/AAS_V3_0_JSON_Schema.json`](tests/schemas/AAS_V3_0_JSON_Schema.json) ·
+[`scripts/aas-push-basyx.mjs`](scripts/aas-push-basyx.mjs) ·
+[issue #65](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/65)
+
+**The item with the most existing code behind it and the least new thinking required.** `aas-export`
+already builds a complete AAS V3 Environment — nameplate elements resolved against
+`idta_submodel_templates`, one Submodel per schema attached through `device_submodels`, `File`
+elements for 3D models and documents, and an `.aasx` OPC container assembled by hand. Conformance is
+already asserted against the vendored IDTA schema in `tests/`. What this asks for is the same object
+graph behind a different route table.
+
+**One decision in the exporter is exactly right for this and should not be revisited.** Telemetry
+values are *never* inlined: the Time Series submodel carries a `LinkedSegment` pointing at the
+historian, which is what IDTA 02008 defines that element for. A live REST API makes the temptation
+worse rather than better — `GET /submodel-elements/…` on a time-series submodel looks like it ought
+to return points. It should still return the link, with `telemetry_latest` (`0010`) supplying current
+values only where the submodel models a current value.
+
+**The split to settle is whether `aas-api` is a second function or a route on the first.** They share
+the whole mapping layer, and duplicating it is how the two drift — the `.aasx` a customer holds and
+the live endpoint their ERP queries would eventually disagree about the same asset, which is a worse
+failure than either being absent. Sharing it means the export becomes a serialisation of the API's own
+response rather than a parallel construction of the same thing.
+
+**The route surface is where the cost actually is.** IDTA 02001/02002 specifies base64url-encoded
+identifiers in paths, an `idShort` path syntax for nested elements, and pagination on every list —
+none of which the export needs, all of which conformance turns on. `aas-push-basyx.mjs` already proves
+this stack's shells load into a real AAS server, so there is a reference implementation to diff route
+behaviour against rather than only a specification to read.
+
+---
+
+### 10 · GitOps edge sync: the pull half
+
+**Builds on:** [`supabase/functions/deploy-nodered/index.ts`](supabase/functions/deploy-nodered/index.ts) ·
+[`node_red_flow.json`](node_red_flow.json) · the `gateway-backups` bucket in
+[`scripts/storage-init.mjs`](scripts/storage-init.mjs) · `digital_thread` (`0005`, `0026`) ·
+[issue #63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63)
+
+**Half of what the issue proposes to establish is already the contract, and the code says so.**
+`deploy-nodered` deploys **only** `node_red_flow.json` as committed to the repository; an inline flow
+array in the request body is refused with a 400 and a stated reason, because a Node-RED `function`
+node is arbitrary JavaScript inside a container that holds the MQTT credential. The comment above that
+check reads: *"That is the GitOps contract: git is the source of truth and this endpoint syncs
+Node-RED to it."* So git is already authoritative and an un-tracked local edit is already
+un-promotable — it is simply not yet *detected*.
+
+**The storage claim needs correcting before anything is planned against it.** The issue describes
+"manual zip backups inside Supabase Storage". The `gateway-backups` bucket holds `flows.json` — JSON,
+5 MiB cap, private, keyed `<sparkplug_id>/` — and it is a backup taken **from** an appliance, not the
+channel a deployment travels down. Nothing about it sits on the deploy path, so replacing it is not
+where this item starts. Its privacy setting is the one thing to preserve if it is touched at all: a
+`flows.json` describes the plant's edge topology, broker addresses and device ids, and a public bucket
+bypasses `storage-policies.sql` entirely.
+
+**What is actually missing is the pull half, and it is the half carrying the security argument.**
+Today the flow is pushed inbound to `:1880`, which means something must be able to reach the edge
+node's admin API, and reconciliation happens only when a human presses deploy. A sidecar that polls
+`git pull` and calls Node-RED's local reload API inverts both: outbound-only from the edge, and
+self-healing on a timer rather than on attention. Drift detection is the same mechanism read backwards
+— compare the running flow against the committed revision.
+
+**Two details the issue does not settle.** Node-RED holds MQTT credentials in its *credential store*,
+encrypted separately and deliberately not in `node_red_flow.json`; a puller that overwrites flows
+without accounting for that disconnects the gateway it has just reconciled. And logging the revision
+hash into `digital_thread` needs an actor — rows from the daemon and the edge functions are attributed
+through the `request.headers` GUC, and the trigger accepts only `ingestion` / `service` / `migration`,
+never `user`. A sidecar reconciling on its own timer is a fourth kind of actor and should say so
+rather than borrow `service`.
+
+---
+
+### 11 · An ISA-95 Unified Namespace bridge
+
+**Builds on:** the DDATA path in [`ingestion/ingestion.py`](ingestion/ingestion.py) ·
+`public.device_locations` (`0001`) · `cells` (`0001`, `0021`) · `devices.location_scope` ·
+[`mosquitto.acl`](mosquitto.acl) ·
+[issue #66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66)
+
+**None of this exists yet — no `uns/` topic appears anywhere in the repository** — and the argument
+for it is sound: a BI tool or SCADA client that wants one spindle speed should not have to link a
+protobuf decoder and learn Sparkplug's alias rules to get one number.
+
+**The obstacle is that the hierarchy the issue names is not in the schema.** ISA-95 has six levels —
+Enterprise / Site / Area / Line / Cell / Asset. This stack has **two**: `cells`, which carries a `name`
+and nothing above it, and `devices`. The example path in the issue,
+`ACS-Cymru/Factory2050/Cell01/Sim_CNC_Mill_01/SpindleSpeed`, therefore has two segments with no source
+— `ACS-Cymru` is the default Sparkplug group id, and `Factory2050` does not exist as data at all. So
+the first question is whether the missing levels become configuration (`system_settings`, which is
+where §3 already decided this class of value lives) or columns on `cells`. Configuration is right for
+a single-site deployment and wrong the moment there are two.
+
+**`device_locations` is the view to build on, and reading `devices.cell_id` directly is the mistake to
+avoid** — that column is an override, and `NULL` means *inherit from the gateway*, which is why its
+comment says to resolve through the view. The other case the view already answers is the one a strict
+tree cannot: `location_scope = 'site_wide'` marks a device asserted to have **no** single cell — a BMS
+sensor, an AGV — and it is a legitimate state, not missing data. A UNS path builder has to give those
+somewhere real to live rather than file them under a cell they are not in.
+
+**Two smaller things follow from where the translation would sit.** Doing it inside the ingestion
+daemon puts a second publish on the same callback thread whose single-writer ceiling §1 measured —
+worth instrumenting the same way rather than assuming the headroom absorbs it. And `mosquitto.acl`
+grants topic access per role: a `uns/#` tree any gateway credential could subscribe to would let one
+machine's credential read the whole plant's telemetry, which the Sparkplug tree's per-node ACLs
+currently prevent.
+
+---
+
+### 12 · Cassette: recording and replaying the broker
+
+**Builds on:** the JSON fallback parser in [`ingestion/ingestion.py`](ingestion/ingestion.py) ·
+`_timestamp_is_sane()` · the `telemetry` hypertable's primary key ·
+[`scripts/storage-init.mjs`](scripts/storage-init.mjs) ·
+[`supabase/storage-policies.sql`](supabase/storage-policies.sql) ·
+[issue #58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58)
+
+**The most speculative item here, and the most useful if it lands.** Recording live MQTT to a JSON
+file and streaming it back answers three things this stack currently cannot: dashboards verified
+against a machine that was only available for two hours, a fault condition reproduced by editing a
+value by hand, and load testing at a chosen multiple of real time — against a fleet whose measured
+rate is **0.95 msg/s** and whose ingestion ceiling is **≈240 msg/s**, per §1.
+
+**One piece is already in place, and it is the piece that makes hand-editing work.** The daemon's
+payload parser falls back to JSON when protobuf parsing fails, reconstructing `timestamp`, `seq`,
+`uuid` and metrics into the same payload shape the protobuf path produces. A cassette can therefore be
+a readable JSON array that replays through the ordinary ingestion path with no special mode — which is
+exactly what makes a spoofed error indistinguishable from a real one downstream, and is the whole
+point of the feature.
+
+**Timestamps are the hard constraint, and they decide the design rather than decorate it.**
+`_timestamp_is_sane()` rejects any metric more than **24 hours** behind now or 5 minutes ahead, because
+such a row *"lands outside the retention policy, or inside an already-compressed chunk that rejects the
+write"*. A cassette replayed at its original timestamps is therefore useless the day after it was
+recorded: replay must **rebase** onto now, preserving inter-message deltas. That is the same operation
+as the issue's speed multiplier, so there is one mechanism here and not two. Rebasing also sidesteps
+the collision the alternative causes — `telemetry`'s primary key is `(time, asset_id, metric_name)`,
+so replaying a capture verbatim writes rows that already exist.
+
+**Storage has a precedent to copy rather than a decision to make.** `gateway-backups` is already a
+private, size-capped, MIME-restricted bucket holding JSON under `<sparkplug_id>/`, with its RLS in
+`storage-policies.sql`; a cassette bucket is that shape with a different cap. What has no precedent is
+the issue's own open question — **how replayed telemetry should be marked**. A column on the hypertable
+is the obvious answer and the expensive one: it touches the `postgres_fdw` projection, the rollups in
+`0010` and every Grafana query. The cheaper framing is that a cassette replays *as a device*, so an
+ordinary device flagged synthetic carries the marking in `devices`, where retention and dashboards can
+filter on a join they already make. That also answers "how do we test rollups" without needing a second
+answer: synthetic devices roll up exactly like real ones, which is the behaviour under test.
+
+**And replay meets quarantine first.** A cassette recorded from a device this deployment never enrolled
+publishes under an id nobody registered — which is the zero-touch onboarding path working as designed:
+the telemetry is held and dropped until an `Administrator` approves it. That is correct and should stay
+correct. It just means "import a cassette" has an approval step inside it, and the UI has to say so
+rather than let the import look like it failed.
+
+---
+
+### 13 · Retiring the flow-backup bucket, and pointing at repositories instead
+
+**Builds on:** [`frontend/src/components/common/FlowBackupUploader.jsx`](frontend/src/components/common/FlowBackupUploader.jsx) ·
+the `gateway-backups` bucket in [`scripts/storage-init.mjs`](scripts/storage-init.mjs) ·
+[`supabase/storage-policies.sql`](supabase/storage-policies.sql) ·
+[`EntityLinksModal.jsx`](frontend/src/components/modals/EntityLinksModal.jsx) and its tag vocabulary ·
+`digital_thread` (`0005`) · **not yet filed as an issue**
+
+**The other end of §10, and it should be sequenced against it rather than planned beside it.** §10
+adds the pull; this removes what the push made necessary. Doing the removal first would leave a
+physical gateway with no copy of its flow anywhere, which is the exact loss `FlowBackupUploader`
+exists to prevent — its header states the case plainly: the appliance is the only copy, and a failed
+SD card takes the plant's edge logic with it, after the enrolment token is already spent. **The bucket
+is not dead weight until the pull half replaces what it does.**
+
+**Two premises need correcting before the security argument is scoped.** The bucket takes
+**`flows.json`, not zips**: JSON only, 5 MiB, private, MIME-restricted, keyed `<sparkplug_id>/`, and
+the uploader already **refuses `flows_cred.json`** — the credential file is the thing that must not
+be stored, and it already is not. So "arbitrary zip/script uploads into Supabase Storage" overstates
+today's surface. What is true and worth keeping as the argument: a stored flow is *unreviewed* — no
+pull request, no revision history, no diff — and that is a governance gap rather than an execution
+vector, because nothing in this stack ever executes an object out of that bucket.
+
+**The repository pointer should almost certainly be a tag, not two columns**, and the reason is
+already written down. Issue #62 asked for exactly this shape — a URL column on gateways and devices —
+and it was deliberately built as a tag on the generic links store instead, because *"a column means a
+migration per link type and a second place asset URLs live."* `document_tag` carries no CHECK
+constraint, so **adding a `source_repository` tag costs nothing and needs no migration at all**;
+`EntityLinksModal` already renders per-entity links with role gating and already writes through
+`/api/v1/documents`, whose writes are already audited. A "Manage Source & Docs" modal is largely that
+modal with one more tag in `TAG_LABELS`.
+
+**`target_branch` is the part that genuinely does not fit**, and it is worth separating rather than
+bundling. A branch is not a URL and has no home in a labelled-link table — so either it rides inside
+the URL as a `/tree/<branch>` path, which is lossy but free, or it earns a column of its own. That is
+one small decision, not the four-step migration the proposal implies. **Note also that the bucket
+hardening step and §6 collide:** renaming `documents` → `links` and adding a tag to the same
+vocabulary should not be two separate migrations against the same column.
+
+*Cited by the proposal as further reading:*
+[Managing Distributed Node-RED Deployments on the Edge](https://www.youtube.com/watch?v=FWeHG6_wTIo).
+
+---
+
+### 14 · An Access Control page
+
+**Builds on:** `issue_gateway_enrollment_token()` / `consume_…` / `release_…` (`0025`) ·
+`revoke_gateway_credential()` and its sweep (`0038`) ·
+[`GatewayBundleModal.jsx`](frontend/src/components/modals/GatewayBundleModal.jsx) ·
+`has_role()` (`0001`) · the MCP read-only principal (`0034`) · [`mosquitto.acl`](mosquitto.acl) ·
+**not yet filed as an issue**
+
+**Every RPC this needs already exists; what is missing is the page.** `0025` mints, consumes and
+releases single-use enrolment tokens, `0038` revokes a credential and sweeps revocations, and
+`has_role()` has gated privileged writes since the baseline. The gap the proposal identifies is real
+and is the right one: the only way to see what credentials exist today is to read `.env` and
+`.env.gateways` on the machine that generated them, which is a file, not a view — and a file that the
+hand-off checklist under **Contributing** explicitly tells you to delete.
+
+**The "reveal-once" pattern is already implemented once, and the second implementation should be the
+same one.** `gateway-bundle` mints a token **as the caller** through a `SECURITY DEFINER` RPC that
+checks `has_role()` itself, holds no service-role key, and cannot read the token table it just wrote
+to — its own header states that its ceiling is what the caller could already do through PostgREST.
+That is the property to preserve. A page that mints service JWTs must not become the one place in the
+stack that holds a service-role key in order to do it.
+
+**Two of the three identity profiles have precedents to copy rather than invent.** `0034` created a
+read-only principal for the MCP client and argued the choice at length — not `service_role`, because
+the point is that a model's query returns exactly what the asker is entitled to see; not a demo
+persona, because a machine credential borrowing a human account conflates two lifecycles. That is
+`Service_Reader` already reasoned through. On the broker, `factoryplus_i3x` is already
+`topic read spBv1.0/#` and `factoryplus_monitor` is already publish-nothing, so the read-only ACL
+template exists as a live account rather than as a design. `Service_Ingestor` is the genuinely new
+one — and note it does not describe the current daemon, which holds the service-role key and writes
+telemetry directly.
+
+**§15 adds a subject this page should cover from the start.** A virtual gateway cannot be enrolled
+— `0025` and `gateway-bundle` both refuse one — so its broker credential is still minted by a shell
+script and carried to Node-RED by hand. Minting it through the same reveal-once component, authorised
+by role rather than by a single-use token, retires the last workflow that requires shell access to
+put a gateway on the broker.
+
+**Two structural notes.** This UI is **tab-based, not routed** — `frontend/src/pages/` holds one file
+and the shell is `components/tabs/` — so `/access-control` is a tab beside Settings, and building it
+as a route would introduce a second navigation model for one page. And the audit half needs care for
+the reason `0026` exists: `digital_thread` is append-only and its trigger will not accept a `user`
+actor asserted by a client. Attributing a minting to the calling administrator has to happen where
+the database already knows who they are — inside the `SECURITY DEFINER` RPC — rather than in a
+payload the page sends.
+
+**Worth stating what this deliberately is not**, since the proposal already draws the line and it is
+the right line: this is not a fine-grained access control engine. The role set is fixed at four, the
+policies name them literally throughout the schema, and `0002` grants permissions to roles by id.
+Profiles are chosen from a list; nothing here builds a permission graph.
+
+---
+
+### 15 · An opt-in simulator, and a fresh install with no simulated assets
+
+**Builds on:** `0002_seed_data.sql` · `0020_cleanup_legacy_simulator_seed.sql` ·
+[`scripts/provision-gateways.mjs`](scripts/provision-gateways.mjs) ·
+[`ingestion/validate.py`](ingestion/validate.py) · [`node_red_flow.json`](node_red_flow.json) ·
+[`simulators/README.md`](simulators/README.md) · **not yet filed as an issue**
+
+**The request came out of the demonstration and is specific**: a participant asked whether the
+simulated devices appear on every start, felt they polluted the Digital Thread, and wanted running
+them to be a choice. The proposal is a `simulation/` directory holding a README, a Node-RED flow and
+the Grafana dashboard and alert rules, so a fresh install starts empty and a reader who wants a live
+machine follows the README — creating a cell, a gateway, a device and a schema through the UI, then
+importing the flow and pointing its nodes at what they made.
+
+**One correction that changes what can be promised.** Retiring the seed does **not** make an existing
+Digital Thread quieter. `0020` retired a simulator seed once already and states the outcome: the
+deletes *append* to `digital_thread`, because the table is immutable by design and
+`trg_devices_digital_thread` fires on DELETE — *"the purge is itself recorded"*. So this is a
+fresh-install improvement, and on a stack that has already run it makes the log slightly longer
+before it makes it shorter. That is still exactly what the participant asked for; it just cannot be
+sold as cleaning up after the fact.
+
+**`0020` is also the playbook, and it should be followed rather than rediscovered.** It records why
+this is a migration and not an edit to `0002` — that file is `ON CONFLICT … DO NOTHING` throughout,
+so deleting rows from it builds a fresh database correctly and leaves every existing one untouched,
+with nothing in the repository explaining where the leftovers came from. It records the dependency
+order (attach before delete, device before gateway on the foreign key) and the trap at the end:
+`asset_config` is keyed by the TEXT `sparkplug_id` and not by a foreign key, so birth parameters do
+not cascade and outlive the device invisibly.
+
+**The blocker is the AAS conformance suite, and it must be re-pointed first.** `Sim_CNC_Mill_01` is
+targeted by name from three places — `test_aas_export.py`, the chart's `e2e-aas-export` Job, and the
+CI step whose comment states the dependency outright: *"0002 registers Sim_CNC_Mill_01
+unquarantined, 0020 attaches its schema and its nameplate"*. `check-docs-drift.mjs` asserts that
+coupling in three separate checks, so those rewrite rather than delete. **The pattern to copy is
+already in the repository**: `validate.py` seeds its own gateway at a pinned UUID and creates its own
+`VALIDATE_*` devices at runtime, which is why CI can say the AAS suite *"has no data dependency on
+validate.py at all"*. A conformance suite that provisions its own subject is a solved problem here —
+the AAS one simply has not been moved onto it yet. And `0020` exists precisely because this coupling
+bit once before: a device the suite still targeted by name had quietly stopped receiving a DBIRTH.
+
+**The plan has one missing step, and it is the interesting one: the broker credential.** A gateway
+created in the UI gets a random UUID, so its `sparkplug_id` is not known in advance — which is
+exactly the property `mosquitto.acl` relies on for the seeded credentials: *"pin the UUID and the
+wire identity is known in advance."* No ACL edit is needed, because `pattern readwrite
+spBv1.0/+/+/%u/#` already confines any username to its own edge-node subtree. But a **broker password
+has to be minted after the row exists**, and `.env.gateways` will not have one.
+
+**The enrolment bundle is not that path, and cannot be made into it.** A simulator gateway is
+`is_virtual = true`, and both `gateway-bundle` and `issue_gateway_enrollment_token()` (`0025`) refuse
+a virtual gateway outright, for the reason the RPC states: *"a bundle for one would produce a broker
+credential nothing could ever present."* That refusal is correct — there is no appliance to install
+anything on, and the bundle exists to travel to hardware. So the simulator README cannot walk a
+reader through enrolment without first telling them to untick **Mark as Virtual Gateway**, which
+would be a false statement about what the row is.
+
+**What is left is the workflow `0025` was written to eliminate, still in place for virtual
+gateways.** Its header describes the pre-enrolment world exactly: *"create a row in the UI, then have
+an operator with shell access run a script and hand the password over by some other means."* For a
+virtual gateway that is still the process — read the `sparkplug_id` off the row, run
+`scripts/mosquitto-provision-gateway.mjs` on the host, which prints the password exactly once because
+`mosquitto_passwd` stores only a hash, then set it as the `_USER` / `_PASSWORD` pair the broker node
+names in its `acsCredentialsEnv` and restart Node-RED so `node-red-init.mjs` writes it into
+`flows_cred.json`. Five steps, one of them a shell, for a gateway that runs on the machine already
+running the stack.
+
+**Closing that is a small build, because the hard part exists.** `gateway-credential-service.mjs` is
+already a one-endpoint, one-verb service that adds a broker account and can do nothing else — it
+cannot read a password back, cannot delete accounts, cannot reach the database, and is not published
+outside the container network. `enroll-gateway` authorises its call with a **single-use token**
+because the caller is an appliance holding no session. A virtual gateway has no appliance and its
+operator *does* hold a session, so the same call wants authorising **by role** instead — which is
+what `gateway-bundle` already does, checking `has_role()` inside a `SECURITY DEFINER` RPC and holding
+no service-role key of its own. That is a second caller of an existing verb, and deliberately not a
+second verb: the service's own header warns that *"it is not a general credential API and must not
+become one."*
+
+**So this belongs with §14** — a "Generate broker credential" action on a virtual gateway, minted
+through the credential service and revealed once, with no token, no bundle and nothing downloaded.
+For the co-located case it could go further and never reach a human at all, since `node-red-init.mjs`
+already reconciles broker credentials out of env pairs named per node. The caveat worth stating: that
+reconciliation runs at **init** and deliberately exits early rather than overwriting credentials it
+must not touch, so writing into a *running* Node-RED is a different mechanism from seeding one at
+boot, and needs its own path or a restart.
+
+**With that step built, the tour is the argument for the whole item**: Cells, Gateways, credential
+minting, Devices, Schemas and — with §14 — Access Control, which is most of the product.
+
+**Collapsing to one cell, one gateway, one device costs more than it looks**, and the cost is worth
+separating from the decision. The four seeded gateways are not four of the same thing: they carry
+MTConnect, OPC 40010/40001-4 Robotics and Energy, ISO 22400 KPIs and ASHRAE 223P respectively, and
+`Sim_Gateway_Site_BMS` is the only working demonstration of `location_scope = 'site_wide'`. A single
+device exercises none of that, nor cell filtering, nor `relocate_devices()` (`0033`). **So this is
+probably two artefacts and not one** — a minimal opt-in simulator whose job is onboarding, and the
+existing four-cell topology retained as an opt-in demonstration fixture whose job is showing the
+vocabularies. Only the first needs to be simple; the second already exists and merely needs to stop
+being automatic.
+
+**Two smaller consequences to handle rather than discover.** The **Expected behaviour** section above
+tells the reader that the `Sim_` devices are pre-registered and so bypass the quarantine queue, and
+to publish under another id to see it work — with no seed, quarantine becomes the *first* thing a new
+user meets instead of a footnote, which is better teaching but needs that paragraph rewritten rather
+than deleted. And `manufacturing-cells.json` hardcodes `Sim_CNC_Mill_01`, so the dashboards genuinely
+do belong in the new directory alongside the flow, exactly as proposed.
+
+---
+
+### 16 · Three kinds of gateway, and a Simulated lane
+
+**Builds on:** `gateways.is_virtual` (`0001`) · `location_scope` and its two CHECK constraints ·
+`public.device_locations` · [`frontend/src/utils/cellResolution.js`](frontend/src/utils/cellResolution.js) ·
+`gateway_holds_a_credential()` (`0038`) · `verify_gateway_binding()` ·
+`gateway_health_rows()` (`0036`) · **not yet filed as an issue**
+
+**`is_virtual` carries three incompatible definitions today, and they are not reconcilable by
+choosing a better word for the same thing.** `0025` and `provision-gateways.mjs` define it as *"no
+physical edge appliance behind this row"* — a claim about whether hardware exists. `GatewaysTab.jsx`
+defines it as *"a deployment fact (this connector runs on the app host)"* — a claim about where it
+runs. The checkbox label says *"(Cloud / Server-Simulated)"* and the badge tooltip says *"ACS-Cymru
+Cloud Virtual Gateway"* — a claim about who hosts it, and one that directly contradicts the second,
+since a cloud connector is the one thing definitively not on the app host.
+
+**Every behaviour that branches on the flag is about remoteness, and none is about virtuality.** The
+bundle is refused because there is no machine to carry it to; there is nothing to revoke because
+enrolment never happened; flow backups are hidden because *"a virtual gateway has no appliance and
+therefore no flow of its own to lose"*; and the bundle modal opens on create because a physical
+gateway *"needs a bundle, on a machine, before it can publish at all"*. So the axis the code actually
+uses is **host vs remote**, and the column is named for a different one.
+
+**Two columns, not a three-way enum.** `deployment` (`'host'` | `'remote'`) and `is_simulated`
+(boolean) express the three varieties this stack wants — a host connector to real devices, a remote
+appliance, and a host-run simulator — while leaving the fourth combination *sayable* rather than
+unrepresentable. Folding them into one enum welds two independent facts together and makes a
+simulator on a separate load-generation box inexpressible. The idiom is already here: `location_scope`
+is an enum with a CHECK, **plus** a cross-column CHECK, and forbidding remote simulators is exactly
+that second kind of constraint —
+
+```sql
+CHECK (NOT is_simulated OR deployment = 'host')
+```
+
+— which states the rule where a reader will find it, and relaxes in one line if a remote simulator
+ever turns out to be wanted.
+
+**Devices should inherit, not carry their own flag**, and the reason is mechanical rather than
+stylistic. `devices.cell_id` is already an override whose `NULL` means *inherit from the gateway*,
+resolved through a view its own comment says to use *"never by reading this column alone"*. The same
+shape applies here — and it makes two of the four containment rules disappear rather than need
+enforcing. *"No simulated device on a real gateway"* and *"no real device on a simulated gateway"* are
+one rule stated twice, and a derived value cannot disagree with its source. `verify_gateway_binding()`
+already guarantees the physical half: a device's data reaches storage only from the gateway it is
+bound to.
+
+**Stored, that same rule is expensive, and it is worth knowing why before choosing.** A CHECK
+constraint cannot reference another table — `devices_site_wide_has_no_cell` works only because both
+columns sit on one row. A device-level `is_simulated` that must agree with its gateway's needs
+**triggers on both sides**: one on `devices` for insert and re-parenting, and one on `gateways` for
+the update that flips the flag under devices that already exist. Two triggers that must agree, to
+maintain an invariant that inheritance gives for nothing.
+
+**The Simulated lane is a derived lane, not a cell row and not a flag on `cells`.** `device_locations`
+already computes `location_source` as `site_wide` / `explicit` / `inherited` / `unassigned`, and
+**`unassigned` is never stored** — it is the `ELSE` arm, which is precisely the precedent. `simulated`
+joins it as a fifth label taking precedence over the rest. Nothing is inserted into `cells`, so there
+is no "Simulated cell" that could be renamed, archived or filled with real devices by accident, and no
+question about what a real device inside a simulated cell would mean.
+
+**That reduces the two cell rules to one same-row constraint**, mirroring the one beside it:
+
+```sql
+CHECK (NOT is_simulated OR cell_id IS NULL)     -- on gateways, as gateways_site_wide_has_no_cell
+```
+
+**One mirrored obligation, which the tooling will enforce.** `device_locations` mirrors
+`cellResolution.js`, and `check-mirror-drift.mjs` pins the label list literally —
+`location_source labels = "explicit,inherited,site_wide,unassigned"`. Adding a lane is therefore a
+deliberate two-file change with a check that fails until both sides agree, which is the intended
+behaviour rather than an obstacle.
+
+**How strictly to enforce is a real choice, and the repository already has a house style for it.** A
+device explicitly placed in a different cell from its gateway is not refused — `device_locations`
+computes `cell_mismatch` and the UI surfaces it. So *report* is an established answer alongside
+*refuse*. The recommendation here is split: **refuse** the gateway-to-cell rule, because it is a
+same-row CHECK costing nothing, and **derive** the device rule, because a derived value has nothing to
+refuse.
+
+**Simulated telemetry is treated exactly like real telemetry, and that is a decision rather than an
+omission.** §12 depends on it: a cassette replays *as a device*, and its whole argument is that
+synthetic devices must roll up exactly like real ones, *"which is the behaviour under test"*. Shorter
+retention for simulated data would break the one feature that needs synthetic data to behave normally
+— and could not be built cheaply anyway, since retention is one policy on one hypertable dropping
+whole chunks rather than rows. **The flag records provenance; each consumer decides.** The Digital
+Thread page hides simulated assets by default, which is one more predicate in `0039`'s RPC and
+answers the demonstration feedback where it was actually aimed — at what a reader sees, not at what
+is stored. `digital_thread` itself keeps receiving the rows, because someone standing up a simulator
+on a production stack is a governance event.
+
+**It sequences after §15, and the reason is a genuine cost rather than a technicality.** The seeded
+`Sim_` gateways are deliberately assigned to real-looking cells — "Cell 1 — Precision Machining" and
+the rest — so that the shopfloor map looks like a shopfloor. `CHECK (NOT is_simulated OR cell_id IS
+NULL)` forbids exactly that, so it cannot land while the seed exists. And it prices the two artefacts
+§15 separates differently: **an onboarding simulator gains** from being visibly not-real, which is
+what the demonstration feedback asked for, while **a demonstration fixture loses**, because a
+shopfloor map showing an empty plant beside one Simulated bucket demonstrates less than four
+populated cells did. Whichever way that resolves, it should be decided per artefact rather than
+inherited from a constraint written for the other one.
+
+**The rename's blast radius is 68 references across 28 files**, most of them frontend tests. The
+load-bearing few are worth listing because they are not textual: `gateway_holds_a_credential()`
+(`0038`) is `IMMUTABLE` and called from triggers, `gateway_health_rows()` (`0036`) names the column in
+its `RETURNS TABLE` signature, and `0025_physical_gateway_enrollment.sql` keeps its filename whatever
+the vocabulary becomes — the chain is immutable, so the old word survives there and the header
+explains why. Above all, `check-docs-drift.mjs` enforces that **every migration adding a `gateways`
+column rebuilds `gateway_status`**, because Postgres freezes `SELECT g.*` at creation time; that rule
+exists for precisely this kind of change and this change must satisfy it twice.
 
 ---
 
