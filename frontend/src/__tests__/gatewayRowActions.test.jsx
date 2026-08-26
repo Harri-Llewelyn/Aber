@@ -137,12 +137,20 @@ describe('gateway row actions', () => {
   })
 })
 
-// Document link counts are still fetched once per page and grouped by entity id -- the request
-// that used to feed the accordion badges. The badges themselves are gone with the accordion, but
-// the fetch is what EntityDocumentsModal's "n attached" figure and any future badge rest on, and
-// it must stay off the poll: ingestion stamps last_heartbeat ~every 30s per gateway, so folding it
-// into load() would issue a documents query on the busiest subscription in the app.
-describe('gateway document link counts', () => {
+/*
+ * THE PAGE ASKS FOR NO DOCUMENT COUNTS, and that absence is the assertion.
+ *
+ * It used to fetch every gateway's document links on mount and group them by entity id, to feed a
+ * badge on each row's accordion. The density refactor retired those accordions into the context
+ * drawer and deleted the badge, but kept the request against a badge that might come back -- and
+ * this block pinned the request so nobody tidied it away.
+ *
+ * That badge is not coming. The request has been removed from all three asset pages, so what needs
+ * pinning is the opposite: a page load must not spend a round trip on a number nothing renders.
+ * Documents are still reachable, and still counted -- EntityDocumentsModal issues its own
+ * per-entity read when it opens, which is the only place the figure was ever shown.
+ */
+describe('gateway document links', () => {
   const withDocs = (rows, docs) => (path) => {
     if (path.startsWith('/api/v1/documents')) return Promise.resolve(docs)
     if (path.startsWith('/api/v1/cells')) return Promise.resolve([{ cell_id: 'cell-1', cell_name: 'Assembly Line 1' }])
@@ -151,23 +159,21 @@ describe('gateway document link counts', () => {
     return Promise.resolve([])
   }
 
-  it('asks for every gateway document once, not once per row', async () => {
+  it('spends no request on document counts when the list loads', async () => {
     api.get.mockImplementation(withDocs([gateway()], []))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
-    const docCalls = api.get.mock.calls.filter(([p]) => p.startsWith('/api/v1/documents'))
-    expect(docCalls).toHaveLength(1)
-    expect(docCalls[0][0]).toBe('/api/v1/documents?entity_type=gateway')
+    expect(api.get.mock.calls.filter(([p]) => p.startsWith('/api/v1/documents'))).toHaveLength(0)
   })
 
-  it('renders the page even when the count cannot be fetched', async () => {
-    api.get.mockImplementation((path) => {
-      if (path.startsWith('/api/v1/documents')) return Promise.reject(new Error('boom'))
-      return withDocs([gateway()], [])(path)
-    })
+  it('still reaches documents through the drawer', async () => {
+    // Removing the count must not remove the way in. Manage Documents opens the modal that does
+    // its own read -- see EntityDocumentsModal.
+    api.get.mockImplementation(withDocs([gateway()], []))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    expect(openPanel().getByText('Manage Documents')).toBeInTheDocument()
   })
 })

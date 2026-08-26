@@ -122,10 +122,12 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   // the inspector is a four-column table and the drawer is 360px wide.
   const [telemetryFor, setTelemetryFor] = useState(null)
   const [docsForDevice, setDocsForDevice] = useState(null)
+  // Bumped when EntityDocumentsModal closes. It also drove a document-link count that nothing has
+  // rendered since the row accordions retired into the context drawer; that count and its request
+  // are gone. This survives because the telemetry/catalog read below keys on it too, and that one
+  // is live -- a document edit is a reasonable moment to re-read, and it is the only signal here
+  // that a human touched something.
   const [docRefreshKey, setDocRefreshKey] = useState(0)
-  // Document link counts for the collapsed accordion badge, keyed by device id. One request for
-  // the whole page -- /api/v1/documents accepts entity_type on its own.
-  const [docCounts, setDocCounts] = useState({})
   // sparkplug_id -> { metric_name: last value }, for the Out-of-vocabulary finding. Keyed on the
   // WIRE identity, not the row id: telemetry.asset_id is the sparkplug_id.
   const [latestBySparkplugId, setLatestBySparkplugId] = useState(new Map())
@@ -141,28 +143,6 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   const [blank]                 = useState({ asset_id: '', asset_name: '', connection_method: 'Sparkplug B', active_gateway_id: '', schema_id: '', cell_id: '', location_scope: SCOPE_CELL })
   const [form, setForm]         = useState(blank)
   const [filterMode, setFilterMode] = useState('all')
-
-  /**
-   * Document-link counts for the collapsed accordion badges.
-   *
-   * Deliberately not part of loadAll(): that runs on the poll and on every Realtime event for
-   * devices, gateways and cells, whereas this number changes only when a human edits a link.
-   * Keyed on docRefreshKey -- once on mount, again when EntityDocumentsModal closes.
-   *
-   * Non-fatal: a failure leaves the badges at zero rather than failing the device list.
-   */
-  useEffect(() => {
-    let cancelled = false
-    api.get('/api/v1/documents?entity_type=device')
-      .then(docs => {
-        if (cancelled) return
-        const counts = {}
-        for (const d of docs || []) counts[d.entity_id] = (counts[d.entity_id] || 0) + 1
-        setDocCounts(counts)
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [docRefreshKey])
 
   /**
    * Latest reported value per (device, metric), plus the catalog that says which values are legal.
