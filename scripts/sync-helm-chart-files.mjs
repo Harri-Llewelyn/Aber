@@ -86,6 +86,16 @@ const MIRRORS = [
   },
   {
     source: 'supabase',
+    dest: 'kong',
+    match: (name) => name === 'kong.yml',
+    why:
+      'STILL MIRRORED, AND ONLY FOR KUBERNETES. Compose no longer reads it -- Envoy is the gateway '
+      + 'there (roadmap §4) -- but the chart still deploys Kong by default, because its Envoy '
+      + 'templates have never run in a cluster. Deleting this file breaks helm install outright, '
+      + 'which is how it was found. It goes when the Helm half of §4 lands',
+  },
+  {
+    source: 'supabase',
     dest: 'envoy',
     match: (name) => name === 'envoy.yaml',
     why:

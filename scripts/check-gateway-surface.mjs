@@ -8,62 +8,26 @@
  * ABSENCE OF A ROUTE NOBODY WROTE, because absence is not probeable: there is no request that
  * demonstrates a route was never added, and no test fails when one is.
  *
- * That gap is what makes a gateway migration dangerous rather than tedious. `kong.yml` fronts nine
- * services, gates four of them with `key-auth`, and leaves six routes open across FOUR deliberate
+ * That gap is what makes a gateway migration dangerous rather than tedious. The gateway fronts
+ * nine services, gates four of them, and leaves six routes open across FOUR deliberate
  * exemptions -- each open for a stated reason and each load bearing. A translation that quietly
- * widened one would pass every test that exists today. So would a route added here and gated
+ * widened one would pass every other test in this repository. So would a route added and gated
  * nowhere.
  *
- * WHAT IT CHECKS is therefore the whole declared surface, against EXPECTED below:
+ * WHAT IT CHECKS, in three modes:
  *
- *   1. the service set, exactly -- no additions, no removals
- *   2. the route set and its paths, exactly, per service
- *   3. the AUTH POSTURE of every route: gated by `key-auth`, or open and recorded as one of the
- *      four exemptions. A new route has no entry and fails; a gated route that loses its plugin
- *      fails; an open route that is not a recorded exemption fails.
- *   4. `strip_path` per route, because it is not cosmetic here -- `fplus-directory` needs `false`
- *      to preserve `/v1/device/<uuid>`, the userinfo routes need `true`, and the wrong one hands
- *      the edge runtime an empty service name and answers 400 naming nothing
- *   5. the consumers are exactly `anon` and `service_role`, and NEITHER CARRIES A LITERAL KEY --
- *      every credential must still be an `__UPPER_SNAKE__` placeholder, because a real JWT
- *      committed here is a leaked key, not a config change
- *   6. the global plugins are exactly `cors` and `prometheus`; `origins` is still substituted
- *      rather than written, and prometheus keeps the three 3.x flags that default to false and
- *      silently delete every per-service series when they are missing
- *   7. THE PLACEHOLDER SET IS KNOWN TO BOTH SUBSTITUTERS. Compose's `supabase-kong-init` and the
- *      chart's initContainer each scan for leftovers AT RUNTIME, so a placeholder added here and
- *      taught to only one of them is a per-target divergence that surfaces as a boot failure on
- *      whichever target was forgotten. This compares the three lists statically instead.
- *   8. THE TWO DOCUMENTS THAT CARRY THE ARGUMENT AGREE. kong.yml's header states both counts and
- *      one bullet per exemption; supabase/README.md, which that header sends readers to for the
- *      full reasoning, states the same counts and names every open route. It said TWO open routes
- *      until this check was written -- half of them -- which is how an exemption gets dropped in a
- *      migration without contradicting anything the migration reads.
+ *   (default)   TEMPLATE HYGIENE, over `supabase/envoy.yaml`. Every credential is still an
+ *               `__UPPER_SNAKE__` placeholder (a real key here is a leaked key, and it matters
+ *               more in envoy.yaml than it did in kong.yml -- the key is inlined into a Lua
+ *               string the filter compares against); the placeholder set is known to BOTH
+ *               substituters, so one taught to only one target cannot become a boot failure on
+ *               the other; and Compose no longer reads kong.yml while the chart still does.
  *
- * WHAT IT DELIBERATELY DOES NOT CHECK. Whether the gateway is Kong. Every assertion above is a
- * statement about the SURFACE -- which paths exist, which are authenticated, which are open and
- * why -- and none of it is Kong vocabulary except where it reads the file. That is the point:
- * roadmap §4 (Kong -> Envoy) says "any migration needs the negative assertions first", and this is
- * them. When the gateway moves, EXPECTED is the specification the new one must satisfy and this
- * header is the argument for each exemption it must preserve.
- *
- * It also does not check that the routes WORK. That is `validate.py`'s half, live against a running
- * stack, and the two are complementary: this one proves the surface is what was intended, that one
- * proves the intended surface behaves.
- *
- * ---------------------------------------------------------------------------------------------
- * TWO MODES, AND THE SECOND IS THE ONE THAT SURVIVES THE MIGRATION.
- *
- *   (default)   reads kong.yml and asserts its SHAPE against EXPECTED. Correct while Kong is the
- *               gateway; meaningless the moment it is not, because Envoy's configuration is
- *               lds.yaml and cds.yaml and this parser has nothing to say about it.
- *
- *   --runtime   probes a LIVE gateway and asserts the observable POSTURE of every route in
- *               EXPECTED: gated routes must be refused before their upstream sees them, open ones
- *               must get through. It names no Kong concept, so it reads identically against
- *               whatever is fronting the stack -- which makes it the before-and-after check the
- *               migration is steered by, rather than a check that has to be rewritten alongside
- *               the thing it is meant to be guarding.
+ *   --runtime   THE ROUTE SURFACE, against a LIVE gateway. Every row in EXPECTED: gated routes
+ *               must be refused before their upstream sees them, open ones must get through. It
+ *               names no gateway concept, so it reads identically against Kong and Envoy -- which
+ *               is what let it steer the migration rather than needing to be rewritten alongside
+ *               the thing it was guarding.
  *
  *   --authenticated
  *               extends --runtime with a CREDENTIALLED pass, and it is the difference between a
@@ -73,6 +37,16 @@
  *               query string to PostgREST, where it was read as a column filter. Presents a valid
  *               key by header and by query, an unregistered key, and asserts that on a route which
  *               hides credentials the header and query forms are indistinguishable upstream.
+ *
+ * WHAT WENT WITH KONG. The default mode used to PARSE `kong.yml` and assert its shape -- services,
+ * routes, strip_path, plugins, consumers, and the agreement between its header's counts and
+ * supabase/README.md. All of that was Kong vocabulary describing a file the stack no longer
+ * deploys on Compose, so it is retired. Two of those eight assertions were never about Kong and
+ * survive above: no literal credential, and both substituters knowing every placeholder.
+ *
+ * It does not check that the routes WORK. That is `validate.py`'s half, live against a running
+ * stack, and the two are complementary: this one proves the surface is what was intended, that one
+ * proves the intended surface behaves.
  *
  * Both share EXPECTED on purpose. Two inventories would drift, and the one that drifted would be
  * the one nobody ran.
@@ -86,11 +60,9 @@
  * The base URL is the first non-flag argument, or SUPABASE_URL. Running it twice against two
  * gateways and diffing the output is the equivalence test roadmap §4 is steered by.
  *
- * No YAML dependency: this runs in CI before any `npm install`, and the shape it reads is narrow
- * and asserted -- see `assertParsed()`, which refuses to compare anything if the scan came back
- * emptier than the file can possibly be. A parser that silently returns nothing would otherwise
- * make every assertion below pass while checking nothing, which is the failure mode a check like
- * this is most likely to have and least likely to show.
+ * No dependencies: this runs in CI before any `npm install`, and the runtime modes speak HTTP
+ * through `node:http` rather than fetch -- see the note on probeOnce for the Windows exit
+ * crash that forced it.
  */
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
@@ -108,9 +80,6 @@ const ok = [];
 const fail = (m) => problems.push(m);
 const pass = (m) => ok.push(m);
 
-const KONG = 'supabase/kong.yml';
-const COMPOSE = 'docker-compose.yml';
-const CHART_KONG = 'deploy/helm/acs-cymru/templates/supabase/kong.yaml';
 
 // -------------------------------------------------------------------------------------------------
 // THE INVENTORY. This is the specification, not a mirror of the file -- every row was read from
@@ -641,23 +610,43 @@ const template = read(ENVOY_TEMPLATE);
   }
 }
 
-// ---- 4. Kong is actually gone. -----------------------------------------------------------------
+// ---- 4. Kong is retired from COMPOSE, and still present for Kubernetes. -----------------------
 {
-  // Retiring a gateway means the config stops existing, not that it stops being referenced. A
-  // leftover kong.yml is a file that looks authoritative and is read by nothing.
-  let stale = false;
-  try {
-    read('supabase/kong.yml');
-    stale = true;
-  } catch { /* expected: it should be gone */ }
-
-  if (stale) {
+  // NOT "kong.yml is gone", which is what this asserted for exactly one commit and which broke
+  // `helm install` outright: the chart still deploys Kong by default, because its Envoy templates
+  // have never run in a cluster. Deleting the shared template took the mirror with it and the
+  // default render failed on a missing file. `helm lint` passed throughout, which is why that was
+  // not caught until the render was actually exercised.
+  //
+  // So the claim worth asserting is the narrower true one: COMPOSE no longer reads it. That flips
+  // to "gone" when the Helm half of roadmap §4 lands, and this comment is the reminder.
+  const compose = read(COMPOSE_FILE);
+  if (/kong\.yml/.test(compose)) {
     fail(
-      'supabase/kong.yml still exists. Envoy is the gateway on both targets; a leftover Kong '
-      + 'config is a file that reads as authoritative and is loaded by nothing.'
+      `${COMPOSE_FILE} still references kong.yml. Envoy is the gateway on Compose; a Kong config `
+      + 'mounted there is a file that reads as authoritative and is loaded by nothing.'
     );
   } else {
-    pass('supabase/kong.yml is gone');
+    pass(`${COMPOSE_FILE} no longer reads kong.yml`);
+  }
+
+  // The converse, and it is the half that actually bites. supabase/kong.yml is mirrored into the
+  // chart and read by templates/supabase/kong.yaml; removing it is a broken `helm install`, not a
+  // tidy-up.
+  let present = true;
+  try {
+    read('supabase/kong.yml');
+  } catch {
+    present = false;
+  }
+  if (!present) {
+    fail(
+      'supabase/kong.yml is missing, but deploy/helm still deploys Kong by default and reads a '
+      + 'mirror of it. `helm install` fails on the absent file. Restore it, or migrate the chart '
+      + 'to Envoy in the same change -- see docs/gateway-migration.md.'
+    );
+  } else {
+    pass('supabase/kong.yml is retained for the Kubernetes target, which has not migrated yet');
   }
 }
 
