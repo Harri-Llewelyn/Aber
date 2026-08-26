@@ -117,7 +117,13 @@ const EXPECTED = [
   { service: 'storage-v1-public', route: 'storage-v1-public-routes',
     paths: ['/storage/v1/object/public/'], strip: true,
     auth: 'open', exemption: 'public-objects',
-    probe: '/storage/v1/object/public/asset-3d-models/__probe__', marker: '"error":"not_found"' },
+    // `statusCode` is storage-api's ERROR ENVELOPE, not one particular error. It was
+    // `"error":"not_found"` until this ran against a cluster whose storage RLS policies had not
+    // been applied, where the same upstream answered `"error":"Unauthorized"` instead -- the
+    // request reached it either way, which is the only thing this row asserts. A marker pinned to
+    // an OUTCOME couples the probe to database state; one pinned to the upstream's identity does
+    // not, and identity is what "did it get through" needs.
+    probe: '/storage/v1/object/public/asset-3d-models/__probe__', marker: 'statusCode' },
 
   { service: 'storage-v1', route: 'storage-v1-routes', paths: ['/storage/v1/'], strip: true,
     auth: 'key-auth',
