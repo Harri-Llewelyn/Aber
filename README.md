@@ -44,7 +44,7 @@ flowchart TB
     end
 
     subgraph Supabase ["Supabase BaaS"]
-        KONG["Kong API Gateway<br/>(54321) key-auth"]
+        GW["Envoy API Gateway<br/>(54321) apikey check"]
         AUTH["GoTrue Auth"]
         PGRST["PostgREST<br/>RLS - digital_thread"]
         RT["Realtime WebSocket"]
@@ -65,12 +65,12 @@ flowchart TB
     MQTT -->|subscribe spBv1.0/#| ING
     ING -->|metadata / quarantine| PGRST
     ING -->|telemetry| TS
-    UI --> KONG
-    KONG --> AUTH
-    KONG --> PGRST
-    KONG --> RT
-    KONG --> STO
-    KONG --> EF
+    UI --> GW
+    GW --> AUTH
+    GW --> PGRST
+    GW --> RT
+    GW --> STO
+    GW --> EF
     PGRST -.->|postgres_fdw view| TS
     GRAF -->|SQL| TS
 ```
@@ -230,7 +230,7 @@ in that range, and the one that matters is not the one in the message:
 
 | Port | Service | Consequence if lost |
 | :--- | :--- | :--- |
-| `54321` | Kong | **the browser has no API** — the dashboard loads and every request fails |
+| `54321` | Envoy | **the browser has no API** — the dashboard loads and every request fails |
 | `54322` | supabase-db | no `psql` from the host; the stack itself is unaffected |
 | `54323` | Supabase Studio | Studio unreachable |
 
@@ -363,7 +363,7 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | `supabase-auth` | `acs-cymru_supabase_auth` | `supabase/gotrue:v2.189.0` | — |
 | `supabase-rest` | `acs-cymru_supabase_rest` | `postgrest/postgrest:v14.12` | — |
 | `supabase-kong-init` | `acs-cymru_supabase_kong_init` | `alpine:3.24` | — |
-| `supabase-kong` | `acs-cymru_supabase_kong` | `kong:3.9.3` | `54321:8000` |
+| `supabase-envoy` | `acs-cymru_supabase_envoy` | `envoyproxy/envoy:v1.31.5` | `54321:8000` |
 | `supabase-functions` | `acs-cymru_supabase_functions` | `supabase/edge-runtime:v1.74.2` | — |
 | `supabase-realtime` | `acs-cymru_supabase_realtime` | `supabase/realtime:v2.34.47` | — |
 | `supabase-storage` | `acs-cymru_supabase_storage` | `supabase/storage-api:v1.11.13` | — |
@@ -393,7 +393,7 @@ unrecognised role produces `403`.
 | :--- | :--- |
 | **Broker** | `allow_anonymous false`; [`mosquitto.acl`](mosquitto.acl) confines each gateway to `spBv1.0/+/+/<own-id>/#` |
 | **Ingestion** | Gateway↔device binding; quarantine gating; append-only historian writes |
-| **Gateway** | Kong `key-auth` on `/rest`, `/realtime`, `/storage`, `/functions` — with **four** documented exemptions ([`supabase/README.md`](supabase/README.md)) |
+| **Gateway** | Envoy's `apikey` check on `/rest`, `/realtime`, `/storage`, `/functions` — with **four** documented exemptions ([`supabase/README.md`](supabase/README.md)) |
 | **API** | PostgREST JWT verification plus RLS on every table |
 | **Database** | `has_role()` reads `user_roles` directly, so revocation is immediate; `digital_thread` is append-only against `service_role` too |
 | **Edge functions** | Explicit router allow-list; per-function secret scoping; role resolved from the database, never a stale JWT claim |
@@ -777,7 +777,7 @@ gigabytes of raw points back into TimescaleDB.
 
 ### 4 · Kong → Envoy, following upstream Supabase
 
-**Builds on:** [`supabase/kong.yml`](supabase/kong.yml) · `supabase-kong-init` ·
+**Builds on:** [`supabase/envoy.yaml`](supabase/envoy.yaml) · `supabase-envoy-init` ·
 [`templates/supabase/kong.yaml`](deploy/helm/acs-cymru/templates/supabase/kong.yaml)
 
 **Upstream Supabase has dropped Kong.** Their self-hosted `docker-compose.yml` now fronts the stack

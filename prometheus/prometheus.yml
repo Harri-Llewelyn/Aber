@@ -86,15 +86,26 @@ scrape_configs:
           component: host
 
   # -----------------------------------------------------------------------------------------------
-  # The API gateway's status listener. Requires BOTH the `prometheus` plugin (declared globally in
-  # supabase/kong.yml and named in KONG_PLUGINS) and KONG_STATUS_LISTEN. With the plugin and without
-  # the listener there is no endpoint at all, and the target simply reports DOWN.
+  # The API gateway's admin listener.
+  #
+  # BOTH THE PORT AND THE PATH MOVED WITH THE GATEWAY (roadmap §4). Kong served `/metrics` on a
+  # dedicated status listener (:8100) that existed only when KONG_STATUS_LISTEN was set; Envoy
+  # serves the scrape at `/stats/prometheus` on its ADMIN listener (:9901), which also answers the
+  # container's healthcheck. Carrying the old path over would scrape a 404 while Prometheus
+  # reported the target UP -- an unmeasured gateway that reads as an idle one, which is the exact
+  # failure the Kong prometheus flags were added for.
+  #
+  # THE SERIES NAMES CHANGED TOO: `kong_http_status` -> `envoy_http_downstream_rq_xx`,
+  # `kong_latency_*` -> `envoy_http_downstream_rq_time_bucket`. No dashboard or alert rule in this
+  # repository used the kong_* series -- they appeared only in comments -- so nothing renders empty
+  # because of this. Verify against a live scrape before building a panel on any of them.
   # -----------------------------------------------------------------------------------------------
-  - job_name: kong
+  - job_name: envoy
+    metrics_path: /stats/prometheus
     static_configs:
-      - targets: ['supabase-kong:8100']
+      - targets: ['supabase-envoy:9901']
         labels:
-          component: supabase-kong
+          component: supabase-envoy
 
   # -----------------------------------------------------------------------------------------------
   # PostgREST's admin server.

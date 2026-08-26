@@ -537,553 +537,137 @@ if (RUNTIME) {
   process.exit(0);
 }
 
-// -------------------------------------------------------------------------------------------------
-// A scanner for the shape kong.yml actually has, and for no other.
-//
-// Indentation carries the structure, and every level below is one this file uses. It is not a YAML
-// parser and must not be reused as one: it understands scalars and single-level lists at the exact
-// depths kong.yml puts them, which is enough to read the surface and nothing more.
-//
-// The one ambiguity is `- name:` at indent 6, which is a ROUTE under `routes:` and a PLUGIN under
-// `plugins:` -- both indent-4 keys on a service. `mode` disambiguates them, and getting that wrong
-// would silently report every gated service as ungated.
-// -------------------------------------------------------------------------------------------------
-function parseKong(text) {
-  const out = { consumers: [], services: [], globalPlugins: [] };
-  let section = null;          // 'consumers' | 'services' | 'plugins'
-  let mode = null;             // within a service: 'routes' | 'plugins'
-  let svc = null, route = null, plugin = null, consumer = null;
-
-  for (const raw of text.split('\n')) {
-    if (/^\s*#/.test(raw) || !raw.trim()) continue;
-    const indent = raw.length - raw.trimStart().length;
-    const line = raw.trim();
-
-    if (indent === 0) {
-      section = /^(consumers|services|plugins):$/.test(line) ? line.slice(0, -1) : null;
-      svc = route = plugin = consumer = null;
-      mode = null;
-      continue;
-    }
-
-    if (section === 'consumers') {
-      if (indent === 2 && line.startsWith('- username:')) {
-        consumer = { username: value(line), keys: [] };
-        out.consumers.push(consumer);
-      } else if (indent === 6 && line.startsWith('- key:') && consumer) {
-        consumer.keys.push(value(line));
-      }
-      continue;
-    }
-
-    if (section === 'services') {
-      if (indent === 2 && line.startsWith('- name:')) {
-        svc = { name: value(line), url: null, plugins: [], routes: [] };
-        out.services.push(svc);
-        mode = null; route = plugin = null;
-      } else if (indent === 4 && svc) {
-        if (line.startsWith('url:')) svc.url = value(line);
-        else if (line === 'routes:') { mode = 'routes'; route = plugin = null; }
-        else if (line === 'plugins:') { mode = 'plugins'; route = plugin = null; }
-      } else if (indent === 6 && line.startsWith('- name:') && svc) {
-        if (mode === 'routes') {
-          route = { name: value(line), strip: null, paths: [] };
-          svc.routes.push(route);
-        } else if (mode === 'plugins') {
-          plugin = { name: value(line), config: {} };
-          svc.plugins.push(plugin);
-        }
-      } else if (indent === 8 && mode === 'routes' && route) {
-        if (line.startsWith('strip_path:')) route.strip = value(line) === 'true';
-      } else if (indent === 10 && mode === 'routes' && route && line.startsWith('- /')) {
-        route.paths.push(line.slice(2));
-      } else if (indent === 10 && mode === 'plugins' && plugin && line.includes(': ')) {
-        plugin.config[line.split(':')[0]] = value(line);
-      }
-      continue;
-    }
-
-    if (section === 'plugins') {
-      if (indent === 2 && line.startsWith('- name:')) {
-        plugin = { name: value(line), config: {} };
-        out.globalPlugins.push(plugin);
-      } else if (indent === 6 && plugin && line.includes(': ')) {
-        plugin.config[line.split(':')[0]] = value(line);
-      }
-    }
-  }
-  return out;
-}
-
-/** The scalar after the first `:`, with any `- ` item marker already gone. */
-function value(line) {
-  const body = line.replace(/^-\s*/, '');
-  return body.slice(body.indexOf(':') + 1).trim();
-}
-
-/**
- * REFUSE TO COMPARE A PARSE THAT CANNOT BE RIGHT.
- *
- * Every assertion below is a set difference, and a scanner that returned nothing would make all of
- * them pass: no unexpected services, no ungated routes, no literal keys. That is the shape of
- * vacuous success this check is most exposed to, so the parse is bounded before it is trusted --
- * against the file's own text rather than against EXPECTED, which is the thing under test.
- */
-function assertParsed(kong, text) {
-  // Counted from the raw text at the two depths that carry them, with no naming convention
-  // assumed: inside the `services:` block, indent 2 is a service and indent 6 is a route OR a
-  // service plugin -- the scanner has to account for every one of the latter, whichever bucket it
-  // put it in. SCOPED TO THAT BLOCK, because the top-level `plugins:` list puts its own entries at
-  // indent 2 and a whole-file count reads them as two more services.
-  const lines = text.split(/\r?\n/);
-  const from = lines.indexOf('services:');
-  const to = lines.indexOf('plugins:');
-  // Found while breaking this guard on purpose: with no `services:` key the scanner reads zero
-  // services AND the bounded count reads zero, so the two agree and the guard waves a parse of
-  // nothing through. The set assertions below do still fail -- but on nine missing services
-  // rather than on the one real cause, which is the wrong thing to put in front of a reader.
-  if (from === -1) {
-    return KONG + ' has no top-level `services:` key, so the scanner read no routing surface at '
-      + 'all. Nothing was compared.';
-  }
-  const servicesBlock = lines.slice(from, to === -1 ? lines.length : to).join('\n');
-  const declaredServices = (servicesBlock.match(/^ {2}- name: /gm) || []).length;
-  const declaredNested = (servicesBlock.match(/^ {6}- name: /gm) || []).length;
-  const routes = kong.services.flatMap((s) => s.routes);
-  const svcPlugins = kong.services.flatMap((s) => s.plugins);
-
-  if (kong.services.length !== declaredServices) {
-    return `the scanner read ${kong.services.length} service(s) from ${KONG} but the file declares `
-      + `${declaredServices}. Every assertion below is a set difference and would pass vacuously on `
-      + 'a short parse, so nothing was compared.';
-  }
-  if (routes.length + svcPlugins.length !== declaredNested) {
-    return `the scanner read ${routes.length} route(s) and ${svcPlugins.length} service plugin(s) `
-      + `from ${KONG}, which is ${routes.length + svcPlugins.length} of the ${declaredNested} nested `
-      + 'entries the file declares. Nothing was compared -- see above.';
-  }
-  if (!kong.consumers.length || !kong.globalPlugins.length) {
-    return 'the scanner read no consumers or no global plugins, which cannot be true of a working '
-      + 'gateway config. Nothing was compared.';
-  }
-  return null;
-}
-
 // =================================================================================================
-// The assertions.
+// TEMPLATE HYGIENE  --  the default mode, and what is LEFT of the static one.
+//
+// The Kong static mode is gone with Kong. It read `kong.yml`'s indentation and asserted its shape:
+// services, routes, strip_path, plugins, consumers. Every one of those was Kong vocabulary, and
+// Envoy's configuration is a bootstrap of listeners and clusters that the parser could not read a
+// word of. Keeping it would have meant maintaining a checker for a file the stack no longer has.
+//
+// TWO OF ITS EIGHT ASSERTIONS WERE NOT ABOUT KONG AT ALL, and those are here. Both are about the
+// TEMPLATE rather than the gateway, so they survived the migration unchanged in meaning:
+//
+//   * Assertion 5 -- NO LITERAL CREDENTIAL IS COMMITTED. Every key in the template must still be
+//     an `__UPPER_SNAKE__` placeholder. A real key here is a leaked key, not a config change, and
+//     it is MORE dangerous in envoy.yaml than it was in kong.yml: the key is inlined into a Lua
+//     string the filter compares against, so it appears in the file as ordinary source.
+//
+//   * Assertion 7 -- BOTH SUBSTITUTERS KNOW EVERY PLACEHOLDER. Compose's `supabase-envoy-init`
+//     and the chart's initContainer each scan for leftovers AT RUNTIME, so a placeholder added to
+//     the template and taught to only one of them is a per-target divergence that surfaces as a
+//     boot failure on whichever target was forgotten. Comparing the three lists statically is
+//     cheaper than discovering it on deploy.
+//
+// The ROUTE surface is no longer checkable from a file, and that is the point of `--runtime`: it
+// asserts posture against a live gateway instead, in terms no gateway owns.
 // =================================================================================================
-const kongText = read(KONG);
-const kong = parseKong(kongText);
 
-const parseProblem = assertParsed(kong, kongText);
-if (parseProblem) {
-  console.error(`\nThe gateway surface was NOT checked:\n\n  ${parseProblem}\n`);
-  process.exit(1);
-}
+const ENVOY_TEMPLATE = 'supabase/envoy.yaml';
+const COMPOSE_FILE = 'docker-compose.yml';
+const CHART_ENVOY = 'deploy/helm/acs-cymru/templates/supabase/envoy.yaml';
 
-const expectedRoutes = new Map(EXPECTED.map((r) => [r.route, r]));
-const actualRoutes = kong.services.flatMap((s) =>
-  s.routes.map((r) => ({ ...r, service: s.name, gated: s.plugins.some((p) => p.name === 'key-auth') }))
-);
-log(`${kong.services.length} services, ${actualRoutes.length} routes, `
-  + `${kong.globalPlugins.length} global plugin(s)`);
+/** Substituted by BOTH targets. All three lists below must agree. */
+const TEMPLATE_PLACEHOLDERS = [
+  '__CORS_ORIGINS__',
+  '__REALTIME_UPSTREAM_HOST__',
+  '__SUPABASE_ANON_KEY__',
+  '__SUPABASE_SERVICE_ROLE_KEY__',
+];
 
-// -------------------------------------------------------------------------------------------------
-// 1. The service set, exactly.
-// -------------------------------------------------------------------------------------------------
+const template = read(ENVOY_TEMPLATE);
+
+// ---- 1. Every placeholder in the template is declared, and nothing else looks like one. --------
 {
-  const want = new Set(EXPECTED.map((r) => r.service));
-  const got = new Set(kong.services.map((s) => s.name));
-  const added = [...got].filter((n) => !want.has(n));
-  const removed = [...want].filter((n) => !got.has(n));
-
-  if (added.length || removed.length) {
-    fail(
-      `${KONG} does not front the services this check records:\n`
-      + (added.length ? `         added and unreviewed: ${added.join(', ')}\n` : '')
-      + (removed.length ? `         recorded but gone:   ${removed.join(', ')}\n` : '')
-      + '         A service added here has no recorded auth posture. Add it to EXPECTED in this\n'
-      + '         script with the reason it is gated or open, so the migration in roadmap §4 has\n'
-      + '         something to translate against.'
-    );
-  } else {
-    pass(`the gateway fronts exactly the ${want.size} recorded services`);
-  }
-}
-
-// -------------------------------------------------------------------------------------------------
-// 2. The route set, its paths, and strip_path.
-//
-// `strip_path` is checked because it is load bearing rather than cosmetic: the edge runtime reads
-// the first path segment to choose a worker, so `fplus-directory` needs the prefix PRESERVED and
-// the userinfo routes need it REMOVED. The wrong one hands the runtime an empty service name and
-// it answers 400 naming nothing -- which reads as a broken function, not a routing mistake.
-// -------------------------------------------------------------------------------------------------
-{
-  const seen = new Set();
-  let drift = 0;
-  for (const r of actualRoutes) {
-    seen.add(r.name);
-    const want = expectedRoutes.get(r.name);
-    if (!want) {
-      drift += 1;
-      fail(
-        `route \`${r.name}\` on service \`${r.service}\` (${r.paths.join(', ') || 'no paths'}) is `
-        + 'NOT in this check\'s inventory.\n'
-        + '         This is the case the check exists for: a route nobody reviewed is open or '
-        + 'gated\n         by accident rather than by decision. Add it to EXPECTED with its reason.'
-      );
-      continue;
-    }
-    if (want.service !== r.service) {
-      drift += 1;
-      fail(`route \`${r.name}\` has moved from service \`${want.service}\` to \`${r.service}\``);
-    }
-    if (JSON.stringify(want.paths) !== JSON.stringify(r.paths)) {
-      drift += 1;
-      fail(
-        `route \`${r.name}\` no longer matches the recorded paths:\n`
-        + `         recorded: ${want.paths.join(', ')}\n`
-        + `         found:    ${r.paths.join(', ') || '(none)'}`
-      );
-    }
-    if (want.strip !== r.strip) {
-      drift += 1;
-      fail(
-        `route \`${r.name}\` has strip_path: ${r.strip}, recorded as ${want.strip}. `
-        + 'For the fplus-directory\n         routes this is the difference between a working '
-        + 'function and a bare 400.'
-      );
-    }
-  }
-  const missing = [...expectedRoutes.keys()].filter((n) => !seen.has(n));
-  if (missing.length) {
-    drift += 1;
-    fail(`recorded route(s) no longer declared in ${KONG}: ${missing.join(', ')}`);
-  }
-  if (!drift) {
-    pass(`all ${EXPECTED.length} routes match their recorded paths and strip_path`);
-  }
-}
-
-// -------------------------------------------------------------------------------------------------
-// 3. THE AUTH POSTURE OF EVERY ROUTE -- the assertion the rest of this file exists to support.
-//
-// `key-auth` is attached at the SERVICE level, so every route on a gated service is gated and every
-// route on an ungated one is open. An open route must name one of the four recorded exemptions;
-// there is no third state, and "open because nobody thought about it" is what this rejects.
-// -------------------------------------------------------------------------------------------------
-{
-  let drift = 0;
-  for (const r of actualRoutes) {
-    const want = expectedRoutes.get(r.name);
-    if (!want) continue;                                  // already reported by assertion 2
-    const posture = r.gated ? 'key-auth' : 'open';
-    if (posture === want.auth) continue;
-    drift += 1;
-    if (want.auth === 'key-auth') {
-      fail(
-        `route \`${r.name}\` (${r.paths.join(', ')}) IS RECORDED AS GATED AND IS NOW OPEN. `
-        + `Service \`${r.service}\`\n         carries no key-auth plugin. `
-        + (r.service === 'functions-v1'
-          ? 'This is the most serious form of it: the edge\n         runtime boots with '
-            + 'VERIFY_JWT="false", so an unauthenticated request can start any worker.'
-          : 'Nothing in validate.py asserts the absence of\n         this change.')
-      );
-    } else {
-      fail(
-        `route \`${r.name}\` is recorded as an OPEN exemption (${want.exemption}) and is now gated `
-        + 'by key-auth.\n         That is the safe direction, but it breaks the clients the '
-        + 'exemption exists for:\n         ' + EXEMPTIONS[want.exemption]
-      );
-    }
-  }
-
-  const openRoutes = EXPECTED.filter((r) => r.auth === 'open');
-  const unrecorded = openRoutes.filter((r) => !EXEMPTIONS[r.exemption]);
-  if (unrecorded.length) {
-    drift += 1;
-    fail(`open route(s) naming no recorded exemption: ${unrecorded.map((r) => r.route).join(', ')}`);
-  }
-
-  if (!drift) {
-    const gated = EXPECTED.filter((r) => r.auth === 'key-auth').length;
-    const groups = new Set(openRoutes.map((r) => r.exemption)).size;
-    pass(
-      `${gated} route(s) are gated by key-auth and ${openRoutes.length} are open across the `
-      + `${groups} recorded exemptions`
-    );
-  }
-}
-
-// -------------------------------------------------------------------------------------------------
-// 4. The consumers, and NO LITERAL KEY MATERIAL.
-//
-// A rendered kong.yml committed over the template is not a config mistake, it is a published
-// service-role key -- and it would look entirely normal in a diff. Both substituters write their
-// output to a volume or a Secret precisely so the literal never reaches the repository, and this is
-// the assertion that says the template stayed a template.
-// -------------------------------------------------------------------------------------------------
-{
-  const got = kong.consumers.map((c) => c.username);
-  const mismatch = JSON.stringify(got) !== JSON.stringify(EXPECTED_CONSUMERS);
-  if (mismatch) {
-    fail(
-      `${KONG} registers consumers [${got.join(', ')}]; recorded is `
-      + `[${EXPECTED_CONSUMERS.join(', ')}]. A third consumer is a third key the gateway accepts.`
-    );
-  }
-
-  const literals = kong.consumers.flatMap((c) =>
-    c.keys.filter((k) => !/^__[A-Z0-9_]+__$/.test(k)).map((k) => ({ user: c.username, k }))
+  // Comment lines are excluded for the reason the substituters exclude them: the template's header
+  // documents the convention BY NAME, so a whole-file scan flags the documentation of the rule as
+  // a violation of it.
+  const found = new Set(
+    template
+      .split('\n')
+      .filter((l) => !/^\s*#/.test(l))
+      .flatMap((l) => [...l.matchAll(/__[A-Z0-9_]+__/g)].map((m) => m[0]))
   );
-  if (literals.length) {
+  const undeclared = [...found].filter((x) => !TEMPLATE_PLACEHOLDERS.includes(x)).sort();
+  const unused = TEMPLATE_PLACEHOLDERS.filter((x) => !found.has(x)).sort();
+
+  if (undeclared.length) {
     fail(
-      'A LITERAL API KEY IS COMMITTED IN ' + KONG + ':\n'
-      + literals.map((l) => `         ${l.user}: ${l.k.slice(0, 12)}…`).join('\n')
-      + '\n         This file is a TEMPLATE substituted at deploy time on both targets. A literal '
-      + 'here is\n         a published credential -- rotate it, do not merely revert the file.'
+      `${ENVOY_TEMPLATE} uses placeholder(s) this script does not know: ${undeclared.join(', ')}. `
+      + 'Add them to TEMPLATE_PLACEHOLDERS and to BOTH substituters.'
     );
-  } else if (!mismatch) {
-    pass(`both consumers (${got.join(', ')}) still carry placeholders, not literal keys`);
+  }
+  if (unused.length) {
+    fail(
+      `TEMPLATE_PLACEHOLDERS names ${unused.join(', ')}, which ${ENVOY_TEMPLATE} does not use. `
+      + 'A substituter replacing something absent hides a rename.'
+    );
+  }
+  if (!undeclared.length && !unused.length) {
+    pass(`${ENVOY_TEMPLATE} uses exactly the ${TEMPLATE_PLACEHOLDERS.length} declared placeholders`);
   }
 }
 
-// -------------------------------------------------------------------------------------------------
-// 5. The global plugins, and the config on each that is load bearing.
-// -------------------------------------------------------------------------------------------------
+// ---- 2. No literal credential is committed. ----------------------------------------------------
 {
-  const got = kong.globalPlugins.map((p) => p.name);
-  if (JSON.stringify([...got].sort()) !== JSON.stringify([...EXPECTED_GLOBAL_PLUGINS].sort())) {
+  // A JWT is three base64url segments separated by dots and starts `eyJ` -- the base64 of `{"`.
+  // Matching the SHAPE rather than a known value is what makes this catch a key nobody has seen.
+  const jwt = template.match(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/);
+  if (jwt) {
     fail(
-      `${KONG} declares global plugins [${got.join(', ')}]; recorded is `
-      + `[${EXPECTED_GLOBAL_PLUGINS.join(', ')}].\n         Every plugin named here must ALSO be in `
-      + 'KONG_PLUGINS on both targets: naming any plugin\n         there replaces the bundled set, '
-      + 'so one missing stops Kong dead at boot.'
+      `${ENVOY_TEMPLATE} contains what looks like a real JWT (${jwt[0].slice(0, 24)}…). `
+      + 'The template is committed; the rendered config is not. Replace it with a placeholder and '
+      + 'ROTATE THE KEY -- it is in the git history now.'
     );
   } else {
-    pass(`the ${got.length} global plugins are exactly ${EXPECTED_GLOBAL_PLUGINS.join(' and ')}`);
+    pass(`${ENVOY_TEMPLATE} carries no literal credential`);
   }
+}
 
-  const cors = kong.globalPlugins.find((p) => p.name === 'cors');
-  if (!cors) {
-    fail('the global `cors` plugin is gone. It is the stack\'s ONLY statement of origin policy -- '
-      + 'the edge\n         functions deliberately declare none, so there is no second layer.');
-  } else if (cors.config.origins !== '__CORS_ORIGINS__') {
-    fail(
-      `the cors plugin's origins is \`${cors.config.origins}\`, not the __CORS_ORIGINS__ `
-      + 'placeholder.\n         Literal origins are what failed on Kubernetes: four localhost '
-      + 'entries that were correct on\n         Compose, so the dashboard logged in and then showed '
-      + 'empty tables while the gateway\n         reported 200 for every request.'
-    );
-  } else {
-    pass('origin policy is still substituted from acs-cymru.corsOrigins, not written literally');
-  }
-
-  const prom = kong.globalPlugins.find((p) => p.name === 'prometheus');
-  if (prom) {
-    const off = PROMETHEUS_FLAGS.filter((f) => prom.config[f] !== 'true');
-    if (off.length) {
+// ---- 3. Both substituters handle every placeholder. --------------------------------------------
+{
+  const compose = read(COMPOSE_FILE);
+  const chart = read(CHART_ENVOY);
+  for (const [file, text] of [[COMPOSE_FILE, compose], [CHART_ENVOY, chart]]) {
+    const missing = TEMPLATE_PLACEHOLDERS.filter((x) => !text.includes(x));
+    if (missing.length) {
       fail(
-        `the prometheus plugin is missing ${off.join(', ')}. On Kong 3.x these default to FALSE, `
-        + 'and\n         without them kong_http_status, kong_latency_* and kong_bandwidth all '
-        + 'disappear while\n         /metrics keeps answering 200 -- an unmeasured gateway that '
-        + 'reads as an idle one.'
+        `${file} does not substitute ${missing.join(', ')}. Its own leftover scan would catch this `
+        + 'at boot -- on that target only, which is how the two drift.'
       );
     } else {
-      pass('the prometheus plugin keeps all three 3.x metric flags that default to false');
+      pass(`${file} substitutes all ${TEMPLATE_PLACEHOLDERS.length} placeholders`);
     }
   }
 }
 
-// -------------------------------------------------------------------------------------------------
-// 6. THE PLACEHOLDER SET IS KNOWN TO BOTH SUBSTITUTERS.
-//
-// Each substituter already scans its own output for leftovers, but only AT RUNTIME -- so a
-// placeholder added to the template and taught to only one of them is a boot failure on whichever
-// target was forgotten, found by deploying rather than by reading. Three lists, compared here.
-//
-// kong.yml's header documents the convention by name, so the template's own list is read from value
-// positions only; a `__PLACEHOLDER__` inside a comment is documentation, not a placeholder.
-// -------------------------------------------------------------------------------------------------
+// ---- 4. Kong is actually gone. -----------------------------------------------------------------
 {
-  const valueLines = kongText.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
-  const inTemplate = [...new Set(valueLines.match(/__[A-Z0-9_]+__/g) || [])].sort();
-  const substituted = (text) => [...new Set(
-    (text.match(/s\|__[A-Z0-9_]+__\|/g) || []).map((m) => m.slice(2, -1))
-  )].sort();
+  // Retiring a gateway means the config stops existing, not that it stops being referenced. A
+  // leftover kong.yml is a file that looks authoritative and is read by nothing.
+  let stale = false;
+  try {
+    read('supabase/kong.yml');
+    stale = true;
+  } catch { /* expected: it should be gone */ }
 
-  // SCOPED TO THE ONE SERVICE. docker-compose.yml holds several init containers that substitute
-  // placeholders into other files -- Grafana's alerting, the BI reader's password, the Prometheus
-  // URL -- and a whole-file scan reads their expressions as ones this template should have
-  // declared. Three false positives, all of them real substitutions belonging to something else.
-  const composeService = (text, name) => {
-    const lines = text.split(/\r?\n/);
-    const from = lines.findIndex((l) => l === `  ${name}:`);
-    if (from === -1) return '';
-    const after = lines.slice(from + 1).findIndex((l) => /^ {2}\S/.test(l));
-    return lines.slice(from, after === -1 ? lines.length : from + 1 + after).join('\n');
-  };
-
-  const byCompose = substituted(composeService(read(COMPOSE), 'supabase-kong-init'));
-  const byChart = substituted(read(CHART_KONG));
-
-  if (!byCompose.length) {
+  if (stale) {
     fail(
-      'no `supabase-kong-init` service with sed substitutions was found in ' + COMPOSE + '.\n'
-      + '         Either it was renamed or Compose no longer renders kong.yml -- and either way\n'
-      + '         the placeholder comparison below examined nothing on that target.'
-    );
-  }
-
-  const describe = (a, b) => [
-    ...a.filter((p) => !b.includes(p)).map((p) => `+${p}`),
-    ...b.filter((p) => !a.includes(p)).map((p) => `-${p}`),
-  ];
-
-  const drift = [];
-  if (JSON.stringify(inTemplate) !== JSON.stringify(EXPECTED_PLACEHOLDERS)) {
-    drift.push(`${KONG} declares ${describe(inTemplate, EXPECTED_PLACEHOLDERS).join(' ')} `
-      + 'against this check\'s recorded set');
-  }
-  if (JSON.stringify(byCompose) !== JSON.stringify(inTemplate)) {
-    drift.push(`supabase-kong-init in ${COMPOSE} substitutes `
-      + `${describe(byCompose, inTemplate).join(' ')} against the template`);
-  }
-  if (JSON.stringify(byChart) !== JSON.stringify(inTemplate)) {
-    drift.push(`the chart's initContainer substitutes ${describe(byChart, inTemplate).join(' ')} `
-      + 'against the template');
-  }
-
-  if (drift.length) {
-    fail(
-      'THE THREE PLACEHOLDER LISTS DISAGREE:\n'
-      + drift.map((d) => `         ${d}`).join('\n')
-      + '\n         (+ is present there and not in the comparison; - is the reverse.)\n'
-      + '         Each substituter scans for leftovers only at runtime, so this surfaces as Kong '
-      + 'failing\n         to boot on whichever target was forgotten -- and only on that one.'
+      'supabase/kong.yml still exists. Envoy is the gateway on both targets; a leftover Kong '
+      + 'config is a file that reads as authoritative and is loaded by nothing.'
     );
   } else {
-    pass(`all ${inTemplate.length} placeholders are substituted by both targets`);
+    pass('supabase/kong.yml is gone');
   }
 }
 
-// -------------------------------------------------------------------------------------------------
-// 7. kong.yml's own header states both counts, and they are the counts.
-//
-// The header is where a reader meets the exemptions, and it is the first thing a migration reads.
-// It said "FOUR ROUTES ARE DELIBERATELY EXEMPT" and then listed four BULLETS covering six routes --
-// two of them name a pair. Both numbers are true of something and neither was stated, so the header
-// now carries both and this asserts them, the same way check-docs-drift.mjs treats a count claim.
-// -------------------------------------------------------------------------------------------------
-{
-  const WORDS = { ZERO: 0, ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5, SIX: 6, SEVEN: 7, EIGHT: 8,
-    NINE: 9, TEN: 10 };
-  const claim = kongText.match(
-    /(\w+) ROUTES ARE DELIBERATELY EXEMPT from `key-auth`, across (\w+) exemptions/
-  );
-  const openRoutes = EXPECTED.filter((r) => r.auth === 'open');
-  const groups = new Set(openRoutes.map((r) => r.exemption)).size;
-
-  if (!claim) {
-    fail(
-      `${KONG}'s header does not carry a "<N> ROUTES ARE DELIBERATELY EXEMPT from \`key-auth\`, `
-      + 'across <N> exemptions" claim.\n         It is where a reader -- and a gateway migration -- '
-      + 'meets the exemptions, so it states both\n         counts and this asserts them.'
-    );
-  } else if (WORDS[claim[1]] !== openRoutes.length || WORDS[claim[2]] !== groups) {
-    fail(
-      `${KONG}'s header claims ${claim[1]} exempt routes across ${claim[2]} exemptions; `
-      + `the file has ${openRoutes.length} across ${groups}.`
-    );
-  } else {
-    pass(`kong.yml's header claim of ${claim[1]} exempt routes across ${claim[2]} exemptions holds`);
-  }
-
-  const bullets = (kongText.match(/^#   \* `[^`]+`/gm) || []).length;
-  if (claim && bullets !== groups) {
-    fail(
-      `${KONG}'s header lists ${bullets} exemption bullet(s) for ${groups} exemptions. `
-      + 'Each exemption\n         carries its argument in the header and a note at its own service '
-      + 'definition; one\n         without an argument is one nobody can safely translate.'
-    );
-  } else if (claim) {
-    pass(`each of the ${groups} exemptions carries its argument in the header`);
-  }
-}
-
-// -------------------------------------------------------------------------------------------------
-// 8. THE DOCUMENT kong.yml POINTS READERS AT AGREES WITH kong.yml.
-//
-// The header ends "The full reasoning, and what the exemptions do and do not expose: supabase/
-// README.md -> API Gateway (kong.yml)". That table said TWO deliberately open routes, and had done
-// since the userinfo and Directory exemptions were added -- so the file that carries the argument
-// for each exemption documented half of them, while every one had been argued for carefully in
-// kong.yml itself. Found by writing this check, which is the only reason it is guarded now.
-//
-// Presence, not prose: every open route's path must appear in that section, and the count claim
-// must match. What each exemption EXPOSES cannot be checked mechanically and is not attempted.
-// -------------------------------------------------------------------------------------------------
-{
-  const WORDS = { ZERO: 0, ONE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5, SIX: 6, SEVEN: 7, EIGHT: 8,
-    NINE: 9, TEN: 10 };
-  const doc = 'supabase/README.md';
-  const text = read(doc);
-  const from = text.indexOf('## API Gateway (`kong.yml`)');
-  const rest = from === -1 ? -1 : text.indexOf('\n## ', from + 1);
-  const section = from === -1 ? '' : text.slice(from, rest === -1 ? undefined : rest);
-
-  const openRoutes = EXPECTED.filter((r) => r.auth === 'open');
-  const groups = new Set(openRoutes.map((r) => r.exemption)).size;
-
-  if (!section) {
-    fail(`${doc} has no "## API Gateway (\`kong.yml\`)" section, and kong.yml's header sends `
-      + 'readers to it for\n         the full reasoning behind every exemption.');
-  } else {
-    const claim = section.match(
-      /\*\*(\w+) routes are deliberately open, across (\w+) exemptions\*\*/i
-    );
-    const missing = openRoutes.flatMap((r) => r.paths).filter((path) => !section.includes(path));
-
-    if (!claim) {
-      fail(`${doc}'s gateway section carries no "**<N> routes are deliberately open, across <N> `
-        + 'exemptions**"\n         claim to check.');
-    } else if (WORDS[claim[1].toUpperCase()] !== openRoutes.length
-               || WORDS[claim[2].toUpperCase()] !== groups) {
-      fail(
-        `${doc} claims ${claim[1]} open routes across ${claim[2]} exemptions; kong.yml has `
-        + `${openRoutes.length} across ${groups}.\n         This is the drift that was already `
-        + 'there when the check was written.'
-      );
-    } else if (missing.length) {
-      fail(
-        `${doc}'s gateway section does not name open route(s): ${missing.join(', ')}.\n`
-        + '         An exemption whose argument is written down in only one of the two files is one\n'
-        + '         a gateway migration can drop without contradicting anything it reads.'
-      );
-    } else {
-      pass(`${doc} documents all ${openRoutes.length} open routes across ${groups} exemptions`);
-    }
-  }
-}
-
-// =================================================================================================
 for (const line of ok) console.log(`  ok   ${line}`);
 if (problems.length) {
-  console.error('\nThe gateway surface has drifted from what was reviewed:\n');
-  for (const p of problems) console.error(`  ${p}\n`);
-  console.error(
-    'EXPECTED in this script is the reviewed surface, not a mirror of kong.yml. If a change here\n'
-    + 'is intended, change EXPECTED in the same commit and say why -- that record is what roadmap\n'
-    + '§4 (Kong -> Envoy) has to translate against, and the exemptions are the part a mechanical\n'
-    + 'translation gets wrong without failing any test that exists today.\n'
-  );
+  console.error('\nThe gateway template has drifted:\n');
+  for (const problem of problems) console.error(`  ${problem}\n`);
   process.exit(1);
 }
 console.log(
-  `\nThe gateway fronts ${kong.services.length} services over ${actualRoutes.length} routes: `
-  + `${EXPECTED.filter((r) => r.auth === 'key-auth').length} gated by key-auth, `
-  + `${EXPECTED.filter((r) => r.auth === 'open').length} open across `
-  + `${new Set(EXPECTED.filter((r) => r.auth === 'open').map((r) => r.exemption)).size} `
-  + 'recorded exemptions.'
+  `\n${ENVOY_TEMPLATE} is consistent with both substituters. The ROUTE surface is not checkable `
+  + 'from a file: run --runtime --authenticated against a live gateway for that.'
 );

@@ -5,7 +5,7 @@ info:
   version: "2.0.0"
   description: |
     The HTTP surface of the ACS-Cymru Asset Tracking Platform. Every request goes through
-    the **Kong API gateway** on `http://127.0.0.1:54321`, which routes to five upstreams:
+    the **Envoy API gateway** on `http://127.0.0.1:54321`, which routes to five upstreams:
 
     | Prefix | Upstream | `apikey` required? |
     | :--- | :--- | :--- |
@@ -24,7 +24,7 @@ info:
     * `Authorization: Bearer <access_token>` — the JWT from `POST /auth/v1/token`.
 
     The exceptions are `/storage/v1/object/public/…` (public-read bucket) and
-    `/functions/v1/{grafana,nodered}-userinfo`, which are exempt from Kong's `key-auth`
+    `/functions/v1/{grafana,nodered}-userinfo`, which are exempt from the gateway's API-key check
     because an OAuth client presents client credentials and has no way to add a Supabase
     header. Both still validate the bearer token themselves.
 
@@ -99,7 +99,7 @@ info:
 
 servers:
   - url: http://127.0.0.1:54321
-    description: Local Docker Compose stack (Kong gateway)
+    description: Local Docker Compose stack (Envoy gateway)
 
 security:
   - bearerAuth: []
@@ -1462,7 +1462,7 @@ paths:
       summary: Rotate a decommissioned gateway's broker credential to an unrecorded password
       description: |
         **Called by the database, not by a browser or an appliance.** A trigger on `gateways`
-        reaches this through Kong with `pg_net` whenever a gateway is archived or deleted, and a
+        reaches this through the gateway with `pg_net` whenever a gateway is archived or deleted, and a
         `pg_cron` sweep retries any archive whose call did not land (migration `0038`).
 
         **Revocation is a rotation, not a deletion.** The credential service is add-only by design
@@ -1477,7 +1477,7 @@ paths:
         revocation endpoint into an issuance one.
 
         Authorised by `GATEWAY_REVOKE_SECRET` in the `x-revoke-secret` header, **not** by the anon
-        key. Kong's `key-auth` in front of `/functions/v1/` proves only that the caller holds a key
+        key. The gateway's API-key check in front of `/functions/v1/` proves only that the caller holds a key
         that ships inside every browser bundle.
       requestBody:
         required: true
@@ -1531,7 +1531,7 @@ paths:
       description: |
         Called by a **physical gateway appliance on first boot**, not by a browser. There is no
         user, no session and no role: possession of the single-use enrolment token is the
-        authorisation. The request still needs the `apikey` header — Kong gates `/functions/v1/`
+        authorisation. The request still needs the `apikey` header — the gateway gates `/functions/v1/`
         with `key-auth` — but the **anon key is sufficient and no user JWT is required**.
 
         The token is minted by `issue_gateway_enrollment_token()` when an operator creates a
@@ -1714,10 +1714,20 @@ paths:
       tags: [Edge Functions]
       summary: AAS repository self-description (IDTA 02002)
       description: |
-        The service profiles this deployment implements. **Unauthenticated by specification** —
-        a client reads it to learn what it is talking to before it holds a credential, which is
-        the same argument that keeps the Factory+ Directory's `/ping` open. It reports profiles
-        and nothing about the fleet.
+        The service profiles this deployment implements. It reports profiles and nothing about
+        the fleet.
+
+        **The function does not authenticate this route; the gateway does.** IDTA 02002 expects
+        it readable before a client holds a credential — the same argument that keeps the
+        Factory+ Directory's `/ping` open — and this endpoint is written that way. But it falls
+        under the gated `/functions/v1/` catch-all, so **an `apikey` is required in practice**
+        and a client without one gets `401` before the function is reached.
+
+        That gap is recorded, not accidental: making it a fifth `key-auth` exemption widens the
+        gateway's open surface, which is a decision to take on its own rather than as a side
+        effect. See `docs/gateway-migration.md`. Note the asymmetry if it is taken — only
+        `/description` belongs outside the gate; every other `aas-api` route authenticates the
+        caller itself and fails closed.
 
         Both advertised profiles are **SSP-002, the read-only variants**. Every route below is a
         `GET`; asset data is authored through the dashboard, which has the role model and writes
@@ -2027,7 +2037,7 @@ paths:
         tables this platform already has. It is an *adapter*: nothing upstream of it knows the
         Directory exists.
 
-        Kong routes it at the **unprefixed** paths a Factory+ client expects — `/ping` and
+        The gateway routes it at the **unprefixed** paths a Factory+ client expects — `/ping` and
         `/v1/…` — because such a client has no Supabase `apikey` and no way to acquire one. Those
         routes are exempt from `key-auth`, so **the function itself is the only thing in front of
         the data**: every `/v1/` path refuses a request with no bearer token, before it routes,
@@ -2234,7 +2244,7 @@ paths:
         **An unset secret answers 503, never 200.** The check fails closed, so a missing environment
         variable is a broken integration rather than an unauthenticated write endpoint.
 
-        **Not exempt from Kong's `key-auth`.** The contact point carries the anon key in the query
+        **Not exempt from the gateway's API-key check.** The contact point carries the anon key in the query
         string (`?apikey=…`) because Grafana's webhook integration exposes only one header pair and
         it is spent on `Authorization`. `hide_credentials` keeps the key from being forwarded on.
 
@@ -2297,7 +2307,7 @@ paths:
         Returns the standard identity claims plus `role`, read from `public.user_roles` and
         mapped to a Grafana org role.
 
-        **Exempt from Kong's `key-auth`, by exact path.** An OAuth client presents client
+        **Exempt from the gateway's API-key check, by exact path.** An OAuth client presents client
         credentials, never a Supabase `apikey`, and Grafana has no setting that adds a header
         to `api_url` — with this gated, the call 401s, Grafana falls back to the token's stock
         `role: authenticated` claim, and reports `[oauth.invalid_role] invalid role:
@@ -2342,7 +2352,7 @@ paths:
         which is what makes Node-RED refuse the login. It is never defaulted to `read` — an
         unmapped role is a provisioning error, and a revoked one must not stay usable.
 
-        Also exempt from Kong's `key-auth`, by exact path.
+        Also exempt from the gateway's API-key check, by exact path.
       security:
         - bearerAuth: []
       responses:

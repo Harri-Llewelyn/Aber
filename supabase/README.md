@@ -9,7 +9,7 @@ foreign-data-wrapper view.
 | [`migrations/`](migrations) | `0001` schema, `0002` seed data, then additive migrations `0003`–`0007` |
 | [`migrations/archive/`](migrations/archive) | The 38 pre-beta migrations, preserved for their reasoning. **Never executed** |
 | [`functions/`](functions) | Deno edge functions and the worker router |
-| [`kong.yml`](kong.yml) | API gateway routes, CORS, and `key-auth` consumers. **A template** |
+| [`envoy.yaml`](envoy.yaml) | API gateway routes, CORS, and the `apikey` check. **A template** |
 | [`seed.sql`](seed.sql) | Demo user accounts |
 
 ---
@@ -657,7 +657,7 @@ archived migration `0036` removed.
 
 ---
 
-## API Gateway (`kong.yml`)
+## API Gateway (`envoy.yaml`)
 
 **This file is a template, and ONE template serves both deployment targets.** Committing literal
 keys would make `.env` no longer authoritative, so the `__UPPER_SNAKE__` placeholders are
@@ -704,7 +704,7 @@ upstream URL, not an exempt route, because `strip_path: true` would otherwise re
 storage-api routes on.
 
 **This table is asserted rather than maintained by hand.**
-[`scripts/check-gateway-surface.mjs`](../scripts/check-gateway-surface.mjs) compares `kong.yml`'s
+[`scripts/check-gateway-surface.mjs`](../scripts/check-gateway-surface.mjs) compares `envoy.yaml`'s
 whole routing and authentication surface against a reviewed inventory — which services exist, which
 routes they carry, which are gated, and which are open under which exemption. It exists because
 `validate.py` asserts the 401s that *should* happen and **nothing can assert the absence of a route
@@ -713,8 +713,9 @@ against the surface rather than against Kong, so it is also the specification a 
 (roadmap §5) has to satisfy.
 
 > This table said **two** routes until that check was written, and had done since the userinfo and
-> Directory exemptions were added. Every one of the four was argued for carefully in `kong.yml`; the
-> document `kong.yml` points readers at for the full reasoning listed half of them.
+> Directory exemptions were added. Every one of the four was argued for carefully in the
+> gateway config; the
+> document it points readers at for the full reasoning listed half of them.
 
 > Adding a plugin name to `KONG_PLUGINS` **replaces** the default `bundled` set rather than adding
 > to it. `key-auth` had to be named explicitly or Kong would refuse to start on a config

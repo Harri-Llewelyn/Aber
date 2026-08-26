@@ -86,12 +86,6 @@ const MIRRORS = [
   },
   {
     source: 'supabase',
-    dest: 'kong',
-    match: (name) => name === 'kong.yml',
-    why: 'Gateway declarative config; a TEMPLATE, rendered into a Secret by the chart',
-  },
-  {
-    source: 'supabase',
     dest: 'envoy',
     match: (name) => name === 'envoy.yaml',
     why:
