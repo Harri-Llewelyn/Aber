@@ -416,6 +416,28 @@ html, body, #root {
   margin-top: 3px;
 }
 
+/* The build this bundle came from (issue #57).
+   Quieter than the role above it, because it is reference rather than identity -- it is read once,
+   when somebody is reporting a fault, and should not compete with the address every time the menu
+   is opened. `user-select: text` is deliberate: the next thing done with this string is pasting it
+   into a bug report. */
+.user-popover-version {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  user-select: text;
+}
+
+.user-popover-version .mono { font-size: 11px; }
+
+/* A build that could not name itself. Italic rather than coloured: "unknown" is not a fault to
+   alarm about, it is a build nobody labelled -- and an amber version string in the account menu
+   would read as a problem with the running system. */
+.user-popover-version-unknown { font-style: italic; }
+
 .user-popover-action {
   display: flex;
   align-items: center;

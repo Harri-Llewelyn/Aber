@@ -69,6 +69,13 @@ ARG VITE_GRAFANA_URL
 # else, rather than leaving it reading the old name and 404ing on upload.
 ARG VITE_MODEL_3D_BUCKET
 ARG VITE_GATEWAY_BACKUP_BUCKET
+# The version shown in the account menu (issue #57). UNLIKE EVERY OTHER ARG HERE, this one has no
+# runtime-config twin: a version is a property of this artefact, not of the environment it is
+# deployed into, so allowing a ConfigMap to override it would let an install claim a version its
+# bundle is not. It must be passed IN because the build context is ./frontend -- there is no .git
+# here for vite.config.js to read, which is exactly why that file tries the environment first.
+# Unset yields "unknown", which the UI shows verbatim rather than inventing a number.
+ARG VITE_APP_VERSION
 
 RUN npm run build
 

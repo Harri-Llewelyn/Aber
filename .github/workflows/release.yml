@@ -204,10 +204,18 @@ jobs:
           # would carry a baked Supabase URL that MASKS a missing ConfigMap instead of surfacing it
           # -- so a published default build would silently point every install at whatever URL this
           # runner happened to have.
+          #
+          # VITE_APP_VERSION IS THE ONE BAKED VALUE ON THIS PATH, and it is not a contradiction of
+          # the paragraph above. Nothing about the ENVIRONMENT is baked; the version identifies the
+          # artefact itself, which is fixed the moment it is built and is the same wherever the
+          # image is promoted. It is also the only value here a ConfigMap must NOT be able to
+          # change -- see frontend/src/version.js.
           - name: frontend
             dockerfile: frontend/Dockerfile
             context: frontend
-            build_args: VITE_RUNTIME_CONFIG=true
+            build_args: |
+              VITE_RUNTIME_CONFIG=true
+              VITE_APP_VERSION=${{ needs.prepare-release.outputs.version }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v5

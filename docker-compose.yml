@@ -1255,6 +1255,15 @@ services:
         # storage-init.mjs does, so the two agree without either being set.
         VITE_MODEL_3D_BUCKET: ${STORAGE_BUCKET:-asset-3d-models}
         VITE_GATEWAY_BACKUP_BUCKET: ${GATEWAY_BACKUP_BUCKET:-gateway-backups}
+        # The version the account menu reports (issue #57). Compose cannot run a command, and this
+        # build's context is ./frontend so there is no .git inside it either -- so labelling a
+        # Compose build means passing the value in:
+        #
+        #   APP_VERSION=$(git describe --tags --always --dirty) docker compose up --build -d frontend
+        #
+        # Left unset the build reports "unknown", which is deliberate: an unlabelled build saying
+        # so is worth more than one quoting a number nobody set.
+        VITE_APP_VERSION: ${APP_VERSION:-}
     restart: always
     ports:
       - "3000:3000"
