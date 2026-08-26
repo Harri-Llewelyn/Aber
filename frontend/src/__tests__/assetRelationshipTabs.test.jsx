@@ -130,24 +130,29 @@ const kpiItem = (label) => [...document.querySelectorAll('.kpi-item')]
   .find(n => label.test(n.textContent))
 
 describe('CellsTab shows the gateways and devices attached to a cell', () => {
-  it('lists a cell\'s gateways and the devices reachable through them', async () => {
+  it('names a cell\'s gateways and the devices reachable through them, on one row', async () => {
     api.get.mockImplementation(routeGet())
 
     render(<CellsTab showToast={vi.fn()} onSelectDevice={vi.fn()} hasPermission={() => true} />)
 
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
-    // The "Assigned Edge Gateways (n)" / "Assigned Devices (n)" nested boxes are gone: they were
-    // titled sub-cards wrapping tables that had their own header rows, and the counts they carried
-    // are already badges on the card header above them.
-    expect(screen.queryByText(/Assigned Edge Gateways/)).toBeNull()
-    expect(screen.queryByText(/Assigned Devices/)).toBeNull()
-    // Once in the gateway table, once as the device's resolved gateway (it used to
-    // render the raw gateway UUID there).
-    expect(screen.getAllByText('Virtual_Gateway_NodeRED')).toHaveLength(2)
-    expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument()
-    // Heartbeat age, not a raw timestamp
-    expect(screen.getByText('20s ago')).toBeInTheDocument()
+    // WHAT THIS TEST IS FOR IS UNCHANGED: a cell has to name the gateways assigned to it and the
+    // devices that RESOLVE to it, so the page answers "what is in this zone" without a drill-down.
+    // Where it says it moved twice. It was a pair of titled sub-cards, then a pair of bare tables
+    // inside a per-cell card, and it is now two columns of one table (issue #61) -- because three
+    // of those cards filled a viewport and the page stopped being scannable at all.
+    const row = screen.getByText('Assembly Line 1').closest('tr')
+    expect(within(row).getByText('Virtual_Gateway_NodeRED')).toBeTruthy()
+    expect(within(row).getByText('Simulated_CNC_01')).toBeTruthy()
+    // The same summary the Gateways page puts on a gateway's device column.
+    expect(within(row).getByText('1 Online / 0 Offline')).toBeTruthy()
+
+    // THE HEARTBEAT IS DELIBERATELY NOT HERE. Per-gateway Sparkplug ID, status and heartbeat age
+    // were three of the columns the nested tables carried, and they are the bulk of the height
+    // this issue was about. Each is on the gateway's own row on the Gateways page, one click away
+    // through the drawer's chip.
+    expect(screen.queryByText('20s ago')).toBeNull()
   })
 
   it('does not flag a Site-Wide device as unlinked', async () => {

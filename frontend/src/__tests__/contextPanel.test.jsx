@@ -355,9 +355,10 @@ describe('Devices page drawer', () => {
 })
 
 describe('Cells page drawer', () => {
-  it('opens from the card title rather than the whole card', async () => {
-    // A cell card contains gateway and device rows that are themselves clickable, so a card-wide
-    // handler would fire on every one of them.
+  it('opens from the row, and marks the row it opened', async () => {
+    // The page was a card per cell, and the CARD TITLE was the click target -- a card-wide handler
+    // would have fired on the gateway and device rows nested inside it. It is one table now
+    // (issue #61), so the whole row is the target, exactly as on Gateways and Devices.
     render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
@@ -366,7 +367,9 @@ describe('Cells page drawer', () => {
 
     const p = within(panel())
     expect(p.getByText('cell-1')).toBeTruthy()
-    expect(document.querySelector('.cell-card-selected')).toBeTruthy()
+    // With the drawer open and the list still live, "which of these am I looking at" has to have
+    // an answer on the list itself.
+    expect(document.querySelector('.row-selected')).toBeTruthy()
   })
 })
 
@@ -503,14 +506,14 @@ describe('Tables shed what the panel now carries', () => {
     expect(p.getByText('Simulated_CNC_01')).toBeTruthy()
   })
 
-  it('leaves no action buttons on a cell card at all', async () => {
+  it('leaves no action buttons on a cell row at all', async () => {
     // Six buttons per card meant the action cluster was wider than the cell name beside it, and
     // every one of them was something you do to ONE cell you have already decided to look at.
-    // Archive was the last to go.
+    // Archive was the last to go; the cards themselves followed with issue #61.
     render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
-    const card = document.querySelector('.cell-card')
+    const card = document.querySelector('.page-main .card')
     for (const name of [/Archive/i, /^Edit/i, /Docs/i, /Thread/i]) {
       expect(within(card).queryByRole('button', { name })).toBeNull()
     }
@@ -648,60 +651,85 @@ describe('Filter bars carry the page\'s primary action', () => {
   })
 })
 
-describe('Cell cards are lists of links, not nested tables of actions', () => {
+describe('The cells table hands its neighbours over, and stays one row tall', () => {
   const renderCells = (props = {}) => render(
     <CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewThread={vi.fn()} {...props} />
   )
 
-  it('hands a clicked gateway and device over to their own pages', async () => {
-    // A gateway or device named on a cell card is the same entity as the one on its own page, and
-    // the card is where you find out it exists -- so reading the name and then hunting for it by
+  const cellsTable = () => document.querySelector('.page-main .card table')
+
+  it('hands a clicked gateway and device over to their own pages, from the drawer', async () => {
+    // A gateway or device named against a cell is the same entity as the one on its own page, and
+    // this page is where you find out it exists -- so reading a name and then hunting for it by
     // hand was the missing half of this page.
+    //
+    // THE LINKS MOVED, THE BEHAVIOUR DID NOT. They were rows in the two sub-tables each cell card
+    // carried; those tables are what made three cells fill a viewport (issue #61), so they are
+    // gone and the drawer's chips -- which already called these same handlers -- are now the one
+    // place the hand-over happens.
     const onSelectGateway = vi.fn()
     const onSelectDevice = vi.fn()
     renderCells({ onSelectGateway, onSelectDevice })
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
-    const card = document.querySelector('.cell-card')
-    fireEvent.click(within(card).getByText('Virtual_Gateway_NodeRED'))
+    fireEvent.click(list().getByText('Assembly Line 1'))
+    await waitFor(() => expect(isOpen()).toBe(true))
+
+    const p = within(panel())
+    fireEvent.click(p.getByText('Virtual_Gateway_NodeRED'))
     expect(onSelectGateway).toHaveBeenCalledWith('gw-1')
 
-    fireEvent.click(within(card).getByText('Simulated_CNC_01'))
+    fireEvent.click(p.getByText('Simulated_CNC_01'))
     expect(onSelectDevice).toHaveBeenCalledWith('dev-1')
   })
 
-  it('drops the per-device Telemetry button from the card', async () => {
-    // It navigated to the Devices page to reach a drawer that is now a modal on the device's own
-    // panel. Clicking the device row gets there in one step instead of two.
+  it('carries the five columns and no Actions column', async () => {
     renderCells()
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
-    const card = document.querySelector('.cell-card')
-    expect(within(card).queryByRole('button', { name: /Telemetry/i })).toBeNull()
-    expect([...card.querySelectorAll('th')].map(h => h.textContent)).not.toContain('Actions')
+    const headers = [...cellsTable().querySelectorAll('thead th')].map(h => h.textContent.trim())
+    // The icon column's header is a screen-reader label, so it reads as a word here and as an
+    // empty cell on screen.
+    expect(headers).toEqual(['Icon', 'Cell Name', 'Cell UUID', 'Assigned Gateways', 'Assigned Devices'])
+    expect(headers).not.toContain('Actions')
+    expect(within(cellsTable()).queryByRole('button', { name: /Telemetry/i })).toBeNull()
   })
 
-  it('collapses a cell with nothing in it to its header', async () => {
+  it('summarises a cell\u2019s devices the way the Gateways page summarises a gateway\u2019s', async () => {
+    // The same question about a different container, so it is deliberately the same column: an
+    // Online/Offline summary that is never collapsed, then the devices themselves.
+    renderCells()
+    await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
+
+    expect(within(cellsTable()).getByText('1 Online / 0 Offline')).toBeTruthy()
+    expect(within(cellsTable()).getByText('Virtual_Gateway_NodeRED')).toBeTruthy()
+  })
+
+  it('renders a cell with nothing in it as one row, marked empty', async () => {
     // A floor mid-setup was a column of full-height cards each saying "nothing here" twice, with
-    // the cells that DO have contents pushed below them.
+    // the cells that DO have contents pushed below them. A row cannot have that problem -- but it
+    // still has to say the cell is empty rather than looking like one whose contents failed to load.
     api.get.mockImplementation(routeGet({
       cells: [cell, { cell_id: 'cell-empty', cell_name: 'TEST2', is_archived: false, gateways: [], gateway_count: 0 }]
     }))
     renderCells()
     await waitFor(() => expect(screen.getByText('TEST2')).toBeInTheDocument())
 
-    const empty = [...document.querySelectorAll('.cell-card')].find(c => within(c).queryByText('TEST2'))
-    expect(empty.className).toMatch(/cell-card-empty/)
-    expect(empty.querySelector('.cell-card-body')).toBeNull()
-    // The header still carries the name, the id and both zero counts.
-    expect(within(empty).getByText('0 Gateway/s')).toBeTruthy()
-    expect(within(empty).getByText('0 Device/s')).toBeTruthy()
-    expect(within(empty).getByText(/cell-empty/)).toBeTruthy()
+    const emptyRow = within(cellsTable()).getByText('TEST2').closest('tr')
+    expect(within(emptyRow).getByText('empty')).toBeTruthy()
+    expect(within(emptyRow).getByText('No gateways assigned')).toBeTruthy()
+    expect(within(emptyRow).getByText('No devices located here')).toBeTruthy()
+    // Still selectable, and still opens the drawer.
+    expect(emptyRow.className).toMatch(/row-selectable/)
 
-    // The populated card is untouched.
-    const full = [...document.querySelectorAll('.cell-card')].find(c => within(c).queryByText('Assembly Line 1'))
-    expect(full.className).not.toMatch(/cell-card-empty/)
-    expect(full.querySelector('.cell-card-body')).toBeTruthy()
+    // The populated row is untouched.
+    const fullRow = within(cellsTable()).getByText('Assembly Line 1').closest('tr')
+    expect(within(fullRow).queryByText('empty')).toBeNull()
+  })
+
+  it('drops the per-cell card layout from the stylesheet with the cards', async () => {
+    // Dead CSS outlives the markup it styled unless something says so out loud.
+    expect(APP_CSS).not.toMatch(/\.cell-card/)
   })
 })
 
@@ -751,31 +779,19 @@ describe('Gateway topic path carries the real Sparkplug group', () => {
 })
 
 describe('Context panel layout invariants', () => {
-  it('gives both cell-card tables one column grid', async () => {
-    // The eye should run straight down Name / Sparkplug ID / Status across both tables rather
-    // than re-finding each column when it crosses from gateways to devices.
+  it('keeps the cells table to one row per cell', async () => {
+    // THE INVARIANT THIS REPLACED was that the two tables INSIDE a cell card shared a column grid,
+    // so the eye ran straight down Name / Sparkplug ID / Status across both. Those tables are gone
+    // (issue #61) and with them the reason to align anything -- a cell is one row now, and the
+    // detail they carried is in the drawer. What is worth pinning is that it stayed that way.
     render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
-    const tables = [...document.querySelectorAll('.cell-card .cell-card-table')]
-    expect(tables).toHaveLength(2)
-
-    const widths = (t) => [...t.querySelectorAll('col')].map(c => c.style.width)
-    // The first three columns match exactly; the fourth spans what the gateway table splits
-    // between Last Heartbeat and Devices, so every boundary the eye follows still lines up.
-    expect(widths(tables[0]).slice(0, 3)).toEqual(widths(tables[1]).slice(0, 3))
-    const sum = (ws) => ws.reduce((n, w) => n + parseFloat(w), 0)
-    expect(sum(widths(tables[0]))).toBe(sum(widths(tables[1])))
-
-    // Percentages only bind under fixed layout -- otherwise the browser sizes from content and
-    // the two tables silently diverge.
-    expect(APP_CSS).toMatch(/\.cell-card-table \{[\s\S]*?table-layout:\s*fixed/)
-
-    // Both tables start with the same header, which is the point.
-    for (const t of tables) {
-      expect([...t.querySelectorAll('th')].slice(0, 3).map(h => h.textContent))
-        .toEqual(['Name', 'Sparkplug ID', 'Status'])
-    }
+    const table = document.querySelector('.page-main .card table')
+    // One table on the page, not one per cell plus two nested in each.
+    expect(document.querySelectorAll('.page-main .card table')).toHaveLength(1)
+    expect(table.querySelectorAll('tbody tr')).toHaveLength(1)
+    expect(table.querySelectorAll('table')).toHaveLength(0)
   })
 
   it('puts a gateway\'s device list above its actions, not below them', async () => {

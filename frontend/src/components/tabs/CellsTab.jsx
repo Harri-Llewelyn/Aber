@@ -3,11 +3,10 @@ import { api } from '../../api'
 import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
-import { gatewayLiveStatus, gatewayNeedsAttention, formatHeartbeat } from '../../utils/gatewayStatus'
-import { effectiveSparkplugId, gatewaySparkplugId } from '../../utils/sparkplugId'
+import { gatewayLiveStatus, gatewayNeedsAttention } from '../../utils/gatewayStatus'
 import { groupDevicesByCell, SOURCE_SITE_WIDE } from '../../utils/cellResolution'
 import CopyableId from '../common/CopyableId'
-import { StatusBadge } from '../common/StatusBadge'
+import { TagList } from '../common/TagList'
 import { ActionButton } from '../common/ActionButton'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
@@ -27,7 +26,7 @@ import {
   IconShieldAlert,
   IconX
 } from '../common/Icons'
-import { deviceLifecycleStatus, deviceStatusDotColor, deviceStatusTitle, deviceDotColor } from '../../utils/deviceStatus'
+import { deviceLifecycleStatus, deviceStatusTitle, deviceDotColor } from '../../utils/deviceStatus'
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
@@ -64,12 +63,6 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   const [formVal, setFormVal]   = useState(blank)
   const [archiveTarget, setArchiveTarget] = useState(null)
   const [docsForCell, setDocsForCell] = useState(null)
-  const [docRefreshKey, setDocRefreshKey] = useState(0)
-  // Document link counts for the collapsed accordion badge, keyed by cell id. `c.document_count`
-  // was read here before, but nothing ever produced that field -- api.js does not select it for
-  // any entity type -- so the badge read 0 until the accordion was expanded and could count its
-  // own fetch. One request per page answers every row.
-  const [docCounts, setDocCounts] = useState({})
   const [filterMode, setFilterMode] = useState('all')
   const [searchQuery, setSearchQuery] = useState(getInitialSearch)
   const [attentionOnly, setAttentionOnly] = useState(false)
@@ -83,24 +76,6 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
     if (urlSearch) setSearchQuery(urlSearch)
     else if (initialSearchFilter) setSearchQuery(initialSearchFilter)
   }, [initialSearchFilter])
-
-  /**
-   * Document-link counts for the collapsed accordion badges. Keyed on docRefreshKey rather than
-   * folded into loadAll(), which runs on the poll and on every Realtime event -- this number
-   * changes only when a human edits a link. Non-fatal: a failure leaves the badges at zero.
-   */
-  useEffect(() => {
-    let cancelled = false
-    api.get('/api/v1/documents?entity_type=cell')
-      .then(docs => {
-        if (cancelled) return
-        const counts = {}
-        for (const d of docs || []) counts[d.entity_id] = (counts[d.entity_id] || 0) + 1
-        setDocCounts(counts)
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [docRefreshKey])
 
   /**
    * Clearing the search also strips `?search=` from the address bar and releases the lifted
@@ -331,175 +306,145 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
         </div>
       )}
 
-      {loading ? (
-        <div className="loading-wrap"><div className="spinner" /> Loading shopfloor cells…</div>
-      ) : filteredCells.length === 0 ? (
-        <div className="card">
+      {/* ONE TABLE, NOT A CARD PER CELL (issue #61).
+          Every cell rendered a card carrying its own header plus two full sub-tables -- gateways
+          with Sparkplug ID, status and heartbeat; devices with Sparkplug ID, status and gateway --
+          so three cells filled the viewport and the page could not be scanned at all. That detail
+          was already duplicated: the context drawer this page has carried since the actions moved
+          off the cards holds the UUID, both membership lists as linking chips, and every action.
+
+          So the card body is GONE rather than relocated, and what is left is the shape the other
+          two asset pages use. A cell now reads as one row, and the drawer is where its detail
+          lives -- which is what makes Gateways and Devices scannable at any fleet size. */}
+      <div className="card">
+        {loading ? (
+          <div className="loading-wrap"><div className="spinner" /> Loading shopfloor cells…</div>
+        ) : filteredCells.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon"><IconFactory size={36} /></div>
             <div className="empty-text">No shopfloor cells match the selected filter.</div>
           </div>
-        </div>
-      ) : (
-        filteredCells.map(c => {
-          const cellGateways = c.gateways || []
-          // Devices that RESOLVE to this cell, not those merely reachable through its gateways.
-          const cellAssets = devicesByCell.get(c.cell_id) || []
-          // A cell with neither collapses to its header. A newly created zone has no gateway and
-          // no device, so a floor in the middle of being set up was a column of full-height cards
-          // each saying "nothing here" twice -- and the cells that DO have contents, which are the
-          // reason to open this page, were pushed below them.
-          const cellIsEmpty = cellGateways.length === 0 && cellAssets.length === 0
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  {/* The icon is the cell's own glyph, chosen in the New Cell form and until now
+                      visible only on the shopfloor map. It is what makes a row recognisable at a
+                      glance in a list where every other column is text. Its header is a screen
+                      reader label rather than a word: a 32px column cannot carry one, and a blank
+                      `th` announces as nothing at all. */}
+                  <th className="cell-icon-col"><span className="sr-only">Icon</span></th>
+                  <th title="Human-readable cell zone name">Cell Name</th>
+                  <th title="Cell zone unique UUID">Cell UUID</th>
+                  <th title="Edge gateways assigned to this cell zone">Assigned Gateways</th>
+                  <th title="Devices located in this cell — its gateways' devices, plus any device filed here explicitly">Assigned Devices</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredCells.map(c => {
+                  const cellGateways = c.gateways || []
+                  // Devices that RESOLVE to this cell, not those merely reachable through its
+                  // gateways -- see groupDevicesByCell.
+                  const cellAssets = devicesByCell.get(c.cell_id) || []
+                  const onlineCount = cellAssets.filter(a => (a.status === 'ONLINE' || !a.status) && !a.is_archived).length
+                  const offlineCount = cellAssets.filter(a => a.status === 'OFFLINE' && !a.is_archived).length
+                  const isEmpty = cellGateways.length === 0 && cellAssets.length === 0
 
-          return (
-            <div key={c.cell_id} className={`cell-card${selectedId === c.cell_id ? ' cell-card-selected' : ''}${cellIsEmpty ? ' cell-card-empty' : ''}`} style={{ opacity: c.is_archived ? 0.9 : 1, border: c.is_archived ? '1px solid var(--warning)' : '1px solid var(--border)' }}>
-              <div className="cell-card-header" style={{ background: c.is_archived ? 'rgba(255,179,0,0.06)' : 'var(--bg-glass)' }}>
-                {/* The TITLE selects, not the whole card. A cell card is a container of gateway and
-                    device rows that are themselves clickable, so a card-wide handler would fire on
-                    every one of them -- and unlike a table row there is no single "empty" area to
-                    aim at. The title is the part that names the thing the panel describes. */}
-                <div
-                  className="cell-card-title row-selectable"
-                  onClick={() => setSelectedId(id => id === c.cell_id ? null : c.cell_id)}
-                  title="Click to inspect this cell in the details panel"
-                >
-                  <CellIcon cell={c} size={18} />
-                  <span>{c.cell_name}</span>
-                  <span className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>ID: {c.cell_id}</span>
-                  <span className="badge badge-neutral" title="Count of edge gateways assigned to this cell">{cellGateways.length} Gateway/s</span>
-                  <span className="badge badge-neutral" title="Count of devices located in this cell — its gateways' devices, plus any device filed here explicitly">{cellAssets.length} Device/s</span>
-                  {cellIsEmpty && !c.is_archived && (
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic', fontWeight: 400 }}>empty</span>
-                  )}
-                  {c.is_archived && (
-                    <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Cell decommissioned and archived">
-                      <IconArchive size={11} /> ARCHIVED (OUT OF COMMISSION)
-                    </span>
-                  )}
-                </div>
+                  return (
+                    <tr
+                      key={c.cell_id}
+                      className={`row-selectable${selectedId === c.cell_id ? ' row-selected' : ''}`}
+                      style={{ background: c.is_archived ? 'rgba(255,179,0,0.06)' : undefined }}
+                      onClick={rowSelectHandler(() => setSelectedId(id => id === c.cell_id ? null : c.cell_id))}
+                      title="Click to inspect this cell in the details panel"
+                    >
+                      <td className="cell-icon-col"><CellIcon cell={c} size={16} /></td>
+                      <td>
+                        <strong>{c.cell_name}</strong>
+                        {c.is_archived && (
+                          <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', marginLeft: '8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Cell decommissioned and archived">
+                            <IconArchive size={11} /> ARCHIVED
+                          </span>
+                        )}
+                        {/* Kept from the card header. A zone with neither a gateway nor a device is
+                            usually half-provisioned, and saying so on the row is what stops it
+                            reading as a cell whose contents merely failed to load. */}
+                        {isEmpty && !c.is_archived && (
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic', marginLeft: '8px' }} title="No gateways and no devices resolve to this cell">empty</span>
+                        )}
+                      </td>
+                      <td><CopyableId value={c.cell_id} label="cell UUID" onNotify={showToast} /></td>
+                      <td>
+                        {cellGateways.length === 0 ? (
+                          <span style={{ fontSize: '11px', color: 'var(--text-dim)', fontStyle: 'italic' }}>No gateways assigned</span>
+                        ) : (
+                          /* Collapsed past three, as the Gateways page's device column is: the
+                             count grows with the fleet rather than with a fixed vocabulary, so an
+                             uncollapsed list makes the row's height unbounded -- which is the
+                             failure this issue is about.
 
-              </div>
+                             AN ARCHIVED GATEWAY IS PINNED. It is the entry that explains a cell
+                             whose devices have gone quiet, and it would otherwise be the first
+                             thing hidden behind a "+N". */
+                          <TagList
+                            limit={3}
+                            tags={cellGateways.map(g => ({
+                              key: g.gateway_id,
+                              // The overflow tooltip reads names; these are keyed by UUID.
+                              label: g.gateway_name,
+                              priority: g.is_archived,
+                              className: `badge ${g.is_archived ? 'badge-warning' : 'badge-neutral'}`,
+                              style: { fontSize: '11px' },
+                              title: `${g.gateway_name} — ${g.is_archived ? 'DECOMMISSIONED' : gatewayLiveStatus(g)}`,
+                              content: `${g.gateway_name}${g.is_archived ? ' (archived)' : ''}`
+                            }))}
+                          />
+                        )}
+                      </td>
+                      <td>
+                        {cellAssets.length === 0 ? (
+                          <span style={{ fontSize: '11px', color: 'var(--text-dim)', fontStyle: 'italic' }}>No devices located here</span>
+                        ) : (
+                          /* THE SAME SHAPE AS Connected Devices ON THE GATEWAYS PAGE, deliberately:
+                             it answers the same question about a different container, and two
+                             columns that mean the same thing should not have to be learned twice.
 
-              {!(cellIsEmpty && !c.is_archived) && (
-              <div className="cell-card-body">
-                {c.is_archived && (
-                  <div style={{ background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', fontSize: '13px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '10px', width: '100%' }}>
-                    <IconShieldAlert size={18} />
-                    <div>
-                      <strong>Cell Zone Out of Commission:</strong> This shopfloor cell is decommissioned and archived. {c.auto_delete_at ? `Retention purge timer active (auto-purges on ${new Date(c.auto_delete_at).toLocaleDateString()}).` : 'Permanent retention active (no auto-purge).'}
-                    </div>
-                  </div>
-                )}
-
-                {/* NO NESTED HEADER BOXES. A cell card held two titled sub-cards, each with its
-                    own border and heading, each containing a table with its own header row -- four
-                    levels of chrome around two short lists. The counts are already on the card
-                    header above, so the headings restated them.
-
-                    Every row is a link. A gateway or device named on a cell card is the same
-                    entity as the one on its own page, and the card is where you find out it exists
-                    -- so reading its name and then going to find it by hand was the missing half
-                    of this page. */}
-                {cellGateways.length > 0 && (
-                  <div className="table-wrap">
-                    {/* The two tables on a cell card share a column grid, so a reader's eye runs
-                        straight down Name, Sparkplug ID and Status across both rather than
-                        re-finding each column when it crosses from gateways to devices. The
-                        widths only bind under `table-layout: fixed` -- see .cell-card-table. */}
-                    <table className="cell-card-table">
-                      <colgroup>
-                        <col style={{ width: '28%' }} />
-                        <col style={{ width: '26%' }} />
-                        <col style={{ width: '22%' }} />
-                        <col style={{ width: '16%' }} />
-                        <col style={{ width: '8%' }} />
-                      </colgroup>
-                      <thead><tr><th title="Gateway Name">Name</th><th title="Sparkplug B edge node id">Sparkplug ID</th><th title="Connectivity status">Status</th><th title="Last Sparkplug B node heartbeat">Last Heartbeat</th><th title="Devices served by this gateway">Devices</th></tr></thead>
-                      <tbody>
-                        {cellGateways.map(g => (
-                          <tr
-                            key={g.gateway_id}
-                            className="row-selectable"
-                            style={{ background: g.is_archived ? 'rgba(255,179,0,0.06)' : undefined }}
-                            onClick={rowSelectHandler(() => onSelectGateway?.(g.gateway_id))}
-                            title={`Open '${g.gateway_name}' on the Gateways page`}
-                          >
-                            <td><strong>{g.gateway_name}</strong></td>
-                            <td><CopyableId value={g.sparkplug_id || gatewaySparkplugId(g.gateway_id)} label="Sparkplug edge node id" onNotify={showToast} /></td>
-                            <td>
-                              {g.is_archived
-                                ? <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)' }}>DECOMMISSIONED</span>
-                                : <StatusBadge status={gatewayLiveStatus(g)} />}
-                            </td>
-                            <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{formatHeartbeat(g.last_heartbeat)}</td>
-                            <td><span className="badge badge-neutral">{g.device_count}</span></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                {cellAssets.length > 0 && (
-                  <div className="table-wrap">
-                    {/* Same grid as the gateway table above. The first three columns match exactly;
-                        the fourth spans what that table splits between Last Heartbeat and Devices,
-                        so every column boundary the eye follows still lines up. */}
-                    <table className="cell-card-table">
-                      <colgroup>
-                        <col style={{ width: '28%' }} />
-                        <col style={{ width: '26%' }} />
-                        <col style={{ width: '22%' }} />
-                        <col style={{ width: '24%' }} />
-                      </colgroup>
-                      <thead><tr><th title="Device Name">Name</th><th title="Sparkplug B device id">Sparkplug ID</th><th title="Status">Status</th><th title="Connected Edge Gateway">Gateway</th></tr></thead>
-                      <tbody>
-                        {cellAssets.map(a => {
-                          const isOff = a.status === 'OFFLINE'
-                          const isArch = a.is_archived
-                          return (
-                            <tr
-                              key={a.asset_id}
-                              className="row-selectable"
-                              style={{ background: isArch ? 'rgba(255,179,0,0.06)' : undefined }}
-                              onClick={rowSelectHandler(() => onSelectDevice?.(a.asset_id))}
-                              title={`Open '${a.asset_name}' on the Devices page`}
-                            >
-                              <td>
-                                <strong>{a.asset_name}</strong>
-                                {isArch && (
-                                  <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Decommissioned device">
-                                    <IconArchive size={11} /> ARCHIVED
-                                  </span>
-                                )}
-                              </td>
-                              <td><CopyableId value={effectiveSparkplugId(a)} label="Sparkplug device id" onNotify={showToast} /></td>
-                              <td>
-                                {isArch ? (
-                                  <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="Decommissioned device (Out of Commission)">
-                                    <IconArchive size={11} /> ARCHIVED (OUT OF COMMISSION)
-                                  </span>
-                                ) : (
-                                  <span className={`badge ${isOff ? 'badge-neutral' : 'badge-online'}`} title={isOff ? 'Sparkplug B DDEATH Received — Device Offline' : 'Device Active'}>
-                                    <span className="badge-dot" style={{ background: isOff ? 'var(--text-muted)' : 'var(--success)' }} />
-                                    {isOff ? 'OFFLINE / DDEATH' : 'ONLINE'}
-                                  </span>
-                                )}
-                              </td>
-                              <td><span className="mono" style={{ color: 'var(--warning-text)' }} title={a.active_gateway_id || 'No gateway assigned'}>{a.gateway_name || a.active_gateway_id || '—'}</span></td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-              )}
-            </div>
-          )
-        })
-      )}
+                             The Online/Offline summary is pinned because it is what the column
+                             exists to answer -- hiding it behind a "+N" would defeat it -- and a
+                             quarantined device is pinned because it is the one entry that calls
+                             for action. */
+                          <TagList
+                            limit={3}
+                            tags={[
+                              {
+                                key: '__summary__',
+                                priority: true,
+                                className: 'badge badge-neutral',
+                                title: 'Located devices breakdown',
+                                content: `${onlineCount} Online / ${offlineCount} Offline`
+                              },
+                              ...cellAssets.map(a => ({
+                                key: a.asset_id,
+                                label: a.asset_name,
+                                priority: a.is_quarantined,
+                                className: `badge ${a.is_archived || a.status === 'OFFLINE' ? 'badge-neutral' : 'badge-online'}`,
+                                style: { fontSize: '11px' },
+                                title: `${a.asset_name} — ${a.is_archived ? 'ARCHIVED' : a.is_quarantined ? 'QUARANTINED' : a.status || 'ONLINE'}`,
+                                content: `${a.asset_name}${a.is_quarantined ? ' (quarantined)' : ''}${a.is_archived ? ' (archived)' : ''}`
+                              }))
+                            ]}
+                          />
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {showForm && (
         <div className="modal-overlay">
@@ -560,7 +505,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
       )}
 
       {docsForCell && (
-        <EntityDocumentsModal entityType="cell" entityId={docsForCell.cell_id} entityName={docsForCell.cell_name} onClose={() => { setDocsForCell(null); setDocRefreshKey(k => k + 1) }} showToast={showToast} hasPermission={hasPermission} />
+        <EntityDocumentsModal entityType="cell" entityId={docsForCell.cell_id} entityName={docsForCell.cell_name} onClose={() => setDocsForCell(null)} showToast={showToast} hasPermission={hasPermission} />
       )}
       </div>
 
@@ -638,7 +583,19 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
             title: "This zone's gateways' devices, plus any device filed here explicitly."
           },
           { label: 'Dashboard URL', value: selectedCell.access_url || null, mono: true, copyable: true, full: true },
-        ] : []}
+          // MOVED OFF THE CARD RATHER THAN DROPPED (issue #61). The card body carried a banner on
+          // every archived cell saying whether a purge timer was running and when it fires; the
+          // body is gone, and this is the one fact in it that lives nowhere else. A retention
+          // deadline is not something to discover by its passing.
+          selectedCell.is_archived && {
+            label: 'Retention',
+            value: selectedCell.auto_delete_at
+              ? `Auto-purges on ${new Date(selectedCell.auto_delete_at).toLocaleDateString()}`
+              : 'Permanent — no auto-purge scheduled',
+            full: true,
+            title: 'What happens to this decommissioned cell and when'
+          },
+        ].filter(Boolean) : []}
         actions={selectedCell ? [
           selectedCell.access_url && {
             label: 'Open Dashboard', icon: <IconExternalLink size={13} />, href: selectedCell.access_url, primary: true,
