@@ -91,6 +91,15 @@ const MIRRORS = [
     why: 'Gateway declarative config; a TEMPLATE, rendered into a Secret by the chart',
   },
   {
+    source: 'supabase',
+    dest: 'envoy',
+    match: (name) => name === 'envoy.yaml',
+    why:
+      'The Envoy translation of kong.yml (roadmap §4). Mirrored for the SAME reason kong.yml is: '
+      + 'one file serves both targets, and a route added for Compose and forgotten on Kubernetes '
+      + 'is a gateway that behaves differently between environments',
+  },
+  {
     source: 'scripts',
     dest: 'scripts',
     match: (name) => name === 'storage-init.mjs',

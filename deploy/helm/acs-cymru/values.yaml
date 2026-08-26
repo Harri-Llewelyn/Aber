@@ -440,6 +440,50 @@ supabaseRest:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { memory: 512Mi }
 
+# -----------------------------------------------------------------------------------------------
+# Envoy -- roadmap §4's replacement for Kong. STATICALLY DRAFTED, NEVER DEPLOYED.
+#
+# DISABLED BY DEFAULT, and that is not caution for its own sake: the Compose half of this migration
+# is verified live and this half is verified only as far as `helm template` and `helm lint`. There
+# is no cluster in the environment it was written in and CI is frozen, so nothing here has ever
+# started. See docs/gateway-migration.md for what must be proven before it is trusted.
+#
+# SIDE BY SIDE FIRST. With `enabled: true` and the default serviceName, Envoy answers on
+# `supabase-envoy:8000` while Kong keeps `supabase-kong:8000`, so the two can be probed against
+# each other in-cluster exactly as they are on Compose.
+#
+# PROMOTION IS TWO VALUES, in one change:
+#
+#     supabaseKong.enabled: false
+#     supabaseEnvoy.serviceName: supabase-kong
+#
+# Kubernetes has no Service aliasing, so the replacement adopting the NAME is what moves the
+# gateway without editing the fifteen files that carry `http://supabase-kong:8000`. The template
+# refuses the state where both are enabled under that name -- two Deployments behind one Service is
+# a coin toss per request, not a migration.
+# -----------------------------------------------------------------------------------------------
+supabaseEnvoy:
+  enabled: false
+  image:
+    repository: envoyproxy/envoy
+    # PINNED, as every image here is. The v3 config API is stable across 1.3x, but a moving tag
+    # would still shift the Lua runtime and the CORS filter's defaults underneath a config that
+    # nothing in this chart validates.
+    tag: "v1.31.5"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  logLevel: info
+  # `supabase-envoy` while both run; `supabase-kong` at promotion. See the note above.
+  serviceName: supabase-envoy
+  metrics:
+    enabled: true
+    # ENVOY'S ADMIN LISTENER, which serves /ready AND /stats/prometheus. Kong split those across
+    # two listeners; Envoy does not, so this one port carries both the probe and the scrape.
+    #
+    # NOT PUBLISHED THROUGH THE INGRESS. The admin interface has no authentication and can drain
+    # listeners and dump the running config -- including the substituted API keys.
+    port: 9901
+
 supabaseKong:
   enabled: true
   image:
