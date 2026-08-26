@@ -1456,6 +1456,74 @@ paths:
             `SUPABASE_PUBLIC_URL` is unset or names an in-stack address, or the bundle template is
             missing from the deployment. No token is issued in either case.
 
+  /functions/v1/revoke-gateway-credential:
+    post:
+      tags: [Edge Functions]
+      summary: Rotate a decommissioned gateway's broker credential to an unrecorded password
+      description: |
+        **Called by the database, not by a browser or an appliance.** A trigger on `gateways`
+        reaches this through Kong with `pg_net` whenever a gateway is archived or deleted, and a
+        `pg_cron` sweep retries any archive whose call did not land (migration `0038`).
+
+        **Revocation is a rotation, not a deletion.** The credential service is add-only by design
+        — it "cannot delete accounts", and a delete verb there would turn "can mint one
+        ACL-confined account" into "can stop the entire fleet publishing". So this re-provisions the
+        gateway's account with a fresh random password the service generates and **nobody records**,
+        and discards the response. The appliance's credential stops working immediately; an inert
+        hash remains in the broker's password file.
+
+        **The password is never returned.** It exists only in this worker's memory for the length of
+        one request. Returning it — even to a caller holding the shared secret — would turn a
+        revocation endpoint into an issuance one.
+
+        Authorised by `GATEWAY_REVOKE_SECRET` in the `x-revoke-secret` header, **not** by the anon
+        key. Kong's `key-auth` in front of `/functions/v1/` proves only that the caller holds a key
+        that ships inside every browser bundle.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sparkplug_id]
+              properties:
+                sparkplug_id:
+                  type: string
+                  pattern: '^gwy[0-9a-f]{21}$'
+                  description: >-
+                    The gateway's immutable edge-node id, which is also its MQTT username. Shape
+                    checked before it reaches the credential service: that service creates an
+                    account for whatever id it is handed, so a malformed one would not fail — it
+                    would succeed and add a junk account nothing removes.
+      responses:
+        '200':
+          description: The rotation was applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revoked: { type: boolean }
+                  replaced:
+                    type: boolean
+                    description: >-
+                      Whether an account actually existed to rotate. False means one has now been
+                      created holding an unrecorded password — inert, but not a withdrawal of
+                      anything. `0038` avoids reaching here in that case by checking `enrolled_at`.
+        '400': { description: Body is not JSON, or `sparkplug_id` is not a well-formed edge-node id. }
+        '401':
+          description: >-
+            The `x-revoke-secret` header is missing or wrong. No detail about which — a response
+            distinguishing the two is a hint.
+        '405': { description: Method not allowed. }
+        '502': { description: The credential service refused the rotation. }
+        '503':
+          description: >-
+            Revocation is unconfigured on this deployment, or the credential service is unreachable.
+            An unconfigured stack answers this rather than 401: it has nothing to check against, and
+            401 would send whoever is debugging it looking for a wrong value rather than a missing
+            one.
+
   /functions/v1/enroll-gateway:
     post:
       tags: [Edge Functions]

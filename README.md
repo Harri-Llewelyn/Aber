@@ -11,7 +11,7 @@ management.
 
 > **Design ethos —** *use pre-existing components and standards; minimise custom code.*
 > Where upstream ACS ships bespoke microservices, this fork uses Supabase, TimescaleDB, Grafana and
-> Node-RED. The custom surface is one Python ingestion daemon, nine edge functions, an i3X server and
+> Node-RED. The custom surface is one Python ingestion daemon, ten edge functions, an i3X server and
 > a React dashboard.
 
 ---
@@ -40,7 +40,7 @@ flowchart TB
 
     subgraph Processing ["Ingestion & Serverless"]
         ING["Python Ingestion Engine<br/>identity - quarantine - binding"]
-        EF["Edge Functions<br/>approve-quarantine - deploy-nodered - aas-export<br/>grafana-userinfo - nodered-userinfo - fplus-directory<br/>grafana-alert-webhook - enroll-gateway - gateway-bundle"]
+        EF["Edge Functions<br/>approve-quarantine - deploy-nodered - aas-export<br/>grafana-userinfo - nodered-userinfo - fplus-directory<br/>grafana-alert-webhook - enroll-gateway - gateway-bundle<br/>revoke-gateway-credential"]
     end
 
     subgraph Supabase ["Supabase BaaS"]
@@ -149,7 +149,26 @@ replacing `prune_platform_alerts()` with a version that reads the setting, so th
 long do we keep alerts" is on a page rather than in a migration — and `0033` adds
 `relocate_devices()`, which applies a whole shopfloor rearrangement in **one transaction** so the
 six machines an operator files in one gesture carry one `causation_id` instead of six, and so a
-batch that fails partway leaves nothing behind — plus demo accounts (`supabase/seed.sql`).
+batch that fails partway leaves nothing behind — and `0034` seeds the **read-only principal the MCP
+client authenticates as**, holding `Operator` so it reads the i3X address space, writes nothing and
+cannot see the audit trail (`scripts/mint-mcp-token.mjs` signs its long-lived token) — and `0035`
+gives `gateways` the columns an appliance **reports about itself** on the heartbeat it already
+publishes, chiefly `cert_expires_at`: the internal CA is hand-distributed into every appliance's
+trust store, so re-minting it takes the whole fleet offline at once with no other signal — and
+`0036` adds `public.gateway_health`, the **third** narrow view the Grafana reader may select,
+after `0027`'s and `0029`'s: it backs the gateway dashboard and the certificate alert while
+leaving the asset inventory `0029` deliberately withheld exactly where it is — and `0038` makes
+**archiving or deleting a gateway revoke its broker credential**, by rotating the account to a
+password nobody records: the credential service is add-only by design, so a delete verb there
+would turn "can mint one confined account" into "can stop the whole fleet publishing" — and `0037`
+makes **archiving a gateway withdraw its outstanding enrolment bundle**, and enrolment refuse
+an archived gateway at all: a bundle downloaded and never instantiated was still redeemable
+after the gateway was archived, which issued a real broker credential and resurrected the row
+to `ONLINE` — and `0039` adds `digital_thread_page()`, which applies the **deleted-asset
+filter as a predicate rather than in the browser**, so the page's row budget is spent on rows
+it will actually show: hiding them afterwards had the page list four assets on a stack of
+twenty-six, and render an empty Gateways section on a fleet of four healthy gateways — plus
+demo accounts (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because `0005` already implements one; a second declaration of `log_digital_thread_event()`
@@ -325,6 +344,7 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | [`deploy/helm/acs-cymru/`](deploy/helm/acs-cymru) | The Helm chart; `values.yaml` documents every setting |
 | [`docs/kubernetes-architecture.md`](docs/kubernetes-architecture.md) | Why the Kubernetes target is built the way it is. Source comments cite it by section |
 | [`docs/incidents.md`](docs/incidents.md) | Faults whose FIX LOOKS ARBITRARY without the story. Read before "tidying" a guard that seems redundant |
+| [`docs/upgrades.md`](docs/upgrades.md) | What survives an upgrade and why nothing needs reconfiguring — plus the three places that is not the whole truth |
 | [`docs/openapi.yaml`](docs/openapi.yaml) · [`docs/i3x-openapi.yaml`](docs/i3x-openapi.yaml) | REST and i3X specifications, rendered by Swagger UI |
 | [`supabase/migrations/archive/`](supabase/migrations/archive) | The 38 pre-beta migrations, preserved for their reasoning. Never executed |
 | [`grafana/`](grafana) · [`timescaledb/`](timescaledb) | Provisioning; hypertable schema, retention and rollup reconciliation, the read-only BI role |
@@ -341,7 +361,7 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | `supabase-db-roles-init` | `acs-cymru_supabase_db_roles_init` | `supabase/postgres:17.6.1.160` | — |
 | `supabase-db-init` | `acs-cymru_supabase_db_init` | `supabase/postgres:17.6.1.160` | — |
 | `supabase-auth` | `acs-cymru_supabase_auth` | `supabase/gotrue:v2.189.0` | — |
-| `supabase-rest` | `acs-cymru_supabase_rest` | `postgrest/postgrest:v12.2.0` | — |
+| `supabase-rest` | `acs-cymru_supabase_rest` | `postgrest/postgrest:v14.12` | — |
 | `supabase-kong-init` | `acs-cymru_supabase_kong_init` | `alpine:3.24` | — |
 | `supabase-kong` | `acs-cymru_supabase_kong` | `kong:3.9.3` | `54321:8000` |
 | `supabase-functions` | `acs-cymru_supabase_functions` | `supabase/edge-runtime:v1.74.2` | — |
@@ -441,11 +461,13 @@ Digital Nameplate; what each one covers and how its identity was verified is in
 ## Testing
 
 ```bash
-# Frontend — 1411 tests
+# Frontend — 1417 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required
 python ingestion/test_gateway_binding.py
+python ingestion/test_gateway_health_metrics.py
+python ingestion/test_archived_gateway.py
 python ingestion/test_declared_metrics.py
 python ingestion/test_modelled_metrics_contract.py
 python ingestion/test_device_location.py
@@ -481,6 +503,14 @@ MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credent
 
 # The credential merge, in isolation — the one piece of it whose failure is silent
 npm run test:lib
+
+# Configuration drift — no services needed, and the ONE check here that reads your own .env.
+# Compares docker-compose.yml against .env.example (enforced in CI) and, when a .env exists,
+# your working file against the template in BOTH directions: keys the template gained and you
+# never copied, keys retired from the template still sitting in your file, and keys Compose
+# reads that the template forgot. All three fail silently otherwise -- Compose substitutes its
+# own default and the stack comes up looking correct on a value nobody chose.
+node scripts/check-env-drift.mjs
 
 # Database suites — need Postgres
 python supabase/migrations/test_user_roles_rls.py
@@ -600,109 +630,78 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Eight extensions, ordered by how much of each already exists. None is speculative: every one names
+Five extensions, ordered by how much of each already exists. None is speculative: every one names
 the code it would build on, because the value of writing them down is that a reader can tell how far
 away each is.
 
 **These are not open defects.** Known issues and accepted risks are
 [GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues).
 
-### 1 · Automated edge gateway telemetry
+### 1 · Horizontal ingestion scaling
 
-**Builds on:** `process_node_message()` · `gateways.agent_version` / `enrolled_at` (`0025`) ·
-the appliance's Node-RED runtime ([`templates/physical-gateway/`](templates/physical-gateway)) ·
-`node_exporter`
+**Builds on:** the single-writer note in `get_timescaledb_connection()` ·
+`acs_ingestion_write_seconds` · `_alias_map` / `_last_seq`
 
-Enrolment stamps `agent_version` and `enrolled_at` once and never refreshes them, so "what is this
-appliance actually doing" is answerable only by getting a shell on it. The appliance already holds
-an authenticated MQTT connection and already publishes `NDATA`, so a periodic health payload —
-uptime, container and disk metrics, the deployed flow's hash — needs no new transport, no new
-credential and no new table: `process_node_message()` resolves the gateway and writes to its row
-today.
+#### The ceiling has now been measured, and it is not close
 
-**The case that justifies it on its own is CA expiry.** The internal CA is distributed by hand into
-every appliance's trust store, and
-[re-minting it does not fail loudly — it succeeds and takes the whole fleet offline](docs/incidents.md).
-A `Cert_Expires_At` metric plus one alert rule turns the single worst fleet-wide failure mode into a
-30-day warning.
+This item used to open by quoting the ceiling out of a docstring — *"one connection, not a pool.
+Every write happens on the paho callback thread, so there is exactly one writer"* — which is an
+assertion, not a measurement. `acs_ingestion_write_seconds` now ships, so there is a number:
 
-#### Use `node_exporter` as the collector, but do not scrape it from here
+| | |
+|---|---|
+| mean write | **≈ 4.1 ms** (0.0744 s over 18 writes) |
+| p90 | **12.6 ms**, via `histogram_quantile` |
+| implied single-thread ceiling | **≈ 240 msg/s**, and this is an *upper* bound |
+| current fleet rate | **≈ 0.95 msg/s** |
 
-The appliances are Ubuntu Server and the stack now runs a Prometheus, so the obvious move is to run
-`node_exporter` on each gateway and add it as a scrape target. **The collector half is right and the
-scrape half is wrong**, and the reason is the network shape this platform deliberately has:
+An upper bound because the histogram starts when the write path is entered: device resolution and
+protobuf decode occupy the same thread beforehand and are outside it. Even so, the headroom is
+**two orders of magnitude**. This item is real but it is not urgent, and that is now a
+measurement rather than an opinion — which is the whole reason the instrument was fitted before
+anything moved rather than after.
 
-- **The appliance's connection is outbound only.** It dials `<broker>:8883`; nothing anywhere
-  assumes traffic in the other direction, and
-  [`templates/physical-gateway/README.md`](templates/physical-gateway/README.md) troubleshoots
-  exactly that way round.
-- **Scraping means an inbound path per gateway** through the plant firewall — the thing an
-  outbound-only design exists to avoid, and a separate conversation with someone's IT department
-  per site.
-- **Gateways are enrolled dynamically** with single-use tokens (`0025`), so a static scrape config
-  cannot know them. Pull would additionally need `http_sd` backed by the `gateways` table: a
-  discovery endpoint to build, secure and keep correct.
+#### `$share` does not do what this entry used to claim
 
-So run `node_exporter` on the appliance and **scrape it locally**. A Node-RED flow polls
-`localhost:9100/metrics`, selects a handful of series — filesystem free, load, memory, uptime — and
-publishes them as Sparkplug metrics on the connection that is already open and already
-authenticated. `process_node_message()` writes them to the gateway's row exactly as this section
-already describes.
+The previous text called an MQTT 5 shared subscription "the honest path" and said the daemon was
+"already shaped for it", needing only per-worker connection ownership and a rebirth path. **Tested
+against the live broker, that is wrong.** Two subscribers in one share group, 20 seconds of fleet
+traffic:
 
-That keeps `node_exporter`'s correctness — it collects host metrics properly, which hand-rolled
-disk and CPU reads in a Node-RED function node will not — while changing nothing about the network,
-the credential model, or discovery. It also makes this item substantially cheaper, because the
-collector was the part that had to be written.
+```
+worker A: 11 msgs    worker B: 11 msgs
+seen by BOTH: DDATA/gwy12…/dev22…  DDATA/gwy12…/dev23…
+              DDATA/gwy12…/dev27…  DDATA/gwy13…/dev24…
+only A: NDATA/gwy13…, NDATA/gwy15…
+only B: NDATA/gwy12…, NDATA/gwy14…, DDATA/gwy15…/dev26…
+```
 
-**And it removes the Windows question.** `windows_exporter` (prometheus-community, formerly
-`wmi_exporter`) serves the same exposition format, so a Windows gateway differs only in which
-collector is installed; the transport, the flow and the database write are identical. Under a pull
-model it would have been a second scrape story.
+Round-robin **per message, with no edge-node affinity** — and Sparkplug state is per edge node.
+Two in-memory tables are keyed `(group_id, edge_node_id)`:
 
-**Where it would go:** `templates/physical-gateway/docker-compose.yml`, which the bundle ships and
-the appliance runs — one service alongside `node-red`, with the same `/proc`, `/sys` and `/` mounts
-the central stack's exporter uses. The bundle is assembled by `gateway-bundle` from
-`GW_BUNDLE_COMPOSE`, so the template is the only file that changes.
+- **`_alias_map`.** A birth certificate is *one message*, so it reaches *one worker*. Above,
+  `gwy12…`'s NDATA went only to B while its devices' DDATA went to both — so worker A would resolve
+  alias-only metrics against an empty table. The failure mode is already documented at the
+  declaration: *"ingests nothing at all from an alias-optimised gateway, and reports no error while
+  doing it."*
+- **`_last_seq`.** Each worker sees a fraction of the sequence numbers, so gap detection fires
+  permanently. `request_node_rebirth()` does not rescue it: the rebirth is also one message, and
+  lands on one worker.
 
-### 2 · Horizontal ingestion scaling
+So the blocker is **the data path, not the rebirth path**. What would actually be required is
+either shared state for those two tables — a round trip on the hottest path, which is what this item
+exists to make faster — or partitioning the topic space by edge node, which is not what `$share`
+does and fights dynamic enrolment, since gateways arrive with single-use tokens and a static
+partition cannot know them.
 
-**Builds on:** the single-writer note in `get_timescaledb_connection()`
+**One prerequisite that turned out not to exist:** the daemon speaks MQTT 3.1.1 (`mqtt.Client()`
+with paho 1.6.1's v1 callbacks), and `$share` is an MQTT 5 feature — but Mosquitto 2.0.22 honours
+shared subscriptions for 3.1.1 clients regardless, verified above. **No protocol upgrade and no
+callback migration is needed.** That was expected to be the hard part and it is not the problem.
 
-The current ceiling is stated in the code rather than discovered: *"one connection, not a pool.
-Every write happens on the paho callback thread, so there is exactly one writer — and that is the
-thing to revisit first if a worker thread is ever introduced."* Three properties bound throughput on
-that thread: the 5-second directory cache, the per-message PostgREST resolution round trips, and the
-bounded DB retry that deliberately stalls the whole fleet rather than one device.
+---
 
-The honest path is an **MQTT 5 shared subscription** (`$share/<group>/spBv1.0/#`) across clustered
-workers, each holding its own connection. The daemon is already shaped for it — resolution is
-cacheable and per-message, and the historian write is idempotent (`ON CONFLICT DO NOTHING`), so two
-workers seeing a redelivery cannot corrupt a series. What it needs is per-worker connection
-ownership and a rebirth-request path that does not depend on a single node's alias table.
-
-**It also carries the last piece of the ingestion metrics work.** Every counter that endpoint
-proposed now ships except one: `acs_ingestion_write_seconds`, the per-write latency histogram. It
-needs a timing wrapper on the historian write — which runs per sample on the broker callback
-thread, the one path in this daemon where casual overhead is least welcome. **That is the same
-thread this item exists to unblock**, and a latency number is worth far more once there is a
-before-and-after to compare it against, so it belongs here rather than as a measurement taken
-against a ceiling nobody has moved yet.
-
-### 3 · Computed ISO 22400 KPIs
-
-**Builds on:** [`timescaledb/aggregates.sql`](timescaledb/aggregates.sql) · the existing rollups ·
-`iso22400_vocabulary`
-
-ISO 22400 is registered as a vocabulary, but its KPIs are by definition **computed** — that is
-exactly what MTConnect and OPC UA exclude and why the standard exists. Availability, Performance and
-Quality can be continuous aggregates over the rollups already in the historian, with **no external
-MES dependency**: `aggregates.sql` is reconciled on every boot on both targets, which is what makes
-a KPI definition a setting rather than a constant fixed before the first row was written.
-
-This is the intermediate step that was previously deferred pending an MES. It does not replace one —
-it makes the vocabulary answer questions instead of only naming them.
-
-### 4 · Ingress → Gateway API
+### 2 · Ingress → Gateway API
 
 **Builds on:** [`templates/ingress.yaml`](deploy/helm/acs-cymru/templates/ingress.yaml) ·
 `acs-cymru.corsOrigins`
@@ -727,51 +726,9 @@ empty tables while the gateway reported 200 for every request.
 keeps `kong.yml` and its `sed` either way — so this retires one placeholder on one target rather
 than the templating approach as a whole.
 
-### 5 · A durable MCP credential, and the Digital Thread over MCP
+---
 
-**Builds on:** `i3x-mcp` against the i3X address space ([`i3x/README.md`](i3x/README.md#mcp)) ·
-`GOTRUE_JWT_EXP` · `digital_thread`
-
-**This used to say "build an MCP server", and that turned out to be the wrong item.**
-[`cesmii/i3X-MCP-Server`](https://github.com/cesmii/i3X-MCP-Server) (`i3x-mcp` on npm, MIT) is a
-generic MCP client of *any* conformant i3X server. It runs against this one unmodified — verified
-2026-08-22 by driving the published package over stdio: object search, current values with
-`quality`, relationship traversal and history out of TimescaleDB all answer. Nothing needs writing.
-
-**The security posture the old item asserted is now demonstrated rather than argued.** Writes are
-not even listed as tools by default; forced on with `--enable-writes`, `update_value` returns our
-`405` and the reason with it. That is the difference between read-only by *construction* and by
-configuration: a user who deliberately defeats the client-side guard still gets nothing.
-
-What is left is the two things pointing it at a real deployment exposes.
-
-#### A durable, low-privilege credential
-
-The client takes a **static** `I3X_TOKEN` from its host's config file, and `GOTRUE_JWT_EXP` is
-`3600`. A token pasted into `claude_desktop_config.json` stops working within the hour, and it fails
-the way [`i3x/README.md`](i3x/README.md#connecting-a-client) already describes for i3X Explorer —
-*as a broken server rather than a stale token*.
-
-The answer is a long-lived JWT for a dedicated read-only principal, signed with the same secret and
-carrying a role RLS already constrains. **What it must not be is `service_role`.** This server
-passes the caller's bearer straight through to PostgREST precisely so that it queries *as them*; a
-key that bypasses RLS would discard the single property that makes handing this to a model
-defensible — that an operator asking a question sees exactly what an operator can see.
-
-#### The Digital Thread has no surface here
-
-i3X models objects, values and history. It has **no audit concept**, and this server's address space
-contains no `digital_thread` — so *"what changed, when, and who changed it"* is the one question an
-i3X-shaped client cannot ask, and it is the clause the old item named that no external package will
-ever satisfy.
-
-Two honest options, and the choice is about audience rather than difficulty. A **second, small MCP
-server over PostgREST** would expose the audit trail with the caller's own token and the same RLS
-scope — which is the only reason it would be safe. Or **leave it**: the Digital Thread is a page
-built for reading a change with its diff and its causation siblings beside it, and a model
-summarising that trail is a different and weaker artefact than the page.
-
-### 6 · Cold Telemetry Archival & Query-in-Place
+### 3 · Cold Telemetry Archival & Query-in-Place
 
 **Builds on:** TimescaleDB retention policies · `telemetry` hypertable · Edge Functions · Apache
 Parquet · `public.system_settings` (`0031`, `0032`)
@@ -798,58 +755,7 @@ gigabytes of raw points back into TimescaleDB.
 
 ---
 
-### 7 · Vestigial column and configuration audit
-
-**Builds on:** [`scripts/check-docs-drift.mjs`](scripts/check-docs-drift.mjs) ·
-[`.env.example`](.env.example) · `0001_baseline_schema.sql`
-
-Columns and settings accumulate faster than they are retired. `devices.connection_method` is the
-clearest example: it is written by the device form and by the quarantine approval modal, exported
-into the AAS as `ConnectionMethod`, and classified as a governance field in the Digital Thread — and
-on a seeded stack **all six devices hold the same value**, `Sparkplug B`, because that is the only
-transport this platform ingests. It is not dead code. It is a field that carries no information,
-which is a harder thing to notice and a harder thing to justify keeping.
-
-**THE AUDIT'S WHOLE DIFFICULTY IS TELLING "UNUSED" FROM "EMPTY HERE", and a scan that cannot will do
-damage.** On a freshly reset stack these are all NULL for every row:
-
-| Column | Why it is empty | Verdict |
-| :--- | :--- | :--- |
-| `devices.quarantine_reason` | Only set when a device is quarantined | **Load-bearing** — ingestion writes it |
-| `devices.reported_identity` | Only set on an identity mismatch | **Load-bearing** — the spoofing diagnosis |
-| `devices.model_3d_path` | Only set once a model is uploaded | **Load-bearing** |
-| `gateways.agent_version` | Stamped at enrolment; every seeded gateway is simulated | **Load-bearing** — §1 builds on it |
-| `devices.asset_type` | Never written by any code path | Candidate |
-| `cells.grafana_url` | Never written by any code path | Candidate |
-
-Four of those six would be deleted by a "drop the columns that are always NULL" pass, and two of
-them are exactly the evidence the platform keeps for its own security decisions. The audit therefore
-has to be **reachability of the write path**, not occupancy of the column — which is a static
-question, and so a checkable one: a guard in `check-docs-drift.mjs` that fails when a `public`
-column is named by no migration other than its own `CREATE TABLE`, no frontend module, no edge
-function and no ingestion path, with the same stated-exception list `NOT_PUBLISHED` already uses for
-relations.
-
-**On the configuration half, the finding is the opposite of the suspicion.** All 66 variables in
-`.env.example` are referenced somewhere in the repository, and `SUPABASE_ANON_KEY` in particular is
-consumed by twelve files — Kong's key-auth, the Grafana alert contact point, the frontend bundle,
-the i3X service and both e2e Jobs. It is also **public by construction**: it is the `anon` role and
-is readable in any built bundle, which is why the chart renders it outside a Secret deliberately.
-Retiring it is not a cleanup, it is a migration.
-
-The real work on that side is narrower and has two parts:
-
-- **Drift between a working `.env` and the template**, which nothing checks in either direction. A
-  developer's file accumulates keys that were retired from the template (`VITE_ALLOW_SIGNUP` is one
-  today) and misses keys that were added to it, silently falling through to a Compose default. The
-  same one-pass comparison this entry was written from is the guard.
-- **Supabase's legacy API keys.** The `anon` / `service_role` JWTs this stack mints in
-  `scripts/setup.mjs` are the key format Supabase has since superseded with publishable and secret
-  keys. That is a real upstream deprecation with a real end date, and it touches Kong's key-auth
-  consumers, the edge-function registry and `custom_access_token_hook`. It should be scoped against
-  the pinned `supabase/gotrue` and `kong` versions before it is planned, not assumed to apply.
-
-### 8 · Kong → Envoy, following upstream Supabase
+### 4 · Kong → Envoy, following upstream Supabase
 
 **Builds on:** [`supabase/kong.yml`](supabase/kong.yml) · `supabase-kong-init` ·
 [`templates/supabase/kong.yaml`](deploy/helm/acs-cymru/templates/supabase/kong.yaml)
@@ -874,13 +780,55 @@ stated reason and each is load bearing; a translation that quietly widened one w
 test that exists today, because `validate.py` asserts the 401s that SHOULD happen and cannot assert
 the absence of a route nobody wrote. Any migration needs the negative assertions first.
 
-**It interacts with §4 and should be sequenced against it.** Gateway API's `HTTPRoute` would retire
+**It interacts with §2 and should be sequenced against it.** Gateway API's `HTTPRoute` would retire
 the `__CORS_ORIGINS__` placeholder on Kubernetes; Envoy would restate CORS in its own filter on both
 targets. Doing both independently means expressing origin policy a third way before deleting the
 first — so whichever lands first should decide where that policy lives.
 
 **Not urgent, and deliberately not bundled with the 2.8 → 3.9.3 bump** that closed the unmaintained-
 image question. This is a divergence-from-upstream question, not a security one.
+
+---
+
+### 5 · Supabase's legacy API keys
+
+**Builds on:** [`scripts/setup.mjs`](scripts/setup.mjs) · `kong.yml`'s `key-auth` consumers ·
+`custom_access_token_hook` (`0001`) · the edge-function registry
+
+The `anon` and `service_role` JWTs this stack mints in `setup.mjs` are the key format Supabase has
+since superseded with **publishable and secret keys**. This is a real upstream deprecation with a
+real end date, and it is the only item on this list whose timing is set by somebody else.
+
+**It was split out of the configuration audit deliberately.** It arrived there as a bullet under a
+cleanup entry, and it is not a cleanup — it is a migration through the authentication path, which is
+the wrong thing to leave filed under "tidying" where its deadline is invisible. Nothing about it is
+started.
+
+**The surface is wider than "rotate two keys".** `SUPABASE_ANON_KEY` alone is consumed by twelve
+files — Kong's `key-auth`, the Grafana alert contact point, the frontend bundle, the i3X service and
+both e2e Jobs — and the two keys are structurally different things rather than two of the same
+thing:
+
+- **`anon` is public by construction.** It is the `anon` role, readable in any built bundle, which
+  is why the chart renders it outside a Secret deliberately. Replacing it is a change to what Kong
+  accepts as a registered key, not a secret rotation.
+- **`service_role` is not.** It is held by the ingestion daemon and every edge function, and
+  `0026`'s whole premise is that a holder of it must not be able to forge an audit row. Anything
+  that changes how it is minted has to leave that property intact.
+- **`custom_access_token_hook` shapes the claims** the rest of the stack reads. PostgREST resolves
+  RLS from them, and `grafana-userinfo` maps a role out of `public.user_roles` beside them.
+
+**Scope it against the pinned versions before planning it, not against the current documentation.**
+This stack runs specific `supabase/gotrue` and `kong` tags; whether the new format is supported, and
+what it changes about `key-auth` consumer registration, is a question about those tags. The upstream
+guidance describes a hosted platform whose components move independently of a self-hosted compose
+file — the same reasoning that makes "latest on Docker Hub" the wrong upgrade yardstick for this
+repository.
+
+**The migration has no rehearsal path today**, which is the first thing to build: there is no way to
+run the stack with both key formats accepted and confirm every consumer still works before the old
+ones are withdrawn. Without it this is a flag day across twelve files, an ingestion daemon and nine
+edge functions.
 
 ---
 

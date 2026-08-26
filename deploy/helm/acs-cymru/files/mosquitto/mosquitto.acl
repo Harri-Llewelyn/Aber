@@ -39,6 +39,17 @@
 #     Narrowing those subscriptions is therefore NOT required, and was deliberately not done:
 #     the topic lives in the seeded flow, which is user content, so changing it would have
 #     rewritten what an operator may have edited in exchange for nothing.
+#   * THE SILENT DROP CANNOT BE LIFTED BY MOVING TO MQTT 5, which was proposed for exactly that
+#     and is why this is written down here rather than rediscovered. The `Not authorized` reason
+#     code that would carry a refusal back to the publisher rides on PUBACK -- and there is no
+#     PUBACK at QoS 0, under either protocol version. Every Sparkplug publisher on this stack is
+#     QoS 0: the four `mqtt out` nodes in node_red_flow.json, the one in the physical-gateway
+#     flow template, ingestion.py's rebirth NCMD, and validate.py. Raising them is not an option
+#     that was left unset -- SPARKPLUG B REQUIRES QoS 0 and retain false for NBIRTH, NDATA,
+#     DBIRTH, DDATA, NDEATH, DDEATH, NCMD and DCMD, delegating loss detection to the `seq`
+#     counter and the rebirth request instead, both of which ingestion.py implements. So a
+#     gateway publishing under the wrong edge node learns nothing from the broker by
+#     construction, and DELIVERY stays the only way to assert this file.
 #
 # `scripts/check-broker-config.mjs` re-runs these assertions on the pinned tag. A config that
 # starts is not a config that is safe.

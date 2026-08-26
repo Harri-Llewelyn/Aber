@@ -96,6 +96,29 @@ scrape_configs:
         labels:
           component: supabase-kong
 
+  # -----------------------------------------------------------------------------------------------
+  # PostgREST's admin server.
+  #
+  # NEW WITH v14.12, AND IMPOSSIBLE BEFORE IT. On v12.2.0 the admin server served /ready and /live
+  # and nothing else -- there was no metrics setting in the configuration at all, so this target
+  # would have scraped a 404. The upgrade is what made it real.
+  #
+  # WHAT IT ADDS OVER THE KONG JOB ABOVE, which already counts every PostgREST request by service
+  # and route: nothing about the HTTP tier, and everything about the process behind it. A
+  # gateway-side 200 cannot tell you the schema cache reloaded, or that the connection pool has
+  # requests queued behind it -- `pgrst_schema_cache_loads_total`, `pgrst_db_pool_waiting` and
+  # `pgrst_db_pool_max` can, and the three `pgrst_jwt_cache_*` counters describe work Kong never
+  # sees at all.
+  #
+  # Names read off a running v14.12, not off a changelog -- the same rule the chart's
+  # servicemonitors.yaml states after getting a Kong metric name wrong in both directions.
+  # -----------------------------------------------------------------------------------------------
+  - job_name: supabase-rest
+    static_configs:
+      - targets: ['supabase-rest:3001']
+        labels:
+          component: supabase-rest
+
   - job_name: grafana
     static_configs:
       - targets: ['grafana:3000']

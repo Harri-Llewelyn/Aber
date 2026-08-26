@@ -579,6 +579,115 @@ groups:
                 type: __expr__
                 uid: __expr__
 
+      # -----------------------------------------------------------------------------------------
+      # 4. GATEWAY CA EXPIRING -- the failure mode that takes the whole fleet at once.
+      #
+      # THE ONE THAT JUSTIFIED APPLIANCE HEALTH TELEMETRY ON ITS OWN. The broker's internal CA is
+      # copied BY HAND into every appliance's trust store, and re-minting it does not fail loudly:
+      # it succeeds, and every gateway drops off together. There is no other signal. It presents as
+      # the entire fleet going quiet, which is the same shape as a broker outage and gets diagnosed
+      # as one -- see docs/incidents.md, where it already happened once.
+      #
+      # THE APPLIANCE REPORTS THE DATE IT ACTUALLY HOLDS, which is the only version of this question
+      # worth asking. A check against the broker's own certificate would say what the SERVER will
+      # present; this says what each CLIENT will accept, and the fleet-wide outage happens when
+      # those two stop agreeing. `gateway_health.cert_expires_in_days` derives the day count once
+      # (migration 0036) so this rule and the dashboard panel cannot disagree about it.
+      #
+      # `for: 0s`, FOR THE SAME REASON AS THE ENROLMENT RULE ABOVE: the threshold IS the delay.
+      # A debounce on a condition that has thirty days left to run postpones nothing that matters.
+      #
+      # THE THRESHOLD IS IN THE RULE, NOT IN THE QUERY, WHICH IS THE OPPOSITE OF RULE 1. The stale
+      # rule reads a view that emits only already-stale gateways, so its `> 0` is a formality. Here
+      # the query returns EVERY gateway that has reported a certificate date, and Grafana's
+      # threshold picks the ones inside the window -- so "thirty days" is visible in the rule an
+      # operator opens rather than buried in SQL. It is also what makes the rule multi-dimensional
+      # in the ordinary way: one instance per gateway, each carrying its own remaining days.
+      #
+      # A NEGATIVE VALUE FIRES THE SAME RULE, and the summary says so rather than reading as a very
+      # small positive. An already-expired CA is not a different condition, it is this one found
+      # late; splitting it into a second `critical` rule would mean two rules to keep in step for
+      # one date.
+      #
+      # WHY THIS READS THE DATABASE AND NOT PROMETHEUS. The daemon exports appliance load, memory,
+      # disk and uptime as gauges, and deliberately NOT the certificate date: that endpoint needs no
+      # credential and is published to the host, so the day the fleet's trust anchor dies stays in
+      # Supabase. See ingestion/metrics.py's header. The database is also the answer that survives a
+      # daemon restart, which matters for a rule whose subject changes once a year.
+      # -----------------------------------------------------------------------------------------
+      - uid: acs-gateway-ca-expiring
+        title: Gateway CA Expiring
+        condition: C
+        for: 0s
+        # NoData IS OK. On a stack with no physical gateways -- the demonstrator, and every CI run --
+        # no appliance reports a certificate date and the query returns nothing. That is a fleet
+        # with no appliances, not a fleet in trouble.
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          entity_type: gateway
+        annotations:
+          summary: >-
+            The broker CA trusted by {{ $labels.gateway }} expires in
+            {{ printf "%.1f" $values.B.Value }} days (negative means it already has). The CA is
+            distributed by hand into each appliance's trust store, so re-issuing it is a fleet
+            operation -- see docs/incidents.md.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: supabase
+            model:
+              refId: A
+              datasource:
+                type: postgres
+                uid: supabase
+              format: time_series
+              rawQuery: true
+              editorMode: code
+              # `collected_at AS "time"` because Grafana's time_series format requires a time
+              # column and this view is a point-in-time answer, exactly as in rule 1.
+              #
+              # `IS NOT NULL` IS LOAD BEARING. A virtual gateway, and any appliance on a bundle
+              # predating migration 0035, reports no certificate date at all. Including those rows
+              # would hand the reducer a NULL per gateway and turn "has not told us" into an alert
+              # instance, which is the noise that teaches an operator to ignore the rule.
+              rawSql: |
+                SELECT collected_at          AS "time",
+                       gateway_name          AS gateway,
+                       sparkplug_id          AS sparkplug_id,
+                       cert_expires_in_days  AS days_remaining
+                  FROM public.gateway_health
+                 WHERE cert_expires_in_days IS NOT NULL
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              # THIRTY DAYS. Long enough to schedule a fleet-wide trust-store update through
+              # whatever change process a plant has, which is the constraint that sets it -- the
+              # work is a visit to every appliance, not a command.
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [30]
+              datasource:
+                type: __expr__
+                uid: __expr__
+
   # ===============================================================================================
   # INGESTION PIPELINE -- whether telemetry is being recorded at all.
   #

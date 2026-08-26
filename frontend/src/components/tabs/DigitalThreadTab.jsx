@@ -777,15 +777,15 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
    * the query is capped at 200 rows inside a time window, so an asset purged before the window
    * would read as live.
    */
-  const purgedAssetCount = useMemo(() => {
-    if (!lookupsLoaded) return 0
-    // DISTINCT ASSETS, not events. Counting rows answered a question nobody asked -- the button
-    // read "(54)" beside a page whose own header said 16 assets, so the number could only be
-    // parsed as a count of something else entirely. What the control acts on is assets.
-    const seen = new Set()
-    for (const e of allEvents) if (!entityNames.has(e.entity_id)) seen.add(e.entity_id)
-    return seen.size
-  }, [allEvents, entityNames, lookupsLoaded])
+  // FROM THE SERVER, AND COUNTED OVER EVERYTHING THE FILTERS SELECT rather than over the page.
+  // Derived from the page it would fall to zero the moment the purge filter became a predicate --
+  // and the control it gates would disappear exactly when it was needed, leaving no way back.
+  // Null until a response says otherwise: `null` means "the server did not tell us", which is not
+  // the same as "there are none" and must not render as zero.
+  const [serverPurgedCount, setServerPurgedCount] = useState(null)
+  // Whether the row limit bit. The page cannot tell otherwise, and "showing the newest 200" is the
+  // difference between a quiet view and a quietly incomplete one -- which is how this was missed.
+  const [truncated, setTruncated] = useState(false)
 
   /**
    * What the page actually renders.
@@ -795,6 +795,43 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
    * the resting view rather than about retention, and the resting view should be the live plant.
    * A deleted Test gateway is noise on every visit; the button restores it in one click and
    * carries a count, so nothing is hidden without saying so.
+   */
+  /**
+   * How many deleted assets the current filters cover.
+   *
+   * THE SERVER'S ANSWER WINS, because it is counted over everything the filters select rather than
+   * over the page that fitted -- which is the whole reason the count moved (0039). The fallback
+   * covers the case where the response carried no count at all: an older API, or a test fixture
+   * that resolves a bare array and models neither deletion nor truncation. Deriving zero there
+   * would unrender the control that reveals them, so "we were not told" falls back to "count what
+   * is in front of us" rather than to "there are none".
+   */
+  const purgedAssetCount = useMemo(() => {
+    if (serverPurgedCount !== null) return serverPurgedCount
+    if (!lookupsLoaded) return 0
+    // DISTINCT ASSETS, not events. Counting rows answered a question nobody asked -- the button
+    // read "(54)" beside a page whose own header said 16 assets.
+    const seen = new Set()
+    for (const e of allEvents) if (!entityNames.has(e.entity_id)) seen.add(e.entity_id)
+    return seen.size
+  }, [serverPurgedCount, allEvents, entityNames, lookupsLoaded])
+
+  /**
+   * What the page actually renders.
+   *
+   * PURGED ASSETS ARE HIDDEN BY DEFAULT (issue #44) -- the records are never removed, so this is a
+   * question about the resting view rather than about retention, and the resting view should be
+   * the live plant.
+   *
+   * A NO-OP AGAINST A CURRENT SERVER, AND KEPT ANYWAY. `digital_thread_page()` (0039) applies the
+   * same rule as a PREDICATE, before the row limit, which is what actually fixed the bug: this
+   * filter was never wrong in itself, it was wrong as the ONLY one, because the 200-row budget was
+   * spent on rows it then discarded -- four assets listed on a stack of twenty-six, and an empty
+   * Gateways section on a fleet of four healthy gateways.
+   *
+   * It stays because it costs nothing when the server has already done it and it is the only thing
+   * standing between an operator and a page full of deleted `Test` gateways if they ever talk to a
+   * build without the RPC.
    */
   const events = useMemo(() => {
     if (showPurged || !lookupsLoaded) return allEvents
@@ -829,10 +866,19 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
     const { since, until } = timeWindow(rangePreset, customStart, customEnd)
     if (since) url += `&since=${encodeURIComponent(since)}`
     if (until) url += `&until=${encodeURIComponent(until)}`
+    if (showPurged) url += '&include_purged=true'
     api.get(url)
-      .then(d => { setAllEvents(d); setLoading(false) })
+      // `d` IS THE EVENT ARRAY, carrying the page-level counts as properties -- see api.js for why
+      // the resource stayed the return value. A fixture that resolves a bare array reports no
+      // deleted assets and no truncation, which is the honest answer for one that models neither.
+      .then(d => {
+        setAllEvents(Array.isArray(d) ? d : [])
+        setServerPurgedCount(typeof d?.purgedAssets === 'number' ? d.purgedAssets : null)
+        setTruncated(Boolean(d?.truncated))
+        setLoading(false)
+      })
       .catch(() => setLoading(false))
-  }, [entityTypeFilter, actionFilter, namedEntityIds, rangePreset, customStart, customEnd])
+  }, [entityTypeFilter, actionFilter, namedEntityIds, rangePreset, customStart, customEnd, showPurged])
 
   // A later handover -- clicking Digital Thread on a second device without leaving the page --
   // replaces the filter rather than being ignored because state was already initialised.

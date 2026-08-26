@@ -15,7 +15,9 @@
 # EVERY PLACEHOLDER IS `__UPPER_SNAKE__`, and both substituters assert that none survive. Adding
 # one means adding it to `supabase-kong-init` in docker-compose.yml AND to the chart.
 #
-# FOUR ROUTES ARE DELIBERATELY EXEMPT from `key-auth`, and all four are load bearing:
+# SIX ROUTES ARE DELIBERATELY EXEMPT from `key-auth`, across FOUR exemptions, and every one of
+# them is load bearing. Both counts are stated because two of the four cover a pair, and only
+# one of the numbers used to appear here:
 #
 #   * `/auth/v1/`                                    -- sign-in must work before a session exists
 #   * `/functions/v1/{grafana,nodered}-userinfo`     -- an OAuth client sends client credentials,

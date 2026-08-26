@@ -541,7 +541,21 @@ for (const gw of GATEWAYS) {
     clientid: `node-red-${gw.key}`,
     autoConnect: true,
     usetls: false,
-    protocolVersion: '4',
+    // MQTT 5. Node-RED's encoding: '4' is 3.1.1, '5' is v5.
+    //
+    // NO FUNCTIONAL BENEFIT ON THIS SIDE, and that is recorded rather than glossed. Three were
+    // proposed and all three were tested and refused: PUBACK reason codes need QoS >= 1 and
+    // Sparkplug mandates QoS 0; the broker's DISCONNECT reason code IS sent under v5 and mqtt.js
+    // receives it, but Node-RED's broker node registers only connect/close/error and drops it; and
+    // `$share` is honoured by Mosquitto 2.0.22 for 3.1.1 clients anyway. This is on the current
+    // protocol version because that is where protocol work happens, not because it does anything
+    // today.
+    //
+    // NO SESSION EXPIRY AND NO WILL DELAY, and this is the one v5 feature that must stay unset:
+    // NDEATH *is* the Last Will, process_node_message() marks the edge node OFFLINE on it, and a
+    // will delay would leave dead gateways reading ONLINE with every device beneath them
+    // apparently live.
+    protocolVersion: '5',
     keepalive: '60',
     cleansession: true,
     // Read by scripts/node-red-init.mjs to pick this node's credential pair out of the

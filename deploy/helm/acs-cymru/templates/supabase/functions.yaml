@@ -134,6 +134,10 @@ spec:
             - name: MQTT_CREDENTIAL_SERVICE_URL
               value: {{ printf "http://%s-gateway-credential:%v" (include "acs-cymru.fullname" .) .Values.gatewayCredential.port | quote }}
             {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_CREDENTIAL_SERVICE_TOKEN" "secretName" $secretName "key" "MQTT_CREDENTIAL_SERVICE_TOKEN") | nindent 12 }}
+            {{- /* Verified by revoke-gateway-credential. The edge runtime boots with
+                   VERIFY_JWT=false, so a function that does not check its own secret is an open
+                   endpoint -- Kong's key-auth proves only that the caller holds the anon key. */}}
+            {{- include "acs-cymru.secretEnv" (dict "name" "GATEWAY_REVOKE_SECRET" "secretName" $secretName "key" "GATEWAY_REVOKE_SECRET") | nindent 12 }}
           # tcpSocket, NOT httpGet -- THIS RUNTIME EXPOSES NO HEALTH ROUTE. Verified against
           # supabase/edge-runtime:v1.74.2 by probing it directly:
           #

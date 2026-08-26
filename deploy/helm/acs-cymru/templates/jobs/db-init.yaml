@@ -130,6 +130,13 @@ spec:
               role rather than creating one with a blank secret, matching timescaledb/roles.sql.
             */}}
             {{- include "acs-cymru.secretEnv" (dict "name" "BI_READER_PASSWORD" "secretName" $secretName "key" "BI_READER_PASSWORD") | nindent 12 }}
+            {{- /* Stored in Vault by 0038 so a trigger on `gateways` can reach the
+                   revoke-gateway-credential function through Kong. `supabase-db -> supabase-kong`
+                   is already an admitted flow; `supabase-db -> gateway-credential` deliberately is
+                   NOT, which is why revocation goes through a function rather than dialling the
+                   credential service directly. The anon key only gets past key-auth. */}}
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "GATEWAY_REVOKE_SECRET" "secretName" $secretName "key" "GATEWAY_REVOKE_SECRET") | nindent 12 }}
           command:
             - /bin/sh
             - -e
@@ -198,6 +205,9 @@ spec:
                     -v nodered_webhook_jwt_secret="$NODERED_WEBHOOK_JWT_SECRET" \
                     -v nodered_redirect_uri="$NODERED_OAUTH_CALLBACK_URL" \
                     -v bi_reader_password="$BI_READER_PASSWORD" \
+                    -v supabase_functions_url="http://{{ include "acs-cymru.fullname" . }}-supabase-kong:8000/functions/v1" \
+                    -v supabase_anon_key="$SUPABASE_ANON_KEY" \
+                    -v gateway_revoke_secret="$GATEWAY_REVOKE_SECRET" \
                     -f "$f" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi
                   cat /tmp/migration.log
                   if [ "$attempt" -ge 3 ] || ! grep -q "deadlock detected" /tmp/migration.log; then

@@ -254,6 +254,11 @@ services:
       # the default stack, where Node-RED runs without adminAuth -- the migration then leaves
       # the secret unset and the webhook goes out unauthenticated.
       NODERED_ADMIN_TOKEN: ${NODERED_ADMIN_TOKEN:-}
+      # Read by 0038, which stores both in Vault so a trigger on `gateways` can reach the
+      # revoke-gateway-credential function through Kong. The anon key only gets past Kong's
+      # key-auth; GATEWAY_REVOKE_SECRET is what authorises the revocation.
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      GATEWAY_REVOKE_SECRET: ${GATEWAY_REVOKE_SECRET:-}
       # Hashed into auth.oauth_clients by 0002_seed_data.sql. Grafana
       # reads the same plaintext from its own environment via grafana.ini.
       GRAFANA_OAUTH_CLIENT_SECRET: ${GRAFANA_OAUTH_CLIENT_SECRET:-}
@@ -293,7 +298,7 @@ services:
           echo \"Executing migration $$f...\";
           attempt=1;
           while :; do
-            if psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v grafana_public_url=\"$$GRAFANA_PUBLIC_URL\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -h supabase-db -U postgres -d postgres -f \"$$f\" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi;
+            if psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v grafana_public_url=\"$$GRAFANA_PUBLIC_URL\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -v supabase_functions_url=\"http://supabase-kong:8000/functions/v1\" -v supabase_anon_key=\"$$SUPABASE_ANON_KEY\" -v gateway_revoke_secret=\"$$GATEWAY_REVOKE_SECRET\" -h supabase-db -U postgres -d postgres -f \"$$f\" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi;
             cat /tmp/migration.log;
             # RETRIED ONLY ON A DEADLOCK, never on anything else. Every migration here is
             # idempotent and is replayed on every boot already, so re-running one is safe by
@@ -389,7 +394,7 @@ services:
 
   supabase-rest:
     container_name: acs-cymru_supabase_rest
-    image: postgrest/postgrest:v12.2.0
+    image: postgrest/postgrest:v14.12
     restart: always
     environment:
       PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD:-postgres}@supabase-db:5432/postgres
@@ -397,6 +402,16 @@ services:
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: ${SUPABASE_JWT_SECRET}
       PGRST_DB_USE_LEGACY_GUCS: "false"
+      # THE ADMIN SERVER, WHICH IS WHERE /metrics LIVES. Off unless this is set: PostgREST binds no
+      # admin listener at all by default, which is why the metrics gap existed rather than being an
+      # oversight in the scrape config.
+      #
+      # NOT PUBLISHED, deliberately. There is no `ports:` entry for 3001, so it is reachable only
+      # from the compose network -- the same treatment prometheus and node_exporter already get,
+      # and for a stronger reason here: the admin server carries NO AUTHENTICATION of any kind and
+      # its /ready and /live endpoints will happily describe a database that is refusing
+      # connections. Kong does not route it either.
+      PGRST_ADMIN_SERVER_PORT: "3001"
     depends_on:
       supabase-db-roles-init:
         condition: service_completed_successfully
@@ -771,6 +786,10 @@ services:
       # its own value and not shared with any other secret.
       MQTT_CREDENTIAL_SERVICE_URL: ${MQTT_CREDENTIAL_SERVICE_URL:-http://gateway-credential:9010}
       MQTT_CREDENTIAL_SERVICE_TOKEN: ${MQTT_CREDENTIAL_SERVICE_TOKEN:-}
+      # Verified by revoke-gateway-credential. The edge runtime boots with VERIFY_JWT=false, so a
+      # function that does not check its own secret is an open endpoint -- Kong's key-auth proves
+      # only that the caller holds the anon key, which ships in every browser bundle.
+      GATEWAY_REVOKE_SECRET: ${GATEWAY_REVOKE_SECRET:-}
       # Where an ENROLLED APPLIANCE dials the broker, returned in the enrolment response. NO
       # `mosquitto` DEFAULT ON PURPOSE: that resolves on this network and nowhere a gateway lives,
       # so a default would produce bundles that enrol perfectly and then connect to nothing.
@@ -1132,7 +1151,12 @@ services:
       # mosquitto-tls-init leaves ca.key root-owned and 0600.
       - mosquitto_certs:/mosquitto/certs:ro
     healthcheck:
-      test: ["CMD-SHELL", "mosquitto_sub -u $${MQTT_MONITOR_USER:-factoryplus_monitor} -P $${MQTT_MONITOR_PASSWORD} -t '$$SYS/broker/version' -C 1 || exit 1"]
+      # -V mqttv5, BECAUSE THAT IS WHAT THE FLEET SPEAKS. Every application client on this stack
+      # -- the daemon, the i3X server and all four simulated gateways -- connects as MQTT 5, so a
+      # probe that only exercised 3.1.1 would report the broker healthy while the protocol
+      # everything actually depends on was broken. A liveness probe should use the transport the
+      # thing it protects uses.
+      test: ["CMD-SHELL", "mosquitto_sub -V mqttv5 -u $${MQTT_MONITOR_USER:-factoryplus_monitor} -P $${MQTT_MONITOR_PASSWORD} -t '$$SYS/broker/version' -C 1 || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -1280,6 +1304,13 @@ services:
       # loop by the mechanism meant to recover it.
       REBIRTH_REQUEST_INTERVAL_SECONDS: ${REBIRTH_REQUEST_INTERVAL_SECONDS:-300}
       PYTHONUNBUFFERED: "1"
+    # THE CA, READ-ONLY. Mounted unconditionally so that MQTT_TLS_ENABLED is the ONLY thing an
+    # operator changes -- the note in .env.example used to list "the CA has to be mounted into both
+    # containers" as the cost of turning TLS on, which meant editing this file, which meant the
+    # switch was not really a switch. mosquitto-tls-init leaves ca.crt world-readable and ca.key
+    # root-owned at 0600, so this reads the root of trust and not the key that signs with it.
+    volumes:
+      - mosquitto_certs:/etc/acs-cymru/broker-ca:ro
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -1345,6 +1376,13 @@ services:
       I3X_SUBSCRIPTION_TTL_SECONDS: ${I3X_SUBSCRIPTION_TTL_SECONDS:-300}
       I3X_SUBSCRIPTION_QUEUE_LIMIT: ${I3X_SUBSCRIPTION_QUEUE_LIMIT:-10000}
       PYTHONUNBUFFERED: "1"
+    # THE CA, READ-ONLY. Mounted unconditionally so that MQTT_TLS_ENABLED is the ONLY thing an
+    # operator changes -- the note in .env.example used to list "the CA has to be mounted into both
+    # containers" as the cost of turning TLS on, which meant editing this file, which meant the
+    # switch was not really a switch. mosquitto-tls-init leaves ca.crt world-readable and ca.key
+    # root-owned at 0600, so this reads the root of trust and not the key that signs with it.
+    volumes:
+      - mosquitto_certs:/etc/acs-cymru/broker-ca:ro
     depends_on:
       mosquitto:
         condition: service_healthy
@@ -1401,9 +1439,33 @@ services:
       # Seeding is first-run only, so editor changes survive `docker compose up`.
       # Set to true for a deliberate reset back to the repo's flow.
       NODE_RED_FORCE_SEED: ${NODE_RED_FORCE_SEED:-false}
+      # ---------------------------------------------------------------------------------------
+      # THE SIMULATED GATEWAYS' TRANSPORT, and until now the one MQTT client on this target that
+      # the TLS switch did not reach.
+      #
+      # node-red-init.mjs has always known how to do this -- it reconciles every `mqtt-broker`
+      # node onto TLS, attaches the CA, and fails closed when the file is missing. It simply never
+      # received the variables here, so `MQTT_TLS_ENABLED=true` moved the ingestion daemon and the
+      # i3X server onto 8883 and left the simulated gateways publishing in clear on 1883 --
+      # silently, because nothing was configured wrongly, the switch just did not arrive.
+      #
+      # The chart has covered all three since the option existed
+      # (`mosquitto.tls.internalClients`). This is Compose catching up.
+      # ---------------------------------------------------------------------------------------
+      MQTT_HOST: ${MQTT_HOST:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_TLS_ENABLED: ${MQTT_TLS_ENABLED:-}
+      MQTT_TLS_CA_FILE: ${MQTT_TLS_CA_FILE:-}
     volumes:
       - nodered_data:/data
       - ./node_red_flow.json:/seed/flows.json:ro
+      # READ-ONLY, AND FOR ca.crt ALONE. mosquitto-tls-init leaves ca.crt world-readable and
+      # ca.key root-owned at 0600, so a container that does not run as root can read the root of
+      # trust and not the key that signs with it -- the same property the gateway-credential
+      # service relies on for the same volume. Mounted unconditionally: an unused certificate
+      # costs nothing, and making the mount conditional would put the operator back to editing
+      # this file, which is what `.env` exists to avoid.
+      - mosquitto_certs:/etc/acs-cymru/broker-ca:ro
       - ./scripts/node-red-init.mjs:/seed/node-red-init.mjs:ro
     # Writes flows_cred.json encrypted at rest. The script fails closed if it
     # cannot produce ciphertext, rather than silently emitting plaintext secrets.
@@ -1428,6 +1490,12 @@ services:
       - "1880:1880"
     volumes:
       - nodered_data:/data
+      # The RUNTIME needs the file too, not only the init container: node-red-init writes the CA
+      # PATH into the tls-config node, and 05-tls.js reads that path when the flow deploys. An
+      # init container that could see the CA and a runtime that could not would produce a flow
+      # that reconciles cleanly and then fails every connection with a generic
+      # "Connection failed to broker" that never mentions certificates.
+      - mosquitto_certs:/etc/acs-cymru/broker-ca:ro
     depends_on:
       node-red-init:
         condition: service_completed_successfully

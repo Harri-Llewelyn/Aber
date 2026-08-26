@@ -607,6 +607,75 @@ def labelled_snapshot() -> dict:
         return dict(_labelled)
 
 
+# ---------------------------------------------------------------------------------------------
+# THE HISTORIAN WRITE LATENCY HISTOGRAM.
+#
+# WHY A DISTRIBUTION AND NOT A COUNTER. Every other series here answers "how many"; this one
+# answers "how long", and the two cannot be the same shape. A mean would be actively misleading
+# on this path -- the interesting write is the slow one that stalls every OTHER device behind it,
+# and a mean is precisely the statistic that hides it.
+#
+# THIS IS THE MEASUREMENT THE SINGLE-WRITER CEILING IS ASSERTED WITHOUT. get_timescaledb_connection()
+# states the ceiling in a docstring; nobody has ever measured it. Fitting the instrument BEFORE
+# anything moves is the whole point -- a latency number taken after a rewrite has nothing to be
+# compared against, which is the wrong way round from how the roadmap first put it.
+#
+# BUCKETS SPAN THE THREE REGIMES THIS PATH ACTUALLY HAS, rather than being copied from
+# prometheus_client's defaults: sub-millisecond to a few milliseconds is a healthy local insert,
+# tens to hundreds of milliseconds is contention or a saturated disk, and anything at or above
+# 0.25s means the bounded reconnect in get_timescaledb_connection() ran -- DB_CONNECT_BACKOFF_SECONDS
+# is 0.25 and DB_CONNECT_MAX_ATTEMPTS is 3, so the retry path lands in the top three buckets and
+# nowhere else. That makes a reconnect stall READABLE OFF THE HISTOGRAM instead of inferable only
+# by correlating with acs_ingestion_db_reconnects_total.
+WRITE_SECONDS_BUCKETS = (
+    0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+)
+
+# COUNTS PER BUCKET, NOT CUMULATIVE. Prometheus wants cumulative `le` buckets and metrics.py
+# accumulates them at render time, because this list is written on the callback thread and read
+# once per scrape: one increment per observation is the right trade against thirteen.
+_write_seconds_buckets = [0] * len(WRITE_SECONDS_BUCKETS)
+_write_seconds_sum = 0.0
+_write_seconds_count = 0
+
+
+def observe_write_seconds(seconds: float):
+    """
+    Record one committed historian write.
+
+    ONLY COMMITTED WRITES ARE OBSERVED, and that is a deliberate exclusion rather than an
+    oversight. A write that raised has its own counter (`write_failures`), and its duration
+    describes the failure -- a connection timing out -- not the daemon's capacity to keep up. Let
+    the two share a histogram and a p99 spike stops being readable: it could mean a slow database
+    or an absent one, which call for opposite responses.
+
+    Shares _counters_lock rather than taking a second one: it is held for a handful of integer
+    increments, and one lock cannot deadlock against itself.
+    """
+    global _write_seconds_sum, _write_seconds_count
+    with _counters_lock:
+        _write_seconds_count += 1
+        _write_seconds_sum += seconds
+        for i, upper in enumerate(WRITE_SECONDS_BUCKETS):
+            if seconds <= upper:
+                _write_seconds_buckets[i] += 1
+                return
+        # Above the last finite bucket. Nothing to increment -- +Inf is derived from the total at
+        # render time, so an outlier is still counted in `_count` and still moves `_sum`.
+
+
+def histogram_snapshot() -> dict:
+    """Histogram state, in the shape metrics.render_exposition() takes."""
+    with _counters_lock:
+        return {
+            "acs_ingestion_write_seconds": {
+                "buckets": tuple(zip(WRITE_SECONDS_BUCKETS, _write_seconds_buckets)),
+                "sum": _write_seconds_sum,
+                "count": _write_seconds_count,
+            }
+        }
+
+
 def diagnose_device_identity(wire_id: str):
     """
     Explain how `wire_id` fails the wire-identity contract, or return None if it is acceptable.
@@ -1055,7 +1124,55 @@ def resolve_device(wire_id: str, use_cache: bool = True):
         raise DirectoryUnavailable(str(e)) from e
 
 
-def resolve_gateway(wire_id: str, group_id: str = None):
+# Throttle for traffic refused because its edge node is archived, keyed by edge node id. An
+# appliance that has not been switched off beats every 30s and publishes its devices besides, so
+# the refusal has to be legible without being the whole log.
+_archived_gateway_warned = {}
+ARCHIVED_GATEWAY_WARN_INTERVAL_SECONDS = 300
+
+
+def resolve_gateway(wire_id: str, group_id: str = None, include_archived: bool = False):
+    """
+    Resolve an edge node to its `gateways` row, refusing one that has been archived.
+
+    `include_archived` is for the two callers that must DESCRIBE the refusal rather than act on it
+    -- verify_gateway_binding() writes a quarantine reason an operator reads, and the quarantine
+    record needs to say which of the two refusals happened. They get the row and check
+    `is_archived` themselves. It is a parameter rather than a second public function so that
+    `resolve_gateway` stays the one seam every caller and every test patches.
+
+    ARCHIVED IS A REFUSAL, NOT A MATCH, and it is the application tier of the same two-tier
+    arrangement mosquitto.acl describes. Migration 0038 revokes a gateway's broker credential when
+    it is archived, so an archived appliance should not be able to connect at all -- but that
+    revocation is ASYNCHRONOUS (net.http_post queues it) and is INERT on a deployment that never
+    configured GATEWAY_REVOKE_SECRET. Both leave a window in which a decommissioned appliance still
+    holds a working credential, and without this it would go on stamping `last_heartbeat` and
+    `status` on a row an operator has retired -- resurrecting it to ONLINE on the dashboard.
+
+    IT REFUSES THE WHOLE EDGE NODE, devices included. A device published beneath an archived
+    gateway is telemetry from decommissioned hardware whichever asset it names, and process_ddata()
+    resolves the gateway before it writes.
+    """
+    row = _resolve_gateway_row(wire_id, group_id)
+    if row is None or include_archived or not row.get("is_archived"):
+        return row
+
+    # NAMED SEPARATELY FROM "unregistered", which is the whole reason this is not simply a filter
+    # in the query. "Received NDATA from unregistered edge node" sends an operator hunting a
+    # provisioning fault; the truth is that somebody archived it, and that is a different fix.
+    count("dropped_gateway_archived")
+    if _throttled(_archived_gateway_warned, wire_id, ARCHIVED_GATEWAY_WARN_INTERVAL_SECONDS):
+        logger.warning(
+            "Dropping traffic from edge node '%s' (%s): the gateway is ARCHIVED. Its broker "
+            "credential should have been revoked when it was archived (migration 0038) -- that it "
+            "can still publish means revocation has not landed, or GATEWAY_REVOKE_SECRET is unset "
+            "on this deployment. Un-archive the gateway to accept it again.",
+            wire_id, row.get("name")
+        )
+    return None
+
+
+def _resolve_gateway_row(wire_id: str, group_id: str = None):
     """
     Resolve an edge node to its `gateways` row.
 
@@ -1093,7 +1210,10 @@ def resolve_gateway(wire_id: str, group_id: str = None):
     # `status` is read back so process_node_message() can tell a genuine ONLINE/OFFLINE transition
     # from the 119 heartbeats an hour that carry the same status as the last one. It does not gate
     # the write -- see the comment there for why that write is not skippable.
-    columns = "id,name,sparkplug_id,sparkplug_group,status"
+    # `is_archived` is read so resolve_gateway() above can refuse a decommissioned edge node. It
+    # is fetched rather than filtered in the query on purpose: a WHERE clause would make an
+    # archived gateway indistinguishable from an unregistered one, and those need different fixes.
+    columns = "id,name,sparkplug_id,sparkplug_group,status,is_archived"
     try:
         # 1. Group-qualified.
         if group_id:
@@ -1211,13 +1331,27 @@ def verify_gateway_binding(device: dict, gateway_wire_id: str, group_id: str = N
     if not bound_gateway_id:
         return None
 
-    gateway = resolve_gateway(gateway_wire_id, group_id)
+    # THE UNFILTERED ROW, because this function's job is to DESCRIBE the mismatch and the
+    # description is what an operator acts on. resolve_gateway() refuses an archived edge node by
+    # answering None, which here would be indistinguishable from "never registered" -- and the
+    # quarantine reason below is written into `devices.quarantine_reason`, where a wrong one sends
+    # somebody looking for a provisioning fault on a gateway they themselves retired.
+    gateway = resolve_gateway(gateway_wire_id, group_id, include_archived=True)
 
     # An unregistered edge node speaking for a *registered, bound* device. resolve_gateway()'s
     # contract is that unregistered edge nodes are dropped; that was only ever enforced on the
     # node-level path, so a device message via an unknown edge node was accepted.
     if gateway is None:
         return "%s: device is bound to a gateway but the publishing edge node '%s' is not registered" % (
+            REASON_GATEWAY_MISMATCH, gateway_wire_id
+        )
+
+    # ARCHIVED IS A REFUSAL EVEN WHEN THE BINDING IS CORRECT, and it has to be checked before the
+    # id comparison below -- a device bound to the gateway that is publishing for it matches by
+    # construction, so without this the telemetry of a decommissioned appliance would be accepted
+    # on the strength of being correctly bound to the appliance that was decommissioned.
+    if gateway.get("is_archived"):
+        return "%s: the publishing edge node '%s' is ARCHIVED. Un-archive the gateway to accept its telemetry again" % (
             REASON_GATEWAY_MISMATCH, gateway_wire_id
         )
 
@@ -1376,8 +1510,18 @@ def quarantine_new_device(wire_id: str, gateway_wire_id: str, reason: str, paylo
     always discarded it, which is why approving a quarantined device previously required the
     operator to re-pick its gateway by hand.
     """
-    gateway = resolve_gateway(gateway_wire_id, group_id)
-    if gateway is None:
+    # Unfiltered, so the log can say WHICH of the two refusals this is. The device is still left
+    # with no gateway either way: attaching a newly discovered one to an archived appliance would
+    # resurrect a retired gateway's device list, and the operator picks a gateway at approval.
+    gateway = resolve_gateway(gateway_wire_id, group_id, include_archived=True)
+    if gateway is not None and gateway.get("is_archived"):
+        logger.warning(
+            "Quarantining device '%s' from ARCHIVED edge node '%s' (%s): it will have no gateway "
+            "assigned until one is chosen at approval.",
+            wire_id, gateway_wire_id, gateway.get("name")
+        )
+        gateway = None
+    elif gateway is None:
         logger.warning(
             "Quarantining device '%s' from unregistered edge node '%s': it will have no gateway "
             "assigned until one is chosen at approval.", wire_id, gateway_wire_id
@@ -1644,6 +1788,195 @@ def accept_reported_status(reported: str, edge_node_id: str = None):
     return candidate
 
 
+# -----------------------------------------------------------------------------
+# Appliance health, carried on the heartbeat that already exists
+# -----------------------------------------------------------------------------
+# WHAT AN APPLIANCE REPORTS ABOUT ITSELF, and where each value lands. Migration 0035 carries the
+# argument for the columns; this is the wire contract.
+#
+# NO NEW TRANSPORT, CREDENTIAL OR TABLE. These arrive as ordinary metrics on the node-level message
+# the appliance already publishes every 30s over a connection it already holds. `on_message()`
+# routes node-level topics here and returns before `process_ddata()`, so none of this reaches the
+# historian or `metric_catalog` -- which is what makes it cheap, and also why it is CURRENT STATE
+# WITH NO HISTORY.
+#
+# `Agent_Version` writes the column `0025` stamps at enrolment. That is the point rather than a
+# collision: enrolment was the only moment the platform ever heard which bundle an appliance runs,
+# so an in-place upgrade was invisible until the appliance re-enrolled.
+GATEWAY_HEALTH_METRICS = {
+    # metric name           column                  kind
+    "Uptime_s":            ("uptime_seconds",      "int"),
+    "Load_1m":             ("load_1m",             "float"),
+    "Mem_Available_Bytes": ("mem_available_bytes", "int"),
+    "Disk_Free_Bytes":     ("disk_free_bytes",     "int"),
+    "Cert_Expires_At":     ("cert_expires_at",     "epoch_ms"),
+    "Agent_Version":       ("agent_version",       "text"),
+    "Flow_Hash":           ("flow_hash",           "text"),
+}
+
+# A sha256 hex digest is 64 characters, which is the longest of these by design. Over-length is
+# dropped rather than truncated, for the same reason a status is: a truncated flow hash matches
+# nothing and would read as "this appliance is running something we never deployed".
+MAX_GATEWAY_HEALTH_TEXT_LENGTH = 64
+
+# Sanity bounds for `Cert_Expires_At`, in epoch milliseconds: 2000-01-01 to 2200-01-01.
+#
+# DELIBERATELY NOT "IN THE FUTURE". An ALREADY-EXPIRED CA is the exact condition this metric exists
+# to surface, so a notAfter in the past is a valid and important reading. Only values that cannot
+# be a certificate date at all are refused -- a zero, a seconds-vs-milliseconds mix-up, a garbled
+# parse.
+CERT_EPOCH_MS_MIN = 946684800000
+CERT_EPOCH_MS_MAX = 7258118400000
+
+# Throttle for refused health metrics, keyed by edge node id. An appliance publishing a bad value
+# publishes it on every heartbeat -- 119 an hour -- so the refusal has to be legible without being
+# the whole log. Same arrangement as the refused-status throttle above.
+_health_rejected_warned = {}
+HEALTH_REJECT_WARN_INTERVAL_SECONDS = 300
+
+
+def _numeric_metric_value(metric):
+    """The metric's numeric value whichever Sparkplug field carries it, or None."""
+    for field in ("int_value", "long_value", "float_value", "double_value"):
+        if metric.HasField(field):
+            return getattr(metric, field)
+    return None
+
+
+def extract_gateway_health(group_id, edge_node_id, payload):
+    """
+    The recognised health metrics in a node-level payload, as a column -> value dict.
+
+    VALIDATED HERE RATHER THAN BY A CHECK CONSTRAINT, and migration 0035 records why: these
+    columns are written in the SAME UPDATE as `status` and `last_heartbeat`. A constraint
+    violation would fail that whole statement, so one nonsensical disk figure would stop a live
+    gateway reporting ONLINE -- a cosmetic fault presenting as an outage. A metric that fails
+    validation is dropped and counted; every other metric in the payload, and the heartbeat
+    itself, still lands.
+
+    Returns {} when nothing recognised is present, which is the ordinary case for the platform's
+    own simulators and for any appliance on a bundle predating this.
+    """
+    health = {}
+    for metric in payload.metrics:
+        # Resolved, not read raw, for the same reason the status metric is: a node publishing
+        # alias-optimised NDATA carries no name, and a raw `metric.name` test would silently see
+        # an appliance as reporting nothing at all.
+        name = resolve_metric_name(group_id, edge_node_id, metric)
+        mapping = GATEWAY_HEALTH_METRICS.get(name)
+        if not mapping:
+            continue
+        column, kind = mapping
+
+        if kind == "text":
+            if not metric.HasField("string_value"):
+                _reject_health(edge_node_id, name, "not a string")
+                continue
+            candidate = metric.string_value.strip()
+            if not candidate or len(candidate) > MAX_GATEWAY_HEALTH_TEXT_LENGTH:
+                _reject_health(edge_node_id, name, "empty or over %d characters"
+                               % MAX_GATEWAY_HEALTH_TEXT_LENGTH)
+                continue
+            health[column] = candidate
+            continue
+
+        raw = _numeric_metric_value(metric)
+        if raw is None:
+            _reject_health(edge_node_id, name, "carries no numeric value")
+            continue
+        try:
+            number = float(raw)
+        except (TypeError, ValueError):
+            _reject_health(edge_node_id, name, "not a number")
+            continue
+        # NaN and the infinities are floats and would serialise into JSON the database refuses.
+        if number != number or number in (float("inf"), float("-inf")):
+            _reject_health(edge_node_id, name, "not finite")
+            continue
+
+        if kind == "epoch_ms":
+            if not (CERT_EPOCH_MS_MIN <= number <= CERT_EPOCH_MS_MAX):
+                _reject_health(edge_node_id, name, "outside any plausible certificate date")
+                continue
+            health[column] = datetime.fromtimestamp(number / 1000, timezone.utc).isoformat()
+            continue
+
+        # Uptime, load, memory and free space are all quantities that cannot be negative. A
+        # negative one is a counter that wrapped or a parse that went wrong, and recording it
+        # would put a number on a page that an operator would act on.
+        if number < 0:
+            _reject_health(edge_node_id, name, "negative")
+            continue
+        health[column] = int(number) if kind == "int" else number
+
+    return health
+
+
+# -----------------------------------------------------------------------------
+# The same readings, as Prometheus gauges -- because the columns have no history
+# -----------------------------------------------------------------------------
+# WHY BOTH. `gateways.disk_free_bytes` and its neighbours hold a LATEST VALUE AND NO HISTORY, which
+# migration 0035 states plainly. So a dashboard reading the database can answer "how full is that
+# disk" and can never answer "is it filling" -- the question an operator actually acts on. These
+# gauges are that second answer, at the scrape interval, over the Prometheus the stack already runs.
+#
+# FOUR OF THE SEVEN, AND THE OMISSIONS ARE THE POINT. The metrics endpoint needs no credential and
+# is published to the host, so `agent_version`, `flow_hash` and `cert_expires_at` stay in the
+# database: the first two are a fingerprint of an appliance's deployed configuration, the third is
+# a fixed date that gains nothing from a time series and is the single most useful fact an attacker
+# on that port could learn. metrics.py's header carries the full argument.
+GATEWAY_HEALTH_GAUGES = {
+    "uptime_seconds":      "acs_ingestion_gateway_uptime_seconds",
+    "load_1m":             "acs_ingestion_gateway_load1",
+    "mem_available_bytes": "acs_ingestion_gateway_mem_available_bytes",
+    "disk_free_bytes":     "acs_ingestion_gateway_disk_free_bytes",
+}
+
+HEALTH_REPORTED_GAUGE = "acs_ingestion_gateway_health_reported_timestamp_seconds"
+
+# Last-seen values per edge node. BOUNDED BY THE FLEET WITHOUT NEEDING A CAP: this is written only
+# after resolve_gateway() has matched a REGISTERED gateway, so an unknown or forged edge node id
+# cannot add an entry -- which is the same argument the cache bound makes, arrived at for free.
+# An archived gateway's series lingers until the daemon restarts; its reported-at timestamp is
+# what says so.
+_gateway_health_gauges = {}
+_gateway_health_gauges_lock = threading.Lock()
+
+
+def record_gateway_health_gauges(edge_node_id, health, at):
+    """
+    Merge one payload's readings into this edge node's gauge set.
+
+    MERGED, NOT REPLACED, so a payload carrying only what its collector could produce does not
+    silently zero the rest. The reported-at gauge moves whenever anything was recognised, which is
+    what lets a reader tell a steady disk figure from a dead collector -- a gauge holds its last
+    value forever and says nothing about its own age.
+    """
+    exported = {metric: health[column]
+                for column, metric in GATEWAY_HEALTH_GAUGES.items() if column in health}
+    with _gateway_health_gauges_lock:
+        entry = _gateway_health_gauges.setdefault(edge_node_id, {})
+        entry.update(exported)
+        entry[HEALTH_REPORTED_GAUGE] = at.timestamp()
+
+
+def gateway_health_gauge_snapshot() -> dict:
+    """A copy, safe to read while the paho callback thread is writing."""
+    with _gateway_health_gauges_lock:
+        return {node: dict(values) for node, values in _gateway_health_gauges.items()}
+
+
+def _reject_health(edge_node_id, metric_name, reason):
+    """Drop one health metric, loudly enough to find and quietly enough to live with."""
+    count("gateway_health_metrics_rejected")
+    if _throttled(_health_rejected_warned, edge_node_id or "", HEALTH_REJECT_WARN_INTERVAL_SECONDS):
+        logger.warning(
+            "Edge node '%s' reported an unusable health metric -- '%s': %s. Dropping that metric; "
+            "the heartbeat and every other metric in the payload are unaffected.",
+            edge_node_id, metric_name, reason
+        )
+
+
 def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: str = None):
     """
     On Sparkplug B node-level messages (NBIRTH / NDATA / NDEATH):
@@ -1722,11 +2055,25 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
     previous_status = gateway.get("status")
     transitioned = previous_status is not None and previous_status != status
 
+    # AFTER the registration check, not before: an unregistered node is dropped either way, and
+    # validating its metrics first would log rejections for a gateway nothing is going to write.
+    update = {
+        "status": status,
+        "last_heartbeat": heartbeat_dt.isoformat(),
+    }
+    health = extract_gateway_health(group_id, edge_node_id, payload)
+    if health:
+        update.update(health)
+        # STAMPED ONLY WHEN SOMETHING WAS RECOGNISED, which is what makes the column mean what
+        # 0035 says it means: an appliance on a bundle predating this beats forever and leaves
+        # `health_reported_at` NULL, which reads as "does not report health" rather than as "has
+        # stopped reporting it". The two need different responses.
+        update["health_reported_at"] = heartbeat_dt.isoformat()
+        # The scrapeable half, for the readings that need a trend rather than a current value.
+        record_gateway_health_gauges(edge_node_id, health, heartbeat_dt)
+
     try:
-        supabase_client.table("gateways").update({
-            "status": status,
-            "last_heartbeat": heartbeat_dt.isoformat()
-        }).eq("id", gateway["id"]).execute()
+        supabase_client.table("gateways").update(update).eq("id", gateway["id"]).execute()
 
         # Kept in step with the row resolve_gateway() cached, so the next heartbeat inside
         # CACHE_TTL_SECONDS compares against what was actually written rather than re-reporting
@@ -2098,6 +2445,13 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     asset_id = device["sparkplug_id"]
     asset_name = device.get("name") or asset_id
 
+    # THE CLOCK STARTS BEFORE THE CONNECTION IS ACQUIRED, not at the INSERT. What bounds this
+    # daemon is how long the one callback thread is occupied per message, and a reconnect occupies
+    # it for up to DB_CONNECT_MAX_ATTEMPTS * DB_CONNECT_BACKOFF_SECONDS while the whole fleet
+    # waits -- the stall get_timescaledb_connection() accepts on purpose. Timing only the INSERT
+    # would make that stall invisible in the one series meant to expose it.
+    write_started = time.perf_counter()
+
     db_conn = get_timescaledb_connection()
     if not db_conn:
         count("dropped_db_unavailable")
@@ -2297,6 +2651,13 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                     )
 
                 logger.info("INGESTED DDATA: Ingested %d metrics for asset '%s' into TimescaleDB", metric_count, asset_id)
+
+        # OUTSIDE `with db_conn`, WHICH IS THE POINT: the block commits on exit, and on a
+        # hypertable the commit is where the write becomes durable. An observation taken at the
+        # end of the cursor block would report everything except the part that touches the disk.
+        # Reached only when the commit itself succeeded -- a commit that raises goes to `except`
+        # below and is deliberately not observed.
+        observe_write_seconds(time.perf_counter() - write_started)
     except Exception as e:
         # The whole message is lost: `with db_conn` rolled the transaction back, so none of the
         # batch landed. Counted so the loss is visible in STATS rather than only in the log --
@@ -2327,13 +2688,78 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         )
 
 
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, userdata, flags, rc, properties=None):
+    """
+    Subscribe once the broker has accepted the connection.
+
+    `properties` IS THE MQTT 5 SIGNATURE, and it is optional so the function is callable under
+    either protocol -- paho passes five arguments for a v5 client and four for a 3.1.1 one. Keeping
+    the default means this is not the thing that breaks if the protocol is ever moved back.
+
+    `rc` is a `ReasonCodes` under v5 rather than an int, and `== 0` still works: paho's
+    ReasonCodes.__eq__ compares against int. Verified against the pinned 1.6.1 rather than assumed,
+    because a comparison that silently became False would leave the daemon connected and
+    subscribed to nothing.
+    """
     if rc == 0:
         logger.info("Connected to MQTT Broker successfully.")
         client.subscribe("spBv1.0/#")
         logger.info("Subscribed to 'spBv1.0/#'")
     else:
         logger.error("Failed to connect to MQTT Broker, return code %s", rc)
+
+
+def on_disconnect(client, userdata, rc, properties=None):
+    """
+    Say that the connection ended, and say why WHEN THE LIBRARY GIVES US A WHY -- which, on the
+    pinned paho, it does not for the case anyone cares about.
+
+    BEFORE THIS THERE WAS NO on_disconnect AT ALL, so an involuntary disconnect was entirely silent
+    and the only evidence was a "Connected to MQTT Broker successfully." arriving twice. That much
+    is a real improvement and is why this exists.
+
+    WHAT MQTT 5 WAS EXPECTED TO ADD, AND DOES NOT HERE. v5 lets the broker state a reason in its
+    DISCONNECT, and mosquitto does: a session takeover, measured against this stack with mqtt.js,
+    arrives as 142 `Session taken over`. paho 1.6.1 RECEIVES THAT PACKET AND DISCARDS THE REASON --
+    `_handle_disconnect()` only decodes one when `remaining_length > 2`, and mosquitto's carries a
+    reason code with zero-length properties, which is shorter than that. Enabling paho's protocol
+    log against the same event shows it plainly:
+
+        Received DISCONNECT None None
+
+    and this callback is then reached with paho's own `MQTT_ERR_CONN_LOST` (7) instead. So the
+    branch below that renders a `ReasonCodes` is not dead code -- a newer paho, or a broker sending
+    properties, would take it -- but on the pinned version it does not fire, and claiming otherwise
+    in a comment would be worse than not logging at all.
+
+    IT IS A LOG LINE AND NOT A DECISION. paho's loop_forever() reconnects on its own and should:
+    every reason a broker sends here is either transient or an operator's deliberate act, and a
+    daemon that gave up on one would turn a reconnect into an outage.
+
+    rc == 0 is a disconnect this daemon asked for, which is not worth a line.
+    """
+    if rc == 0:
+        return
+
+    # TWO DIFFERENT THINGS ARRIVE HERE AND CONFLATING THEM WOULD BE WORSE THAN NOT LOGGING.
+    #
+    #   a ReasonCodes  the BROKER said why -- it sent a DISCONNECT packet. This is the v5 gain:
+    #                  "Session taken over", "Server shutting down", "Administrative action".
+    #   a bare int     PAHO said why, and the broker said nothing. 7 is MQTT_ERR_CONN_LOST: the
+    #                  socket went away. A hard broker restart looks like this, because the process
+    #                  dies before it can send anything -- which is exactly the case v5 CANNOT
+    #                  improve, and printing paho's number as though it were a protocol reason code
+    #                  would misrepresent what was learned.
+    if isinstance(rc, int):
+        logger.warning(
+            "Disconnected from MQTT Broker: the connection dropped (paho rc=%s); the broker sent "
+            "no reason. Reconnecting.", rc
+        )
+    else:
+        logger.warning(
+            "Disconnected from MQTT Broker by the broker: %s (reason code %s). Reconnecting. "
+            "Under MQTT 3.1.1 this line could only have said 'unexpected'.", rc, int(rc.value)
+        )
 
 
 def parse_sparkplug_payload(msg):
@@ -2693,9 +3119,18 @@ def start_metrics_endpoint():
                 cache.evictions
             )
 
+        # APPLIANCE HEALTH, read at scrape time for the same reason the cache gauges are: these
+        # are states rather than events. Four readings plus the timestamp that says how old they
+        # are -- a gauge holds its last value indefinitely, so without that timestamp a dead
+        # collector and a steady disk are the same picture.
+        for edge_node, values in gateway_health_gauge_snapshot().items():
+            for metric, value in values.items():
+                labelled[(metric, (("edge_node", edge_node),))] = value
+
         return metrics.render_exposition(
             counters=counter_snapshot(),
             labelled=labelled,
+            histograms=histogram_snapshot(),
             gauges={
                 "acs_ingestion_up": 1,
                 "acs_ingestion_db_connected":
@@ -2716,14 +3151,21 @@ def main():
         )
         raise SystemExit(1)
 
-    # Note: Intentionally using paho-mqtt==1.6.1 v1 callback signatures.
-    # If upgrading to paho-mqtt 2.x+, callbacks must be migrated to CallbackAPIVersion.VERSION2
-    # signatures (e.g. on_connect(client, userdata, flags, reason_code, properties)).
-    client = mqtt.Client()
+    # MQTT 5, and paho-mqtt==1.6.1's v1 callback API. Those are separate choices: the PROTOCOL is
+    # v5 and the CALLBACK STYLE is still v1, which 1.6.1 supports. Upgrading to paho 2.x is what
+    # would force CallbackAPIVersion.VERSION2, and that is a different change.
+    #
+    # WHAT v5 BUYS THIS DAEMON TODAY: nothing measurable, and that is recorded rather than
+    # glossed. The broker's DISCONNECT reason code -- the one benefit that survived review -- is
+    # sent by mosquitto and DISCARDED BY paho 1.6.1 before it reaches on_disconnect(); see the
+    # measurement there. The daemon is on v5 because the platform is, and a stack speaking two
+    # protocol versions is a combination nobody tests.
+    client = mqtt.Client(protocol=mqtt.MQTTv5)
     client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
     # Before connect(), necessarily: paho applies the TLS context when the socket is opened.
     configure_mqtt_tls(client)
     client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
     client.on_message = on_message
 
     # Started before the connect loop, not after: the connect loop below retries indefinitely, so
@@ -2745,7 +3187,13 @@ def main():
     while True:
         try:
             logger.info("Connecting to MQTT Broker at %s:%s...", MQTT_HOST, MQTT_PORT)
-            client.connect(MQTT_HOST, MQTT_PORT, 60)
+            # `clean_start=True` is v5's spelling of 3.1.1's clean_session, and it is passed
+            # explicitly rather than left to paho's MQTT_CLEAN_START_FIRST_ONLY default so the
+            # session semantics are the ones this daemon already had. NO SESSION EXPIRY
+            # INTERVAL IS SET, deliberately: Sparkplug's NDEATH is the Last Will, and a
+            # surviving session would delay it -- leaving dead edge nodes reading ONLINE with
+            # every device beneath them apparently live.
+            client.connect(MQTT_HOST, MQTT_PORT, 60, clean_start=True)
             break
         except Exception as e:
             logger.warning("MQTT Broker connection failed: %s. Retrying in 2 seconds...", e)

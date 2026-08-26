@@ -57,6 +57,37 @@ That second one is worth understanding, because it is the whole onboarding model
 Click the inject node, then look at **Devices → quarantine** in the dashboard. Edit `DEVICE_ID` in
 the function node to name your actual machine.
 
+## What this appliance reports about itself
+
+Every 30s the heartbeat carries a handful of facts about the appliance, so "what is that gateway
+actually doing" is answerable from the dashboard instead of by getting a shell on it:
+
+| Reported | From |
+| :--- | :--- |
+| uptime | the Node-RED runtime's own start |
+| 1-minute load, available memory, free disk on `/` | `node_exporter`, polled locally |
+| bundle version, flow hash | recorded by `bootstrap` at enrolment |
+| broker CA expiry | read from the CA this appliance installed |
+
+**`node_exporter` runs here and is never scraped from the centre.** It has no published port. The
+platform's Prometheus does not reach into plants: this appliance dials out to the broker and
+nothing assumes traffic the other way, gateways enrol dynamically so a static scrape config could
+not know them, and an inbound path per gateway is the thing an outbound-only design exists to
+avoid. The flow polls it over the appliance's own Docker network and republishes three series on
+the MQTT connection it already holds.
+
+**A collector that is down costs three metrics, never the heartbeat.** The poll runs on its own
+timer and writes to a cache that the heartbeat reads. Wiring it into the heartbeat would let a slow
+disk read stop the gateway reporting ONLINE — which is a worse failure than any it measures.
+Readings go stale after five minutes and are then omitted rather than repeated, so a number on the
+dashboard is always one this appliance really took.
+
+**The CA expiry is the one that earns its place.** The broker's CA is distributed by hand into
+every appliance's trust store, so re-minting it does not fail loudly — it succeeds, and every
+gateway drops off at once with no signal but absence. Reporting the date *this* appliance holds
+turns the worst fleet-wide failure into a dated warning. It is read once, at enrolment, from the CA
+that was installed; replacing that file by hand without re-enrolling will not update it.
+
 ## What this gateway is allowed to publish
 
 The broker confines this appliance to `spBv1.0/+/+/<its own Sparkplug id>/#`.

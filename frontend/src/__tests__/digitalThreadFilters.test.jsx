@@ -352,10 +352,19 @@ describe('Digital Thread time range', () => {
   // window; that the API turns the ask into a SQL predicate rather than a client-side filter is
   // the part that would be silently reverted, and the symptom would be a wrong row count rather
   // than an error.
-  it('applies the bounds as PostgREST predicates on recorded_at', () => {
+  //
+  // THE MECHANISM MOVED AND THE GUARD FOLLOWED IT. The bounds used to be `query.gte(...)` on a
+  // PostgREST builder; migration 0039 made this page an RPC, because the deleted-asset filter is
+  // an anti-join PostgREST cannot express. They are arguments now. What must stay true is
+  // unchanged: the window reaches the database, and is not applied to rows the limit already cut.
+  it('applies the bounds as arguments to the page RPC, not as a client-side filter', () => {
     const source = fs.readFileSync(path.resolve(__dirname, '../api.js'), 'utf8')
-    expect(source).toMatch(/query\.gte\('recorded_at', since\)/)
-    expect(source).toMatch(/query\.lte\('recorded_at', until\)/)
+    expect(source).toMatch(/supabase\.rpc\('digital_thread_page'/)
+    expect(source).toMatch(/p_since: since \|\| null/)
+    expect(source).toMatch(/p_until: until \|\| null/)
+    // And the filter this whole change exists for: it is a predicate, so the row budget is spent
+    // on rows that will be shown.
+    expect(source).toMatch(/p_include_purged: includePurged/)
   })
 })
 

@@ -1568,7 +1568,11 @@ def on_message(client, userdata, msg):  # noqa: ARG001
 def start_mqtt():
     import paho.mqtt.client as mqtt
 
-    client = mqtt.Client(client_id=f"i3x-service-{os.getpid()}")
+    # MQTT 5 with paho 1.6.1's v1 callback API -- the protocol and the callback style are separate
+    # choices, and only paho 2.x would force the latter to move. NOT for the DISCONNECT reason
+    # code: mosquitto sends one and paho 1.6.1 discards it (measured; see ingestion.py's
+    # on_disconnect). This is on v5 because the rest of the platform is.
+    client = mqtt.Client(client_id=f"i3x-service-{os.getpid()}", protocol=mqtt.MQTTv5)
     if MQTT_USER and MQTT_PASSWORD:
         client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
     if MQTT_TLS_ENABLED:
@@ -1580,20 +1584,40 @@ def start_mqtt():
             )
         client.tls_set(ca_certs=MQTT_TLS_CA_FILE)
 
-    def on_connect(c, u, f, rc):  # noqa: ARG001
+    # `properties` is the MQTT 5 signature and defaults so the function is callable under either
+    # protocol. `rc` is a ReasonCodes under v5 and `== 0` still holds -- paho's ReasonCodes.__eq__
+    # compares against int.
+    def on_connect(c, u, f, rc, properties=None):  # noqa: ARG001
         if rc == 0:
             logger.info("MQTT connected; subscribing to spBv1.0/#")
             c.subscribe("spBv1.0/#", qos=0)
         else:
             logger.error("MQTT connection refused, rc=%s", rc)
 
+    def on_disconnect(c, u, rc, properties=None):  # noqa: ARG001
+        # BEFORE THIS THERE WAS NO on_disconnect, so a drop was silent. A ReasonCodes here would
+        # mean the broker stated a reason; on paho 1.6.1 that does not happen even under v5, so in
+        # practice this reports paho's own MQTT_ERR_CONN_LOST. The branch stays because a newer
+        # paho would take it. A log line either way -- the loop below reconnects and should.
+        if rc == 0:
+            return
+        if isinstance(rc, int):
+            logger.warning("MQTT connection dropped (paho rc=%s); no reason from the broker. "
+                           "Reconnecting.", rc)
+        else:
+            logger.warning("MQTT disconnected by the broker: %s (reason code %s). Reconnecting.",
+                           rc, int(rc.value))
+
     client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
     client.on_message = on_message
 
     def run():
         while True:
             try:
-                client.connect(MQTT_HOST, MQTT_PORT, 60)
+                # v5's spelling of clean_session. NO SESSION EXPIRY INTERVAL: Sparkplug's
+                # NDEATH is the Last Will, and a surviving session would delay it.
+                client.connect(MQTT_HOST, MQTT_PORT, 60, clean_start=True)
                 client.loop_forever()
             except Exception as exc:  # noqa: BLE001
                 logger.warning("MQTT connection failed: %s; retrying in 5s", exc)

@@ -431,13 +431,34 @@ its own gets five rules against a datasource whose health check fails. That is s
 placeholder in `grafana/provisioning/datasources/datasources.template.yml`, which is also why the
 datasource URL is substituted per deployment target rather than committed.
 
-### Deliberately not implemented
+### `acs_ingestion_write_seconds` — the one distribution
 
-`acs_ingestion_write_seconds`, the histogram in #22's proposal. It needs a timing wrapper on the
-historian write, which is the one path in this daemon that runs per sample on the broker callback
-thread — the place least appropriate for casual overhead. It is worth doing with the horizontal
-ingestion scaling work, which exists to unblock that same thread: a latency number is worth far
-more once there is a before-and-after to compare it against.
+Every other series here answers *how many*; this one answers *how long*, and it is the only
+measurement of the ceiling the daemon's own docstring asserts. `get_timescaledb_connection()` has
+always said that one connection on the paho callback thread is "the thing to revisit first" — and
+until this histogram existed, nobody had ever measured what that thread actually costs per message.
+
+**It had been deferred to the horizontal-scaling work, on the argument that a latency number is
+worth more once there is a before-and-after to compare against. That argument is the wrong way
+round**: you cannot have a *before* if you fit the instrument afterwards. The measurement is what
+decides whether the rewrite is worth doing, so it has to come first.
+
+**What it times, and why it starts where it does.** The clock starts before the connection is
+acquired, not at the `INSERT`, and stops after `with db_conn` commits. What bounds this daemon is
+how long the single callback thread is *occupied*, and a reconnect occupies it for up to
+`DB_CONNECT_MAX_ATTEMPTS × DB_CONNECT_BACKOFF_SECONDS` while the whole fleet waits — the stall
+`get_timescaledb_connection()` accepts on purpose. Timing only the `INSERT` would hide it. The
+bucket boundaries are chosen so it cannot hide inside a bucket that also holds healthy writes:
+**anything at or above `le="0.25"` is the reconnect path, not the database.**
+
+**Committed writes only.** A write that raised is counted by `acs_ingestion_write_failures_total`
+and excluded here, so a p99 spike means a slow database and never an absent one. Letting the two
+share a distribution would make the quantile ambiguous between conditions that call for opposite
+responses.
+
+**It does not cover the whole message.** Device resolution — which can issue a PostgREST round trip
+on a cache miss — and protobuf decode happen *before* the clock starts, on the same thread. So a
+ceiling derived from this series is an **upper bound**: the real one is lower.
 
 ## Testing
 

@@ -111,6 +111,76 @@ export function formatHeartbeat(lastHeartbeat, now = Date.now()) {
 }
 
 /**
+ * APPLIANCE HEALTH, reported by the gateway itself on the heartbeat (migration 0035).
+ *
+ * These read columns that are NULL on every gateway that does not report them -- a virtual one, and
+ * any appliance on a bundle predating that migration -- so each helper returns null rather than a
+ * zero or a dash, and the caller decides how to say "not reported". A zero disk figure and an
+ * unreported one must never render the same way.
+ */
+
+/**
+ * The window the CA-expiry alert fires in.
+ *
+ * MIRRORS `acs-gateway-ca-expiring` in grafana/provisioning/alerting/alert-rules.yaml, whose
+ * threshold is `lt 30`, and scripts/check-docs-drift.mjs asserts the two agree. They are one
+ * decision -- long enough to schedule a fleet-wide trust-store update through a plant's change
+ * process -- and a UI that warned on a different horizon from the alert would send an operator
+ * looking for a rule that had not fired.
+ */
+export const CERT_EXPIRY_WARN_DAYS = 30;
+
+/** Days until the reported CA expires. Negative once it has. Null when nothing was reported. */
+export function certExpiryDays(certExpiresAt, now = Date.now()) {
+  if (!certExpiresAt) return null;
+  const ts = new Date(certExpiresAt).getTime();
+  if (Number.isNaN(ts)) return null;
+  return (ts - now) / 86_400_000;
+}
+
+/**
+ * The CA expiry as a person reads it, or null when the appliance has not reported one.
+ *
+ * PAST IS SPELLED OUT RATHER THAN SIGNED. "in -3 days" is a number an operator has to decode at
+ * exactly the moment they are least inclined to; an expired CA is the whole failure this column
+ * exists to catch, so it says so.
+ */
+export function formatCertExpiry(certExpiresAt, now = Date.now()) {
+  const days = certExpiryDays(certExpiresAt, now);
+  if (days === null) return null;
+  if (days < 0) return `EXPIRED ${Math.abs(Math.round(days))}d ago`;
+  if (days < 1) return 'expires today';
+  return `in ${Math.round(days)}d`;
+}
+
+/** True when the reported CA is inside the alert's window, or already gone. */
+export function isCertExpiring(certExpiresAt, now = Date.now()) {
+  const days = certExpiryDays(certExpiresAt, now);
+  return days !== null && days < CERT_EXPIRY_WARN_DAYS;
+}
+
+/**
+ * Bytes, at the precision an operator acts on.
+ *
+ * BINARY UNITS, because these come from node_exporter reading /proc, which counts in them -- and
+ * because a disk figure that disagrees with what `df -h` on the appliance says is worse than no
+ * figure at all. Zero is a real reading and formats as "0 B"; only null and undefined are absent.
+ */
+export function formatBytes(bytes) {
+  if (bytes === null || bytes === undefined || Number.isNaN(Number(bytes))) return null;
+  const n = Number(bytes);
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let i = 0;
+  let value = Math.abs(n);
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i += 1;
+  }
+  const rendered = i === 0 ? value : value.toFixed(value < 10 ? 1 : 0);
+  return `${n < 0 ? '-' : ''}${rendered} ${units[i]}`;
+}
+
+/**
  * Milliseconds until an enrolment token expires, or null when there is nothing to count down.
  *
  * Negative is NOT clamped to zero: the modal distinguishes "expires in 4 minutes" from "expired 20

@@ -690,16 +690,31 @@ context because `node_red_flow.json` lives there). Baking is what makes "which r
 `aas-export` is running" a property of the deployed artefact, so a rollback rolls the functions back.
 
 `key-auth` is enabled on `/rest/v1/`, `/realtime/v1/`, `/storage/v1/` and `/functions/v1/`.
-**Two routes are deliberately open**, and both are load bearing:
+**Six routes are deliberately open, across four exemptions**, and every one is load bearing:
 
-| Route | Why |
-| :--- | :--- |
-| `/auth/v1/` | GoTrue authenticates its own callers, and is the OAuth 2.1 server Grafana talks to — an OAuth client presents client credentials, not a Supabase apikey. Sign-in must also work before any session exists |
-| `/storage/v1/object/public/` | An AAS `File` URL must be dereferenceable by a viewer holding no session. Requiring a key would break every shell already handed out |
+| Route(s) | Exemption | Why |
+| :--- | :--- | :--- |
+| `/auth/v1/` | sign-in | GoTrue authenticates its own callers, and is the OAuth 2.1 server Grafana talks to. Sign-in must work before any session exists |
+| `/storage/v1/object/public/` | public objects | An AAS `File` URL must be dereferenceable by a viewer holding no session. Requiring a key would break every shell already handed out |
+| `/functions/v1/grafana-userinfo`, `/functions/v1/nodered-userinfo` | OAuth userinfo | An OAuth client presents client credentials, never a Supabase apikey, and **no Grafana setting can add a header to `api_url`** — gated, it 401s and Grafana reports `invalid role`, an RBAC fault rather than a gateway one. Exact paths and not a prefix, because `/functions/v1/` would re-open the whole runtime |
+| `/ping`, `/v1/` | Factory+ Directory | A Factory+ client has no apikey and no way to acquire one. `/ping` is open by specification; `/v1/` is authenticated by the **function**, which refuses a request carrying no bearer token and then queries as the *caller*, so RLS still applies |
 
 The public-object exemption is a **separate service** with `/object/public/` baked into its
 upstream URL, not an exempt route, because `strip_path: true` would otherwise remove the segment
 storage-api routes on.
+
+**This table is asserted rather than maintained by hand.**
+[`scripts/check-gateway-surface.mjs`](../scripts/check-gateway-surface.mjs) compares `kong.yml`'s
+whole routing and authentication surface against a reviewed inventory — which services exist, which
+routes they carry, which are gated, and which are open under which exemption. It exists because
+`validate.py` asserts the 401s that *should* happen and **nothing can assert the absence of a route
+nobody wrote**: a route added here and gated nowhere fails no test that probes. It was written
+against the surface rather than against Kong, so it is also the specification a move to Envoy
+(roadmap §5) has to satisfy.
+
+> This table said **two** routes until that check was written, and had done since the userinfo and
+> Directory exemptions were added. Every one of the four was argued for carefully in `kong.yml`; the
+> document `kong.yml` points readers at for the full reasoning listed half of them.
 
 > Adding a plugin name to `KONG_PLUGINS` **replaces** the default `bundled` set rather than adding
 > to it. `key-auth` had to be named explicitly or Kong would refuse to start on a config

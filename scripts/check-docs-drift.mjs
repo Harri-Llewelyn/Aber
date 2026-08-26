@@ -466,6 +466,14 @@ function edgeFunctionNames() {
 
   /** name -> why a later migration is allowed to replace an earlier definition. */
   const INTENDED_REDECLARATIONS = {
+    'public.consume_gateway_enrollment_token': `0025 declares it testing only the token hash,
+      consumed_at and expires_at; 0037 replaces it with one that ALSO refuses an archived gateway.
+      THE BODY IS REPRODUCED IN FULL rather than patched, because this function is the security
+      boundary for enrolment and a reader should see all of it at once -- a redeclaration that
+      patched only the WHERE clause would leave the hash shape-check and the identity SELECT in a
+      different migration from the rule they protect. 0037's self-check runs the reproduction it
+      exists to close: archive a gateway holding a live bundle, then attempt redemption. This list
+      can check that a redeclaration was INTENDED and not that it was COMPLETE.`,
     'public.prune_platform_alerts': `0030 declares it with the window as a literal default; 0032
       replaces it with one whose default is NULL and which reads alerts.retention_days from
       system_settings, so an Administrator can see and change the window without a shell. THE
@@ -567,6 +575,14 @@ function edgeFunctionNames() {
       + 'revoked from anon/authenticated by 0027. It is read by the Grafana `supabase` datasource '
       + 'over a direct connection, never over PostgREST, so a documented path would answer 403 to '
       + 'every caller the OpenAPI spec describes',
+  gateway_health:
+      'Per-gateway identity, heartbeat freshness and the appliance health 0035 records, granted '
+      + 'to `grafana_reader` alone and revoked from anon/authenticated by 0036 -- the third view '
+      + 'in the same arrangement as platform_health and storage_footprint above. It backs the '
+      + 'Gateway Fleet Health dashboard and the certificate-expiry alert rule over a direct '
+      + 'connection, never over PostgREST. The browser reads the same facts from `gateways` and '
+      + '`gateway_status` with RLS applied, which is why publishing a second, RLS-free path to '
+      + 'them would be a downgrade rather than a convenience',
   };
 
   const spec = read('docs/openapi.yaml');
@@ -686,6 +702,310 @@ function edgeFunctionNames() {
     } else {
       pass(`all ${declared.size} frontend build args are on the reviewed non-secret allowlist`);
     }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 10c. The roadmap is a contiguous list, and all of it is inside the roadmap section.
+//
+// Retiring an item means deleting it, renumbering the rest and updating the count claim, which is
+// three edits that must agree and which are made by hand. Four items have been retired recently and
+// each renumbered everything below it.
+//
+// THE FAILURE THIS EXISTS FOR HAS ALREADY HAPPENED. Splitting the legacy-API-key work into its own
+// entry appended it to the END OF THE FILE rather than to the end of its section, so it landed
+// after `## Contributing`: correctly numbered, fully written, and outside the roadmap. It read as
+// "item 8 is missing" to someone scrolling the section, and nothing here noticed -- the link check
+// passed, the prose was intact, and no count was wrong. A heading under the wrong parent is
+// invisible to every check that looks at content rather than at structure.
+//
+// Three assertions, because the three ways this drifts are independent: an item outside the
+// section, a gap or duplicate in the numbering, and a count sentence left behind by a retirement.
+// -------------------------------------------------------------------------------------------------
+{
+  const readme = read('README.md');
+  const lines = readme.split('\n');
+
+  const sectionStart = lines.findIndex((l) => /^## Roadmap/.test(l));
+  if (sectionStart < 0) {
+    fail('README.md has no "## Roadmap" section heading');
+  } else {
+    // The section runs to the next `## ` heading, or to the end of the file.
+    let sectionEnd = lines.length;
+    for (let i = sectionStart + 1; i < lines.length; i += 1) {
+      if (/^## /.test(lines[i])) { sectionEnd = i; break; }
+    }
+
+    const items = [];
+    const strays = [];
+    lines.forEach((line, i) => {
+      const m = /^### (\d+) · /.exec(line);
+      if (!m) return;
+      if (i > sectionStart && i < sectionEnd) items.push(Number(m[1]));
+      else strays.push(`line ${i + 1}: ${line.trim()}`);
+    });
+
+    if (strays.length) {
+      fail(
+        `${strays.length} numbered roadmap item(s) sit OUTSIDE the "## Roadmap" section:\n` +
+          strays.map((s) => `        ${s}`).join('\n') +
+          '\n      They are in the file and not in the roadmap, which reads to a person as the item\n' +
+          '      being missing. Move them above the next "## " heading.'
+      );
+    }
+
+    const expected = items.map((_, i) => i + 1);
+    if (items.join(',') !== expected.join(',')) {
+      fail(
+        `the roadmap items are numbered ${items.join(', ') || '(none)'} -- expected ` +
+          `${expected.join(', ')}. Retiring an item means renumbering every item below it.`
+      );
+    } else if (!strays.length) {
+      // The count claim in the section's opening sentence, written as a word.
+      const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight',
+        'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen'];
+      const claim = /^(\w+) extensions,/im.exec(lines.slice(sectionStart, sectionEnd).join('\n'));
+      const claimed = claim ? WORDS.indexOf(claim[1].toLowerCase()) : -1;
+      if (claimed < 0) {
+        fail(
+          'the roadmap section does not open with a "<Word> extensions," count claim, which this ' +
+            'check reads to catch a retirement that renumbered without recounting.'
+        );
+      } else if (claimed !== items.length) {
+        fail(
+          `README.md claims "${claim[1]} extensions" but the roadmap lists ${items.length}.`
+        );
+      } else {
+        pass(`the roadmap lists ${items.length} contiguously numbered items, all inside its section`);
+      }
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 10d. Every migration that adds a `gateways` column rebuilds the view that is supposed to expose it.
+//
+// `public.gateway_status` is declared `SELECT g.*`, and POSTGRES EXPANDS THAT STAR AT CREATION TIME
+// into a frozen column list. A column added to `gateways` afterwards is not in the view, and
+// nothing errors -- the view goes on returning the columns it was born with, so the failure is a
+// dashboard field that is silently absent rather than a query that fails.
+//
+// REPLAY ORDER MAKES IT PERMANENT. db-init replays every migration on every boot in filename order,
+// so 0025's own `ensure_gateway_status_view()` call runs BEFORE any later migration's ALTER and
+// rebuilds the view without it, every single boot. There is no state in which it self-corrects.
+//
+// 0001, 0004, 0008 and 0025 each end with the call and the view's comment says to make it. 0035
+// added seven columns and did not, which is what this exists to have caught.
+// -------------------------------------------------------------------------------------------------
+{
+  const ADDS_COLUMN = /ALTER TABLE (?:ONLY )?public\.gateways\s+ADD COLUMN/i;
+  const REBUILDS = /SELECT\s+public\.ensure_gateway_status_view\(\)/i;
+
+  // STATEMENTS ONLY. Both regexes would otherwise match the prose ABOUT them -- 0035's own header
+  // explains the replay-order trap by name, and a migration that merely discusses the rebuild
+  // would satisfy a check looking for it. Found by breaking this assertion: removing the real call
+  // from 0035 left the check passing on the strength of its comment.
+  const statements = (sql) => sql.split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
+
+  const migrations = readdirSync(join(REPO, 'supabase/migrations'))
+    .filter((f) => /^\d{4}_.*\.sql$/.test(f))
+    .sort()
+    .map((f) => [f, statements(read(`supabase/migrations/${f}`))]);
+
+  // A REBUILD IN A LATER MIGRATION COVERS AN EARLIER ADD, because db-init replays them in filename
+  // order on every boot: 0024 adds `description` and never rebuilds, but 0025 rebuilds afterwards
+  // and the column arrives in the view regardless. What actually breaks is an add that NOTHING
+  // after it rebuilds -- which is exactly the position the newest migration is always in.
+  const offenders = [];
+  let checked = 0;
+  for (let i = 0; i < migrations.length; i += 1) {
+    if (!ADDS_COLUMN.test(migrations[i][1])) continue;
+    checked += 1;
+    const coveredBy = migrations.slice(i).find(([, sql]) => REBUILDS.test(sql));
+    if (!coveredBy) offenders.push(migrations[i][0]);
+  }
+
+  if (!checked) {
+    fail('no migration appears to add a `gateways` column, which cannot be true -- 0008, 0024, '
+      + '0025 and 0035 all do.\n      This check examined nothing.');
+  } else if (offenders.length) {
+    fail(
+      `${offenders.length} migration(s) add a public.gateways column that NOTHING after them `
+      + `rebuilds public.gateway_status for: ${offenders.join(', ')}.\n`
+      + '      The view is `SELECT g.*`, which Postgres freezes at creation, so the column is\n'
+      + '      invisible through it and nothing errors -- the view goes on returning what it was\n'
+      + '      born with. db-init replays migrations in filename order on every boot, so an\n'
+      + '      earlier rebuild never picks it up and the state does not self-correct. End the\n'
+      + '      migration with:\n'
+      + '        SELECT public.ensure_gateway_status_view();'
+    );
+  } else {
+    pass(`all ${checked} migrations adding a gateways column rebuild gateway_status`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 10e. The CA-expiry warning window is one decision, declared twice.
+//
+// Grafana's `acs-gateway-ca-expiring` rule fires below 30 days; the Gateways page colours the same
+// field with CERT_EXPIRY_WARN_DAYS. They are the SAME number for the same reason -- long enough to
+// schedule a fleet-wide trust-store update through a plant's change process, which is a visit to
+// every appliance rather than a command.
+//
+// DRIFT HERE IS WORSE THAN A WRONG NUMBER. A UI that warns at 14 days while the rule fires at 30
+// sends an operator looking for an alert that has not been raised; one that warns at 60 while the
+// rule fires at 30 trains them to ignore the colour. Either way the two disagree about a date
+// somebody is going to act on, and neither side is obviously the wrong one to a reader.
+//
+// Same arrangement as the alert-retention window below: declared where each consumer needs it,
+// asserted equal here.
+// -------------------------------------------------------------------------------------------------
+{
+  const rules = read('grafana/provisioning/alerting/alert-rules.yaml');
+  const util = read('frontend/src/utils/gatewayStatus.js');
+
+  // The threshold node of the CA rule, found by walking forward from its uid so a `params: [30]`
+  // belonging to some other rule cannot answer for it.
+  const ruleAt = rules.indexOf('uid: acs-gateway-ca-expiring');
+  const ruleBody = ruleAt === -1 ? '' : rules.slice(ruleAt, ruleAt + 4000);
+  const ruleDays = ruleBody.match(/type:\s*lt\s*\n\s*params:\s*\[(\d+)\]/);
+  const uiDays = util.match(/CERT_EXPIRY_WARN_DAYS\s*=\s*(\d+)/);
+
+  if (ruleAt === -1) {
+    fail('grafana alert rule `acs-gateway-ca-expiring` is gone. It is the only warning that a '
+      + 'gateway\'s\n      hand-distributed CA is about to expire, which takes the whole fleet '
+      + 'offline at once.');
+  } else if (!ruleDays || !uiDays) {
+    fail('could not read the CA-expiry window from '
+      + `${ruleDays ? 'frontend/src/utils/gatewayStatus.js' : 'the Grafana rule'}, so the two were `
+      + 'not compared.');
+  } else if (ruleDays[1] !== uiDays[1]) {
+    fail(
+      `the CA-expiry warning window disagrees: the Grafana rule fires below ${ruleDays[1]} days, `
+      + `the Gateways page warns below ${uiDays[1]}.\n`
+      + '      An operator seeing one without the other goes looking for an alert that was never\n'
+      + '      raised, or learns to ignore a colour that means nothing.'
+    );
+  } else {
+    pass(`the CA-expiry window is ${ruleDays[1]} days in both the Grafana rule and the Gateways page`);
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// 11a. Every public column is reachable from something that reads or writes it.
+//
+// Columns accumulate faster than they are retired, and a column that carries no information is
+// harder to notice than dead code: it is written, exported, classified as a governance field, and
+// says nothing. `devices.connection_method` is the worked example -- all six seeded devices hold
+// `Sparkplug B`, because that is the only transport this platform ingests.
+//
+// THE WHOLE DIFFICULTY IS TELLING "UNUSED" FROM "EMPTY HERE", AND OCCUPANCY CANNOT.
+// `devices.quarantine_reason`, `devices.reported_identity`, `devices.model_3d_path` and
+// `gateways.agent_version` are NULL for every row on a freshly reset stack, and two of them are
+// the evidence this platform keeps for its own security decisions. A "drop the columns that are
+// always NULL" pass would delete them. So this asks a static question instead -- is there a write
+// path or a read path anywhere -- which is checkable and cannot be fooled by an empty demo.
+//
+// STRIP THE DECLARING STATEMENT, NOT THE DECLARING FILE. A column consumed entirely inside its own
+// migration's functions is reachable: `gateway_enrollment_tokens.token_hash` is hashed into by
+// issue_gateway_token() and read by redeem_gateway_token(), both in 0025, and nothing outside that
+// file ever names it. Excluding whole files reported it and `created_by` as dead, which is exactly
+// the kind of false positive that gets a guard switched off.
+//
+// WHAT IT CANNOT SEE, stated because a check whose limits are unwritten gets trusted too far: this
+// is a substring search over 3.6 MB, so a SHORT OR COMMON name is unfalsifiable -- `devices.status`
+// could lose every consumer and still match the word `status` somewhere. It catches distinctively
+// named dead columns, which is the class that actually accumulates. It also cannot see through
+// `SELECT *` or `to_jsonb(NEW)`, both of which reach every column without naming one; that
+// direction is safe, since it only ever makes the check MORE willing to call something reachable.
+//
+// It reports zero today -- including `devices.asset_type` and `cells.grafana_url`, which the
+// roadmap entry that commissioned this listed as candidates on evidence that had since gone stale.
+// That is the point: the invariant holds now, and the ordinary way to break it is to add a column
+// and never wire it up, or to remove the last consumer of one and leave the column behind.
+// -------------------------------------------------------------------------------------------------
+{
+  const migFiles = readdirSync(join(REPO, 'supabase/migrations'))
+    .filter((f) => /^\d{4}_.*\.sql$/.test(f))
+    .sort();
+  const migSrc = migFiles.map((f) => [f, read(`supabase/migrations/${f}`)]);
+
+  const CREATE_TABLE = /CREATE TABLE (?:IF NOT EXISTS )?public\.([a-z0-9_]+)\s*\(([\s\S]*?)\n\);/gi;
+  const ADD_COLUMN =
+    /ALTER TABLE (?:ONLY )?public\.([a-z0-9_]+)\s+ADD COLUMN (?:IF NOT EXISTS )?([a-z][a-z0-9_]*)/gi;
+
+  const columns = new Map();
+  for (const [file, sql] of migSrc) {
+    for (const m of sql.matchAll(CREATE_TABLE)) {
+      for (const line of m[2].split('\n')) {
+        // Four-space indent is how this schema writes a column; a constraint continuation or a
+        // CASE arm inside a generated-column expression is not one.
+        const cm = /^\s{4}([a-z][a-z0-9_]*)\s+[a-z]/i.exec(line);
+        if (!cm) continue;
+        if (/^(constraint|primary|unique|foreign|check|else|when|then)$/i.test(cm[1])) continue;
+        if (!columns.has(`${m[1]}.${cm[1]}`)) columns.set(`${m[1]}.${cm[1]}`, cm[1]);
+      }
+    }
+    for (const m of sql.matchAll(ADD_COLUMN)) {
+      if (!columns.has(`${m[1]}.${m[2]}`)) columns.set(`${m[1]}.${m[2]}`, m[2]);
+    }
+  }
+
+  // Everything that could name a column, minus the statements that declare one.
+  let searchable = '';
+  for (const [, sql] of migSrc) {
+    searchable +=
+      sql
+        .replace(CREATE_TABLE, '')
+        .replace(
+          /ALTER TABLE (?:ONLY )?public\.[a-z0-9_]+\s+ADD COLUMN (?:IF NOT EXISTS )?[a-z][a-z0-9_]*[^;]*;/gi,
+          ''
+        ) + '\n';
+  }
+  const walkInto = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(join(REPO, dir), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const rel = `${dir}/${e.name}`;
+      if (e.isDirectory()) {
+        if (!/^(node_modules|__pycache__|dist|\.git)$/.test(e.name)) walkInto(rel);
+      } else if (/\.(js|jsx|ts|tsx|py|sql|mjs|json|ya?ml)$/.test(e.name)) {
+        searchable += read(rel) + '\n';
+      }
+    }
+  };
+  for (const d of [
+    'frontend/src', 'supabase/functions', 'ingestion', 'i3x', 'timescaledb',
+    'scripts', 'grafana', 'node-red', 'tests', 'docs',
+  ]) {
+    walkInto(d);
+  }
+
+  // Stated exceptions, the same arrangement NOT_PUBLISHED uses for relations: a column that is
+  // deliberately write-only or reserved goes here WITH ITS REASON, so the next reader meets an
+  // argument rather than an empty allow-list.
+  const UNREACHABLE_BY_DESIGN = new Map([]);
+
+  const orphans = [...columns]
+    .filter(([key, col]) => !UNREACHABLE_BY_DESIGN.has(key) && !new RegExp(`\\b${col}\\b`).test(searchable))
+    .map(([key]) => key)
+    .sort();
+
+  if (orphans.length) {
+    fail(
+      `${orphans.length} public column(s) are named by nothing that reads or writes them: ` +
+        `${orphans.join(', ')}.\n` +
+        '      Either wire the column up, drop it in a migration, or -- if it is deliberately\n' +
+        '      write-only or reserved -- add it to UNREACHABLE_BY_DESIGN in this script WITH the\n' +
+        '      reason. Do not assume it is dead because it is empty: several columns here are NULL\n' +
+        '      for every row on a fresh stack and are load-bearing when they are not.'
+    );
+  } else {
+    pass(`all ${columns.size} public columns are reachable from a read or write path`);
   }
 }
 

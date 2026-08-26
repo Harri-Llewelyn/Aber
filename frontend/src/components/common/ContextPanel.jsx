@@ -22,8 +22,11 @@ import { grafanaAlertUrl } from '../../constants'
  * @param {string}   type      Entity kind, shown as a badge: 'CELL' | 'GATEWAY' | 'DEVICE' | 'SCHEMA'.
  * @param {string}   title     The entity's display name.
  * @param {node}     subtitle  Optional line under the title -- status badges, lifecycle flags.
- * @param {Array}    fields    [{ label, value, mono?, copyable?, title?, full? }] rendered as the
- *                             metadata list. `copyable` renders the value as a CopyableId button.
+ * @param {Array}    fields    [{ label, value, mono?, copyable?, title?, full?, danger? }]
+ *                             rendered as the metadata list. `copyable` renders the value as a
+ *                             CopyableId button. `danger` colours the VALUE only -- the label
+ *                             stays neutral, because the fact is the problem, not the field.
+ *                             Used for a gateway CA inside its expiry window.
  * @param {Array}    actions   [{ label, icon, onClick, href?, disabled?, title?, primary?,
  *                             pending?, pendingLabel? }]. `pending` puts that one action into the
  *                             in-flight state -- spinner, swapped label, and unclickable until it
@@ -160,7 +163,11 @@ export function ContextPanel({ open, type, title, subtitle, fields = [], actions
               {fields.map((f, i) => (
                 <div key={i} className={`context-field${f.full ? ' context-field-full' : ''}`}>
                   <dt className="context-field-label">{f.label}</dt>
-                  <dd className={`context-field-value${f.mono && !f.copyable ? ' mono' : ''}`} title={f.title}>
+                  <dd
+                    className={`context-field-value${f.mono && !f.copyable ? ' mono' : ''}`
+                      + (f.danger ? ' context-field-danger' : '')}
+                    title={f.title}
+                  >
                     {/* Empty is stated rather than left blank. A missing Sparkplug id and a blank
                         row look identical otherwise, and only one of them is a problem. */}
                     {f.value === null || f.value === undefined || f.value === ''

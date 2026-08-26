@@ -22,11 +22,29 @@ kept separate from `metric_catalog`, which records what a device actually publis
 
 ### Scope boundaries, already settled
 
-- **Inferred ISO 22400 KPIs are deferred, not rejected.** Computing OEE needs planned busy time,
-  planned run time per item, and good/scrap disposition. None of those are telemetry, and storing
-  them is what would turn this platform into an MES. PackML state-time accumulation is the route
-  that later makes OEE *arithmetic over existing metrics* rather than inference. Do not propose
-  storing schedules, orders or routings.
+- **ISO 22400 KPIs ARRIVE AS PUBLISHED METRICS. This platform does not compute them, and that is
+  now settled rather than deferred.** Computing OEE needs planned busy time, planned run time per
+  item, and good/scrap disposition. None of those are telemetry, and storing them is what would
+  turn this platform into an MES. Do not propose storing schedules, orders or routings.
+
+  **The catalog already says so.** `metric_catalog` registers `OEE/AVAILABILITY`, `OEE/QUALITY`,
+  `OEE/EFFECTIVENESS`, `OEE/PERFORMANCE` and `OEE/OEE` as ISO 22400 metrics with semantic ids and
+  `PERCENT` units — publishable metrics, declared in a DBIRTH by whatever system actually knows the
+  plan, and ingested like any other. A second route that computed the same semantic ids in the
+  historian would mean two ways to produce one identity with no way to tell them apart.
+
+  **Checked against the registered formulas rather than argued from principle.** Of the eight KPIs
+  in `iso22400_vocabulary`, NOT ONE is computable from the 47 metrics in the catalog: `A = APT/PBT`
+  has no PBT, `E = (PRI × PQ)/APT` has no PRI, `Q = GQ/PQ` has only a total `Controller/PART_COUNT`
+  with no quality disposition, and MTBF/MTTR need maintenance records. Moving the arithmetic to
+  Grafana or Node-RED does not help — the inputs are missing there too. The constraint is the data,
+  not the place.
+
+  **Derived series over what we DO have are fine, and must not borrow these ids.**
+  `Controller/EXECUTION` and `Controller/PART_COUNT` support an uptime ratio and a parts-per-hour
+  rate. Both are legitimate; neither may carry an ISO 22400 semantic id, because that asserts an
+  interoperability claim the computation cannot support — the exact failure the metric-catalog
+  provenance check in `scripts/check-docs-drift.mjs` exists to catch.
 - **AGVs are the one gap the five vocabularies leave, and VDA 5050 does not fill it here.** VDA 5050
   is a complete bidirectional MQTT interface with its own topic tree keyed on
   manufacturer + serialNumber, so it fails the vocabulary test and would introduce a second identity
@@ -502,3 +520,4 @@ Five things that matter, three of them specific to this source:
 | Seed 223P before the standard is published? | **Yes**, from `223p.ttl` `v1.0.0-2026`, with the migration header stating it is pre-publication |
 | Does 223P follow the QUDT import? | **No** — separate vocabulary, separate licence, and units are already covered |
 | Is OPC 34100 (ECM) seeded too? | **No** — only Machinery/Energy; ECM is recorded as a dependency |
+| Should the platform COMPUTE ISO 22400 KPIs? | **No.** They arrive as published metrics — the `OEE/*` rows in `metric_catalog` are that route. Not one of the eight registered formulas is computable from the catalogued metrics, and moving the arithmetic to Grafana or Node-RED does not change that. Was roadmap item 3; retired |

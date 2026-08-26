@@ -174,6 +174,22 @@ if (mqttTlsEnabled && !mqttTlsCaFile) {
       'would report only a generic connection failure.'
   );
 }
+// THE PORT HAS TO MOVE WITH THE TRANSPORT, and on Compose nothing moves it for you.
+//
+// The chart derives the broker port from the same flag that turns TLS on
+// (`ternary 8883 1883 ... internalClients`), so the two cannot disagree there. Compose has no
+// conditional in `${}`, so MQTT_PORT is a separate variable an operator can leave behind -- and
+// TLS against the PLAINTEXT listener fails as a handshake timeout that names neither the port nor
+// the transport. Refused here, where the fix is one line of `.env`, rather than left to present as
+// a broker that will not connect.
+if (mqttTlsEnabled && (!mqttPortEnv || mqttPortEnv === '1883')) {
+  fail(
+    `MQTT_TLS_ENABLED is set but MQTT_PORT is ${mqttPortEnv || 'unset, leaving the flow on 1883'}. ` +
+      'That is the plaintext listener: the broker node would attempt a TLS handshake against it ' +
+      'and report only a connection failure. Set MQTT_PORT=8883 in the same .env that enabled TLS.'
+  );
+}
+
 if (mqttTlsEnabled && !fs.existsSync(mqttTlsCaFile)) {
   // Checked HERE rather than left to Node-RED, because of how 05-tls.js handles it: an unreadable
   // `ca` path marks the tls-config node invalid, and addTLSOptions() then attaches NO ca while
@@ -258,12 +274,49 @@ if (mqttTlsEnabled || mqttPortEnv || mqttHostEnv) {
     });
   };
 
+  // THE INVERSE OF applyTls, AND ITS ABSENCE WAS A ONE-WAY DOOR.
+  //
+  // applyTls has always existed; nothing undid it. So turning TLS back OFF moved the port to 1883
+  // and left `usetls: true` -- a TLS handshake against the PLAINTEXT listener, which 10-mqtt.js
+  // reports as "Connection failed to broker: <clientid>@<url>", the same line a wrong password
+  // gives, with certificates never mentioned. The comments in applyTls already describe how long
+  // that takes to diagnose.
+  //
+  // It matters on both targets: on Kubernetes it is `mosquitto.tls.internalClients` being turned
+  // back off, and on Compose it is a line removed from `.env`. Reconciliation has to be
+  // bidirectional or it is not reconciliation.
+  //
+  // The tls-config node itself is left in place rather than deleted. It is inert with `usetls`
+  // false, and removing a node from a flow an operator may have opened is a bigger act than
+  // clearing the two fields that decide the transport.
+  const clearTls = (broker) => {
+    setField(broker, 'usetls', false);
+    setField(broker, 'tls', '');
+  };
+
+  // THE PROTOCOL VERSION IS RECONCILED, NOT SEEDED, and finding that out is the whole reason this
+  // line exists. Moving the generators to MQTT 5 changed the SEED; an existing Node-RED volume
+  // keeps its own flows.json, because that file is user content and is deliberately never
+  // overwritten. So the broker reported `p5` for the ingestion daemon and the i3X server and `p2`
+  // for all four simulated gateways -- a half-migrated stack, with nothing to indicate it.
+  //
+  // It belongs here for the same reason host, port and TLS do: it is TRANSPORT, not user content.
+  // An operator who rewires a flow in the editor has an opinion about topics and payloads, not
+  // about which MQTT version the platform speaks.
+  //
+  // NOT AN ENVIRONMENT VARIABLE, unlike its neighbours. The daemon's protocol is a constant in
+  // Python (`mqtt.Client(protocol=mqtt.MQTTv5)`), so this is a code-level decision about what the
+  // whole platform speaks rather than a per-deployment setting -- and a knob that let one client
+  // drift from the others would only produce a combination nobody tests.
+  const PROTOCOL_VERSION = '5';
+
   for (const broker of brokers) {
+    setField(broker, 'protocolVersion', PROTOCOL_VERSION);
     if (mqttHostEnv) setField(broker, 'broker', mqttHostEnv);
     // Node-RED stores the port as a STRING. A number works at runtime but shows as empty in the
     // editor's port field, so the node looks misconfigured to whoever opens it next.
     if (mqttPortEnv) setField(broker, 'port', String(mqttPortEnv));
-    if (mqttTlsEnabled) applyTls(broker);
+    if (mqttTlsEnabled) applyTls(broker); else clearTls(broker);
   }
 
   if (changes.length) {

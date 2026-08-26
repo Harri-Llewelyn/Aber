@@ -16,7 +16,7 @@
         "clientid": "node-red-cnc",
         "autoConnect": true,
         "usetls": false,
-        "protocolVersion": "4",
+        "protocolVersion": "5",
         "keepalive": "60",
         "cleansession": true,
         "acsCredentialsEnv": "MQTT_GW_CNC_MACHINING"
@@ -30,7 +30,7 @@
         "clientid": "node-red-robot",
         "autoConnect": true,
         "usetls": false,
-        "protocolVersion": "4",
+        "protocolVersion": "5",
         "keepalive": "60",
         "cleansession": true,
         "acsCredentialsEnv": "MQTT_GW_ROBOTIC_ASSEMBLY"
@@ -44,7 +44,7 @@
         "clientid": "node-red-oee",
         "autoConnect": true,
         "usetls": false,
-        "protocolVersion": "4",
+        "protocolVersion": "5",
         "keepalive": "60",
         "cleansession": true,
         "acsCredentialsEnv": "MQTT_GW_AGV_FLEET"
@@ -58,7 +58,7 @@
         "clientid": "node-red-bms",
         "autoConnect": true,
         "usetls": false,
-        "protocolVersion": "4",
+        "protocolVersion": "5",
         "keepalive": "60",
         "cleansession": true,
         "acsCredentialsEnv": "MQTT_GW_FACILITY_BMS"
