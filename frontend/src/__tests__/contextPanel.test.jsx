@@ -483,7 +483,7 @@ describe('Tables shed what the panel now carries', () => {
     await waitFor(() => expect(isOpen()).toBe(true))
 
     // Neither the documents list nor the telemetry table renders inside a 360px column any more:
-    // documents open in their editor from Manage Documents, telemetry in a modal from here.
+    // documents open in their editor from Manage Links, telemetry in a modal from here.
     expect(within(panel()).queryByText('Attached Document Links')).toBeNull()
     expect(within(panel()).queryByRole('table')).toBeNull()
 
@@ -524,11 +524,11 @@ describe('Tables shed what the panel now carries', () => {
 
     const p = within(panel())
     expect(p.getByText('Edit Details')).toBeTruthy()
-    expect(p.getByText('Manage Documents')).toBeTruthy()
+    expect(p.getByText('Manage Links')).toBeTruthy()
     expect(p.getByText('View Digital Thread')).toBeTruthy()
     expect(p.getByText(/Archive Cell/i)).toBeTruthy()
     // The accordion is gone from the drawer too -- it was a cramped list in a 360px column, and
-    // Manage Documents opens the full editor.
+    // Manage Links opens the full editor.
     expect(p.queryByText('Attached Document Links')).toBeNull()
   })
 })
@@ -544,7 +544,7 @@ describe('The panel is the single home for entity actions', () => {
     expect(headers).not.toContain('Actions')
 
     const p = within(panel_after(() => fireEvent.click(list().getByText('Virtual_Gateway_NodeRED'))))
-    for (const label of ['Edit Details', 'View Digital Thread', 'Manage Documents']) {
+    for (const label of ['Edit Details', 'View Digital Thread', 'Manage Links']) {
       expect(p.getByText(label)).toBeTruthy()
     }
     expect(p.getByText(/Archive Gateway/i)).toBeTruthy()
@@ -585,8 +585,19 @@ describe('The panel is the single home for entity actions', () => {
   })
 })
 
-describe('Documents accordion no longer duplicates the panel action', () => {
-  it('leaves Manage Documents as the single way into document editing', async () => {
+describe('Links accordion no longer duplicates the panel action', () => {
+  /*
+   * ONE WAY IN, and the assertion has to identify the accordion by something the action does not
+   * share. It used to name the accordion's own controls -- "Manage Links" and "View Links" -- which
+   * worked while the surviving action was called "Manage Documents". Issue #62 renamed that action
+   * to Manage Links, so those strings now match the very control that is supposed to remain: the
+   * old negative assertions would fail against a panel that is entirely correct.
+   *
+   * So the accordion is identified by its HEADING, which nothing else renders, and the action by
+   * there being exactly one of it. That is the invariant either way -- the duplication this
+   * describe block is named for was two entry points, not two spellings.
+   */
+  it('leaves one way into link editing, and no accordion beside it', async () => {
     render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
 
@@ -594,9 +605,9 @@ describe('Documents accordion no longer duplicates the panel action', () => {
     await waitFor(() => expect(isOpen()).toBe(true))
 
     const p = within(panel())
-    expect(p.queryByText(/Manage Links/i)).toBeNull()
-    expect(p.queryByText(/View Links/i)).toBeNull()
-    expect(p.getByText('Manage Documents')).toBeTruthy()
+    expect(p.queryByText(/Attached Document Links/i)).toBeNull()
+    expect(p.queryByText(/^View Links$/i)).toBeNull()
+    expect(p.getAllByText('Manage Links')).toHaveLength(1)
   })
 
   it('keeps one device figure on a cell, not two ways of counting them', async () => {

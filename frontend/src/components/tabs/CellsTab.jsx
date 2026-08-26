@@ -12,7 +12,7 @@ import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { CellIcon, CELL_ICONS, DEFAULT_CELL_ICON } from '../../utils/cellIcon'
 import { ArchiveModal } from '../modals/ArchiveModal'
-import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
+import { EntityLinksModal } from '../modals/EntityLinksModal'
 import {
   IconFactory,
   IconPlus,
@@ -505,7 +505,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
       )}
 
       {docsForCell && (
-        <EntityDocumentsModal entityType="cell" entityId={docsForCell.cell_id} entityName={docsForCell.cell_name} onClose={() => setDocsForCell(null)} showToast={showToast} hasPermission={hasPermission} />
+        <EntityLinksModal entityType="cell" entityId={docsForCell.cell_id} entityName={docsForCell.cell_name} onClose={() => setDocsForCell(null)} showToast={showToast} hasPermission={hasPermission} />
       )}
       </div>
 
@@ -613,9 +613,9 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
             title: 'Open the immutable audit trace for this cell'
           },
           {
-            label: 'Manage Documents', icon: <IconBookOpen size={13} />,
+            label: 'Manage Links', icon: <IconBookOpen size={13} />,
             onClick: () => setDocsForCell(selectedCell),
-            title: 'Attach or edit external document links for this cell'
+            title: 'Attach or edit links for this cell — documents, an asset register, a file repository, any URL'
           },
           // The last control to leave the card. Archive is not a property of the card in the way
           // the note there once claimed -- it is a thing done to one cell you have chosen, exactly

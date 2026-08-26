@@ -19,7 +19,7 @@ import { ActionButton } from '../common/ActionButton'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { ArchiveModal } from '../modals/ArchiveModal'
-import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
+import { EntityLinksModal } from '../modals/EntityLinksModal'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
 import { FlowBackupUploader } from '../common/FlowBackupUploader'
 import {
@@ -581,7 +581,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
       )}
 
       {docsForGw && (
-        <EntityDocumentsModal entityType="gateway" entityId={docsForGw.gateway_id} entityName={docsForGw.gateway_name} onClose={() => setDocsForGw(null)} showToast={showToast} hasPermission={hasPermission} />
+        <EntityLinksModal entityType="gateway" entityId={docsForGw.gateway_id} entityName={docsForGw.gateway_name} onClose={() => setDocsForGw(null)} showToast={showToast} hasPermission={hasPermission} />
       )}
       </div>
 
@@ -779,9 +779,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             title: 'Open the immutable audit trace for this gateway'
           },
           {
-            label: 'Manage Documents', icon: <IconBookOpen size={13} />,
+            label: 'Manage Links', icon: <IconBookOpen size={13} />,
             onClick: () => setDocsForGw(selected),
-            title: 'Attach or edit external document links for this gateway'
+            title: 'Attach or edit links for this gateway — documents, an asset register, a file repository, any URL'
           },
           !selected.is_archived && {
             label: 'Archive Gateway', icon: <IconArchive size={13} />,

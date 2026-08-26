@@ -630,7 +630,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Five extensions, ordered by how much of each already exists. None is speculative: every one names
+Six extensions, ordered by how much of each already exists. None is speculative: every one names
 the code it would build on, because the value of writing them down is that a reader can tell how far
 away each is.
 
@@ -829,6 +829,39 @@ repository.
 run the stack with both key formats accepted and confirm every consumer still works before the old
 ones are withdrawn. Without it this is a flag day across twelve files, an ingestion daemon and nine
 edge functions.
+
+### 6 · `documents` → `links`, in the schema
+
+**Builds on:** `public.documents` (`0001`) · its four RLS policies and `idx_documents_entity` ·
+`/api/v1/documents` in [`frontend/src/api.js`](frontend/src/api.js) · the `document:manage`
+permission row (`0002`)
+
+**The UI has already made this move; the storage has not.** Issue #62 generalised the feature from
+document links to links of any kind — an asset register in EZOfficeInventory, a file repository
+where measurement data belongs, anything with a URL — and the user-facing vocabulary was renamed to
+match. The table underneath is still called `documents`, its tag column is still `document_tag`, the
+endpoint is still `/api/v1/documents`, and the permission is still `document:manage`.
+
+**Nothing about the model was ever document-specific**, which is why the rename is a rename and not
+a redesign: the table is `(entity_type, entity_id, display_name, url, document_tag)` — an arbitrary
+labelled URL against an arbitrary entity. That is what makes the divergence safe to hold for now,
+and also what makes it worth closing: a table called `documents` holding a link to a SharePoint
+folder nobody will ever open a document in is a name that misleads the next reader about what the
+feature is for.
+
+**Deliberately not done in the same change as the UI rename.** A table rename is a migration —
+table, index, four policies, the grants PostgREST resolves through, `api.js`, and the permission
+row's name string — and it is justified entirely by clarity rather than by behaviour. Landing it
+inside a UI commit would have buried a schema change where nobody reviews schema changes.
+
+**The permission's UUID must not move.** `role_permissions` references it by id (`0002` grants it to
+roles 1 and 2), and `PERMISSION_UUIDS.DOCUMENT_MANAGE` in the frontend is that same literal. Only the
+`name` string changes; renaming the constant is a frontend edit, not an authorisation change.
+
+**One thing that makes it cheaper than it looks:** `document_tag` carries no CHECK constraint. The
+tag vocabulary lives only in the frontend, so no enum has to migrate with the column — the stored
+values (`health_and_safety`, `asset_register`, …) are already the values the renamed column would
+hold.
 
 ---
 

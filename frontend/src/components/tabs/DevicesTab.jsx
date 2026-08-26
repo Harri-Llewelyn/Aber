@@ -24,7 +24,7 @@ import { ApproveQuarantineModal } from '../modals/ApproveQuarantineModal'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { AssetConfigModal } from '../modals/AssetConfigModal'
 import { DeviceNameplateModal } from '../modals/DeviceNameplateModal'
-import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
+import { EntityLinksModal } from '../modals/EntityLinksModal'
 import { TelemetryExportModal } from '../modals/TelemetryExportModal'
 import { TelemetryModal } from '../modals/TelemetryModal'
 import { isProvisioningOverdue, isNeverSeen } from '../../utils/deviceProvisioning'
@@ -122,7 +122,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   // the inspector is a four-column table and the drawer is 360px wide.
   const [telemetryFor, setTelemetryFor] = useState(null)
   const [docsForDevice, setDocsForDevice] = useState(null)
-  // Bumped when EntityDocumentsModal closes. It also drove a document-link count that nothing has
+  // Bumped when EntityLinksModal closes. It also drove a document-link count that nothing has
   // rendered since the row accordions retired into the context drawer; that count and its request
   // are gone. This survives because the telemetry/catalog read below keys on it too, and that one
   // is live -- a document edit is a reasonable moment to re-read, and it is the only signal here
@@ -1267,7 +1267,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
         />
       )}
       {docsForDevice && (
-        <EntityDocumentsModal entityType="device" entityId={docsForDevice.asset_id} entityName={docsForDevice.asset_name} onClose={() => { setDocsForDevice(null); setDocRefreshKey(k => k + 1) }} showToast={showToast} hasPermission={hasPermission} />
+        <EntityLinksModal entityType="device" entityId={docsForDevice.asset_id} entityName={docsForDevice.asset_name} onClose={() => { setDocsForDevice(null); setDocRefreshKey(k => k + 1) }} showToast={showToast} hasPermission={hasPermission} />
       )}
       {telemetryFor && (
         <TelemetryModal
@@ -1522,9 +1522,9 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           {
             // The accordion below lists the links; this is how a new one gets attached. Both are
             // needed now that the accordion no longer carries its own Manage button.
-            label: 'Manage Documents', icon: <IconBookOpen size={13} />,
+            label: 'Manage Links', icon: <IconBookOpen size={13} />,
             onClick: () => setDocsForDevice(selectedDevice),
-            title: 'Attach or edit external document links for this device'
+            title: 'Attach or edit links for this device — documents, an asset register, a file repository, any URL'
           },
           {
             label: 'View Digital Thread', icon: <IconHistory size={13} />,
@@ -1548,11 +1548,11 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             by one, and the table below is a table again rather than alternating data and drawers. */}
         {selectedDevice && (
           <>
-            {/* The documents accordion is gone -- a cramped list inside a 360px column, and the
-                Manage Documents action above opens the full editor.
+            {/* The links accordion is gone -- a cramped list inside a 360px column, and the
+                Manage Links action above opens the full editor.
 
                 THE 3D MODEL STAYS, because it was the accordion's footer and has nowhere else to
-                go. It is an attachment like a document link, which is why it does not belong in
+                go. It is an attachment like a link, which is why it does not belong in
                 the Configuration modal (a read-only view of what the device REPORTED) -- and
                 unlike a list of links, one upload control fits a narrow column perfectly well.
                 onChange reloads so model_3d_path cannot go stale. */}

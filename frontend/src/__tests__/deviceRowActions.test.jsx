@@ -102,7 +102,7 @@ describe('device row actions', () => {
     }
     // Documents are BOTH here: the accordion below lists the links, and this opens the editor
     // that attaches one. The accordion's own "Manage Links" pill was removed as the duplicate.
-    expect(labels).toMatch(/Manage Documents/i)
+    expect(labels).toMatch(/Manage Links/i)
   })
 
   it('replaces Edit with Restore on an archived device', async () => {
@@ -139,14 +139,14 @@ describe('device row actions', () => {
   it('reaches documents through the panel action, not an accordion', async () => {
     // The accordion is gone from both places. It was mounted once per row (a hundred collapsed
     // drawers on a hundred-device page), then once in the drawer -- where it was a cramped list
-    // in a 360px column. Manage Documents opens the full editor instead.
+    // in a 360px column. Manage Links opens the full editor instead.
     await show([device()])
 
     expect(inRow().queryByText('Attached Document Links')).toBeNull()
 
     const panel = openPanel()
     expect(panel.queryByText('Attached Document Links')).toBeNull()
-    expect(panel.getByText('Manage Documents')).toBeInTheDocument()
+    expect(panel.getByText('Manage Links')).toBeInTheDocument()
   })
 })
 

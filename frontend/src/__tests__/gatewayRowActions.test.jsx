@@ -93,7 +93,7 @@ describe('gateway row actions', () => {
     const panel = openPanel()
 
     expect(panel.getByText(/View Digital Thread/i)).toBeTruthy()
-    expect(panel.getByText(/Manage Documents/i)).toBeTruthy()
+    expect(panel.getByText(/Manage Links/i)).toBeTruthy()
     expect(panel.getByText(/Edit Details/i)).toBeTruthy()
   })
 
@@ -126,14 +126,14 @@ describe('gateway row actions', () => {
   it('reaches documents through the panel action, not an accordion', async () => {
     // The accordion is gone from both places. It was mounted once per row (a hundred collapsed
     // drawers on a hundred-gateway page), then once in the drawer -- where it was a cramped list
-    // in a 360px column. Manage Documents opens the full editor instead.
+    // in a 360px column. Manage Links opens the full editor instead.
     await show([gateway()])
 
     expect(inRow().queryByText('Attached Document Links')).toBeNull()
 
     const panel = openPanel()
     expect(panel.queryByText('Attached Document Links')).toBeNull()
-    expect(panel.getByText('Manage Documents')).toBeInTheDocument()
+    expect(panel.getByText('Manage Links')).toBeInTheDocument()
   })
 })
 
@@ -147,7 +147,7 @@ describe('gateway row actions', () => {
  *
  * That badge is not coming. The request has been removed from all three asset pages, so what needs
  * pinning is the opposite: a page load must not spend a round trip on a number nothing renders.
- * Documents are still reachable, and still counted -- EntityDocumentsModal issues its own
+ * Documents are still reachable, and still counted -- EntityLinksModal issues its own
  * per-entity read when it opens, which is the only place the figure was ever shown.
  */
 describe('gateway document links', () => {
@@ -168,12 +168,12 @@ describe('gateway document links', () => {
   })
 
   it('still reaches documents through the drawer', async () => {
-    // Removing the count must not remove the way in. Manage Documents opens the modal that does
-    // its own read -- see EntityDocumentsModal.
+    // Removing the count must not remove the way in. Manage Links opens the modal that does
+    // its own read -- see EntityLinksModal.
     api.get.mockImplementation(withDocs([gateway()], []))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
-    expect(openPanel().getByText('Manage Documents')).toBeInTheDocument()
+    expect(openPanel().getByText('Manage Links')).toBeInTheDocument()
   })
 })
