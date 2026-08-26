@@ -43,13 +43,30 @@
  * WHAT IT DELIBERATELY DOES NOT CHECK. Whether the gateway is Kong. Every assertion above is a
  * statement about the SURFACE -- which paths exist, which are authenticated, which are open and
  * why -- and none of it is Kong vocabulary except where it reads the file. That is the point:
- * roadmap §5 (Kong -> Envoy) says "any migration needs the negative assertions first", and this is
+ * roadmap §4 (Kong -> Envoy) says "any migration needs the negative assertions first", and this is
  * them. When the gateway moves, EXPECTED is the specification the new one must satisfy and this
  * header is the argument for each exemption it must preserve.
  *
  * It also does not check that the routes WORK. That is `validate.py`'s half, live against a running
  * stack, and the two are complementary: this one proves the surface is what was intended, that one
  * proves the intended surface behaves.
+ *
+ * ---------------------------------------------------------------------------------------------
+ * TWO MODES, AND THE SECOND IS THE ONE THAT SURVIVES THE MIGRATION.
+ *
+ *   (default)   reads kong.yml and asserts its SHAPE against EXPECTED. Correct while Kong is the
+ *               gateway; meaningless the moment it is not, because Envoy's configuration is
+ *               lds.yaml and cds.yaml and this parser has nothing to say about it.
+ *
+ *   --runtime   probes a LIVE gateway and asserts the observable POSTURE of every route in
+ *               EXPECTED: gated routes must be refused before their upstream sees them, open ones
+ *               must get through. It names no Kong concept, so it reads identically against
+ *               whatever is fronting the stack -- which makes it the before-and-after check the
+ *               migration is steered by, rather than a check that has to be rewritten alongside
+ *               the thing it is meant to be guarding.
+ *
+ * Both share EXPECTED on purpose. Two inventories would drift, and the one that drifted would be
+ * the one nobody ran.
  *
  * Usage:
  *   node scripts/check-gateway-surface.mjs
@@ -62,6 +79,8 @@
  * this is most likely to have and least likely to show.
  */
 import { readFileSync } from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
@@ -99,41 +118,51 @@ const EXEMPTIONS = {
 
 const EXPECTED = [
   { service: 'auth-v1', route: 'auth-v1-routes', paths: ['/auth/v1/'], strip: true,
-    auth: 'open', exemption: 'sign-in' },
+    auth: 'open', exemption: 'sign-in',
+    probe: '/auth/v1/health', marker: '"name":"GoTrue"' },
 
   { service: 'rest-v1', route: 'rest-v1-routes', paths: ['/rest/v1/'], strip: true,
-    auth: 'key-auth' },
+    auth: 'key-auth',
+    probe: '/rest/v1/cells?select=id', marker: 'PGRST' },
 
   { service: 'realtime-v1', route: 'realtime-v1-ws', paths: ['/realtime/v1/'], strip: true,
-    auth: 'key-auth' },
+    auth: 'key-auth',
+    probe: '/realtime/v1/', marker: null },
 
   { service: 'storage-v1-public', route: 'storage-v1-public-routes',
     paths: ['/storage/v1/object/public/'], strip: true,
-    auth: 'open', exemption: 'public-objects' },
+    auth: 'open', exemption: 'public-objects',
+    probe: '/storage/v1/object/public/asset-3d-models/__probe__', marker: '"error":"not_found"' },
 
   { service: 'storage-v1', route: 'storage-v1-routes', paths: ['/storage/v1/'], strip: true,
-    auth: 'key-auth' },
+    auth: 'key-auth',
+    probe: '/storage/v1/object/list/asset-3d-models', marker: 'statusCode' },
 
   { service: 'functions-v1-grafana-userinfo', route: 'functions-v1-grafana-userinfo-route',
     paths: ['/functions/v1/grafana-userinfo'], strip: true,
-    auth: 'open', exemption: 'oauth-userinfo' },
+    auth: 'open', exemption: 'oauth-userinfo',
+    probe: '/functions/v1/grafana-userinfo', marker: '"error"' },
 
   { service: 'functions-v1-nodered-userinfo', route: 'functions-v1-nodered-userinfo-route',
     paths: ['/functions/v1/nodered-userinfo'], strip: true,
-    auth: 'open', exemption: 'oauth-userinfo' },
+    auth: 'open', exemption: 'oauth-userinfo',
+    probe: '/functions/v1/nodered-userinfo', marker: '"error"' },
 
   // strip_path FALSE on both, unlike every other route here. The function reads the first path
   // segment to pick a worker, so the matched prefix has to survive; stripping it hands the runtime
   // an empty service name and it answers 400.
   { service: 'fplus-directory', route: 'fplus-directory-ping', paths: ['/ping'], strip: false,
-    auth: 'open', exemption: 'fplus-directory' },
+    auth: 'open', exemption: 'fplus-directory',
+    probe: '/ping', marker: '"service":"fplus-directory"' },
   { service: 'fplus-directory', route: 'fplus-directory-v1', paths: ['/v1/'], strip: false,
-    auth: 'open', exemption: 'fplus-directory' },
+    auth: 'open', exemption: 'fplus-directory',
+    probe: '/v1/device', marker: '"error"' },
 
   // The catch-all, and the most important of the four gates: the edge runtime boots with
   // VERIFY_JWT="false", so without this plugin an unauthenticated request can start any worker.
   { service: 'functions-v1', route: 'functions-v1-routes', paths: ['/functions/v1/'], strip: true,
-    auth: 'key-auth' },
+    auth: 'key-auth',
+    probe: '/functions/v1/aas-api/description', marker: '"profiles"' },
 ];
 
 /** Consumers the gateway registers. Values must stay placeholders -- see assertion 5. */
@@ -156,6 +185,173 @@ const EXPECTED_PLACEHOLDERS = [
   '__SUPABASE_ANON_KEY__',
   '__SUPABASE_SERVICE_ROLE_KEY__',
 ];
+
+// =================================================================================================
+// RUNTIME MODE  --  `node scripts/check-gateway-surface.mjs --runtime [baseUrl]`
+//
+// WHY A SECOND MODE RATHER THAN A SECOND SCRIPT. Everything above reads `kong.yml` and asserts its
+// SHAPE. That is the right check while Kong is the gateway and worthless the moment it is not:
+// Envoy's configuration is `lds.yaml` and `cds.yaml`, and a checker that parses Kong's indentation
+// has nothing to say about it. What survives a gateway swap is not the config -- it is the
+// OBSERVABLE POSTURE of each route, and that is what this mode asserts.
+//
+// So the inventory above is shared deliberately. Two inventories would drift, and the one that
+// drifted would be the one nobody ran.
+//
+// THE DISCRIMINATOR IS "DID THE REQUEST REACH THE UPSTREAM", NOT THE STATUS CODE, and the
+// difference is the whole reason this is not three lines of curl. An OPEN route may legitimately
+// answer 401 -- `/v1/device` and both userinfo endpoints are exempt from the gateway precisely so
+// they can authenticate the caller THEMSELVES, and they answer 401 when nobody is signed in. A
+// check that read 401 as "gated" would call those four correctly gated while they were wide open,
+// which is the exact failure this exists to catch.
+//
+// So each row carries a `marker`: a string only its UPSTREAM emits. Present means the request got
+// through; absent on a gated route means the gateway refused it. That test is worded in terms of
+// the upstreams rather than the gateway, so it reads identically against Kong and against Envoy --
+// whose refusal body will differ from Kong's `No API key found in request` and does not need to be
+// known here.
+//
+// EVERY REQUEST IS SENT WITH NO `apikey` AND NO `Authorization`. That is the only condition under
+// which the gate is observable at all: with a valid key every route answers from its upstream and
+// the gated and open sets become indistinguishable.
+// -------------------------------------------------------------------------------------------------
+
+const RUNTIME = process.argv.includes('--runtime');
+
+if (RUNTIME) {
+  const argBase = process.argv[process.argv.indexOf('--runtime') + 1];
+  const base = (
+    argBase && !argBase.startsWith('--') ? argBase : process.env.SUPABASE_URL || 'http://127.0.0.1:54321'
+  ).replace(/\/+$/, '');
+
+  const runtimeProblems = [];
+  const runtimeOk = [];
+
+  // A row with no `probe` is a declaration this mode cannot check, and saying so is the point --
+  // silence would read as a pass. `realtime-v1` is the case: it upgrades to a WebSocket, so an
+  // ordinary GET never reaches a body its upstream authored.
+  const unprobeable = EXPECTED.filter((r) => !r.probe || r.marker === null);
+
+  const probes = EXPECTED.filter((r) => r.probe && r.marker !== null);
+
+  /**
+   * One unauthenticated GET.
+   *
+   * DELIBERATELY `node:http` AND NOT `fetch`. Node's fetch holds its sockets open in a keep-alive
+   * pool, and `process.exit()` below while undici still owns one aborts the process on Windows with
+   * `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)` -- AFTER the report has printed. The
+   * run reads as a pass that crashed, and in CI as a failure with a green-looking log above it.
+   * `agent: false` gives each request its own socket and closes it, so exit has nothing to trip on.
+   *
+   * NO HEADERS BEYOND Accept. Sending no `apikey` and no `Authorization` is the whole experiment.
+   */
+  const probeOnce = (url) => new Promise((resolveProbe) => {
+    let mod, opts;
+    try {
+      const u = new URL(url);
+      mod = u.protocol === 'https:' ? https : http;
+      opts = {
+        method: 'GET',
+        hostname: u.hostname,
+        port: u.port || (u.protocol === 'https:' ? 443 : 80),
+        path: `${u.pathname}${u.search}`,
+        headers: { Accept: '*/*' },
+        agent: false,
+      };
+    } catch (err) {
+      resolveProbe({ status: 0, body: '', error: `unparseable URL: ${err.message}` });
+      return;
+    }
+
+    const req = mod.request(opts, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => resolveProbe({ status: res.statusCode, body, error: null }));
+    });
+    req.setTimeout(15000, () => {
+      req.destroy();
+      resolveProbe({ status: 0, body: '', error: 'timed out after 15s' });
+    });
+    req.on('error', (err) => resolveProbe({ status: 0, body: '', error: err.message }));
+    req.end();
+  });
+
+  const results = await Promise.all(probes.map(async (row) => {
+    const { status, body, error } = await probeOnce(`${base}${row.probe}`);
+    return { row, status, body, error };
+  }));
+
+  for (const { row, status, body, error } of results) {
+    const label = `${row.route} (${row.probe})`;
+
+    if (error) {
+      runtimeProblems.push(`${label}: the gateway could not be reached -- ${error}`);
+      continue;
+    }
+
+    const reachedUpstream = body.includes(row.marker);
+
+    if (row.auth === 'key-auth') {
+      // GATED: the gateway must refuse it before the upstream sees it.
+      if (reachedUpstream) {
+        runtimeProblems.push(
+          `${label} is GATED in the inventory but an unauthenticated request reached its upstream `
+          + `(HTTP ${status}, body contains ${JSON.stringify(row.marker)}). The gate is not applied.`
+        );
+      } else if (status !== 401) {
+        runtimeProblems.push(
+          `${label} is gated and did not reach its upstream, but answered HTTP ${status} rather `
+          + `than 401. A gate that refuses with the wrong status is still a behaviour change for `
+          + `every client that retries on 401.`
+        );
+      } else {
+        runtimeOk.push(`${row.route} is gated: refused before its upstream, 401`);
+      }
+      continue;
+    }
+
+    // OPEN: the request must get through. The upstream's own answer -- including its own 401 --
+    // is the evidence; see the note on the discriminator above.
+    if (!reachedUpstream) {
+      runtimeProblems.push(
+        `${label} is OPEN in the inventory (exemption '${row.exemption}') but an unauthenticated `
+        + `request did not reach its upstream (HTTP ${status}). Either the gateway is now gating `
+        + `it -- which breaks ${EXEMPTIONS[row.exemption]} -- or the upstream is down.`
+      );
+    } else {
+      runtimeOk.push(
+        `${row.route} is open (${row.exemption}): reached its upstream, HTTP ${status}`
+      );
+    }
+  }
+
+  for (const line of runtimeOk) console.log(`  ok   ${line}`);
+  for (const row of unprobeable) {
+    console.log(`  --   ${row.route}: declared ${row.auth}, not probeable over plain HTTP`);
+  }
+
+  if (runtimeProblems.length) {
+    console.error(`\nThe live gateway at ${base} does not match the reviewed surface:\n`);
+    for (const p of runtimeProblems) console.error(`  ${p}\n`);
+    console.error(
+      'This mode asserts POSTURE, not configuration, so it is the check that must still pass after\n'
+      + 'the gateway is replaced. A failure here is a route whose exposure changed, not a file that\n'
+      + 'was formatted differently.\n'
+    );
+    process.exit(1);
+  }
+
+  const gated = probes.filter((r) => r.auth === 'key-auth').length;
+  const open = probes.filter((r) => r.auth === 'open').length;
+  console.log(
+    `\nThe live gateway at ${base} matches the reviewed surface: ${gated} route(s) refused before `
+    + `their upstream, ${open} reached theirs across `
+    + `${new Set(probes.filter((r) => r.auth === 'open').map((r) => r.exemption)).size} exemptions`
+    + (unprobeable.length ? `, ${unprobeable.length} not probeable over plain HTTP.` : '.')
+  );
+  process.exit(0);
+}
 
 // -------------------------------------------------------------------------------------------------
 // A scanner for the shape kong.yml actually has, and for no other.
@@ -323,7 +519,7 @@ log(`${kong.services.length} services, ${actualRoutes.length} routes, `
       + (added.length ? `         added and unreviewed: ${added.join(', ')}\n` : '')
       + (removed.length ? `         recorded but gone:   ${removed.join(', ')}\n` : '')
       + '         A service added here has no recorded auth posture. Add it to EXPECTED in this\n'
-      + '         script with the reason it is gated or open, so the migration in roadmap §5 has\n'
+      + '         script with the reason it is gated or open, so the migration in roadmap §4 has\n'
       + '         something to translate against.'
     );
   } else {
@@ -695,7 +891,7 @@ if (problems.length) {
   console.error(
     'EXPECTED in this script is the reviewed surface, not a mirror of kong.yml. If a change here\n'
     + 'is intended, change EXPECTED in the same commit and say why -- that record is what roadmap\n'
-    + '§5 (Kong -> Envoy) has to translate against, and the exemptions are the part a mechanical\n'
+    + '§4 (Kong -> Envoy) has to translate against, and the exemptions are the part a mechanical\n'
     + 'translation gets wrong without failing any test that exists today.\n'
   );
   process.exit(1);
