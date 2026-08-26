@@ -332,7 +332,11 @@ static_resources:
                             if key ~= ANON and key ~= SERVICE then
                               handle:respond(
                                 { [":status"] = "401", ["content-type"] = "application/json" },
-                                '{"message":"Invalid authentication credentials"}'
+                                -- Kong answers "Unauthorized" for a RECOGNISED-but-wrong key and
+                                -- "No API key found in request" for a missing one. Two different
+                                -- messages for two different faults, and clients that log them
+                                -- would otherwise see the fault change name at the migration.
+                                '{"message":"Unauthorized"}'
                               )
                               return
                             end
@@ -391,7 +395,7 @@ static_resources:
                               if key ~= ANON and key ~= SERVICE then
                                 handle:respond(
                                   { [":status"] = "401", ["content-type"] = "application/json" },
-                                  '{"message":"Invalid authentication credentials"}'
+                                  '{"message":"Unauthorized"}'
                                 )
                               end
                             end

@@ -65,12 +65,26 @@
  *               migration is steered by, rather than a check that has to be rewritten alongside
  *               the thing it is meant to be guarding.
  *
+ *   --authenticated
+ *               extends --runtime with a CREDENTIALLED pass, and it is the difference between a
+ *               comparison and a promotion gate. The unauthenticated pass sends no key at all, so
+ *               it is blind to everything the gateway does WITH one -- which is how the first
+ *               Envoy translation passed every assertion here while forwarding the apikey from the
+ *               query string to PostgREST, where it was read as a column filter. Presents a valid
+ *               key by header and by query, an unregistered key, and asserts that on a route which
+ *               hides credentials the header and query forms are indistinguishable upstream.
+ *
  * Both share EXPECTED on purpose. Two inventories would drift, and the one that drifted would be
  * the one nobody ran.
  *
  * Usage:
  *   node scripts/check-gateway-surface.mjs
  *   node scripts/check-gateway-surface.mjs --verbose
+ *   node scripts/check-gateway-surface.mjs --runtime [baseUrl]
+ *   node scripts/check-gateway-surface.mjs --runtime --authenticated [baseUrl]   # needs SUPABASE_ANON_KEY
+ *
+ * The base URL is the first non-flag argument, or SUPABASE_URL. Running it twice against two
+ * gateways and diffing the output is the equivalence test roadmap §4 is steered by.
  *
  * No YAML dependency: this runs in CI before any `npm install`, and the shape it reads is narrow
  * and asserted -- see `assertParsed()`, which refuses to compare anything if the scan came back
@@ -123,11 +137,13 @@ const EXPECTED = [
 
   { service: 'rest-v1', route: 'rest-v1-routes', paths: ['/rest/v1/'], strip: true,
     auth: 'key-auth',
-    probe: '/rest/v1/cells?select=id', marker: 'PGRST' },
+    probe: '/rest/v1/cells?select=id', marker: 'PGRST' ,
+    authMarker: '42501', hides: true},
 
   { service: 'realtime-v1', route: 'realtime-v1-ws', paths: ['/realtime/v1/'], strip: true,
     auth: 'key-auth',
-    probe: '/realtime/v1/', marker: null },
+    probe: '/realtime/v1/', marker: null,
+    authMarker: null, hides: false },
 
   { service: 'storage-v1-public', route: 'storage-v1-public-routes',
     paths: ['/storage/v1/object/public/'], strip: true,
@@ -136,7 +152,8 @@ const EXPECTED = [
 
   { service: 'storage-v1', route: 'storage-v1-routes', paths: ['/storage/v1/'], strip: true,
     auth: 'key-auth',
-    probe: '/storage/v1/object/list/asset-3d-models', marker: 'statusCode' },
+    probe: '/storage/v1/object/list/asset-3d-models', marker: 'statusCode' ,
+    authMarker: 'statusCode', hides: true},
 
   { service: 'functions-v1-grafana-userinfo', route: 'functions-v1-grafana-userinfo-route',
     paths: ['/functions/v1/grafana-userinfo'], strip: true,
@@ -162,7 +179,8 @@ const EXPECTED = [
   // VERIFY_JWT="false", so without this plugin an unauthenticated request can start any worker.
   { service: 'functions-v1', route: 'functions-v1-routes', paths: ['/functions/v1/'], strip: true,
     auth: 'key-auth',
-    probe: '/functions/v1/aas-api/description', marker: '"profiles"' },
+    probe: '/functions/v1/aas-api/description', marker: '"profiles"' ,
+    authMarker: 'profiles', hides: true},
 ];
 
 /** Consumers the gateway registers. Values must stay placeholders -- see assertion 5. */
@@ -217,11 +235,23 @@ const EXPECTED_PLACEHOLDERS = [
 // -------------------------------------------------------------------------------------------------
 
 const RUNTIME = process.argv.includes('--runtime');
+/** Extends --runtime with the credentialled pass. See the block at the end of that mode. */
+const AUTHENTICATED = process.argv.includes('--authenticated');
 
 if (RUNTIME) {
-  const argBase = process.argv[process.argv.indexOf('--runtime') + 1];
+  // THE FIRST NON-FLAG ARGUMENT, not "whatever follows --runtime".
+  //
+  // It was the latter, and the failure was silent and total: `--runtime --authenticated <url>`
+  // read `--authenticated` as the base, rejected it for starting with `--`, and fell back to
+  // SUPABASE_URL. Every run that was supposed to be probing the second gateway probed the first
+  // one instead, and reported a clean pass for it under the other one's name. Caught by diffing
+  // two runs that should have differed and did not.
+  //
+  // Order-independent now, so `--runtime <url> --authenticated` and
+  // `--runtime --authenticated <url>` mean the same thing.
+  const argBase = process.argv.slice(2).find((a) => !a.startsWith('--'));
   const base = (
-    argBase && !argBase.startsWith('--') ? argBase : process.env.SUPABASE_URL || 'http://127.0.0.1:54321'
+    argBase || process.env.SUPABASE_URL || 'http://127.0.0.1:54321'
   ).replace(/\/+$/, '');
 
   const runtimeProblems = [];
@@ -245,7 +275,7 @@ if (RUNTIME) {
    *
    * NO HEADERS BEYOND Accept. Sending no `apikey` and no `Authorization` is the whole experiment.
    */
-  const probeOnce = (url) => new Promise((resolveProbe) => {
+  const probeOnce = (url, extraHeaders = {}) => new Promise((resolveProbe) => {
     let mod, opts;
     try {
       const u = new URL(url);
@@ -255,7 +285,7 @@ if (RUNTIME) {
         hostname: u.hostname,
         port: u.port || (u.protocol === 'https:' ? 443 : 80),
         path: `${u.pathname}${u.search}`,
-        headers: { Accept: '*/*' },
+        headers: { Accept: '*/*', ...extraHeaders },
         agent: false,
       };
     } catch (err) {
@@ -350,6 +380,160 @@ if (RUNTIME) {
     + `${new Set(probes.filter((r) => r.auth === 'open').map((r) => r.exemption)).size} exemptions`
     + (unprobeable.length ? `, ${unprobeable.length} not probeable over plain HTTP.` : '.')
   );
+
+  // ===============================================================================================
+  // AUTHENTICATED MODE  --  `--runtime --authenticated`
+  //
+  // WHY THE UNAUTHENTICATED PASS IS NOT A PROMOTION GATE ON ITS OWN, learned the hard way: the
+  // Envoy translation passed every unauthenticated assertion above while `hide_credentials` was
+  // stripping the apikey from the HEADER and not from the QUERY STRING. A client sending
+  // `?apikey=...` -- which Kong accepts and then removes -- got its key forwarded to PostgREST,
+  // which parsed it as a COLUMN FILTER and answered PGRST100 where Kong answered 200. Every probe
+  // above was green throughout, because none of them presented a credential at all.
+  //
+  // So this pass presents one, three ways, and asserts what each is for:
+  //
+  //   header    a valid key in `apikey:` reaches the upstream          (the gate opens)
+  //   query     a valid key in `?apikey=` reaches the upstream         (key_in_query, which
+  //                                                                     Realtime cannot live
+  //                                                                     without -- a browser sets
+  //                                                                     no header on a handshake)
+  //   invalid   a wrong key is refused 401 and reaches nothing         (the gate is a check, not
+  //                                                                     a presence test)
+  //
+  // AND THE ONE THAT CAUGHT THE BUG: on a route that hides credentials, the header form and the
+  // query form must produce the SAME STATUS. That comparison is worded against neither gateway nor
+  // upstream -- it says only "how the caller passed the key must not change the answer" -- which is
+  // exactly the invariant `hide_credentials` exists to provide and the one a translation silently
+  // drops. 400-vs-200 is what it looked like when it was broken.
+  //
+  // ITS LIMIT, MEASURED RATHER THAN ASSUMED. Re-introducing the bug on purpose fails `rest-v1` on
+  // both counts and leaves `functions-v1` GREEN: a stray `apikey=` corrupts a PostgREST request
+  // because PostgREST reads unknown query parameters as column filters, and is simply ignored by
+  // the edge runtime. So this detects FORWARDING only where the upstream is sensitive to it, and
+  // `rest-v1` is the row carrying that weight. The half it cannot see is the leak -- a forwarded
+  // service-role key sitting in an upstream access log -- which no black-box probe can observe
+  // from outside. Stated here so the green on the other rows is not read as more than it is.
+  // ===============================================================================================
+
+  if (AUTHENTICATED) {
+    const anonKey = process.env.SUPABASE_ANON_KEY || '';
+    if (!anonKey) {
+      console.error(
+        '\n--authenticated needs SUPABASE_ANON_KEY to present a valid credential.\n'
+        + 'Run `set -a && . ./.env && set +a` first. Refusing rather than skipping: a pass that\n'
+        + 'silently checked nothing is the failure this whole mode exists to prevent.\n'
+      );
+      process.exit(1);
+    }
+
+    /** Append a query parameter to a path that may or may not already have a query string. */
+    const withParam = (path, param) => path + (path.includes('?') ? '&' : '?') + param;
+
+    const authProblems = [];
+    const authOk = [];
+
+    // Exempt routes are checked too, and for a reason that is not symmetry: an exemption that
+    // starts REFUSING a request carrying a key is just as broken as a gate that stops applying,
+    // and presenting a credential to an open route is the ordinary case for the two userinfo
+    // endpoints -- an OAuth client may well send one.
+    for (const row of EXPECTED) {
+      if (!row.probe || row.marker === null) continue;
+
+      const label = `${row.route} (${row.probe})`;
+
+      if (row.auth === 'open') {
+        const res = await probeOnce(`${base}${row.probe}`, { apikey: anonKey });
+        if (res.error) {
+          authProblems.push(`${label}: ${res.error}`);
+        } else if (!res.body.includes(row.marker)) {
+          authProblems.push(
+            `${label} is OPEN, but presenting a valid key stopped it reaching its upstream `
+            + `(HTTP ${res.status}). An exemption that refuses a credentialled caller is as `
+            + `broken as a gate that stops applying.`
+          );
+        } else {
+          authOk.push(`${row.route}: open, and a credentialled request still reaches its upstream`);
+        }
+        continue;
+      }
+
+      // ---- gated ------------------------------------------------------------------------------
+      if (row.authMarker === null) {
+        console.log(`  --   ${row.route}: gated, no authenticated probe (${row.marker === null ? 'not probeable over plain HTTP' : 'no marker'})`);
+        continue;
+      }
+
+      const [viaHeader, viaQuery, viaWrong] = await Promise.all([
+        probeOnce(`${base}${row.probe}`, { apikey: anonKey }),
+        probeOnce(`${base}${withParam(row.probe, `apikey=${encodeURIComponent(anonKey)}`)}`, {}),
+        probeOnce(`${base}${row.probe}`, { apikey: 'not-a-registered-key' }),
+      ]);
+
+      const transport = [viaHeader, viaQuery, viaWrong].find((r) => r.error);
+      if (transport) {
+        authProblems.push(`${label}: ${transport.error}`);
+        continue;
+      }
+
+      if (!viaHeader.body.includes(row.authMarker)) {
+        authProblems.push(
+          `${label}: a VALID key in the apikey header did not reach the upstream `
+          + `(HTTP ${viaHeader.status}). The gate is refusing a key it should accept.`
+        );
+      }
+
+      if (!viaQuery.body.includes(row.authMarker)) {
+        authProblems.push(
+          `${label}: a VALID key in the QUERY STRING did not reach the upstream `
+          + `(HTTP ${viaQuery.status}). Kong accepts the key either way (key_in_query), and `
+          + `Realtime depends on it -- a browser cannot set a header on a WebSocket handshake.`
+        );
+      }
+
+      if (row.hides && viaHeader.status !== viaQuery.status) {
+        authProblems.push(
+          `${label}: the same key answered HTTP ${viaHeader.status} in the header and `
+          + `HTTP ${viaQuery.status} in the query string. This route hides credentials, so the two `
+          + `must be indistinguishable upstream -- a difference means the query copy was FORWARDED. `
+          + `That both leaks the key into upstream logs and corrupts the request: PostgREST reads a `
+          + `stray apikey= as a column filter.`
+        );
+      }
+
+      if (viaWrong.status !== 401 || viaWrong.body.includes(row.authMarker)) {
+        authProblems.push(
+          `${label}: an UNREGISTERED key was not refused (HTTP ${viaWrong.status}`
+          + `${viaWrong.body.includes(row.authMarker) ? ', and reached the upstream' : ''}). `
+          + `The gate is testing for the presence of a key rather than its value.`
+        );
+      }
+
+      if (!authProblems.some((p) => p.startsWith(label))) {
+        authOk.push(
+          `${row.route}: gated, accepts a valid key in header and query`
+          + `${row.hides ? ', hides it from the upstream' : ', forwards it by design'}`
+          + `, refuses an unregistered one`
+        );
+      }
+    }
+
+    for (const line of authOk) console.log(`  ok   ${line}`);
+
+    if (authProblems.length) {
+      console.error(`\nThe live gateway at ${base} mishandles credentials:\n`);
+      for (const p of authProblems) console.error(`  ${p}\n`);
+      process.exit(1);
+    }
+
+    const checked = EXPECTED.filter((r) => r.auth === 'key-auth' && r.authMarker).length;
+    console.log(
+      `\nCredential handling at ${base} matches the reviewed surface: ${checked} gated route(s) `
+      + 'accept a valid key by header and by query, hide it where Kong hides it, and refuse an '
+      + 'unregistered one.'
+    );
+  }
+
   process.exit(0);
 }
 
