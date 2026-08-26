@@ -1,0 +1,151 @@
+# =================================================================================================
+# Envoy, BESIDE Kong rather than instead of it.  Roadmap §4, first phase.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.envoy.yml up -d supabase-envoy
+#
+# Kong keeps 54321 and keeps serving the stack. Envoy takes 54331. Nothing else changes, so the
+# frontend, the ingestion daemon and every edge function go on talking to Kong exactly as before
+# and a broken Envoy config costs a probe run rather than the stack.
+#
+# WHY AN OVERRIDE FIRST AND NOT A REPLACEMENT. The interesting failures in a gateway translation
+# are the ones that do not fail: a route whose gate quietly stopped applying, a prefix that now
+# matches in a different order, a Host header the upstream reads and nobody else does. Those are
+# only findable by comparison, and comparison needs both gateways running at once:
+#
+#   node scripts/check-gateway-surface.mjs --runtime http://127.0.0.1:54321   # Kong
+#   node scripts/check-gateway-surface.mjs --runtime http://127.0.0.1:54331   # Envoy
+#
+# Identical output is the bar. That check names no Kong concept -- it asserts only whether an
+# unauthenticated request reached its upstream -- which is precisely why it can be pointed at both.
+#
+# THIS FILE IS NOT A DEPLOYMENT TARGET. It is a bench. `deploy/helm/` is untouched, and Kong is
+# still primary everywhere until the promotion step in roadmap §4.
+# =================================================================================================
+services:
+  # -----------------------------------------------------------------------------------------------
+  # Substitutes the same four values supabase-kong-init substitutes, from the SAME variables.
+  #
+  # THAT SHARING IS THE POINT, not convenience. `KONG_CORS_ORIGINS` is the only statement of origin
+  # policy in the stack; reading it here means the two gateways cannot disagree about who may call
+  # the API, and the comparison above stays a test of routing rather than of two config files that
+  # happen to have drifted.
+  #
+  # The keys are re-validated rather than assumed: an empty one substituted into the Lua below
+  # would make `key == ANON` true for a request presenting an empty apikey, which is the same hole
+  # kong-init refuses to create.
+  # -----------------------------------------------------------------------------------------------
+  supabase-envoy-init:
+    container_name: acs-cymru_supabase_envoy_init
+    image: alpine:3.24
+    environment:
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      # Kong takes a full URL because it routes on one; Envoy splits the concern -- the cluster
+      # names the address and this names only the Host header. Same leading-label rule either way.
+      REALTIME_UPSTREAM_HOST: ${REALTIME_UPSTREAM_HOST:-realtime-dev.supabase-realtime}
+      KONG_CORS_ORIGINS: '${KONG_CORS_ORIGINS:-["http://localhost:3000","http://127.0.0.1:3000","http://localhost:8088","http://127.0.0.1:8088"]}'
+    volumes:
+      - ./supabase/envoy.yaml:/template/envoy.yaml:ro
+      - envoy_config:/config
+    entrypoint:
+      - /bin/sh
+      - -e
+      - -c
+      - |
+        if [ -z "$$SUPABASE_ANON_KEY" ] || [ -z "$$SUPABASE_SERVICE_ROLE_KEY" ]; then
+          echo 'SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY must be set -- an empty key substituted into the Lua filter would be accepted from any caller presenting an empty apikey.' >&2
+          exit 1
+        fi
+        case "$$KONG_CORS_ORIGINS" in
+          '['*']') ;;
+          *)
+            echo "KONG_CORS_ORIGINS must be a JSON array of browser origins. Got: $$KONG_CORS_ORIGINS" >&2
+            exit 1
+            ;;
+        esac
+        case "$$REALTIME_UPSTREAM_HOST" in
+          realtime-dev*) ;;
+          *)
+            echo "REALTIME_UPSTREAM_HOST must begin with the label 'realtime-dev' -- Realtime reads the tenant id from it and answers a bare 403 otherwise. Got: $$REALTIME_UPSTREAM_HOST" >&2
+            exit 1
+            ;;
+        esac
+
+        # Kong takes origins as a JSON array of strings; Envoy takes a list of string matchers.
+        # One line either way, so `sed` can still substitute it:
+        #   ["a","b"]  ->  [{exact: "a"},{exact: "b"}]
+        #
+        # THE SPACE AFTER THE COLON IS REQUIRED, and its absence is not a formatting preference:
+        # in a YAML flow mapping `{exact:"a"}` is a single scalar KEY named `exact:"a"`, not a key
+        # with a value. Envoy then refuses the entire bootstrap with
+        # `no such field: 'exact:"http://localhost:3000"'`. Found by running it -- which is the
+        # argument for this override existing at all.
+        CORS_MATCHERS=$$(printf '%s' "$$KONG_CORS_ORIGINS" | sed 's/"\([^"]*\)"/{exact: "\1"}/g')
+
+        # `|` as the delimiter, because every value here contains `/`.
+        sed -e "s|__SUPABASE_ANON_KEY__|$$SUPABASE_ANON_KEY|g" \
+            -e "s|__SUPABASE_SERVICE_ROLE_KEY__|$$SUPABASE_SERVICE_ROLE_KEY|g" \
+            -e "s|__REALTIME_UPSTREAM_HOST__|$$REALTIME_UPSTREAM_HOST|g" \
+            -e "s|__CORS_ORIGINS__|$$CORS_MATCHERS|g" \
+            /template/envoy.yaml > /config/envoy.yaml
+
+        # THE SAME LEFTOVER SCAN kong-init runs, and for the same reason: a placeholder added to
+        # the template and not taught to this script substitutes to nothing, and Envoy would boot
+        # with the literal `__NAME__` in a route or a key comparison and refuse everything.
+        # Comments are excluded -- the header documents the placeholders by name.
+        LEFTOVER=$$(grep -vE '^[[:space:]]*#' /config/envoy.yaml | grep -oE '__[A-Z0-9_]+__' | sort -u || true)
+        if [ -n "$$LEFTOVER" ]; then
+          echo "Unsubstituted placeholder(s) left in envoy.yaml: $$LEFTOVER" >&2
+          echo "Add them to the sed above, or remove them from supabase/envoy.yaml." >&2
+          exit 1
+        fi
+        echo 'envoy.yaml rendered.'
+
+  supabase-envoy:
+    container_name: acs-cymru_supabase_envoy
+    # PINNED, like every other image here. Envoy's config API is versioned per release and the
+    # `v3` types below are stable, but `:latest` would still move the Lua runtime and the CORS
+    # filter's defaults underneath a config nothing else in this repository validates.
+    image: envoyproxy/envoy:v1.31.5
+    restart: unless-stopped
+    ports:
+      # A SECOND PORT, not Kong's. Both gateways serve at once; that is the whole method.
+      - "${ENVOY_HTTP_PORT:-54331}:8000"
+    volumes:
+      - envoy_config:/etc/envoy:ro
+    command:
+      - envoy
+      - --config-path
+      - /etc/envoy/envoy.yaml
+      # Envoy exits 1 on a config it cannot parse rather than starting degraded, so a bad
+      # translation shows up as a container that will not stay up -- which is what we want while
+      # Kong is still the one serving traffic.
+      - --log-level
+      - info
+    depends_on:
+      supabase-envoy-init:
+        condition: service_completed_successfully
+      # The same upstreams Kong waits on. Envoy's STRICT_DNS clusters resolve lazily and would
+      # start without these, but then the first probe run would be measuring startup order rather
+      # than routing.
+      supabase-auth:
+        condition: service_started
+      supabase-rest:
+        condition: service_started
+      supabase-storage:
+        condition: service_started
+      supabase-functions:
+        condition: service_started
+    healthcheck:
+      # Envoy's admin `/ready` answers 200 only once the listener is up. Kong's own healthcheck
+      # takes the same shape, so `docker compose ps` reads consistently across both.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9901/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  # Separate from `kong_config` deliberately: the two renders must not be able to overwrite each
+  # other, and dropping this volume must not disturb the gateway that is actually serving.
+  envoy_config:
