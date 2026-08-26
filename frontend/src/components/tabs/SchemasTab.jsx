@@ -117,9 +117,25 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   const [selectedId, setSelectedId] = useState(null)
   const [detailSchema, setDetailSchema] = useState(null)
   const [forkTarget, setForkTarget] = useState(null)
-  // Archived versions are hidden by default -- see isCurrentSchema() for why history interleaved
-  // with the working set stops being readable.
-  const [showArchivedVersions, setShowArchivedVersions] = useState(false)
+  /**
+   * The registry's two filters (issue #60).
+   *
+   * The registry grows one row per PUBLISH, not one per schema -- every version a lineage has ever
+   * held is a row -- so it is the fastest-growing list on the page and was the only list page
+   * without a filter bar. It had exactly one narrowing control, an Archived Versions toggle in the
+   * card header among the primary actions.
+   *
+   * THAT TOGGLE IS NOW AN OPTION IN THIS SELECT RATHER THAN A CONTROL BESIDE IT. isCurrentSchema()
+   * is `status !== archived`, so the toggle was already a status filter wearing a button; leaving
+   * it in place next to a status dropdown would have been two controls that can contradict each
+   * other -- "Archived" chosen here while the toggle says hide, and no answer for which wins.
+   * CellsTab:258 made this exact move for the same reason and records it.
+   *
+   * `current` is the default and NOT `all`, which is what preserves the old behaviour: superseded
+   * versions are history and stay out of the working list until asked for.
+   */
+  const [statusFilter, setStatusFilter] = useState('current')
+  const [schemaSearch, setSchemaSearch] = useState('')
 
   /**
    * A group is open when the operator opened it, OR when a search is narrowing the catalog.
@@ -540,7 +556,38 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   // not: an unfinished draft has to stay reachable, because opening it is the only way to finish
   // it. See isCurrentSchema().
   const archivedCount = schemas.filter(s => !isCurrentSchema(s)).length
-  const visibleSchemas = showArchivedVersions ? schemas : schemas.filter(isCurrentSchema)
+  const currentCount = schemas.length - archivedCount
+  const draftCount = schemas.filter(s => schemaStatus(s) === SCHEMA_STATUS.DRAFT).length
+  const activeCount = schemas.filter(s => schemaStatus(s) === SCHEMA_STATUS.ACTIVE).length
+
+  const matchesStatusFilter = (s) => {
+    if (statusFilter === 'all') return true
+    if (statusFilter === 'current') return isCurrentSchema(s)
+    return schemaStatus(s) === statusFilter
+  }
+
+  /**
+   * Narrows the registry by name, UUID and change description.
+   *
+   * THREE FIELDS HERE, ONE IN THE CATALOG BELOW, and the difference is not an inconsistency. The
+   * catalog matches metric name alone because its search would otherwise return rows whose reason
+   * for matching is invisible in the table -- which reads as a bug. Every field matched here is a
+   * COLUMN of this table, so a hit can always be seen. The rule is the same one; the tables differ.
+   *
+   * The UUID earns its place: a schema arrives from a log line or an API response as a UUID far
+   * more often than as a name, and CopyableId puts it in the row precisely so it can be carried
+   * around. Change description earns its place because it is where "why does this version exist"
+   * is written, and that is the question a search of a version history is usually asking.
+   */
+  const schemaSearchTerm = schemaSearch.trim().toLowerCase()
+  const matchesSchemaSearch = (s) =>
+    !schemaSearchTerm || [s.schema_name, s.schema_uuid, s.change_description]
+      .some(field => String(field || '').toLowerCase().includes(schemaSearchTerm))
+
+  const visibleSchemas = schemas.filter(s => matchesStatusFilter(s) && matchesSchemaSearch(s))
+  // Drives the Clear button and its count. `current` is the resting state, not a filter.
+  const schemaFilterCount = (statusFilter !== 'current' ? 1 : 0) + (schemaSearchTerm ? 1 : 0)
+  const clearSchemaFilters = () => { setStatusFilter('current'); setSchemaSearch('') }
   /**
    * Narrows the catalog by metric name, and by nothing else.
    *
@@ -685,11 +732,34 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
   // covers a navigation that pushed none.
   const arrivingSchemaId =
     new URLSearchParams(window.location.search).get('search') || initialSchemaId || ''
+  /**
+   * ARRIVING OPENS THE DRAWER *AND* REVEALS THE ROW (issue #60).
+   *
+   * The hook matches over every schema, not the filtered list -- correctly, since a navigation has
+   * already chosen its target and a filter must not be able to veto it. But that means the drawer
+   * could open on a row the table is not showing, and the operator would be reading a panel with
+   * no selected row behind it. This was already reachable before the filter bar existed: arriving
+   * on a superseded version while archived versions were hidden did exactly that. Adding a search
+   * box and a status filter multiplies the ways in, so the arrival now widens whatever would hide
+   * what it just selected.
+   *
+   * WIDEN, NOT CLEAR. Clearing would restore `current`, which is itself a filter and the very one
+   * that hides a superseded version -- so resetting to the defaults would hide the archived
+   * schema the operator just navigated to. The status only moves when the target needs it.
+   */
   useArrivalSelection(
     arrivingSchemaId,
     schemas,
     (s, term) => s.schema_uuid === term,
-    (s) => setSelectedId(s.schema_uuid)
+    (s) => {
+      setSelectedId(s.schema_uuid)
+      setSchemaSearch('')
+      setStatusFilter(prev => {
+        const shown = prev === 'all'
+          || (prev === 'current' ? isCurrentSchema(s) : schemaStatus(s) === prev)
+        return shown ? prev : 'all'
+      })
+    }
   )
 
   // Resolved fresh every render -- see the note on selectedId.
@@ -712,10 +782,65 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           meet them in exactly once -- the first time you create one. Every visit after that is to
           read or version a schema that already exists, and those were below ~600 rows of metric
           groups. The page now opens on its subject and keeps the raw material underneath it. */}
+      {/* THE PAGE'S FIRST FILTER BAR (issue #60), and the shape the other five list pages already
+          use. The registry gains a row per PUBLISH rather than per schema, so it outgrows a plain
+          list faster than anything else here, and it had no search at all -- while the metric
+          catalog directly below it has had one for some time. */}
+      <div className="filter-bar">
+        <select
+          className="form-control"
+          style={{ width: '190px' }}
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          aria-label="Filter schemas by lifecycle state"
+          title="Filter by lifecycle state. Current hides superseded versions."
+        >
+          {/* Counts in the labels, as on Cells and Gateways: it is how the archived count survived
+              losing its badge, and it answers "is there any history at all?" without selecting. */}
+          <option value="current">Current ({currentCount})</option>
+          <option value={SCHEMA_STATUS.ACTIVE}>Active ({activeCount})</option>
+          <option value={SCHEMA_STATUS.DRAFT}>Draft ({draftCount})</option>
+          <option value={SCHEMA_STATUS.ARCHIVED}>Archived ({archivedCount})</option>
+          <option value="all">All versions ({schemas.length})</option>
+        </select>
+
+        <input
+          className="form-control"
+          style={{ width: '260px' }}
+          value={schemaSearch}
+          onChange={e => setSchemaSearch(e.target.value)}
+          placeholder="Search name, UUID or description…"
+          aria-label="Search the schema registry"
+          title="Filter schemas by name, UUID or change description"
+        />
+
+        {schemaFilterCount > 0 && (
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={clearSchemaFilters}
+            title="Clear every filter"
+          >
+            <IconX size={13} /> Clear filters ({schemaFilterCount})
+          </button>
+        )}
+      </div>
+
       <div className="card" style={{ marginBottom: '24px' }}>
         <div className="card-header">
+          {/* FILTERED OF TOTAL, not a bare count. A narrowed registry would otherwise read as a
+              short one, which is the wrong thing to believe about a version history. */}
           <h3 className="section-title">
-            Registered Schemas <span className="section-count">{visibleSchemas.length}</span>
+            Registered Schemas{' '}
+            <span
+              className="section-count"
+              title={visibleSchemas.length === schemas.length
+                ? `${schemas.length} schema version${schemas.length === 1 ? '' : 's'} registered`
+                : `${visibleSchemas.length} of ${schemas.length} versions match the current filters`}
+            >
+              {visibleSchemas.length === schemas.length
+                ? schemas.length
+                : `${visibleSchemas.length}/${schemas.length}`}
+            </span>
           </h3>
           {/* The page's two primary actions, in the header of the card they act on. They had a
               row of their own above the catalog, which put "Build Schema from Catalog" nowhere
@@ -738,20 +863,9 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
             >
               <IconFileCode size={14} /> Build Schema from Catalog
             </button>
-
-          {archivedCount > 0 && (
-            <button
-              className="btn btn-ghost btn-sm"
-              aria-expanded={showArchivedVersions}
-              onClick={() => setShowArchivedVersions(v => !v)}
-              title={showArchivedVersions
-                ? 'Hide superseded versions'
-                : `Show the ${archivedCount} archived version${archivedCount === 1 ? '' : 's'} kept as history`}
-            >
-              {showArchivedVersions ? <IconChevronUp size={13} /> : <IconChevronDown size={13} />}
-              {' '}Archived Versions <span className="section-count">{archivedCount}</span>
-            </button>
-          )}
+          {/* The Archived Versions toggle that stood here is now an option in the status select
+              above -- see the note on `statusFilter`. The header keeps the title and the two
+              primary actions, which is what `.filter-bar` exists to make possible. */}
           </div>
         </div>
         <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '12px 20px 0' }}>
@@ -761,8 +875,27 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           an editable draft. Publishing a draft activates it, archives its predecessor, and moves every device across in
           one transaction. Version numbers are assigned by the database and cannot be chosen.
         </p>
-        {loading ? <div className="loading-wrap"><div className="spinner" /> Loading schemas…</div> : (
-          <div className="table-wrap">
+        {loading ? <div className="loading-wrap"><div className="spinner" /> Loading schemas…</div> : visibleSchemas.length === 0 ? (
+          /* SAYS WHY IT IS EMPTY, the same way the catalog's empty state below does. A registry
+             that always has rows in it rendering as a blank table reads as a failed load rather
+             than as a filter doing its job -- and "there are no schemas" is a far more alarming
+             thing to believe than "none match this search". */
+          <div className="empty-state" style={{ padding: '24px 20px' }}>
+            <div className="empty-icon"><IconFileCode size={36} /></div>
+            <div className="empty-text">
+              {schemas.length === 0
+                ? 'No schemas registered yet — build one from the metric catalog below.'
+                : schemaSearchTerm
+                  ? <>No schema matches <strong>{schemaSearch.trim()}</strong>.</>
+                  : 'No schema versions in this lifecycle state.'}
+            </div>
+          </div>
+        ) : (
+          /* `.table-scroll` caps the height and pins the header row. The registry gains a row per
+             publish and nothing bounded it, so on a floor with a few versioned schemas the table
+             pushed the metric catalog -- the thing schemas are BUILT from -- off the bottom of
+             the page. */
+          <div className="table-wrap table-scroll">
             <table>
               <thead><tr><th title="Schema descriptive name">Schema Name</th><th title="Lineage position and lifecycle state. Only a draft is editable.">Version</th><th title="Why this version exists, recorded when it was created">Change Description</th><th title="Schema unique UUID">Schema UUID</th><th title="Devices provisioned with this schema">Devices</th></tr></thead>
               <tbody>

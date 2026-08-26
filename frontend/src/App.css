@@ -416,6 +416,28 @@ html, body, #root {
   margin-top: 3px;
 }
 
+/* The build this bundle came from (issue #57).
+   Quieter than the role above it, because it is reference rather than identity -- it is read once,
+   when somebody is reporting a fault, and should not compete with the address every time the menu
+   is opened. `user-select: text` is deliberate: the next thing done with this string is pasting it
+   into a bug report. */
+.user-popover-version {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  user-select: text;
+}
+
+.user-popover-version .mono { font-size: 11px; }
+
+/* A build that could not name itself. Italic rather than coloured: "unknown" is not a fault to
+   alarm about, it is a build nobody labelled -- and an amber version string in the account menu
+   would read as a problem with the running system. */
+.user-popover-version-unknown { font-style: italic; }
+
 .user-popover-action {
   display: flex;
   align-items: center;
@@ -790,6 +812,42 @@ html, body, #root {
 /* ===== Table ===== */
 .table-wrap {
   overflow-x: auto;
+}
+
+/* ===== Capped, scrolling table =====
+   A modifier on `.table-wrap`, for lists that grow without an upper bound and sit above other
+   content the page still needs to reach. The schema registry is the first (issue #60): it gains a
+   row per PUBLISH rather than per schema, so a floor with a few versioned schemas pushed the
+   metric catalog -- the thing schemas are built FROM -- off the bottom of the page.
+
+   THE HEADER IS PINNED, which is the half that makes the cap usable rather than merely shorter.
+   Five columns of UUIDs and version badges are unreadable once the row naming them has scrolled
+   away, and a capped table without a sticky header just moves that problem inside the box.
+
+   `overscroll-behavior: contain` stops a flick that bottoms out here from carrying on down the
+   page, the same reason `.zone-chips` carries it. */
+.table-scroll {
+  max-height: 420px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.table-scroll thead tr {
+  position: sticky;
+  top: 0;
+  /* Above the rows it covers, and nothing else -- `.action-menu` portals to <body> precisely so
+     it is not competing at this level. */
+  z-index: 2;
+}
+
+/* `thead tr` already carries `--bg-glass`, which is translucent: rows scrolling under a pinned
+   header would show through it. The opaque card colour goes on the cells, since the row's own
+   background is the glass tint that has to stay. */
+.table-scroll thead th {
+  background: var(--bg-card);
+  /* `border-bottom` on the row does not travel with a sticky element in every engine, so the
+     hairline is drawn as a shadow that does. Without it the header floats on top of the rows. */
+  box-shadow: inset 0 -1px 0 var(--border);
 }
 
 table {
@@ -2660,22 +2718,6 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 .row-selectable { cursor: pointer; }
 
-/* The card equivalent of `.row-selected`, for the Cells page. Same job: with the panel open and
-   the list still live, "which of these am I looking at" is otherwise unanswerable. Uses an
-   outline rather than a border so the card does not shift by 1px when selected. */
-.cell-card-selected {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
-}
-
-/* A cell with no gateways and no devices renders as its header alone -- name, id and two zero
-   counts on one line. A floor in the middle of being set up was otherwise a column of full-height
-   cards each saying "nothing here" twice, with the cells that DO have contents pushed below them.
-   The header keeps its full treatment, so an empty cell is still selectable and still opens the
-   panel; it just stops claiming 200px to say it is empty. */
-.cell-card-empty { margin-bottom: 10px; }
-.cell-card-empty .cell-card-header { padding-top: 10px; padding-bottom: 10px; }
-
 /* Below this the drawer would leave the table too little room to be worth reading. It becomes an
    overlay instead -- still not modal, still dismissible, but no longer stealing half the list. */
 @media (max-width: 1100px) {
@@ -2697,23 +2739,6 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
     border-radius: 0;
     border-right: none;
   }
-}
-
-/* The two tables inside a cell card share one column grid, so the eye runs straight down Name,
-   Sparkplug ID and Status across both instead of re-finding each column when it crosses from
-   gateways to devices.
-
-   `table-layout: fixed` is what makes that true. Without it the browser sizes columns from their
-   CONTENT, so the same percentages produce two different grids the moment one table holds a longer
-   gateway name than the other holds a device name -- which is most of the time. */
-.cell-card-table {
-  table-layout: fixed;
-}
-
-/* Fixed layout clips rather than widening, so anything that could overrun has to say so. */
-.cell-card-table td {
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* ===== A table inside a modal =====
@@ -2784,40 +2809,35 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
 .vocab-note-label { color: var(--text-primary); font-weight: 600; }
 
-/* ===== Cell Card Layout ===== */
-.cell-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin-bottom: 20px;
+/* ===== Cells table =====
+   The Cells page rendered a card per cell, each with its own header and two full sub-tables, and
+   three cells filled the viewport (issue #61). It is one table now, the same shape Gateways and
+   Devices use, so all that layout went with it. What is left is the one column those pages have
+   no equivalent for.
+
+   THE ICON COLUMN IS FIXED AND NARROW. It carries a 16px glyph and nothing else, so left to the
+   auto table layout it would take an equal share of the row and push the name away from the edge
+   the eye scans down. */
+.cell-icon-col {
+  width: 32px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.cell-icon-col svg { vertical-align: middle; }
+
+/* A label for assistive technology only. The icon column's header has no room for a word and a
+   blank `th` announces as nothing, which leaves a screen reader listing an unnamed column. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
   overflow: hidden;
-  box-shadow: var(--shadow);
-}
-
-.cell-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  background: var(--bg-glass);
-  border-bottom: 1px solid var(--border);
-}
-
-.cell-card-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.cell-card-body {
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  width: 100%;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ===== Digital Thread Swimlanes =====

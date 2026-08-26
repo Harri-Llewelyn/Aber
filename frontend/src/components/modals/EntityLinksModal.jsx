@@ -16,6 +16,8 @@ import {
   IconShieldCheck,
   IconTag,
   IconFileCode,
+  IconClipboardList,
+  IconUpload,
   IconSharePoint,
   IconDrive,
   IconGithub,
@@ -23,11 +25,32 @@ import {
 } from '../common/Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 
+/**
+ * The tag vocabulary (issue #62).
+ *
+ * THESE KEYS ARE STORED VALUES AND MUST NOT BE RENAMED. `documents.document_tag` carries no CHECK
+ * constraint, so this object is the only place the vocabulary is enumerated -- which makes ADDING a
+ * tag free, and makes renaming a key a silent data problem: every existing row keeps the old string
+ * and falls through to Other. Labels below are display text and may be reworded at will.
+ *
+ * `asset_register` and `file_repository` are what generalised this feature from documents to links
+ * of any kind:
+ *
+ *   - ASSET REGISTER is issue #62's actual request -- EZOfficeInventory and its equivalents. It is
+ *     a tag rather than a column on gateways and devices, which is what the issue asked for,
+ *     because a column means a migration per link type and a second place asset URLs live.
+ *   - FILE REPOSITORY is a different KIND of entry from the rest, and the wording reflects it. Every
+ *     other tag points at something that exists; this one points at where files BELONG -- the share
+ *     measurement data is saved to. This platform deliberately stores no such files, so naming
+ *     their home is the most it can usefully do.
+ */
 const TAG_ICONS = {
   image:             <IconImage size={12} />,
   health_and_safety: <IconShieldCheck size={12} />,
   procurement:       <IconTag size={12} />,
   schematic:         <IconFileCode size={12} />,
+  asset_register:    <IconClipboardList size={12} />,
+  file_repository:   <IconUpload size={12} />,
   other:             <IconFileText size={12} />,
 }
 
@@ -36,7 +59,21 @@ const TAG_LABELS = {
   health_and_safety: 'Health & Safety',
   procurement:       'Procurement',
   schematic:         'Schematic',
+  asset_register:    'Asset Register',
+  file_repository:   'File Repository',
   other:             'Other',
+}
+
+/** What each tag is for, on the option and on the badge. */
+const TAG_HINTS = {
+  image:             'A photograph or rendering of the asset',
+  health_and_safety: 'Risk assessments, safe systems of work, COSHH sheets',
+  procurement:       'Purchase orders, quotations, supplier records',
+  schematic:         'Drawings, wiring diagrams, P&IDs',
+  asset_register:    'This asset in an external asset tracker, such as EZOfficeInventory',
+  file_repository:   'Where files for this asset are saved — measurement data, exports, logs. '
+                     + 'The platform stores no such files; this records where they belong.',
+  other:             'Anything else with a URL',
 }
 
 function getDomainBadgeIcon(url = '') {
@@ -53,45 +90,48 @@ function getDomainBadgeIcon(url = '') {
   return <span className="badge badge-neutral" style={{ gap: '4px' }}><IconGlobe size={12} /> External Link</span>
 }
 
-export function EntityDocumentsModal({ entityType, entityId, entityName, onClose, showToast, hasPermission }) {
+export function EntityLinksModal({ entityType, entityId, entityName, onClose, showToast, hasPermission }) {
   // Escape closes. Via the shared stack rather than a listener of this component's own,
   // because a ConfirmModal can open on top of this one and a bare document listener on each
   // would let one keypress dismiss both.
   useEscapeKey(onClose)
 
-  const [docs, setDocs]               = useState([])
+  // `links` here, `documents` on the wire. The endpoint, the table and the `document_tag` payload
+  // key below still carry the original name -- see roadmap item 6 in README.md, which is where that
+  // rename lives. This component is the boundary: everything a user reads says Link.
+  const [links, setLinks]             = useState([])
   const [loading, setLoading]         = useState(true)
   const [showForm, setShowForm]       = useState(false)
-  const [editingDoc, setEditingDoc]   = useState(null)
+  const [editingLink, setEditingLink] = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(null)
   const [form, setForm]               = useState({ display_name: '', url: '', document_tag: 'other' })
 
   const canManage = hasPermission?.(PERMISSION_UUIDS.DOCUMENT_MANAGE) ?? false
 
-  const loadDocs = useCallback(() => {
+  const loadLinks = useCallback(() => {
     setLoading(true)
     api.get(`/api/v1/documents?entity_type=${encodeURIComponent(entityType)}&entity_id=${encodeURIComponent(entityId)}`)
-      .then(d => { setDocs(d); setLoading(false) })
+      .then(d => { setLinks(d); setLoading(false) })
       .catch(() => setLoading(false))
   }, [entityType, entityId])
 
-  useEffect(() => { loadDocs() }, [loadDocs])
+  useEffect(() => { loadLinks() }, [loadLinks])
 
   const openNew = () => {
-    setEditingDoc(null)
+    setEditingLink(null)
     setForm({ display_name: '', url: '', document_tag: 'other' })
     setShowForm(true)
   }
 
   const openEdit = (doc) => {
-    setEditingDoc(doc)
+    setEditingLink(doc)
     setForm({ display_name: doc.display_name, url: doc.url, document_tag: doc.document_tag || 'other' })
     setShowForm(true)
   }
 
   const save = async () => {
     if (!form.display_name.trim()) {
-      showToast('Document name is required', 'error')
+      showToast('Link name is required', 'error')
       return
     }
     if (!form.url.trim() || (!form.url.startsWith('http://') && !form.url.startsWith('https://'))) {
@@ -100,26 +140,26 @@ export function EntityDocumentsModal({ entityType, entityId, entityName, onClose
     }
 
     try {
-      if (editingDoc) {
-        await api.put(`/api/v1/documents/${editingDoc.id}`, form)
-        showToast(`Document link '${form.display_name}' updated`, 'success')
+      if (editingLink) {
+        await api.put(`/api/v1/documents/${editingLink.id}`, form)
+        showToast(`Link '${form.display_name}' updated`, 'success')
       } else {
         await api.post('/api/v1/documents', { ...form, entity_type: entityType, entity_id: entityId })
-        showToast(`Document link '${form.display_name}' attached`, 'success')
+        showToast(`Link '${form.display_name}' attached`, 'success')
       }
       setShowForm(false)
-      loadDocs()
+      loadLinks()
     } catch (e) {
       showToast(e.message, 'error')
     }
   }
 
-  const removeDoc = async (id, name) => {
+  const removeLink = async (id, name) => {
     try {
       await api.delete(`/api/v1/documents/${id}`)
       setConfirmDelete(null)
-      loadDocs()
-      showToast(`Document link '${name}' removed`, 'success')
+      loadLinks()
+      showToast(`Link '${name}' removed`, 'success')
     } catch (e) {
       showToast(e.message, 'error')
     }
@@ -135,17 +175,17 @@ export function EntityDocumentsModal({ entityType, entityId, entityName, onClose
         <div className="modal-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <IconBookOpen size={18} style={{ color: 'var(--accent)' }} />
-            <span>Document Links — <strong style={{ color: 'var(--accent)' }}>{entityName}</strong></span>
+            <span>Links — <strong style={{ color: 'var(--accent)' }}>{entityName}</strong></span>
           </div>
           <button className="btn btn-ghost btn-sm" onClick={onClose} title="Close modal"><IconX size={14} /></button>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-            Attached External Links ({docs.length})
+            Attached Links ({links.length})
           </div>
 
-          <button className={`btn btn-primary btn-sm ${!canManage ? 'btn-disabled' : ''}`} disabled={!canManage} onClick={openNew} title="Attach new document link">
+          <button className={`btn btn-primary btn-sm ${!canManage ? 'btn-disabled' : ''}`} disabled={!canManage} onClick={openNew} title="Attach a new link to this asset">
             <IconPlus size={13} /> Add Link
           </button>
         </div>
@@ -153,25 +193,31 @@ export function EntityDocumentsModal({ entityType, entityId, entityName, onClose
         {showForm && (
           <div style={{ background: 'var(--bg-base)', border: '1px solid var(--border-hover)', borderRadius: '8px', padding: '16px', marginBottom: '20px' }}>
             <div style={{ fontWeight: 600, marginBottom: '12px', color: 'var(--accent)', fontSize: '13px' }}>
-              {editingDoc ? 'Edit Document Link' : 'Register New External Document Link'}
+              {editingLink ? 'Edit Link' : 'Add a New Link'}
             </div>
             <div className="form-group">
-              <label className="form-label">Document Display Name</label>
-              <input className="form-control" value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))} placeholder="e.g. Operating Manual, Electrical Schematic, Safety Audit" />
+              <label className="form-label">Display Name</label>
+              <input className="form-control" value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))} placeholder="e.g. Operating Manual, Asset Register Entry, Measurement Data Share" />
             </div>
             <div className="form-group">
-              <label className="form-label">Link URL (SharePoint / Google Drive / Cloud Link)</label>
+              <label className="form-label">Link URL (SharePoint, Google Drive, an asset tracker, any URL)</label>
               <input className="form-control" type="url" value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} placeholder="https://company.sharepoint.com/documents/manual.pdf" />
             </div>
             <div className="form-group">
-              <label className="form-label">Document Classification Tag</label>
+              <label className="form-label">Tag</label>
+              {/* Built from TAG_LABELS rather than written out again. The hand-written list here
+                  drifted from that object the moment a tag was added to one and not the other --
+                  which is how a stored tag ends up unselectable in the form that wrote it. */}
               <select className="form-control" value={form.document_tag} onChange={e => setForm(f => ({ ...f, document_tag: e.target.value }))}>
-                <option value="image">Image</option>
-                <option value="health_and_safety">Health & Safety</option>
-                <option value="procurement">Procurement</option>
-                <option value="schematic">Schematic</option>
-                <option value="other">Other</option>
+                {Object.entries(TAG_LABELS).map(([value, label]) => (
+                  <option key={value} value={value} title={TAG_HINTS[value]}>{label}</option>
+                ))}
               </select>
+              {/* The chosen tag's meaning, under the control. File Repository especially needs it:
+                  it is the one tag that names a destination rather than a document. */}
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                {TAG_HINTS[form.document_tag]}
+              </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
               <button className="btn btn-ghost btn-sm" onClick={() => setShowForm(false)} disabled={savingLink}>Cancel</button>
@@ -188,20 +234,20 @@ export function EntityDocumentsModal({ entityType, entityId, entityName, onClose
         )}
 
         <div style={{ maxHeight: '340px', overflowY: 'auto' }}>
-          {loading ? <div className="loading-wrap"><div className="spinner" /> Loading document links…</div> :
-           docs.length === 0 ? (
+          {loading ? <div className="loading-wrap"><div className="spinner" /> Loading links…</div> :
+           links.length === 0 ? (
              <div className="empty-state" style={{ padding: '30px 10px' }}>
                <div className="empty-icon"><IconBookOpen size={30} /></div>
-               <div className="empty-text">No document links attached to this {entityType}.</div>
+               <div className="empty-text">No links attached to this {entityType}.</div>
              </div>
            ) : (
              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-               {docs.map(d => (
+               {links.map(d => (
                  <div key={d.id} style={{ background: 'var(--bg-glass)', border: '1px solid var(--border)', borderRadius: '8px', padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
                    <div style={{ minWidth: 0, flex: 1 }}>
                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                        <strong style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{d.display_name}</strong>
-                       <span className="badge badge-neutral" style={{ fontSize: '11px', gap: '4px' }}>
+                       <span className="badge badge-neutral" style={{ fontSize: '11px', gap: '4px' }} title={TAG_HINTS[d.document_tag] || TAG_HINTS.other}>
                          {TAG_ICONS[d.document_tag] || <IconFileText size={12} />}
                          {TAG_LABELS[d.document_tag] || 'Other'}
                        </span>
@@ -213,7 +259,7 @@ export function EntityDocumentsModal({ entityType, entityId, entityName, onClose
                    </div>
 
                    <div className="btn-group" style={{ flexShrink: 0 }}>
-                     <a href={d.url} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm" style={{ textDecoration: 'none', gap: '4px' }} title="Open document link in new tab">
+                     <a href={d.url} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm" style={{ textDecoration: 'none', gap: '4px' }} title="Open this link in a new tab">
                        <IconExternalLink size={12} /> Open ↗
                      </a>
                      {canManage && (
@@ -222,7 +268,7 @@ export function EntityDocumentsModal({ entityType, entityId, entityName, onClose
                        </button>
                      )}
                      {canManage && (
-                       <button className="btn btn-danger btn-sm" onClick={() => setConfirmDelete(d)} title="Remove document link">
+                       <button className="btn btn-danger btn-sm" onClick={() => setConfirmDelete(d)} title="Remove this link">
                          <IconTrash size={12} />
                        </button>
                      )}
@@ -236,9 +282,9 @@ export function EntityDocumentsModal({ entityType, entityId, entityName, onClose
 
         {confirmDelete && (
           <ConfirmModal
-            message={`Are you sure you want to remove the document link '${confirmDelete.display_name}'?`}
+            message={`Are you sure you want to remove the link '${confirmDelete.display_name}'?`}
             pendingLabel="Removing…"
-            onConfirm={() => removeDoc(confirmDelete.id, confirmDelete.display_name)}
+            onConfirm={() => removeLink(confirmDelete.id, confirmDelete.display_name)}
             onCancel={() => setConfirmDelete(null)}
           />
         )}

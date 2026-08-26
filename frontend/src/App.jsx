@@ -47,8 +47,11 @@ import {
   IconMoon,
   IconUser,
   IconBug,
+  IconTag,
   IconLogOut
 } from './components/common/Icons'
+
+import { APP_VERSION, VERSION_IS_KNOWN, versionTitle } from './version'
 
 import { Toast } from './components/common/Toast'
 import { AlertPill } from './components/common/AlertPill'
@@ -316,6 +319,23 @@ function UserMenu({ persona, userRole, onSignOut, theme, onToggleTheme, onReport
           <div className="user-popover-head">
             <div className="user-popover-email">{persona}</div>
             <div className="user-popover-role">{userRole}</div>
+            {/* THE VERSION SITS IN THE HEAD, NOT AMONG THE THREE ACTIONS BELOW (issue #57), and the
+                split is the one this menu already draws: the head states facts about the session,
+                the rows below DO things. A version is read and never pressed, so putting it in the
+                action list would be the fourth item that does not behave like the other three.
+
+                Shown to every user rather than to administrators alone. The reason to display it
+                at all is that whoever hits a fault can say which build they hit it on, and that is
+                most often not the person with the admin password. */}
+            <div
+              className={`user-popover-version${VERSION_IS_KNOWN ? '' : ' user-popover-version-unknown'}`}
+              title={versionTitle()}
+            >
+              <IconTag size={11} aria-hidden="true" />
+              {/* Selectable, because the next thing anybody does with this string is paste it into
+                  a bug report -- which is the same reason the Report Bug button is two rows down. */}
+              <span className="mono">{APP_VERSION}</span>
+            </div>
           </div>
 
           {/* A TOGGLE STATES WHERE IT IS, NOT WHERE IT GOES. "Theme: Dark" with a sun icon reads as

@@ -1,5 +1,41 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { execFileSync } from 'node:child_process'
+
+/**
+ * The version this bundle reports in the account menu (issue #57).
+ *
+ * TWO SOURCES, IN THIS ORDER, and the order is the whole design:
+ *
+ *   1. `VITE_APP_VERSION` from the environment. This is the ONLY source a container build has.
+ *      frontend/Dockerfile's context is `./frontend`, so `.git` is not in the build at all and
+ *      the command below cannot run -- the value has to be handed in from outside.
+ *   2. `git describe`, for `npm run dev` and any build run from a working tree. This is what makes
+ *      a developer's build label itself without anyone remembering to set a variable.
+ *
+ * `--tags` counts lightweight tags, `--always` degrades to a bare commit id rather than failing on
+ * a repository with no tag yet, and `--dirty` marks a build made over uncommitted edits -- which
+ * is precisely the build whose identity is otherwise a lie.
+ *
+ * FAILURE IS NOT FATAL AND IS NOT DISGUISED. No git, no repository, no tags: the version resolves
+ * to `unknown` and src/version.js renders that as the answer. A build that cannot know its version
+ * must not invent one -- see the note there.
+ */
+function resolveAppVersion() {
+  const supplied = process.env.VITE_APP_VERSION
+  if (typeof supplied === 'string' && supplied.trim() !== '') return supplied.trim()
+
+  try {
+    // execFileSync, not execSync: no shell, so nothing here is interpolated into a command line.
+    return execFileSync('git', ['describe', '--tags', '--always', '--dirty'], {
+      cwd: import.meta.dirname,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim() || 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
 
 export default defineConfig(({ mode, command }) => {
   const env = loadEnv(mode, process.cwd(), '')
@@ -28,6 +64,12 @@ export default defineConfig(({ mode, command }) => {
 
   return {
     plugins: [react()],
+    // Injected rather than left to Vite's own VITE_* inlining, because the git fallback above has
+    // no environment variable behind it -- `define` is what lets one spelling in the app cover the
+    // container build and the working-tree build alike.
+    define: {
+      'import.meta.env.VITE_APP_VERSION': JSON.stringify(resolveAppVersion()),
+    },
     server: {
       host: '0.0.0.0',
       port: 3000,

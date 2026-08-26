@@ -19,7 +19,7 @@ import { ActionButton } from '../common/ActionButton'
 import { usePendingAction, usePendingKey } from '../../hooks/usePendingAction'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { ArchiveModal } from '../modals/ArchiveModal'
-import { EntityDocumentsModal } from '../modals/EntityDocumentsModal'
+import { EntityLinksModal } from '../modals/EntityLinksModal'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
 import { FlowBackupUploader } from '../common/FlowBackupUploader'
 import {
@@ -71,12 +71,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   // The gateway whose bundle modal is open. Held as the OBJECT rather than an id: the modal needs
   // the name and sparkplug_id, and it stays open across a poll that may reorder the list.
   const [bundleForGw, setBundleForGw] = useState(null)
-  const [docRefreshKey, setDocRefreshKey] = useState(0)
   const [filterMode, setFilterMode] = useState('all')
-  // Document link counts for the collapsed accordion badge, keyed by gateway id. Fetched once
-  // for the whole page rather than per row: /api/v1/documents accepts entity_type on its own,
-  // so one request answers every row instead of one request each.
-  const [docCounts, setDocCounts] = useState({})
 
   const getInitialSearch = () => {
     const params = new URLSearchParams(window.location.search)
@@ -134,31 +129,6 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
       throw e
     }
   }, [])
-
-  /**
-   * Document-link counts for the collapsed accordion badges.
-   *
-   * Deliberately NOT part of load() above. That runs on the poll and on every Realtime event,
-   * and ingestion stamps last_heartbeat roughly every 30s per gateway -- so folding this in
-   * would issue a documents query on the busiest subscription in the app to refresh a number
-   * that changes when a human edits a link. Keyed on docRefreshKey instead: once on mount, and
-   * again when EntityDocumentsModal closes.
-   *
-   * Non-fatal: a failure leaves the badges at zero, which is what they read before this
-   * existed. A page of gateways must not fail to render because a count could not be had.
-   */
-  useEffect(() => {
-    let cancelled = false
-    api.get('/api/v1/documents?entity_type=gateway')
-      .then(docs => {
-        if (cancelled) return
-        const counts = {}
-        for (const d of docs || []) counts[d.entity_id] = (counts[d.entity_id] || 0) + 1
-        setDocCounts(counts)
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [docRefreshKey])
 
   // Reconciliation loop, not the primary refresh -- see useRealtimeTable for why polling stays.
   //
@@ -611,7 +581,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
       )}
 
       {docsForGw && (
-        <EntityDocumentsModal entityType="gateway" entityId={docsForGw.gateway_id} entityName={docsForGw.gateway_name} onClose={() => { setDocsForGw(null); setDocRefreshKey(k => k + 1) }} showToast={showToast} hasPermission={hasPermission} />
+        <EntityLinksModal entityType="gateway" entityId={docsForGw.gateway_id} entityName={docsForGw.gateway_name} onClose={() => setDocsForGw(null)} showToast={showToast} hasPermission={hasPermission} />
       )}
       </div>
 
@@ -809,9 +779,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             title: 'Open the immutable audit trace for this gateway'
           },
           {
-            label: 'Manage Documents', icon: <IconBookOpen size={13} />,
+            label: 'Manage Links', icon: <IconBookOpen size={13} />,
             onClick: () => setDocsForGw(selected),
-            title: 'Attach or edit external document links for this gateway'
+            title: 'Attach or edit links for this gateway — documents, an asset register, a file repository, any URL'
           },
           !selected.is_archived && {
             label: 'Archive Gateway', icon: <IconArchive size={13} />,

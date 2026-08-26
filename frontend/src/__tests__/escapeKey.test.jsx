@@ -11,7 +11,7 @@ import { ConfirmModal } from '../components/modals/ConfirmModal'
  *
  * The rule exists because modals stack. ConfirmModal sits at z-index 1100 so it can open ON TOP
  * of another dialog -- the GitOps sync confirmation over the Directory page, the purge
- * confirmation over the Archives table, the delete confirmation inside EntityDocumentsModal. If
+ * confirmation over the Archives table, the delete confirmation inside EntityLinksModal. If
  * each layer bound its own `document` keydown listener, one Escape would dismiss the
  * confirmation AND the dialog that asked for it: the user answers "no" to a question and loses
  * their unsaved form as a bonus.
