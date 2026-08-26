@@ -84,6 +84,22 @@ const rowFor = (name) => {
 }
 
 /**
+ * Bring superseded versions into the registry.
+ *
+ * This was a dedicated "Show the N archived versions kept as history" button in the card header.
+ * It is now an option in the status filter the registry gained with issue #60 -- isCurrentSchema()
+ * is `status !== archived`, so the toggle was a status filter wearing a button, and leaving it
+ * beside a status dropdown would have been two controls able to contradict each other.
+ *
+ * The behaviour these tests assert is unchanged: history is hidden until asked for, and asking is
+ * one click. Only the control has moved, so this is a helper rather than an edit at each site.
+ */
+const revealArchived = () => fireEvent.change(
+  screen.getByLabelText('Filter schemas by lifecycle state'),
+  { target: { value: 'all' } }
+)
+
+/**
  * Select a schema row and return its context panel.
  *
  * The Actions column is gone: View / Edit Draft / Create Version / More all moved into the
@@ -124,7 +140,7 @@ describe('Registry — read-only protections and status badges', () => {
     await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
     expect(within(registryTable()).queryByText('Robot_Arm_Schema')).toBeNull()
 
-    fireEvent.click(screen.getByTitle('Show the 1 archived version kept as history'))
+    revealArchived()
 
     const archived = rowFor('Robot_Arm_Schema')
     expect(within(archived).getByText('v1 · Archived')).toBeTruthy()
@@ -310,7 +326,7 @@ describe('Downloading a version definition', () => {
     schemaRows = [ARCHIVED_V1, ACTIVE_V2]
     renderTab()
     await waitFor(() => expect(rowFor('Robot_Arm_Schema_v2')).toBeTruthy())
-    fireEvent.click(screen.getByTitle('Show the 1 archived version kept as history'))
+    revealArchived()
 
     await clickRowDownload('Robot_Arm_Schema')
     await waitFor(() => expect(captured.length).toBe(1))

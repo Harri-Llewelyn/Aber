@@ -792,6 +792,42 @@ html, body, #root {
   overflow-x: auto;
 }
 
+/* ===== Capped, scrolling table =====
+   A modifier on `.table-wrap`, for lists that grow without an upper bound and sit above other
+   content the page still needs to reach. The schema registry is the first (issue #60): it gains a
+   row per PUBLISH rather than per schema, so a floor with a few versioned schemas pushed the
+   metric catalog -- the thing schemas are built FROM -- off the bottom of the page.
+
+   THE HEADER IS PINNED, which is the half that makes the cap usable rather than merely shorter.
+   Five columns of UUIDs and version badges are unreadable once the row naming them has scrolled
+   away, and a capped table without a sticky header just moves that problem inside the box.
+
+   `overscroll-behavior: contain` stops a flick that bottoms out here from carrying on down the
+   page, the same reason `.zone-chips` carries it. */
+.table-scroll {
+  max-height: 420px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.table-scroll thead tr {
+  position: sticky;
+  top: 0;
+  /* Above the rows it covers, and nothing else -- `.action-menu` portals to <body> precisely so
+     it is not competing at this level. */
+  z-index: 2;
+}
+
+/* `thead tr` already carries `--bg-glass`, which is translucent: rows scrolling under a pinned
+   header would show through it. The opaque card colour goes on the cells, since the row's own
+   background is the glass tint that has to stay. */
+.table-scroll thead th {
+  background: var(--bg-card);
+  /* `border-bottom` on the row does not travel with a sticky element in every engine, so the
+     hairline is drawn as a shadow that does. Without it the header floats on top of the rows. */
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
