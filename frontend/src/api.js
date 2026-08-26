@@ -891,49 +891,64 @@ const apiMethods = {
       // A tag that matches no device must return nothing rather than everything.
       if (entityIds && entityIds.length === 0) return [];
 
-      let query = supabase.from('digital_thread').select('*');
+      // THE DELETED-ASSET FILTER HAS TO BE A PREDICATE, NOT A POST-FILTER, WHICH IS WHY THIS IS AN
+      // RPC. Every other filter on this page is already pushed down for the reason `namedEntityIds`
+      // states: the limit is applied by the database, so filtering afterwards pages through 200
+      // mixed rows and shows whichever fraction survived. Hiding purged assets was the one filter
+      // still applied in the browser, and it produced exactly that failure -- four assets listed on
+      // a stack of twenty-six, and a Gateways section that rendered empty on four healthy gateways,
+      // because the window had been spent on rows that were then discarded.
+      //
+      // It cannot be expressed as a PostgREST filter: "still exists" is an anti-join against three
+      // tables. `digital_thread_page()` (migration 0039) does it in one statement and returns the
+      // purged COUNT alongside the page -- the count drives the control that reveals them, so
+      // deriving it from the page would have made the button vanish exactly when it was needed.
+      const includePurged = url.searchParams.get('include_purged') === 'true';
 
-      if (entityType) {
-        // The trigger writes TG_TABLE_NAME -- 'cells' / 'gateways' / 'devices'. The UI has always
-        // offered 'CELL' / 'GATEWAY' / 'DEVICE', so even an honoured exact match would never have
-        // hit. Normalise to the stored form.
-        const stored = { CELL: 'cells', GATEWAY: 'gateways', DEVICE: 'devices' }[entityType.toUpperCase()];
-        query = query.eq('entity_type', stored || entityType);
-      }
-      if (entityIds) query = query.in('entity_id', entityIds);
-      // ALLOW-LISTED AGAINST THE SHARED ENUM, not a literal array. Written out by hand this read
-      // ['INSERT', 'UPDATE', 'DELETE'], so when 0026 added SCHEMA_REJECTION the filter silently
-      // stopped being able to select it -- and not by erroring: an unlisted action fell through
-      // and applied no predicate, so asking for one kind of event returned every kind. Same trap
-      // as the empty-entityIds guard above, and the same answer: a filter that matches nothing
-      // must return nothing.
-      if (action && Object.prototype.hasOwnProperty.call(DIGITAL_THREAD_ACTIONS, action)) {
-        query = query.eq('action', action);
-      } else if (action) {
+      if (action && !Object.prototype.hasOwnProperty.call(DIGITAL_THREAD_ACTIONS, action)) {
         // An action the client does not know about. Refusing beats widening: returning every row
         // for an unrecognised filter is how a caller ends up believing it has seen a filtered set.
         return [];
       }
-      // Bounds before the limit. PostgREST serialises the whole builder at await-time so the JS
-      // call order does not itself decide anything -- but these are `where` and that is `limit`,
-      // and writing them in that order is the point being made.
-      if (since) query = query.gte('recorded_at', since);
-      if (until) query = query.lte('recorded_at', until);
-      if (Number.isFinite(limit) && limit > 0) query = query.limit(limit);
 
-      const { data, error } = await query.order('recorded_at', { ascending: false });
+      const { data, error } = await supabase.rpc('digital_thread_page', {
+        p_limit: Number.isFinite(limit) && limit > 0 ? limit : 200,
+        p_include_purged: includePurged,
+        // Normalised to the stored form. The trigger writes TG_TABLE_NAME -- 'cells' / 'gateways' /
+        // 'devices' -- and the UI has always offered 'CELL' / 'GATEWAY' / 'DEVICE'.
+        p_entity_type: entityType
+          ? ({ CELL: 'cells', GATEWAY: 'gateways', DEVICE: 'devices' }[entityType.toUpperCase()] || entityType)
+          : null,
+        p_action: action || null,
+        p_entity_ids: entityIds && entityIds.length ? entityIds : null,
+        p_since: since || null,
+        p_until: until || null,
+      });
       if (error) throw error;
 
-      const rows = (data || []).map(mapDigitalThreadRow);
-      if (!search) return rows;
+      const payload = data || {};
+      let rows = (payload.events || []).map(mapDigitalThreadRow);
 
       // Substring match, applied after mapping so it searches the rendered description rather
       // than the raw columns -- that is what the field's placeholder promises.
-      const needle = search.toLowerCase();
-      return rows.filter(r =>
-        String(r.entity_id || '').toLowerCase().includes(needle) ||
-        String(r.description || '').toLowerCase().includes(needle)
-      );
+      if (search) {
+        const needle = search.toLowerCase();
+        rows = rows.filter(r =>
+          String(r.entity_id || '').toLowerCase().includes(needle) ||
+          String(r.description || '').toLowerCase().includes(needle)
+        );
+      }
+
+      // THE ARRAY IS STILL THE RETURN VALUE, with the two page-level facts attached to it.
+      //
+      // `api.get(path)` resolves to the RESOURCE everywhere else in this file, and one path
+      // resolving to a wrapper object would be a contract every caller and every test mock has to
+      // know about -- 97 of them found out at once when it was tried. Attaching the extras keeps
+      // `.length`, `.map` and destructuring working, and lets a mock return a bare array and
+      // simply have no opinion about deleted assets, which is the right default for a fixture.
+      rows.purgedAssets = Number(payload.purged_assets || 0);
+      rows.truncated = Boolean(payload.truncated);
+      return rows;
     }
 
     if (path.startsWith('/api/v1/quarantine')) {

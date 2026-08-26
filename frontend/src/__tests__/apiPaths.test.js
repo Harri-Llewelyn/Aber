@@ -22,6 +22,12 @@ vi.mock('../lib/supabaseClient', () => {
   return {
     supabase: {
       from: vi.fn(() => mockQueryBuilder),
+      // '/api/v1/digital-thread' is served by the digital_thread_page RPC since migration 0039 --
+      // the deleted-asset filter is an anti-join PostgREST cannot express. This path only has to
+      // not throw here; what it sends is asserted in apiRelationships.test.js.
+      rpc: vi.fn().mockResolvedValue({
+        data: { events: [], purged_assets: 0, truncated: false }, error: null
+      }),
       // '/api/v1/gitops/deploy-flow' routes through an Edge Function rather than
       // PostgREST, so the mock needs this surface too.
       functions: {

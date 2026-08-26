@@ -164,7 +164,11 @@ would turn "can mint one confined account" into "can stop the whole fleet publis
 makes **archiving a gateway withdraw its outstanding enrolment bundle**, and enrolment refuse
 an archived gateway at all: a bundle downloaded and never instantiated was still redeemable
 after the gateway was archived, which issued a real broker credential and resurrected the row
-to `ONLINE` — plus demo accounts (`supabase/seed.sql`).
+to `ONLINE` — and `0039` adds `digital_thread_page()`, which applies the **deleted-asset
+filter as a predicate rather than in the browser**, so the page's row budget is spent on rows
+it will actually show: hiding them afterwards had the page list four assets on a stack of
+twenty-six, and render an empty Gateways section on a fleet of four healthy gateways — plus
+demo accounts (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because `0005` already implements one; a second declaration of `log_digital_thread_event()`

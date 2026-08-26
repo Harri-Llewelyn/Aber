@@ -11,7 +11,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Recording stub for the PostgREST query builder. Each `from()` starts a fresh chain and
 // pushes the resulting call record onto `calls`.
-const state = { calls: [], responses: {} };
+// `rpcCalls` is separate from `calls` because they answer different questions: `calls` records
+// PostgREST table access, `rpcCalls` records the digital_thread_page function the Digital Thread
+// moved to in 0039. Keeping them apart means `callFor('digital_thread')` still means "the table
+// was queried", which is the assertion that would otherwise quietly start passing again.
+const state = { calls: [], rpcCalls: [], responses: {} };
 
 function makeBuilder(table) {
   const record = { table, select: null, filters: [], range: null, order: null, payload: null, op: null };
@@ -38,6 +42,19 @@ function makeBuilder(table) {
 vi.mock('../lib/supabaseClient', () => ({
   supabase: {
     from: vi.fn((table) => makeBuilder(table)),
+    // The Digital Thread page is an RPC since 0039. Calls are recorded so the tests below can
+    // assert the ARGUMENTS, which is where its filters live now.
+    rpc: vi.fn((fn, args) => {
+      state.rpcCalls.push({ fn, args });
+      return Promise.resolve({
+        data: {
+          events: (state.responses.digital_thread || { data: [] }).data || [],
+          purged_assets: 0,
+          truncated: false
+        },
+        error: null
+      });
+    }),
     functions: { invoke: vi.fn().mockResolvedValue({ data: {}, error: null }) }
   }
 }));
@@ -48,6 +65,7 @@ const callFor = (table) => state.calls.find(c => c.table === table);
 
 beforeEach(() => {
   state.calls = [];
+  state.rpcCalls = [];
   state.responses = {};
 });
 
@@ -348,27 +366,46 @@ describe('telemetry filtering by device tag', () => {
 });
 
 describe('digital thread filtering', () => {
+  /*
+   * THE FILTERS ARE RPC ARGUMENTS NOW, not query-builder calls. Migration 0039 moved this page to
+   * `digital_thread_page()` because hiding deleted assets is an anti-join PostgREST cannot
+   * express -- and doing it in the browser instead spent the row limit on rows that were then
+   * discarded, which is how a cleared filter bar came to list four assets on a stack of
+   * twenty-six. What each test asks is unchanged; where it looks is not.
+   */
+  const rpcArgs = () => state.rpcCalls.find(c => c.fn === 'digital_thread_page')?.args;
+
   it('normalises the UI entity type to the table name the trigger records', async () => {
     // log_digital_thread_event() writes TG_TABLE_NAME ('devices'); the dropdown offers 'DEVICE'.
     // An exact match would never have hit even once the parameter was honoured at all.
     await api.get('/api/v1/digital-thread?entity_type=DEVICE');
-    expect(callFor('digital_thread').filters).toContainEqual(['eq', 'entity_type', 'devices']);
+    expect(rpcArgs().p_entity_type).toBe('devices');
   });
 
   it('honours the row limit', async () => {
     await api.get('/api/v1/digital-thread?limit=200');
-    expect(callFor('digital_thread').filters).toContainEqual(['limit', 200]);
+    expect(rpcArgs().p_limit).toBe(200);
   });
 
   it('restricts to the entity ids carrying a device tag', async () => {
     await api.get('/api/v1/digital-thread?entity_ids=dev-a,dev-b');
-    expect(callFor('digital_thread').filters).toContainEqual(['in', 'entity_id', ['dev-a', 'dev-b']]);
+    expect(rpcArgs().p_entity_ids).toEqual(['dev-a', 'dev-b']);
+  });
+
+  it('hides deleted assets unless asked, as a predicate rather than afterwards', async () => {
+    // THE ONE THIS MIGRATION EXISTS FOR. Applied in the query, the 200-row budget is spent on rows
+    // that will be shown; applied afterwards, it was spent on rows that were then thrown away.
+    await api.get('/api/v1/digital-thread');
+    expect(rpcArgs().p_include_purged).toBe(false);
+    state.rpcCalls.length = 0;
+    await api.get('/api/v1/digital-thread?include_purged=true');
+    expect(rpcArgs().p_include_purged).toBe(true);
   });
 
   it('returns nothing for a tag that matches no device', async () => {
     const rows = await api.get('/api/v1/digital-thread?entity_ids=');
     expect(rows).toEqual([]);
-    expect(callFor('digital_thread')).toBeUndefined();
+    expect(rpcArgs()).toBeUndefined();
   });
 
   it('searches entity id and rendered description, case-insensitively', async () => {

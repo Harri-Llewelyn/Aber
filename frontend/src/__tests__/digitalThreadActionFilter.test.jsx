@@ -152,17 +152,22 @@ describe('an unrecognised action must not widen the query', () => {
      * unrecognised one not?
      */
     vi.resetModules()
+    // THE STUB FOLLOWS THE MECHANISM. This page is served by the `digital_thread_page` RPC since
+    // migration 0039 -- the deleted-asset filter is an anti-join PostgREST cannot express -- so the
+    // recognised action now has to arrive as an ARGUMENT rather than as a `.eq()` on a builder.
+    // The question the test asks is unchanged: did it reach the database, and did the unrecognised
+    // one stop here?
     const built = []
-    const chain = () => {
-      const q = {
-        select: () => q, eq: (col, val) => { built.push([col, val]); return q },
-        in: () => q, gte: () => q, lte: () => q, order: () => q, limit: () => q,
-        then: (resolve) => resolve({ data: [], error: null })
-      }
-      return q
-    }
     vi.doMock('../lib/supabaseClient', () => ({
-      supabase: { from: () => chain() },
+      supabase: {
+        from: () => { throw new Error('the digital thread page must go through the RPC') },
+        rpc: (fn, args) => {
+          built.push([fn, args])
+          return Promise.resolve({
+            data: { events: [], purged_assets: 0, truncated: false }, error: null
+          })
+        }
+      },
       SUPABASE_URL: 'http://localhost:54321',
       SUPABASE_ANON_KEY: 'test'
     }))
@@ -172,13 +177,14 @@ describe('an unrecognised action must not widen the query', () => {
     for (const action of Object.keys(DIGITAL_THREAD_ACTIONS)) {
       built.length = 0
       await realApi.get(`/api/v1/digital-thread?action=${action}`)
-      expect(built, `${action} should have become a predicate`)
-        .toContainEqual(['action', action])
+      expect(built.length, `${action} should have reached the RPC`).toBe(1)
+      expect(built[0][0]).toBe('digital_thread_page')
+      expect(built[0][1].p_action, `${action} should have become an argument`).toBe(action)
     }
 
     built.length = 0
     await expect(realApi.get('/api/v1/digital-thread?action=NOT_AN_ACTION')).resolves.toEqual([])
-    expect(built, 'an unrecognised action must build no predicate at all').toEqual([])
+    expect(built, 'an unrecognised action must not reach the database at all').toEqual([])
 
     vi.doUnmock('../lib/supabaseClient')
     vi.resetModules()
