@@ -441,12 +441,14 @@ supabaseRest:
     limits: { memory: 512Mi }
 
 # -----------------------------------------------------------------------------------------------
-# Envoy -- roadmap §4's replacement for Kong. STATICALLY DRAFTED, NEVER DEPLOYED.
+# Envoy -- roadmap §4's replacement for Kong. PARTLY VERIFIED IN A CLUSTER.
 #
-# DISABLED BY DEFAULT, and that is not caution for its own sake: the Compose half of this migration
-# is verified live and this half is verified only as far as `helm template` and `helm lint`. There
-# is no cluster in the environment it was written in and CI is frozen, so nothing here has ever
-# started. See docs/gateway-migration.md for what must be proven before it is trusted.
+# DISABLED BY DEFAULT, and that is not caution for its own sake. Installed into a real cluster, the
+# load-bearing mechanism holds: the `supabase-kong` Service selects `component=supabase-envoy`, the
+# unauthenticated probe reports the same posture it does on Compose, and a valid key opens the gate
+# while an unregistered one is refused. What could NOT be exercised is everything that needs this
+# project's own images -- `db-init` and `gateway-credential` are unpublished GHCR tags, so no
+# migrations ran and no edge functions were deployed. See docs/gateway-migration.md.
 #
 # SIDE BY SIDE FIRST. With `enabled: true` and the default serviceName, Envoy answers on
 # `supabase-envoy:8000` while Kong keeps `supabase-kong:8000`, so the two can be probed against

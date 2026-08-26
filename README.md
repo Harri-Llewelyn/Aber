@@ -798,7 +798,7 @@ gigabytes of raw points back into TimescaleDB.
 **Compose is migrated. Kubernetes is not, and the gap is deliberate.** `supabase-envoy` publishes
 54321 and answers to `supabase-kong` through a network alias; Kong, `supabase-kong-init` and the
 `kong_config` volume are gone from `docker-compose.yml`. The chart still deploys Kong by default,
-because its Envoy templates render and lint and **have never run in a cluster** — which is also why
+because its Envoy templates are **verified in part, not in full** — which is also why
 `supabase/kong.yml` is still in the repository. It is read by nothing on Compose and by the chart on
 Kubernetes, and the template-hygiene check asserts exactly that pair rather than the tempting
 one-liner "kong.yml is gone".
@@ -838,10 +838,19 @@ the first path segment.
   files carrying `http://supabase-kong:8000`; it does nothing for these two, which select **pod
   labels**. A ServiceMonitor carried over unchanged scrapes 404 *while reporting the target up* —
   an unmeasured gateway that reads as an idle one.
-- **Proving any of it.** `helm lint` passing is not verification, and this migration produced the
-  proof: deleting `kong.yml` left the chart's default render failing on a missing file, and lint
-  stayed green through it. The bar is a port-forward and the same `--runtime --authenticated` run
-  that Compose cleared.
+- **Finishing the proof.** It has now been installed into a real cluster, and the load-bearing part
+  holds: the `supabase-kong` Service selects `component=supabase-envoy`, and the unauthenticated
+  probe passes in-cluster with the same 3 gated / 6 open / 4 exemptions Compose reports. Credential
+  handling is right in both directions — a valid key opens the gate, an unregistered one is refused
+  401. What is NOT proven is everything needing the stack's own images: `db-init` and
+  `gateway-credential` are unpublished GHCR tags, so no migrations ran, no edge functions were
+  deployed, and Realtime waits forever on a schema nothing creates. That also leaves the Realtime
+  handshake, the ServiceMonitor scrape (no Prometheus Operator CRDs) and the Ingress itself (no
+  ingress controller) untested. All of it is downstream of CI, not of the chart.
+- **`helm lint` is not verification, and this migration produced the proof**: deleting `kong.yml`
+  left the chart's default render failing on a missing file, and lint stayed green through it.
+  Rendering caught worse — the API's Ingress route was gated on `supabaseKong.enabled`, so
+  promoting removed it entirely and every call would have 404'd at the controller.
 - **The fifth exemption**, below.
 
 **A fifth exemption is still an open question, and it should be answered rather than drift in.**

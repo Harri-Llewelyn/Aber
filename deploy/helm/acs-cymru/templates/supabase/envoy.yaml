@@ -6,20 +6,28 @@
 {{- fail "\n\nacs-cymru: files/envoy/envoy.yaml is missing.\n\nMirror it with:  node scripts/sync-helm-chart-files.mjs\n\nEnvoy refuses to start on a config it cannot parse, so an absent one is a CrashLoopBackOff rather\nthan a silent 404 -- but the message points at a path, not at the sync step, which is why this fails here.\n" }}
 {{- end }}
 {{/*
-STATICALLY DRAFTED, NOT YET DEPLOYED. Roadmap §4.
+PARTLY VERIFIED IN A CLUSTER. Roadmap §4.
 
-`helm template` renders it and `helm lint` passes, so the YAML and the value plumbing are checked.
-NOTHING HERE HAS RUN IN A CLUSTER: there is no k3d in the environment it was written in and CI is
-frozen, so the Compose half of this migration is verified live and this half is verified only as
-far as rendering. Treat every runtime claim below as a translation of Kong's, not an observation.
+WHAT HOLDS, observed rather than translated: installed with `supabaseKong.enabled=false` and
+`supabaseEnvoy.serviceName=supabase-kong`, the Service selects `component=supabase-envoy` and gets a
+live endpoint -- so the name adoption that the whole promotion rests on works. The unauthenticated
+probe reports the same 3 gated / 6 open / 4 exemptions it reports on Compose, and credentials behave
+in both directions: a valid key opens the gate, an unregistered one is refused 401.
 
-WHAT MUST BE PROVEN BEFORE IT IS TRUSTED, and it is the same bar the Compose half cleared:
+WHAT IS STILL UNPROVEN, and none of it is this file's doing: `db-init` and `gateway-credential` are
+unpublished GHCR tags, so the cluster ran no migrations and deployed no edge functions -- the
+authenticated probe's markers cannot be satisfied against empty upstreams. The Realtime handshake,
+the ServiceMonitor scrape (no Prometheus Operator CRDs) and the Ingress (no ingress controller) are
+untested for the same class of reason.
 
-  kubectl -n <ns> port-forward svc/supabase-envoy 54331:8000
-  node scripts/check-gateway-surface.mjs --runtime --authenticated http://127.0.0.1:54331
+TO RE-RUN IT:
 
-against the same command pointed at supabase-kong, with identical output. See
-docs/gateway-migration.md.
+  kubectl -n <ns> port-forward svc/supabase-kong 18080:8000
+  SUPABASE_ANON_KEY=<the cluster's, from its Secret -- NOT .env's>
+    node scripts/check-gateway-surface.mjs --runtime --authenticated http://127.0.0.1:18080
+
+Two traps worth carrying: the key must come from the CLUSTER's Secret, and Windows reserves
+54328-54427, which silently refuses the obvious port-forward ports. See docs/gateway-migration.md.
 */}}
 {{- if and .Values.supabaseKong.enabled (eq .Values.supabaseEnvoy.serviceName "supabase-kong") }}
 {{- fail "\n\nacs-cymru: supabaseKong.enabled and supabaseEnvoy.serviceName=supabase-kong at once.\n\nTwo Deployments would answer on one Service name and requests would be load-balanced across the\ngateway being replaced and the one replacing it -- which is not a migration, it is a coin toss per\nrequest, and the probe would report whichever one it happened to reach.\n\nRun them side by side with supabaseEnvoy.serviceName=supabase-envoy, or promote by setting\nsupabaseKong.enabled=false in the same change that renames the Service.\n" }}

@@ -3,9 +3,11 @@
 Roadmap §4. This document is the protocol for proving the two gateways are equivalent, and the plan
 for promoting Envoy once they are.
 
-**Status.** The Compose half is built and verified live. The Helm half is **statically drafted and
-has never run in a cluster** — see [Helm](#2-helm-statically-drafted). Nothing is promoted; Kong is
-primary on both targets.
+**Status.** Compose is **migrated** — Envoy publishes 54321 and Kong is retired there. The Helm half
+is **partly verified**: installed into a real cluster, where the Service adoption, routing, all four
+exemptions and both gating directions hold, but where the stack's own images are unpublished so the
+authenticated probe has nothing to reach. Kubernetes still defaults to Kong. See
+[Helm](#22-helm--partly-verified).
 
 **Why this migration at all.** Upstream Supabase has made Envoy the default self-hosted gateway,
 and — the part that turns a preference into a deadline — the **new `sb_publishable_*` /
@@ -158,12 +160,29 @@ the protocol existing:
 `kong_config` volume; removing it while Kong is still the published gateway leaves the gateway
 serving whatever the volume last held — a stale config that starts cleanly.
 
-### 2.2 Helm — **statically drafted**
+### 2.2 Helm — **partly verified**
 
-> **Nothing in this section has run.** `helm lint` passes and `helm template` renders all three
-> states (Envoy off, side by side, promoted), so the YAML and the value plumbing are checked. There
-> was no cluster available and CI is frozen until September 2026. Every runtime claim is a
-> translation of Kong's behaviour, not an observation.
+> **What was observed, in a real cluster.** Installed with `supabaseKong.enabled=false` and
+> `supabaseEnvoy.serviceName=supabase-kong`: the `supabase-kong` Service selects
+> `component=supabase-envoy` and gets a live endpoint, so the name adoption the promotion rests on
+> works. The unauthenticated probe reports the same **3 gated / 6 open / 4 exemptions** it reports
+> on Compose. A valid key opens the gate; an unregistered one is refused `401`.
+>
+> **What could not be exercised, and why none of it is the chart's fault.** `db-init` and
+> `gateway-credential` are unpublished GHCR tags, so the cluster ran no migrations and deployed no
+> edge functions — the authenticated probe's markers have nothing to match against. Realtime waits
+> forever on a `_realtime` schema `db-init` would have created. The ServiceMonitor cannot be
+> dry-run or scraped (no Prometheus Operator CRDs) and the Ingress cannot route (no ingress
+> controller). All of it is downstream of CI being frozen until September 2026.
+>
+> **Two environment traps, recorded because both cost time.** `values-dev.yaml` asks for
+> `storageClass: local-path`, which is k3s's name — Docker Desktop uses the same
+> `rancher.io/local-path` provisioner under the names `hostpath` and `standard`, and every PVC sits
+> `Pending` until it is overridden. And Windows reserves TCP `54328-54427`, which refuses the
+> obvious port-forward ports with a permissions error rather than an in-use one.
+>
+> **The probe's key must come from the cluster's own Secret**, not from `.env`. Presenting the
+> wrong one produces `401`s that read exactly like a broken gate.
 
 Already drafted, in this branch:
 
@@ -198,14 +217,28 @@ change, not a broken-panel one. Worth re-checking against a live scrape before b
 same spirit as the note in `servicemonitors.yaml` about a series name first written from
 documentation and corrected by measurement.
 
-**Before trusting any of it:**
+**To re-run it:**
 
 ```bash
-kubectl -n <ns> port-forward svc/supabase-envoy 54331:8000
-node scripts/check-gateway-surface.mjs --runtime --authenticated http://127.0.0.1:54331
+helm install acs deploy/helm/acs-cymru -n acs -f deploy/helm/acs-cymru/values-dev.yaml \
+  --set ingress.enabled=false --set global.storageClass=standard \
+  --set gatewayCredential.enabled=false --set telemetry.serviceMonitor.enabled=false \
+  --set supabaseEnvoy.enabled=true --set supabaseKong.enabled=false \
+  --set supabaseEnvoy.serviceName=supabase-kong
+
+kubectl -n acs port-forward svc/supabase-kong 18080:8000
+ANON=$(kubectl get secret -n acs acs-acs-cymru-secrets -o jsonpath='{.data.SUPABASE_ANON_KEY}' | base64 -d)
+SUPABASE_ANON_KEY=$ANON node scripts/check-gateway-surface.mjs --runtime http://127.0.0.1:18080
 ```
 
-against the same command pointed at `supabase-kong`, with identical output.
+The unauthenticated pass must match Compose's. The authenticated pass will fail on `rest-v1` and
+`functions-v1` until the project images are published — with `404`s, not `401`s, which is the
+distinction that says the gate opened and the upstream was empty.
+
+**Tearing it down:** the namespace hangs in `Terminating` on `mosquitto-external`, a `LoadBalancer`
+Service whose `service.kubernetes.io/load-balancer-cleanup` finalizer no controller will clear
+without a LoadBalancer provider. `kubectl patch svc mosquitto-external -n acs -p
+'{"metadata":{"finalizers":null}}' --type=merge` releases it.
 
 ### 2.3 Documentation and OpenAPI
 
