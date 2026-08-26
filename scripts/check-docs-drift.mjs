@@ -763,8 +763,15 @@ function edgeFunctionNames() {
       );
     } else if (!strays.length) {
       // The count claim in the section's opening sentence, written as a word.
+      //
+      // EXTENDED PAST THE CURRENT COUNT, for the same reason the edge-function check is: a list
+      // that stops exactly at today's number fails on the next item added, and it fails with a
+      // message saying the README is wrong while the README is correct. The roadmap reached
+      // sixteen and this stopped at fifteen, which is precisely that.
       const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight',
-        'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen'];
+        'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
+        'seventeen', 'eighteen', 'nineteen', 'twenty', 'twenty-one', 'twenty-two',
+        'twenty-three', 'twenty-four', 'twenty-five'];
       const claim = /^(\w+) extensions,/im.exec(lines.slice(sectionStart, sectionEnd).join('\n'));
       const claimed = claim ? WORDS.indexOf(claim[1].toLowerCase()) : -1;
       if (claimed < 0) {
