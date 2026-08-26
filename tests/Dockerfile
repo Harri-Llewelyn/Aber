@@ -53,6 +53,9 @@ RUN pip install --no-cache-dir jsonschema==4.23.0
 # parents[3] of /app/supabase/functions/aas-export/test_aas_export.py is /app -- so these paths, and
 # only these paths, make the suites' lookups resolve.
 COPY tests/schemas /app/tests/schemas
+# The suites' SUBJECT, provisioned at runtime rather than seeded (roadmap §14). Both import it, so
+# it travels with them or every live check skips itself for want of a device.
+COPY tests/aas_fixture.py /app/tests/aas_fixture.py
 # test_aas_api.py asserts that every route the service advertises is documented, so the spec is a
 # fixture of the suite rather than only a deliverable.
 COPY docs/openapi.yaml /app/docs/openapi.yaml

@@ -1781,11 +1781,14 @@ jobs:
       # THE REASON FOR THE ORDERING CHANGED, and the old one was never true. It used to read that
       # validate.py "approves Simulated_CNC_01 out of quarantine and records its birth parameters".
       # It does not and never did: validate.py seeds its own gateway at a pinned UUID and creates
-      # its own VALIDATE_* devices at runtime, and touches the demo device nowhere. The AAS
-      # suite's subject is now seeded outright -- 0002 registers Sim_CNC_Mill_01 unquarantined,
-      # 0020 attaches its schema and its nameplate -- so this suite has no data dependency on
-      # validate.py at all. What remains is the reason the initContainer itself gives: do not run
-      # a conformance suite against a stack whose conformance run did not pass.
+      # its own VALIDATE_* devices at runtime, and touches the demo device nowhere.
+      #
+      # THE AAS SUITE NOW DOES THE SAME (roadmap §14). Its subject used to be seeded outright --
+      # 0002 registered Sim_CNC_Mill_01 and 0020 gave it a schema and a nameplate -- which made a
+      # CONFORMANCE suite depend on DEMO DATA that §14 removes. It provisions its own through
+      # tests/aas_fixture.py and tears it down afterwards, so it has no data dependency on the
+      # seed OR on validate.py. What remains is the reason the initContainer itself gives: do not
+      # run a conformance suite against a stack whose conformance run did not pass.
       - name: In-Cluster Conformance — AAS V3 Export
         run: |
           set -eu
@@ -1815,8 +1818,9 @@ jobs:
           # The suite announces the skip on stderr, so assert its ABSENCE.
           if grep -q 'live checks skipped' /tmp/aas.log; then
             echo "::error::the AAS suite SKIPPED its live checks -- it verified the offline parity checks only."
-            echo "::error::Sim_CNC_Mill_01 is not registered. It is seeded by migration 0002, so this means"
-            echo "::error::the migrations did not complete, or the stack was not reachable from the Job."
+            echo "::error::The suite provisions its own subject through tests/aas_fixture.py, so this means"
+            echo "::error::the stack was not reachable, or provisioning was refused -- check the log above for"
+            echo "::error::a 'could not provision the fixture' line naming the HTTP status."
             exit 1
           fi
           echo "AAS live checks ran (not skipped)."
@@ -2212,11 +2216,11 @@ jobs:
           fi
 
 
-      # The live half of the AAS export suite: composes a shell for the demo device against the
+      # The live half of the AAS export suite: composes a shell for the subject it provisions,
       # running stack and validates the emitted document. The same file runs in
       # edge-function-auth-test, where these checks skip themselves for want of a stack.
       #
-      # Its subject is `Sim_CNC_Mill_01`, which migration 0002 seeds and 0020 gives its schema and
+      # Its subject is provisioned by the suite itself (tests/aas_fixture.py), which is what
       # its IDTA nameplate -- so it needs no simulator to have published and no operator to have
       # approved anything. This step used to be ordered after validate.py on the stated grounds
       # that validate.py approved the demo device and recorded its birth parameters; it does

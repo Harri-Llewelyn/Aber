@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import unittest
 import urllib.error
 import urllib.request
@@ -51,7 +52,17 @@ DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "acscymru123")
 # The machining cell's first CNC on the `Simulated Shopfloor` flow, seeded by 0002 and given its
 # schema and nameplate by 0020 -- so it exists wherever the migrations run, not only where
 # provision-gateways.mjs has been run. It replaced `Simulated_CNC_01`, which 0020 deletes.
-TARGET_DEVICE = os.getenv("AAS_TEST_DEVICE", "Sim_CNC_Mill_01")
+# THE SUITE PROVISIONS ITS OWN SUBJECT, and this is the point of it rather than a detail.
+#
+# It used to be `Sim_CNC_Mill_01`, seeded by 0002 as part of the demonstration shopfloor -- so a
+# CONFORMANCE suite depended on DEMO DATA, which roadmap §14 removes. That coupling has already bitten
+# once: 0020 exists partly because the previous subject, `Simulated_CNC_01`, quietly stopped receiving
+# a DBIRTH while this suite went on naming it and reporting success.
+#
+# `AAS_TEST_DEVICE` still overrides it, and then NOTHING IS PROVISIONED -- the escape hatch for
+# pointing the suite at a real asset is deliberately not also a way to half-create a fixture.
+TARGET_DEVICE = os.getenv("AAS_TEST_DEVICE", "")
+PROVISION_FIXTURE = not TARGET_DEVICE
 
 try:
     from jsonschema import Draft201909Validator
@@ -159,10 +170,28 @@ def find_device_id(token: str) -> str | None:
         return None
 
 
+sys.path.insert(0, str(REPO_ROOT / "tests"))
+import aas_fixture  # noqa: E402  -- after sys.path, by necessity
+
+
+def provision(token):
+    """The fixture device's id, creating it if this run owns it. None when unreachable."""
+    global TARGET_DEVICE
+    if not PROVISION_FIXTURE:
+        return find_device_id(token)
+    try:
+        device = aas_fixture.ensure(SUPABASE_URL, token, ANON_KEY)
+    except Exception as err:  # noqa: BLE001 -- reported, never silently skipped
+        print(f"[test_aas_export] could not provision the fixture: {err}")
+        return None
+    TARGET_DEVICE = device["name"]
+    return device["id"]
+
+
 TOKEN = sign_in()
-DEVICE_ID = find_device_id(TOKEN) if TOKEN else None
+DEVICE_ID = provision(TOKEN) if TOKEN else None
 LIVE = TOKEN is not None and DEVICE_ID is not None
-SKIP_REASON = f"no reachable stack, or device '{TARGET_DEVICE}' not registered"
+SKIP_REASON = "no reachable stack, or the AAS fixture could not be provisioned"
 
 
 def evaluate_aas_export_authorization(user: dict | None, auth_header: str | None) -> tuple[int, str]:
@@ -993,4 +1022,11 @@ if __name__ == "__main__":
         print(f"[test_aas_export] live checks skipped: {SKIP_REASON}")
     if not HAVE_JSONSCHEMA:
         print("[test_aas_export] jsonschema not installed: official-schema validation skipped")
-    unittest.main(verbosity=2)
+    # Teardown AFTER the report, so a failing run still leaves its console output intact -- and
+    # only when this run created the subject, or the AAS_TEST_DEVICE escape hatch would delete
+    # somebody's real asset.
+    try:
+        unittest.main(verbosity=2, exit=False)
+    finally:
+        if LIVE and PROVISION_FIXTURE:
+            aas_fixture.teardown(SUPABASE_URL, TOKEN, ANON_KEY)

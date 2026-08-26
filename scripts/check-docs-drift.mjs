@@ -1082,9 +1082,14 @@ function edgeFunctionNames() {
 //     nothing else can do -- a Mosquitto account per gateway, without which a gateway row is a
 //     device that can never connect.
 //   * THE SEED owns existence. Provisioning is a Compose-side script; the Kubernetes path never
-//     runs it, so a row that lives only there does not exist in CI. The AAS conformance suite
-//     targets `Sim_CNC_Mill_01` and asserts against the document it composes, so it needs that
-//     device to be present wherever the migrations have run.
+//     runs it, so a row that lives only there does not exist in CI, and the shopfloor map, the
+//     Grafana cell dashboards and the quarantine walkthrough all read empty there.
+//
+//     THE AAS SUITE USED TO BE THE STRONGEST REASON FOR THIS and no longer is: it targeted
+//     `Sim_CNC_Mill_01` by name, so the seed had to exist wherever the migrations had run.
+//     Roadmap §14 moved it onto tests/aas_fixture.py, which provisions its own subject and
+//     tears it down. What is left here is demonstration value, which is a weaker claim and is
+//     exactly what §14 proposes to make opt-in.
 //
 // The duplication is therefore deliberate and narrow -- one gateway and one device, not the whole
 // floor -- and this is what keeps it honest. The failure it exists to prevent is quiet: rename the
@@ -1166,35 +1171,62 @@ function edgeFunctionNames() {
   //
   // Checked against the WHOLE device list rather than the first entry, so re-ordering the topology
   // is not a failure. What matters is that the name resolves to something the migrations create.
+  // THE ASSERTION IS INVERTED FROM WHAT IT WAS, and the inversion is roadmap §14.
+  //
+  // It used to require that the AAS suite target one of the SEEDED devices -- because it did, and a
+  // rename would have emptied the suite rather than failing it. The suites now provision their own
+  // subject through tests/aas_fixture.py, for the reason 0020 records: a conformance suite that
+  // depends on demo data stops testing the moment the demo changes, and says nothing while it does.
+  //
+  // So what is checked now is that they have NOT drifted back: an `AAS_TEST_DEVICE` default naming
+  // a seeded device would silently re-couple them, and would pass every test in both suites.
   const seededNames = devices.map(([, , name]) => name);
   const aas = read('supabase/functions/aas-export/test_aas_export.py');
-  const target = /AAS_TEST_DEVICE",\s*"([^"]+)"/.exec(aas);
-  if (!target) {
-    fail('test_aas_export.py no longer declares an AAS_TEST_DEVICE default');
-  } else if (seededNames.length && !seededNames.includes(target[1])) {
-    fail(
-      `test_aas_export.py targets '${target[1]}', which is not one of the seeded devices ` +
-        `(${seededNames.join(', ')}).\n` +
-        '      The live checks resolve the device by name and SKIP THEMSELVES when it is absent,\n' +
-        '      so this drift does not fail the suite -- it empties it.'
-    );
-  } else if (seededNames.length) {
-    pass(`test_aas_export.py targets a seeded device (${target[1]})`);
+  const api = read('supabase/functions/aas-api/test_aas_api.py');
+
+  for (const [file, text] of [
+    ['test_aas_export.py', aas],
+    ['test_aas_api.py', api],
+  ]) {
+    const target = /AAS_TEST_DEVICE",\s*"([^"]*)"/.exec(text);
+    if (!target) {
+      fail(`${file} no longer declares an AAS_TEST_DEVICE default -- the escape hatch is gone`);
+    } else if (target[1] === '') {
+      if (!text.includes('aas_fixture')) {
+        fail(
+          `${file} defaults AAS_TEST_DEVICE to empty but does not import aas_fixture, so it has ` +
+            'no subject at all and every live check skips itself.'
+        );
+      } else {
+        pass(`${file} provisions its own subject rather than targeting seeded data`);
+      }
+    } else if (seededNames.includes(target[1])) {
+      fail(
+        `${file} defaults AAS_TEST_DEVICE to '${target[1]}', a SEEDED device. Roadmap §14 removes ` +
+          'the seed; a conformance suite pointed at it empties itself rather than failing.\n' +
+          '      Leave the default empty and let tests/aas_fixture.py provision the subject.'
+      );
+    } else {
+      pass(`${file} targets '${target[1]}', which is not seeded data`);
+    }
   }
 
-  // The chart's e2e Job passes the same name explicitly, so it can drift independently of the
-  // default above.
+  // The chart's e2e Job can pin the name independently of the defaults above, so it is checked
+  // separately -- and must now NOT pin one, for the same reason.
   const job = read('deploy/helm/acs-cymru/templates/jobs/e2e-aas-export-job.yaml');
   const jobTarget = /name:\s*AAS_TEST_DEVICE\s*\n\s*value:\s*(\S+)/.exec(job);
-  if (jobTarget && seededNames.length && !seededNames.includes(jobTarget[1])) {
+  if (jobTarget && seededNames.includes(jobTarget[1])) {
     fail(
-      `e2e-aas-export-job.yaml sets AAS_TEST_DEVICE=${jobTarget[1]}, which is not one of the ` +
-        `seeded devices (${seededNames.join(', ')}).`
+      `e2e-aas-export-job.yaml pins AAS_TEST_DEVICE=${jobTarget[1]}, a seeded device. The Job ` +
+        'should let the suite provision its own subject, as the suite now does everywhere else.'
     );
   } else if (jobTarget) {
-    pass(`the chart's AAS e2e Job targets a seeded device (${jobTarget[1]})`);
+    pass(`the chart's AAS e2e Job pins '${jobTarget[1]}', which is not seeded data`);
+  } else {
+    pass("the chart's AAS e2e Job lets the suite provision its own subject");
   }
 }
+
 
 // -------------------------------------------------------------------------------------------------
 // 13. Every metric name a Grafana alert rule queries exists in `metric_catalog`.
