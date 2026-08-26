@@ -251,6 +251,25 @@ else
     step "Reseeding Node-RED with the new credentials"
     NODE_RED_FORCE_SEED=true docker compose up -d --force-recreate node-red-init node-red
   fi
+
+  # -----------------------------------------------------------------------------------------
+  # AND REPLAY THE SEED, BECAUSE STEP 4 RAN BEFORE THERE WAS ANYTHING TO SEED IT ONTO.
+  #
+  # seed.sql commits one multi-entity act -- commissioning Cell 1 -- so the Digital Thread drawer
+  # has a causation group to show. Its subject is the machining gateway and three of its devices,
+  # which USED TO BE seeded by 0002 and therefore always existed by the time seed.sql ran. Roadmap
+  # §14 made the floor opt-in, and provisioning is step 5: at step 4 the UPDATEs match no rows,
+  # write nothing, and the demonstration is simply absent.
+  #
+  # It is not a failure -- seed.sql distinguishes "no floor" from "floor but no group" and skips
+  # with a notice -- but it does mean a reset would finish with the one thing this script exists
+  # to leave you: a working stack, minus the feature its own summary describes. Replaying db-init
+  # is the whole fix, because every migration and the seed are idempotent by construction and 0040
+  # has already recorded itself as applied, so this is the second boot the seed was written for.
+  # -----------------------------------------------------------------------------------------
+  step "Replaying the seed now the floor exists"
+  docker compose up -d --force-recreate supabase-db-init >/dev/null 2>&1
+  docker wait acs-cymru_supabase_db_init >/dev/null 2>&1 || true
 fi
 
 # --- 6. summary ----------------------------------------------------------------------------------
@@ -288,7 +307,12 @@ fi
 # of its own after that.
 #
 # THE COUNT IS QUERIED RATHER THAN WRITTEN DOWN, for the same reason. A literal here would be wrong
-# the first time somebody adds a device to Cell 1 in 0002_seed_data.sql, and nothing would catch it.
+# the first time somebody adds a device to Cell 1, and nothing would catch it.
+#
+# AND THE WHOLE PARAGRAPH IS NOW CONDITIONAL ON THAT QUERY FINDING SOMETHING. It used to fall back
+# to a hardcoded 4 when the query returned nothing, which was a reasonable default while the floor
+# was seeded and became a fabricated number the moment `--skip-gateways` was passed: a summary
+# telling the reader to click a marker on a gateway that does not exist on their stack.
 demo_rows=$(docker exec acs-cymru_supabase_db psql -U postgres -d postgres -tAc \
   "SELECT count(*) FROM public.digital_thread
     WHERE causation_id = (
@@ -299,8 +323,15 @@ demo_rows=$(docker exec acs-cymru_supabase_db psql -U postgres -d postgres -tAc 
          AND count(*) FILTER (WHERE entity_type = 'devices')  > 1
        ORDER BY causation_id DESC LIMIT 1)" 2>/dev/null | tr -d '[:space:]')
 
-printf '\nThe Digital Thread opens on one seeded act: commissioning Cell 1 wrote %s audit rows in a\n' "${demo_rows:-4}"
-printf 'SINGLE transaction, which is what gives the Same transaction control in the event drawer\n'
-printf 'something to show. Open Digital Thread and click the newest marker on\n'
-printf 'Sim_Gateway_Cell1_Machining.\n'
-printf '\nEvery row after those records a real change.\n'
+if [ -n "${demo_rows:-}" ] && [ "${demo_rows:-0}" -gt 0 ] 2>/dev/null; then
+  printf '\nThe Digital Thread opens on one seeded act: commissioning Cell 1 wrote %s audit rows in a\n' "$demo_rows"
+  printf 'SINGLE transaction, which is what gives the Same transaction control in the event drawer\n'
+  printf 'something to show. Open Digital Thread and click the newest marker on\n'
+  printf 'Sim_Gateway_Cell1_Machining.\n'
+  printf '\nEvery row after those records a real change.\n'
+else
+  printf '\nThe shopfloor is EMPTY, which is the default since roadmap §14: no cells, no gateways,\n'
+  printf 'no devices, and a Digital Thread describing only what you do next. Run\n'
+  printf '`npm run provision:gateways` for the four-cell demonstration floor, or follow\n'
+  printf 'simulators/README.md to build one machine by hand.\n'
+fi

@@ -167,8 +167,13 @@ after the gateway was archived, which issued a real broker credential and resurr
 to `ONLINE` — and `0039` adds `digital_thread_page()`, which applies the **deleted-asset
 filter as a predicate rather than in the browser**, so the page's row budget is spent on rows
 it will actually show: hiding them afterwards had the page list four assets on a stack of
-twenty-six, and render an empty Gateways section on a fleet of four healthy gateways — plus
-demo accounts (`supabase/seed.sql`).
+twenty-six, and render an empty Gateways section on a fleet of four healthy gateways — and `0040`
+**retires the demonstration shopfloor from the seed**, so a fresh install comes up with no assets
+at all and the four-cell floor is something a reader asks for with `npm run provision:gateways`; it
+is the one migration in the chain that must run **exactly once** rather than on every boot, because
+the rows it removes are rows an operator may deliberately want back, and a delete replayed every
+boot would silently undo every provisioning run — which is what `public.one_shot_migrations` is
+for — plus demo accounts (`supabase/seed.sql`).
 
 > **There is no `0017`.** It was drafted as an audit-trigger change guard and then not written,
 > because `0005` already implements one; a second declaration of `log_digital_thread_event()`
@@ -621,11 +626,19 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
   with it `auth.sessions`. The dashboard clears the stale tokens and returns to the login screen.
 - **Swagger UI's "Example Value" is documentation, not data.** Press **Execute** and read the
   **Response body** panel.
+- **A fresh install has no cells, no gateways and no devices, and that is the point.** It used to
+  come up with a four-cell simulated shopfloor seeded by `0002`, which meant every install began
+  with assets nobody had asked for and a Digital Thread already describing them. The floor is now
+  opt-in: `npm run provision:gateways` creates it, and
+  [`simulators/README.md`](simulators/README.md) walks through building one machine by hand
+  instead. `0040` retires it from databases that already have it, once.
 - **An unrecognised device appears in the quarantine queue, not on the shopfloor map.** That is the
   zero-touch onboarding path working: a device that announces itself under an id nobody registered
-  is held and its telemetry dropped until an `Administrator` approves it. The demonstrator's own
-  `Sim_` devices are pre-registered and so bypass it — publish under any other well-formed
-  `dev`-prefixed id to see it.
+  is held and its telemetry dropped until an `Administrator` approves it. With no seeded assets
+  this is now the **first** thing a new user meets rather than a footnote — publish under any
+  well-formed `dev`-prefixed id and it is waiting for you. The demonstrator's own `Sim_` devices
+  are pre-registered by provisioning and so bypass it, which is what makes introducing one
+  unregistered device on purpose a demonstration rather than the default state.
 
 ---
 

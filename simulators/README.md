@@ -213,14 +213,18 @@ click it to copy. It never changes, so an asset can be renamed freely without br
 
 The ids the shipped flow publishes under are pinned in
 [`scripts/provision-gateways.mjs`](../scripts/provision-gateways.mjs), which owns the demonstrator's
-topology — four cell gateways and six devices. The machining cell's pair
-(`gwy120000000000400080000` and `dev220000000000400080000`, `Sim_Gateway_Cell1_Machining` and
-`Sim_CNC_Mill_01`) is **also** seeded by
-[`0002_seed_data.sql`](../supabase/migrations/0002_seed_data.sql), because provisioning is a
-Compose-side script the Kubernetes path never runs and the AAS conformance suite needs that device
-to exist wherever the migrations do.
+topology — four cell gateways and six devices. **None of them exists until you run it.**
 
-The examples below use that pair.
+That is new, and it is roadmap §14: the machining cell's pair used to be seeded by
+[`0002_seed_data.sql`](../supabase/migrations/0002_seed_data.sql) as well, so a fresh install came
+up with a shopfloor nobody had asked for. The two reasons for that seed have both expired — the AAS
+conformance suite provisions its own subject now, and demonstration value is exactly what should not
+be automatic — so `0040_retire_demonstration_seed.sql` retires it, once, and provisioning is the
+only thing that creates these rows.
+
+The examples below use the machining cell's pair (`gwy120000000000400080000` and
+`dev220000000000400080000`, `Sim_Gateway_Cell1_Machining` and `Sim_CNC_Mill_01`), so run
+`npm run provision:gateways` first if you have not.
 
 | Order | Type | Topic | Purpose |
 | :-- | :--- | :--- | :--- |
@@ -427,9 +431,10 @@ This matters more than it used to: a **registered device bound to a gateway** no
 rejected when they arrive via a different (or unregistered) edge node. Registering the gateway is
 what makes that binding resolvable.
 
-`Sim_Gateway_Cell1_Machining` already exists at the pinned id `gwy120000000000400080000` — seeded by
-`0002_seed_data.sql` — and `npm run provision:gateways` creates the other three along with a broker
-credential for each, so the shipped flow works with no manual setup.
+`npm run provision:gateways` creates all four at their pinned ids — `Sim_Gateway_Cell1_Machining` is
+`gwy120000000000400080000` — along with a broker credential for each and the schema attachments the
+Devices page and the AAS export read, so the shipped flow works with no manual setup once it has
+run. Until it has, the shopfloor is empty by design: nothing is seeded any more.
 
 ---
 

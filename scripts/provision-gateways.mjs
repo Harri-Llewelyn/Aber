@@ -110,9 +110,24 @@ const GATEWAYS = [
     cellName: 'Cell 1 — Precision Machining',
     description: 'Machine tools publishing MTConnect 2.x semantics',
     devices: [
-      { id: '22000000-0000-4000-8000-000000000001', name: 'Sim_CNC_Mill_01' },
-      { id: '23000000-0000-4000-8000-000000000001', name: 'Sim_CNC_Mill_02' },
-      { id: '27000000-0000-4000-8000-000000000001', name: 'Sim_Tool_Changer_01' },
+      // TWO SCHEMAS, and 0022's header explains why this one device carries them: the class
+      // schema is the MTConnect contract, and `Simulated_CNC_01_Schema` is the AAS handover
+      // contract -- the only one carrying the ISO 22400 factors AND the nameplate identity
+      // metrics, which is what gives the exported shell its KeyPerformanceIndicators aspect.
+      {
+        id: '22000000-0000-4000-8000-000000000001', name: 'Sim_CNC_Mill_01',
+        schemas: ['Machining_Cell_Schema', 'Simulated_CNC_01_Schema'],
+      },
+      {
+        id: '23000000-0000-4000-8000-000000000001', name: 'Sim_CNC_Mill_02',
+        schemas: ['Machining_Cell_Schema'],
+      },
+      // Robotics rather than machining, which is worth a second look and is deliberate --
+      // see 0022's header: the grouping is by articulated machinery, not by cell.
+      {
+        id: '27000000-0000-4000-8000-000000000001', name: 'Sim_Tool_Changer_01',
+        schemas: ['Robotics_Cell_Schema'],
+      },
     ],
   },
   {
@@ -122,7 +137,10 @@ const GATEWAYS = [
     cellName: 'Cell 2 — Robotic Assembly',
     description: 'Articulated robots publishing OPC 40010 Robotics and 40001-4 Energy semantics',
     devices: [
-      { id: '24000000-0000-4000-8000-000000000001', name: 'Sim_Robot_Arm_01' },
+      {
+        id: '24000000-0000-4000-8000-000000000001', name: 'Sim_Robot_Arm_01',
+        schemas: ['Robotics_Cell_Schema'],
+      },
     ],
   },
   {
@@ -135,7 +153,10 @@ const GATEWAYS = [
     cellName: 'Cell 3 — Production KPIs',
     description: 'ISO 22400 KPI aggregation for the machining cell',
     devices: [
-      { id: '25000000-0000-4000-8000-000000000001', name: 'Sim_Cell3_Aggregator' },
+      {
+        id: '25000000-0000-4000-8000-000000000001', name: 'Sim_Cell3_Aggregator',
+        schemas: ['ISO22400_OEE_Schema'],
+      },
     ],
   },
   {
@@ -151,7 +172,11 @@ const GATEWAYS = [
       // Site-wide like its gateway, and stated EXPLICITLY rather than inherited: location_scope
       // does not inherit through the data path, so a device behind a site-wide gateway resolves to
       // Unassigned unless it makes the same assertion itself.
-      { id: '26000000-0000-4000-8000-000000000001', name: 'Sim_BMS_Zone_HVAC', locationScope: 'site_wide' },
+      {
+        id: '26000000-0000-4000-8000-000000000001', name: 'Sim_BMS_Zone_HVAC',
+        locationScope: 'site_wide',
+        schemas: ['BMS_Facility_Schema'],
+      },
     ],
   },
 ];
@@ -512,6 +537,83 @@ async function ensureDevice(spec, gatewayId, cellId) {
   return { row: created[0], created: true };
 }
 
+// --- schema attachment ------------------------------------------------------------------------
+/**
+ * Attach a device's schemas through `device_submodels`.
+ *
+ * WHY THIS IS HERE AT ALL, when two migrations already do it. `0020` attaches the tri-standard
+ * schema and `0022` attaches one per machine class, both guarded on the device existing -- and
+ * db-init replays every migration on every boot, so a floor provisioned today has its schemas
+ * tomorrow whatever this function does. That was fine while `0002_seed_data.sql` seeded the
+ * devices, because the migrations then ran in an order where the guard was always satisfied.
+ *
+ * It is not fine now that provisioning is how the floor arrives. The gap between "provisioned" and
+ * "next boot" is where a reader looks at what they just made, and a device with no schema is not
+ * visibly incomplete -- it is a blank column, an AAS shell carrying its nameplate and nothing else,
+ * and an unmodelled-metric check that silently never fires. Three quiet failures, all resolved by a
+ * restart nobody knows to perform.
+ *
+ * BY NAME, NOT BY PINNED ID, which is the opposite of how everything else in this file is
+ * addressed and is right here for a specific reason. The device and gateway ids must be pinned
+ * because `sparkplug_id` is generated from them and IS the wire identity. A schema's id is
+ * referenced by nothing outside the database, whereas `schema_name` is UNIQUE and is the key that
+ * `Foo` -> `Foo_v2` versioning derives from -- so the name is the stable handle, and resolving it
+ * here means an operator who has published a v2 gets told about it rather than silently re-bound
+ * to v1 behind their back.
+ *
+ * WHAT THIS DELIBERATELY DOES NOT DO IS SEED THE NAMEPLATE. 0020 seeds `Sim_CNC_Mill_01`'s IDTA
+ * Digital Nameplate, and duplicating those nine values here would be a second copy to keep in
+ * step for no gain: `nameplateProperty()` resolves published-value-first, and the simulator sends
+ * a DBIRTH carrying the identity metrics within seconds of the flow starting. The seeded row only
+ * matters where no broker is running, and there the next boot supplies it.
+ */
+async function ensureSubmodels(deviceRow, schemaNames) {
+  if (!schemaNames || schemaNames.length === 0) return;
+
+  const wanted = `(${schemaNames.map((n) => `"${n}"`).join(',')})`;
+  const schemas = await rest(
+    `/schemas?schema_name=in.${encodeURIComponent(wanted)}&select=id,schema_name,status`
+  );
+
+  const missing = schemaNames.filter((n) => !schemas.some((row) => row.schema_name === n));
+  if (missing.length > 0) {
+    // NOT FATAL, and not silent either. The schemas are seeded by migrations, so an absent one
+    // means the chain has not finished or has been edited -- neither of which is a reason to
+    // abandon a provisioning run that has already created rows and issued broker credentials.
+    console.warn(
+      `    schema(s) not registered, so ${deviceRow.name} is unattached to them: ${missing.join(', ')}`
+    );
+  }
+
+  const existing = await rest(`/device_submodels?device_id=eq.${deviceRow.id}&select=schema_id`);
+  const held = new Set(existing.map((row) => row.schema_id));
+
+  for (const schema of schemas) {
+    if (held.has(schema.id)) continue;
+    // An ARCHIVED schema is still attachable and this says so rather than refusing: it is what a
+    // device provisioned against v1 legitimately carries after someone publishes v2, and
+    // `publish_schema_version()` is what re-points it.
+    if (schema.status !== 'active') {
+      console.log(`    note: ${schema.schema_name} is ${schema.status}, not active`);
+    }
+    // DRY RUN IS CHECKED HERE, NOT AT THE TOP, and the distinction is the whole point of the
+    // function: the reads above are what make the plan accurate, and reporting "would attach"
+    // for a schema the device already carries would be a plan that describes work nobody is
+    // going to do. It is checked at all because ensureDevice returns a real row for an EXISTING
+    // device even under --dry-run -- so without this line, a dry run would reach this POST and
+    // write, which is the one thing --dry-run promises it cannot do.
+    if (dryRun) {
+      console.log(`    [dry-run] would attach ${schema.schema_name}`);
+      continue;
+    }
+    await rest('/device_submodels', {
+      method: 'POST',
+      body: JSON.stringify({ device_id: deviceRow.id, schema_id: schema.id }),
+    });
+    console.log(`    attached ${schema.schema_name}`);
+  }
+}
+
 // --- broker credential ------------------------------------------------------------------------
 /**
  * Issue the Mosquitto account by DELEGATING to the existing script.
@@ -641,6 +743,11 @@ async function main() {
       console.log(
         `    ${deviceCreated ? 'created' : 'exists'}: ${deviceRow.name} -> ${deviceRow.sparkplug_id}`
       );
+      // On an EXISTING device too, not only a newly created one -- the same reasoning as the
+      // is_virtual and cell reconciliation above. A stack provisioned before this function existed
+      // has its schemas from the migrations; one whose operator detached a schema gets it back,
+      // which is the behaviour `--rotate`-free re-running is for.
+      await ensureSubmodels(deviceRow, device.schemas);
       devices.push({ name: deviceRow.name, sparkplugId: deviceRow.sparkplug_id });
     }
 
