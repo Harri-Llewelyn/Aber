@@ -1630,9 +1630,15 @@ exists for precisely this kind of change and this change must satisfy it twice.
 
 ### 16 · `Service_Ingestor`, and taking the service-role key off the daemon
 
+**Built.** The ingestion daemon no longer holds `SUPABASE_SERVICE_ROLE_KEY`. It authenticates as
+`Service_Ingestor`, an `Operator` principal that cannot write a single row directly, and every
+write it makes goes through a SECURITY DEFINER gate that checks the caller is that principal —
+`0046_service_ingestor_principal.sql` · `0047_ingestion_write_rpcs.sql` ·
+`0048_machine_principals_are_not_users.sql` · [`ingestion/ingestion.py`](ingestion/ingestion.py) ·
+[`scripts/setup.mjs`](scripts/setup.mjs) · **never filed as an issue**
+
 **Builds on:** `record_ingestion_rejection()` (`0026`) · `create_service_principal()` (`0044`) ·
-`0034`'s read-only principal · [`ingestion/ingestion.py`](ingestion/ingestion.py) ·
-`verify_gateway_binding()` · **not yet filed as an issue**
+`0034`'s read-only principal · `verify_gateway_binding()`
 
 **Carved out of §13 rather than left inside a section marked built.** That item specified three
 identity profiles and shipped the mechanism for two: `Service_Reader` is what
@@ -1657,17 +1663,74 @@ built it precisely to replace `service_role`'s direct INSERT on the audit table,
 so. So the pattern is established and applied once; the work is applying it to the remaining writes
 and then reducing the credential.
 
-**Three things to resolve before it is a task rather than a direction.** Which writes still need
-`service_role` after the RPCs exist, and whether any of them can be expressed as a policy on a role
-instead. Whether `Service_Ingestor` should be an `auth.users` principal like `0034`'s — in which
-case it needs a token, and §13's ceiling and audit trail apply to it — or a Postgres role the daemon
-connects as, which is a different trust path and does not go through PostgREST at all. And what
-happens to a deployed daemon mid-upgrade, since the credential it holds is in its environment and
-the RPCs it would need do not exist until the migration runs.
+**The three open questions are now answered, and `0046` is the first of them landing.** That
+migration creates the identity and nothing holds it yet, which is deliberate.
+
+*What the daemon actually writes*, counted rather than estimated — five sites across three tables:
+the quarantine `INSERT` on `devices`, the birth-metrics and status `UPDATE`s on `devices`, the
+`asset_config` upsert of birth parameters, and the health `UPDATE` on `gateways`. Reads are
+`devices`, `gateways`, `device_schemas` and `schemas`. Telemetry is not on this list at all — it
+goes to TimescaleDB over the daemon's own connection and never touches Supabase. That is what makes
+this tractable: it is `0026`'s pattern applied a fixed number of further times, not a rewrite.
+
+*`Service_Ingestor` is an `auth.users` principal*, not a Postgres role. The role would be tighter in
+isolation and was rejected for what it cannot do: it is invisible to `list_service_principals()`
+(`0042`), no token against it can be recorded by `record_service_token_issued()` (`0043`), and the
+Access Control page cannot show it. A machine identity the page built for this purpose cannot see is
+a second trust path, auditable only over psql. `0046` records the full argument.
+
+*It holds `Operator`, which cannot perform any of those five writes* — 0034's observation that
+"every write policy in this schema names Administrator or Shopfloor_Manager" is what makes the RPCs
+the only route rather than the tidy route. `0046`'s self-check asserts exactly that gap, because if
+a later migration ever widens a write policy to admit `Operator`, this credential silently becomes
+as wide as the role and nothing else in the schema would report it.
+
+*The mid-upgrade question is answered by ordering.* Identity, then the write RPCs, then the daemon
+calling them while still holding the service key, and only then the credential swap. Nothing the
+daemon depends on is removed until after it has stopped depending on it, so a deployed daemon keeps
+working at every step.
+
+**`0047` turned out to be worth more than a permissions exercise**, which was not the expectation
+going in. Three rules the daemon enforces *in Python* moved into SQL with it, and each was a rule a
+compromised or simply buggy daemon could previously have ignored. `RESERVED_GATEWAY_STATUSES` is
+the clearest: a gateway may not assert `PENDING_ENROLLMENT`, `AWAITING_BIRTH` or `STALE` about
+itself, because all three short-circuit ahead of the staleness arm in `public.gateway_status` and
+would leave a silent gateway looking healthy — the one thing that derived status exists to prevent.
+That rule sat in a frozenset in the process most exposed to the plant network, applied to a string
+that arrived *from* the plant network. The watchdog's `status = 'ONLINE'` predicate and
+`first_dbirth_at`'s write-once behaviour moved the same way: both were caller conventions, and both
+are now properties of the gate.
+
+The gates are granted to `authenticated` rather than to `service_role` alone, because the narrow
+credential is an ordinary authenticated principal — so each one checks that the caller *is*
+`Service_Ingestor`. That check is the only thing between a signed-in user and the daemon's write
+surface, which is why `0047`'s self-check asserts a second principal holding the same `Operator`
+role is refused.
+
+**Two findings came out of the build that the entry did not predict, and both were silent.**
+
+*Giving the daemon an identity would have relabelled every ingestion write as a human action.*
+`log_digital_thread_event()` concludes `actor_source = 'user'` from `auth.uid()` being non-NULL,
+which was sound while the only accounts carrying a `sub` were people's. Point the daemon at a real
+principal and it inverts — and nothing errors. The Digital Thread simply starts attributing
+automated device registrations and status flips to a person, with no sign but a `changed_by` uuid
+belonging to nobody who works here. The irony is the lesson: that same function already refuses to
+accept `'user'` from a header, because *"claiming a human author is exactly the assertion a client
+must not be able to make about itself"* — and narrowing the credential would have let it make that
+claim through the front door. `0048` teaches it to ask what kind of account it is, using `0042`'s
+existing machine-identity predicate rather than inventing a second one. The row got better as well
+as correct: an ingestion write now records `'ingestion'` **and** names the principal, where it used
+to record `'ingestion'` and `NULL`.
+
+*`agent_version` was being written to nowhere.* It is in `GATEWAY_HEALTH_METRICS`, and the first
+draft of `0047`'s gate omitted it from the `SET` clause — so the value was extracted from the
+payload, validated, and discarded. The page would have gone on showing whatever version enrolled
+however long ago: stale, not absent, which is the harder thing to notice.
+[`check-docs-drift.mjs`](scripts/check-docs-drift.mjs) now cross-references the two lists.
 
 **The value is not tidiness.** A credential that bypasses RLS is the one thing on this stack whose
-compromise cannot be contained by any policy written anywhere else, and it currently sits in the
-process most exposed to the plant network.
+compromise cannot be contained by any policy written anywhere else, and it sat in the process most
+exposed to the plant network. What replaced it can do exactly seven things.
 
 ---
 

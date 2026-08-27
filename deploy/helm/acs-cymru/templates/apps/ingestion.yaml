@@ -141,11 +141,19 @@ spec:
             */}}
             {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_INGESTION_USER") | nindent 12 }}
             {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_INGESTION_PASSWORD") | nindent 12 }}
-            # Through Kong, in-cluster. The daemon is a service-role client: it registers
-            # discovered devices, sets is_quarantined, and stamps gateway heartbeats.
+            # Through Kong, in-cluster. THE DAEMON IS NO LONGER A SERVICE-ROLE CLIENT (roadmap
+            # item 16): that key bypasses RLS entirely and sat in the process most exposed to the
+            # plant network. It registers discovered devices, sets is_quarantined and stamps
+            # gateway heartbeats through the SECURITY DEFINER gates in migration 0047, as the
+            # Service_Ingestor principal seeded by 0046.
+            #
+            # BOTH KEYS, DOING DIFFERENT JOBS. The anon key is the apikey the gateway checks --
+            # its filter admits exactly two literal keys, so the ingestion token is refused at the
+            # edge if sent in its place. The ingestion token is the Authorization bearer.
             - name: SUPABASE_URL
               value: {{ include "acs-cymru.supabase.internalUrl" . | quote }}
-            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_SERVICE_ROLE_KEY" "secretName" $secretName "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_INGESTION_KEY" "secretName" $secretName "key" "SUPABASE_INGESTION_KEY") | nindent 12 }}
             - name: PYTHONUNBUFFERED
               value: "1"
             # Enables the heartbeat the liveness probe reads. UNSET IS A NO-OP, which is why the

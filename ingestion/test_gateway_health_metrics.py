@@ -204,10 +204,8 @@ class ProcessNodeMessageHealthTests(unittest.TestCase):
         ingestion._health_rejected_warned.clear()
         self.updates = []
 
-        table = MagicMock()
-        table.update.side_effect = lambda payload: self._capture(payload)
         self.client = MagicMock()
-        self.client.table.return_value = table
+        self.client.rpc.side_effect = lambda fn, params: self._capture(fn, params)
 
         self._real_client = ingestion.supabase_client
         self._real_resolve = ingestion.resolve_gateway
@@ -222,39 +220,58 @@ class ProcessNodeMessageHealthTests(unittest.TestCase):
         ingestion.supabase_client = self._real_client
         ingestion.resolve_gateway = self._real_resolve
 
-    def _capture(self, payload):
-        self.updates.append(payload)
+    def _capture(self, fn, params):
+        if fn == "ingest_record_gateway_health":
+            self.updates.append(params)
         chain = MagicMock()
-        chain.eq.return_value.execute.return_value = None
+        chain.execute.return_value = None
         return chain
 
     def _send(self, *metrics):
+        """
+        The parameters of the ingest_record_gateway_health() call the heartbeat made.
+
+        The write goes through a gate now (roadmap item 16, migration 0047), so the health
+        readings arrive as a `p_health` object rather than as columns spread across an UPDATE
+        payload. `_flat` below keeps the assertions reading the way they did.
+        """
         ingestion.process_node_message(NODE, "NDATA", FakePayload(list(metrics)), group_id=GROUP)
         return self.updates[-1]
 
-    def test_health_metrics_reach_the_update_with_a_timestamp(self):
-        update = self._send(FakeMetric("Disk_Free_Bytes", long_value=8192))
-        self.assertEqual(update["disk_free_bytes"], 8192)
-        self.assertIn("health_reported_at", update)
-        # The same instant the heartbeat is stamped with, not a second reading of the clock.
-        self.assertEqual(update["health_reported_at"], update["last_heartbeat"])
+    @staticmethod
+    def _flat(params):
+        """The call flattened back into the column view the assertions are written against."""
+        flat = {"status": params["p_status"], "last_heartbeat": params["p_heartbeat_at"]}
+        flat.update(params.get("p_health") or {})
+        return flat
+
+    def test_health_metrics_reach_the_gate_and_mark_it_as_reporting(self):
+        params = self._send(FakeMetric("Disk_Free_Bytes", long_value=8192))
+        self.assertEqual(self._flat(params)["disk_free_bytes"], 8192)
+        # `health_reported_at` is no longer stamped here: the gate stamps it, and only when
+        # `p_health` is a non-empty object. A non-empty p_health IS the signal, so that is what
+        # this asserts -- and 0047's self-check asserts the gate acts on it. Sending the timestamp
+        # from the daemon would have made it a caller convention again.
+        self.assertTrue(params["p_health"])
+        self.assertEqual(params["p_heartbeat_at"], self._flat(params)["last_heartbeat"])
 
     def test_a_payload_reporting_no_health_leaves_the_timestamp_alone(self):
         # An appliance on an older bundle. It must beat normally and leave `health_reported_at`
         # untouched -- writing it here would make "does not report health" indistinguishable from
         # "reported health a moment ago", which is the distinction 0035 adds the column for.
-        update = self._send(FakeMetric("Gateway_Status", string_value="ONLINE"))
-        self.assertNotIn("health_reported_at", update)
-        self.assertEqual(update["status"], "ONLINE")
-        self.assertIn("last_heartbeat", update)
+        params = self._send(FakeMetric("Gateway_Status", string_value="ONLINE"))
+        # No health object at all, which is what keeps the gate from stamping the column.
+        self.assertIsNone(params["p_health"])
+        self.assertEqual(params["p_status"], "ONLINE")
+        self.assertIsNotNone(params["p_heartbeat_at"])
 
     def test_a_rejected_metric_still_leaves_a_heartbeat(self):
         # The property that replaces the CHECK constraints 0035 declines to add.
-        update = self._send(FakeMetric("Disk_Free_Bytes", long_value=-5))
-        self.assertNotIn("disk_free_bytes", update)
-        self.assertNotIn("health_reported_at", update)
-        self.assertIn("last_heartbeat", update)
-        self.assertEqual(update["status"], "ONLINE")
+        params = self._send(FakeMetric("Disk_Free_Bytes", long_value=-5))
+        self.assertNotIn("disk_free_bytes", self._flat(params))
+        self.assertIsNone(params["p_health"])
+        self.assertIsNotNone(params["p_heartbeat_at"])
+        self.assertEqual(params["p_status"], "ONLINE")
 
 
 class GatewayHealthGaugeTests(unittest.TestCase):

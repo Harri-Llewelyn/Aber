@@ -78,7 +78,7 @@ class DeviceLocationInvariantTest(unittest.TestCase):
         self._real_resolve_device = ingestion.resolve_device
 
         self.client = MagicMock()
-        self.client.table.return_value.insert.return_value.execute.return_value = FakeResponse(
+        self.client.rpc.return_value.execute.return_value = FakeResponse(
             [{"id": "dev-uuid", "name": "Unknown_Robot", "sparkplug_id": "dev000000000000000000abc"}]
         )
         ingestion.supabase_client = self.client
@@ -92,10 +92,25 @@ class DeviceLocationInvariantTest(unittest.TestCase):
         ingestion._device_cache.clear()
 
     def _inserted(self):
-        return [c.args[0] for c in self.client.table.return_value.insert.call_args_list]
+        """
+        The parameters of each ingest_register_quarantined_device() call.
+
+        The write goes through a gate now (roadmap item 16, migration 0047), which strengthens
+        what this file asserts rather than merely relocating it: the gate HAS NO location
+        parameter, so a location is not something the daemon declines to send -- it is something
+        the call cannot express.
+        """
+        return [
+            c.args[1] for c in self.client.rpc.call_args_list
+            if c.args and c.args[0] == "ingest_register_quarantined_device"
+        ]
 
     def _updated(self):
-        return [c.args[0] for c in self.client.table.return_value.update.call_args_list]
+        """The parameters of every other ingestion write gate."""
+        return [
+            c.args[1] for c in self.client.rpc.call_args_list
+            if c.args and c.args[0] != "ingest_register_quarantined_device"
+        ]
 
     # -- quarantine_new_device -------------------------------------------------------------
 
@@ -137,7 +152,7 @@ class DeviceLocationInvariantTest(unittest.TestCase):
             "dev000000000000000000abc", "gwy000000000000000000abc",
             ingestion.REASON_UNKNOWN_DEVICE, FakePayload(FakeMetric("temperature"))
         )
-        self.assertEqual(self._inserted()[0]["gateway_id"], "gw-uuid")
+        self.assertEqual(self._inserted()[0]["p_gateway_id"], "gw-uuid")
 
     def test_unregistered_edge_node_still_leaves_the_cell_null(self):
         """A device with no resolvable gateway is unassigned, not assigned to a guess."""
@@ -147,7 +162,7 @@ class DeviceLocationInvariantTest(unittest.TestCase):
             ingestion.REASON_UNKNOWN_DEVICE, FakePayload(FakeMetric("temperature"))
         )
         record = self._inserted()[0]
-        self.assertIsNone(record.get("gateway_id"))
+        self.assertIsNone(record.get("p_gateway_id"))
         self.assertIsNone(record.get("cell_id"))
 
     # -- every other write path ------------------------------------------------------------

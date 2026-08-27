@@ -144,7 +144,17 @@ class TestRecordDeclaredMetrics(unittest.TestCase):
         ingestion.supabase_client = self._real_client
 
     def _update_payloads(self):
-        return [c.args[0] for c in self.client.table.return_value.update.call_args_list]
+        """
+        The parameters of each ingest_record_declared_metrics() call.
+
+        Reads the RPC rather than a table UPDATE because the write goes through a gate now
+        (roadmap item 16, migration 0047). The property under test is unchanged -- one write per
+        real change to the declared set -- but it is asserted on the call the daemon now makes.
+        """
+        return [
+            c.args[1] for c in self.client.rpc.call_args_list
+            if c.args and c.args[0] == "ingest_record_declared_metrics"
+        ]
 
     def test_writes_when_the_declared_set_is_new(self):
         device = {"id": "dev-uuid", "name": "Robot_01", "last_birth_metrics": None}
@@ -152,8 +162,8 @@ class TestRecordDeclaredMetrics(unittest.TestCase):
 
         payloads = self._update_payloads()
         self.assertEqual(len(payloads), 1)
-        self.assertEqual(payloads[0]["last_birth_metrics"], ["temperature", "vibration"])
-        self.assertIn("last_birth_metrics_at", payloads[0])
+        self.assertEqual(payloads[0]["p_metrics"], ["temperature", "vibration"])
+        self.assertIn("p_observed_at", payloads[0])
 
     def test_no_write_when_the_declared_set_is_unchanged(self):
         """
@@ -172,13 +182,13 @@ class TestRecordDeclaredMetrics(unittest.TestCase):
 
         payloads = self._update_payloads()
         self.assertEqual(len(payloads), 1)
-        self.assertEqual(payloads[0]["last_birth_metrics"], ["humidity", "temperature"])
+        self.assertEqual(payloads[0]["p_metrics"], ["humidity", "temperature"])
 
     def test_write_when_a_metric_is_removed(self):
         device = {"id": "dev-uuid", "name": "Robot_01",
                   "last_birth_metrics": ["humidity", "temperature"]}
         ingestion.record_declared_metrics(device, FakePayload("temperature"))
-        self.assertEqual(self._update_payloads()[0]["last_birth_metrics"], ["temperature"])
+        self.assertEqual(self._update_payloads()[0]["p_metrics"], ["temperature"])
 
     def test_cached_row_is_updated_in_place(self):
         """
@@ -194,7 +204,7 @@ class TestRecordDeclaredMetrics(unittest.TestCase):
 
     def test_supabase_failure_does_not_propagate(self):
         """A failed write must not abort DBIRTH handling; the next birth retries."""
-        self.client.table.return_value.update.side_effect = RuntimeError("supabase down")
+        self.client.rpc.side_effect = RuntimeError("supabase down")
         device = {"id": "dev-uuid", "name": "Robot_01", "last_birth_metrics": None}
 
         ingestion.record_declared_metrics(device, FakePayload("temperature"))
@@ -500,8 +510,20 @@ class TestDeviceLivenessWatchdog(unittest.TestCase):
         ingestion.supabase_client = self._real_client
         reset_module_state()
 
-    def _update_chain(self):
-        return self.client.table.return_value.update
+    def _offline_calls(self):
+        """
+        The ingest_mark_device_offline() calls the sweep made.
+
+        The write goes through a gate now (roadmap item 16, migration 0047). The properties this
+        class exists to protect are unchanged and still asserted below -- one write per quiet
+        period, tracking retained on failure -- but the already-OFFLINE predicate that used to be
+        a client-side `.eq("status", "ONLINE")` now lives in the gate, where a caller cannot
+        forget it. That it holds is asserted by 0047's own self-check.
+        """
+        return [
+            c for c in self.client.rpc.call_args_list
+            if c.args and c.args[0] == "ingest_mark_device_offline"
+        ]
 
     def test_a_device_never_seen_is_never_stale(self):
         """
@@ -511,7 +533,7 @@ class TestDeviceLivenessWatchdog(unittest.TestCase):
         """
         self.assertEqual(ingestion.stale_device_ids(now=10_000_000, timeout=60), [])
         self.assertEqual(ingestion.sweep_stale_devices(now=10_000_000, timeout=60), [])
-        self._update_chain().assert_not_called()
+        self.assertEqual(self._offline_calls(), [])
 
     def test_a_device_within_the_window_is_not_stale(self):
         ingestion.mark_device_seen(self.DEVICE)
@@ -531,21 +553,30 @@ class TestDeviceLivenessWatchdog(unittest.TestCase):
         written = ingestion.sweep_stale_devices(now=seen_at + 61, timeout=60)
 
         self.assertEqual(written, [self.DEVICE["id"]])
-        self._update_chain().assert_called_once_with({"status": "OFFLINE"})
+        calls = self._offline_calls()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].args[1], {"p_device_id": self.DEVICE["id"]})
 
-    def test_the_update_is_filtered_on_status_online(self):
+    def test_the_sweep_goes_through_the_gate_that_carries_the_filter(self):
         """
-        The database-side half of write-on-change. With `status = ONLINE` in the filter an
-        already-OFFLINE row matches nothing, so no UPDATE runs and no audit row is appended --
-        which a client-side check alone could not guarantee.
+        The database-side half of write-on-change. It used to be a client-side
+        `.eq("status", "ONLINE")` on the UPDATE; it is now `IS DISTINCT FROM 'OFFLINE'` inside
+        ingest_mark_device_offline(), so an already-OFFLINE row matches nothing and no audit row
+        is appended -- and a future edit to this sweep cannot drop it by forgetting a filter.
+
+        What is asserted here is that the sweep uses the gate at all. That the gate carries the
+        predicate is asserted in SQL, by 0047's self-check, which calls it twice against the same
+        device and fails if the second call moves a row.
         """
         ingestion.mark_device_seen(self.DEVICE)
         seen_at = ingestion._device_seen[self.DEVICE["id"]]["at"]
         ingestion.sweep_stale_devices(now=seen_at + 61, timeout=60)
 
-        first_eq = self._update_chain().return_value.eq
-        first_eq.assert_called_once_with("id", self.DEVICE["id"])
-        first_eq.return_value.eq.assert_called_once_with("status", "ONLINE")
+        calls = self._offline_calls()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].args[1]["p_device_id"], self.DEVICE["id"])
+        # The status is not a parameter: the gate pins OFFLINE, so no caller can send another.
+        self.assertEqual(list(calls[0].args[1]), ["p_device_id"])
 
     def test_a_swept_device_is_not_written_twice(self):
         """
@@ -560,7 +591,7 @@ class TestDeviceLivenessWatchdog(unittest.TestCase):
         ingestion.sweep_stale_devices(now=seen_at + 200, timeout=60)
         ingestion.sweep_stale_devices(now=seen_at + 400, timeout=60)
 
-        self.assertEqual(self._update_chain().call_count, 1)
+        self.assertEqual(len(self._offline_calls()), 1)
 
     def test_a_device_that_comes_back_is_tracked_again(self):
         ingestion.mark_device_seen(self.DEVICE)
@@ -595,8 +626,7 @@ class TestDeviceLivenessWatchdog(unittest.TestCase):
         Retried on the next sweep. A failed write that dropped the device would leave it ONLINE
         forever while the log claimed it had been handled.
         """
-        self._update_chain().return_value.eq.return_value.eq.return_value.execute.side_effect = \
-            RuntimeError("supabase down")
+        self.client.rpc.return_value.execute.side_effect = RuntimeError("supabase down")
         ingestion.mark_device_seen(self.DEVICE)
         seen_at = ingestion._device_seen[self.DEVICE["id"]]["at"]
 

@@ -483,11 +483,20 @@ function edgeFunctionNames() {
       passed. 0032's self-check fabricates a 400-day-old firing alert and asserts it survives,
       because this list can check that a redeclaration was INTENDED and not that it was COMPLETE.`,
     'public.log_digital_thread_event': `0003 adds append-only enforcement, 0005 adds actor_source
-      attribution, and 0026 adds the causation_id stamp. 0026's body is the live one and reproduces
-      0005 IN FULL -- a later declaration that patched rather than reproduced would silently drop
-      the heartbeat suppression guard or the attribution, which is exactly why 0017 was never
-      written. 0026's own self-check asserts both survived, because this list checks that a
+      attribution, 0026 adds the causation_id stamp, and 0048 stops a machine principal being
+      recorded as a user. 0048's body is the live one and reproduces 0026 IN FULL -- a later
+      declaration that patched rather than reproduced would silently drop the heartbeat suppression
+      guard or the attribution, which is exactly why 0017 was never written. 0048 was written by
+      taking the DEPLOYED definition and changing one branch, for that reason. Its own self-check
+      asserts an ingestion write is still recorded as 'ingestion', because this list checks that a
       redeclaration was INTENDED and cannot check that it was COMPLETE.`,
+    'public.is_ingestion_caller': `0047 admits the Service_Ingestor principal OR a caller still
+      presenting the service-role key; 0048 removes the second arm, which is what completes roadmap
+      item 16. The transitional arm existed so that a daemon deployed before the credential swap
+      kept working, and 0047 says removing it should be one line "so that it is a decision rather
+      than a refactor". 0048 is that decision -- nothing hands the daemon a service-role key any
+      more, on either Compose or Kubernetes, so the arm only widened the gates. 0048's self-check
+      asserts service_role is now refused.`,
     'public.digital_thread_page': `0039 derives is_purged as an anti-join against cells, gateways
       and devices, DELIBERATELY not narrowed by entity_type -- its own comment argues that an asset
       is live if it is still in any of them, which is three index probes rather than a CASE that
@@ -1711,6 +1720,49 @@ function edgeFunctionNames() {
       pass(
         `the ${days}-day alert retention window is declared once in 0032's seed_setting() and ` +
           `cited consistently in ${new Set(CITATIONS.map((c) => c.file)).size} files`
+      );
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Every gateway health column the daemon can produce is written by the gate it now goes through.
+//
+// THIS FAILS SILENTLY AND THAT IS WHY IT IS CHECKED. `ingest_record_gateway_health()` (0047) names
+// its columns literally in a SET clause. A metric added to GATEWAY_HEALTH_METRICS but not to that
+// clause is extracted from the payload, logged as recognised, and then dropped on the floor -- the
+// page goes on showing the last value written by some other path, which for `agent_version` is
+// whatever enrolment stamped however long ago. Nothing errors, and the reading looks stale rather
+// than absent, which is the hardest kind of wrong to notice.
+{
+  const py = read('ingestion/ingestion.py');
+  const block = py.match(/GATEWAY_HEALTH_METRICS\s*=\s*\{([\s\S]*?)\n\}/);
+  const sql = read('supabase/migrations/0047_ingestion_write_rpcs.sql');
+  const fn = sql.match(/CREATE OR REPLACE FUNCTION public\.ingest_record_gateway_health[\s\S]*?\$fn\$;/);
+
+  if (!block) {
+    fail('check-docs-drift: could not find GATEWAY_HEALTH_METRICS in ingestion/ingestion.py.');
+  } else if (!fn) {
+    fail('check-docs-drift: could not find ingest_record_gateway_health() in 0047.');
+  } else {
+    // ("Metric_Name": ("column_name", "kind")) -- the column is what has to appear in the gate.
+    // [a-z0-9_] and not [a-z_]: `load_1m` carries a digit, and a class without one drops it from
+    // the corpus silently -- the check then passes while ignoring the column it was meant to guard.
+    const columns = [...block[1].matchAll(/\(\s*"([a-z0-9_]+)"\s*,\s*"[a-z_]+"\s*\)/g)].map((m) => m[1]);
+    const missing = columns.filter((c) => !new RegExp(`\\b${c}\\s*=`).test(fn[0]));
+
+    if (missing.length) {
+      fail(
+        `ingest_record_gateway_health() does not write gateway health column(s): ${missing.join(', ')}.\n` +
+          '      GATEWAY_HEALTH_METRICS in ingestion.py maps a Sparkplug metric onto each of these,\n' +
+          '      so the daemon extracts the value, validates it, and then has nowhere to put it. The\n' +
+          '      write is dropped without an error and the dashboard shows a stale value rather than\n' +
+          '      a missing one.'
+      );
+    } else {
+      pass(
+        `all ${columns.length} gateway health column(s) in GATEWAY_HEALTH_METRICS are written by ` +
+          `ingest_record_gateway_health() (roadmap §16)`
       );
     }
   }

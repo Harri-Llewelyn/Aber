@@ -57,13 +57,27 @@ const b64url = (input) =>
  * `exp` is ten years out, matching the demo tokens' 2033. These are infrastructure keys held by
  * services, not user sessions: a short expiry here would silently take the stack off the air on a
  * date nobody wrote down, and there is no refresh path for them.
+ *
+ * `subject` NAMES A PRINCIPAL AND IS WHAT MAKES A NARROW SERVICE KEY POSSIBLE (roadmap item 16).
+ * The anon and service-role keys carry a `role` and no `sub`, because they are not anybody --
+ * PostgREST switches to the database role and RLS never asks who is calling. A key minted with a
+ * `sub` is somebody: `role: authenticated` puts it through RLS like any signed-in user, and
+ * `auth.uid()` resolves to the principal seeded in a migration.
+ *
+ * WHY NOT `scripts/mint-mcp-token.mjs`, which already signs tokens for a named principal. That
+ * script enforces a 90-day ceiling, and it is right to: it mints tokens that get pasted into a
+ * config file on somebody's laptop, cannot be revoked, and walk out of the building with the
+ * machine. An infrastructure key held by a container is the other case entirely -- the one this
+ * function's own comment above describes -- and giving it a 90-day expiry would take ingestion off
+ * the air on a date nobody wrote down, which is exactly what that comment exists to prevent.
  */
-function mintJwt(role, secret) {
+function mintJwt(role, secret, subject) {
   const now = Math.floor(Date.now() / 1000);
   const header = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
   const payload = b64url(JSON.stringify({
     iss: 'supabase',
     role,
+    ...(subject ? { sub: subject } : {}),
     iat: now,
     exp: now + 10 * 365 * 24 * 60 * 60,
   }));
@@ -98,6 +112,12 @@ if (demoMode) {
 const jwtSecret = hex(32);
 
 /**
+ * Service_Ingestor, seeded by migration 0046. Pinned here rather than looked up, for the reason
+ * 0034's principal is pinned: this file runs before any database exists.
+ */
+const INGESTION_PRINCIPAL = 'b0000000-0000-4000-8000-000000000002';
+
+/**
  * Every value replaced, and why each is the length it is.
  *
  * Two carry hard limits enforced by the container rather than by taste — supabase/realtime refuses
@@ -110,6 +130,16 @@ const generated = {
   SUPABASE_JWT_SECRET: jwtSecret,
   SUPABASE_ANON_KEY: mintJwt('anon', jwtSecret),
   SUPABASE_SERVICE_ROLE_KEY: mintJwt('service_role', jwtSecret),
+  // The ingestion daemon's own credential (roadmap item 16). `authenticated` with a `sub`, not a
+  // role that bypasses RLS: it authenticates as Service_Ingestor (migration 0046), which holds
+  // Operator and therefore cannot write a single row directly. Every write it makes goes through
+  // one of the SECURITY DEFINER gates in 0047, and those check that the caller IS this principal.
+  //
+  // The daemon still needs SUPABASE_ANON_KEY as well, and that is not a redundancy: the gateway's
+  // apikey check admits exactly two literal keys, so this token would be refused at the edge if it
+  // were sent as the apikey. It travels as the Authorization bearer, the way i3X passes a caller's
+  // own token through to PostgREST.
+  SUPABASE_INGESTION_KEY: mintJwt('authenticated', jwtSecret, INGESTION_PRINCIPAL),
   PG_META_CRYPTO_KEY: hex(32),
   REALTIME_DB_ENC_KEY: hex(8),          // EXACTLY 16 chars
   REALTIME_SECRET_KEY_BASE: hex(32),    // AT LEAST 64 chars
