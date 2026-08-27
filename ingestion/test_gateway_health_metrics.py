@@ -231,7 +231,7 @@ class ProcessNodeMessageHealthTests(unittest.TestCase):
         """
         The parameters of the ingest_record_gateway_health() call the heartbeat made.
 
-        The write goes through a gate now (roadmap item 16, migration 0047), so the health
+        The write goes through a gate now (Machine Identities in supabase/README.md, migration 0047), so the health
         readings arrive as a `p_health` object rather than as columns spread across an UPDATE
         payload. `_flat` below keeps the assertions reading the way they did.
         """

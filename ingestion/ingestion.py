@@ -57,7 +57,7 @@ MQTT_TLS_CA_FILE = os.getenv("MQTT_TLS_CA_FILE", "").strip()
 # Supabase configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 
-# TWO KEYS, DOING DIFFERENT JOBS, AND NEITHER IS THE SERVICE-ROLE KEY ANY MORE (roadmap item 16).
+# TWO KEYS, DOING DIFFERENT JOBS, AND NEITHER IS THE SERVICE-ROLE KEY ANY MORE (see Machine Identities in supabase/README.md).
 #
 # The anon key is the `apikey` the gateway checks. Its Lua filter admits exactly two literal
 # strings, so the ingestion token cannot be sent in its place -- it would be refused at the edge
@@ -244,7 +244,7 @@ try:
         logger.warning(
             "SUPABASE_URL, SUPABASE_ANON_KEY or SUPABASE_INGESTION_KEY missing. Supabase "
             "integration disabled. SUPABASE_INGESTION_KEY replaced SUPABASE_SERVICE_ROLE_KEY -- "
-            "see roadmap item 16; run scripts/setup.mjs or copy the key from .env.example."
+            "see Machine Identities in supabase/README.md; run scripts/setup.mjs or copy the key from .env.example."
         )
 except Exception as e:
     logger.warning("Failed to initialize Supabase client: %s", e)
@@ -3212,7 +3212,7 @@ def main():
         logger.critical(
             "CRITICAL SECURITY ERROR: Supabase client is uninitialized! SUPABASE_URL, "
             "SUPABASE_ANON_KEY or SUPABASE_INGESTION_KEY missing or invalid. "
-            "SUPABASE_INGESTION_KEY replaced SUPABASE_SERVICE_ROLE_KEY here (roadmap item 16); an "
+            "SUPABASE_INGESTION_KEY replaced SUPABASE_SERVICE_ROLE_KEY here (see Machine Identities in supabase/README.md); an "
             ".env predating that change has no such key -- run scripts/setup.mjs, or copy it from "
             ".env.example for a demonstration stack. "
             "Ingestion daemon refusing to start MQTT loop in fail-open state. System halting to enforce fail-closed device quarantine gating."

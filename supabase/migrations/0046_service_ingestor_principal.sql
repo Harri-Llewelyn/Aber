@@ -1,5 +1,6 @@
 -- =============================================================================================
--- 0046 · `Service_Ingestor`, the identity the ingestion daemon will hold. Roadmap §16.
+-- 0046 · `Service_Ingestor`, the identity the ingestion daemon will hold.
+-- See Machine Identities in supabase/README.md.
 -- =============================================================================================
 -- §13 specified three identity profiles and shipped the mechanism for two. This is the third, and
 -- §13's own text flagged it as different in kind: "`Service_Ingestor` is the genuinely new one --

@@ -96,7 +96,7 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
   // would let one keypress dismiss both.
   useEscapeKey(onClose)
 
-  // `links` here AND on the wire, as of roadmap item 6. This component used to be the boundary
+  // `links` here AND on the wire, as of migration 0049. This component used to be the boundary
   // between the two vocabularies -- Link everywhere a user could see, `documents` in the endpoint,
   // the table and the payload key -- and 0049 removed the divergence rather than the boundary.
   // Nothing here translates any more.

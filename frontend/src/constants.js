@@ -16,7 +16,7 @@ export const PERMISSION_UUIDS = {
   GATEWAY_MANAGE:     'e789a012-3456-4c1d-8706-933e08544e35',
   TELEMETRY_READ:     'f012a345-6789-4c1d-8706-933e08544e36',
   ARCHIVE_MANAGE:     'b345c678-9012-4c1d-8706-933e08544e37',
-  // Renamed from DOCUMENT_MANAGE by roadmap item 6. THE UUID IS UNCHANGED and must stay so:
+  // Renamed from DOCUMENT_MANAGE by 0049. THE UUID IS UNCHANGED and must stay so:
   // role_permissions references it by id, so this is a variable rename, not an authorisation
   // change. Only the permission's `name` string moved, in 0049.
   LINK_MANAGE:        'a012b345-6789-4c1d-8706-933e08544e38',

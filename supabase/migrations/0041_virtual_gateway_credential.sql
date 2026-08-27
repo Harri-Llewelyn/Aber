@@ -2,7 +2,8 @@
 -- 0041_virtual_gateway_credential.sql
 --
 -- The authority half of "Generate broker credential" for a VIRTUAL gateway, so the last workflow
--- that requires shell access to put a gateway on the broker can be retired. Roadmap §13, and the
+-- that requires shell access to put a gateway on the broker can be retired. See Machine
+-- Identities in supabase/README.md, and the
 -- step §14 named as the one thing missing from a hand-built simulator.
 --
 -- ---------------------------------------------------------------------------------------------

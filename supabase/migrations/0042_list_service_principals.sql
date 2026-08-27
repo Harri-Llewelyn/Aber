@@ -2,7 +2,7 @@
 -- 0042_list_service_principals.sql
 --
 -- The read behind the Access Control page's Service Identities section: which NON-HUMAN accounts
--- can reach this stack, and what each of them holds. Roadmap §13.
+-- can reach this stack, and what each of them holds. See Machine Identities in supabase/README.md.
 --
 -- ---------------------------------------------------------------------------------------------
 -- WHY AN RPC AT ALL, WHEN THE PAGE ALREADY READS `gateway_status` DIRECTLY

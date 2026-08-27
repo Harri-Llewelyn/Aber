@@ -149,7 +149,7 @@ class DBirthDedupTestCase(unittest.TestCase):
         """
         The fields each ingest_set_device_state() call actually changes.
 
-        The write goes through a gate now (roadmap item 16, migration 0047). Its signature is
+        The write goes through a gate now (Machine Identities in supabase/README.md, migration 0047). Its signature is
         fixed and NULL means "leave alone", so the changed-field set that used to be the UPDATE
         payload is now the non-NULL parameters -- normalised back to column names here so the
         assertions keep saying what they said. The property is unchanged: a steady-state rebirth

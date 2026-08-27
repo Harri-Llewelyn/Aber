@@ -2,7 +2,7 @@
 -- 0043_record_service_token_issued.sql
 --
 -- Record that a long-lived JWT was signed for a service principal, as a `TOKEN_MINTED` row in
--- `digital_thread`. Roadmap §13.
+-- `digital_thread`. See Machine Identities in supabase/README.md.
 --
 -- ---------------------------------------------------------------------------------------------
 -- WHY THIS EXISTS, AND IT IS NOT CONVENIENCE

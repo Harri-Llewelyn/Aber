@@ -455,6 +455,30 @@ Two consequences worth stating on the front page; both are detailed in
   time bomb. Anything in it must carry nothing beyond machine geometry. Writes are gated on
   `device:manage`, not merely `authenticated`.
 
+### Machine identities
+
+Four identities here are held by software rather than people, and each is narrow by construction:
+`Service_Ingestor` and the MCP reader hold `Operator`, `factoryplus_i3x` reads the broker namespace
+and publishes nothing, and `gateway-credential-service` can add one broker account and do nothing
+else. All four are `auth.users` rows with no email, no password and no identity provider, so none
+can sign in.
+
+**The ingestion daemon does not hold `SUPABASE_SERVICE_ROLE_KEY`.** It used to, and that was the one
+credential whose compromise no policy written anywhere else could contain, sitting in the process
+most exposed to the plant network. It authenticates as `Service_Ingestor` — an `Operator` principal
+that cannot write a single row directly — and every write it makes goes through a `SECURITY DEFINER`
+gate that checks the caller is that principal. `Operator` being insufficient is the design, not an
+oversight: it makes those gates the only route rather than the tidy one.
+
+**Tokens cannot be revoked.** PostgREST checks the signature, not a session table, so revoking means
+rotating `SUPABASE_JWT_SECRET` and invalidating every key in the stack. Expiry is therefore the only
+bound that exists — 90 days maximum for a token a person holds, ten years for an infrastructure key
+a container holds — and the **Access Control** tab exists to say what is outstanding, because with
+no revocation an accurate inventory *is* the safety story.
+
+The full argument, including the three revocation designs that were checked and rejected, is in
+[`supabase/README.md`](supabase/README.md#machine-identities).
+
 Known issues and accepted risks are tracked as
 [GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues).
 
@@ -672,35 +696,36 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Sixteen extensions, none of them speculative: every one names the code it would build on, because
+Thirteen extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
 
-**Items 1-6 are this repository's own**, ordered by how much of each already exists. **Items 7-15
+**This section lists only what is NOT built.** An item that ships is removed from here and its
+substance moves into the documentation, so the presence of a number is the answer to "is this
+done?" — no entry here says `Built`, because a checklist that contains finished work is not a
+checklist. Items 6, 13 and 16 left this way and are now documented under
+[Machine identities](#machine-identities) and in
+[`supabase/README.md`](supabase/README.md#machine-identities); item 9's subject was retired the same
+way when `aas-api` shipped.
+
+**Retired numbers are not reused, and the list is therefore not contiguous.** The gaps at 6, 13 and
+16 are deliberate. Renumbering on retirement was the earlier practice and it does not survive
+contact with this repository: the remaining entries are named by **48 comments** in migrations,
+scripts and components, all explaining why that code is the way it is, and shifting every number
+below a removal would silently redirect all of them without erroring. A number cited from code is an
+identifier, not a position. Where code refers to work that has since shipped, the citation names the
+documentation rather than a roadmap number.
+
+**Items 1-5 are this repository's own**, ordered by how much of each already exists. **Items 7-15
 arrive from feature requests** — 7-11 from GitHub issues
 [#67](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/67),
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63),
 [#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66) and
 [#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58), in that same order of how much already
-exists; 12-16 are not yet filed. Where an entry's heading differs from the issue's title, it is
+exists; 12 and 15 are not yet filed. Where an entry's heading differs from the issue's title, it is
 because the work that remains is narrower than the title claims.
-
-**One has been retired by being built.** [#65](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/65)
-asked for live IDTA 02001/02002 endpoints beside the static export, and `aas-api` now serves them —
-which is why the numbering below skips from 8 to 9 rather than the list having lost an entry. It was
-the item with the most existing code behind it, exactly as the entry predicted. What it left behind
-is one open question rather than one open task, and it is recorded in §4: whether a client with no
-Supabase apikey should become a fifth `key-auth` exemption.
-
-**Two are marked `Built` and keep their numbers, which is a change of practice.** §9 was RETIRED
-when it shipped and the list renumbered around it — fine at the time, because almost nothing cited
-it. That is no longer true: **§13 is named by twelve comments in migrations, scripts and components,
-and §14 by forty-one across twenty-five files**, all of them explaining why that code is the way it
-is. Renumbering would silently redirect every one of them — §13's citations would point at the
-simulator, §14's at gateway nomenclature — and not one would error. A number that is cited from code
-is an identifier, not a position, so a built item stays where it is and says so in its first line.
 
 **None of these are open defects.** Feature requests live here once they have been checked against
 the code; known issues and accepted risks stay in
@@ -970,60 +995,6 @@ this entry was written against the wrong one once already:
 
 ---
 
-### 6 · `documents` → `links`, in the schema
-
-**Built.** The table is `public.links`, its tag column is `link_tag`, the endpoint is
-`/api/v1/links` and the permission is `link:manage` — `0049_documents_become_links.sql` ·
-[`frontend/src/api.js`](frontend/src/api.js) ·
-[`EntityLinksModal.jsx`](frontend/src/components/modals/EntityLinksModal.jsx) ·
-[`docs/openapi.yaml`](docs/openapi.yaml)
-
-**Builds on:** `public.documents` (`0001`) · its four RLS policies and `idx_documents_entity` ·
-`/api/v1/documents` in [`frontend/src/api.js`](frontend/src/api.js) · the `document:manage`
-permission row (`0002`)
-
-**The UI had already made this move; the storage had not.** Issue #62 generalised the feature from
-document links to links of any kind — an asset register in EZOfficeInventory, a file repository
-where measurement data belongs, anything with a URL — and the user-facing vocabulary was renamed to
-match. The table underneath is still called `documents`, its tag column is still `document_tag`, the
-endpoint is still `/api/v1/documents`, and the permission is still `document:manage`.
-
-**Nothing about the model was ever document-specific**, which is why the rename is a rename and not
-a redesign: the table is `(entity_type, entity_id, display_name, url, document_tag)` — an arbitrary
-labelled URL against an arbitrary entity. That is what makes the divergence safe to hold for now,
-and also what makes it worth closing: a table called `documents` holding a link to a SharePoint
-folder nobody will ever open a document in is a name that misleads the next reader about what the
-feature is for.
-
-**Deliberately not done in the same change as the UI rename.** A table rename is a migration —
-table, index, four policies, the grants PostgREST resolves through, `api.js`, and the permission
-row's name string — and it is justified entirely by clarity rather than by behaviour. Landing it
-inside a UI commit would have buried a schema change where nobody reviews schema changes.
-
-**The permission's UUID must not move.** `role_permissions` references it by id (`0002` grants it to
-roles 1 and 2), and `PERMISSION_UUIDS.DOCUMENT_MANAGE` in the frontend is that same literal. Only the
-`name` string changes; renaming the constant is a frontend edit, not an authorisation change.
-
-**One thing that made it cheaper than it looked:** `document_tag` carries no CHECK constraint. The
-tag vocabulary lives only in the frontend, so no enum had to migrate with the column — the stored
-values (`health_and_safety`, `asset_register`, …) are already the values the renamed column holds.
-The permission's UUID did not move, and `0049`'s self-check asserts that by counting what still
-references it: a new row with a new id would satisfy a name check and silently strip the capability
-from both roles.
-
-**The replay model turned a rename into a copy, which is the part worth recording.** db-init
-replays every migration on every boot in filename order, so `0001` runs first — and it had to stop
-creating `documents`, for the reason `0004` gives for `gateways.ip_address`: a baseline that still
-created the old name would recreate it, empty and fully policied, on the first boot after the
-rename and leave it beside the real table forever. But once `0001` creates `links`, the upgrade
-boot reaches `0049` with an empty `links` **already there**, and `ALTER TABLE … RENAME TO` collides
-with it. So `0049` copies the rows and drops the old table instead. Two properties fall out of
-that: no table holding data is ever dropped, and the surviving table is definitionally the one
-`0001` defines — its index, primary key, policies and grants were created under the new names and
-need no renaming, which removes four `ALTER POLICY` statements that could each have drifted.
-
----
-
 ### 7 · Enforcing the schema, not just recording the breach
 
 **Builds on:** `payload_violations()` · `modelled_types()` / `device_modelled_types()` ·
@@ -1263,154 +1234,26 @@ modal with one more tag in `TAG_LABELS`.
 **`target_branch` is the part that genuinely does not fit**, and it is worth separating rather than
 bundling. A branch is not a URL and has no home in a labelled-link table — so either it rides inside
 the URL as a `/tree/<branch>` path, which is lossy but free, or it earns a column of its own. That is
-one small decision, not the four-step migration the proposal implies. **Note also that the bucket
-hardening step and §6 collide:** renaming `documents` → `links` and adding a tag to the same
-vocabulary should not be two separate migrations against the same column.
+one small decision, not the four-step migration the proposal implies. **Note that the rename this used to collide with has already
+landed:** `documents` → `links` shipped in `0049`, so adding a tag to that vocabulary is now a
+change to one column on a table that already carries the right name, rather than two migrations
+against the same column.
 
 *Cited by the proposal as further reading:*
 [Managing Distributed Node-RED Deployments on the Edge](https://www.youtube.com/watch?v=FWeHG6_wTIo).
 
 ---
 
-### 13 · An Access Control page
-
-**Built.** The **Access Control** tab lists every gateway with what the platform knows about its
-broker credential, a virtual gateway can be issued one from the dashboard, the machine identities
-that can reach the stack are listed on both planes, and an Administrator can create a new one and
-see what tokens are outstanding against it — `0041_virtual_gateway_credential.sql` ·
-`0042_list_service_principals.sql` · `0043_record_service_token_issued.sql` ·
-`0044_create_service_principal.sql` · `supabase/functions/gateway-credential` ·
-[`AccessControlTab.jsx`](frontend/src/components/tabs/AccessControlTab.jsx) ·
-[`credentialState.js`](frontend/src/utils/credentialState.js) ·
-[`serviceIdentities.js`](frontend/src/utils/serviceIdentities.js) ·
-[`mint-mcp-token.mjs`](scripts/mint-mcp-token.mjs)
-
-**MINTING STAYS ON THE HOST, AND THAT IS THE DECISION THE REST OF THE DESIGN FOLLOWS FROM.** The
-page does not sign tokens. It was surveyed as a feature and refused, because
-`scripts/mint-mcp-token.mjs` records the constraint that governs the whole area: *"THERE IS NO
-REVOCATION: PostgREST checks the signature, not a session table. Revoking means rotating
-`SUPABASE_JWT_SECRET`, which invalidates every token in the stack including the anon and
-service_role keys."*
-
-Three ways of adding revocation were checked and none works. Deleting the `auth.users` row does not
-help — PostgREST validates the signature and never looks the subject up. Removing the role does not
-either: `0034` records that the relations the i3X address space is assembled from are `FOR SELECT TO
-authenticated USING (true)`, so a role-less principal still reads them. A `revoked_at` predicate
-would have to be added to **every RLS policy in the schema**.
-
-**So a clean implementation would have solved the wrong half.** `pgjwt` is installed and
-`extensions.sign()` exists, so a `SECURITY DEFINER` RPC could sign a token without the secret ever
-leaving the database — technically neat, and it would have made an unrevocable 90-day credential a
-button press with a tidy audit trail of a thing nobody can undo. Solving the wrong half well is
-worse than not solving it, because the clean implementation reads as safety.
-
-**What the page does instead is the part that is actually load-bearing: say what is outstanding.**
-Since nothing can be revoked, knowing how many unexpired tokens exist and when the first of them
-lapses *is* the safety story — and that is an inventory question, which is what this page is for.
-`tokenStatus()` counts every unexpired mint rather than reading the latest, because **a re-mint adds
-a live credential rather than replacing one**, and reporting the newer of two would state half the
-exposure on the one page whose job is to state all of it.
-
-**The script records before it prints**, which is the inverse of `0041`'s ordering and inverted for
-a reason. The token exists nowhere until stdout, so a failed audit write costs a row describing a
-credential nobody holds; the other order costs an unrevocable credential in the wild with no record
-of it. A refusal therefore prints nothing and exits non-zero. The 90-day ceiling is enforced in both
-the script and the database, deliberately duplicated: what it bounds cannot be revoked, so it should
-not be removable by editing one file.
-
-**The two planes are not one list, and showing that is most of what the section is for.** A database
-identity is an `auth.users` row that cannot sign in, holding a role; a broker identity is an entry in
-`mosquitto.acl`. Nothing holds both — the ingestion daemon connects to the broker as
-`factoryplus_ingestion` and reaches the database with the service-role key, which is not an identity
-at all. That is exactly what "**`Service_Ingestor` does not describe the current daemon**" means, and
-it is legible on the page rather than only in this paragraph.
-
-**The broker half is a literal in the frontend, checked against the file.** Mosquitto exposes no API
-that lists its principals, and the credential service is add-only by design — a LIST verb there
-would hand whoever holds one bearer token an inventory of every account on the broker. So
-`check-docs-drift.mjs` asserts the page and `mosquitto.acl` agree on the principals *and their topic
-rules*: a username that matches while its rules have diverged is the worse failure, because the page
-then states, specifically and wrongly, what a client is allowed to do.
-
-**The page cannot be an inventory of the broker, and says so rather than implying otherwise.**
-Mosquitto's accounts live in a file reachable only by `gateway-credential-service`, which is add-only
-and cannot list anything back — giving it a LIST verb would hand whoever holds one bearer token the
-whole account table, which is exactly the drift its header forbids. So the page reports what the
-*platform* issued, and the gap is not hypothetical: `provision-gateways.mjs` mints four working
-credentials for the demonstration floor and `record_gateway_credential_issued()` cannot be called on
-its behalf, because `has_role()` resolves through `auth.uid()` and that is NULL for the service-role
-key. Those four read **No platform record** and connect perfectly well. The state is named for the
-record rather than for the credential for precisely that reason — *"No credential"* would be a claim
-about the broker that nothing in the frontend is in a position to make.
-
-**Builds on:** `issue_gateway_enrollment_token()` / `consume_…` / `release_…` (`0025`) ·
-`revoke_gateway_credential()` and its sweep (`0038`) ·
-[`GatewayBundleModal.jsx`](frontend/src/components/modals/GatewayBundleModal.jsx) ·
-`has_role()` (`0001`) · the MCP read-only principal (`0034`) · [`mosquitto.acl`](mosquitto.acl) ·
-**not yet filed as an issue**
-
-**Every RPC this needs already exists; what is missing is the page.** `0025` mints, consumes and
-releases single-use enrolment tokens, `0038` revokes a credential and sweeps revocations, and
-`has_role()` has gated privileged writes since the baseline. The gap the proposal identifies is real
-and is the right one: the only way to see what credentials exist today is to read `.env` and
-`.env.gateways` on the machine that generated them, which is a file, not a view — and a file that the
-hand-off checklist under **Contributing** explicitly tells you to delete.
-
-**The "reveal-once" pattern is already implemented once, and the second implementation should be the
-same one.** `gateway-bundle` mints a token **as the caller** through a `SECURITY DEFINER` RPC that
-checks `has_role()` itself, holds no service-role key, and cannot read the token table it just wrote
-to — its own header states that its ceiling is what the caller could already do through PostgREST.
-That is the property to preserve. A page that mints service JWTs must not become the one place in the
-stack that holds a service-role key in order to do it.
-
-**The third profile did not ship, and it is now §16 rather than a loose end inside a section marked
-built.** `Service_Reader` is what `create_service_principal()` grants as `Operator`, and the
-read-only broker template exists as `factoryplus_i3x`. `Service_Ingestor` is neither: it describes a
-daemon that does not exist yet.
-
-**Two of the three identity profiles have precedents to copy rather than invent.** `0034` created a
-read-only principal for the MCP client and argued the choice at length — not `service_role`, because
-the point is that a model's query returns exactly what the asker is entitled to see; not a demo
-persona, because a machine credential borrowing a human account conflates two lifecycles. That is
-`Service_Reader` already reasoned through. On the broker, `factoryplus_i3x` is already
-`topic read spBv1.0/#` and `factoryplus_monitor` is already publish-nothing, so the read-only ACL
-template exists as a live account rather than as a design. `Service_Ingestor` is the genuinely new
-one — and note it does not describe the current daemon, which holds the service-role key and writes
-telemetry directly.
-
-**§14's subject is now covered, and it was the first thing built.** A virtual gateway cannot be
-enrolled — `0025` and `gateway-bundle` both refuse one — so its broker credential was minted by a
-shell script and carried to Node-RED by hand. It is now minted through the same reveal-once
-component, authorised by role rather than by a single-use token, which retires the last workflow
-requiring shell access to put a gateway on the broker.
-
-The authority is worth stating plainly, because it is **more** than `gateway-bundle`'s. That
-function holds no secret at all and its ceiling is what the caller could already do through
-PostgREST; this one cannot match that, because the broker's password file is not reachable from SQL.
-What it preserves is the part that matters — **no service-role key** — and the registry entry in
-`main/index.ts` is where that is stated rather than discovered.
-
-**Two structural notes.** This UI is **tab-based, not routed** — `frontend/src/pages/` holds one file
-and the shell is `components/tabs/` — so `/access-control` is a tab beside Settings, and building it
-as a route would introduce a second navigation model for one page. And the audit half needs care for
-the reason `0026` exists: `digital_thread` is append-only and its trigger will not accept a `user`
-actor asserted by a client. Attributing a minting to the calling administrator has to happen where
-the database already knows who they are — inside the `SECURITY DEFINER` RPC — rather than in a
-payload the page sends.
-
-**Worth stating what this deliberately is not**, since the proposal already draws the line and it is
-the right line: this is not a fine-grained access control engine. The role set is fixed at four, the
-policies name them literally throughout the schema, and `0002` grants permissions to roles by id.
-Profiles are chosen from a list; nothing here builds a permission graph.
-
----
-
 ### 14 · An opt-in simulator, and a fresh install with no simulated assets
 
-**Mostly built.** `0040_retire_demonstration_seed.sql` ·
+**Builds on:** `0040_retire_demonstration_seed.sql` ·
 [`simulation/`](simulation/README.md) · [`scripts/provision-gateways.mjs`](scripts/provision-gateways.mjs) ·
-`0033_relocate_devices.sql` · [`supabase/seed.sql`](supabase/seed.sql) ·
-**what remains is the one-machine walkthrough and the broker credential, and the second belongs to §13**
+`0033_relocate_devices.sql` · [`supabase/seed.sql`](supabase/seed.sql)
+
+**What remains is the one-machine walkthrough, and only that.** The seed and the opt-in simulator
+shipped; the broker-credential half was the other outstanding piece and it shipped with the Access
+Control tab, which can now mint a virtual gateway's credential from the dashboard — see
+[Machine identities](#machine-identities).
 
 **The request came out of the demonstration and was specific**: a participant asked whether the
 simulated devices appear on every start, felt they polluted the Digital Thread, and wanted running
@@ -1523,16 +1366,16 @@ no service-role key of its own. That is a second caller of an existing verb, and
 second verb: the service's own header warns that *"it is not a general credential API and must not
 become one."*
 
-**So that step belongs with §13** — a "Generate broker credential" action on a virtual gateway,
-minted through the credential service and revealed once, with no token, no bundle and nothing
-downloaded. For the co-located case it could go further and never reach a human at all, since
+**That step is built** — the Access Control tab carries a "Generate broker credential" action for
+a virtual gateway, minted through the credential service and revealed once, with no token, no bundle
+and nothing downloaded. For the co-located case it could go further and never reach a human at all, since
 `node-red-init.mjs` already reconciles broker credentials out of env pairs named per node. The caveat
 worth stating: that reconciliation runs at **init** and deliberately exits early rather than
 overwriting credentials it must not touch, so writing into a *running* Node-RED is a different
 mechanism from seeding one at boot, and needs its own path or a restart.
 
 **With that step built, the tour is the argument for the whole item**: Cells, Gateways, credential
-minting, Devices, Schemas and — with §13 — Access Control, which is most of the product.
+minting, Devices, Schemas and Access Control, which is most of the product.
 
 ---
 
@@ -1646,113 +1489,6 @@ column rebuilds `gateway_status`**, because Postgres freezes `SELECT g.*` at cre
 exists for precisely this kind of change and this change must satisfy it twice.
 
 ---
-
-### 16 · `Service_Ingestor`, and taking the service-role key off the daemon
-
-**Built.** The ingestion daemon no longer holds `SUPABASE_SERVICE_ROLE_KEY`. It authenticates as
-`Service_Ingestor`, an `Operator` principal that cannot write a single row directly, and every
-write it makes goes through a SECURITY DEFINER gate that checks the caller is that principal —
-`0046_service_ingestor_principal.sql` · `0047_ingestion_write_rpcs.sql` ·
-`0048_machine_principals_are_not_users.sql` · [`ingestion/ingestion.py`](ingestion/ingestion.py) ·
-[`scripts/setup.mjs`](scripts/setup.mjs) · **never filed as an issue**
-
-**Builds on:** `record_ingestion_rejection()` (`0026`) · `create_service_principal()` (`0044`) ·
-`0034`'s read-only principal · `verify_gateway_binding()`
-
-**Carved out of §13 rather than left inside a section marked built.** That item specified three
-identity profiles and shipped the mechanism for two: `Service_Reader` is what
-`create_service_principal()` grants as `Operator`, and the read-only broker template already exists
-as a live account in `factoryplus_i3x`. The third was flagged in §13's own text as different in
-kind — *"`Service_Ingestor` is the genuinely new one — and note it does not describe the current
-daemon, which holds the service-role key and writes telemetry directly"* — and it is a name in a
-list only for as long as nobody looks at what granting it would mean.
-
-**The gap is not a UI gap, and that is why it needs its own item.** Every other service identity in
-this stack is narrow by construction: the MCP principal holds `Operator` and reads five relations,
-`factoryplus_i3x` reads the namespace and publishes nothing, and `gateway-credential-service` can
-add one broker account and do nothing else. The ingestion daemon is the exception — it holds
-`SUPABASE_SERVICE_ROLE_KEY`, which bypasses RLS entirely, and there is currently no smaller
-credential it could hold and still do its job.
-
-**What it actually writes is narrower than what the key permits**, which is what makes this
-tractable rather than a rewrite. Telemetry goes to TimescaleDB over its own connection. Against
-Supabase the daemon registers quarantined devices, records births, updates status and calls
-`record_ingestion_rejection()` — and that last one is already the shape the rest would take: `0026`
-built it precisely to replace `service_role`'s direct INSERT on the audit table, and its header says
-so. So the pattern is established and applied once; the work is applying it to the remaining writes
-and then reducing the credential.
-
-**The three open questions are now answered, and `0046` is the first of them landing.** That
-migration creates the identity and nothing holds it yet, which is deliberate.
-
-*What the daemon actually writes*, counted rather than estimated — five sites across three tables:
-the quarantine `INSERT` on `devices`, the birth-metrics and status `UPDATE`s on `devices`, the
-`asset_config` upsert of birth parameters, and the health `UPDATE` on `gateways`. Reads are
-`devices`, `gateways`, `device_schemas` and `schemas`. Telemetry is not on this list at all — it
-goes to TimescaleDB over the daemon's own connection and never touches Supabase. That is what makes
-this tractable: it is `0026`'s pattern applied a fixed number of further times, not a rewrite.
-
-*`Service_Ingestor` is an `auth.users` principal*, not a Postgres role. The role would be tighter in
-isolation and was rejected for what it cannot do: it is invisible to `list_service_principals()`
-(`0042`), no token against it can be recorded by `record_service_token_issued()` (`0043`), and the
-Access Control page cannot show it. A machine identity the page built for this purpose cannot see is
-a second trust path, auditable only over psql. `0046` records the full argument.
-
-*It holds `Operator`, which cannot perform any of those five writes* — 0034's observation that
-"every write policy in this schema names Administrator or Shopfloor_Manager" is what makes the RPCs
-the only route rather than the tidy route. `0046`'s self-check asserts exactly that gap, because if
-a later migration ever widens a write policy to admit `Operator`, this credential silently becomes
-as wide as the role and nothing else in the schema would report it.
-
-*The mid-upgrade question is answered by ordering.* Identity, then the write RPCs, then the daemon
-calling them while still holding the service key, and only then the credential swap. Nothing the
-daemon depends on is removed until after it has stopped depending on it, so a deployed daemon keeps
-working at every step.
-
-**`0047` turned out to be worth more than a permissions exercise**, which was not the expectation
-going in. Three rules the daemon enforces *in Python* moved into SQL with it, and each was a rule a
-compromised or simply buggy daemon could previously have ignored. `RESERVED_GATEWAY_STATUSES` is
-the clearest: a gateway may not assert `PENDING_ENROLLMENT`, `AWAITING_BIRTH` or `STALE` about
-itself, because all three short-circuit ahead of the staleness arm in `public.gateway_status` and
-would leave a silent gateway looking healthy — the one thing that derived status exists to prevent.
-That rule sat in a frozenset in the process most exposed to the plant network, applied to a string
-that arrived *from* the plant network. The watchdog's `status = 'ONLINE'` predicate and
-`first_dbirth_at`'s write-once behaviour moved the same way: both were caller conventions, and both
-are now properties of the gate.
-
-The gates are granted to `authenticated` rather than to `service_role` alone, because the narrow
-credential is an ordinary authenticated principal — so each one checks that the caller *is*
-`Service_Ingestor`. That check is the only thing between a signed-in user and the daemon's write
-surface, which is why `0047`'s self-check asserts a second principal holding the same `Operator`
-role is refused.
-
-**Two findings came out of the build that the entry did not predict, and both were silent.**
-
-*Giving the daemon an identity would have relabelled every ingestion write as a human action.*
-`log_digital_thread_event()` concludes `actor_source = 'user'` from `auth.uid()` being non-NULL,
-which was sound while the only accounts carrying a `sub` were people's. Point the daemon at a real
-principal and it inverts — and nothing errors. The Digital Thread simply starts attributing
-automated device registrations and status flips to a person, with no sign but a `changed_by` uuid
-belonging to nobody who works here. The irony is the lesson: that same function already refuses to
-accept `'user'` from a header, because *"claiming a human author is exactly the assertion a client
-must not be able to make about itself"* — and narrowing the credential would have let it make that
-claim through the front door. `0048` teaches it to ask what kind of account it is, using `0042`'s
-existing machine-identity predicate rather than inventing a second one. The row got better as well
-as correct: an ingestion write now records `'ingestion'` **and** names the principal, where it used
-to record `'ingestion'` and `NULL`.
-
-*`agent_version` was being written to nowhere.* It is in `GATEWAY_HEALTH_METRICS`, and the first
-draft of `0047`'s gate omitted it from the `SET` clause — so the value was extracted from the
-payload, validated, and discarded. The page would have gone on showing whatever version enrolled
-however long ago: stale, not absent, which is the harder thing to notice.
-[`check-docs-drift.mjs`](scripts/check-docs-drift.mjs) now cross-references the two lists.
-
-**The value is not tidiness.** A credential that bypasses RLS is the one thing on this stack whose
-compromise cannot be contained by any policy written anywhere else, and it sat in the process most
-exposed to the plant network. What replaced it can do exactly seven things.
-
----
-
 
 ## Contributing
 

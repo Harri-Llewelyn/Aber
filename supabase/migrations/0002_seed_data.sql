@@ -74,7 +74,7 @@ INSERT INTO public.permissions VALUES ('f012a345-6789-4c1d-8706-933e08544e36', '
 ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.permissions VALUES ('b345c678-9012-4c1d-8706-933e08544e37', 'archive:manage', 'Archive, restore, and set retention auto-delete timers')
 ON CONFLICT (id) DO NOTHING;
--- `link:manage`, renamed from `document:manage` by 0049 (roadmap item 6). THE ID DOES NOT MOVE:
+-- `link:manage`, renamed from `document:manage` by 0049. THE ID DOES NOT MOVE:
 -- role_permissions references it, and PERMISSION_UUIDS.LINK_MANAGE in the frontend is this same
 -- literal. Only the name string changed. Seeded under the new name here as well as updated there,
 -- because ON CONFLICT (id) DO NOTHING below means this INSERT cannot correct an existing row.

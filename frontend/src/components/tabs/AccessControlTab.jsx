@@ -27,7 +27,7 @@ import {
  * Access Control — broker credentials, and where they came from.
  *
  * =================================================================================================
- * THE GAP THIS CLOSES, in roadmap §13's words: "the only way to see what credentials exist today is
+ * THE GAP THIS CLOSES, in the words of Machine Identities in supabase/README.md: "the only way to see what credentials exist today is
  * to read `.env` and `.env.gateways` on the machine that generated them, which is a file, not a
  * view — and a file that the hand-off checklist explicitly tells you to delete."
  *

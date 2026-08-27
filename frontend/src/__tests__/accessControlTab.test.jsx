@@ -186,7 +186,7 @@ describe('AccessControlTab', () => {
   })
 
   /**
-   * MINTING STAYS ON THE HOST (roadmap §13): these tokens cannot be revoked, so issuing one should
+   * MINTING STAYS ON THE HOST (Machine Identities, supabase/README.md): these tokens cannot be revoked, so issuing one should
    * cost more than a click. What the page removes is the error-prone part -- transcribing a UUID --
    * so the whole command is copyable and carries the principal already in it.
    */

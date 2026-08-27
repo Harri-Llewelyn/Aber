@@ -346,6 +346,7 @@ grants — `DROP VIEW` discards both, which is why they live inside it.
 | `cells` | Factory groupings. `name` is still `UNIQUE` — cells are not addressed on the wire |
 | `gateways` | Edge gateways. `sparkplug_id` generated column, `location_scope`, `last_heartbeat` |
 | `devices` | `sparkplug_id`, `is_quarantined`, quarantine diagnostics, `last_birth_metrics`, `model_3d_path`, `cell_id` |
+| `links` | Arbitrary labelled URLs against any entity: `(entity_type, entity_id, display_name, url, link_tag)`. Renamed from `documents` / `document_tag` by `0049` — nothing about the model was ever document-specific |
 | `digital_thread` | **Append-only** audit log, written only by trigger |
 | `metric_catalog` | What devices publish. `name` is **immutable** |
 | `metric_groups` | Registry of approved group *spellings* — membership is always derived from the name |
@@ -430,6 +431,114 @@ the audited database had `changed_by IS NULL`).
 `approve_quarantined_device()` sets with `SET LOCAL`. `auth.uid()` still wins when present — a
 direct PostgREST write by a signed-in user is already correctly attributed, and the GUC must not be
 able to override it.
+
+**A `sub` is no longer sufficient evidence of a person** (`0048`). The trigger used to conclude
+`actor_source = 'user'` from `auth.uid()` being non-NULL, which held for exactly as long as the only
+accounts carrying a `sub` were people's. `Service_Ingestor` is the counter-example and there will be
+more, because the Access Control page mints them — so pointing the ingestion daemon at a real
+principal would have relabelled every automated device registration and status flip as a human
+action, silently, with no sign but a `changed_by` uuid belonging to nobody who works here.
+
+`is_machine_principal()` decides it, reusing `0042`'s predicate unchanged — no email, no password,
+no `auth.identities` row — because a second definition of "is this a service account" would be worse
+than the bug. A machine falls through to the `X-ACS-Cymru-Actor` header path and is recorded as what
+it is, while `changed_by` still receives the principal. The row improved as well as being corrected:
+an ingestion write records `'ingestion'` **and** names the identity, where it used to record
+`'ingestion'` and `NULL`.
+
+---
+
+## Machine Identities
+
+Four identities on this stack are held by software rather than people, and each is narrow by
+construction. They were built as roadmap items 13 and 16; that work is finished, so it is documented
+here rather than left on a checklist.
+
+| Identity | Holds | May do |
+| :--- | :--- | :--- |
+| `Service_Ingestor` (`0046`) | `Operator` | Nothing directly. Seven `SECURITY DEFINER` gates in `0047`, each checking the caller **is** this principal |
+| MCP reader (`0034`) | `Operator` | Reads the five relations the i3X address space is assembled from. Writes nothing; cannot read `digital_thread` |
+| `factoryplus_i3x` | broker account | Reads the namespace, publishes nothing |
+| `gateway-credential-service` | broker admin, scoped | Adds one broker account and nothing else |
+
+All four are `auth.users` rows with **no email, no password and no identity provider**, so none can
+sign in. That is also `0042`'s predicate for listing them, and `0048`'s for keeping their writes out
+of the audit trail's `'user'` bucket.
+
+### The ingestion daemon does not hold `service_role`
+
+It used to, and that was the one credential on this stack whose compromise no policy written
+anywhere else could contain — sitting in the process most exposed to the plant network. It now
+authenticates as `Service_Ingestor`, an `Operator` principal that cannot write a single row
+directly, and every write it makes goes through a gate in `0047`.
+
+`Operator` is not "enough" and that is the design. Every write policy in this schema names
+`Administrator` or `Shopfloor_Manager`, so the gates are the **only** route rather than the tidy
+one. A credential that could perform those writes by holding a role that permits them would be a
+smaller `service_role`, not a narrower one: it could still write anything that role can write, to
+any row, in any shape. This one can do exactly seven things.
+
+Three rules moved from Python into SQL with the gates, each previously enforced by the caller:
+
+- **Reserved gateway statuses.** A gateway may not assert `PENDING_ENROLLMENT`, `AWAITING_BIRTH` or
+  `STALE` about itself — all three short-circuit ahead of the staleness arm in `gateway_status` and
+  would leave a silent gateway looking healthy, which is the one thing that derived status exists to
+  prevent. The rule was a frozenset in the daemon, applied to a string arriving from the plant
+  network.
+- **The watchdog's already-OFFLINE predicate**, which keeps a per-tick sweep out of an append-only
+  table.
+- **`first_dbirth_at` being write-once**, previously enforced against a cache that can go stale.
+
+The daemon presents the **anon key as the gateway `apikey` and its own token as the bearer**. That
+is not redundancy: the gateway's filter admits exactly two literal keys, so the ingestion token is
+refused at the edge if sent as the apikey.
+
+### There is no revocation, so expiry is the whole safety story
+
+`mint-mcp-token.mjs` records the constraint the rest of the design follows from: PostgREST checks
+the **signature**, not a session table. Revoking means rotating `SUPABASE_JWT_SECRET`, which
+invalidates every token in the stack including the anon and service-role keys.
+
+Three ways of adding revocation were checked and none works. Deleting the `auth.users` row does not
+help — the signature is validated and the subject is never looked up. Removing the role does not
+either: the relations the i3X address space is assembled from are `FOR SELECT TO authenticated
+USING (true)`, so a role-less principal still reads them. A `revoked_at` predicate would have to be
+added to **every RLS policy in the schema**.
+
+`pgjwt` is installed and `extensions.sign()` exists, so a `SECURITY DEFINER` RPC could sign a token
+without the secret ever leaving the database — technically neat, and it would have made an
+unrevocable credential a button press with a tidy audit trail of a thing nobody can undo. **Solving
+the wrong half well is worse than not solving it, because the clean implementation reads as safety.**
+So minting stays on the host.
+
+Two expiry regimes, and the split is deliberate:
+
+| Minted by | Expiry | Why |
+| :--- | :--- | :--- |
+| `mint-mcp-token.mjs` | 30 days default, **90 ceiling** | Pasted into a config file on somebody's laptop. It walks out of the building with the machine, and cannot be revoked, so the expiry is the only bound that exists |
+| `setup.mjs` | 10 years | Infrastructure keys held by a container, alongside the anon and service-role keys. A short expiry here takes the stack off the air on a date nobody wrote down, and there is no refresh path |
+
+The ceiling is enforced in both the script and the database, deliberately duplicated: what it bounds
+cannot be revoked, so it should not be removable by editing one file. `mint-mcp-token.mjs` also
+**records before it prints** — the token exists nowhere until stdout, so a failed audit write costs
+a row describing a credential nobody holds, where the other order costs an unrevocable credential in
+the wild with no record of it.
+
+### The Access Control page states what is outstanding
+
+Since nothing can be revoked, knowing how many unexpired tokens exist and when the first lapses
+*is* the safety story — an inventory question, which is what the page is for. It lists every gateway
+with what the platform knows about its broker credential, lists the machine identities on both
+planes, lets an Administrator create one, and shows what tokens stand against it.
+
+`tokenStatus()` counts **every** unexpired mint rather than reading the latest, because a re-mint
+adds a live credential rather than replacing one — reporting the newer of two would state half the
+exposure on the one page whose job is to state all of it.
+
+Built by `0041`–`0044`, `supabase/functions/gateway-credential`,
+[`AccessControlTab.jsx`](../frontend/src/components/tabs/AccessControlTab.jsx),
+[`credentialState.js`](../frontend/src/utils/credentialState.js) and
+[`serviceIdentities.js`](../frontend/src/utils/serviceIdentities.js).
 
 ---
 

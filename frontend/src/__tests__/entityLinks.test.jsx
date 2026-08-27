@@ -21,7 +21,7 @@ import { PERMISSION_UUIDS } from '../constants'
  * keeps the old string and renders as Other. Labels are display; keys are data.
  *
  * The endpoint and column are now `links` / `link_tag`, matching what the UI has always called
- * them -- roadmap item 6, migration 0049. The tag VALUES did not move with them, which is the
+ * them -- migration 0049. The tag VALUES did not move with them, which is the
  * distinction the paragraph above turns on.
  */
 
@@ -140,7 +140,7 @@ describe('stored tag values', () => {
     fireEvent.click(screen.getByRole('button', { name: /Save Link/i }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalled())
-    // Wire and UI now agree -- roadmap item 6 closed the divergence this used to pin.
+    // Wire and UI now agree -- 0049 closed the divergence this used to pin.
     expect(api.post).toHaveBeenCalledWith('/api/v1/links', expect.objectContaining({
       link_tag: 'asset_register',
       entity_type: 'device',

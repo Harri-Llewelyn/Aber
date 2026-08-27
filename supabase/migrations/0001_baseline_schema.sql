@@ -1018,7 +1018,7 @@ CREATE TABLE IF NOT EXISTS public.directory_services (
 );
 
 -- Name: links; Type: TABLE; Schema: public; Owner: -
--- `links`, not `documents`, and `link_tag`, not `document_tag`. Renamed by 0049 (roadmap item 6)
+-- `links`, not `documents`, and `link_tag`, not `document_tag`. Renamed by 0049
 -- once issue #62 generalised the feature from document links to links of ANY kind -- an asset
 -- register, a file repository, anything with a URL.
 --

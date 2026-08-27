@@ -1,5 +1,5 @@
 -- =============================================================================================
--- 0049 · `documents` becomes `links`, in the schema. Roadmap item 6.
+-- 0049 · `documents` becomes `links`, in the schema.
 -- =============================================================================================
 -- Issue #62 generalised this feature from document links to links of ANY kind -- an asset register
 -- in EZOfficeInventory, a file repository where measurement data belongs, anything with a URL --

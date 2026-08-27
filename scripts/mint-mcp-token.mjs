@@ -25,7 +25,7 @@
 // the only bound that exists, 90 days is the default for that reason, and a laptop that walks out
 // of the building is a credential that walks with it.
 //
-// IT RECORDS BEFORE IT PRINTS, AND THAT ORDER IS THE POINT (roadmap §13). The token exists nowhere
+// IT RECORDS BEFORE IT PRINTS, AND THAT ORDER IS THE POINT (Machine Identities, supabase/README.md). The token exists nowhere
 // until this process writes it to stdout -- signing is local computation -- so a failure to record
 // costs an audit row describing a token nobody holds, which is harmless. The reverse order costs an
 // unrevocable credential in the wild with no record of it, which is the worst outcome available.
@@ -55,7 +55,7 @@ const DEFAULT_SUBJECT = 'b0000000-0000-4000-8000-000000000001';
 /**
  * THE CEILING, MIRRORED BY `service_token_max_days()` IN 0043.
  *
- * 90 was the DEFAULT before roadmap §13 and is now the maximum, with 30 the default. The change is
+ * 90 was the DEFAULT before the Access Control work and is now the maximum, with 30 the default. The change is
  * not cosmetic: the header explains that these tokens cannot be revoked, so the expiry is the only
  * bound that exists -- and a bound that only applies when somebody remembers to pass a flag is not
  * one. Asking for more is an error rather than a clamp, because silently issuing something shorter
