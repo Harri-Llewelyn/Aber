@@ -1456,6 +1456,87 @@ paths:
             `SUPABASE_PUBLIC_URL` is unset or names an in-stack address, or the bundle template is
             missing from the deployment. No token is issued in either case.
 
+  /functions/v1/gateway-credential:
+    post:
+      tags: [Edge Functions]
+      summary: Mint a virtual gateway's broker credential and reveal it once
+      description: |
+        Issues a Mosquitto account for a **virtual** gateway and returns the password in the
+        response. It is shown once and is not recoverable afterwards: the broker stores only a
+        hash, and nothing in this stack keeps a copy.
+
+        **The mirror image of `/functions/v1/gateway-bundle`.** A physical gateway gets a bundle
+        carrying a single-use claim, and the appliance mints its own credential at first boot —
+        the password never travels through a browser. A virtual gateway has no appliance, so both
+        halves of that path refuse it outright (`issue_gateway_enrollment_token()` raises on
+        `is_virtual`), and this endpoint is what replaces them.
+
+        **A physical gateway is refused here for the same reason, in reverse.** Offering this
+        beside a working bundle would be offering the worse of two options with nothing to say so.
+
+        Requires `Administrator` or `Shopfloor_Manager`. The authority decision is made by
+        `authorize_virtual_gateway_credential()`, a `SECURITY DEFINER` RPC called *as the caller*
+        that checks `has_role()` itself — the role check in the function turns a refusal into a
+        usable 403 rather than being the boundary. The mint is recorded in `digital_thread` as a
+        `CREDENTIAL_ISSUED` row attributed to the calling operator, carrying the wire identity and
+        never the password.
+
+        > **Minting again replaces the account.** There is no rotation ceremony and no second
+        > credential: the broker holds one password per username, so a second call invalidates the
+        > first — including one a running connector is currently using.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [gateway_id]
+              properties:
+                gateway_id:
+                  type: string
+                  format: uuid
+                  description: The virtual gateway to mint a broker account for.
+      responses:
+        '200':
+          description: >-
+            The credential. `audit_recorded` is `false` when the mint succeeded but the
+            `digital_thread` row could not be written — the password is still returned, because the
+            account exists and withholding it would strand one nobody can authenticate as.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  gateway_name: { type: string }
+                  sparkplug_id: { type: string, pattern: '^gwy[0-9a-f]{21}$' }
+                  mqtt_username:
+                    type: string
+                    description: >-
+                      Always equal to `sparkplug_id`. `mosquitto.acl` pins the topic's edge-node
+                      segment to the connecting username, so it cannot be anything else.
+                  password:
+                    type: string
+                    description: base64url. Shown once; the broker keeps only a hash.
+                  applied_to_running_broker:
+                    type: boolean
+                    description: >-
+                      Whether the live broker reloaded the account. `false` means the durable copy
+                      was written but the running process has not picked it up yet.
+                  audit_recorded: { type: boolean }
+                  env_hint:
+                    type: object
+                    description: >-
+                      The `MQTT_GW_<NAME>_USER` / `_PASSWORD` variable names `node-red-init`
+                      reconciles a broker node's credentials from.
+        '400': { description: '`gateway_id` malformed, absent, or naming a physical or archived gateway.' }
+        '401': { description: Missing or invalid Authorization header. }
+        '403': { description: 'Forbidden: requires Administrator or Shopfloor_Manager.' }
+        '500': { description: The credential service is not configured for this deployment. }
+        '503':
+          description: >-
+            The broker credential service is unreachable or refused. Nothing was changed — no
+            account was created and no audit row written.
+
   /functions/v1/revoke-gateway-credential:
     post:
       tags: [Edge Functions]

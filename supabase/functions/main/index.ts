@@ -56,6 +56,19 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // No service-role key: it makes no privileged database write.
   "deploy-nodered": ["NODERED_URL", "NODERED_ADMIN_TOKEN", "NODERED_FLOW_JSON"],
 
+  // Mints a VIRTUAL gateway's broker credential and reveals it once. The mirror of enroll-gateway:
+  // that one has no user and is authorised by a single-use token; this one has a session and is
+  // authorised by role, through a SECURITY DEFINER RPC that checks has_role() itself (0041).
+  //
+  // NO SERVICE-ROLE KEY, WHICH IS THE POINT OF THE ENTRY. It holds the credential service's bearer
+  // token and nothing else -- and that token's whole authority is "add one confined account to a
+  // password file", which is narrower than any other way of reaching the broker. It cannot read a
+  // table, cannot write outside the caller's RLS context, and cannot see another function's
+  // secrets. gateway-bundle holds nothing at all; this cannot match that, because the password file
+  // is not reachable from SQL, and the registry is where that difference is stated rather than
+  // discovered.
+  "gateway-credential": ["MQTT_CREDENTIAL_SERVICE_URL", "MQTT_CREDENTIAL_SERVICE_TOKEN"],
+
   // Physical gateway enrolment. THE ONLY FUNCTION HERE WITH NO USER, by construction: the caller is
   // an appliance holding a single-use token, and possession of that token is the authorisation. It
   // holds the service-role key because the token table is reachable by nothing else (RLS on, no

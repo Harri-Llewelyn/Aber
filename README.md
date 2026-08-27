@@ -11,7 +11,7 @@ management.
 
 > **Design ethos —** *use pre-existing components and standards; minimise custom code.*
 > Where upstream ACS ships bespoke microservices, this fork uses Supabase, TimescaleDB, Grafana and
-> Node-RED. The custom surface is one Python ingestion daemon, eleven edge functions, an i3X server and
+> Node-RED. The custom surface is one Python ingestion daemon, twelve edge functions, an i3X server and
 > a React dashboard.
 
 ---
@@ -164,7 +164,13 @@ would turn "can mint one confined account" into "can stop the whole fleet publis
 makes **archiving a gateway withdraw its outstanding enrolment bundle**, and enrolment refuse
 an archived gateway at all: a bundle downloaded and never instantiated was still redeemable
 after the gateway was archived, which issued a real broker credential and resurrected the row
-to `ONLINE` — and `0039` adds `digital_thread_page()`, which applies the **deleted-asset
+to `ONLINE` — and `0039` adds `0041` gives a **virtual gateway a
+"Generate broker credential" path that needs no shell**: `authorize_virtual_gateway_credential()`
+gates by role and refuses a physical or archived gateway, and
+`record_gateway_credential_issued()` writes the `CREDENTIAL_ISSUED` audit row attributed to the
+operator who asked — the two are separate so that a credential service that is down cannot produce
+a record of a mint that never happened, and a mint that succeeds cannot go unrecorded — and `0039`
+adds `digital_thread_page()`, which applies the **deleted-asset
 filter as a predicate rather than in the browser**, so the page's row budget is spent on rows
 it will actually show: hiding them afterwards had the page list four assets on a stack of
 twenty-six, and render an empty Gateways section on a fleet of four healthy gateways — plus
