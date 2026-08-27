@@ -1632,7 +1632,7 @@ exists for precisely this kind of change and this change must satisfy it twice.
 
 **Builds on:** `record_ingestion_rejection()` (`0026`) · `create_service_principal()` (`0044`) ·
 `0034`'s read-only principal · `0046_service_ingestor_principal.sql` ·
-[`ingestion/ingestion.py`](ingestion/ingestion.py) ·
+`0047_ingestion_write_rpcs.sql` · [`ingestion/ingestion.py`](ingestion/ingestion.py) ·
 `verify_gateway_binding()` · **not yet filed as an issue**
 
 **Carved out of §13 rather than left inside a section marked built.** That item specified three
@@ -1684,6 +1684,23 @@ as wide as the role and nothing else in the schema would report it.
 calling them while still holding the service key, and only then the credential swap. Nothing the
 daemon depends on is removed until after it has stopped depending on it, so a deployed daemon keeps
 working at every step.
+
+**`0047` turned out to be worth more than a permissions exercise**, which was not the expectation
+going in. Three rules the daemon enforces *in Python* moved into SQL with it, and each was a rule a
+compromised or simply buggy daemon could previously have ignored. `RESERVED_GATEWAY_STATUSES` is
+the clearest: a gateway may not assert `PENDING_ENROLLMENT`, `AWAITING_BIRTH` or `STALE` about
+itself, because all three short-circuit ahead of the staleness arm in `public.gateway_status` and
+would leave a silent gateway looking healthy — the one thing that derived status exists to prevent.
+That rule sat in a frozenset in the process most exposed to the plant network, applied to a string
+that arrived *from* the plant network. The watchdog's `status = 'ONLINE'` predicate and
+`first_dbirth_at`'s write-once behaviour moved the same way: both were caller conventions, and both
+are now properties of the gate.
+
+The gates are granted to `authenticated` rather than to `service_role` alone, because the narrow
+credential is an ordinary authenticated principal — so each one checks that the caller *is*
+`Service_Ingestor`. That check is the only thing between a signed-in user and the daemon's write
+surface, which is why `0047`'s self-check asserts a second principal holding the same `Operator`
+role is refused.
 
 **The value is not tidiness.** A credential that bypasses RLS is the one thing on this stack whose
 compromise cannot be contained by any policy written anywhere else, and it currently sits in the
