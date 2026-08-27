@@ -212,6 +212,147 @@ off, and why `conformance_policy` has no third value that would.
 
 ---
 
+## Broker Capture and Playback
+
+`capture.py` records live Sparkplug B traffic to a file and publishes it back, rebased onto now.
+It answers three things this stack could not otherwise do: verify a dashboard against a machine
+that was on site for two hours, reproduce a fault by editing a value by hand, and load test at a
+chosen multiple of real time against a fleet whose measured rate is 0.95 msg/s.
+
+```bash
+python capture.py record --out morning-shift.json --seconds 300
+python capture.py inspect morning-shift.json
+python capture.py play morning-shift.json --as-gateway gwy… --map dev<recorded>=dev<target> --speed 10
+```
+
+### A capture cannot be played back as itself
+
+This is the constraint the whole design turns on, and it is not a limitation to be worked around.
+
+`mosquitto.acl` confines every client to `spBv1.0/+/+/%u/#` — the topic's edge-node segment must
+equal the connecting username — and its header states the rule behind that: **"THERE IS NO
+WILDCARD-WRITE PRINCIPAL"**. That replaced a shared account which could forge DBIRTH and DDATA for
+every machine on site, a forgery `verify_gateway_binding()` cannot detect *"since a forged message
+under a CORRECTLY BOUND device passes that check by construction"*.
+
+A playback tool that published captured topics verbatim would be that account, reintroduced, and
+would need write access to every edge node appearing in any capture anyone ever recorded.
+
+So `play` publishes as **one gateway**, under one credential provisioned the ordinary way, and
+rewrites every captured identity onto assets that gateway owns:
+
+| | recorded | played back |
+| :--- | :--- | :--- |
+| edge-node segment | the machine's real gateway | `--as-gateway` |
+| device segment | the machine | its `--map` target |
+| `Asset_ID` metric | the machine | rewritten with the topic |
+
+**The `Asset_ID` metric moves with the topic, and it has to.** A DBIRTH still claiming the captured
+device's id under a rewritten topic is exactly the disagreement `resolve_wire_identity()` treats as
+a faulty identity — so rewriting one and not the other would quarantine every device the playback
+touched, and read as a fleet problem. It is rewritten only when already present: an aliased DDATA
+deliberately carries no `Asset_ID`, and inventing one would make the playback less representative
+than the traffic it came from.
+
+**Getting the gateway wrong fails silently, so it is refused up front.** A publish outside the ACL
+is dropped by the broker with no PUBACK at QoS 0 — under MQTT 3.1.1 and 5 alike — so, as
+`mosquitto.acl` puts it, *"the publisher learns nothing from the broker by construction"*.
+`validate.py` has already had the run where every publish went nowhere. `play` therefore refuses to
+start unless `MQTT_PLAYBACK_USER` is the gateway named by `--as-gateway`.
+
+**There is no accidental playback into a real machine's history**, because every captured device
+needs an explicit `--map` onto a 24-character `dev…` id. An unmapped device is refused rather than
+passed through.
+
+### Rebasing, and why it is also the speed control
+
+`_timestamp_is_sane()` rejects any metric more than 24 hours behind now, because such a row *"lands
+outside the retention policy, or inside an already-compressed chunk that rejects the write"*. A
+capture published at its original timestamps is therefore worthless the day after it was recorded —
+and could not be written even if it were fresh, since `telemetry`'s primary key is
+`(time, asset_id, metric_name)` and a verbatim second run collides row for row.
+
+Every timestamp moves by one offset, preserving the intervals between them. Dividing that offset by
+a speed factor is the same operation, which is why there is one mechanism here and not two.
+
+**Both clocks move.** `process_ddata()` judges `metric.timestamp` and falls back to the payload's
+only when the metric has none, so rebasing the payload alone would leave every metric on the
+capture's clock for the sanity window to drop — a playback that connects, publishes, reports
+success and writes nothing.
+
+**`--speed` cannot push a message outside that window**, which is worth stating because the
+intuition says otherwise. Playing an hour of capture at 0.1x takes ten hours, but the rebasing
+divides by the same speed, so the timestamp moves to exactly ten hours from now too. The scheduler
+and the rebasing share a divisor. What *does* fail is a timestamp already far from the capture
+epoch — a stale reading, a device clock skewed against the recorder's, or a hand edit — and
+`play` reports those before publishing rather than leaving them to be discovered as a gap.
+
+### The file is JSON; the wire is whatever was recorded
+
+Editing a captured value by hand is half the point, so the file holds the readable form regardless
+of what arrived — and the shape is the one `parse_sparkplug_payload()` already accepts as its
+fallback, so a hand-edit valid in the file is valid to the daemon.
+
+**Playback re-encodes into the encoding each message arrived in.** Both are live traffic here — the
+Node-RED simulator flow publishes JSON, physical gateways publish protobuf — and they enter the
+daemon down different branches of `parse_sparkplug_payload()`. Replaying a JSON fleet as protobuf
+would mean a fault reproduced through this tool could be one the playback introduced, or one it
+silently repaired.
+
+That both encodings are in use was found by recording, not by reading: the first version of the
+recorder understood protobuf only, skipped every message the seeded fleet published, and reported
+the fleet as idle.
+
+### Playback meets quarantine first
+
+A capture replayed onto devices this deployment has not registered publishes under ids nobody
+enrolled — which is zero-touch onboarding working as designed. The telemetry is held and dropped
+until an `Administrator` approves it, and that is correct and stays correct. It means **"play a
+capture" has an approval step inside it** the first time a target device is used.
+
+The way around it is not to weaken quarantine but to map onto devices that already exist, which is
+what `--map` requires anyway.
+
+### Marking what was replayed
+
+Replayed telemetry is written to the historian exactly like observed telemetry, because that is the
+point. `gateways.is_simulated` (`0052`) is what says otherwise, and **devices inherit it through
+`gateway_id` rather than carrying a flag of their own** — see that migration's header, and roadmap
+item 15, for why a stored device-level copy would need two triggers to maintain an invariant the
+join gives for nothing.
+
+It is a label, not a filter: nothing on the ingestion path branches on it. Retention, dashboards and
+reports can tell replayed data apart through a join they already make, and synthetic devices roll up
+exactly like real ones — which is the behaviour under test when the question is "do the rollups
+work".
+
+**Distinct from `is_virtual`**, which is about whether an edge appliance exists rather than whether
+the readings are real. A physical appliance replaying a capture is `is_virtual = false`,
+`is_simulated = true`.
+
+### Captures are local files
+
+There is no capture bucket. `gateway-backups` is the obvious precedent — private, size-capped,
+MIME-restricted, confined to `<sparkplug_id>/` — but its clients hold a **user session**: uploads
+come from an Administrator's browser or from the gateway-credential service. `capture.py` runs on a
+host with `.env` and no session, so putting captures in Storage would mean either handing a CLI the
+service-role key, which `0046` exists to stop, or building the upload as a frontend feature. Neither
+is a consequence of recording traffic, so a capture stays a file on disk until somebody wants the
+sharing badly enough to build the UI half.
+
+### Configuration
+
+| Variable | Used by | Default |
+| :--- | :--- | :--- |
+| `MQTT_CAPTURE_USER` / `MQTT_CAPTURE_PASSWORD` | `record` | falls back to `MQTT_INGESTION_*` |
+| `MQTT_PLAYBACK_USER` / `MQTT_PLAYBACK_PASSWORD` | `play` | none — must be set |
+
+`record` defaults to the ingestion principal because recording is a read: `mosquitto.acl` grants it
+`read spBv1.0/#` and no asset write at all, so a mistyped subcommand cannot publish. `play` has no
+default and no fallback, because there is no gateway this tool should pick on an operator's behalf.
+
+---
+
 ## TimescaleDB Telemetry Mapping
 
 | Sparkplug value | Column |

@@ -7,7 +7,7 @@ import { navDensity, TABS } from '../App'
  * The top bar's density band.
  *
  * WHY THIS IS A UNIT TEST AND NOT A RENDER TEST. The band that matters most is `tight`, and it is
- * for twelve tabs where there are eleven — roadmap item 11 adds the twelfth. Asserting it through
+ * for twelve tabs where there are eleven, and no twelfth page exists yet. Asserting it through
  * the DOM would mean it could only be checked once that page shipped, which is the moment it
  * starts being relied on and the worst moment to find the threshold wrong.
  *
@@ -51,6 +51,11 @@ describe('the tab list this band is measured against', () => {
   it('is eleven tabs, so the tight band is still ahead of us', () => {
     // If this fails, a page was added or removed and the bands are due a re-measure rather than a
     // re-count: the arithmetic in App.css is written against these widths.
+    //
+    // THE TWELFTH PAGE IS NOT SCHEDULED. This band was built expecting one from the roadmap item
+    // that became broker capture and playback, which shipped as a CLI and added no page at all --
+    // so `tight` is still ahead of us, and still worth having: the band that has never run is
+    // exactly the one that cannot be checked by rendering.
     expect(TABS).toHaveLength(11)
   })
 

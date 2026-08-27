@@ -7,10 +7,10 @@
 -- a spoofed fault is only useful if it is indistinguishable from a real one downstream -- and it
 -- is also the problem: once it lands, nothing in the historian says the reading was replayed.
 --
--- THIS COLUMN IS THE ANSWER TO THAT, AND IT IS ON THE WRONG TABLE IF YOU BELIEVE THE ROADMAP.
--- Roadmap item 11 proposed marking the DEVICE -- "an ordinary device flagged synthetic carries the
--- marking in `devices`". Item 15 had already argued the opposite, and its argument is mechanical
--- rather than stylistic, so it is the one followed here:
+-- THIS COLUMN IS THE ANSWER, AND IT IS ON THE OTHER TABLE FROM THE ONE PLAYBACK ASKED FOR.
+-- Playback's own roadmap entry proposed marking the DEVICE -- "an ordinary device flagged synthetic
+-- carries the marking in `devices`". Item 15 had already argued the opposite, and its argument is
+-- mechanical rather than stylistic, so it is the one followed here:
 --
 --   * a device-level flag has to agree with its gateway's, and a CHECK constraint cannot reference
 --     another table. Keeping them in step needs a trigger on `devices` for insert and re-parenting
@@ -66,7 +66,24 @@ COMMENT ON COLUMN public.gateways.is_simulated IS
 
 
 -- ---------------------------------------------------------------------------------------------
--- 2. Self-check
+-- 2. Rebuild gateway_status
+-- ---------------------------------------------------------------------------------------------
+-- WITHOUT THIS THE COLUMN IS INVISIBLE AND NOTHING ERRORS. `gateway_status` is defined as
+-- `SELECT g.*`, which Postgres expands and FREEZES at creation time -- so a column added
+-- afterwards never appears through the view, which goes on returning exactly what it was born
+-- with. db-init replays migrations in filename order on every boot, so an earlier rebuild cannot
+-- pick this up either and the state does not self-correct.
+--
+-- The frontend reads gateways through this view. The SIMULATED badge would simply never render,
+-- with no error anywhere to say why -- and the unit tests would not catch it, because they mock
+-- the API and assert the component given the column, not the view that has to supply it.
+--
+-- Found by scripts/check-docs-drift.mjs, which asserts exactly this pairing.
+SELECT public.ensure_gateway_status_view();
+
+
+-- ---------------------------------------------------------------------------------------------
+-- 3. Self-check
 -- ---------------------------------------------------------------------------------------------
 -- ASSERTING THAT A DEVICE INHERITS THE FLAG THROUGH A JOIN WOULD BE VACUOUS -- a join always
 -- reflects the column it selects, so such a check passes for any column on any table and proves
@@ -75,7 +92,7 @@ COMMENT ON COLUMN public.gateways.is_simulated IS
 --
 -- WHAT CAN ACTUALLY FAIL is the decision itself: that `devices` carries NO flag of its own. A
 -- later migration adding `devices.is_simulated` would look entirely reasonable in isolation -- it
--- is what roadmap item 11 originally proposed -- and would silently reintroduce the two-triggers
+-- is what playback's roadmap entry originally proposed -- and would silently reintroduce the
 -- problem this design exists to avoid, with a stored copy free to disagree with its source. That
 -- is checkable, and it is the only thing here that is.
 DO $selfcheck$

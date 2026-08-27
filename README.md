@@ -530,6 +530,8 @@ python ingestion/test_payload_conformance.py
 python ingestion/test_metrics_endpoint.py
 python ingestion/test_entity_cache.py
 python ingestion/test_telemetry_batching.py
+# Broker capture and playback -- identity rewriting, timestamp rebasing, wire encodings
+python ingestion/test_capture_playback.py
 python i3x/test_i3x_service.py
 python supabase/functions/approve-quarantine/test_approve_quarantine.py
 python supabase/functions/deploy-nodered/test_deploy_nodered.py
@@ -696,7 +698,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Twelve extensions, none of them speculative: every one names the code it would build on, because
+Eleven extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
@@ -707,11 +709,12 @@ done?" — no entry here says `Built`, because a checklist that contains finishe
 checklist. Items 6, 13 and 16 left this way and are now documented under
 [Machine identities](#machine-identities) and in
 [`supabase/README.md`](supabase/README.md#machine-identities); item 7 is documented under
-[Schema Conformance](ingestion/README.md#schema-conformance); and item 9's subject was retired the
-same way when `aas-api` shipped.
+[Schema Conformance](ingestion/README.md#schema-conformance); item 11 under
+[Broker Capture and Playback](ingestion/README.md#broker-capture-and-playback); and item 9's subject
+was retired the same way when `aas-api` shipped.
 
-**Retired numbers are not reused, and the list is therefore not contiguous.** The gaps at 6, 7, 13
-and 16 are deliberate. Renumbering on retirement was the earlier practice and it does not survive
+**Retired numbers are not reused, and the list is therefore not contiguous.** The gaps at 6, 7, 11,
+13 and 16 are deliberate. Renumbering on retirement was the earlier practice and it does not survive
 contact with this repository: the remaining entries are named by **48 comments** in migrations,
 scripts and components, all explaining why that code is the way it is, and shifting every number
 below a removal would silently redirect all of them without erroring. A number cited from code is an
@@ -719,12 +722,12 @@ identifier, not a position. Where code refers to work that has since shipped, th
 documentation rather than a roadmap number.
 
 **Items 1-5 are this repository's own**, ordered by how much of each already exists. **Items 8-15
-arrive from feature requests** — 8-11 from GitHub issues
+arrive from feature requests** — 8, 9 and 10 from GitHub issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
-[#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63),
-[#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66) and
-[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58), in that same order of how much already
-exists; 12 and 15 are not yet filed. Where an entry's heading differs from the issue's title, it is
+[#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
+[#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66), in that same order of how much already
+exists; 12 and 15 are not yet filed.
+[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) was item 11 and is now built. Where an entry's heading differs from the issue's title, it is
 because the work that remains is narrower than the title claims.
 
 **None of these are open defects.** Feature requests live here once they have been checked against
@@ -1113,54 +1116,6 @@ currently prevent.
 
 ---
 
-### 11 · Cassette: recording and replaying the broker
-
-**Builds on:** the JSON fallback parser in [`ingestion/ingestion.py`](ingestion/ingestion.py) ·
-`_timestamp_is_sane()` · the `telemetry` hypertable's primary key ·
-[`scripts/storage-init.mjs`](scripts/storage-init.mjs) ·
-[`supabase/storage-policies.sql`](supabase/storage-policies.sql) ·
-[issue #58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58)
-
-**The most speculative item here, and the most useful if it lands.** Recording live MQTT to a JSON
-file and streaming it back answers three things this stack currently cannot: dashboards verified
-against a machine that was only available for two hours, a fault condition reproduced by editing a
-value by hand, and load testing at a chosen multiple of real time — against a fleet whose measured
-rate is **0.95 msg/s** and whose ingestion ceiling is **≈240 msg/s**, per §1.
-
-**One piece is already in place, and it is the piece that makes hand-editing work.** The daemon's
-payload parser falls back to JSON when protobuf parsing fails, reconstructing `timestamp`, `seq`,
-`uuid` and metrics into the same payload shape the protobuf path produces. A cassette can therefore be
-a readable JSON array that replays through the ordinary ingestion path with no special mode — which is
-exactly what makes a spoofed error indistinguishable from a real one downstream, and is the whole
-point of the feature.
-
-**Timestamps are the hard constraint, and they decide the design rather than decorate it.**
-`_timestamp_is_sane()` rejects any metric more than **24 hours** behind now or 5 minutes ahead, because
-such a row *"lands outside the retention policy, or inside an already-compressed chunk that rejects the
-write"*. A cassette replayed at its original timestamps is therefore useless the day after it was
-recorded: replay must **rebase** onto now, preserving inter-message deltas. That is the same operation
-as the issue's speed multiplier, so there is one mechanism here and not two. Rebasing also sidesteps
-the collision the alternative causes — `telemetry`'s primary key is `(time, asset_id, metric_name)`,
-so replaying a capture verbatim writes rows that already exist.
-
-**Storage has a precedent to copy rather than a decision to make.** `gateway-backups` is already a
-private, size-capped, MIME-restricted bucket holding JSON under `<sparkplug_id>/`, with its RLS in
-`storage-policies.sql`; a cassette bucket is that shape with a different cap. What has no precedent is
-the issue's own open question — **how replayed telemetry should be marked**. A column on the hypertable
-is the obvious answer and the expensive one: it touches the `postgres_fdw` projection, the rollups in
-`0010` and every Grafana query. The cheaper framing is that a cassette replays *as a device*, so an
-ordinary device flagged synthetic carries the marking in `devices`, where retention and dashboards can
-filter on a join they already make. That also answers "how do we test rollups" without needing a second
-answer: synthetic devices roll up exactly like real ones, which is the behaviour under test.
-
-**And replay meets quarantine first.** A cassette recorded from a device this deployment never enrolled
-publishes under an id nobody registered — which is the zero-touch onboarding path working as designed:
-the telemetry is held and dropped until an `Administrator` approves it. That is correct and should stay
-correct. It just means "import a cassette" has an approval step inside it, and the UI has to say so
-rather than let the import look like it failed.
-
----
-
 ### 12 · Retiring the flow-backup bucket, and pointing at repositories instead
 
 **Builds on:** [`frontend/src/components/common/FlowBackupUploader.jsx`](frontend/src/components/common/FlowBackupUploader.jsx) ·
@@ -1421,11 +1376,17 @@ same-row CHECK costing nothing, and **derive** the device rule, because a derive
 refuse.
 
 **Simulated telemetry is treated exactly like real telemetry, and that is a decision rather than an
-omission.** §11 depends on it: a cassette replays *as a device*, and its whole argument is that
-synthetic devices must roll up exactly like real ones, *"which is the behaviour under test"*. Shorter
+omission.** [Broker playback](ingestion/README.md#broker-capture-and-playback) now depends on it,
+which moved this from a prediction to a constraint: a capture replays *as a gateway*, and synthetic
+devices must roll up exactly like real ones because that is the behaviour under test. Shorter
 retention for simulated data would break the one feature that needs synthetic data to behave normally
 — and could not be built cheaply anyway, since retention is one policy on one hypertable dropping
-whole chunks rather than rows. **The flag records provenance; each consumer decides.** The Digital
+whole chunks rather than rows.
+
+**`gateways.is_simulated` already exists** (`0052`), added with playback and taken deliberately from
+this item's design rather than item 11's: the flag is on the gateway and devices inherit it. What
+remains here is `deployment`, the cross-column CHECK that needs both, the `is_virtual` rename, and
+the Simulated lane in `device_locations`. **The flag records provenance; each consumer decides.** The Digital
 Thread page hides simulated assets by default, which is one more predicate in `0039`'s RPC and
 answers the demonstration feedback where it was actually aimed — at what a reader sees, not at what
 is stored. `digital_thread` itself keeps receiving the rows, because someone standing up a simulator
