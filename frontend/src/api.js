@@ -565,6 +565,55 @@ const apiMethods = {
   },
 
   /**
+   * Every TOKEN_MINTED row, grouped by the principal it was signed for.
+   *
+   * NOT "THE LATEST PER PRINCIPAL", which is what a naive inventory would fetch. A re-mint does not
+   * invalidate the previous token -- PostgREST validates the signature and consults no table -- so
+   * two mints a week apart are two live credentials. Reading only the newer one would report half
+   * of what is outstanding. tokenStatus() counts the unexpired ones; this hands it all of them.
+   *
+   * BOUNDED, because `digital_thread` is append-only and cannot be pruned. Only TOKEN_MINTED rows
+   * are selected, and only the columns the status derivation reads.
+   */
+  listServiceTokens: async () => {
+    const { data, error } = await supabase
+      .from('digital_thread')
+      .select('entity_id,recorded_at,new_data')
+      .eq('action', 'TOKEN_MINTED')
+      .eq('entity_type', 'service_principals')
+      .order('recorded_at', { ascending: false });
+
+    if (error) throw new Error(error.message || 'Could not read token history');
+
+    const byPrincipal = new Map();
+    for (const row of data || []) {
+      if (!byPrincipal.has(row.entity_id)) byPrincipal.set(row.entity_id, []);
+      byPrincipal.get(row.entity_id).push({
+        issued_at: row.new_data?.issued_at || row.recorded_at,
+        expires_at: row.new_data?.expires_at || null,
+        jti: row.new_data?.jti || null,
+      });
+    }
+    return byPrincipal;
+  },
+
+  /**
+   * Create a machine identity that cannot sign in.
+   *
+   * THROUGH THE RPC, AS THE CALLER. `create_service_principal()` (0044) is SECURITY DEFINER and
+   * checks has_role() itself -- it writes to `auth.users`, which no browser-facing role can reach
+   * and which nothing else in this application writes to except migration 0034.
+   */
+  createServicePrincipal: async (roleName, note) => {
+    const { data, error } = await supabase.rpc('create_service_principal', {
+      p_role_name: roleName,
+      p_note: note || null,
+    });
+    if (error) throw new Error(error.message || 'Could not create the service principal');
+    return Array.isArray(data) ? data[0] : data;
+  },
+
+  /**
    * Every gateway with what the platform knows about its broker credential.
    *
    * TWO READS, NOT A JOIN, and the second is the interesting one. `gateway_status` carries

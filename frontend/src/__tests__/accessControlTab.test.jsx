@@ -6,7 +6,7 @@ import { AccessControlTab } from '../components/tabs/AccessControlTab'
 import { api } from '../api'
 
 vi.mock('../api', () => ({
-  api: { listGatewayCredentials: vi.fn(), listServicePrincipals: vi.fn() }
+  api: { listGatewayCredentials: vi.fn(), listServicePrincipals: vi.fn(), listServiceTokens: vi.fn() }
 }))
 
 // The two modals reach for browser APIs this suite has no need to stub; the tab's job is to decide
@@ -45,6 +45,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   // Defaulted so every credential-inventory test renders the whole page. Individual tests override.
   api.listServicePrincipals.mockResolvedValue([MCP_PRINCIPAL])
+  api.listServiceTokens.mockResolvedValue(new Map())
 })
 
 describe('AccessControlTab', () => {
@@ -176,7 +177,76 @@ describe('AccessControlTab', () => {
     // CopyableId renders a button, which is what makes it keyboard-reachable and announced as an
     // action -- a clickable span would be neither.
     await waitFor(() => expect(screen.getByRole('button', { name: /gwy120000000000400080000/ })).toBeTruthy())
-    expect(screen.getByRole('button', { name: /b0000000-0000-4000-8000-000000000001/ })).toBeTruthy()
+    // EXACT, because the mint command in the next column also contains this id -- and a loose
+    // matcher that happens to find two buttons is one that would keep passing if the id column
+    // were deleted outright.
+    // CopyableId's accessible name is `Copy <label> <value>`, so naming the label is what makes
+    // this exact rather than a substring that also matches the mint command in the next column.
+    expect(screen.getByRole('button', { name: 'Copy principal id b0000000-0000-4000-8000-000000000001' })).toBeTruthy()
+  })
+
+  /**
+   * MINTING STAYS ON THE HOST (roadmap §13): these tokens cannot be revoked, so issuing one should
+   * cost more than a click. What the page removes is the error-prone part -- transcribing a UUID --
+   * so the whole command is copyable and carries the principal already in it.
+   */
+  it('offers the mint command rather than a mint button', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(
+      screen.getByRole('button', {
+        name: `Copy mint command node scripts/mint-mcp-token.mjs --principal ${MCP_PRINCIPAL.principal_id}`
+      })
+    ).toBeTruthy())
+    expect(screen.queryByRole('button', { name: /^Mint token$/i })).toBeNull()
+  })
+
+  /**
+   * THE COUNT IS OF OUTSTANDING TOKENS, NOT OF THE LATEST MINT. A re-mint does not invalidate the
+   * previous token -- PostgREST validates the signature and consults no table -- so two mints a
+   * week apart are two live credentials. Reporting only the newer one would state half the
+   * exposure, on the one page whose job is to state all of it.
+   */
+  it('counts every unexpired token, not just the most recent', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    const inDays = (d) => new Date(Date.now() + d * 86400000).toISOString()
+    api.listServiceTokens.mockResolvedValue(new Map([
+      [MCP_PRINCIPAL.principal_id, [
+        { expires_at: inDays(30), jti: 'a' },
+        { expires_at: inDays(12), jti: 'b' },
+        { expires_at: inDays(-3), jti: 'expired-and-not-counted' }
+      ]]
+    ]))
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('2 active tokens')).toBeTruthy())
+    // The EARLIEST expiry is the one shown: it is the next date on which something stops working.
+    expect(screen.getByText(/in 12 days/i)).toBeTruthy()
+  })
+
+  it('says a principal has no token on record rather than implying it has none at all', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('No token on record')).toBeTruthy())
+    // The same distinction the credential column makes: the page reports what it recorded, and a
+    // token minted before the script recorded its issues would not appear here.
+    expect(screen.getByText(/would not appear here/i)).toBeTruthy()
+  })
+
+  /**
+   * `digital_thread:read` is a separate permission from listing principals. A caller without it
+   * must still see the identities -- blanking the section over a missing history would hide the
+   * very thing the page exists to show.
+   */
+  it('still lists identities when the token history cannot be read', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listServiceTokens.mockRejectedValue(new Error('permission denied for table digital_thread'))
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
+    expect(screen.getByText('No token on record')).toBeTruthy()
   })
 
   it('surfaces a failed read rather than rendering an empty inventory', async () => {

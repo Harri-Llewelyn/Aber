@@ -133,3 +133,81 @@ export function roleReach(roles) {
   }
   return roles.map(r => ROLE_REACH[r] || `Holds ${r}.`).join(' ')
 }
+
+/**
+ * What tokens are OUTSTANDING for a principal, which is not the same as what was last minted.
+ *
+ * =================================================================================================
+ * A RE-MINT DOES NOT REPLACE ANYTHING. `scripts/mint-mcp-token.mjs` signs a new JWT; it does not
+ * invalidate the previous one, and it could not -- PostgREST validates the signature and consults
+ * no table, so the only way to stop a token working is to let it expire or to rotate
+ * SUPABASE_JWT_SECRET, which invalidates every token in the stack including the anon key.
+ *
+ * So "the latest mint" is the wrong question and would UNDERSTATE the exposure: two mints a week
+ * apart are two live credentials, and reading only the newer one reports half of what is out
+ * there. What matters is how many are unexpired, and when the first of them lapses.
+ * =================================================================================================
+ */
+export const TOKEN_STATES = { ACTIVE: 'active', EXPIRED: 'expired', NONE: 'none' }
+
+export function tokenStatus(mints, now = Date.now()) {
+  const rows = (mints || [])
+    .map(m => ({ ...m, expiresAtMs: Date.parse(m.expires_at) }))
+    // A row whose expiry will not parse is DROPPED rather than treated as live: counting it as
+    // outstanding would inflate the number an operator acts on, and counting it as expired would
+    // hide a credential that may well still work.
+    .filter(m => Number.isFinite(m.expiresAtMs))
+    .sort((a, b) => a.expiresAtMs - b.expiresAtMs)
+
+  if (rows.length === 0) return { state: TOKEN_STATES.NONE, outstanding: 0, rows: [] }
+
+  const live = rows.filter(m => m.expiresAtMs > now)
+  if (live.length === 0) {
+    return {
+      state: TOKEN_STATES.EXPIRED,
+      outstanding: 0,
+      lastExpiry: rows[rows.length - 1].expiresAtMs,
+      rows,
+    }
+  }
+
+  return {
+    state: TOKEN_STATES.ACTIVE,
+    outstanding: live.length,
+    // THE EARLIEST, not the latest. It is the next date on which something an operator depends on
+    // stops working, which is the one they need in a calendar.
+    earliestExpiry: live[0].expiresAtMs,
+    rows,
+  }
+}
+
+const DAY_MS = 86400000
+
+export function tokenStatusLabel(status) {
+  if (!status || status.state === TOKEN_STATES.NONE) return 'No token on record'
+  if (status.state === TOKEN_STATES.EXPIRED) return 'Expired'
+  return status.outstanding === 1 ? '1 active token' : `${status.outstanding} active tokens`
+}
+
+export function tokenStatusTone(status) {
+  if (!status || status.state === TOKEN_STATES.NONE) return 'unknown'
+  if (status.state === TOKEN_STATES.EXPIRED) return 'neutral'
+  return 'ok'
+}
+
+/** The line under the badge: the date that matters, and which date it is. */
+export function tokenStatusDetail(status, now = Date.now()) {
+  if (!status || status.state === TOKEN_STATES.NONE) {
+    return 'Nothing has been minted for this identity through scripts/mint-mcp-token.mjs. A token '
+      + 'issued before that script recorded its issues would not appear here.'
+  }
+  if (status.state === TOKEN_STATES.EXPIRED) {
+    return `The last token expired on ${new Date(status.lastExpiry).toLocaleDateString()}.`
+  }
+  const days = Math.max(0, Math.ceil((status.earliestExpiry - now) / DAY_MS))
+  const when = new Date(status.earliestExpiry).toLocaleDateString()
+  return status.outstanding === 1
+    ? `Expires ${when} — in ${days} day${days === 1 ? '' : 's'}. It cannot be revoked before then.`
+    : `Earliest expires ${when} — in ${days} day${days === 1 ? '' : 's'}. Minting again adds a `
+      + 'credential rather than replacing one; none can be revoked before it lapses.';
+}

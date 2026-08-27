@@ -17,6 +17,10 @@ import {
   GATEWAY_ACL_PATTERN,
   describePrincipal,
   roleReach,
+  tokenStatus,
+  tokenStatusDetail,
+  tokenStatusLabel,
+  tokenStatusTone,
 } from '../../utils/serviceIdentities'
 
 /**
@@ -59,6 +63,7 @@ export function AccessControlTab({ showToast }) {
   const [bundleForGw, setBundleForGw] = useState(null)
   const [credentialForGw, setCredentialForGw] = useState(null)
   const [principals, setPrincipals] = useState([])
+  const [tokens, setTokens] = useState(() => new Map())
   // ITS OWN ERROR, not folded into loadError. The two reads have DIFFERENT authority -- gateway
   // credentials accept Shopfloor_Manager, service principals are Administrator-only (0042) -- so a
   // single error state would blame the whole page for a refusal that applies to one section.
@@ -76,6 +81,14 @@ export function AccessControlTab({ showToast }) {
     api.listServicePrincipals()
       .then(d => { setPrincipals(d); setPrincipalError(null) })
       .catch(e => { setPrincipals([]); setPrincipalError(e?.message || 'Could not list service principals.') })
+
+    // ITS OWN FAILURE, SWALLOWED TO AN EMPTY MAP. `digital_thread:read` is a separate permission
+    // from listing principals, and a caller without it should still see the identities -- with
+    // every one reading "No token on record", which is exactly what that state means from where
+    // they stand. Blanking the section instead would hide the identities over a missing history.
+    api.listServiceTokens()
+      .then(setTokens)
+      .catch(() => setTokens(new Map()))
   }, [])
 
   useEffect(() => { load(true) }, [load])
@@ -390,17 +403,24 @@ export function AccessControlTab({ showToast }) {
                   <th>Principal ID</th>
                   <th>Holds</th>
                   <th>Reaches</th>
-                  <th>Token minted by</th>
+                  {/* WHAT IS OUTSTANDING, not when it was last minted -- see tokenStatus(). A
+                      re-mint adds a live credential rather than replacing one, and nothing here
+                      can revoke either. */}
+                  <th title="Long-lived tokens signed for this identity that have not yet expired">
+                    Tokens
+                  </th>
+                  <th>Mint</th>
                 </tr>
               </thead>
               <tbody>
                 {principals.length === 0 && (
-                  <tr><td colSpan={5} style={{ color: 'var(--text-muted)', padding: '14px' }}>
+                  <tr><td colSpan={6} style={{ color: 'var(--text-muted)', padding: '14px' }}>
                     No machine identities are registered. Every account on this stack belongs to a person.
                   </td></tr>
                 )}
                 {principals.map(p => {
                   const meta = describePrincipal(p.principal_id)
+                  const status = tokenStatus(tokens.get(p.principal_id))
                   return (
                     <tr key={p.principal_id}>
                       {/* THE PURPOSE IS A TOOLTIP NOW. It is three lines of background on a row whose
@@ -444,11 +464,32 @@ export function AccessControlTab({ showToast }) {
                           )}
                         </div>
                       </td>
-                      <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '46ch' }}>
+                      <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '40ch' }}>
                         {roleReach(p.roles)}
                       </td>
-                      <td className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                        {meta.mintedBy || '—'}
+                      <td>
+                        <span
+                          className={`badge badge-${tokenStatusTone(status)}`}
+                          style={{ fontSize: '11px' }}
+                          title={tokenStatusDetail(status)}
+                        >
+                          {tokenStatusLabel(status)}
+                        </span>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '4px', maxWidth: '34ch' }}>
+                          {tokenStatusDetail(status)}
+                        </div>
+                      </td>
+                      {/* THE COMMAND, NOT A BUTTON. Minting stays on the host deliberately (roadmap
+                          §13): these tokens cannot be revoked, so issuing one should cost more than
+                          a click. What the page can do is remove the part that is error-prone --
+                          transcribing a UUID -- so the whole line is copyable. */}
+                      <td>
+                        <CopyableId
+                          value={`node scripts/mint-mcp-token.mjs --principal ${p.principal_id}`}
+                          label="mint command"
+                          title="Copy the command. It runs on the host that has .env, records the issue in the Digital Thread, and only then prints the token."
+                          onNotify={showToast}
+                        />
                       </td>
                     </tr>
                   )

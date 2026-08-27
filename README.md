@@ -173,7 +173,14 @@ a record of a mint that never happened, and a mint that succeeds cannot go unrec
 adds `list_service_principals()`, the **Administrator-only read behind the Service Identities
 section**: `auth.users` is GoTrue's and is not served by PostgREST at all, and `user_roles` is
 deliberately unreachable from a browser, so the alternative to a four-column function is a broad
-grant on the two tables that decide who is who — and `0039`
+grant on the two tables that decide who is who — and `0043` adds
+`record_service_token_issued()`, which writes a **`TOKEN_MINTED`** row for a long-lived JWT and
+refuses two things outright: a subject that can sign in, and any expiry beyond
+`service_token_max_days()` — **90 days, because these tokens cannot be revoked** and the expiry is
+the only bound that exists — and `0044` adds `create_service_principal()`, which creates a machine
+identity the way `0034` does (`id` alone, so it has no email, no password and no identity provider)
+and accepts **only a read-only role**, since a privileged machine identity becomes an unrevocable
+write credential the moment a token is signed for it — and `0039`
 adds `digital_thread_page()`, which applies the **deleted-asset
 filter as a predicate rather than in the browser**, so the page's row budget is spent on rows
 it will actually show: hiding them afterwards had the page list four assets on a stack of
@@ -1216,16 +1223,49 @@ vocabulary should not be two separate migrations against the same column.
 
 ### 13 · An Access Control page
 
-**Mostly built.** The **Access Control** tab lists every gateway with what the platform knows about
-its broker credential, a virtual gateway can be issued one from the dashboard, and the machine
-identities that can reach the stack are listed on both planes —
-`0041_virtual_gateway_credential.sql` · `0042_list_service_principals.sql` ·
-`supabase/functions/gateway-credential` ·
+**Built.** The **Access Control** tab lists every gateway with what the platform knows about its
+broker credential, a virtual gateway can be issued one from the dashboard, the machine identities
+that can reach the stack are listed on both planes, and an Administrator can create a new one and
+see what tokens are outstanding against it — `0041_virtual_gateway_credential.sql` ·
+`0042_list_service_principals.sql` · `0043_record_service_token_issued.sql` ·
+`0044_create_service_principal.sql` · `supabase/functions/gateway-credential` ·
 [`AccessControlTab.jsx`](frontend/src/components/tabs/AccessControlTab.jsx) ·
 [`credentialState.js`](frontend/src/utils/credentialState.js) ·
-[`serviceIdentities.js`](frontend/src/utils/serviceIdentities.js). **What remains is issuing a new
-service identity from the page**, which is the part that would need the JWT secret — see the
-warning about that below, which is why it was left last rather than first.
+[`serviceIdentities.js`](frontend/src/utils/serviceIdentities.js) ·
+[`mint-mcp-token.mjs`](scripts/mint-mcp-token.mjs)
+
+**MINTING STAYS ON THE HOST, AND THAT IS THE DECISION THE REST OF THE DESIGN FOLLOWS FROM.** The
+page does not sign tokens. It was surveyed as a feature and refused, because
+`scripts/mint-mcp-token.mjs` records the constraint that governs the whole area: *"THERE IS NO
+REVOCATION: PostgREST checks the signature, not a session table. Revoking means rotating
+`SUPABASE_JWT_SECRET`, which invalidates every token in the stack including the anon and
+service_role keys."*
+
+Three ways of adding revocation were checked and none works. Deleting the `auth.users` row does not
+help — PostgREST validates the signature and never looks the subject up. Removing the role does not
+either: `0034` records that the relations the i3X address space is assembled from are `FOR SELECT TO
+authenticated USING (true)`, so a role-less principal still reads them. A `revoked_at` predicate
+would have to be added to **every RLS policy in the schema**.
+
+**So a clean implementation would have solved the wrong half.** `pgjwt` is installed and
+`extensions.sign()` exists, so a `SECURITY DEFINER` RPC could sign a token without the secret ever
+leaving the database — technically neat, and it would have made an unrevocable 90-day credential a
+button press with a tidy audit trail of a thing nobody can undo. Solving the wrong half well is
+worse than not solving it, because the clean implementation reads as safety.
+
+**What the page does instead is the part that is actually load-bearing: say what is outstanding.**
+Since nothing can be revoked, knowing how many unexpired tokens exist and when the first of them
+lapses *is* the safety story — and that is an inventory question, which is what this page is for.
+`tokenStatus()` counts every unexpired mint rather than reading the latest, because **a re-mint adds
+a live credential rather than replacing one**, and reporting the newer of two would state half the
+exposure on the one page whose job is to state all of it.
+
+**The script records before it prints**, which is the inverse of `0041`'s ordering and inverted for
+a reason. The token exists nowhere until stdout, so a failed audit write costs a row describing a
+credential nobody holds; the other order costs an unrevocable credential in the wild with no record
+of it. A refusal therefore prints nothing and exits non-zero. The 90-day ceiling is enforced in both
+the script and the database, deliberately duplicated: what it bounds cannot be revoked, so it should
+not be removable by editing one file.
 
 **The two planes are not one list, and showing that is most of what the section is for.** A database
 identity is an `auth.users` row that cannot sign in, holding a role; a broker identity is an entry in

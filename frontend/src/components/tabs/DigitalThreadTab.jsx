@@ -33,7 +33,22 @@ function actorTitle(event) {
  * in the singular upper case, and a handover from another page arrives already in that form, so
  * both spellings reach this component and both have to normalise to one.
  */
-const ENTITY_KIND = { cells: 'CELL', gateways: 'GATEWAY', devices: 'DEVICE' }
+/*
+ * `service_principals` IS NOT A TABLE, unlike the other three. Migrations 0043 and 0044 write it as
+ * an entity_type for rows about `auth.users` identities -- auth is GoTrue's schema, there is no
+ * public table of them, and `entity_id` carries no foreign key anywhere.
+ *
+ * IT IS LISTED HERE BECAUSE THE FALLBACK IS NOT GOOD ENOUGH. `entityKind` upper-cases whatever it
+ * does not know, which would render this lane as SERVICE_PRINCIPALS -- and 0031's header states the
+ * bar these rows have to clear: "a half-legible audit entry is worse than an absent one, because it
+ * looks like the feature works."
+ */
+const ENTITY_KIND = {
+  cells: 'CELL',
+  gateways: 'GATEWAY',
+  devices: 'DEVICE',
+  service_principals: 'SERVICE IDENTITY',
+}
 export const entityKind = (t) =>
   ENTITY_KIND[String(t || '').toLowerCase()] || String(t || '').toUpperCase()
 
@@ -144,6 +159,11 @@ export function diffFields(oldData, newData) {
 export function classifyEvent(event, diff) {
   const action = String(event.event_type || event.action || '').toUpperCase()
   if (action === 'SCHEMA_REJECTION') return 'governance'
+  // TOKEN_MINTED is governance for the same reason and a sharper one: it records that somebody was
+  // granted a way to reach this stack. It is not `creation` -- no row was created, and the thing
+  // that WAS created lives outside the database entirely -- and not `critical`, which is reserved
+  // for lifecycle events. Who may do what is precisely what governance means.
+  if (action === 'TOKEN_MINTED') return 'governance'
   if (action === 'DELETE') return 'critical'
   if (action === 'INSERT') return 'creation'
 
@@ -609,7 +629,10 @@ function EventDiff({ event, diff }) {
   // SCHEMA_REJECTION joins the one-sided set because it records an OBSERVATION, not a mutation:
   // `old_data` is NULL by construction (migration 0026), and rendering a "Previous" column that
   // can never hold anything invites the reader to look for a prior state that does not exist.
+  // TOKEN_MINTED joins them for the same reason: `old_data` is NULL by construction (0043), because
+  // signing a token does not change a prior state -- there was no token, and now there is one more.
   const oneSided = action === 'INSERT' || action === 'DELETE' || action === 'SCHEMA_REJECTION'
+    || action === 'TOKEN_MINTED'
 
   return (
     <div className="dt-diff">
@@ -617,7 +640,8 @@ function EventDiff({ event, diff }) {
         {action === 'INSERT' ? 'Initial properties'
           : action === 'DELETE' ? 'Final properties'
             : action === 'SCHEMA_REJECTION' ? 'Rejected payload'
-              : 'Changed properties'}
+              : action === 'TOKEN_MINTED' ? 'Token issued'
+                : 'Changed properties'}
       </div>
 
       {diff.length === 0 ? (
@@ -636,7 +660,8 @@ function EventDiff({ event, diff }) {
               <th>{action === 'DELETE' ? 'Deleted'
                 : action === 'INSERT' ? 'Created'
                   : action === 'SCHEMA_REJECTION' ? 'Observed'
-                    : 'New'}</th>
+                    : action === 'TOKEN_MINTED' ? 'Issued'
+                      : 'New'}</th>
             </tr>
           </thead>
           <tbody>
