@@ -3,13 +3,26 @@ import { api } from '../../api'
 import { IconCheck } from '../common/Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 
-export function ValidatePayloadModal({ schemas, onClose }) {
+/**
+ * `initialSchemaUuid` is the schema the caller already had in hand.
+ *
+ * THE SELECT STAYS, which is the part worth arguing. Opened from a schema's drawer the target is
+ * already decided, so pre-selecting removes a step -- but "does this payload match v1 or v2?" is a
+ * real question, and it is the one this modal answers best. Dropping the control to save a click
+ * would have removed the only place in the product where two versions can be tested against the
+ * same payload without retyping it.
+ */
+export function ValidatePayloadModal({ schemas, initialSchemaUuid, onClose }) {
   // Escape closes. Via the shared stack rather than a listener of this component's own,
   // because a ConfirmModal can open on top of this one and a bare document listener on each
   // would let one keypress dismiss both.
   useEscapeKey(onClose)
 
-  const [selectedSchemaUuid, setSelectedSchemaUuid] = useState(schemas[0]?.schema_uuid || '')
+  // Falls back to the first schema rather than to nothing: opened without a target -- which no
+  // call site does today -- an empty select would submit a validation against no schema at all.
+  const [selectedSchemaUuid, setSelectedSchemaUuid] = useState(
+    initialSchemaUuid || schemas[0]?.schema_uuid || ''
+  )
   // MTConnect names and value vocabularies: EXECUTION is READY/ACTIVE/INTERRUPTED/…,
   // EMERGENCY_STOP is ARMED/TRIGGERED. See archive/20260101000019_mtconnect_catalog_migration.sql.
   const defaultPayload = `{\n  "Systems/TEMPERATURE": 42.5,\n  "Controller/EXECUTION": "ACTIVE",\n  "Controller/EMERGENCY_STOP": "ARMED"\n}`

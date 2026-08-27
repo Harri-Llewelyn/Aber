@@ -480,3 +480,20 @@ describe('Detail modal — read-only vs draft', () => {
     expect(screen.queryByText(/Version History/)).toBeNull()
   })
 })
+
+describe('validating a payload', () => {
+  /**
+   * IT MOVED OUT OF THE CARD HEADER. From there it could not know what to validate against, so its
+   * first step was a dropdown of every schema name -- which means the reader had already decided
+   * WHICH schema and then had to pick it out of a list showing nothing but names. Nothing covered
+   * this button before, in either position, so the move was unverified in both directions: that it
+   * left the header, and that it arrived somewhere.
+   */
+  it('is a schema\'s own action rather than a page-level button', async () => {
+    renderTab()
+    await waitFor(() => expect(registryTable()).toBeTruthy())
+
+    expect(screen.queryByText(/Validate Candidate Payload/i)).toBeNull()
+    expect(panelFor('Robot_Arm_Schema').getByText(/Validate Payload/i)).toBeTruthy()
+  })
+})

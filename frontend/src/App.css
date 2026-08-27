@@ -986,12 +986,17 @@ tbody tr:hover { background: var(--bg-glass); }
    would also fire when the pointer is over the gap beside it. */
 .table-group-row:hover > td { background: color-mix(in srgb, var(--text-primary) 9%, var(--bg-card)); }
 
+/* PADDED LIKE A TABLE CELL, because it is standing in for one. `td` is `12px 16px`, and this was
+   `7px 12px` -- so a category label started four pixels left of every value in the column beneath
+   it, and its row stood ten pixels shorter than the rows it groups. In a collapsed catalog that is
+   eleven short, misaligned bands against a registry of tall, aligned ones, which is what read as
+   "a different table" even though both are the same card, the same tokens and the same markup. */
 .table-group-button {
   width: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 12px;
+  padding: 12px 16px;
   background: none;
   border: none;
   cursor: pointer;
