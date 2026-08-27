@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
+import CopyableId from '../common/CopyableId'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
 import { GatewayCredentialModal } from '../modals/GatewayCredentialModal'
 import { IconArchive, IconDownload, IconLock, IconRefreshCw, IconShieldAlert } from '../common/Icons'
@@ -101,26 +102,6 @@ export function AccessControlTab({ showToast }) {
 
   const archivedCount = useMemo(() => rows.filter(r => r.is_archived).length, [rows])
 
-  /**
-   * THE DISTINCT STATES ON SCREEN, each explained ONCE beneath the table.
-   *
-   * The explanation is a property of the STATE, not of the row, and rendering it per row made that
-   * invisible: four gateways with no platform record produced the same four-line paragraph four
-   * times, which crowded out the two things that actually vary -- the badge and the date -- and
-   * repeated a caveat the preamble already makes in red.
-   *
-   * A legend keyed on what is present rather than on the full set, so it never explains a state
-   * nothing on this stack is in.
-   */
-  const legend = useMemo(() => {
-    const seen = new Map()
-    for (const g of visible) {
-      const state = credentialState(g, g.issued_at)
-      if (!seen.has(state)) seen.set(state, g)
-    }
-    return [...seen.entries()]
-  }, [visible])
-
   const afterAction = useCallback(() => {
     setCredentialForGw(null)
     setBundleForGw(null)
@@ -140,63 +121,69 @@ export function AccessControlTab({ showToast }) {
   return (
     <div className="page-layout">
       <div className="page-main">
-        {/* THE PAGE STATES ITS OWN LIMIT FIRST, the way Settings does, and for the same reason:
-            somebody arriving here to answer "does this gateway have a credential" needs to know
-            what this page can and cannot see BEFORE they read a row, not after they act on one. */}
-        <div className="settings-preamble card">
-          <div className="settings-preamble-title">
-            <IconLock size={15} /> Broker credentials
-          </div>
-          <p>
-            Every gateway authenticates to the broker as its own Sparkplug ID — the ACL pins the
-            topic’s edge-node segment to the connecting username, so no two gateways can share a
-            connection. This page shows what the platform has issued, and gives you the two ways to
-            issue one.
-          </p>
-          <p className="settings-preamble-warning">
-            <strong>This is not an inventory of the broker.</strong> Mosquitto’s account file can
-            only be added to, never read back, so a gateway showing{' '}
-            <em>No platform record</em> may still hold a working credential — the ones{' '}
-            <code>npm run provision:gateways</code> creates are issued outside the dashboard and
-            leave no record here.
-          </p>
-        </div>
+        {/* ONE CARD FOR ONE LIST -- title, description, controls and rows -- which is the Schemas
+            page's shape and the one the rest of the app uses. This was three stacked cards for a
+            single table: three borders, three sets of padding, and a heading separated from the
+            rows it describes by a control bar in its own box.
 
-        {loadError && (
-          <div className="card" style={{ padding: '12px', color: 'var(--danger)' }}>
-            <IconShieldAlert size={13} /> {loadError}
-          </div>
-        )}
-
-        {/* THE SHAPE EVERY OTHER PAGE USES: what you are looking at on the left, what you are
-            looking for on the right. The archived toggle is the Devices page's "Needs attention"
-            control -- a btn-sm that switches between btn-primary and btn-ghost and carries its own
-            count -- rather than a bare checkbox, which was the only control of its kind in the app
-            and read as a form field rather than as a filter. */}
-        <div className="filter-bar">
-          <div style={{ display: 'flex', gap: '14px', fontSize: '12px', color: 'var(--text-muted)' }}>
-            <span><strong style={{ color: 'var(--text-primary)' }}>{summary.issued}</strong> issued</span>
-            <span><strong style={{ color: 'var(--text-primary)' }}>{summary.awaiting}</strong> bundle outstanding</span>
-            <span><strong style={{ color: 'var(--text-primary)' }}>{summary.revoked}</strong> revoked</span>
-            <span><strong style={{ color: 'var(--text-primary)' }}>{summary.unrecorded}</strong> no record</span>
+            THE PAGE STILL STATES ITS OWN LIMIT BEFORE THE FIRST ROW, which is the part that has to
+            survive the tidying: somebody arriving to answer "does this gateway have a credential"
+            needs to know what this page can and cannot see BEFORE they read a row, not after they
+            have acted on one. */}
+        <div className="card" style={{ overflowX: 'auto' }}>
+          <div style={{ padding: '14px 14px 0' }}>
+            <div className="settings-preamble-title" style={{ marginBottom: '8px' }}>
+              <IconLock size={15} /> Broker credentials
+            </div>
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '0 0 6px' }}>
+              Every gateway authenticates to the broker as its own Sparkplug ID — the ACL pins the
+              topic’s edge-node segment to the connecting username, so no two gateways can share a
+              connection. This page shows what the platform has issued, and gives you the two ways
+              to issue one.
+            </p>
+            <p className="settings-preamble-warning" style={{ fontSize: '12px', margin: 0 }}>
+              <strong>This is not an inventory of the broker.</strong> Mosquitto’s account file can
+              only be added to, never read back, so a gateway showing{' '}
+              <em>No platform record</em> may still hold a working credential — the ones{' '}
+              <code>npm run provision:gateways</code> creates are issued outside the dashboard and
+              leave no record here.
+            </p>
           </div>
 
-          <div className="filter-bar-spacer" style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-            <button
-              className={`btn btn-sm ${showArchived ? 'btn-primary' : 'btn-ghost'}`}
-              onClick={() => setShowArchived(v => !v)}
-              aria-pressed={showArchived}
-              title="Archived gateways keep their row and their history, and 0038 has already rotated their broker credential to a password nobody holds. They can be issued a new one only after being restored."
-            >
-              <IconArchive size={13} /> Archived ({archivedCount})
-            </button>
-            <button className="btn btn-ghost btn-sm" onClick={() => load()} title="Re-read credentials">
-              <IconRefreshCw size={13} /> Refresh
-            </button>
-          </div>
-        </div>
+          {loadError && (
+            <div style={{ padding: '10px 14px', color: 'var(--danger)', fontSize: '12px' }}>
+              <IconShieldAlert size={13} /> {loadError}
+            </div>
+          )}
 
-        <div className="card" style={{ marginTop: '12px', overflowX: 'auto' }}>
+          {/* THE SHAPE EVERY OTHER PAGE USES: what you are looking at on the left, what you are
+              looking for on the right. The archived toggle is the Devices page's "Needs attention"
+              control -- a btn-sm switching between btn-primary and btn-ghost and carrying its own
+              count -- rather than a bare checkbox, which was the only control of its kind in the
+              app and read as a form field rather than as a filter. */}
+          <div className="filter-bar" style={{ marginTop: '10px' }}>
+            <div style={{ display: 'flex', gap: '14px', fontSize: '12px', color: 'var(--text-muted)' }}>
+              <span><strong style={{ color: 'var(--text-primary)' }}>{summary.issued}</strong> issued</span>
+              <span><strong style={{ color: 'var(--text-primary)' }}>{summary.awaiting}</strong> bundle outstanding</span>
+              <span><strong style={{ color: 'var(--text-primary)' }}>{summary.revoked}</strong> revoked</span>
+              <span><strong style={{ color: 'var(--text-primary)' }}>{summary.unrecorded}</strong> no record</span>
+            </div>
+
+            <div className="filter-bar-spacer" style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+              <button
+                className={`btn btn-sm ${showArchived ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => setShowArchived(v => !v)}
+                aria-pressed={showArchived}
+                title="Archived gateways keep their row and their history, and 0038 has already rotated their broker credential to a password nobody holds. They can be issued a new one only after being restored."
+              >
+                <IconArchive size={13} /> Archived ({archivedCount})
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={() => load()} title="Re-read credentials">
+                <IconRefreshCw size={13} /> Refresh
+              </button>
+            </div>
+          </div>
+
           <table className="data-table">
             <thead>
               <tr>
@@ -230,9 +217,19 @@ export function AccessControlTab({ showToast }) {
                         {g.is_virtual ? '⚡ VIRTUAL' : 'PHYSICAL'}
                       </span>
                     </td>
-                    {/* THE USERNAME IS THE WIRE IDENTITY, not a display name, and is shown in mono
-                        so it reads as the string the ACL matches rather than as a label. */}
-                    <td className="mono" style={{ fontSize: '12px' }}>{g.sparkplug_id}</td>
+                    {/* THE USERNAME IS THE WIRE IDENTITY, not a display name -- and it is the one
+                        value on this page an operator retypes elsewhere, into a broker node's
+                        credential pair. Click-to-copy for the same reason every other identifier in
+                        the app has it: a 24-character string transcribed by eye is a gateway that
+                        authenticates and then has every publish silently dropped by the ACL. */}
+                    <td>
+                      <CopyableId
+                        value={g.sparkplug_id}
+                        label="MQTT username"
+                        title={`Copy ${g.sparkplug_id} — the username this gateway authenticates as`}
+                        onNotify={showToast}
+                      />
+                    </td>
                     <td>
                       {/* The badge carries the explanation as its title as well, so the meaning is
                           reachable from the row without the legend having to be on screen. */}
@@ -287,24 +284,6 @@ export function AccessControlTab({ showToast }) {
               })}
             </tbody>
           </table>
-
-          {legend.length > 0 && (
-            <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px' }}>
-              {legend.map(([state, sample]) => (
-                <div key={state} style={{ display: 'flex', gap: '8px', alignItems: 'baseline', marginTop: '6px' }}>
-                  <span
-                    className={`badge badge-${credentialStateTone(state)}`}
-                    style={{ fontSize: '11px', flexShrink: 0 }}
-                  >
-                    {credentialStateLabel(state)}
-                  </span>
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                    {credentialStateExplanation(state, sample)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* =========================================================================================
@@ -340,6 +319,10 @@ export function AccessControlTab({ showToast }) {
               <thead>
                 <tr>
                   <th>Identity</th>
+                  {/* ITS OWN COLUMN, matching how the Schemas page treats a schema UUID. It was
+                      stacked under the name, which made it read as a subtitle rather than as the
+                      value a JWT's `sub` claim has to equal. */}
+                  <th>Principal ID</th>
                   <th>Holds</th>
                   <th>Reaches</th>
                   <th>Token minted by</th>
@@ -347,7 +330,7 @@ export function AccessControlTab({ showToast }) {
               </thead>
               <tbody>
                 {principals.length === 0 && (
-                  <tr><td colSpan={4} style={{ color: 'var(--text-muted)', padding: '14px' }}>
+                  <tr><td colSpan={5} style={{ color: 'var(--text-muted)', padding: '14px' }}>
                     No machine identities are registered. Every account on this stack belongs to a person.
                   </td></tr>
                 )}
@@ -355,14 +338,33 @@ export function AccessControlTab({ showToast }) {
                   const meta = describePrincipal(p.principal_id)
                   return (
                     <tr key={p.principal_id}>
+                      {/* THE PURPOSE IS A TOOLTIP NOW. It is three lines of background on a row whose
+                          other four columns are the answer -- what it holds, what that reaches, and
+                          where its token comes from. Read once and then in the way every time after,
+                          which is what a tooltip is for.
+
+                          The dotted underline is what says there is something to hover. A title on a
+                          plain span is invisible, and an affordance nobody can see is not one. */}
                       <td>
-                        <div style={{ fontWeight: 600 }}>{meta.name}</div>
-                        <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px' }}>
-                          {p.principal_id}
-                        </div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', maxWidth: '48ch' }}>
-                          {meta.purpose}
-                        </div>
+                        <span
+                          title={meta.purpose}
+                          style={{
+                            fontWeight: 600,
+                            textDecoration: 'underline dotted var(--text-muted)',
+                            textUnderlineOffset: '3px',
+                            cursor: 'help',
+                          }}
+                        >
+                          {meta.name}
+                        </span>
+                      </td>
+                      <td>
+                        <CopyableId
+                          value={p.principal_id}
+                          label="principal id"
+                          title={`Copy ${p.principal_id} — the subject a token for this identity must name`}
+                          onNotify={showToast}
+                        />
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>

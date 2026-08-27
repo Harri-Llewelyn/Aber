@@ -59,7 +59,8 @@ describe('AccessControlTab', () => {
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getAllByText('No platform record').length).toBeGreaterThan(0))
-    expect(screen.getByText(/does not mean the broker holds none/i)).toBeTruthy()
+    // The meaning lives on the badge's tooltip now rather than in three lines beside it.
+    expect(screen.getAllByTitle(/does not mean the broker holds none/i).length).toBe(1)
     expect(screen.queryByText(/^No credential$/i)).toBeNull()
   })
 
@@ -79,17 +80,19 @@ describe('AccessControlTab', () => {
 
     await waitFor(() => expect(screen.getByText(/Generate/)).toBeTruthy())
     expect(screen.getByText(/Bundle/)).toBeTruthy()
-    // Twice: the row's badge and the legend's. The legend explains each state PRESENT, once.
-    expect(screen.getAllByText('Issued').length).toBe(2)
+    expect(screen.getAllByText('Issued', { selector: '.badge' }).length).toBe(1)
   })
 
   /**
-   * THE LEGEND EXISTS BECAUSE THE EXPLANATION IS A PROPERTY OF THE STATE, NOT OF THE ROW. Rendered
-   * per row, four gateways in the same state produced the same four-line paragraph four times --
-   * crowding out the badge and the date, which are the only things that vary, and repeating a
-   * caveat the preamble already makes.
+   * THE EXPLANATION IS A PROPERTY OF THE STATE, NOT OF THE ROW, and it must not be rendered as
+   * visible text once per row. Four gateways in one state used to produce the same four-line
+   * paragraph four times, crowding out the badge and the date -- the only things that vary -- and
+   * repeating verbatim a caveat the preamble already makes in red directly above.
+   *
+   * It briefly became a legend under the table, which was a third copy of the same sentence. It is
+   * a tooltip on the badge: reachable from the row, and taking no vertical space at all.
    */
-  it('explains each state once beneath the table, however many rows share it', async () => {
+  it('carries the explanation as a tooltip rather than repeating it down the column', async () => {
     api.listGatewayCredentials.mockResolvedValue([
       provisioned,
       { ...provisioned, id: '13000000-0000-4000-8000-000000000001', name: 'Sim_Gateway_Cell2_Robotics' },
@@ -98,13 +101,11 @@ describe('AccessControlTab', () => {
     ])
     render(<AccessControlTab showToast={vi.fn()} />)
 
-    await waitFor(() => expect(screen.getAllByText('No platform record').length).toBeGreaterThan(0))
-    // Four rows, one explanation.
-    expect(screen.getAllByText(/does not mean the broker holds none/i).length).toBe(1)
-    // Four badges in the table plus one in the legend. SCOPED TO `.badge`, because the preamble
-    // also names the state in prose -- and an unscoped count would be a magic number that changes
-    // whenever that sentence is reworded.
-    expect(screen.getAllByText('No platform record', { selector: '.badge' }).length).toBe(5)
+    await waitFor(() => expect(screen.getAllByText('No platform record', { selector: '.badge' }).length).toBe(4))
+    // FOUR BADGES, FOUR TOOLTIPS, AND NOT ONE LINE OF REPEATED BODY TEXT. The second assertion is
+    // the one that matters: it fails the moment the sentence is put back into the column.
+    expect(screen.getAllByTitle(/does not mean the broker holds none/i).length).toBe(4)
+    expect(screen.queryByText(/does not mean the broker holds none/i)).toBeNull()
   })
 
   /** Archived gateways are hidden by default and offer no action when shown — 0041 refuses them. */
@@ -144,8 +145,9 @@ describe('AccessControlTab', () => {
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText(/Undocumented principal/i)).toBeTruthy())
-    expect(screen.getByText(/check which one seeded this id/i)).toBeTruthy()
-    // No role means every RLS policy refuses it -- said, rather than left as a gap.
+    expect(screen.getByTitle(/check which one seeded this id/i)).toBeTruthy()
+    // No role means every RLS policy refuses it -- said in a COLUMN, not a tooltip, because it is
+    // the answer to "what can this reach" rather than background on what it is.
     expect(screen.getByText(/every RLS policy refuses it/i)).toBeTruthy()
   })
 
@@ -159,6 +161,22 @@ describe('AccessControlTab', () => {
     // Exactly one of the three writes, and it is the daemon.
     expect(screen.getAllByText('CAN PUBLISH').length).toBe(1)
     expect(screen.getAllByText('READ ONLY').length).toBe(2)
+  })
+
+  /**
+   * The wire identity and the principal id are the two values on this page an operator retypes
+   * somewhere else -- into a broker node's credential pair, and into a token's `sub` claim. A
+   * 24-character string transcribed by eye is a client that authenticates and is then refused by
+   * something that never says why.
+   */
+  it('makes both identifiers copyable rather than selectable text', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    // CopyableId renders a button, which is what makes it keyboard-reachable and announced as an
+    // action -- a clickable span would be neither.
+    await waitFor(() => expect(screen.getByRole('button', { name: /gwy120000000000400080000/ })).toBeTruthy())
+    expect(screen.getByRole('button', { name: /b0000000-0000-4000-8000-000000000001/ })).toBeTruthy()
   })
 
   it('surfaces a failed read rather than rendering an empty inventory', async () => {
