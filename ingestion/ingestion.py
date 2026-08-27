@@ -585,8 +585,13 @@ _device_seen_lock = threading.Lock()
 # (migration 0005); it cannot suppress the write itself.
 _DEVICE_COLUMNS = (
     "id,name,sparkplug_id,reported_identity,gateway_id,is_quarantined,first_dbirth_at,"
-    "last_birth_metrics,status,identity_source"
+    "last_birth_metrics,status,identity_source,conformance_policy"
 )
+
+# The value of devices.conformance_policy that lets a violation DROP a metric rather than only
+# record it (0050). Anything else -- including the 'audit' default and a row fetched before this
+# column existed -- means record and write anyway, which is the behaviour since 0026.
+CONFORMANCE_ENFORCE = "enforce"
 
 
 # -----------------------------------------------------------------------------
@@ -2719,6 +2724,30 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     observed = []
     dropped = []
 
+    # RESOLVED BEFORE THE WRITE, WHICH IS THE STRUCTURAL CHANGE ENFORCEMENT NEEDED (item 7).
+    #
+    # Conformance used to be evaluated entirely after the commit, and the comment down there still
+    # explains why the RECORD belongs there: a rejection row asserts something about the device,
+    # and a batch that rolled back is evidence about the database instead. That reasoning is about
+    # writing the audit row, and it is untouched.
+    #
+    # Dropping is a different question and has to be answered before the rows are built, so the
+    # constraints have to be in hand here. The lookup is skipped entirely when neither consumer
+    # wants it -- the same instinct as the existing AUDIT_PAYLOAD_REJECTIONS guard, which exists
+    # because device_modelled_constraints() can issue a PostgREST round trip on a cache miss.
+    enforcing = bool(device) and device.get("conformance_policy") == CONFORMANCE_ENFORCE
+    modelled = (
+        device_modelled_constraints(device["id"])
+        if device and (enforcing or AUDIT_PAYLOAD_REJECTIONS)
+        else None
+    )
+    # A device set to enforce whose schema could not be read is NOT enforced against. None means
+    # either "nothing is bound" or "the directory blinked", and neither is grounds for discarding
+    # a reading -- the second especially, since it would make our own outage look like the
+    # device's fault.
+    enforcing = enforcing and modelled is not None
+    rejected_schema = 0
+
     try:
         with db_conn:
             with db_conn.cursor() as cur:
@@ -2838,13 +2867,52 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
 
                     # The VALUE travels with the kind now: enum, minimum, maximum and pattern
                     # are constraints on values, and the kind alone answered only `type`.
-                    observed.append((
-                        metric_name,
-                        value_kind,
+                    metric_value = (
                         val_double if value_kind == "double"
                         else val_string if value_kind == "string"
-                        else val_bool,
-                    ))
+                        else val_bool
+                    )
+
+                    # ---------------------------------------------------------------------
+                    # Enforcement. Only reached for a device explicitly set to `enforce`.
+                    # ---------------------------------------------------------------------
+                    # THE OFFENDING METRIC ONLY, not the message. This mirrors how an unresolved
+                    # alias and an out-of-window timestamp are already handled a few lines up:
+                    # dropping the whole payload would discard samples that conform perfectly
+                    # well, and the loss would be far larger than the fault.
+                    if enforcing:
+                        constraint = modelled.metrics.get(metric_name)
+                        if constraint is None:
+                            faults = ([("unmodelled_metric",
+                                        "no attached schema declares this metric", {})]
+                                      if modelled.closed else [])
+                        else:
+                            faults = constraint_violations(
+                                metric_name, value_kind, metric_value, constraint)
+                            faults = [
+                                f for f in faults
+                                if enforceable_violation({"code": f[0], "dropped": False},
+                                                         modelled.closed)
+                            ]
+
+                        if faults:
+                            code, detail, _extra = faults[0]
+                            dropped.append((metric_name, code, detail))
+                            rejected_schema += 1
+                            # LOUD, AND NAMING BOTH SIDES. The schema cache has a five-minute TTL,
+                            # so an edit starts discarding telemetry up to five minutes after
+                            # somebody made it -- long enough that the two are not obviously
+                            # connected. A line that names the device, the metric and the
+                            # constraint is what makes that connection findable afterwards.
+                            logger.warning(
+                                "SCHEMA ENFORCED: dropped metric '%s' for device '%s' (%s) -- %s "
+                                "(%s). The device is set to conformance_policy=enforce; this "
+                                "reading was NOT written and cannot be recovered.",
+                                metric_name, device.get("name"), asset_id, code, detail
+                            )
+                            continue
+
+                    observed.append((metric_name, value_kind, metric_value))
 
                     rows.append(
                         (metric_dt, asset_id, metric_name, val_double, val_string, val_bool)
@@ -2885,6 +2953,7 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                 count("metrics_written", metric_count)
                 count("metrics_rejected_timestamp", rejected_timestamps)
                 count("metrics_unresolved_alias", unresolved_aliases)
+                count("metrics_rejected_schema", rejected_schema)
 
                 if unresolved_aliases:
                     # Skip the undecodable metrics, keep the rest, and ask the node to re-birth.
@@ -2907,6 +2976,16 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                         "window (-%ds/+%ds). Check the gateway's clock.",
                         rejected_timestamps, asset_id,
                         TELEMETRY_MAX_AGE_SECONDS, TELEMETRY_MAX_FUTURE_SECONDS
+                    )
+
+                if rejected_schema:
+                    # A second line, at the same level as the timestamp and alias summaries above,
+                    # so the per-message total is visible to somebody reading the log for volume
+                    # rather than for a specific metric.
+                    logger.warning(
+                        "Dropped %d metric(s) for asset '%s' that contradicted its bound schema. "
+                        "Set conformance_policy='audit' on this device to record without "
+                        "discarding.", rejected_schema, asset_id
                     )
 
                 logger.info("INGESTED DDATA: Ingested %d metrics for asset '%s' into TimescaleDB", metric_count, asset_id)
@@ -2940,9 +3019,12 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     # deliberate: device_modelled_constraints() can issue a PostgREST round trip on a cache miss,
     # and a daemon with auditing off must not pay for a lookup whose only consumer is disabled.
     if AUDIT_PAYLOAD_REJECTIONS:
+        # `modelled` was resolved before the write and is reused rather than re-read: it is the
+        # same cached value, and fetching it twice would double the round trips on a cache miss
+        # for a device that is enforcing.
         record_payload_violations(
             device,
-            payload_violations(observed, dropped, device_modelled_constraints(device["id"])),
+            payload_violations(observed, dropped, modelled),
             payload_dt,
         )
 
