@@ -456,7 +456,7 @@ here rather than left on a checklist.
 
 | Identity | Holds | May do |
 | :--- | :--- | :--- |
-| `Service_Ingestor` (`0046`) | `Operator` | Nothing directly. Seven `SECURITY DEFINER` gates in `0047`, each checking the caller **is** this principal |
+| `Service_Ingestor` (`0046`) | `Operator` | Nothing directly. Eight `SECURITY DEFINER` functions -- seven gates in `0047` plus `record_ingestion_rejection()` from `0026`, brought under the same rule by `0051` -- each checking the caller **is** this principal |
 | MCP reader (`0034`) | `Operator` | Reads the five relations the i3X address space is assembled from. Writes nothing; cannot read `digital_thread` |
 | `factoryplus_i3x` | broker account | Reads the namespace, publishes nothing |
 | `gateway-credential-service` | broker admin, scoped | Adds one broker account and nothing else |
@@ -476,7 +476,39 @@ directly, and every write it makes goes through a gate in `0047`.
 `Administrator` or `Shopfloor_Manager`, so the gates are the **only** route rather than the tidy
 one. A credential that could perform those writes by holding a role that permits them would be a
 smaller `service_role`, not a narrower one: it could still write anything that role can write, to
-any row, in any shape. This one can do exactly seven things.
+any row, in any shape. This one can do exactly eight things.
+
+#### The eighth function, and the five weeks it spent unreachable
+
+`record_ingestion_rejection()` is the daemon's ninth RPC by call count and was not one of `0047`'s
+seven, because it already existed: `0026` built it as the narrow gate replacing `service_role`'s
+direct INSERT on `digital_thread`. Its access control was its **grant**, which was correct while
+`service_role` was the only thing that could call it.
+
+`0046` took that key away from the daemon and nobody re-granted this one. Every payload conformance
+violation since has been detected, logged, and then not written down:
+
+```
+permission denied for function record_ingestion_rejection (42501)
+```
+
+**The daemon catches it and carries on**, which is why nothing went red and no dashboard moved.
+Under `conformance_policy = 'enforce'` (`0050`) that is worse than an absent audit row: the metric
+is dropped AND the record of dropping it fails, so both halves of the evidence go.
+
+`0051` corrects it the way `0047` would have, had it been written then — the grant widens to
+`authenticated` and `require_ingestion_caller()` moves inside the body, because a bare widening
+would let any signed-in user forge a `SCHEMA_REJECTION` row into a table no application role can
+prune.
+
+**Why it went unnoticed is the part worth keeping.** The seeded fleet does not violate its own
+schemas, so on an ordinary stack the call site is never reached — the failure needed a device to
+publish something its schema forbade, and nothing here does. It surfaced while exercising broker
+capture and playback: replaying one machine class's metrics under another's identity produced this
+deployment's first real violations, and the error appeared within two seconds. A feature nobody had
+written yet was the only thing standing between this and a much later discovery, which is the
+argument for `test_ingestion_rejection_rpc.py` asserting the grant directly rather than only
+exercising the function as its owner.
 
 Three rules moved from Python into SQL with the gates, each previously enforced by the caller:
 

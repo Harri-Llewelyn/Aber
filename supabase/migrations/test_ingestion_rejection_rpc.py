@@ -35,6 +35,14 @@ DB_NAME = os.getenv("SUPABASE_DB_NAME", os.getenv("DB_NAME", "postgres"))
 DB_USER = os.getenv("SUPABASE_DB_USER", os.getenv("DB_USER", "postgres"))
 DB_PASSWORD = os.getenv("SUPABASE_DB_PASSWORD", os.getenv("DB_PASSWORD", "postgres"))
 
+# The Service_Ingestor machine principal (0046). Pinned rather than looked up: the point of the
+# guard in 0051 is that ONE identity may call this function, so a test that discovered the id at
+# runtime would agree with whatever the schema currently says instead of with what it should say.
+INGESTION_PRINCIPAL = "b0000000-0000-4000-8000-000000000002"
+# The MCP principal (0042) -- any authenticated identity that is not the daemon. Used as the
+# stranger in the negative test below.
+OTHER_PRINCIPAL = "b0000000-0000-4000-8000-000000000001"
+
 
 def get_connection():
     conn = psycopg2.connect(
@@ -82,6 +90,26 @@ class RejectionRpcTestCase(unittest.TestCase):
         if not row:
             self.skipTest("no devices seeded; 0002 has not run")
         self.device_id, self.device_name = row
+        self.as_ingestion_principal()
+
+    def as_ingestion_principal(self):
+        """
+        Present the Service_Ingestor claim, which 0051 made a precondition of calling the RPC.
+
+        NEEDED FROM 0051 ONWARDS, AND NOT BEFORE. Until then the function's whole access control
+        was its grant, and this suite connects as the owner, so it got in without saying who it
+        was. 0051 added `require_ingestion_caller()` inside the body -- because the grant had to
+        widen to `authenticated` when the daemon stopped holding `service_role` -- and a guard on
+        `auth.uid()` does not care that the connection is a superuser.
+
+        The claim alone, with no SET ROLE: `is_ingestion_caller()` reads `auth.uid()` out of
+        `request.jwt.claims`, so this is what the guard actually tests. Staying owner keeps the
+        assertions below able to read `digital_thread`, which is what they are here for.
+        """
+        self.cur.execute(
+            "SELECT set_config('request.jwt.claims', %s, true)",
+            (json.dumps({"sub": INGESTION_PRINCIPAL, "role": "authenticated"}),),
+        )
 
     def tearDown(self):
         self.conn.rollback()
@@ -186,6 +214,10 @@ class RejectionRpcTestCase(unittest.TestCase):
 
     def test_a_non_array_payload_is_refused(self):
         self.conn.rollback()
+        # THE ROLLBACK DISCARDS THE CLAIM, because set_config(..., true) is transaction-local --
+        # so this has to be re-presented or the call is refused by 0051's guard before it ever
+        # reaches the argument check this test is about, and fails on the wrong error.
+        self.as_ingestion_principal()
         with self.assertRaises(psycopg2.errors.InvalidParameterValue):
             self.cur.execute(
                 "SELECT public.record_ingestion_rejection(%s::uuid, %s::jsonb)",
@@ -280,6 +312,95 @@ class ServiceRoleCannotForgeAuditRowsTestCase(unittest.TestCase):
             "SELECT has_function_privilege("
             "  'public.record_ingestion_rejection(uuid, jsonb, timestamptz)', 'EXECUTE')")
         self.assertTrue(self.cur.fetchone()[0])
+
+
+class IngestionPrincipalGateTestCase(unittest.TestCase):
+    """
+    THE REGRESSION 0051 CLOSED, GUARDED FROM BOTH SIDES.
+
+    0046 moved the daemon off `service_role` onto the Service_Ingestor principal, and 0047
+    re-granted the seven functions it created. This one dates from 0026 and was missed, so it kept
+    `service_role`-only EXECUTE while the caller had become `authenticated`. The daemon has been
+    getting 42501 on every payload violation since -- and catching it, and logging it, and
+    carrying on, which is why nothing went red.
+
+    IT DOES NOT SHOW UP ON A HEALTHY STACK. The seeded fleet does not violate its own schemas, so
+    the call site is never reached; it took replaying one machine class's metrics under another's
+    identity to produce a violation at all. A test is the only thing that would have caught this,
+    and these two are it.
+
+    Both halves are asserted because each passes on its own in a broken state: the grant alone
+    passes with the function open to every signed-in user, and the guard alone passes with the
+    daemon locked out exactly as it was.
+    """
+
+    def setUp(self):
+        self.conn = get_connection()
+        self.cur = self.conn.cursor()
+        self.cur.execute("SELECT id FROM public.devices LIMIT 1")
+        row = self.cur.fetchone()
+        if not row:
+            self.skipTest("no devices seeded; 0002 has not run")
+        self.device_id = row[0]
+
+    def tearDown(self):
+        self.conn.rollback()
+        self.cur.close()
+        self.conn.close()
+
+    def claim(self, sub):
+        self.cur.execute(
+            "SELECT set_config('request.jwt.claims', %s, true)",
+            (json.dumps({"sub": sub, "role": "authenticated"}),),
+        )
+
+    def test_authenticated_holds_execute(self):
+        """
+        The grant. Without it the daemon cannot reach the function at all, which is the state
+        0046 left behind and 0051 corrects.
+        """
+        self.cur.execute(
+            "SELECT has_function_privilege('authenticated',"
+            "  'public.record_ingestion_rejection(uuid, jsonb, timestamptz)', 'EXECUTE')")
+        self.assertTrue(
+            self.cur.fetchone()[0],
+            "`authenticated` cannot execute record_ingestion_rejection(). The ingestion daemon "
+            "authenticates as the Service_Ingestor principal, which is an `authenticated` "
+            "identity, so it is locked out of recording payload violations -- silently, because "
+            "it catches the 42501 and logs it.",
+        )
+
+    def test_the_ingestion_principal_can_record(self):
+        self.claim(INGESTION_PRINCIPAL)
+        self.cur.execute(
+            "SELECT public.record_ingestion_rejection(%s::uuid, %s::jsonb)",
+            (self.device_id, json.dumps([{"metric": "Rogue/Metric", "code": "unmodelled_metric"}])),
+        )
+        self.assertIsNotNone(self.cur.fetchone()[0])
+
+    def test_another_authenticated_identity_cannot(self):
+        """
+        The guard. The function is granted to `authenticated`, so this is the only thing standing
+        between a signed-in user and a forged row in an append-only table that no application role
+        can prune -- including the four seeded demonstration personas.
+        """
+        self.claim(OTHER_PRINCIPAL)
+        with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
+            self.cur.execute(
+                "SELECT public.record_ingestion_rejection(%s::uuid, %s::jsonb)",
+                (self.device_id, json.dumps([{"metric": "Forged", "code": "unmodelled_metric"}])),
+            )
+
+    def test_an_anonymous_caller_cannot(self):
+        """
+        No claim at all -- `auth.uid()` is NULL. COALESCE in is_ingestion_caller() is what makes
+        this false rather than NULL, and a NULL there would make the IF NOT in the guard skip.
+        """
+        with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
+            self.cur.execute(
+                "SELECT public.record_ingestion_rejection(%s::uuid, %s::jsonb)",
+                (self.device_id, json.dumps([{"metric": "Anon", "code": "unmodelled_metric"}])),
+            )
 
 
 if __name__ == "__main__":
