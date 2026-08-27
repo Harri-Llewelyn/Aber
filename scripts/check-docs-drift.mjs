@@ -500,6 +500,16 @@ function edgeFunctionNames() {
       taking the DEPLOYED definition and changing one branch, for that reason. Its own self-check
       asserts an ingestion write is still recorded as 'ingestion', because this list checks that a
       redeclaration was INTENDED and cannot check that it was COMPLETE.`,
+    'public.record_ingestion_rejection': `0026 declares it with the GRANT as its only access
+      control, which was right while service_role was the only caller; 0051 replaces it with one
+      that ALSO requires the Service_Ingestor principal, because 0046 moved the daemon off that key
+      and the grant therefore had to widen to authenticated. Widening without the guard would let
+      any signed-in user forge a SCHEMA_REJECTION row into an append-only table no application role
+      can prune. THE BODY IS REPRODUCED IN FULL, and was produced by copying 0026's text rather than
+      retyping it -- the same discipline 0048 records, for the same reason. 0051's self-check
+      asserts BOTH directions in one block, since either alone passes in a state that is broken:
+      the daemon reaching it proves nothing if a stranger can too. This list can check that a
+      redeclaration was INTENDED and not that it was COMPLETE.`,
     'public.is_ingestion_caller': `0047 admits the Service_Ingestor principal OR a caller still
       presenting the service-role key; 0048 removes the second arm, which is what completes roadmap
       item 16. The transitional arm existed so that a daemon deployed before the credential swap
