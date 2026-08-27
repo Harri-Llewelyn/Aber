@@ -28,7 +28,7 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
 /**
  * The tag vocabulary (issue #62).
  *
- * THESE KEYS ARE STORED VALUES AND MUST NOT BE RENAMED. `documents.document_tag` carries no CHECK
+ * THESE KEYS ARE STORED VALUES AND MUST NOT BE RENAMED. `links.link_tag` carries no CHECK
  * constraint, so this object is the only place the vocabulary is enumerated -- which makes ADDING a
  * tag free, and makes renaming a key a silent data problem: every existing row keeps the old string
  * and falls through to Other. Labels below are display text and may be reworded at will.
@@ -96,21 +96,22 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
   // would let one keypress dismiss both.
   useEscapeKey(onClose)
 
-  // `links` here, `documents` on the wire. The endpoint, the table and the `document_tag` payload
-  // key below still carry the original name -- see roadmap item 6 in README.md, which is where that
-  // rename lives. This component is the boundary: everything a user reads says Link.
+  // `links` here AND on the wire, as of roadmap item 6. This component used to be the boundary
+  // between the two vocabularies -- Link everywhere a user could see, `documents` in the endpoint,
+  // the table and the payload key -- and 0049 removed the divergence rather than the boundary.
+  // Nothing here translates any more.
   const [links, setLinks]             = useState([])
   const [loading, setLoading]         = useState(true)
   const [showForm, setShowForm]       = useState(false)
   const [editingLink, setEditingLink] = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(null)
-  const [form, setForm]               = useState({ display_name: '', url: '', document_tag: 'other' })
+  const [form, setForm]               = useState({ display_name: '', url: '', link_tag: 'other' })
 
-  const canManage = hasPermission?.(PERMISSION_UUIDS.DOCUMENT_MANAGE) ?? false
+  const canManage = hasPermission?.(PERMISSION_UUIDS.LINK_MANAGE) ?? false
 
   const loadLinks = useCallback(() => {
     setLoading(true)
-    api.get(`/api/v1/documents?entity_type=${encodeURIComponent(entityType)}&entity_id=${encodeURIComponent(entityId)}`)
+    api.get(`/api/v1/links?entity_type=${encodeURIComponent(entityType)}&entity_id=${encodeURIComponent(entityId)}`)
       .then(d => { setLinks(d); setLoading(false) })
       .catch(() => setLoading(false))
   }, [entityType, entityId])
@@ -119,13 +120,13 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
 
   const openNew = () => {
     setEditingLink(null)
-    setForm({ display_name: '', url: '', document_tag: 'other' })
+    setForm({ display_name: '', url: '', link_tag: 'other' })
     setShowForm(true)
   }
 
   const openEdit = (doc) => {
     setEditingLink(doc)
-    setForm({ display_name: doc.display_name, url: doc.url, document_tag: doc.document_tag || 'other' })
+    setForm({ display_name: doc.display_name, url: doc.url, link_tag: doc.link_tag || 'other' })
     setShowForm(true)
   }
 
@@ -141,10 +142,10 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
 
     try {
       if (editingLink) {
-        await api.put(`/api/v1/documents/${editingLink.id}`, form)
+        await api.put(`/api/v1/links/${editingLink.id}`, form)
         showToast(`Link '${form.display_name}' updated`, 'success')
       } else {
-        await api.post('/api/v1/documents', { ...form, entity_type: entityType, entity_id: entityId })
+        await api.post('/api/v1/links', { ...form, entity_type: entityType, entity_id: entityId })
         showToast(`Link '${form.display_name}' attached`, 'success')
       }
       setShowForm(false)
@@ -156,7 +157,7 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
 
   const removeLink = async (id, name) => {
     try {
-      await api.delete(`/api/v1/documents/${id}`)
+      await api.delete(`/api/v1/links/${id}`)
       setConfirmDelete(null)
       loadLinks()
       showToast(`Link '${name}' removed`, 'success')
@@ -208,7 +209,7 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
               {/* Built from TAG_LABELS rather than written out again. The hand-written list here
                   drifted from that object the moment a tag was added to one and not the other --
                   which is how a stored tag ends up unselectable in the form that wrote it. */}
-              <select className="form-control" value={form.document_tag} onChange={e => setForm(f => ({ ...f, document_tag: e.target.value }))}>
+              <select className="form-control" value={form.link_tag} onChange={e => setForm(f => ({ ...f, link_tag: e.target.value }))}>
                 {Object.entries(TAG_LABELS).map(([value, label]) => (
                   <option key={value} value={value} title={TAG_HINTS[value]}>{label}</option>
                 ))}
@@ -216,7 +217,7 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
               {/* The chosen tag's meaning, under the control. File Repository especially needs it:
                   it is the one tag that names a destination rather than a document. */}
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                {TAG_HINTS[form.document_tag]}
+                {TAG_HINTS[form.link_tag]}
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
@@ -247,9 +248,9 @@ export function EntityLinksModal({ entityType, entityId, entityName, onClose, sh
                    <div style={{ minWidth: 0, flex: 1 }}>
                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                        <strong style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{d.display_name}</strong>
-                       <span className="badge badge-neutral" style={{ fontSize: '11px', gap: '4px' }} title={TAG_HINTS[d.document_tag] || TAG_HINTS.other}>
-                         {TAG_ICONS[d.document_tag] || <IconFileText size={12} />}
-                         {TAG_LABELS[d.document_tag] || 'Other'}
+                       <span className="badge badge-neutral" style={{ fontSize: '11px', gap: '4px' }} title={TAG_HINTS[d.link_tag] || TAG_HINTS.other}>
+                         {TAG_ICONS[d.link_tag] || <IconFileText size={12} />}
+                         {TAG_LABELS[d.link_tag] || 'Other'}
                        </span>
                        {getDomainBadgeIcon(d.url)}
                      </div>

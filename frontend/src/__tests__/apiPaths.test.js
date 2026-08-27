@@ -47,7 +47,7 @@ describe('API Path Coverage Test', () => {
     '/api/v1/quarantine',
     '/api/v1/digital-thread',
     '/api/v1/cells/some-id/digital-thread',
-    '/api/v1/documents?entity_type=cell&entity_id=123',
+    '/api/v1/links?entity_type=cell&entity_id=123',
     '/api/v1/devices/dev-123/config',
     '/api/v1/schemas',
     // Reference vocabularies. All three are read-only tables with no write policy, so a route
@@ -71,7 +71,7 @@ describe('API Path Coverage Test', () => {
     '/api/v1/cells/cell-123/restore',
     '/api/v1/quarantine/dev-123/reject',
     '/api/v1/devices/aas-export',
-    '/api/v1/documents',
+    '/api/v1/links',
     '/api/v1/schemas/validate',
     '/api/v1/schemas',
     '/api/v1/gitops/deploy-flow'
@@ -83,14 +83,14 @@ describe('API Path Coverage Test', () => {
     '/api/v1/devices/dev-123',
     '/api/v1/cells/cell-123/archive',
     '/api/v1/cells/cell-123/restore',
-    '/api/v1/documents/doc-123'
+    '/api/v1/links/doc-123'
   ];
 
   const deletePaths = [
     '/api/v1/cells/cell-123',
     '/api/v1/gateways/gw-123',
     '/api/v1/devices/dev-123',
-    '/api/v1/documents/doc-123'
+    '/api/v1/links/doc-123'
   ];
 
   it('should handle all GET path strings used across components without throwing Unhandled API path', async () => {

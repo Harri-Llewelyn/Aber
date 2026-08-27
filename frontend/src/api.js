@@ -1164,11 +1164,11 @@ const apiMethods = {
       });
     }
 
-    if (path.startsWith('/api/v1/documents')) {
+    if (path.startsWith('/api/v1/links')) {
       const url = new URL(path, window.location.origin);
       const entityType = url.searchParams.get('entity_type');
       const entityId = url.searchParams.get('entity_id');
-      let query = supabase.from('documents').select('*');
+      let query = supabase.from('links').select('*');
       if (entityType) query = query.eq('entity_type', entityType);
       if (entityId) query = query.eq('entity_id', entityId);
       const { data, error } = await query.order('created_at', { ascending: false });
@@ -1342,11 +1342,11 @@ const apiMethods = {
     if (path.startsWith('/api/v1/stats')) {
       const [qRes, docRes] = await Promise.all([
         supabase.from('devices').select('id', { count: 'exact', head: true }).eq('is_quarantined', true),
-        supabase.from('documents').select('id', { count: 'exact', head: true })
+        supabase.from('links').select('id', { count: 'exact', head: true })
       ]);
       return {
         quarantine_pending: qRes.count || 0,
-        documents_attached: docRes.count || 0
+        links_attached: docRes.count || 0
       };
     }
 
@@ -1478,13 +1478,13 @@ const apiMethods = {
       return data?.[0] || {};
     }
 
-    if (path === '/api/v1/documents') {
-      const { data, error } = await supabase.from('documents').insert({
+    if (path === '/api/v1/links') {
+      const { data, error } = await supabase.from('links').insert({
         entity_type: body.entity_type,
         entity_id: body.entity_id,
         display_name: body.display_name,
         url: body.url,
-        document_tag: body.document_tag || 'other'
+        link_tag: body.link_tag || 'other'
       }).select();
       if (error) throw error;
       return data?.[0] || {};
@@ -1715,12 +1715,12 @@ const apiMethods = {
       return data[0] || {};
     }
 
-    if (path.startsWith('/api/v1/documents/')) {
+    if (path.startsWith('/api/v1/links/')) {
       const id = path.split('/')[4];
-      const { data, error } = await supabase.from('documents').update({
+      const { data, error } = await supabase.from('links').update({
         display_name: body.display_name,
         url: body.url,
-        document_tag: body.document_tag || 'other',
+        link_tag: body.link_tag || 'other',
         updated_at: new Date().toISOString()
       }).eq('id', id).select();
       if (error) throw error;
@@ -1920,9 +1920,9 @@ const apiMethods = {
   },
 
   delete: async (path, options = {}) => {
-    if (path.startsWith('/api/v1/documents/')) {
+    if (path.startsWith('/api/v1/links/')) {
       const id = path.split('/')[4];
-      const { error } = await supabase.from('documents').delete().eq('id', id);
+      const { error } = await supabase.from('links').delete().eq('id', id);
       if (error) throw error;
       return true;
     }

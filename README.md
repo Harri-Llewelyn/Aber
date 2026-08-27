@@ -972,11 +972,17 @@ this entry was written against the wrong one once already:
 
 ### 6 · `documents` → `links`, in the schema
 
+**Built.** The table is `public.links`, its tag column is `link_tag`, the endpoint is
+`/api/v1/links` and the permission is `link:manage` — `0049_documents_become_links.sql` ·
+[`frontend/src/api.js`](frontend/src/api.js) ·
+[`EntityLinksModal.jsx`](frontend/src/components/modals/EntityLinksModal.jsx) ·
+[`docs/openapi.yaml`](docs/openapi.yaml)
+
 **Builds on:** `public.documents` (`0001`) · its four RLS policies and `idx_documents_entity` ·
 `/api/v1/documents` in [`frontend/src/api.js`](frontend/src/api.js) · the `document:manage`
 permission row (`0002`)
 
-**The UI has already made this move; the storage has not.** Issue #62 generalised the feature from
+**The UI had already made this move; the storage had not.** Issue #62 generalised the feature from
 document links to links of any kind — an asset register in EZOfficeInventory, a file repository
 where measurement data belongs, anything with a URL — and the user-facing vocabulary was renamed to
 match. The table underneath is still called `documents`, its tag column is still `document_tag`, the
@@ -998,10 +1004,23 @@ inside a UI commit would have buried a schema change where nobody reviews schema
 roles 1 and 2), and `PERMISSION_UUIDS.DOCUMENT_MANAGE` in the frontend is that same literal. Only the
 `name` string changes; renaming the constant is a frontend edit, not an authorisation change.
 
-**One thing that makes it cheaper than it looks:** `document_tag` carries no CHECK constraint. The
-tag vocabulary lives only in the frontend, so no enum has to migrate with the column — the stored
-values (`health_and_safety`, `asset_register`, …) are already the values the renamed column would
-hold.
+**One thing that made it cheaper than it looked:** `document_tag` carries no CHECK constraint. The
+tag vocabulary lives only in the frontend, so no enum had to migrate with the column — the stored
+values (`health_and_safety`, `asset_register`, …) are already the values the renamed column holds.
+The permission's UUID did not move, and `0049`'s self-check asserts that by counting what still
+references it: a new row with a new id would satisfy a name check and silently strip the capability
+from both roles.
+
+**The replay model turned a rename into a copy, which is the part worth recording.** db-init
+replays every migration on every boot in filename order, so `0001` runs first — and it had to stop
+creating `documents`, for the reason `0004` gives for `gateways.ip_address`: a baseline that still
+created the old name would recreate it, empty and fully policied, on the first boot after the
+rename and leave it beside the real table forever. But once `0001` creates `links`, the upgrade
+boot reaches `0049` with an empty `links` **already there**, and `ALTER TABLE … RENAME TO` collides
+with it. So `0049` copies the rows and drops the old table instead. Two properties fall out of
+that: no table holding data is ever dropped, and the surviving table is definitionally the one
+`0001` defines — its index, primary key, policies and grants were created under the new names and
+need no renaming, which removes four `ALTER POLICY` statements that could each have drifted.
 
 ---
 
