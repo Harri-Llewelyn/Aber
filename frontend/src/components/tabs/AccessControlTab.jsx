@@ -11,6 +11,12 @@ import {
   credentialStateLabel,
   credentialStateTone,
 } from '../../utils/credentialState'
+import {
+  BROKER_PRINCIPALS,
+  GATEWAY_ACL_PATTERN,
+  describePrincipal,
+  roleReach,
+} from '../../utils/serviceIdentities'
 
 /**
  * Access Control — broker credentials, and where they came from.
@@ -51,12 +57,24 @@ export function AccessControlTab({ showToast }) {
   const [showArchived, setShowArchived] = useState(false)
   const [bundleForGw, setBundleForGw] = useState(null)
   const [credentialForGw, setCredentialForGw] = useState(null)
+  const [principals, setPrincipals] = useState([])
+  // ITS OWN ERROR, not folded into loadError. The two reads have DIFFERENT authority -- gateway
+  // credentials accept Shopfloor_Manager, service principals are Administrator-only (0042) -- so a
+  // single error state would blame the whole page for a refusal that applies to one section.
+  const [principalError, setPrincipalError] = useState(null)
 
   const load = useCallback((isInitial = false) => {
     if (isInitial) setLoading(true)
     api.listGatewayCredentials()
       .then(d => { setRows(d); setLoadError(null); setLoading(false) })
       .catch(e => { setLoadError(e?.message || 'Could not read gateway credentials.'); setLoading(false) })
+
+    // NOT AWAITED WITH THE OTHER, and not allowed to fail the page. This section is supplementary:
+    // an Administrator who can see it should, and everyone else should still get the credential
+    // inventory rather than a blank tab.
+    api.listServicePrincipals()
+      .then(d => { setPrincipals(d); setPrincipalError(null) })
+      .catch(e => { setPrincipals([]); setPrincipalError(e?.message || 'Could not list service principals.') })
   }, [])
 
   useEffect(() => { load(true) }, [load])
@@ -240,6 +258,108 @@ export function AccessControlTab({ showToast }) {
               })}
             </tbody>
           </table>
+        </div>
+
+        {/* =========================================================================================
+            SERVICE IDENTITIES -- the second half of the page, and the half that is TWO LISTS rather
+            than one. Nothing holds an identity on both planes, which is the fact worth showing: the
+            ingestion daemon connects to the broker as `factoryplus_ingestion` and reaches the
+            database with the service-role key, which is not an identity at all.
+            ========================================================================================= */}
+        <div className="settings-preamble card" style={{ marginTop: '20px' }}>
+          <div className="settings-preamble-title">
+            <IconLock size={15} /> Service identities
+          </div>
+          <p>
+            The non-human clients that can reach this stack. They are two separate lists because they
+            live on two separate planes — a database identity is a role, a broker identity is an ACL
+            entry, and nothing here holds both.
+          </p>
+        </div>
+
+        <div className="card" style={{ marginTop: '12px', padding: '12px' }}>
+          <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '8px' }}>Database principals</div>
+          {principalError && (
+            <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+              <IconShieldAlert size={12} /> {principalError}
+            </div>
+          )}
+          {!principalError && principals.length === 0 && (
+            <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+              No machine identities are registered. Every account on this stack belongs to a person.
+            </div>
+          )}
+          {principals.map(p => {
+            const meta = describePrincipal(p.principal_id)
+            return (
+              <div key={p.principal_id} style={{ padding: '8px 0', borderTop: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <strong style={{ fontSize: '13px' }}>{meta.name}</strong>
+                  {(p.roles || []).map(r => (
+                    <span key={r} className="badge badge-neutral" style={{ fontSize: '11px' }}>{r}</span>
+                  ))}
+                  {/* STATED, NOT ASSUMED. It is the property that makes listing these safe, and
+                      0042 returns it rather than letting the page infer it from the predicate. */}
+                  {p.can_sign_in === false && (
+                    <span className="badge badge-ok" style={{ fontSize: '11px' }}>CANNOT SIGN IN</span>
+                  )}
+                </div>
+                <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px' }}>
+                  {p.principal_id}
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', maxWidth: '80ch' }}>
+                  {meta.purpose}
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', maxWidth: '80ch' }}>
+                  <strong>Reaches:</strong> {roleReach(p.roles)}
+                </div>
+                {meta.mintedBy && (
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    Token minted by <code>{meta.mintedBy}</code>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="card" style={{ marginTop: '12px', padding: '12px' }}>
+          <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '8px' }}>Broker principals</div>
+          {/* DECLARED IN THE REPOSITORY, NOT FETCHED, and the page says so rather than implying a
+              live read. Mosquitto has no API that lists its principals; check-docs-drift asserts
+              this list against mosquitto.acl. */}
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+            Read from <code>mosquitto.acl</code> in the repository — the broker has no API that lists
+            these, so they are declared alongside the file and checked against it at build time.
+          </div>
+          {BROKER_PRINCIPALS.map(bp => (
+            <div key={bp.username} style={{ padding: '8px 0', borderTop: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <strong className="mono" style={{ fontSize: '12px' }}>{bp.username}</strong>
+                <span className={`badge badge-${bp.writes ? 'pending' : 'ok'}`} style={{ fontSize: '11px' }}>
+                  {bp.writes ? 'CAN PUBLISH' : 'READ ONLY'}
+                </span>
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', maxWidth: '80ch' }}>
+                {bp.purpose}
+              </div>
+              <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                {bp.topics.join('  ·  ')}
+              </div>
+            </div>
+          ))}
+          <div style={{ padding: '8px 0', borderTop: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <strong style={{ fontSize: '12px' }}>Every gateway</strong>
+              <span className="badge badge-neutral" style={{ fontSize: '11px' }}>ACL PATTERN</span>
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', maxWidth: '80ch' }}>
+              {GATEWAY_ACL_PATTERN.purpose}
+            </div>
+            <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+              pattern {GATEWAY_ACL_PATTERN.pattern}
+            </div>
+          </div>
         </div>
       </div>
 

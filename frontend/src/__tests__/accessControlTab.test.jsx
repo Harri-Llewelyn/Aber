@@ -6,7 +6,7 @@ import { AccessControlTab } from '../components/tabs/AccessControlTab'
 import { api } from '../api'
 
 vi.mock('../api', () => ({
-  api: { listGatewayCredentials: vi.fn() }
+  api: { listGatewayCredentials: vi.fn(), listServicePrincipals: vi.fn() }
 }))
 
 // The two modals reach for browser APIs this suite has no need to stub; the tab's job is to decide
@@ -34,7 +34,18 @@ const enrolled = {
   enrolled_at: '2026-08-01T09:00:00Z', credential_revoked_at: null, issued_at: null
 }
 
-beforeEach(() => vi.clearAllMocks())
+const MCP_PRINCIPAL = {
+  principal_id: 'b0000000-0000-4000-8000-000000000001',
+  roles: ['Operator'],
+  created_at: null,
+  can_sign_in: false
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  // Defaulted so every credential-inventory test renders the whole page. Individual tests override.
+  api.listServicePrincipals.mockResolvedValue([MCP_PRINCIPAL])
+})
 
 describe('AccessControlTab', () => {
   /**
@@ -81,6 +92,46 @@ describe('AccessControlTab', () => {
 
     await waitFor(() => expect(screen.getByText(/Restore to issue/i)).toBeTruthy())
     expect(screen.queryByText(/Generate/)).toBeNull()
+  })
+
+  /**
+   * The two reads have DIFFERENT authority -- credentials accept Shopfloor_Manager, principals are
+   * Administrator-only (0042) -- so a refusal on one must not blank the other. Folding them into
+   * one error state would blame the whole page for a refusal that applies to one section.
+   */
+  it('still renders the credential inventory when the principal read is refused', async () => {
+    api.listGatewayCredentials.mockResolvedValue([provisioned])
+    api.listServicePrincipals.mockRejectedValue(new Error('insufficient privileges to list service principals'))
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText(/insufficient privileges/i)).toBeTruthy())
+    expect(screen.getAllByText('No platform record').length).toBeGreaterThan(0)
+  })
+
+  /** An unrecognised machine identity is more interesting than a recognised one, so it is listed. */
+  it('lists a principal the dashboard has no description for, rather than hiding it', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listServicePrincipals.mockResolvedValue([
+      { principal_id: 'c0000000-0000-4000-8000-000000000009', roles: [], created_at: null, can_sign_in: false }
+    ])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText(/Undocumented principal/i)).toBeTruthy())
+    expect(screen.getByText(/check which one seeded this id/i)).toBeTruthy()
+    // No role means every RLS policy refuses it -- said, rather than left as a gap.
+    expect(screen.getByText(/every RLS policy refuses it/i)).toBeTruthy()
+  })
+
+  it('shows the broker principals and marks which one can publish', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('factoryplus_ingestion')).toBeTruthy())
+    expect(screen.getByText('factoryplus_i3x')).toBeTruthy()
+    expect(screen.getByText('factoryplus_monitor')).toBeTruthy()
+    // Exactly one of the three writes, and it is the daemon.
+    expect(screen.getAllByText('CAN PUBLISH').length).toBe(1)
+    expect(screen.getAllByText('READ ONLY').length).toBe(2)
   })
 
   it('surfaces a failed read rather than rendering an empty inventory', async () => {

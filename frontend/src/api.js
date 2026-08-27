@@ -546,6 +546,25 @@ const apiMethods = {
   },
 
   /**
+   * The machine identities that can reach this stack.
+   *
+   * THROUGH AN RPC, because neither table this needs is reachable from a browser and both are
+   * unreachable on purpose: `auth.users` is GoTrue's and is not served by PostgREST at all, and
+   * `public.user_roles` is in check-docs-drift's NOT_PUBLISHED list -- "read server-side by the two
+   * userinfo functions, never by a client". `list_service_principals()` (0042) returns four columns
+   * and no secret, which is the narrow alternative to granting the browser the two tables that
+   * decide who is who.
+   *
+   * ADMINISTRATOR ONLY at the database, so a Shopfloor_Manager reaching this gets a raise rather
+   * than an empty list -- which the caller surfaces rather than rendering as "no service accounts".
+   */
+  listServicePrincipals: async () => {
+    const { data, error } = await supabase.rpc('list_service_principals');
+    if (error) throw new Error(error.message || 'Could not list service principals');
+    return data || [];
+  },
+
+  /**
    * Every gateway with what the platform knows about its broker credential.
    *
    * TWO READS, NOT A JOIN, and the second is the interesting one. `gateway_status` carries

@@ -169,7 +169,11 @@ to `ONLINE` — and `0039` adds `0041` gives a **virtual gateway a
 gates by role and refuses a physical or archived gateway, and
 `record_gateway_credential_issued()` writes the `CREDENTIAL_ISSUED` audit row attributed to the
 operator who asked — the two are separate so that a credential service that is down cannot produce
-a record of a mint that never happened, and a mint that succeeds cannot go unrecorded — and `0039`
+a record of a mint that never happened, and a mint that succeeds cannot go unrecorded — and `0042`
+adds `list_service_principals()`, the **Administrator-only read behind the Service Identities
+section**: `auth.users` is GoTrue's and is not served by PostgREST at all, and `user_roles` is
+deliberately unreachable from a browser, so the alternative to a four-column function is a broad
+grant on the two tables that decide who is who — and `0039`
 adds `digital_thread_page()`, which applies the **deleted-asset
 filter as a predicate rather than in the browser**, so the page's row budget is spent on rows
 it will actually show: hiding them afterwards had the page list four assets on a stack of
@@ -1212,12 +1216,30 @@ vocabulary should not be two separate migrations against the same column.
 
 ### 13 · An Access Control page
 
-**Partly built.** The **Access Control** tab lists every gateway with what the platform knows about
-its broker credential, and a virtual gateway can now be issued one from the dashboard —
-`0041_virtual_gateway_credential.sql` · `supabase/functions/gateway-credential` ·
+**Mostly built.** The **Access Control** tab lists every gateway with what the platform knows about
+its broker credential, a virtual gateway can be issued one from the dashboard, and the machine
+identities that can reach the stack are listed on both planes —
+`0041_virtual_gateway_credential.sql` · `0042_list_service_principals.sql` ·
+`supabase/functions/gateway-credential` ·
 [`AccessControlTab.jsx`](frontend/src/components/tabs/AccessControlTab.jsx) ·
-[`credentialState.js`](frontend/src/utils/credentialState.js). **What remains is the identity
-profiles and the audit half.**
+[`credentialState.js`](frontend/src/utils/credentialState.js) ·
+[`serviceIdentities.js`](frontend/src/utils/serviceIdentities.js). **What remains is issuing a new
+service identity from the page**, which is the part that would need the JWT secret — see the
+warning about that below, which is why it was left last rather than first.
+
+**The two planes are not one list, and showing that is most of what the section is for.** A database
+identity is an `auth.users` row that cannot sign in, holding a role; a broker identity is an entry in
+`mosquitto.acl`. Nothing holds both — the ingestion daemon connects to the broker as
+`factoryplus_ingestion` and reaches the database with the service-role key, which is not an identity
+at all. That is exactly what "**`Service_Ingestor` does not describe the current daemon**" means, and
+it is legible on the page rather than only in this paragraph.
+
+**The broker half is a literal in the frontend, checked against the file.** Mosquitto exposes no API
+that lists its principals, and the credential service is add-only by design — a LIST verb there
+would hand whoever holds one bearer token an inventory of every account on the broker. So
+`check-docs-drift.mjs` asserts the page and `mosquitto.acl` agree on the principals *and their topic
+rules*: a username that matches while its rules have diverged is the worse failure, because the page
+then states, specifically and wrongly, what a client is allowed to do.
 
 **The page cannot be an inventory of the broker, and says so rather than implying otherwise.**
 Mosquitto's accounts live in a file reachable only by `gateway-credential-service`, which is add-only

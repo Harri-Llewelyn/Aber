@@ -1073,6 +1073,108 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 11c. The Access Control page's broker list agrees with mosquitto.acl.
+//
+// WHY THIS IS A LITERAL IN THE FRONTEND AT ALL, since a hardcoded list is normally the thing to
+// avoid. There is nowhere to read it from: the ACL is a FILE mounted read-only into the broker,
+// Mosquitto exposes no API that lists its principals, and `gateway-credential-service` is add-only
+// by design -- its header forbids exactly the LIST verb that would answer this, and such a verb
+// would hand whoever holds one bearer token an inventory of every account on the broker.
+//
+// So the list is declared beside the page that renders it, and this is what keeps it true. The
+// failure it prevents is quiet in both directions: a principal added to the ACL and not here is a
+// client with broker access the access-control page does not mention, and one removed from the ACL
+// and left here is a page describing an authorisation the broker is not enforcing. Neither shows up
+// as an error anywhere.
+//
+// THE TOPIC RULES ARE COMPARED TOO, not just the usernames -- a username that matches while its
+// rules have diverged is the worse failure of the two, because the page then states, specifically
+// and wrongly, what a client is allowed to do.
+// -------------------------------------------------------------------------------------------------
+{
+  const acl = read('mosquitto.acl');
+  const ui = read('frontend/src/utils/serviceIdentities.js');
+
+  // A `user <name>` line owns every `topic` line until the next `user` or the end of the file.
+  const aclPrincipals = new Map();
+  for (const [, name, body] of acl.matchAll(/^user[ \t]+(\S+)[ \t]*$([\s\S]*?)(?=^user[ \t]|$(?![\s\S]))/gm)) {
+    aclPrincipals.set(
+      name,
+      [...body.matchAll(/^topic[ \t]+(\S+)[ \t]+(\S+)[ \t]*$/gm)].map((m) => `${m[1]} ${m[2]}`)
+    );
+  }
+
+  // WHITESPACE IS NORMALISED ON BOTH SIDES. The ACL aligns its columns with extra spaces
+  // (`topic read  spBv1.0/#`), and a check that treated that as a difference would fail on
+  // formatting while missing a real divergence in the noise.
+  const norm = (t) => t.replace(/\s+/g, ' ').trim();
+
+  const uiPrincipals = new Map(
+    [...ui.matchAll(/username:\s*'([^']+)',[\s\S]*?topics:\s*\[([^\]]*)\]/g)].map(([, name, topics]) => [
+      name,
+      [...topics.matchAll(/'([^']+)'/g)].map((m) => norm(m[1])),
+    ])
+  );
+
+  if (aclPrincipals.size === 0 || uiPrincipals.size === 0) {
+    fail(
+      'could not read the broker principals out of ' +
+        (aclPrincipals.size === 0 ? 'mosquitto.acl' : 'frontend/src/utils/serviceIdentities.js') +
+        ` (found ${aclPrincipals.size} in the ACL, ${uiPrincipals.size} on the page).\n` +
+        '      One of them changed shape, so the Access Control page is no longer being checked\n' +
+        '      against the ACL at all.'
+    );
+  } else {
+    const problems = [];
+
+    for (const [name, topics] of aclPrincipals) {
+      if (!uiPrincipals.has(name)) {
+        problems.push(`${name} is in mosquitto.acl but not on the Access Control page`);
+        continue;
+      }
+      const shown = uiPrincipals.get(name);
+      const missing = topics.map(norm).filter((t) => !shown.includes(t));
+      if (missing.length) {
+        problems.push(`${name} is granted '${missing.join("', '")}' by the ACL and the page does not show it`);
+      }
+    }
+
+    for (const name of uiPrincipals.keys()) {
+      if (!aclPrincipals.has(name)) {
+        problems.push(`${name} is on the Access Control page but not in mosquitto.acl`);
+      }
+    }
+
+    // The gateway rule is a PATTERN and not a principal -- there is no account by that name, which
+    // is precisely why adding a gateway needs a broker account and no ACL edit. Checked separately
+    // for the same reason the page renders it separately.
+    const aclPattern = acl.match(/^pattern[ \t]+(.+)$/m);
+    const uiPattern = ui.match(/pattern:\s*'([^']+)'/);
+    if (!aclPattern || !uiPattern) {
+      problems.push('the gateway ACL pattern could not be read from one of the two files');
+    } else if (norm(aclPattern[1]) !== norm(uiPattern[1])) {
+      problems.push(
+        `the gateway ACL pattern differs: the broker enforces '${norm(aclPattern[1])}' and the ` +
+          `page shows '${norm(uiPattern[1])}'`
+      );
+    }
+
+    if (problems.length) {
+      fail(
+        `the Access Control page and mosquitto.acl disagree: ${problems.join('; ')}.\n` +
+          '      A principal in the ACL and not on the page is broker access nobody can see; one on\n' +
+          '      the page and not in the ACL is an authorisation the broker is not enforcing.'
+      );
+    } else {
+      pass(
+        `the Access Control page lists all ${aclPrincipals.size} broker principals with the rules ` +
+          'mosquitto.acl grants them'
+      );
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 12. The seeded demonstrator asset agrees with provision-gateways.mjs.
 //
 // `0002_seed_data.sql` and `scripts/provision-gateways.mjs` both register the machining cell's
