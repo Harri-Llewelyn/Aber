@@ -8,6 +8,7 @@ import { useApiActivity } from './hooks/useApiActivity'
 import { useQuarantineAlerts } from './hooks/useQuarantineAlerts'
 import { clearInvalidSession, isSessionRejected } from './utils/sessionError'
 import { PERMISSION_UUIDS } from './constants'
+import AmbientPipeline from './components/common/AmbientPipeline'
 
 /*
  * THERE IS NO SIGN-UP PATH, and its absence is a decision rather than an omission.
@@ -120,6 +121,11 @@ export function tabIsVisible(tabDef, hasPermission, userRole) {
 }
 
 function AuthScreen({ onLoginSuccess, notice }) {
+  // AuthScreen owns a theme handle of its own because it renders INSTEAD of Dashboard, never
+  // beside it -- the two hook instances are never mounted at the same time and cannot diverge.
+  // Before this the toggle lived only in UserMenu, behind the login: a light-mode operator got
+  // the dark default on the one screen they see before authenticating, every single time.
+  const { theme, toggleTheme } = useTheme()
   /**
    * EMPTY, AND THEY MUST STAY EMPTY.
    *
@@ -176,8 +182,27 @@ function AuthScreen({ onLoginSuccess, notice }) {
   // typo'd variable name look correct in dark mode and fail silently in light mode; without
   // one, an unknown variable renders as an obviously-wrong inherited colour instead.
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)', padding: '20px' }}>
-      <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '32px', borderRadius: '16px', background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)' }}>
+    <div style={{ position: 'relative', display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-base)', padding: '20px', overflow: 'hidden' }}>
+      {/* Decoration, and it is allowed to fail. The canvas paints --bg-base as its own ground, so
+          a browser that gives back no 2d context leaves the page looking exactly as it did before
+          this was added rather than leaving a hole. It is aria-hidden and pointer-events:none
+          throughout, and it renders a single still frame under prefers-reduced-motion. */}
+      <AmbientPipeline theme={theme} />
+
+      {/* The theme control, ABOVE the canvas and the only interactive thing outside the card.
+          Same convention as the one in UserMenu: the label states where the theme IS and the icon
+          shows where the button GOES, which is why the icon and the word disagree on purpose. */}
+      <button
+        type="button"
+        onClick={toggleTheme}
+        className="auth-theme-toggle"
+        title={`Switch to the ${theme === 'dark' ? 'light' : 'dark'} theme`}
+        aria-label={`Theme: ${theme === 'dark' ? 'dark' : 'light'}. Switch to the ${theme === 'dark' ? 'light' : 'dark'} theme.`}
+      >
+        {theme === 'dark' ? <IconSun size={16} /> : <IconMoon size={16} />}
+      </button>
+
+      <div className="card" style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: '420px', padding: '32px', borderRadius: '16px', background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)' }}>
         <div style={{ textAlign: 'center', marginBottom: '24px' }}>
           <div style={{ display: 'inline-flex', padding: '12px', borderRadius: '12px', background: 'var(--accent-dim)', color: 'var(--accent)', marginBottom: '12px' }}>
             <IconFactory size={36} />

@@ -3759,3 +3759,49 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
   color: var(--danger-text);
   line-height: 1.45;
 }
+
+
+/* ---------------------------------------------------------------------------------------------
+   The sign-in screen's theme toggle.
+   ---------------------------------------------------------------------------------------------
+   In App.css rather than inline, unlike the rest of the sign-in screen, because it needs :hover
+   and :focus-visible and an inline style object cannot express either.
+
+   EVERY COLOUR IS A TOKEN AND NONE HAS A FALLBACK LITERAL. That is the rule authScreenTheme.test
+   enforces on this screen, and the reason is a real bug: a fallback is exactly what let a typo'd
+   variable name render correctly in dark mode and invisibly in light. An unknown token here
+   inherits something obviously wrong instead of quietly looking fine in one theme.
+
+   --bg-card and not --bg-glass for the resting fill: this button sits on the animated canvas
+   rather than on the page, and a translucent chip over moving strokes shimmers. */
+.auth-theme-toggle {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.auth-theme-toggle:hover {
+  color: var(--accent);
+  border-color: var(--border-hover);
+}
+
+/* :focus-visible, not :focus -- a mouse user pressing it should not be left with a ring, but a
+   keyboard user arriving by Tab must be able to see where they are. This is the only tab stop on
+   the screen outside the form. */
+.auth-theme-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
