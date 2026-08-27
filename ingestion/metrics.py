@@ -77,6 +77,7 @@ COUNTER_MAP = {
     # its metrics were not. Kept as separate series so a query cannot conflate them.
     "metrics_rejected_timestamp": ("acs_ingestion_timestamps_rejected_total", {}),
     "metrics_unresolved_alias": ("acs_ingestion_alias_unresolved_total", {}),
+    "metrics_rejected_schema": ("acs_ingestion_schema_rejected_total", {}),
     # The historian write path.
     "write_failures": ("acs_ingestion_write_failures_total", {}),
     "db_reconnects": ("acs_ingestion_db_reconnects_total", {}),
@@ -109,6 +110,8 @@ HELP = {
         "Metrics whose timestamp failed validation; the message itself was still processed.",
     "acs_ingestion_alias_unresolved_total":
         "Metrics carrying an alias with no known name, pending a rebirth.",
+    "acs_ingestion_schema_rejected_total":
+        "Metrics DROPPED for contradicting their device's bound schema. Non-zero only for a device set to conformance_policy=enforce (0050); this telemetry was not written and cannot be recovered.",
     "acs_ingestion_write_failures_total":
         "Historian writes that raised. Telemetry from these is lost.",
     "acs_ingestion_db_reconnects_total": "Times the historian connection was re-opened.",

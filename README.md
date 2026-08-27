@@ -696,7 +696,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Thirteen extensions, none of them speculative: every one names the code it would build on, because
+Twelve extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
@@ -706,20 +706,20 @@ substance moves into the documentation, so the presence of a number is the answe
 done?" — no entry here says `Built`, because a checklist that contains finished work is not a
 checklist. Items 6, 13 and 16 left this way and are now documented under
 [Machine identities](#machine-identities) and in
-[`supabase/README.md`](supabase/README.md#machine-identities); item 9's subject was retired the same
-way when `aas-api` shipped.
+[`supabase/README.md`](supabase/README.md#machine-identities); item 7 is documented under
+[Schema Conformance](ingestion/README.md#schema-conformance); and item 9's subject was retired the
+same way when `aas-api` shipped.
 
-**Retired numbers are not reused, and the list is therefore not contiguous.** The gaps at 6, 13 and
-16 are deliberate. Renumbering on retirement was the earlier practice and it does not survive
+**Retired numbers are not reused, and the list is therefore not contiguous.** The gaps at 6, 7, 13
+and 16 are deliberate. Renumbering on retirement was the earlier practice and it does not survive
 contact with this repository: the remaining entries are named by **48 comments** in migrations,
 scripts and components, all explaining why that code is the way it is, and shifting every number
 below a removal would silently redirect all of them without erroring. A number cited from code is an
 identifier, not a position. Where code refers to work that has since shipped, the citation names the
 documentation rather than a roadmap number.
 
-**Items 1-5 are this repository's own**, ordered by how much of each already exists. **Items 7-15
-arrive from feature requests** — 7-11 from GitHub issues
-[#67](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/67),
+**Items 1-5 are this repository's own**, ordered by how much of each already exists. **Items 8-15
+arrive from feature requests** — 8-11 from GitHub issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63),
 [#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66) and
@@ -995,45 +995,6 @@ this entry was written against the wrong one once already:
 
 ---
 
-### 7 · Enforcing the schema, not just recording the breach
-
-**Builds on:** `payload_violations()` · `modelled_types()` / `device_modelled_types()` ·
-`record_ingestion_rejection()` (`0026`) · `schemas.schema_definition` ·
-[`ingestion/test_payload_conformance.py`](ingestion/test_payload_conformance.py) ·
-[issue #67](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/67)
-
-**The issue opens by saying non-conforming payloads "pass through the ingestion layer", and the
-first half of the work it proposes is already running.** The daemon reads each device's attached
-schemas through `device_submodels`, caches them for `SCHEMA_CACHE_TTL_SECONDS`, evaluates every
-DDATA metric against them in `payload_violations()`, and writes the findings to `digital_thread`
-via `record_ingestion_rejection()` — deduplicated by `_violation_signature()`, so a device with one
-persistent fault records one finding rather than one per message. `schemas.schema_definition` is
-already a JSON Schema document: `properties`, `required`, `type`.
-
-**The real gap is that nothing is rejected**, and the code says so in as many words. The docstring
-on `SCHEMA_CACHE_TTL_SECONDS` justifies a five-minute staleness window by observing that it *"cannot
-cause a wrong DROP, because nothing is dropped for non-conformance"*. So `record_ingestion_rejection()`
-records an observation, and its name is aspirational. The second gap is depth: `modelled_types()`
-extracts a metric-name → JSON-type map and nothing else, so `enum`, `minimum`, `pattern` and
-`additionalProperties` in a stored schema are read past in silence. A real validator closes that half
-cheaply — the documents are already there and already Draft-shaped.
-
-**Two decisions have to be made first, and neither is in the issue.** The issue names **DBIRTH**;
-the code judges **DDATA**, and they are different jobs — DBIRTH declares the metric *set*
-(`extract_declared_metrics()`), while DDATA carries the values a `type` or `enum` constraint is about.
-And "validate against their declared `schema_uuid`" would mean resolving a schema *from the payload*:
-`Schema_UUID` is in `IDENTITY_METRICS`, which the daemon receives and deliberately discards under the
-stated rule that **the topic identifies the asset and a self-declared marker is not evidence**.
-Validating against the *bound* schema keeps that rule; validating against the declared one reverses it.
-
-**Enforcement is a policy change, not a library change**, and that is the part to be careful with.
-The moment a violation drops a metric, editing a schema can silence a live machine — and it does so
-through a cache with a five-minute TTL, so the effect arrives after the edit rather than with it.
-`AUDIT_PAYLOAD_REJECTIONS` exists because writing to an append-only table needed an off switch;
-dropping telemetry needs one too, and needs it per device rather than per daemon.
-
----
-
 ### 8 · The Directory's MQTT half, and the one lookup it still lacks
 
 **Builds on:** [`supabase/functions/fplus-directory/index.ts`](supabase/functions/fplus-directory/index.ts) ·
@@ -1062,8 +1023,9 @@ registry, it has no change-notify metrics, and it does not register itself with 
 because there is no ConfigDB here to register with."* The issue's first implementation step — have the
 ingestion daemon write dynamic topic bindings on NBIRTH/DBIRTH — is precisely that registry, and it
 would move the Directory from *deriving* addresses out of the enrolment record to *accumulating* them
-from what devices claim about themselves. Given §7's rule on self-declared markers, that is a trust
-decision, not a plumbing one.
+from what devices claim about themselves. Given the rule that a self-declared marker is not evidence
+-- see [Schema Conformance](ingestion/README.md#schema-conformance) -- that is a trust decision, not
+a plumbing one.
 
 **And the local-namespace caveats are load bearing.** Both `/v1/schema` and `/v1/service` return
 `namespace: "local"` with a note that these are not registered Factory+ UUIDs. Publishing the same

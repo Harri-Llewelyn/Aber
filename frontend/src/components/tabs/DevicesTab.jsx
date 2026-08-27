@@ -334,6 +334,10 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
         cell_id: form.cell_id || '',
         location_scope: form.location_scope || SCOPE_CELL,
       }
+      // Edit only, matching the control above: a device being created takes the column's own
+      // default. Sending it on create would write 'audit' explicitly, which is the same value by
+      // a longer route and makes the form look like it decided something it did not.
+      if (editing) payload.conformance_policy = form.conformance_policy || 'audit'
       if (editing) {
         await api.put(`/api/v1/devices/${editing.asset_id}`, payload)
       } else {
@@ -1211,6 +1215,55 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                 )
               })()}
             </div>
+
+            {/* Only when editing. A device being created has no schema attached yet, so the
+                control would offer a choice that cannot do anything, and the column defaults to
+                'audit' server-side anyway (0050). */}
+            {editing && (
+              <div className="form-group">
+                <label className="form-label">Schema Conformance</label>
+                <select
+                  className="form-control"
+                  value={form.conformance_policy || 'audit'}
+                  onChange={e => setForm(f => ({ ...f, conformance_policy: e.target.value }))}
+                  title="What happens when a metric contradicts this device's bound schema"
+                >
+                  <option value="audit">Audit — record the violation, keep the reading</option>
+                  <option value="enforce">Enforce — record it and DROP the reading</option>
+                </select>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                  Applies to DDATA values judged against the schemas bound to this device. Only the
+                  offending metric is affected; the rest of the message is written either way.
+                </div>
+
+                {/* THE STATE THAT LOOKS LIKE IT WORKED AND DOES NOTHING. With no schema attached
+                    the daemon has nothing to judge against, so 'enforce' is inert -- and an
+                    operator who set it would reasonably believe they had switched something on.
+                    Same instinct as the multi-submodel note above the Schema picker. */}
+                {form.conformance_policy === 'enforce'
+                  && schemasForDevice(editing, schemas).length === 0 && (
+                  <div style={{ fontSize: '11px', color: 'var(--warning-text)', marginTop: '6px' }}>
+                    This device has no schema attached, so enforcing does nothing — there is
+                    nothing to judge a value against. Attach a schema above first.
+                  </div>
+                )}
+
+                {/* THE WARNING IS SHOWN ON THE CHANGE, not on the state. Somebody reopening a
+                    device that already enforces does not need to be told again; somebody about to
+                    turn it on does, because what it discards cannot be fetched back from anywhere.
+                    Telemetry is not like a schema edit, which can be reverted. */}
+                {form.conformance_policy === 'enforce'
+                  && editing.conformance_policy !== 'enforce'
+                  && schemasForDevice(editing, schemas).length > 0 && (
+                  <div style={{ fontSize: '11px', color: 'var(--danger-text)', marginTop: '6px' }}>
+                    From the next message, a value contradicting this device's schema will not be
+                    written to the historian and cannot be recovered. The violation is still
+                    recorded in the Digital Thread. Schema changes take up to five minutes to take
+                    effect.
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* THE CONNECTION METHOD PICKER IS GONE, and it was the field most likely to be believed.
                 It offered OPC-UA, Modbus TCP and HTTP REST beside Sparkplug B as though choosing one

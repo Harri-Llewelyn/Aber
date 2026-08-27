@@ -120,6 +120,98 @@ function, which calls the atomic `public.approve_quarantined_device()` RPC.
 
 ---
 
+## Schema Conformance
+
+Every DDATA metric is evaluated against the schemas bound to its device, and what fails is recorded
+in `digital_thread` through `record_ingestion_rejection()` (`0026`). Since `0050` a device can also
+be set to **reject** what fails, rather than only report it.
+
+### `audit` and `enforce`
+
+`devices.conformance_policy` carries it, and the default is `audit`.
+
+| | `audit` (default) | `enforce` |
+| :--- | :--- | :--- |
+| Violation recorded in `digital_thread` | yes | yes |
+| Sample written to the historian | **yes** | **no**, for the offending metric |
+| Rest of the message | written | written |
+
+**Per device, not per daemon**, and that is the whole reason it is a column rather than an
+environment variable. Enforcement is a judgement about one asset's schema being trustworthy enough
+to reject against, and a fleet is not uniform: a submodel written carefully last week and a
+twenty-year-old press whose schema is a first guess do not deserve the same treatment.
+`AUDIT_PAYLOAD_REJECTIONS` remains per-daemon because it governs whether a row is written, which is
+a cost shaped like the process.
+
+Opting a device in is a deliberate act. **Devices → select a device → Edit Details → Schema
+Conformance**, which warns before it takes effect and refuses to pretend: choosing `enforce` on a
+device with no schema attached says so, because with nothing bound there is nothing to judge
+against and the setting would do nothing at all.
+
+Or directly:
+
+```sql
+UPDATE public.devices SET conformance_policy = 'enforce' WHERE sparkplug_id = 'dev…';
+```
+
+### What is judged, and against which schema
+
+**DDATA values, and only those.** DBIRTH declares the metric *set* and carries no values, so a
+`type` or `enum` constraint has nothing to bite on there — it is still recorded through
+`record_declared_metrics()` and never gates.
+
+**The BOUND schema, never the declared one.** `Schema_UUID` arrives in `IDENTITY_METRICS` and is
+deliberately discarded: the topic identifies the asset, and a self-declared marker is not evidence.
+Judging a payload against a schema the payload nominates reverses that rule, and would let a
+misbehaving device opt itself out by declaring something permissive.
+
+The reader understands `type`, `enum`, `minimum`, `maximum`, `pattern` and `additionalProperties`.
+It did not until roadmap item 7 — it read `type` alone, so the rest sat in stored schemas doing
+nothing. `exclusiveMinimum` / `exclusiveMaximum` are still **not** read: Draft 4 spells them as
+booleans modifying `minimum`, Draft 6+ as numbers replacing it, and guessing the dialect would move
+a boundary in whichever direction the guess was wrong. An unread facet reports nothing; a misread
+one rejects good telemetry.
+
+Where a device carries several submodels the constraints **union permissively** — the answer is
+what the device is *permitted* to send, so a submodel that lists no `enum` widens it to
+unconstrained, and bounds keep the widest. A per-schema check would flag a device for publishing
+what another of its own submodels accounts for.
+
+### What `enforce` deliberately will not drop
+
+- **An unmodelled metric**, unless a schema closes the set with `additionalProperties: false`. JSON
+  Schema permits unnamed properties by default, so silence is permission — and dropping on silence
+  would delete every reading from a device that gained a sensor before anyone updated its schema,
+  which is the ordinary way a fleet changes.
+- **Anything at all, when the schema could not be read.** A directory blip and "no schema is bound"
+  are the same answer, and neither is grounds for discarding a reading — the first especially,
+  since it would make our own outage look like the device's fault.
+- **A value failing a stored `pattern` that does not compile.** That fault belongs to whoever wrote
+  the schema, and charging it to the device would silence a machine because somebody typed a bad
+  regular expression. It is reported under its own code and never enforced.
+- **The rest of the message.** Only the offending metric is dropped, mirroring how an unresolved
+  alias and an out-of-window timestamp are already handled.
+
+### The delay, and why the drop is loud instead
+
+Schemas are cached for `SCHEMA_CACHE_TTL_SECONDS` (five minutes). Under `enforce` that means an
+edit can start discarding telemetry up to five minutes after somebody made it — long enough that
+the two are not obviously connected.
+
+Shortening the TTL would put a PostgREST round trip on the hottest path in the process for every
+device, so the loss is made **loud** instead:
+
+- each drop logs the device, the metric, the constraint it failed and the fact that the reading
+  cannot be recovered;
+- a per-message summary follows, naming how to switch the device back to `audit`;
+- `acs_ingestion_schema_rejected_total` counts it, beside `acs_ingestion_metrics_written_total`.
+
+A metric dropped this way is still recorded in `digital_thread`, and that row is then the **only**
+remaining evidence the device sent anything — which is why enforcement does not switch recording
+off, and why `conformance_policy` has no third value that would.
+
+---
+
 ## TimescaleDB Telemetry Mapping
 
 | Sparkplug value | Column |

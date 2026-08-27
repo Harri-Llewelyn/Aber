@@ -418,6 +418,152 @@ class TestTransactionSemantics(BatchingTestCase):
         self.assertEqual(self.batch_calls(), [])
         self.assertEqual(ingestion.counter_snapshot().get("dropped_db_unavailable"), 1)
 
+# =================================================================================================
+# Schema enforcement (roadmap item 7, migration 0050)
+#
+# The half that can DESTROY DATA, so these drive the whole of process_ddata and assert on what
+# reached execute_values -- not on the validator, which is unit-tested next door. A metric that is
+# dropped here was never written and cannot be recovered from anywhere.
+# =================================================================================================
+class SchemaEnforcementTestCase(BatchingTestCase):
+
+    def setUp(self):
+        super().setUp()
+        self._real_constraints = ingestion.device_modelled_constraints
+        # A bound schema: TEMPERATURE is a number between 0 and 100, MODE is one of two strings.
+        self.schema = ingestion.ModelledSchema({
+            "Systems/TEMPERATURE": ingestion.MetricConstraint(
+                types=frozenset({"number"}), minimum=0.0, maximum=100.0),
+            "Controller/MODE": ingestion.MetricConstraint(
+                types=frozenset({"string"}), enum=frozenset({"AUTO", "MANUAL"})),
+        }, closed=False)
+        ingestion.device_modelled_constraints = lambda uuid: self.schema
+
+    def tearDown(self):
+        ingestion.device_modelled_constraints = self._real_constraints
+        super().tearDown()
+
+    def enforce(self):
+        self.device["conformance_policy"] = "enforce"
+
+    def names(self):
+        """The metric name of every row that reached the historian."""
+        return [r[2] for r in self.rows()]
+
+    # -- the default, which must not have changed ---------------------------------------------
+    def test_audit_is_the_default_and_writes_a_violating_metric_anyway(self):
+        """
+        THE PROPERTY THE WHOLE FEATURE IS BUILT AROUND NOT BREAKING. Everything shipped before
+        item 7 behaves this way, and a device that nobody opted in must keep behaving this way.
+        """
+        self.ingest(Payload([Metric("Systems/TEMPERATURE", double=999.0)]))
+        self.assertEqual(self.names(), ["Systems/TEMPERATURE"])
+        self.assertIsNone(ingestion.counter_snapshot().get("metrics_rejected_schema"))
+
+    def test_a_device_with_no_policy_field_at_all_is_not_enforced(self):
+        """A row cached before 0050 added the column. Absent must read as 'audit', not as enforce."""
+        self.device.pop("conformance_policy", None)
+        self.ingest(Payload([Metric("Systems/TEMPERATURE", double=999.0)]))
+        self.assertEqual(self.names(), ["Systems/TEMPERATURE"])
+
+    # -- enforcement --------------------------------------------------------------------------
+    def test_an_out_of_range_value_is_dropped_and_its_siblings_are_written(self):
+        """
+        The offending metric only. Mirrors how an out-of-window timestamp is already handled:
+        dropping the message would discard readings that conform perfectly well.
+        """
+        self.enforce()
+        self.ingest(Payload([
+            Metric("Systems/TEMPERATURE", double=999.0),
+            Metric("Controller/MODE", string="AUTO"),
+        ]))
+        self.assertEqual(self.names(), ["Controller/MODE"])
+        self.assertEqual(ingestion.counter_snapshot().get("metrics_rejected_schema"), 1)
+
+    def test_a_conforming_value_is_written_under_enforcement(self):
+        self.enforce()
+        self.ingest(Payload([Metric("Systems/TEMPERATURE", double=50.0)]))
+        self.assertEqual(self.names(), ["Systems/TEMPERATURE"])
+        self.assertIsNone(ingestion.counter_snapshot().get("metrics_rejected_schema"))
+
+    def test_a_boundary_value_is_written(self):
+        """`minimum` is inclusive. The setpoint a machine sits at is the value it reports most."""
+        self.enforce()
+        self.ingest(Payload([Metric("Systems/TEMPERATURE", double=0.0)]))
+        self.assertEqual(self.names(), ["Systems/TEMPERATURE"])
+
+    def test_an_enum_violation_is_dropped(self):
+        self.enforce()
+        self.ingest(Payload([Metric("Controller/MODE", string="MELTING")]))
+        self.assertEqual(self.names(), [])
+        self.assertEqual(ingestion.counter_snapshot().get("metrics_rejected_schema"), 1)
+
+    def test_a_type_violation_is_dropped(self):
+        self.enforce()
+        self.ingest(Payload([Metric("Systems/TEMPERATURE", string="hot")]))
+        self.assertEqual(self.names(), [])
+
+    # -- what enforcement must NOT drop --------------------------------------------------------
+    def test_an_unmodelled_metric_survives_an_open_schema(self):
+        """
+        JSON Schema permits unnamed properties by default, so silence is permission. Dropping on
+        silence would delete every reading from a device that gained a sensor before anyone
+        updated its schema -- which is the ordinary way a fleet changes.
+        """
+        self.enforce()
+        self.ingest(Payload([Metric("Newly/Added", double=1.0)]))
+        self.assertEqual(self.names(), ["Newly/Added"])
+        self.assertIsNone(ingestion.counter_snapshot().get("metrics_rejected_schema"))
+
+    def test_an_unmodelled_metric_is_dropped_once_the_schema_closes_the_set(self):
+        self.enforce()
+        self.schema = ingestion.ModelledSchema(self.schema.metrics, closed=True)
+        self.ingest(Payload([Metric("Newly/Added", double=1.0)]))
+        self.assertEqual(self.names(), [])
+        self.assertEqual(ingestion.counter_snapshot().get("metrics_rejected_schema"), 1)
+
+    def test_an_unreadable_schema_enforces_nothing(self):
+        """
+        device_modelled_constraints() returns None both when nothing is bound and when the
+        directory blinked. Neither is grounds for discarding a reading -- the second especially,
+        since it would make our own outage look like the device's fault.
+        """
+        self.enforce()
+        ingestion.device_modelled_constraints = lambda uuid: None
+        self.ingest(Payload([Metric("Systems/TEMPERATURE", double=999.0)]))
+        self.assertEqual(self.names(), ["Systems/TEMPERATURE"])
+
+    def test_an_invalid_stored_pattern_never_drops(self):
+        """The fault is the schema author's. A bad regex must not silence a healthy machine."""
+        self.enforce()
+        self.schema = ingestion.ModelledSchema({
+            "Batch/ID": ingestion.MetricConstraint(
+                types=frozenset({"string"}), pattern="([unclosed"),
+        }, closed=True)
+        self.ingest(Payload([Metric("Batch/ID", string="B1234")]))
+        self.assertEqual(self.names(), ["Batch/ID"])
+        self.assertIsNone(ingestion.counter_snapshot().get("metrics_rejected_schema"))
+
+    def test_a_dropped_metric_is_still_reported_as_a_violation(self):
+        """
+        Enforcement must not cost the audit trail. The metric is gone from the historian, so the
+        digital_thread row is the ONLY remaining evidence that the device sent anything at all.
+        """
+        self.enforce()
+        recorded = []
+        real = ingestion.record_payload_violations
+        ingestion.record_payload_violations = lambda d, v, t: recorded.extend(v)
+        try:
+            self.ingest(Payload([Metric("Systems/TEMPERATURE", double=999.0)]))
+        finally:
+            ingestion.record_payload_violations = real
+
+        self.assertEqual(len(recorded), 1)
+        self.assertEqual(recorded[0]["metric"], "Systems/TEMPERATURE")
+        self.assertEqual(recorded[0]["code"], "above_maximum")
+        self.assertTrue(recorded[0]["dropped"])
+
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
