@@ -79,6 +79,10 @@ spec:
               value: {{ .Values.supabaseStorage.fileSizeLimit | int64 | quote }}
             - name: GATEWAY_BACKUP_BUCKET
               value: {{ .Values.supabaseStorage.gatewayBackupBucket | quote }}
+            - name: CAPTURE_BUCKET
+              value: {{ .Values.supabaseStorage.captureBucket | quote }}
+            - name: CAPTURE_FILE_SIZE_LIMIT
+              value: {{ .Values.supabaseStorage.captureFileSizeLimit | quote }}
             - name: GATEWAY_BACKUP_FILE_SIZE_LIMIT
               {{- /* int64 first, for the same reason as the limit above -- `quote` alone renders
                      5242880 as "5.24288e+06", which parseInt reads as 5. */}}

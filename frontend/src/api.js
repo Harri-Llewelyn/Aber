@@ -372,6 +372,31 @@ export const MODEL_3D_BUCKET = readSetting('VITE_MODEL_3D_BUCKET', 'asset-3d-mod
 export const GATEWAY_BACKUP_BUCKET = readSetting('VITE_GATEWAY_BACKUP_BUCKET', 'gateway-backups');
 
 /**
+ * Broker captures -- recorded Sparkplug traffic, for playback through `ingestion/capture.py`.
+ *
+ * PRIVATE, and the argument is stronger than for the bucket above rather than weaker. A flows.json
+ * describes what the edge is CONFIGURED to do; a capture is a recording of what it actually said --
+ * every device id that spoke in the window, every metric name, and the values.
+ *
+ * Objects live under `<sparkplug_id>/` of the gateway a capture plays back AS, which is never the
+ * one it was recorded from: mosquitto.acl pins the topic's edge-node segment to the connecting
+ * username, so playback always rewrites captured identities onto one gateway's own assets. That
+ * prefix is enforced by RLS (supabase/storage-policies.sql); the paths here follow the rule and do
+ * not implement it.
+ */
+export const CAPTURE_BUCKET = readSetting('VITE_CAPTURE_BUCKET', 'broker-captures');
+
+/**
+ * The capture-file version this stack reads.
+ *
+ * MIRRORS `CAPTURE_VERSION` in ingestion/capture.py, which is the authority. Duplicated rather than
+ * derived because there is no import path from Python into the bundle -- and checked here so a
+ * capture the tool would refuse is refused at upload instead of at playback, which is where the
+ * mistake is furthest from its cause.
+ */
+export const CAPTURE_VERSION = 1;
+
+/**
  * The filename a server offered in Content-Disposition, or null.
  *
  * READ FROM THE HEADER rather than composed here, because the server already decided it -- it knows
@@ -384,6 +409,27 @@ export const GATEWAY_BACKUP_BUCKET = readSetting('VITE_GATEWAY_BACKUP_BUCKET', '
 export function filenameFromDisposition(header) {
   const match = /filename="([^"]+)"/i.exec(header || '');
   return match ? match[1] : null;
+}
+
+/**
+ * `<sparkplug_id>/<iso-timestamp>-<label>.capture.json`.
+ *
+ * The timestamp leads for the same reason it does for a flow backup -- the name sorts
+ * chronologically, so `list()` ordered by name is ordered by age without reading metadata.
+ *
+ * THE LABEL IS SLUGGED RATHER THAN TRUSTED. It comes from the uploaded filename, and an operator
+ * naming a capture "morning shift / line 2" would otherwise put a `/` in the key, which storage
+ * reads as a folder separator -- silently filing the object one level deeper, outside the prefix
+ * the RLS policy checks, where the insert is then refused for a reason the name does not suggest.
+ */
+export function capturePath(sparkplugId, label, when = new Date()) {
+  const stamp = when.toISOString().replace(/[:.]/g, '-');
+  const slug = String(label || 'capture')
+    .replace(/\.capture\.json$|\.json$/i, '')
+    .replace(/[^A-Za-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48) || 'capture';
+  return `${sparkplugId}/${stamp}-${slug}.capture.json`;
 }
 
 /** `<sparkplug_id>/<iso-timestamp>-flows.json`, sortable by name so the newest is last. */
@@ -786,6 +832,107 @@ const apiMethods = {
     if (error) {
       if (/row-level security|Unauthorized/i.test(error.message || '')) {
         throw new Error('You do not have permission to delete backups.');
+      }
+      throw new Error(error.message || 'Delete failed');
+    }
+  },
+
+  /**
+   * Captures stored against one gateway, newest first.
+   *
+   * Same empty-list caveat as listGatewayBackups: storage-api applies the SELECT policy and returns
+   * an EMPTY ARRAY to an unauthorised caller rather than an error, so the UI must decide what to
+   * show from the caller's role and never from the length of this.
+   */
+  listCaptures: async (sparkplugId) => {
+    const { data, error } = await supabase.storage
+      .from(CAPTURE_BUCKET)
+      .list(sparkplugId, { limit: 100, sortBy: { column: 'name', order: 'desc' } });
+
+    if (error) throw new Error(error.message || 'Could not list captures');
+    return (data || [])
+      .filter(o => o.name && !o.name.startsWith('.'))
+      .map(o => ({
+        name: o.name,
+        path: `${sparkplugId}/${o.name}`,
+        size: o.metadata?.size ?? null,
+        createdAt: o.created_at || o.updated_at || null
+      }));
+  },
+
+  /**
+   * Upload a capture file.
+   *
+   * VALIDATED AS A CAPTURE BEFORE IT IS SENT, not merely as JSON. The bucket accepts a handful of
+   * JSON-ish MIME types because browsers report a hand-picked .json inconsistently, so the type is
+   * close to no check at all -- and a file that turns out not to be a capture is discovered when
+   * somebody tries to PLAY it, which is both the worst moment and the one furthest from the
+   * mistake.
+   *
+   * The version is checked too, and refused rather than accepted hopefully: `capture.py play`
+   * refuses a version it does not know, so storing one would be filing something the tool on the
+   * other side will not read.
+   */
+  uploadCapture: async (sparkplugId, file) => {
+    const text = await file.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error(`"${file.name}" is not valid JSON. Record one with: python ingestion/capture.py record --out <file>`);
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('A capture is a JSON object. This file is not one.');
+    }
+    if (parsed.acs_capture_version === undefined) {
+      // The likeliest wrong file in this dialog by a distance, since both are JSON and both are
+      // things an engineer downloads from this same panel.
+      if (Array.isArray(parsed)) {
+        throw new Error('That looks like a Node-RED flow export, not a capture.');
+      }
+      throw new Error('That file carries no acs_capture_version, so it is not a broker capture.');
+    }
+    if (parsed.acs_capture_version !== CAPTURE_VERSION) {
+      throw new Error(
+        `That capture is version ${parsed.acs_capture_version} and this stack reads version ${CAPTURE_VERSION}. ` +
+        'capture.py refuses a version it does not know rather than guessing at the difference.'
+      );
+    }
+    if (!Array.isArray(parsed.messages) || parsed.messages.length === 0) {
+      throw new Error('That capture contains no messages, so there would be nothing to play back.');
+    }
+
+    const path = capturePath(sparkplugId, file.name);
+    const { error } = await supabase.storage
+      .from(CAPTURE_BUCKET)
+      // upsert FALSE: the path carries a timestamp, so every upload is a new file and a
+      // double-click cannot overwrite the previous one.
+      .upload(path, file, { upsert: false, contentType: 'application/json' });
+
+    if (error) {
+      if (/row-level security|Unauthorized/i.test(error.message || '')) {
+        throw new Error('You do not have permission to upload a capture for this gateway.');
+      }
+      if (/exceeded the maximum allowed size|Payload too large/i.test(error.message || '')) {
+        throw new Error('That capture is over the bucket limit. Record a shorter window.');
+      }
+      throw new Error(error.message || 'Upload failed');
+    }
+    return { path, messages: parsed.messages.length };
+  },
+
+  /** A short-lived signed URL. Signed because the bucket is private -- there is no public URL. */
+  captureUrl: async (path) => {
+    const { data, error } = await supabase.storage.from(CAPTURE_BUCKET).createSignedUrl(path, 60);
+    if (error) throw new Error(error.message || 'Could not create a download link');
+    return data.signedUrl;
+  },
+
+  deleteCapture: async (path) => {
+    const { error } = await supabase.storage.from(CAPTURE_BUCKET).remove([path]);
+    if (error) {
+      if (/row-level security|Unauthorized/i.test(error.message || '')) {
+        throw new Error('You do not have permission to delete captures.');
       }
       throw new Error(error.message || 'Delete failed');
     }

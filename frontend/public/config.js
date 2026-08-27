@@ -29,9 +29,10 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   // Grafana as the BROWSER reaches it, for the "View in Grafana" links on active alerts. Same
   // origin as GRAFANA_PUBLIC_URL / GF_SERVER_ROOT_URL on the server side.
   VITE_GRAFANA_URL: '',
-  // Storage buckets, as named by scripts/storage-init.mjs (STORAGE_BUCKET and
-  // GATEWAY_BACKUP_BUCKET). Blank falls through to the defaults in src/api.js, which are the
-  // same two names -- so a deployment only sets these if it renamed a bucket.
+  // Storage buckets, as named by scripts/storage-init.mjs (STORAGE_BUCKET, GATEWAY_BACKUP_BUCKET
+  // and CAPTURE_BUCKET). Blank falls through to the defaults in src/api.js, which are the same
+  // three names -- so a deployment only sets these if it renamed a bucket.
   VITE_MODEL_3D_BUCKET: '',
   VITE_GATEWAY_BACKUP_BUCKET: '',
+  VITE_CAPTURE_BUCKET: '',
 };

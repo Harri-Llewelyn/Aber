@@ -330,15 +330,41 @@ work".
 the readings are real. A physical appliance replaying a capture is `is_virtual = false`,
 `is_simulated = true`.
 
-### Captures are local files
+### Where captures are kept
 
-There is no capture bucket. `gateway-backups` is the obvious precedent — private, size-capped,
-MIME-restricted, confined to `<sparkplug_id>/` — but its clients hold a **user session**: uploads
-come from an Administrator's browser or from the gateway-credential service. `capture.py` runs on a
-host with `.env` and no session, so putting captures in Storage would mean either handing a CLI the
-service-role key, which `0046` exists to stop, or building the upload as a frontend feature. Neither
-is a consequence of recording traffic, so a capture stays a file on disk until somebody wants the
-sharing badly enough to build the UI half.
+`capture.py` writes a file, and the file is enough — the three things above all work with one on
+disk. To share a capture, or to keep the only copy of a fault off somebody's laptop, there is the
+**`broker-captures`** bucket and a panel on the gateway's detail drawer in **Gateways**.
+
+**The prefix is the gateway a capture plays back AS, not the one it was recorded from**, and those
+are different by construction: playback rewrites captured identities onto one gateway's own assets,
+so the target is the only thing about a capture that is a fact rather than a guess. RLS enforces the
+prefix, exactly as it does for `gateway-backups`.
+
+**Uploading is a browser act, not a CLI one, and that is a consequence rather than a preference.**
+Storage authorises through a *user session*; `capture.py` runs on a host with `.env` and no session.
+Giving the CLI upload rights would mean handing it the service-role key, which `0046` exists to stop.
+So the recorder writes a file and a person files it — `record` → drop it on the panel.
+
+| | read | upload / delete |
+| :--- | :--- | :--- |
+| Administrator, Shopfloor_Manager | yes | yes |
+| Auditor | yes | **no** — a read-only role that can remove evidence is not one |
+| Operator | no | no |
+
+**The upload checks that the file is a capture**, not merely that it is JSON — `acs_capture_version`
+present, matching the version this stack reads, and a non-empty `messages` array. The bucket has to
+accept several JSON-ish MIME types because browsers report a hand-picked `.json` inconsistently, so
+the type is close to no check at all, and a wrong file is otherwise discovered when somebody tries to
+*play* it: the worst moment, and the furthest from the mistake.
+
+**25 MiB**, sized from the traffic rather than picked. At the fleet's measured 0.95 msg/s a full
+working day fits; what it refuses is a capture taken at the ingestion ceiling, which is a load-test
+artefact rather than something anybody keeps.
+
+**A capture names devices that are not the gateway it is filed under**, because it records whatever
+was on the wire. That is not a leak across the prefix rule — every role that can read the bucket can
+already enumerate the fleet through the directory — but it is why nobody below them can read it.
 
 ### Configuration
 
@@ -346,6 +372,12 @@ sharing badly enough to build the UI half.
 | :--- | :--- | :--- |
 | `MQTT_CAPTURE_USER` / `MQTT_CAPTURE_PASSWORD` | `record` | falls back to `MQTT_INGESTION_*` |
 | `MQTT_PLAYBACK_USER` / `MQTT_PLAYBACK_PASSWORD` | `play` | none — must be set |
+| `CAPTURE_BUCKET` | `storage-init`, the dashboard | `broker-captures` |
+| `CAPTURE_FILE_SIZE_LIMIT` | `storage-init` | `26214400` (25 MiB) |
+
+Renaming the bucket means changing `supabase/storage-policies.sql` too. A bucket with no policies is
+invisible to every browser-facing role and a policy naming a bucket that does not exist is dead text
+— neither errors.
 
 `record` defaults to the ingestion principal because recording is a read: `mosquitto.acl` grants it
 `read spBv1.0/#` and no asset write at all, so a mistyped subcommand cannot publish. `play` has no

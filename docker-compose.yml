@@ -558,6 +558,10 @@ services:
       # neither errors, so the two files are kept in step by hand.
       GATEWAY_BACKUP_BUCKET: ${GATEWAY_BACKUP_BUCKET:-gateway-backups}
       GATEWAY_BACKUP_FILE_SIZE_LIMIT: ${GATEWAY_BACKUP_FILE_SIZE_LIMIT:-5242880}
+      # Broker captures. Private, under <sparkplug_id>/ of the gateway they play back as; 25 MiB
+      # because a capture is a recording of traffic rather than a description of configuration.
+      CAPTURE_BUCKET: ${CAPTURE_BUCKET:-broker-captures}
+      CAPTURE_FILE_SIZE_LIMIT: ${CAPTURE_FILE_SIZE_LIMIT:-26214400}
     volumes:
       - ./scripts/storage-init.mjs:/app/storage-init.mjs:ro
     command: ["node", "/app/storage-init.mjs"]
@@ -1284,6 +1288,7 @@ services:
         # storage-init.mjs does, so the two agree without either being set.
         VITE_MODEL_3D_BUCKET: ${STORAGE_BUCKET:-asset-3d-models}
         VITE_GATEWAY_BACKUP_BUCKET: ${GATEWAY_BACKUP_BUCKET:-gateway-backups}
+        VITE_CAPTURE_BUCKET: ${CAPTURE_BUCKET:-broker-captures}
         # The version the account menu reports (issue #57). Compose cannot run a command, and this
         # build's context is ./frontend so there is no .git inside it either -- so labelling a
         # Compose build means passing the value in:

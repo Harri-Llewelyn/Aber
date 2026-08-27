@@ -23,6 +23,7 @@ import { EntityLinksModal } from '../modals/EntityLinksModal'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
 import { GatewayCredentialModal } from '../modals/GatewayCredentialModal'
 import { FlowBackupUploader } from '../common/FlowBackupUploader'
+import { CaptureLibrary } from '../common/CaptureLibrary'
 import {
   IconRadio,
   IconPlus,
@@ -893,6 +894,26 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             {!selected.is_archived && (
               <div style={{ marginTop: '14px' }}>
                 <FlowBackupUploader
+                  gateway={selected}
+                  canRead={canReadBackups}
+                  canManage={canManageBackups}
+                  showToast={showToast}
+                />
+              </div>
+            )}
+
+            {/* SAME ROLE GATES AS THE FLOW BACKUPS ABOVE, because the two buckets carry the same
+                storage policies -- read for Administrator, Shopfloor_Manager and Auditor, write for
+                the first two. Reusing the flags rather than adding a second pair keeps the UI from
+                disagreeing with RLS in one panel and not the other.
+
+                SHOWN FOR VIRTUAL GATEWAYS TOO, unlike the flow backups. A virtual gateway has no
+                appliance and therefore no flow of its own to lose -- but it is a perfectly good
+                playback target, and arguably the best one, since nothing else is publishing under
+                its edge node to collide with a capture's sequence numbers. */}
+            {!selected.is_archived && (
+              <div style={{ marginTop: '14px' }}>
+                <CaptureLibrary
                   gateway={selected}
                   canRead={canReadBackups}
                   canManage={canManageBackups}
