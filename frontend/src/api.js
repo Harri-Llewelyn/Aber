@@ -1840,6 +1840,11 @@ const apiMethods = {
       if ('description' in body) patch.description = emptyToNull(body.description);
       if ('connection_method' in body) patch.connection_method = emptyToNull(body.connection_method);
       if ('schema_id' in body) patch.schema_id = emptyToNull(body.schema_id);
+      // Not emptyToNull: the column is NOT NULL with a default of 'audit' (0050), so writing NULL
+      // would be rejected by the database rather than read as "leave it alone". An absent key is
+      // how the caller says that, and the CHECK constraint refuses anything outside the two
+      // values -- a typo here fails loudly instead of silently reading as 'not enforce'.
+      if ('conformance_policy' in body) patch.conformance_policy = body.conformance_policy;
       if ('active_gateway_id' in body || 'gateway_id' in body) {
         patch.gateway_id = gatewayIdFrom(body);
       }

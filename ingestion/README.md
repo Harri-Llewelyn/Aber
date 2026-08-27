@@ -143,7 +143,12 @@ twenty-year-old press whose schema is a first guess do not deserve the same trea
 `AUDIT_PAYLOAD_REJECTIONS` remains per-daemon because it governs whether a row is written, which is
 a cost shaped like the process.
 
-Opting a device in is a deliberate act:
+Opting a device in is a deliberate act. **Devices → select a device → Edit Details → Schema
+Conformance**, which warns before it takes effect and refuses to pretend: choosing `enforce` on a
+device with no schema attached says so, because with nothing bound there is nothing to judge
+against and the setting would do nothing at all.
+
+Or directly:
 
 ```sql
 UPDATE public.devices SET conformance_policy = 'enforce' WHERE sparkplug_id = 'dev…';
