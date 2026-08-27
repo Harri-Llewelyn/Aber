@@ -114,6 +114,25 @@ export const TABS = [
  * be sent with curl, and what refuses it is the RLS policy. Nothing here is a security control,
  * and treating it as one is how a UI gate ends up being the ONLY gate.
  */
+/**
+ * Which density band the top bar is in, from the number of tabs this session can see.
+ *
+ * NAMED AND EXPORTED SO IT CAN BE TESTED, because the case it exists for does not exist yet: the
+ * `tight` band is for twelve tabs and there are eleven. Reading it out of the rendered DOM would
+ * mean it could only be checked once a twelfth page shipped -- which is the moment it starts being
+ * relied upon and the worst moment to discover the threshold was wrong.
+ *
+ * The bands are measured; the arithmetic is in App.css beside the rules that use them. 11 tabs fit
+ * at 1920 and must not start abbreviating; 12 do not and must.
+ */
+export function navDensity(visibleTabCount) {
+  if (visibleTabCount >= 12) return 'tight'
+  if (visibleTabCount >= 10) return 'compact'
+  // undefined rather than a third name: no attribute at all means no rule matches, which is what
+  // an Operator seeing eight tabs should get at every width the existing ladder already handles.
+  return undefined
+}
+
 export function tabIsVisible(tabDef, hasPermission, userRole) {
   if (tabDef.role && userRole !== tabDef.role) return false
   if (!tabDef.permission) return true
@@ -523,6 +542,10 @@ function Dashboard({ session, onSignOut }) {
 
   const persona = session?.user?.email || 'Administrator'
 
+  // Computed once and used twice: the nav renders it and the header measures it. Filtering in
+  // both places would let the bar's declared density disagree with the tabs actually in it.
+  const navTabs = TABS.filter(t => tabIsVisible(t, hasPermission, userRole))
+
   return (
     <div className="app-shell">
       {/*
@@ -533,24 +556,56 @@ function Dashboard({ session, onSignOut }) {
         block in App.css. Every tab therefore carries a `title` with its full name at all times,
         because below that width the title is the only thing naming the page.
       */}
-      <header className="topbar">
+      {/* HOW MANY TABS THIS SESSION SEES IS NOT A CSS FACT, and that is the whole reason for this
+          attribute. The nav is 8 tabs for an Operator and 11 for an Administrator, so a media
+          query tuned for the crowded case would strip the brand from somebody who had room for it
+          all along. React knows the count; CSS does not, and cannot be told any other way.
+
+          TWO BANDS AND NOT A BOOLEAN, because the widths differ by about 200px and one threshold
+          would be wrong for one of them. 11 tabs at 1920 fits today -- see the screenshot in the
+          commit -- and must not start abbreviating; 12 does not fit and must. The bands are
+          measured rather than guessed: the nav is rigid and the two side groups split what is
+          left, so brand space is (viewport - 72px of padding and gaps - nav width) / 2, against a
+          brand that wants ~290px. */}
+      <header
+        className="topbar"
+        data-nav-dense={navDensity(navTabs.length)}
+      >
         <div className="topbar-brand">
           <div className="brand-icon" title="ACS Cymru Platform Logo"><IconFactory size={18} /></div>
           <div className="brand-text">
             {/* Titled because .brand-name truncates: it is the region that yields space when the
-                nav and the session controls have taken theirs. */}
-            <div className="brand-name" title="AMRC Connectivity Stack - Cymru">AMRC Connectivity Stack - Cymru</div>
+                nav and the session controls have taken theirs.
+
+                TWO SPELLINGS, ONE SHOWN, and the measurement behind that is unobvious. The two
+                lines are nearly the same width -- the wordmark ~242px against the strapline
+                ~251px -- and this is a stacked block, so the box is as wide as the WIDER of them.
+                Hiding the strapline therefore reclaims about nine pixels rather than the two
+                hundred it looks like it should. The line that has to give is the wordmark, and it
+                gives by getting shorter rather than by disappearing.
+
+                `title` carries the full name at every step, and the short form is hidden from
+                assistive technology, so the accessible name never changes with the viewport. */}
+            <div className="brand-name" title="AMRC Connectivity Stack - Cymru">
+              <span className="brand-name-full">AMRC Connectivity Stack - Cymru</span>
+              <span className="brand-name-short" aria-hidden="true">ACS Cymru</span>
+            </div>
             <div className="brand-sub">Shopfloor to Digital Twin Pipeline</div>
           </div>
         </div>
 
+        {/* aria-label on each tab, and not only `title`, because the label is display:none at the
+            narrowest step of the ladder. A `title` is a weak accessible name -- some screen
+            readers ignore it when another source is present -- and an icon-only control whose
+            name lives in a tooltip has no name at all on a touch panel. */}
         <nav className="topbar-nav" aria-label="Primary">
-          {TABS.filter(t => tabIsVisible(t, hasPermission, userRole)).map(t => (
+          {navTabs.map(t => (
             <button
               key={t.id}
               className={`nav-tab ${tab === t.id ? 'active' : ''}`}
               onClick={() => handleNavClick(t.id)}
               title={`Navigate to ${t.label} page`}
+              aria-label={t.label}
               aria-current={tab === t.id ? 'page' : undefined}
             >
               <span className="tab-icon">{t.icon}</span>

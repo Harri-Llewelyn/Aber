@@ -296,6 +296,10 @@ html, body, #root {
 
 /* Truncates rather than wrapping or pushing: the bar is a fixed 52px, so a second line would be
    clipped mid-glyph. The element carries a `title` in App.jsx, so the full name stays reachable. */
+/* Two spellings of the wordmark, one shown. See the density ladder below for why the SHORT one
+   is the lever rather than the strapline. */
+.brand-name-short { display: none; }
+
 .brand-name {
   font-size: 14px;
   font-weight: 700;
@@ -540,6 +544,50 @@ html, body, #root {
    omission. It used to shed the user's own name at 1600px and keep its role badge below that. It is
    now a 28px circle at every width, so there is nothing left in it to drop -- the declutter did at
    every viewport what this block used to do only at narrow ones. */
+/* ---------------------------------------------------------------------------------------------
+   THE DENSITY BAND, WHICH THE WIDTH BANDS BELOW CANNOT EXPRESS.
+   ---------------------------------------------------------------------------------------------
+   The nav is `flex: 0 0 auto` and the brand and the session controls are each `flex: 1 1 0`, so
+   the nav takes what it needs and the two side groups split what is left -- equally, which is what
+   centres the bar. Brand space is therefore
+
+       (viewport - 72px of padding and gaps - nav width) / 2
+
+   against a brand that wants about 290px. That denominator is why the bar runs out of room sooner
+   than it looks like it should: the session controls need only ~140px but are handed the same
+   share as the brand, so the brand is clipped while space sits unused on the right. Fixing THAT by
+   letting the right group size to its content is possible and was rejected -- it un-centres the
+   nav for every user, including the Operator who sees 8 tabs and never had a problem.
+
+   THE NUMBERS, at 14px Outfit:
+
+     11 tabs  nav ~1250px  brand gets ~298px at 1920  -> fits, and does today
+     12 tabs  nav ~1360px  brand gets ~244px at 1920  -> clipped by ~45px
+
+   THE STRAPLINE IS NOT THE LEVER, which is the counter-intuitive part and the reason this block
+   exists at all rather than just moving the 1599px rule up. `.brand-text` is a stacked block, so
+   it is as wide as the WIDER line: the wordmark measures ~242px and the strapline ~251px, so
+   hiding the strapline reclaims about nine pixels. The wordmark is what has to give, and it gives
+   by getting shorter -- "ACS Cymru", ~75px -- rather than by disappearing, so the product is still
+   named at every step.
+
+   Two bands because the two counts differ by ~110px of nav and one threshold would be wrong for
+   one of them. A session below 10 tabs never enters either. */
+.topbar[data-nav-dense="compact"] { /* 10-11 tabs */ }
+.topbar[data-nav-dense="tight"]   { /* 12+ tabs   */ }
+
+@media (max-width: 2099px) {
+  .topbar[data-nav-dense="tight"] .brand-sub { display: none; }
+  .topbar[data-nav-dense="tight"] .brand-name-full { display: none; }
+  .topbar[data-nav-dense="tight"] .brand-name-short { display: inline; }
+}
+
+@media (max-width: 1899px) {
+  .topbar[data-nav-dense="compact"] .brand-sub { display: none; }
+  .topbar[data-nav-dense="compact"] .brand-name-full { display: none; }
+  .topbar[data-nav-dense="compact"] .brand-name-short { display: inline; }
+}
+
 @media (max-width: 1599px) {
   .brand-sub { display: none; }
 }
