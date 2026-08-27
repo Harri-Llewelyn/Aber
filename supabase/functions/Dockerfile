@@ -1,6 +1,6 @@
 # Edge functions, baked into an image rather than bind-mounted.
 #
-# WHY. docker-compose.yml mounts ./supabase/functions and ./node_red_flow.json into the stock
+# WHY. docker-compose.yml mounts ./supabase/functions and ./simulation/node_red_flow.json into the stock
 # supabase/edge-runtime image and assembles the rest in a shell entrypoint. That is right for
 # Compose -- editing a function and restarting one container is the whole development loop -- but
 # it does not survive the move to Kubernetes: there is no repository on a cluster node to mount,
@@ -13,7 +13,7 @@
 #
 # BUILD CONTEXT IS THE REPOSITORY ROOT, not this directory:
 #   docker build -f supabase/functions/Dockerfile -t acs-cymru/edge-runtime:<tag> .
-# node_red_flow.json lives at the root and is the canonical flow deploy-nodered pushes, so it has
+# node_red_flow.json lives in simulation/ and is the canonical flow deploy-nodered pushes, so it has
 # to be reachable from the context. Building from supabase/functions/ instead fails on that COPY.
 #
 # PINNED to the tag docker-compose.yml runs. The runtime and the functions are versioned together
@@ -30,7 +30,7 @@ RUN rm -f /home/deno/functions/Dockerfile
 
 # The canonical Node-RED flow: the "git" side of the GitOps sync deploy-nodered pushes to the
 # running Node-RED.
-COPY node_red_flow.json /home/deno/flows/node_red_flow.json
+COPY simulation/node_red_flow.json /home/deno/flows/node_red_flow.json
 
 # The physical gateway bundle template -- the files gateway-bundle zips up and hands to an operator.
 # Same delivery reasoning as the flow above: baked in, so which revision of the appliance template a

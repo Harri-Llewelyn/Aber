@@ -23,7 +23,7 @@
 # reaching other subscribers.
 #
 # The three attacks this closes, and why a sparkplug_id is not a secret:
-#   simulators/README.md -> "Broker topic authorisation"
+#   simulation/README.md -> "Broker topic authorisation"
 #
 # ---------------------------------------------------------------------------------------------
 # VERIFIED BEHAVIOUR OF THIS FILE, against eclipse-mosquitto:2.0.20, the pinned image:

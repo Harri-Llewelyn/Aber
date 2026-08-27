@@ -2360,173 +2360,47 @@ ON CONFLICT (companion_spec, name) DO UPDATE SET
 -- versioning derives from, and 0001's prevent_active_schema_mutation() freezes every column but
 -- `status` on an `active` schema -- so renaming it is a versioning event, not a relabelling, and
 -- one that would strand any device already provisioned against the old name. A stale-looking
--- display string is the cheaper of the two, and the attachment below says what it is attached to.
+-- display string is the cheaper of the two.
+--
+-- IT IS ATTACHED TO NOTHING ON A FRESH INSTALL, which is new and is not an oversight. The device
+-- it names is no longer seeded (see below); 0020 attaches this schema to `Sim_CNC_Mill_01` when
+-- that device exists, and `provision-gateways.mjs` attaches it at creation when a reader opts into
+-- the demonstration floor.
 
 INSERT INTO public.schemas VALUES ('e3333333-4444-5555-6666-777777777777', 'Simulated_CNC_01_Schema', 'Default tri-standard schema for the demo CNC: MTConnect observations, ISO 22400 KPIs and OPC UA companion-specification data points.', '{"type": "object", "required": ["Systems/TEMPERATURE", "Controller/EXECUTION", "Controller/EMERGENCY_STOP"], "properties": {"OEE/QUALITY": {"type": "number"}, "Axes/C/ANGLE": {"type": "number"}, "SERIAL_NUMBER": {"type": "string"}, "OEE/AVAILABILITY": {"type": "number"}, "safety_interlock": {"type": "boolean"}, "Axes/DISPLACEMENT": {"type": "number"}, "OEE/EFFECTIVENESS": {"type": "number"}, "max_temp_threshold": {"type": "number"}, "Controller/FIRMWARE": {"type": "string"}, "Systems/TEMPERATURE": {"type": "number"}, "Controller/EXECUTION": {"type": "string"}, "Machine/OperatingMode": {"type": "string"}, "Controller/EMERGENCY_STOP": {"type": "string"}, "MotionDevice/OverridePercent": {"type": "number"}}}', '2026-08-02 05:44:47.407135+00', 'https://acs-cymru.local/semantics/schema/SimulatedCNC01', 'IRI', 1, NULL, 'active', 'Initial release')
 ON CONFLICT (schema_name) DO NOTHING;
 
 
 -- -------------------------------------------------------------------------------------------
--- Factory cells  (0 rows)
+-- Factory cells, edge gateways and devices  (0 rows -- and that is the change)
 -- -------------------------------------------------------------------------------------------
--- None seeded. Unassigned and Site-Wide are DERIVED lanes, not rows: a magic cell would put
--- semantics in a free-text name, and the pg_cron purge runs as superuser, past any RLS guard.
-
--- (no rows)
-
-
--- -------------------------------------------------------------------------------------------
--- Edge gateways  (4 rows)
--- -------------------------------------------------------------------------------------------
--- The simulated shopfloor's cell gateways. Every UUID is PINNED: `sparkplug_id` is generated from
--- the primary key, so an auto-discovered gateway would get a different wire identity on every
--- rebuild, silently detaching previously recorded telemetry from the asset that produced it.
+-- NO ASSETS ARE SEEDED. A fresh install comes up with an empty shopfloor, and the demonstration
+-- floor -- four cells, four `Sim_Gateway_*` gateways, six `Sim_*` devices -- is something a
+-- reader ASKS for by running `npm run provision:gateways`. See roadmap §14 and
+-- `0040_retire_demonstration_seed.sql`, which removes the rows this block used to write from
+-- databases that already have them; deleting the statements here alone would have built a fresh
+-- database correctly and left every existing one seeded with nothing to explain where from.
 --
--- THE WHOLE FLOOR IS SEEDED, AND IT IS DUPLICATED FROM `scripts/provision-gateways.mjs` ON
--- PURPOSE. That script owns the topology and is the only thing that CAN own it, because a gateway
--- row is useless without a Mosquitto account and this file cannot create one. But provisioning is
--- a Compose-side script the Kubernetes path never runs, so a row that lives only there does not
--- exist in CI -- and the schemas 0022 binds have to attach to something. Seeding the rows here and
--- issuing the credentials there splits the job along the line of what each can actually do.
+-- THE REASON THE FLOOR WAS EVER HERE, AND WHY THAT REASON EXPIRED. Provisioning is a Compose-side
+-- script that the Kubernetes path never runs, so a row living only there does not exist in CI --
+-- and the AAS conformance suite targeted `Sim_CNC_Mill_01` BY NAME. That made the seed load-
+-- bearing for a conformance run. It is not any more: the suite provisions its own subject through
+-- `tests/aas_fixture.py` and tears it down, so what the seed carried is demonstration value, and
+-- demonstration value is exactly what should not be automatic.
 --
--- The two must agree. `scripts/check-docs-drift.mjs` compares every id, name and gateway binding
--- in this block against that script's GATEWAYS list and fails the build on any divergence -- a
--- diverged id is a diverged `sparkplug_id`, so it is a diverged wire identity and not merely an
--- untidy row.
+-- CELLS WERE NEVER SEEDED HERE EVEN THEN, for a reason that still holds: Unassigned and Site-Wide
+-- are DERIVED lanes, not rows. A magic cell would put semantics in a free-text name, and the
+-- pg_cron purge runs as superuser, past any RLS guard. Provisioning creates the demonstration's
+-- four cells by name, and 0040 removes them again only where the floor was their last occupant.
 --
--- `cell_id` IS NULL ON ALL FOUR and provisioning fills it in: cells are created by name, this file
--- seeds none (see above), and inventing them here would put cells on the shopfloor map whose only
--- members are rows this file wrote.
-
--- NAMED COLUMNS, not positional. pg_dump emits `INSERT INTO t VALUES (...)`, which binds to the
--- column ORDER of the table as it stood when the dump was taken -- so dropping a column (0004
--- removed `ip_address`) makes this fail with "INSERT has more expressions than target columns",
--- and, far worse, ADDING one in the middle would silently shift every value one column left
--- without erroring at all. Naming the columns makes the statement independent of the table's
--- shape. `sparkplug_id` is omitted because it is GENERATED ALWAYS ... STORED and cannot be
--- written; it derives from the pinned id above.
-INSERT INTO public.gateways (
-  id, name, cell_id, access_url, status, created_at,
-  is_archived, archived_at, auto_delete_at, last_heartbeat, is_virtual, location_scope
-) VALUES
-  ('12000000-0000-4000-8000-000000000001', 'Sim_Gateway_Cell1_Machining', NULL,
-   'http://localhost:1880', 'OFFLINE', '2026-08-02 05:44:29.274898+00',
-   false, NULL, NULL, NULL, true, 'cell'),
-  ('13000000-0000-4000-8000-000000000001', 'Sim_Gateway_Cell2_Robotics', NULL,
-   'http://localhost:1880', 'OFFLINE', '2026-08-02 05:44:29.274898+00',
-   false, NULL, NULL, NULL, true, 'cell'),
-  ('14000000-0000-4000-8000-000000000001', 'Sim_Gateway_Cell3_OEE', NULL,
-   'http://localhost:1880', 'OFFLINE', '2026-08-02 05:44:29.274898+00',
-   false, NULL, NULL, NULL, true, 'cell'),
-  -- SITE-WIDE, and stated rather than left to default. A building management system spans the
-  -- site, and the CHECK constraint forbids pairing `site_wide` with a cell_id -- so this row is
-  -- also the one provisioning must NOT later place in a cell.
-  ('15000000-0000-4000-8000-000000000001', 'Sim_Gateway_Site_BMS', NULL,
-   'http://localhost:1880', 'OFFLINE', '2026-08-02 05:44:29.274898+00',
-   false, NULL, NULL, NULL, true, 'site_wide')
-ON CONFLICT (id) DO NOTHING;
-
-
--- -------------------------------------------------------------------------------------------
--- Simulated devices  (6 rows)
--- -------------------------------------------------------------------------------------------
--- Pre-registered rather than left to be auto-discovered, for the same pinned-UUID reason as the
--- gateways above. Each UUID is the one behind the `dev…` id its subflow publishes under --
--- `22000000-0000-4000-8000-000000000001` is `dev220000000000400080000`, and so on.
+-- WHAT STAYS ABOVE is the tri-standard schema, and 0022's four class schemas stay likewise. A
+-- schema is a CONTRACT, not an asset: it costs nothing unattached, and it is what makes putting
+-- the floor back a matter of creating rows rather than re-authoring five JSON Schemas.
 --
--- NOT QUARANTINED, and that is a REVERSAL of what the one seeded device used to say. It was
--- seeded quarantined to preserve the zero-touch onboarding demo -- but that demo is now shown the
--- way a real one would be, by introducing ONE unregistered device on purpose (the flow's "ADD
--- YOUR OWN DEVICE" path, or any well-formed id absent from provision-gateways' list). Leaving
--- these quarantined instead means their DDATA is dropped: the shopfloor map, the Grafana
--- dashboards and the AAS telemetry aspect are all empty until somebody clicks approve, which is
--- the opposite of the steady state everything else is meant to be read against.
---
--- EACH IS BOUND TO ITS GATEWAY AT CREATION, not left for the first DBIRTH to imply.
--- `verify_gateway_binding()` rejects a device's telemetry when it arrives via an edge node it is
--- not bound to, so a null `gateway_id` here would surface as telemetry silently stopping rather
--- than as a row that is wrong.
---
--- `schema_id` IS NULL ON FIVE OF THE SIX. Schemas are attached through `device_submodels` by
--- migration 0022, which is the modern path and the one that lets a device carry several. The
--- exception is Sim_CNC_Mill_01, which keeps the tri-standard demo schema as its 1:1 fallback --
--- see 0022's header for why that one device carries two.
---
--- NAMED COLUMNS here too, for the reason argued above the gateways. This statement was positional
--- and carried a bare `DEFAULT` in the fourteenth slot to skip the generated `sparkplug_id` --
--- which is precisely the fragility named there, one column insertion away from silently shifting
--- every value left.
---
--- DO NOTHING, never DO UPDATE. This is pre-registration, not re-provisioning: an UPDATE fires
--- log_digital_thread_event(), so a DO UPDATE here risks appending to an append-only audit table
--- on every single boot.
-
-INSERT INTO public.devices (
-  id, name, gateway_id, status, is_quarantined, created_at,
-  is_archived, archived_at, auto_delete_at, asset_type, connection_method, first_dbirth_at,
-  schema_id, reported_identity, quarantine_reason, identity_source,
-  last_birth_metrics, last_birth_metrics_at, model_3d_path, cell_id, location_scope
-) VALUES
-  -- Cell 1 -- Precision Machining
-  ('22000000-0000-4000-8000-000000000001', 'Sim_CNC_Mill_01',
-   '12000000-0000-4000-8000-000000000001', 'OFFLINE', false, '2026-08-02 05:44:38.321627+00',
-   false, NULL, NULL, NULL, 'Sparkplug B', NULL,
-   'e3333333-4444-5555-6666-777777777777', NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'cell'),
-  ('23000000-0000-4000-8000-000000000001', 'Sim_CNC_Mill_02',
-   '12000000-0000-4000-8000-000000000001', 'OFFLINE', false, '2026-08-02 05:44:38.321627+00',
-   false, NULL, NULL, NULL, 'Sparkplug B', NULL,
-   NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'cell'),
-  ('27000000-0000-4000-8000-000000000001', 'Sim_Tool_Changer_01',
-   '12000000-0000-4000-8000-000000000001', 'OFFLINE', false, '2026-08-02 05:44:38.321627+00',
-   false, NULL, NULL, NULL, 'Sparkplug B', NULL,
-   NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'cell'),
-  -- Cell 2 -- Robotic Assembly
-  ('24000000-0000-4000-8000-000000000001', 'Sim_Robot_Arm_01',
-   '13000000-0000-4000-8000-000000000001', 'OFFLINE', false, '2026-08-02 05:44:38.321627+00',
-   false, NULL, NULL, NULL, 'Sparkplug B', NULL,
-   NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'cell'),
-  -- Cell 3 -- Production KPIs. A COMPUTED asset: it measures nothing itself, it accumulates
-  -- time-in-state from the machining cell and publishes ISO 22400 factors on a fixed heartbeat.
-  ('25000000-0000-4000-8000-000000000001', 'Sim_Cell3_Aggregator',
-   '14000000-0000-4000-8000-000000000001', 'OFFLINE', false, '2026-08-02 05:44:38.321627+00',
-   false, NULL, NULL, NULL, 'Sparkplug B', NULL,
-   NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'cell'),
-  -- Site-wide, and stated EXPLICITLY rather than inherited from its gateway: `location_scope`
-  -- does not inherit through the data path, so a device behind a site-wide gateway resolves to
-  -- Unassigned unless it makes the same assertion itself.
-  ('26000000-0000-4000-8000-000000000001', 'Sim_BMS_Zone_HVAC',
-   '15000000-0000-4000-8000-000000000001', 'OFFLINE', false, '2026-08-02 05:44:38.321627+00',
-   false, NULL, NULL, NULL, 'Sparkplug B', NULL,
-   NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 'site_wide')
-ON CONFLICT (id) DO NOTHING;
-
-
--- -------------------------------------------------------------------------------------------
--- Device submodel attachments  (1 row)
--- -------------------------------------------------------------------------------------------
--- The join that lets a device carry more than one schema, one AAS Submodel each. `devices.schema_id`
--- is retained as the fallback arm for devices with no rows here; readers resolve the union through
--- the `device_schemas` view.
---
--- ON CONFLICT (device_id, schema_id), so this is a no-op on a database where 0020 already made the
--- same attachment -- which is the case for every stack that existed before the legacy seed was
--- purged, since 0002's device INSERT above does nothing when provision-gateways created the row
--- first and therefore never carries `schema_id` onto it.
---
--- THE ROW'S OWN `id` IS NO LONGER PINNED, and unpinning it is what keeps this statement safe.
--- It used to be `d577cbc0-66ae-4a0f-bb85-ff7fe96bcbb0`, bound to the legacy device. On a database
--- seeded before 0020 that id still exists on the OLD attachment when this line runs -- 0002 is
--- replayed before 0020 on every boot, so the legacy device is still present at this point -- and
--- re-using it here would raise a PRIMARY KEY violation on `id` that `ON CONFLICT (device_id,
--- schema_id)` does not catch, failing db-init on every boot. Nothing references this id, so it
--- has no reason to be stable; the pair of foreign keys is the real identity of the row.
-
-INSERT INTO public.device_submodels (device_id, schema_id, submodel_key, created_at)
-VALUES (
-  '22000000-0000-4000-8000-000000000001', 'e3333333-4444-5555-6666-777777777777', NULL,
-  '2026-08-02 05:44:48.1724+00'
-)
-ON CONFLICT (device_id, schema_id) DO NOTHING;
+-- THE ATTACHMENT THAT USED TO SIT HERE went with the devices. `provision-gateways.mjs` now writes
+-- it, so a provisioned device carries its schema immediately rather than at the next boot -- and
+-- 0020 and 0022 still attach on replay, both guarded on the device existing, which is what keeps
+-- an already-provisioned stack correct without either file knowing about the other.
 
 
 -- -------------------------------------------------------------------------------------------

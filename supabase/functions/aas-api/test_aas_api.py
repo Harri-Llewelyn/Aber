@@ -22,6 +22,7 @@ import base64
 import json
 import os
 import re
+import sys
 import unittest
 import urllib.error
 import urllib.parse
@@ -38,7 +39,10 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
 ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 DEMO_EMAIL = os.getenv("AAS_TEST_EMAIL", "admin@acs-cymru.local")
 DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "acscymru123")
-TARGET_DEVICE = os.getenv("AAS_TEST_DEVICE", "Sim_CNC_Mill_01")
+# Provisioned by this suite, not seeded. See the note in test_aas_export.py -- the two share
+# tests/aas_fixture.py so they cannot disagree about what a conformance subject is.
+TARGET_DEVICE = os.getenv("AAS_TEST_DEVICE", "")
+PROVISION_FIXTURE = not TARGET_DEVICE
 
 API_BASE = f"{SUPABASE_URL}/functions/v1/aas-api"
 
@@ -106,10 +110,28 @@ def find_device(token: str):
         return None
 
 
+sys.path.insert(0, str(REPO_ROOT / "tests"))
+import aas_fixture  # noqa: E402  -- after sys.path, by necessity
+
+
+def provision(token):
+    """The fixture device row, creating it if this run owns it. None when unreachable."""
+    global TARGET_DEVICE
+    if not PROVISION_FIXTURE:
+        return find_device(token)
+    try:
+        device = aas_fixture.ensure(SUPABASE_URL, token, ANON_KEY)
+    except Exception as err:  # noqa: BLE001 -- reported, never silently skipped
+        print(f"[test_aas_api] could not provision the fixture: {err}")
+        return None
+    TARGET_DEVICE = device["name"]
+    return device
+
+
 TOKEN = sign_in()
-DEVICE = find_device(TOKEN) if TOKEN else None
+DEVICE = provision(TOKEN) if TOKEN else None
 LIVE = TOKEN is not None and DEVICE is not None
-SKIP_REASON = f"no reachable stack, or device '{TARGET_DEVICE}' not registered"
+SKIP_REASON = "no reachable stack, or the AAS fixture could not be provisioned"
 
 
 def target_shell_id() -> str | None:
@@ -568,6 +590,8 @@ if __name__ == "__main__":
     if not HAVE_JSONSCHEMA:
         print("[test_aas_api] jsonschema is not installed; metamodel conformance is SKIPPED")
     runner = unittest.main(verbosity=2, exit=False)
+    if LIVE and PROVISION_FIXTURE:
+        aas_fixture.teardown(SUPABASE_URL, TOKEN, ANON_KEY)
     if not LIVE:
         print(f"[test_aas_api] live checks skipped: {SKIP_REASON}")
     raise SystemExit(0 if runner.result.wasSuccessful() else 1)

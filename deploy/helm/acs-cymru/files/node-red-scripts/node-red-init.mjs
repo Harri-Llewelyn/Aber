@@ -10,11 +10,17 @@
  *   - settings.js is stack config     -> reconcile EVERY BOOT (a volume outlives a fix to it)
  *   - the CREDENTIALS are stack config -> but only while there are none to lose
  *
+ * AND A FOURTH QUESTION, WHICH IS NEW: *WHICH* FLOW. This used to seed the demonstrator's
+ * simulator unconditionally, so a stack that had generated no assets still came up publishing
+ * under four gateway identities that did not exist. Roadmap §14 makes the simulator opt-in
+ * (NODE_RED_SEED_SIMULATOR=true); by default this seeds a one-node "Start here" flow that points
+ * at the tutorial and connects to nothing.
+ *
  * Every guard below carries a one-line note. The failure modes behind them -- why `flowFile` is
  * load-bearing, why `_credentialSecret` silently defeats the seed, why settings.js is LOADED
  * rather than grepped, and how to tell an auth failure from a network one -- are documented in:
  *
- *   simulators/README.md -> "Flow provisioning" and "Node-RED authentication"
+ *   simulation/README.md -> "Flow provisioning" and "Node-RED authentication"
  *
  * Verified against Node-RED 5.0.1 (nodered/node-red:latest).
  */
@@ -46,6 +52,17 @@ const credentialSecret = process.env.NODERED_CREDENTIAL_SECRET;
 const mqttUser = process.env.MQTT_USER || 'gwy100000000000400080000';
 const mqttPassword = process.env.MQTT_PASSWORD;
 const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
+
+// THE SIMULATOR IS OPT-IN (roadmap §14). Unset, this script seeds the starter flow below instead
+// of the demonstrator's, and the difference is not cosmetic: the simulator flow declares four
+// `mqtt-broker` nodes, and a broker node is what makes a broker CREDENTIAL mandatory. Seeding it on
+// a stack nobody has provisioned therefore forces four passwords to exist for four gateways that do
+// not, which is why `setup.mjs` used to mint them eagerly -- it says so, and calls the alternative
+// a deadlock. Not seeding the flow dissolves that: no broker nodes, no credential requirement, no
+// eager passwords, and no accounts in the broker for rows nobody created.
+//
+// `npm run stack:reset` sets this, so the one-command demonstration path is unchanged.
+const seedSimulator = /^(1|true|yes)$/i.test(process.env.NODE_RED_SEED_SIMULATOR || '');
 
 // Bumped whenever the BODY of the generated settings.js changes in a way an existing volume
 // needs. Without it, a settings.js that merely *has* an adminAuth passes settingsAreCorrect()
@@ -113,13 +130,67 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 //
 // THE GUARD IS A MARKER FILE, NOT `flows.json` EXISTING: the image ships a placeholder flows.json
 // and Docker pre-populates a fresh volume from it, so that file exists before this script has ever
-// run. A marker records what this script DID. (simulators/README.md -> "Flow provisioning")
+// run. A marker records what this script DID. (simulation/README.md -> "Flow provisioning")
 const SEED_MARKER = path.join(DATA_DIR, '.factoryplus-seeded');
 const seededBefore = fs.existsSync(SEED_MARKER);
 const seededFlow = !seededBefore || forceSeed;
 
+/**
+ * The blank canvas, and why it is one node rather than an empty file.
+ *
+ * An empty `flows.json` is a valid Node-RED flow and it is also indistinguishable from a broken
+ * seed: the editor opens on nothing, with no way to tell whether that is the intended state or the
+ * symptom of a mount that failed. One comment node costs nothing, connects to nothing, and answers
+ * the question a reader is actually asking when they open an empty editor.
+ *
+ * The `info` field is what the editor renders in its sidebar when the node is selected, so the
+ * instructions live there rather than in the node's title, which is a single line.
+ */
+const STARTER_FLOW = [
+  {
+    id: 'acs-cymru-start-here',
+    type: 'tab',
+    label: 'Start here',
+    disabled: false,
+    info: [
+      '# No simulated assets',
+      '',
+      'This stack ships a **blank canvas**. There are no cells, no gateways and no devices, and',
+      'Node-RED is not publishing anything.',
+      '',
+      'To bring up the demonstration shopfloor -- four cells, four gateways, six devices -- follow',
+      '`simulation/README.md` in the repository. It is three steps, in this order:',
+      '',
+      '1. `npm run provision:gateways` -- creates the rows and issues a broker credential for each',
+      '   gateway, writing them to `.env.gateways`.',
+      '2. Fold those credentials into `.env`. They are not recoverable afterwards: `mosquitto_passwd`',
+      '   stores only a hash.',
+      '3. Restart with `NODE_RED_SEED_SIMULATOR=true NODE_RED_FORCE_SEED=true`, or run',
+      '   `npm run stack:reset`, which does all three.',
+      '',
+      'The order matters. Importing the flow before step 2 leaves four broker nodes naming',
+      'credentials that do not exist, and `node-red-init` will refuse to start rather than seed a',
+      'connection that cannot authenticate.',
+      '',
+      'To build ONE machine by hand instead -- a cell, a gateway, a device and a schema through the',
+      'dashboard -- the same README walks through it. That path needs no flow import at all until',
+      'you have something to publish about.',
+    ].join('\n'),
+  },
+  {
+    id: 'acs-cymru-start-here-note',
+    type: 'comment',
+    z: 'acs-cymru-start-here',
+    name: 'This stack ships no simulated assets -- see the info panel',
+    info: 'Open the "Start here" tab description (the info sidebar) for the three steps.',
+    x: 260,
+    y: 120,
+    wires: [],
+  },
+];
+
 if (seededFlow) {
-  if (!fs.existsSync(SEED_FLOW)) {
+  if (seedSimulator && !fs.existsSync(SEED_FLOW)) {
     fail(`seed flow not found at ${SEED_FLOW}`);
   }
   // Anything already here is either the image's placeholder or -- on a volume provisioned before
@@ -129,16 +200,28 @@ if (seededFlow) {
     fs.copyFileSync(flowsPath, `${flowsPath}.pre-seed`);
     console.log(`[node-red-init] existing flow backed up to ${flowsPath}.pre-seed`);
   }
-  fs.copyFileSync(SEED_FLOW, flowsPath);
+  // THE MARKER RECORDS WHICH FLOW, not just that one was written. Without it, a volume seeded
+  // blank and a volume seeded with the simulator are indistinguishable afterwards -- and the
+  // question "why is my editor empty" has two different answers depending on which happened.
+  const seedBytes = seedSimulator
+    ? fs.readFileSync(SEED_FLOW)
+    : Buffer.from(`${JSON.stringify(STARTER_FLOW, null, 2)}\n`);
+
+  fs.writeFileSync(flowsPath, seedBytes);
   fs.writeFileSync(
     SEED_MARKER,
     JSON.stringify({
       seeded_at: new Date().toISOString(),
-      source: SEED_FLOW,
-      sha256: crypto.createHash('sha256').update(fs.readFileSync(SEED_FLOW)).digest('hex')
+      source: seedSimulator ? SEED_FLOW : 'built-in starter flow (NODE_RED_SEED_SIMULATOR unset)',
+      simulator: seedSimulator,
+      sha256: crypto.createHash('sha256').update(seedBytes).digest('hex')
     }, null, 2)
   );
-  console.log(`[node-red-init] flow ${forceSeed ? 're-seeded (forced)' : 'seeded'} to ${flowsPath}.`);
+  console.log(
+    `[node-red-init] ${seedSimulator ? 'simulator flow' : 'starter flow (no simulated assets)'} ` +
+      `${forceSeed ? 're-seeded (forced)' : 'seeded'} to ${flowsPath}.` +
+      (seedSimulator ? '' : ' Set NODE_RED_SEED_SIMULATOR=true for the demonstration shopfloor.')
+  );
 } else {
   console.log(
     `[node-red-init] flow already seeded (${SEED_MARKER}); preserving Node-RED editor changes. ` +
@@ -211,12 +294,21 @@ if (mqttTlsEnabled || mqttPortEnv || mqttHostEnv) {
   // cannot share a connection. Reconciling only `mqtt-broker-config` left the others pointing at
   // whatever host the flow was authored against, which on Kubernetes is nothing.
   const brokers = flow.filter((n) => n.type === 'mqtt-broker');
+
+  // NO BROKER NODES IS NOW A LEGITIMATE STATE and this no longer fails on it. The starter flow has
+  // none, by design -- there is nothing to reconcile a broker host onto, and nothing is trying to
+  // connect. This check still exists for the case it was written for: a flow that DOES declare
+  // brokers, deployed against a host it was not authored for. Failing on an empty flow would have
+  // made the blank canvas unbootable while reporting a mismatch against a repository flow the
+  // operator deliberately did not seed.
   if (brokers.length === 0) {
-    fail(
-      `flow at ${flowsPath} contains no mqtt-broker nodes. The broker transport settings could ` +
-        'not be applied; the deployed flow does not match the repository flow.'
+    console.log(
+      '[node-red-init] no mqtt-broker nodes in the flow; broker transport settings not applied. ' +
+        'That is expected on the starter flow -- nothing is publishing yet.'
     );
   }
+  // The loop below iterates `brokers` and the write is guarded on `changes.length`, so an empty
+  // list degrades to a no-op without a second branch.
 
   const changes = [];
   const setField = (broker, key, value) => {
@@ -339,7 +431,7 @@ if (mqttTlsEnabled || mqttPortEnv || mqttHostEnv) {
 // `credentialSecret` in a commented-out example, so a substring test passes a file that declares
 // nothing. It checks the AUTH keys and SETTINGS_VERSION too, which is what lets a volume from
 // before authentication existed be repaired rather than left with an open admin API.
-// (simulators/README.md -> "Flow provisioning")
+// (simulation/README.md -> "Flow provisioning")
 function settingsAreCorrect() {
   if (!fs.existsSync(settingsPath)) return false;
   try {
@@ -659,7 +751,7 @@ module.exports = {
      * map above. The last-resort branch returns a bare username to keep an unknown session alive;
      * that is safe because enforcement reads the token's stored scope, not this object.
      *
-     * (simulators/README.md -> "Node-RED authentication")
+     * (simulation/README.md -> "Node-RED authentication")
      */
     users: async function (username) {
       const permissions = editorUsers.get(username);
@@ -950,7 +1042,7 @@ if (missingCredential && !brokerIdentityChanged) {
 // The broker node ends up with no username and Mosquitto refuses it with CONNACK 5.
 //
 // Guarded by writeCredentials, not by the seed path -- the question is "is there ciphertext only
-// this key can open", not "is this volume fresh". (simulators/README.md -> "Flow provisioning")
+// this key can open", not "is this volume fresh". (simulation/README.md -> "Flow provisioning")
 if (writeCredentials && fs.existsSync(runtimeConfigPath)) {
   try {
     const runtimeConfig = JSON.parse(fs.readFileSync(runtimeConfigPath, 'utf8'));
@@ -997,10 +1089,22 @@ credentials.setKey(credentialSecret);
 for (const [nodeId, credential] of brokerCredentials) {
   await credentials.add(nodeId, credential);
 }
-console.log(
-  `[node-red-init] seeding credentials for ${brokerCredentials.size} broker node(s): ` +
-    [...brokerCredentials].map(([id, c]) => `${id}=${c.user}`).join(', ')
-);
+// ZERO IS A LEGITIMATE COUNT and is said differently, rather than printed as an empty list after a
+// trailing colon. The starter flow declares no broker nodes at all (roadmap §14), so "seeding
+// credentials for 0 broker node(s): " is the ordinary output of a working blank canvas -- and it
+// reads exactly like a lookup that returned nothing, which is the one impression this script's
+// logging is otherwise careful never to give.
+if (brokerCredentials.size === 0) {
+  console.log(
+    '[node-red-init] no broker nodes in the flow, so there are no credentials to seed. ' +
+      'That is the starter flow; set NODE_RED_SEED_SIMULATOR=true for the demonstration shopfloor.'
+  );
+} else {
+  console.log(
+    `[node-red-init] seeding credentials for ${brokerCredentials.size} broker node(s): ` +
+      [...brokerCredentials].map(([id, c]) => `${id}=${c.user}`).join(', ')
+  );
+}
 
 const exported = await credentials.export();
 
@@ -1049,6 +1153,12 @@ try {
 fs.writeFileSync(credentialsPath, JSON.stringify(exported));
 
 console.log(
-  `[node-red-init] broker credentials written encrypted (aes-256-ctr) to ${credentialsPath} ` +
-    `for ${brokerCredentials.size} gateway account(s).`
+  brokerCredentials.size === 0
+    // Still WRITTEN, and deliberately so: an empty encrypted envelope is what proves the
+    // credential key in settings.js is the one Node-RED will use, and it is what stops Node-RED
+    // minting a `_credentialSecret` of its own on first start -- the failure section 3b exists for.
+    ? `[node-red-init] empty credential file written encrypted (aes-256-ctr) to ${credentialsPath}; ` +
+        'nothing in the flow needs an account.'
+    : `[node-red-init] broker credentials written encrypted (aes-256-ctr) to ${credentialsPath} ` +
+        `for ${brokerCredentials.size} gateway account(s).`
 );

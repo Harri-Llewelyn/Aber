@@ -1,15 +1,146 @@
-# Simulators & Edge Automation
+# The simulated shopfloor
 
-Node-RED runs the **Gateway Simulator** — a self-contained, zero-dependency flow that publishes the
-full Sparkplug B lifecycle so the platform can be exercised end to end with no physical hardware.
+Everything simulated lives here, and **none of it runs unless you ask for it.**
+
+That is roadmap §14, and the request behind it was specific: a participant at a demonstration asked
+whether the simulated devices appear on every start, said they polluted the Digital Thread, and
+wanted running them to be a choice. A fresh install now comes up with no cells, no gateways and no
+devices at all.
+
+Node-RED still runs the **Gateway Simulator** — a self-contained, zero-dependency flow that
+publishes the full Sparkplug B lifecycle so the platform can be exercised end to end with no
+physical hardware. It just has nothing to publish about until the assets exist.
 
 | Artefact | Location |
 | :--- | :--- |
-| Flow definition | [`../node_red_flow.json`](../node_red_flow.json) |
+| Flow definition | [`node_red_flow.json`](node_red_flow.json) |
+| Shopfloor dashboard | [`grafana/dashboards/manufacturing-cells.json`](grafana/dashboards/manufacturing-cells.json) |
+| Machine alert rules | [`grafana/alerting/shopfloor-alert-rules.yaml`](grafana/alerting/shopfloor-alert-rules.yaml) |
+| Topology and credentials | [`../scripts/provision-gateways.mjs`](../scripts/provision-gateways.mjs) |
+| Retirement of the old seed | [`../supabase/migrations/0040_retire_demonstration_seed.sql`](../supabase/migrations/0040_retire_demonstration_seed.sql) |
 | Provisioning script | [`../scripts/node-red-init.mjs`](../scripts/node-red-init.mjs) |
 | Broker config | [`../mosquitto.conf`](../mosquitto.conf), [`../mosquitto.acl`](../mosquitto.acl) |
 | Gateway credential tool | [`../scripts/mosquitto-provision-gateway.mjs`](../scripts/mosquitto-provision-gateway.mjs) |
 | Editor | `http://localhost:1880` |
+
+---
+
+## Turning the demonstrator on
+
+**Four things are opt-in, and they are separate because they fail separately.** Steps 1 and 2 are
+the ones that matter; 3 and 4 are Grafana surfaces you can add whenever.
+
+The order of 1 and 2 is not arbitrary — see the note under step 2.
+
+### 1. The assets — four cells, four gateways, six devices
+
+```bash
+npm run provision:gateways
+```
+
+This is the only step that **must** happen, and the only one nothing else can do: a gateway row is
+useless without a Mosquitto account, and the account has to be issued against the `sparkplug_id` the
+database generates from the row's pinned UUID. The script creates the cells, the gateways and the
+devices, attaches each device's schema, issues a broker credential per gateway and writes them to
+`.env.gateways` (mode 0600).
+
+**The passwords are not recoverable** — `mosquitto_passwd` stores a hash. Fold them into `.env` and
+restart Node-RED, or the four brokers will log `Connection failed to broker` with no CONNACK code:
+
+```bash
+docker compose restart node-red     # after updating .env from .env.gateways
+```
+
+`npm run stack:reset` does all of this for you, including replaying the seed afterwards so the
+Digital Thread's causation demonstration has a subject.
+
+### 2. The Node-RED flow
+
+**Node-RED comes up blank.** The editor opens on a one-node *Start here* tab that declares no broker
+nodes and connects to nothing, so a stack nobody has provisioned publishes nothing at all.
+
+```bash
+NODE_RED_SEED_SIMULATOR=true NODE_RED_FORCE_SEED=true \
+  docker compose up -d --force-recreate node-red-init node-red
+```
+
+Two flags, doing different jobs: `SEED_SIMULATOR` chooses the demonstrator's flow over the starter
+flow, and `FORCE_SEED` overrides the first-run-only guard on a volume that has already been seeded.
+The flow is user content, so it is seeded once and then left alone — `FORCE_SEED` is what says *yes,
+overwrite my editor changes*. On a genuinely fresh volume the first flag alone is enough.
+
+**Do step 1 first.** The flow declares four `mqtt-broker` nodes, and `node-red-init` **fails closed**
+when a broker node names a credential pair that is not set — it refuses to start rather than seed a
+connection that cannot authenticate. That is deliberate: the alternative is an empty username, which
+Mosquitto refuses with CONNACK 5 while Node-RED reports only `Connection failed to broker`, naming
+the client id and not the username.
+
+This is also why `npm run setup` no longer mints four gateway passwords. It used to have to: the
+flow was seeded unconditionally, so four credentials were mandatory before a stack existed to
+provision them against — a deadlock that made `docker compose up` exit 1 on
+`service "node-red-init" didn't complete successfully`. With the flow opt-in there are no broker
+nodes by default, so there is nothing to require.
+
+### 3. The Grafana dashboard
+
+Not provisioned by default, because its panels hardcode `Sim_CNC_Mill_01` — on an install running
+real plant it named a machine that does not exist, in a folder an operator would reasonably read as
+describing their floor.
+
+```bash
+cp simulation/grafana/dashboards/*.json grafana/provisioning/dashboards/shopfloor/
+docker compose restart grafana
+```
+
+### 4. The machine alert rules
+
+Thermal Excursion, Emergency Stop Engaged and Low OEE Availability. They evaluate machine telemetry
+at a 10-second interval, which the group's own comment has always admitted is a demonstrator setting
+— *"because someone is standing in front of a fault-injection button"*.
+
+```bash
+cp simulation/grafana/alerting/*.yaml grafana/provisioning/alerting/
+docker compose restart grafana
+```
+
+The init step globs `*alert-rules.yaml`, so dropping the file in is all that is needed.
+
+**These are not simulator-specific in their queries**, and that is the honest cost of moving them:
+each groups by `asset_id` and matches whatever publishes the metric, so a real machining centre
+publishing `Systems/TEMPERATURE` is covered by rule 1 exactly as the simulator is. Somebody
+onboarding real plant wants them — they just should not arrive before there is any plant.
+
+### On Kubernetes
+
+Steps 2, 3 and 4 are values flags, because the chart bakes its files in rather than mounting them:
+
+```bash
+helm upgrade acs-cymru deploy/helm/acs-cymru --reuse-values \
+  --set simulation.nodeRed.enabled=true \
+  --set simulation.grafana.enabled=true
+```
+
+Step 1 is unchanged — `npm run provision:gateways -- --target=k8s`.
+
+**`simulation.nodeRed.enabled` has the same first-run-only caveat**, and it bites harder here because
+there is no `FORCE_SEED` equivalent to pass on the command line. Flipping it on an install whose PVC
+has already been seeded changes nothing until that volume is re-seeded. That is the guard protecting
+editor changes doing its job, not the flag failing.
+
+### What you get instead if you skip all four
+
+A blank canvas. No cells, no gateways, no devices, nothing publishing, and a Digital Thread that
+records only what you do next.
+
+The quarantine queue still works, and it is now the **first** thing a new user meets rather than a
+footnote: publish under any well-formed `dev`-prefixed id and the device is held for approval. That
+is the zero-touch onboarding path, and it teaches better than a floor that was already there when
+you arrived.
+
+**Nothing is dropped on the floor in the meantime.** Before this, a default stack ran the simulator
+against four gateway identities that did not exist, so ingestion logged *"unregistered edge node"* on
+a throttle and discarded every message — gateways are never auto-created. Correct behaviour, and an
+odd thing for a stack to be doing before anyone had asked it for anything.
 
 ---
 
@@ -38,7 +169,7 @@ To inspect, reset, or re-import by hand:
    session is needed first because GoTrue ships no consent UI. Import and Deploy need
    Administrator or Shopfloor_Manager — Operator and Auditor get a read-only editor.
 2. **☰ menu → Import**.
-3. Paste the contents of [`../node_red_flow.json`](../node_red_flow.json).
+3. Paste the contents of [`node_red_flow.json`](node_red_flow.json).
 4. **Import**, then **Deploy**.
 
 To force a re-seed over editor changes, set `NODE_RED_FORCE_SEED=true` and restart, or use the
@@ -213,14 +344,18 @@ click it to copy. It never changes, so an asset can be renamed freely without br
 
 The ids the shipped flow publishes under are pinned in
 [`scripts/provision-gateways.mjs`](../scripts/provision-gateways.mjs), which owns the demonstrator's
-topology — four cell gateways and six devices. The machining cell's pair
-(`gwy120000000000400080000` and `dev220000000000400080000`, `Sim_Gateway_Cell1_Machining` and
-`Sim_CNC_Mill_01`) is **also** seeded by
-[`0002_seed_data.sql`](../supabase/migrations/0002_seed_data.sql), because provisioning is a
-Compose-side script the Kubernetes path never runs and the AAS conformance suite needs that device
-to exist wherever the migrations do.
+topology — four cell gateways and six devices. **None of them exists until you run it.**
 
-The examples below use that pair.
+That is new, and it is roadmap §14: the machining cell's pair used to be seeded by
+[`0002_seed_data.sql`](../supabase/migrations/0002_seed_data.sql) as well, so a fresh install came
+up with a shopfloor nobody had asked for. The two reasons for that seed have both expired — the AAS
+conformance suite provisions its own subject now, and demonstration value is exactly what should not
+be automatic — so `0040_retire_demonstration_seed.sql` retires it, once, and provisioning is the
+only thing that creates these rows.
+
+The examples below use the machining cell's pair (`gwy120000000000400080000` and
+`dev220000000000400080000`, `Sim_Gateway_Cell1_Machining` and `Sim_CNC_Mill_01`), so run
+`npm run provision:gateways` first if you have not.
 
 | Order | Type | Topic | Purpose |
 | :-- | :--- | :--- | :--- |
@@ -427,9 +562,10 @@ This matters more than it used to: a **registered device bound to a gateway** no
 rejected when they arrive via a different (or unregistered) edge node. Registering the gateway is
 what makes that binding resolvable.
 
-`Sim_Gateway_Cell1_Machining` already exists at the pinned id `gwy120000000000400080000` — seeded by
-`0002_seed_data.sql` — and `npm run provision:gateways` creates the other three along with a broker
-credential for each, so the shipped flow works with no manual setup.
+`npm run provision:gateways` creates all four at their pinned ids — `Sim_Gateway_Cell1_Machining` is
+`gwy120000000000400080000` — along with a broker credential for each and the schema attachments the
+Devices page and the AAS export read, so the shipped flow works with no manual setup once it has
+run. Until it has, the shopfloor is empty by design: nothing is seeded any more.
 
 ---
 

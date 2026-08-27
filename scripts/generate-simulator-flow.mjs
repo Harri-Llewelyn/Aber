@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
-const FLOW_PATH = path.join(rootDir, 'node_red_flow.json');
+const FLOW_PATH = path.join(rootDir, 'simulation', 'node_red_flow.json');
 
 const checkOnly = process.argv.includes('--check');
 

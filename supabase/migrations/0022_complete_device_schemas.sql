@@ -212,20 +212,41 @@ END;
 $$;
 
 
--- Self-check. Asserts the END STATE -- that every simulated device present carries at least one
--- schema, which is the property the Configuration Parameters modal and the AAS export both
--- depend on, and the one this migration exists to establish.
+-- Self-check. Asserts the END STATE -- that every device this migration is responsible for and
+-- which is actually present carries at least one schema, which is the property the Configuration
+-- Parameters modal and the AAS export both depend on, and the one this migration exists to
+-- establish.
 --
 -- Through the VIEW rather than the join table: `device_schemas` is what those readers consult, and
 -- asserting on device_submodels alone would pass while the union a consumer actually sees was
 -- empty.
+--
+-- SCOPED TO THE SIX PINNED IDS ABOVE, WHICH IT WAS NOT. It used to scan every device whose name
+-- matched `Sim\_%`, which was equivalent while the only such devices were seeded by 0002 and
+-- attached by the block above. It stopped being equivalent when roadmap §14 retired that seed:
+-- `Sim_` becomes a naming CONVENTION a reader follows for their own simulated assets, and the
+-- first device somebody creates in the UI and calls `Sim_MyMachine` has no schema for a minute or
+-- two -- which is a normal intermediate state, not a broken migration.
+--
+-- The old predicate would have turned it into a failed db-init on the next boot, and the error
+-- would have blamed a migration that has nothing to do with the device it named. Assert what this
+-- file attaches, not what a name pattern happens to match.
 DO $$
 DECLARE
+  -- The same six ids as the attachment block, and only those.
+  v_owned CONSTANT uuid[] := ARRAY[
+    '22000000-0000-4000-8000-000000000001',
+    '23000000-0000-4000-8000-000000000001',
+    '24000000-0000-4000-8000-000000000001',
+    '27000000-0000-4000-8000-000000000001',
+    '26000000-0000-4000-8000-000000000001',
+    '25000000-0000-4000-8000-000000000001'
+  ]::uuid[];
   v_orphan TEXT;
 BEGIN
   SELECT string_agg(d.name, ', ' ORDER BY d.name) INTO v_orphan
     FROM public.devices d
-   WHERE d.name LIKE 'Sim\_%'
+   WHERE d.id = ANY(v_owned)
      AND NOT d.is_archived
      AND NOT EXISTS (
        SELECT 1 FROM public.device_schemas ds
@@ -234,11 +255,13 @@ BEGIN
 
   IF v_orphan IS NOT NULL THEN
     RAISE EXCEPTION
-      '0022 self-check: simulated device(s) with no schema attached: %. They would export an AAS '
-      'shell with no telemetry aspect and would never be checked for unmodelled metrics.', v_orphan;
+      '0022 self-check: demonstration device(s) with no schema attached: %. They would export an '
+      'AAS shell with no telemetry aspect and would never be checked for unmodelled metrics.',
+      v_orphan;
   END IF;
 
-  RAISE NOTICE '0022 self-check passed: every simulated device carries at least one schema.';
+  RAISE NOTICE '0022 self-check passed: every demonstration device present carries at least one '
+               'schema.';
 END;
 $$;
 

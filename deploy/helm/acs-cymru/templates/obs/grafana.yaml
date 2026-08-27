@@ -68,7 +68,19 @@ A SECOND ConfigMap for the second folder, mounted at a second path.
 dashboards.yml declares one provider per folder and each provider points at its own directory --
 so one ConfigMap cannot serve both without nesting the paths, which would file every shopfloor
 dashboard under both folders.
+
+CONDITIONAL SINCE ROADMAP §14. `manufacturing-cells.json` hardcodes `Sim_CNC_Mill_01`, and the
+simulated shopfloor it describes is now opt-in -- so shipping this dashboard unconditionally meant
+every install, including one running real plant, got a Shopfloor Operations folder whose panels
+name a machine that does not exist there.
+
+THE VOLUME BELOW IS NOT CONDITIONAL, and that asymmetry is deliberate. `dashboards.yml` is a
+mirrored FILE rather than a template, so its shopfloor provider is declared whether or not this
+ConfigMap exists -- and a provider whose `path` is missing logs an error on every sweep. Marking
+the volume `optional` gives Grafana an EMPTY directory instead, which the provider reads as "no
+dashboards here" and says nothing about. One flag, no second edit, and no false alarm.
 */}}
+{{- if .Values.simulation.grafana.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -83,9 +95,10 @@ data:
 {{ $.Files.Get $path | indent 4 }}
 {{- end }}
 {{- if eq $foundShopfloor 0 }}
-{{- fail "\n\nacs-cymru: no dashboards found at files/grafana-dashboards-shopfloor/*.json\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n" }}
+{{- fail "\n\nacs-cymru: simulation.grafana.enabled is true but no dashboards were found at files/grafana-dashboards-shopfloor/*.json\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n" }}
 {{- end }}
 ---
+{{- end }}
 {{/*
 Unified alerting: the rules, the notification policy and the contact-point TEMPLATE.
 
@@ -107,6 +120,17 @@ data:
 {{- $foundAlerting = add1 $foundAlerting }}
   {{ base $path }}: |
 {{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- if .Values.simulation.grafana.enabled }}
+{{- $foundSimAlerting := 0 }}
+{{- range $path, $bytes := .Files.Glob "files/grafana-alerting-simulation/*.yaml" }}
+{{- $foundSimAlerting = add1 $foundSimAlerting }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- if eq $foundSimAlerting 0 }}
+{{- fail "\n\nacs-cymru: simulation.grafana.enabled is true but no rules were found at files/grafana-alerting-simulation/*.yaml\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n" }}
+{{- end }}
 {{- end }}
 {{- if eq $foundAlerting 0 }}
 {{- fail "\n\nacs-cymru: no alerting provisioning found at files/grafana-alerting/*.yaml\n\nMirror it with:  node scripts/sync-helm-chart-files.mjs\n\nFailing the render is deliberate. An empty ConfigMap mounts cleanly and Grafana comes up with no\nalert rules and no contact point -- a stack that looks healthy and will never tell anyone that a\nmachine is overheating.\n" }}
@@ -276,7 +300,9 @@ spec:
                 echo 'SUPABASE_ANON_KEY must be set -- it is what gets the alert webhook past Kong key-auth.' >&2
                 exit 1
               fi
-              cp /alerting-config/policies.yaml /alerting-config/alert-rules.yaml /alerting/
+              # Globbed, so simulation.grafana.enabled adds shopfloor-alert-rules.yaml to the
+              # ConfigMap and it is carried through without editing this line.
+              cp /alerting-config/policies.yaml /alerting-config/*alert-rules.yaml /alerting/
               sed -e "s|__GRAFANA_ALERT_WEBHOOK_SECRET__|$GRAFANA_ALERT_WEBHOOK_SECRET|g" \
                   -e "s|__SUPABASE_ANON_KEY__|$SUPABASE_ANON_KEY|g" \
                   /alerting-config/contact-points.template.yaml > /alerting/contact-points.yaml
@@ -395,6 +421,8 @@ spec:
         - name: dashboards-shopfloor
           configMap:
             name: {{ printf "%s-grafana-dashboards-shopfloor" $fullname }}
+            # Absent unless simulation.grafana.enabled -- see the note above that ConfigMap.
+            optional: true
         - name: alerting-config
           configMap:
             name: {{ printf "%s-grafana-alerting" $fullname }}

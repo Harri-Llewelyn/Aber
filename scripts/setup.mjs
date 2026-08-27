@@ -123,19 +123,24 @@ const generated = {
   MQTT_MONITOR_PASSWORD: hex(24),
   // THE FOUR SIMULATED CELL GATEWAYS, generated here rather than left to `provision:gateways`.
   //
-  // That script needs a RUNNING stack -- it talks to PostgREST and to the broker container -- but
+  // THE FOUR GATEWAY PASSWORDS ARE NO LONGER MINTED HERE, and the deadlock they existed to break
+  // is gone rather than worked around. The reasoning that put them here was sound at the time:
+  // that script needs a RUNNING stack -- it talks to PostgREST and to the broker container -- but
   // node-red-init fails closed when a broker node declares a credential pair it cannot find, and
-  // it runs during the very `docker compose up` that would bring that stack up. Leaving these to
-  // provisioning is therefore a deadlock: the documented quickstart exits 1 on
-  // `service "node-red-init" didn't complete successfully`, which names neither the flow, the
-  // variable, nor the script that would have written it.
+  // it runs during the very `docker compose up` that would bring that stack up. Leaving them to
+  // provisioning meant the documented quickstart exited 1 on
+  // `service "node-red-init" didn't complete successfully`, naming neither the flow, the variable,
+  // nor the script that would have written it.
   //
-  // Provisioning still works and is still how these are ROTATED; it writes .env.gateways for
-  // folding back in here. See the block on these in .env.example for which way authority runs.
-  MQTT_GW_CNC_MACHINING_PASSWORD: hex(24),
-  MQTT_GW_ROBOTIC_ASSEMBLY_PASSWORD: hex(24),
-  MQTT_GW_AGV_FLEET_PASSWORD: hex(24),
-  MQTT_GW_FACILITY_BMS_PASSWORD: hex(24),
+  // What made that unavoidable was the FLOW being seeded unconditionally: four broker nodes, four
+  // mandatory credential pairs. Roadmap §14 makes the simulator opt-in, so a default stack seeds a
+  // starter flow with no broker nodes at all -- and minting four passwords here would now create
+  // four broker accounts for four gateways that do not exist, on a stack whose whole point is that
+  // it generates no assets.
+  //
+  // `npm run provision:gateways` mints them against a running stack and writes .env.gateways for
+  // folding back in; `npm run stack:reset` does the whole sequence. See the block on these in
+  // .env.example for which way authority runs afterwards.
   GRAFANA_ADMIN_PASSWORD: hex(12),
   GRAFANA_OAUTH_CLIENT_SECRET: hex(32),
   NODERED_CREDENTIAL_SECRET: hex(32),

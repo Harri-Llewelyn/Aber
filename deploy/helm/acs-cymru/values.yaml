@@ -1037,6 +1037,38 @@ frontend:
     limits: { memory: 128Mi }
 
 # ---------------------------------------------------------------------------------------------
+# The demonstrator
+# ---------------------------------------------------------------------------------------------
+# THE SIMULATED SHOPFLOOR IS OPT-IN (roadmap §14). A fresh install has no cells, no gateways and no
+# devices -- `0040_retire_demonstration_seed.sql` retired the seed that used to create them --
+# because a participant at the demonstration asked whether the simulated devices appear on every
+# start and said they polluted the Digital Thread.
+#
+# WHAT THIS FLAG DOES AND DOES NOT COVER. It governs only the two GRAFANA artefacts that name the
+# demonstrator: the Shopfloor Operations dashboard, whose panels hardcode `Sim_CNC_Mill_01`, and
+# the three machine alert rules that run at a 10-second interval because someone is standing in
+# front of a fault-injection button. The ASSETS are not a chart concern at all: they arrive from
+# `scripts/provision-gateways.mjs`, which also issues the broker credential no migration could.
+#
+# So `simulation.grafana.enabled=true` on a cluster where nobody has provisioned gives a dashboard
+# with no series and three rules in NoData -- which is the honest outcome, and the reason this is
+# not defaulted on.
+simulation:
+  # The Node-RED flow. Off, the editor opens on a one-node "Start here" tab that declares no broker
+  # nodes and connects to nothing. On, it seeds the demonstrator's four-gateway simulator -- which
+  # needs the four MQTT_GW_* credential pairs in the chart Secret, because node-red-init FAILS
+  # CLOSED on a broker node whose declared pair is absent.
+  #
+  # THE PVC IS SEEDED FIRST-RUN-ONLY, because the flow is user content. Flipping this on an
+  # existing install therefore changes nothing until the volume is re-seeded; that is the same
+  # NODE_RED_FORCE_SEED guard Compose has, and it is protecting editor changes rather than being
+  # awkward.
+  nodeRed:
+    enabled: false
+  grafana:
+    enabled: false
+
+# ---------------------------------------------------------------------------------------------
 # Observability and exposure
 # ---------------------------------------------------------------------------------------------
 grafana:
