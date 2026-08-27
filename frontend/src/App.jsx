@@ -41,6 +41,7 @@ import {
   IconFileCode,
   IconArchive,
   IconSettings,
+  IconLock,
   IconBookOpen,
   IconHistory,
   IconSun,
@@ -71,6 +72,7 @@ const VocabularyTab    = lazy(() => import('./components/tabs/VocabularyTab').th
 const DirectoryTab     = lazy(() => import('./components/tabs/DirectoryTab').then(m => ({ default: m.DirectoryTab })))
 const ArchivesTab      = lazy(() => import('./components/tabs/ArchivesTab').then(m => ({ default: m.ArchivesTab })))
 const SettingsTab      = lazy(() => import('./components/tabs/SettingsTab').then(m => ({ default: m.SettingsTab })))
+const AccessControlTab = lazy(() => import('./components/tabs/AccessControlTab').then(m => ({ default: m.AccessControlTab })))
 
 export const TABS = [
   { id: 'overview',       label: 'Overview',          icon: <IconLayoutDashboard size={15} /> },
@@ -88,6 +90,14 @@ export const TABS = [
   // policy is `has_role(ARRAY['Administrator'])`. Inventing a SETTINGS_MANAGE permission for the
   // UI would mean two different predicates deciding the same question, and the day they disagree
   // the page is visible and every save fails.
+  // BESIDE Settings AND GATED THE SAME WAY, on the ROLE rather than on a permission. The two RPCs
+  // behind this page check `has_role(ARRAY['Administrator','Shopfloor_Manager'])`, so the page is
+  // deliberately NARROWER than the API it calls: seeing who holds what is an access-control
+  // question, and a Shopfloor_Manager who needs to issue a credential still can, from Gateways.
+  //
+  // A TAB, NOT A ROUTE. `frontend/src/pages/` holds one file and the shell is `components/tabs/`;
+  // adding `/access-control` as a route would introduce a second navigation model for one page.
+  { id: 'access-control', label: 'Access Control',    icon: <IconLock size={15} />, role: 'Administrator' },
   { id: 'settings',       label: 'Settings',          icon: <IconSettings size={15} />, role: 'Administrator' },
 ]
 
@@ -588,6 +598,7 @@ function Dashboard({ session, onSignOut }) {
           {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} />}
           {/* The role is re-checked here, not only in the nav: routing can put `tab` on a value
               the nav never offered. Still a courtesy -- RLS is what refuses the write. */}
+          {tab === 'access-control' && userRole === 'Administrator' && <AccessControlTab showToast={showToast} />}
           {tab === 'settings' && userRole === 'Administrator' && <SettingsTab showToast={showToast} />}
         </Suspense>
       </main>

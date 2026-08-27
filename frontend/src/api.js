@@ -546,6 +546,120 @@ const apiMethods = {
   },
 
   /**
+   * The machine identities that can reach this stack.
+   *
+   * THROUGH AN RPC, because neither table this needs is reachable from a browser and both are
+   * unreachable on purpose: `auth.users` is GoTrue's and is not served by PostgREST at all, and
+   * `public.user_roles` is in check-docs-drift's NOT_PUBLISHED list -- "read server-side by the two
+   * userinfo functions, never by a client". `list_service_principals()` (0042) returns four columns
+   * and no secret, which is the narrow alternative to granting the browser the two tables that
+   * decide who is who.
+   *
+   * ADMINISTRATOR ONLY at the database, so a Shopfloor_Manager reaching this gets a raise rather
+   * than an empty list -- which the caller surfaces rather than rendering as "no service accounts".
+   */
+  listServicePrincipals: async () => {
+    const { data, error } = await supabase.rpc('list_service_principals');
+    if (error) throw new Error(error.message || 'Could not list service principals');
+    return data || [];
+  },
+
+  /**
+   * Every TOKEN_MINTED row, grouped by the principal it was signed for.
+   *
+   * NOT "THE LATEST PER PRINCIPAL", which is what a naive inventory would fetch. A re-mint does not
+   * invalidate the previous token -- PostgREST validates the signature and consults no table -- so
+   * two mints a week apart are two live credentials. Reading only the newer one would report half
+   * of what is outstanding. tokenStatus() counts the unexpired ones; this hands it all of them.
+   *
+   * BOUNDED, because `digital_thread` is append-only and cannot be pruned. Only TOKEN_MINTED rows
+   * are selected, and only the columns the status derivation reads.
+   */
+  listServiceTokens: async () => {
+    const { data, error } = await supabase
+      .from('digital_thread')
+      .select('entity_id,recorded_at,new_data')
+      .eq('action', 'TOKEN_MINTED')
+      .eq('entity_type', 'service_principals')
+      .order('recorded_at', { ascending: false });
+
+    if (error) throw new Error(error.message || 'Could not read token history');
+
+    const byPrincipal = new Map();
+    for (const row of data || []) {
+      if (!byPrincipal.has(row.entity_id)) byPrincipal.set(row.entity_id, []);
+      byPrincipal.get(row.entity_id).push({
+        issued_at: row.new_data?.issued_at || row.recorded_at,
+        expires_at: row.new_data?.expires_at || null,
+        jti: row.new_data?.jti || null,
+      });
+    }
+    return byPrincipal;
+  },
+
+  /**
+   * Create a machine identity that cannot sign in.
+   *
+   * THROUGH THE RPC, AS THE CALLER. `create_service_principal()` (0044) is SECURITY DEFINER and
+   * checks has_role() itself -- it writes to `auth.users`, which no browser-facing role can reach
+   * and which nothing else in this application writes to except migration 0034.
+   */
+  createServicePrincipal: async (roleName, note) => {
+    const { data, error } = await supabase.rpc('create_service_principal', {
+      p_role_name: roleName,
+      p_note: note || null,
+    });
+    if (error) throw new Error(error.message || 'Could not create the service principal');
+    return Array.isArray(data) ? data[0] : data;
+  },
+
+  /**
+   * Every gateway with what the platform knows about its broker credential.
+   *
+   * TWO READS, NOT A JOIN, and the second is the interesting one. `gateway_status` carries
+   * `enrolled_at` and `credential_revoked_at`, which is the whole story for a PHYSICAL gateway. A
+   * virtual one has neither by construction -- enrolment refuses it -- so its only record is the
+   * CREDENTIAL_ISSUED row 0041 writes, which lives in `digital_thread`.
+   *
+   * PostgREST cannot join those: `digital_thread.entity_id` carries no foreign key, deliberately,
+   * so an audit row survives the purge of the thing it describes. So they are fetched separately
+   * and reduced here.
+   *
+   * BOUNDED, because `digital_thread` is append-only and grows forever. Only CREDENTIAL_ISSUED rows
+   * are selected and only the newest per gateway is kept -- re-minting appends rather than
+   * replaces, and the page is asking "when was the credential this gateway is using issued", which
+   * is the last one.
+   */
+  listGatewayCredentials: async () => {
+    const [gatewaysRes, issuedRes] = await Promise.all([
+      supabase
+        .from('gateway_status')
+        .select('id,name,sparkplug_id,is_virtual,is_archived,status,enrolled_at,credential_revoked_at,live_status')
+        .order('name'),
+      supabase
+        .from('digital_thread')
+        .select('entity_id,recorded_at,changed_by')
+        .eq('action', 'CREDENTIAL_ISSUED')
+        .eq('entity_type', 'gateways')
+        .order('recorded_at', { ascending: false })
+    ]);
+
+    if (gatewaysRes.error) throw new Error(gatewaysRes.error.message || 'Could not read gateways');
+
+    // AN AUDIT READ THAT FAILS IS NOT FATAL. `digital_thread:read` is a separate permission, and a
+    // caller without it should still see the gateway inventory -- with every virtual gateway
+    // reading `No platform record`, which is exactly what that state means from where they stand.
+    const issuedBy = new Map();
+    if (!issuedRes.error) {
+      for (const row of issuedRes.data || []) {
+        if (!issuedBy.has(row.entity_id)) issuedBy.set(row.entity_id, row.recorded_at);
+      }
+    }
+
+    return (gatewaysRes.data || []).map(g => ({ ...g, issued_at: issuedBy.get(g.id) || null }));
+  },
+
+  /**
    * Mint a VIRTUAL gateway's broker credential and get it back once.
    *
    * `supabase.functions.invoke()` WOULD work here -- the response is JSON, so the decoding trap
@@ -956,8 +1070,19 @@ const apiMethods = {
         p_include_purged: includePurged,
         // Normalised to the stored form. The trigger writes TG_TABLE_NAME -- 'cells' / 'gateways' /
         // 'devices' -- and the UI has always offered 'CELL' / 'GATEWAY' / 'DEVICE'.
+        //
+        // `service_principals` is NOT a table name, unlike the other three: 0043 and 0044 write it
+        // for auth.users identities, which live in GoTrue's schema. It is mapped here anyway
+        // because this map is the only thing that turns a dropdown label into what is stored --
+        // an entry missing from it falls through unchanged and matches no row at all, which reads
+        // as "no events" rather than as a broken filter.
         p_entity_type: entityType
-          ? ({ CELL: 'cells', GATEWAY: 'gateways', DEVICE: 'devices' }[entityType.toUpperCase()] || entityType)
+          ? ({
+              CELL: 'cells',
+              GATEWAY: 'gateways',
+              DEVICE: 'devices',
+              'SERVICE IDENTITY': 'service_principals',
+            }[entityType.toUpperCase()] || entityType)
           : null,
         p_action: action || null,
         p_entity_ids: entityIds && entityIds.length ? entityIds : null,

@@ -842,13 +842,18 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                 : `${visibleSchemas.length}/${schemas.length}`}
             </span>
           </h3>
-          {/* The page's two primary actions, in the header of the card they act on. They had a
-              row of their own above the catalog, which put "Build Schema from Catalog" nowhere
-              near the schemas and left a 34px band holding two buttons. */}
+          {/* The page's primary action, in the header of the card it acts on. It had a row of its
+              own above the catalog, which put "Build Schema from Catalog" nowhere near the schemas
+              and left a 34px band holding two buttons.
+
+              "VALIDATE CANDIDATE PAYLOAD" USED TO SIT HERE AND IS NOW A SCHEMA'S OWN ACTION. From
+              the header it could not know what to validate against, so its first step was a
+              dropdown of every schema name -- which means the reader had to have decided WHICH
+              schema before opening it, and then pick it out of a list showing nothing but names.
+              From the drawer the target is already chosen, and chosen somewhere its version,
+              status, change description and device count are all on screen. Fewer clicks is the
+              smaller half of that. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <button className="btn btn-ghost btn-sm" onClick={() => setShowValidateModal(true)} disabled={schemas.length === 0} title="Test sample telemetry payload against registered schema rules">
-              <IconCheck size={14} /> Validate Candidate Payload
-            </button>
             {/* The only way to create a schema. "Register New Schema" used to sit beside this,
                 taking a raw JSON Schema document as free text -- which meant a schema could name
                 metrics that were not in the catalog, had no standard, and carried no semantic id.
@@ -1335,18 +1340,20 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                 const open = isGroupOpen(group.label)
                 return (
                 <tbody key={group.label}>
-                  <tr>
-                    <td colSpan={8} style={{ background: 'var(--bg-glass)', padding: 0, borderTop: '1px solid var(--border)' }}>
+                  {/* THE CATEGORY ROW USED `--bg-glass`, WHICH IS EXACTLY THE HOVER COLOUR, and
+                      that one collision produced three symptoms: a category header looked
+                      permanently hovered, a hovered metric row looked like a category header, and a
+                      run of collapsed categories merged into a single slab. `.table-group-row`
+                      mixes toward the text colour instead -- separated from the row background AND
+                      from hover, which is what lets both mean something. */}
+                  <tr className="table-group-row">
+                    <td colSpan={8}>
                       {/* Whole header row is the control, same as the vocabulary panel's sections. */}
                       <button
                         type="button"
+                        className="table-group-button"
                         onClick={() => toggleGroup(group.label)}
                         aria-expanded={open}
-                        style={{
-                          width: '100%', display: 'flex', alignItems: 'center', gap: '8px',
-                          padding: '6px 12px', background: 'none', border: 'none',
-                          cursor: 'pointer', color: 'inherit', textAlign: 'left', font: 'inherit'
-                        }}
                         title={open
                           ? `Collapse ${group.label}`
                           : `Expand ${group.label} (${group.metrics.length} metric${group.metrics.length === 1 ? '' : 's'})`}
@@ -1497,7 +1504,15 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         />
       )}
 
-      {showValidateModal && <ValidatePayloadModal schemas={schemas} onClose={() => setShowValidateModal(false)} />}
+      {/* The drawer's selection is the starting target; the modal's own select still lets it be
+          changed, so one payload can be tested against two versions without retyping it. */}
+      {showValidateModal && (
+        <ValidatePayloadModal
+          schemas={schemas}
+          initialSchemaUuid={selectedSchema?.schema_uuid}
+          onClose={() => setShowValidateModal(false)}
+        />
+      )}
       {showBuilderModal && <SchemaBuilderModal catalog={catalog} gateways={gateways} onSubmit={handleBuilderSubmit} onCancel={() => setShowBuilderModal(false)} />}
       {deprecateTarget && (
         <DeprecateMetricModal
@@ -1609,6 +1624,14 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
             title: deviceCountFor(selectedSchema.schema_uuid) === 0
               ? 'No device is provisioned with this schema version'
               : 'Open the Devices page filtered to this schema'
+          },
+          {
+            label: 'Validate Payload', icon: <IconCheck size={13} />,
+            onClick: () => setShowValidateModal(true),
+            disabled: !selectedSchema.schema_definition,
+            title: selectedSchema.schema_definition
+              ? `Test a sample telemetry payload against ${schemaVersionLabel(selectedSchema)} of ${selectedSchema.schema_name}`
+              : 'This version has no definition to validate against'
           },
           {
             // Was the sole item behind the row's "More" menu. With the Actions column gone this is
