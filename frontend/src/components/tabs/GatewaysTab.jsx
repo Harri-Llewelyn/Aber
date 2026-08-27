@@ -67,7 +67,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   // otherwise. is_virtual is deliberately NOT the same question: virtual is a deployment fact
   // (this connector runs on the app host), site-wide is a claim about location. A virtual
   // gateway is usually site-wide, but conflating them would relocate assets on a checkbox.
-  const blank = { gateway_id: '', gateway_name: '', status: 'OFFLINE', is_virtual: false, access_url: '', cell_id: '', location_scope: SCOPE_CELL }
+  const blank = { gateway_id: '', gateway_name: '', status: 'OFFLINE', is_virtual: false, is_simulated: false, access_url: '', cell_id: '', location_scope: SCOPE_CELL }
   const [form, setForm]         = useState(blank)
   const [docsForGw, setDocsForGw] = useState(null)
   // The gateway whose bundle modal is open. Held as the OBJECT rather than an id: the modal needs
@@ -390,6 +390,16 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                                <IconZap size={11} /> VIRTUAL
                              </span>
                            )}
+                           {/* SEPARATE FROM VIRTUAL, AND BOTH CAN BE SHOWN AT ONCE. Virtual is
+                               about whether an edge appliance exists; this is about whether the
+                               readings are real. A physical appliance replaying a capture is
+                               virtual=false, simulated=true, which is why neither implies the
+                               other and the badges do not merge. */}
+                           {g.is_simulated && (
+                             <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Telemetry from this gateway is generated, not observed -- a simulator or a broker playback target">
+                               SIMULATED
+                             </span>
+                           )}
                            {g.is_archived && (
                              <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Decommissioned gateway">
                                <IconArchive size={11} /> ARCHIVED
@@ -560,6 +570,21 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                   : 'Runs on its own hardware. On save you will be given a bundle to copy to that machine; it enrols itself and appears here as online.'}
               </div>
             )}
+            <div className="form-group form-group-check">
+              <input type="checkbox" id="is_simulated" checked={form.is_simulated || false} onChange={e => setForm(f => ({ ...f, is_simulated: e.target.checked }))} />
+              <label htmlFor="is_simulated" className="form-label">Telemetry is simulated or replayed</label>
+            </div>
+            {/* WHAT TICKING IT MEANS, SAID WHERE IT IS TICKED. It changes no behaviour on the
+                ingestion path -- a simulated gateway is ingested exactly like a real one, which is
+                the point of broker playback -- so the only thing it does is let everything
+                downstream tell the difference. Saying so stops it reading as a switch that
+                quarantines or diverts the data. */}
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '-6px', marginBottom: '12px' }}>
+              Marks this gateway's readings as generated rather than observed — a simulator, or a
+              target for <code>capture.py play</code>. Its devices inherit the mark; they have no
+              setting of their own. Ingestion is unchanged: this is a label for dashboards,
+              retention and reports, not a filter on the data path.
+            </div>
             <div className="form-group">
               <label className="form-label">Gateway Access URL (Optional UI Console)</label>
               <input className="form-control" value={form.access_url || ''} onChange={e => setForm(f => ({ ...f, access_url: e.target.value }))} placeholder="e.g. http://localhost:1880" title="Web Console / Management URL for this gateway" />
@@ -601,6 +626,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           <>
             <StatusBadge status={gatewayLiveStatus(selected)} />
             {selected.is_virtual && <span className="badge badge-neutral" style={{ fontSize: '11px' }}>VIRTUAL</span>}
+            {selected.is_simulated && <span className="badge badge-neutral" style={{ fontSize: '11px' }} title="Telemetry from this gateway is generated, not observed">SIMULATED</span>}
             {selected.is_archived && <span className="badge badge-warning" style={{ fontSize: '11px' }}>ARCHIVED</span>}
           </>
         )}

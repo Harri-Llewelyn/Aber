@@ -95,7 +95,7 @@ const DEVICE_EMBED =
   'is_archived, gateway_id, cell_id, location_scope, created_at, model_3d_path';
 const GATEWAY_EMBED =
   `id, name, description, sparkplug_id, cell_id, location_scope, access_url, status, last_heartbeat, ` +
-  `is_virtual, is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
+  `is_virtual, is_simulated, is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
 
 /**
  * Effective cell per device, keyed by device id, read from public.device_locations.
@@ -1452,6 +1452,10 @@ const apiMethods = {
         description: emptyToNull(body.description),
         access_url: body.access_url,
         is_virtual: !!body.is_virtual,
+        // Defaulted rather than omitted so a gateway created for playback can be flagged in one
+        // step. The column is NOT NULL DEFAULT false (0052), so `false` here and an absent key
+        // reach the same row -- being explicit is for the reader, not the database.
+        is_simulated: !!body.is_simulated,
         status: body.status || 'OFFLINE',
         ...locationFieldsFrom(body)
       }).select();
@@ -1770,6 +1774,9 @@ const apiMethods = {
         access_url: body.access_url
       };
       if ('is_virtual' in body)  patch.is_virtual = !!body.is_virtual;
+      // Separate from is_virtual and not derived from it: a physical appliance replaying a capture
+      // is virtual=false, simulated=true. Folding them would make that gateway unrepresentable.
+      if ('is_simulated' in body) patch.is_simulated = !!body.is_simulated;
       // See the devices patch: emptyToNull so clearing the field stores NULL, not ''.
       if ('description' in body) patch.description = emptyToNull(body.description);
       // Same pairing rule as devices: marking a gateway Site-Wide clears its cell rather than
