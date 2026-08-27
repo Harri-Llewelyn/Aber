@@ -228,6 +228,24 @@ export function CaptureLibrary({ gateway, canRead, canManage, showToast }) {
         </>
       )}
 
+      {/* PLAYBACK MEETS QUARANTINE FIRST, AND SILENCE IS THE FAILURE MODE. A capture played onto a
+          device id nobody registered is held and dropped until an Administrator approves it --
+          zero-touch onboarding working exactly as designed, and correct. But from the operator's
+          side it looks identical to a playback that did nothing: the command reports success, the
+          messages are published, and no telemetry appears. Saying so here is the difference between
+          "there is a step left" and "this is broken".
+
+          STATIC RATHER THAN COMPUTED, and not for want of trying. The panel could parse each stored
+          capture and compare the ids it names against the directory -- but those ids are rewritten
+          at playback, so what gets quarantined is decided by the --map targets chosen at the
+          command line, which this panel never sees. A computed warning would be confidently wrong
+          about the file it was looking at. */}
+      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>
+        Playing a capture onto a device that is not registered here does not fail — it lands in{' '}
+        <strong>Quarantine</strong> and waits for approval, and until then no telemetry is stored.
+        Map onto devices that already exist to skip that step.
+      </div>
+
       {/* Shown to a reader who cannot write, so the absent dropzone is explained rather than
           looking like a missing feature. */}
       {!canManage && (

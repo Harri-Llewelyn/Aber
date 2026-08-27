@@ -128,6 +128,36 @@ describe('the simulated-gateway warning', () => {
   })
 })
 
+describe('the quarantine notice', () => {
+  // THE ONE REQUIREMENT THE ROADMAP ENTRY STATED THAT THE FIRST CUT MISSED. It said the approval
+  // step "has to be said by the UI rather than let the import look like it failed" -- and the
+  // first version of this panel documented it thoroughly in ingestion/README.md and mentioned
+  // quarantine zero times on screen, which is the one place an operator watching a playback
+  // produce nothing would actually be looking.
+
+  it('says a playback onto an unregistered device is held rather than lost', async () => {
+    await show()
+    expect(screen.getByText(/does not fail/i)).toBeInTheDocument()
+    expect(screen.getByText(/Quarantine/)).toBeInTheDocument()
+  })
+
+  it('is shown to a read-only role too', async () => {
+    // An Auditor can download a capture and hand it to somebody who will play it. The step is
+    // still ahead of them, so hiding it behind write authority would tell the wrong half.
+    await show({ canManage: false })
+    expect(screen.getByText(/does not fail/i)).toBeInTheDocument()
+  })
+
+  it('is shown even when no captures are stored yet', async () => {
+    // It is guidance about playing, not about the list -- and the moment somebody most needs it
+    // is the first time, when there is nothing here to look at.
+    api.listCaptures.mockResolvedValue([])
+    await show()
+    await waitFor(() => expect(screen.getByText(/No captures yet/i)).toBeTruthy())
+    expect(screen.getByText(/does not fail/i)).toBeInTheDocument()
+  })
+})
+
 describe('listing and actions', () => {
 
   it('says how many are stored', async () => {

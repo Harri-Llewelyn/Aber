@@ -698,7 +698,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Eleven extensions, none of them speculative: every one names the code it would build on, because
+Twelve extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
@@ -721,12 +721,12 @@ below a removal would silently redirect all of them without erroring. A number c
 identifier, not a position. Where code refers to work that has since shipped, the citation names the
 documentation rather than a roadmap number.
 
-**Items 1-5 are this repository's own**, ordered by how much of each already exists. **Items 8-15
+**Items 1-5 are this repository's own**, ordered by how much of each already exists, as is 17. **Items 8-15
 arrive from feature requests** — 8, 9 and 10 from GitHub issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
 [#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66), in that same order of how much already
-exists; 12 and 15 are not yet filed.
+exists; 12, 15 and 17 are not yet filed.
 [#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) was item 11 and is now built. Where an entry's heading differs from the issue's title, it is
 because the work that remains is narrower than the title claims.
 
@@ -1410,6 +1410,88 @@ the vocabulary becomes — the chain is immutable, so the old word survives ther
 explains why. Above all, `check-docs-drift.mjs` enforces that **every migration adding a `gateways`
 column rebuilds `gateway_status`**, because Postgres freezes `SELECT g.*` at creation time; that rule
 exists for precisely this kind of change and this change must satisfy it twice.
+
+---
+
+### 17 · Recording a capture from the dashboard
+
+**Builds on:** [`ingestion/capture.py`](ingestion/capture.py) · `on_message()` and the daemon's
+existing `spBv1.0/#` subscription · the `broker-captures` bucket and
+[`supabase/storage-policies.sql`](supabase/storage-policies.sql) · `gateways.is_simulated` (`0052`) ·
+the gate pattern in `0047` · **not yet filed as an issue**
+
+**Capture and playback shipped as a CLI, and the CLI is the part that cannot be delegated.**
+`capture.py record` opens an MQTT subscription; a browser cannot. Mosquitto listens on 1883 TCP with
+no WebSocket listener, and the recording principal's password is a server-side secret — putting it
+in a bundle publishes it, which is the exact thing `mosquitto.acl` was rewritten to prevent. So
+"click Capture and a recording starts" is not a UI feature with a backend detail attached. **It is a
+new behaviour in a server-side component, with a page in front of it.**
+
+#### The daemon is the host, and it is nearly free
+
+`ingestion.py` already holds the subscription and the credential. A capture job costs it no new
+broker connection and no second subscriber: `on_message()` appends to a buffer when a job is active
+and the topic matches. That matters beyond tidiness — a second subscriber on the same edge node
+splits the `seq` stream, and `_last_seq` is keyed `(group, edge_node)`, so an independent recorder
+would make the daemon's own gap detection fire permanently. This is the same finding §1 records
+about `$share`, arriving from the other direction.
+
+**Two bounds it needs that a CLI did not.** A CLI run is watched by the person who started it; a
+daemon job is not. So the buffer needs a size cap as well as a duration, and **anything left at
+`recording` when the daemon starts must be reconciled to `failed`** — otherwise a restart mid-capture
+leaves a row counting down forever and a page that never stops saying "42 seconds remaining".
+
+#### The daemon cannot write the bucket, and that is the load-bearing gap
+
+`broker_captures_insert_privileged` requires `has_role(['Administrator', 'Shopfloor_Manager'])`. The
+daemon authenticates as `Service_Ingestor`, which holds `Operator` and deliberately holds nothing
+else. **So this needs a gate before it needs a page** — a `SECURITY DEFINER` function in `0047`'s
+shape, checked with `is_ingestion_caller()`, rather than a role the daemon should not have or a
+policy arm that widens the bucket to everything holding `Operator`.
+
+This is exactly the shape of the defect `0051` fixed, and worth naming so it is not rediscovered:
+the daemon calling a storage path nobody granted it fails with `42501`, is caught, is logged, and
+looks like nothing happening.
+
+#### What the page is
+
+The twelfth page, and the first thing to exercise the `tight` band in `navDensity()`, which has been
+sitting unexercised since it was built for a page that turned out not to exist.
+
+- **Two tabs, Gateways and Devices**, following `VocabularyTab`'s pattern, with a **Capture** button
+  per row in the shape of the **Generate** button on the broker credentials table.
+- **One capture at a time, across the whole stack**, enforced by a partial unique index on
+  `status = 'recording'` rather than by the UI — a rule the database keeps is a rule two browser tabs
+  cannot break.
+- **A card at the top** while one is running: subject, elapsed, remaining.
+- **One stored capture per subject.** A new recording replaces the old, behind a modal that names
+  what it is about to delete and when that was taken — not "are you sure". The cost is real and
+  should be taken deliberately: **a capture of a rare fault can be destroyed by a routine
+  re-record**, and the modal is the only thing standing there.
+
+#### Two things the current design has to change to allow it
+
+**Captures are filed by what they play back AS; this files them by what was RECORDED.** Today the
+prefix is the playback target, which is the only fact available when a person uploads a file by
+hand. A page that records from a subject knows the subject, which is more intuitive and is what makes
+the two tabs work — so the prefix becomes the recorded asset, and the RLS `EXISTS` gains a `devices`
+arm alongside `gateways`. Playback still names its own target at the command line; the two stop being
+the same question.
+
+**A device-scoped capture must quietly include its gateway's birth messages.** The obvious filter —
+`DDATA` for one device — omits `NBIRTH`/`DBIRTH`, which is where the alias table lives. A gateway
+publishing alias-optimised DDATA would produce a capture that replays as `unresolved_alias` and
+drops every metric, from a file that looks complete. The daemon already documents this failure at
+`_alias_map`: *"ingests nothing at all from an alias-optimised gateway, and reports no error while
+doing it."*
+
+#### What it does not need
+
+**No new broker credential**, because the daemon already has one and this adds no publisher. **No
+scheduling.** A capture is started by a person watching a machine misbehave; a cron-shaped version of
+this is a different feature with a different argument, and building the timer first would be building
+the easy half.
+
 
 ---
 
