@@ -1331,7 +1331,17 @@ services:
       MQTT_TLS_ENABLED: ${MQTT_TLS_ENABLED:-}
       MQTT_TLS_CA_FILE: ${MQTT_TLS_CA_FILE:-}
       SUPABASE_URL: http://supabase-kong:8000
-      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      # THE SERVICE-ROLE KEY IS DELIBERATELY NOT HERE ANY MORE (roadmap item 16). It bypasses RLS
+      # entirely, and it sat in the process most exposed to the plant network -- the one credential
+      # on this stack whose compromise no policy written anywhere else can contain.
+      #
+      # Both of these are needed and they do different jobs. The anon key is the apikey the gateway
+      # checks; it admits exactly two literal keys, so the ingestion token cannot be sent in its
+      # place. The ingestion token is the Authorization bearer, and it names Service_Ingestor
+      # (migration 0046) -- an Operator principal that cannot write a single row directly. Every
+      # write goes through a gate in 0047 that checks the caller is that principal.
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_INGESTION_KEY: ${SUPABASE_INGESTION_KEY}
       # Device liveness watchdog. A device that stops publishing writes nothing and emits no
       # DDEATH, so without this it stays ONLINE forever. 0 disables it; raise the window for a
       # fleet of event-driven devices that legitimately stay quiet for long periods.

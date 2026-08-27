@@ -87,6 +87,15 @@ secrets:
   jwtSecret: ""
   anonKey: ""
   serviceRoleKey: ""
+  # The ingestion daemon's own credential (roadmap item 16). Signed by the same jwtSecret, but
+  # unlike the two above it names a PRINCIPAL rather than a role: claims are
+  # {"iss":"supabase","role":"authenticated","sub":"b0000000-0000-4000-8000-000000000002"}.
+  # That subject is Service_Ingestor, seeded by migration 0046; it holds Operator and cannot write
+  # a row directly, so every write goes through a gate in 0047 that checks the caller is it.
+  #
+  # PART OF THE SAME MATCHING SET as anonKey and serviceRoleKey -- re-sign all three together when
+  # jwtSecret changes. `scripts/setup.mjs` mints all three for the Compose path.
+  ingestionKey: ""
 
   # Superuser password for Supabase Postgres, and the password set on the scoped roles
   # (supabase_auth_admin, authenticator, supabase_storage_admin) by the roles-init Job.

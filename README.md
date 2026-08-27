@@ -1630,10 +1630,15 @@ exists for precisely this kind of change and this change must satisfy it twice.
 
 ### 16 · `Service_Ingestor`, and taking the service-role key off the daemon
 
+**Built.** The ingestion daemon no longer holds `SUPABASE_SERVICE_ROLE_KEY`. It authenticates as
+`Service_Ingestor`, an `Operator` principal that cannot write a single row directly, and every
+write it makes goes through a SECURITY DEFINER gate that checks the caller is that principal —
+`0046_service_ingestor_principal.sql` · `0047_ingestion_write_rpcs.sql` ·
+`0048_machine_principals_are_not_users.sql` · [`ingestion/ingestion.py`](ingestion/ingestion.py) ·
+[`scripts/setup.mjs`](scripts/setup.mjs) · **never filed as an issue**
+
 **Builds on:** `record_ingestion_rejection()` (`0026`) · `create_service_principal()` (`0044`) ·
-`0034`'s read-only principal · `0046_service_ingestor_principal.sql` ·
-`0047_ingestion_write_rpcs.sql` · [`ingestion/ingestion.py`](ingestion/ingestion.py) ·
-`verify_gateway_binding()` · **not yet filed as an issue**
+`0034`'s read-only principal · `verify_gateway_binding()`
 
 **Carved out of §13 rather than left inside a section marked built.** That item specified three
 identity profiles and shipped the mechanism for two: `Service_Reader` is what
@@ -1702,9 +1707,30 @@ credential is an ordinary authenticated principal — so each one checks that th
 surface, which is why `0047`'s self-check asserts a second principal holding the same `Operator`
 role is refused.
 
+**Two findings came out of the build that the entry did not predict, and both were silent.**
+
+*Giving the daemon an identity would have relabelled every ingestion write as a human action.*
+`log_digital_thread_event()` concludes `actor_source = 'user'` from `auth.uid()` being non-NULL,
+which was sound while the only accounts carrying a `sub` were people's. Point the daemon at a real
+principal and it inverts — and nothing errors. The Digital Thread simply starts attributing
+automated device registrations and status flips to a person, with no sign but a `changed_by` uuid
+belonging to nobody who works here. The irony is the lesson: that same function already refuses to
+accept `'user'` from a header, because *"claiming a human author is exactly the assertion a client
+must not be able to make about itself"* — and narrowing the credential would have let it make that
+claim through the front door. `0048` teaches it to ask what kind of account it is, using `0042`'s
+existing machine-identity predicate rather than inventing a second one. The row got better as well
+as correct: an ingestion write now records `'ingestion'` **and** names the principal, where it used
+to record `'ingestion'` and `NULL`.
+
+*`agent_version` was being written to nowhere.* It is in `GATEWAY_HEALTH_METRICS`, and the first
+draft of `0047`'s gate omitted it from the `SET` clause — so the value was extracted from the
+payload, validated, and discarded. The page would have gone on showing whatever version enrolled
+however long ago: stale, not absent, which is the harder thing to notice.
+[`check-docs-drift.mjs`](scripts/check-docs-drift.mjs) now cross-references the two lists.
+
 **The value is not tidiness.** A credential that bypasses RLS is the one thing on this stack whose
-compromise cannot be contained by any policy written anywhere else, and it currently sits in the
-process most exposed to the plant network.
+compromise cannot be contained by any policy written anywhere else, and it sat in the process most
+exposed to the plant network. What replaced it can do exactly seven things.
 
 ---
 

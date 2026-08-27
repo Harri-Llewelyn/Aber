@@ -56,7 +56,20 @@ MQTT_TLS_CA_FILE = os.getenv("MQTT_TLS_CA_FILE", "").strip()
 
 # Supabase configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL", "http://127.0.0.1:54321")
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+
+# TWO KEYS, DOING DIFFERENT JOBS, AND NEITHER IS THE SERVICE-ROLE KEY ANY MORE (roadmap item 16).
+#
+# The anon key is the `apikey` the gateway checks. Its Lua filter admits exactly two literal
+# strings, so the ingestion token cannot be sent in its place -- it would be refused at the edge
+# before PostgREST ever saw it.
+#
+# The ingestion token is the Authorization bearer and is what actually authorises the writes. It
+# names Service_Ingestor (migration 0046), an `authenticated` principal holding Operator, which
+# cannot write a single row directly: every write goes through a SECURITY DEFINER gate in 0047 that
+# checks the caller is that principal. This is the same shape i3X uses -- pass a bearer through to
+# PostgREST and let RLS answer -- rather than a key that bypasses RLS entirely.
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+SUPABASE_INGESTION_KEY = os.getenv("SUPABASE_INGESTION_KEY", "")
 
 # Liveness heartbeat. OPT-IN, empty by default: Docker Compose declares no healthcheck for this
 # service and nothing reads the file there, so writing one would be litter. Kubernetes sets it and
@@ -183,13 +196,19 @@ SCHEMA_CACHE_TTL_SECONDS = int(os.getenv("SCHEMA_CACHE_TTL_SECONDS", "300"))
 supabase_client = None
 try:
     from supabase import create_client, Client
-    if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
+    if SUPABASE_URL and SUPABASE_ANON_KEY and SUPABASE_INGESTION_KEY:
         # Declares the daemon as the actor behind its writes, so digital_thread rows say
         # "ingestion" rather than the generic "service".
         #
-        # A HEADER, because the daemon and the edge functions arrive on the SAME service-role
-        # key -- the connection alone cannot tell them apart. PostgREST exposes request headers
-        # as the `request.headers` GUC, which log_digital_thread_event() reads.
+        # A HEADER, because the daemon and the edge functions used to arrive on the SAME
+        # service-role key -- the connection alone could not tell them apart. PostgREST exposes
+        # request headers as the `request.headers` GUC, which log_digital_thread_event() reads.
+        #
+        # STILL NEEDED NOW THAT THE DAEMON HAS ITS OWN IDENTITY, and for a sharper reason than
+        # before. The trigger concludes `actor_source = 'user'` from `auth.uid()` being non-NULL,
+        # so a daemon with a real `sub` would have relabelled every ingestion write as a human
+        # action -- the exact claim that function refuses to accept from a header. 0048 teaches it
+        # that a machine principal is not a user; this header is what it falls back to reading.
         #
         # The trigger accepts only 'ingestion' / 'service' / 'migration' from this header and
         # never 'user': a client asserting a human author for its own writes is precisely the
@@ -199,8 +218,20 @@ try:
         # constructor is incomplete in supabase-py 2.x and raises on an attribute the Auth client
         # then expects ("'ClientOptions' object has no attribute 'storage'"). Mutating the
         # session's headers is the path that actually reaches PostgREST, verified end to end.
-        supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+        supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
         try:
+            # `.auth()` AND NOT `session.headers["Authorization"] = ...`, which is the obvious
+            # thing and does not work. Setting the session header appears to succeed -- read it
+            # back and it is there -- but supabase-py re-derives Authorization from the client's
+            # own token on every request, so the anon key goes out regardless and PostgREST
+            # resolves the role as `anon`. That failure is quiet in the worst way: reads of
+            # `devices` and `gateways` come back 42501 while the header says what you set.
+            #
+            # The apikey stays the anon key (create_client put it there), so the request carries
+            # `apikey: <anon>` for the gateway's filter and `Bearer <ingestion token>` for
+            # PostgREST -- which is what makes auth.uid() resolve to Service_Ingestor and opens
+            # the 0047 gates.
+            supabase_client.postgrest.auth(SUPABASE_INGESTION_KEY)
             supabase_client.postgrest.session.headers["X-ACS-Cymru-Actor"] = "ingestion"
         except Exception as header_err:
             # Losing the label is not worth losing ingestion over: without it the trigger falls
@@ -210,7 +241,11 @@ try:
             )
         logger.info("Supabase client initialized successfully.")
     else:
-        logger.warning("SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing. Supabase integration disabled.")
+        logger.warning(
+            "SUPABASE_URL, SUPABASE_ANON_KEY or SUPABASE_INGESTION_KEY missing. Supabase "
+            "integration disabled. SUPABASE_INGESTION_KEY replaced SUPABASE_SERVICE_ROLE_KEY -- "
+            "see roadmap item 16; run scripts/setup.mjs or copy the key from .env.example."
+        )
 except Exception as e:
     logger.warning("Failed to initialize Supabase client: %s", e)
 
@@ -3175,7 +3210,11 @@ def main():
     _require_credentials()
     if supabase_client is None:
         logger.critical(
-            "CRITICAL SECURITY ERROR: Supabase client is uninitialized! SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing or invalid. "
+            "CRITICAL SECURITY ERROR: Supabase client is uninitialized! SUPABASE_URL, "
+            "SUPABASE_ANON_KEY or SUPABASE_INGESTION_KEY missing or invalid. "
+            "SUPABASE_INGESTION_KEY replaced SUPABASE_SERVICE_ROLE_KEY here (roadmap item 16); an "
+            ".env predating that change has no such key -- run scripts/setup.mjs, or copy it from "
+            ".env.example for a demonstration stack. "
             "Ingestion daemon refusing to start MQTT loop in fail-open state. System halting to enforce fail-closed device quarantine gating."
         )
         raise SystemExit(1)

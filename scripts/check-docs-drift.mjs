@@ -483,11 +483,20 @@ function edgeFunctionNames() {
       passed. 0032's self-check fabricates a 400-day-old firing alert and asserts it survives,
       because this list can check that a redeclaration was INTENDED and not that it was COMPLETE.`,
     'public.log_digital_thread_event': `0003 adds append-only enforcement, 0005 adds actor_source
-      attribution, and 0026 adds the causation_id stamp. 0026's body is the live one and reproduces
-      0005 IN FULL -- a later declaration that patched rather than reproduced would silently drop
-      the heartbeat suppression guard or the attribution, which is exactly why 0017 was never
-      written. 0026's own self-check asserts both survived, because this list checks that a
+      attribution, 0026 adds the causation_id stamp, and 0048 stops a machine principal being
+      recorded as a user. 0048's body is the live one and reproduces 0026 IN FULL -- a later
+      declaration that patched rather than reproduced would silently drop the heartbeat suppression
+      guard or the attribution, which is exactly why 0017 was never written. 0048 was written by
+      taking the DEPLOYED definition and changing one branch, for that reason. Its own self-check
+      asserts an ingestion write is still recorded as 'ingestion', because this list checks that a
       redeclaration was INTENDED and cannot check that it was COMPLETE.`,
+    'public.is_ingestion_caller': `0047 admits the Service_Ingestor principal OR a caller still
+      presenting the service-role key; 0048 removes the second arm, which is what completes roadmap
+      item 16. The transitional arm existed so that a daemon deployed before the credential swap
+      kept working, and 0047 says removing it should be one line "so that it is a decision rather
+      than a refactor". 0048 is that decision -- nothing hands the daemon a service-role key any
+      more, on either Compose or Kubernetes, so the arm only widened the gates. 0048's self-check
+      asserts service_role is now refused.`,
     'public.digital_thread_page': `0039 derives is_purged as an anti-join against cells, gateways
       and devices, DELIBERATELY not narrowed by entity_type -- its own comment argues that an asset
       is live if it is still in any of them, which is three index probes rather than a CASE that
