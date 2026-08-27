@@ -334,11 +334,18 @@ export function AccessControlTab({ showToast }) {
             ingestion daemon connects to the broker as `factoryplus_ingestion` and reaches the
             database with the service-role key, which is not an identity at all.
             ========================================================================================= */}
-        <div className="settings-preamble card" style={{ marginTop: '20px' }}>
-          <div className="settings-preamble-title">
+        {/* A HEADING, NOT A CARD. It holds one sentence and introduces the two cards beneath it, so
+            wrapping it in a card of its own gave the page a third border, a third padding, and a
+            band that looked like a section with nothing in it.
+
+            It also carried `.settings-preamble-title`, which is small-caps -- a THIRD title
+            treatment on a page that already had `.section-title` above and bold 13px text below.
+            One page, one way of naming a section. */}
+        <div style={{ margin: '24px 4px 12px' }}>
+          <h3 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <IconLock size={15} /> Service identities
-          </div>
-          <p>
+          </h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '6px 0 0' }}>
             The non-human clients that can reach this stack. They are two separate lists because they
             live on two separate planes — a database identity is a role, a broker identity is an ACL
             entry, and nothing here holds both.
@@ -349,15 +356,31 @@ export function AccessControlTab({ showToast }) {
             question: an identity, what it holds, what that reaches, and where it comes from. These
             were stacked prose, which meant every row repeated the label words ("The identity…",
             "Reaches:", "Token minted by") that one header says once. */}
-        <div className="card" style={{ marginTop: '12px', overflowX: 'auto' }}>
-          <div style={{ fontWeight: 600, fontSize: '13px', padding: '12px 12px 0' }}>Database principals</div>
+        {/* THE DIRECTORY'S GROUPED-CARD SHAPE -- `.card` > `.card-header` > title + count > rows --
+            which is what every other multi-table page in the app uses. This was a bold 13px div
+            with hand-picked padding, so the same page named one section with `.section-title` and
+            another with an improvised style. */}
+        <div className="card" style={{ marginTop: '12px' }}>
+          <div className="card-header">
+            <h3 className="section-title">
+              Database principals{' '}
+              <span
+                className="section-count"
+                title={`${principals.length} machine ${principals.length === 1 ? 'identity' : 'identities'} that cannot sign in`}
+              >
+                {principals.length}
+              </span>
+            </h3>
+          </div>
           {principalError && (
-            <div style={{ color: 'var(--text-muted)', fontSize: '12px', padding: '8px 12px 12px' }}>
-              <IconShieldAlert size={12} /> {principalError}
+            <div className="callout" style={{ borderColor: 'var(--danger)', color: 'var(--danger-text)' }}>
+              <IconShieldAlert size={14} className="callout-icon" />
+              <div>{principalError}</div>
             </div>
           )}
           {!principalError && (
-            <table style={{ marginTop: '8px' }}>
+            <div className="table-wrap">
+            <table>
               <thead>
                 <tr>
                   <th>Identity</th>
@@ -432,19 +455,34 @@ export function AccessControlTab({ showToast }) {
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </div>
 
-        <div className="card" style={{ marginTop: '12px', overflowX: 'auto' }}>
-          <div style={{ fontWeight: 600, fontSize: '13px', padding: '12px 12px 0' }}>Broker principals</div>
+        <div className="card" style={{ marginTop: '12px' }}>
+          <div className="card-header">
+            <h3 className="section-title">
+              Broker principals{' '}
+              {/* THE PATTERN COUNTS. It is not an account -- there is no principal by that name --
+                  but it IS a rule in the same file granting the same kind of access, and a count
+                  that excluded it would disagree with the rows a reader can see. */}
+              <span
+                className="section-count"
+                title={`${BROKER_PRINCIPALS.length} named principals and the pattern every gateway connects under`}
+              >
+                {BROKER_PRINCIPALS.length + 1}
+              </span>
+            </h3>
+          </div>
           {/* DECLARED IN THE REPOSITORY, NOT FETCHED, and the page says so rather than implying a
               live read. Mosquitto has no API that lists its principals; check-docs-drift asserts
               this list against mosquitto.acl, in both directions and including the topic rules. */}
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '6px 12px 0' }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '12px 20px 0' }}>
             Read from <code>mosquitto.acl</code> in the repository — the broker has no API that lists
             these, so they are declared alongside the file and checked against it at build time.
-          </div>
-          <table style={{ marginTop: '8px' }}>
+          </p>
+          <div className="table-wrap" style={{ marginTop: '12px' }}>
+          <table>
             <thead>
               <tr>
                 <th>Principal</th>
@@ -488,6 +526,7 @@ export function AccessControlTab({ showToast }) {
               </tr>
             </tbody>
           </table>
+          </div>
         </div>
       </div>
 
