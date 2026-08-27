@@ -77,7 +77,24 @@ const LOCALLY_BUILT = new Set(BUILT_IMAGES.map((n) => `${IMAGE_NAMESPACE}/${n}`)
  * name here is a decision rather than a way to silence the check.
  */
 const TARGET_SPECIFIC = new Map([
-  ['alpine', 'Compose: supabase-kong-init. Kubernetes: the same work is an initContainer using the Kong image.'],
+  [
+    'alpine',
+    'Compose: supabase-envoy-init, which substitutes the API keys and the CORS origins into ' +
+      'envoy.yaml. Kubernetes: the same work is an initContainer on the gateway Deployment, using ' +
+      'the gateway image rather than a second one. (It said supabase-kong-init until roadmap §4 ' +
+      'promoted Envoy; the arrangement is unchanged, the service name is not.)',
+  ],
+  [
+    'kong',
+    'KUBERNETES ONLY, AND ONLY WHEN ASKED FOR. Roadmap §4 promoted Envoy to the primary gateway ' +
+      'on Compose, so Kong is gone from docker-compose.yml entirely -- but the chart keeps it ' +
+      'behind `supabaseKong.enabled` so a cluster can roll back to the gateway it was installed ' +
+      'with, and _helpers.tpl fails the render if both are enabled under one Service name. ' +
+      'Retiring the pin means deleting that rollback, which is a separate decision from ' +
+      'promoting Envoy and should be taken separately. Recorded here rather than left to fail: ' +
+      'the parity check went red the moment Kong left Compose, and with CI minutes exhausted ' +
+      'until September 2026 nothing said so.',
+  ],
   ['node', 'Compose: supabase-storage-init / node-red-init. Kubernetes: node:20-alpine, pinned inline in the Job.'],
   ['busybox', 'Kubernetes only: the wait-for initContainers.'],
   ['curlimages/curl', 'Kubernetes only: readiness waits that need an HTTP client.'],
