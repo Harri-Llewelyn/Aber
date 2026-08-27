@@ -44,7 +44,7 @@ flowchart TB
     end
 
     subgraph Supabase ["Supabase BaaS"]
-        KONG["Kong API Gateway<br/>(54321) key-auth"]
+        GW["Envoy API Gateway<br/>(54321) apikey check"]
         AUTH["GoTrue Auth"]
         PGRST["PostgREST<br/>RLS - digital_thread"]
         RT["Realtime WebSocket"]
@@ -65,12 +65,12 @@ flowchart TB
     MQTT -->|subscribe spBv1.0/#| ING
     ING -->|metadata / quarantine| PGRST
     ING -->|telemetry| TS
-    UI --> KONG
-    KONG --> AUTH
-    KONG --> PGRST
-    KONG --> RT
-    KONG --> STO
-    KONG --> EF
+    UI --> GW
+    GW --> AUTH
+    GW --> PGRST
+    GW --> RT
+    GW --> STO
+    GW --> EF
     PGRST -.->|postgres_fdw view| TS
     GRAF -->|SQL| TS
 ```
@@ -230,7 +230,7 @@ in that range, and the one that matters is not the one in the message:
 
 | Port | Service | Consequence if lost |
 | :--- | :--- | :--- |
-| `54321` | Kong | **the browser has no API** — the dashboard loads and every request fails |
+| `54321` | Envoy | **the browser has no API** — the dashboard loads and every request fails |
 | `54322` | supabase-db | no `psql` from the host; the stack itself is unaffected |
 | `54323` | Supabase Studio | Studio unreachable |
 
@@ -363,7 +363,7 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | `supabase-auth` | `acs-cymru_supabase_auth` | `supabase/gotrue:v2.189.0` | — |
 | `supabase-rest` | `acs-cymru_supabase_rest` | `postgrest/postgrest:v14.12` | — |
 | `supabase-kong-init` | `acs-cymru_supabase_kong_init` | `alpine:3.24` | — |
-| `supabase-kong` | `acs-cymru_supabase_kong` | `kong:3.9.3` | `54321:8000` |
+| `supabase-envoy` | `acs-cymru_supabase_envoy` | `envoyproxy/envoy:v1.31.5` | `54321:8000` |
 | `supabase-functions` | `acs-cymru_supabase_functions` | `supabase/edge-runtime:v1.74.2` | — |
 | `supabase-realtime` | `acs-cymru_supabase_realtime` | `supabase/realtime:v2.34.47` | — |
 | `supabase-storage` | `acs-cymru_supabase_storage` | `supabase/storage-api:v1.11.13` | — |
@@ -393,7 +393,7 @@ unrecognised role produces `403`.
 | :--- | :--- |
 | **Broker** | `allow_anonymous false`; [`mosquitto.acl`](mosquitto.acl) confines each gateway to `spBv1.0/+/+/<own-id>/#` |
 | **Ingestion** | Gateway↔device binding; quarantine gating; append-only historian writes |
-| **Gateway** | Kong `key-auth` on `/rest`, `/realtime`, `/storage`, `/functions` — with **four** documented exemptions ([`supabase/README.md`](supabase/README.md)) |
+| **Gateway** | Envoy's `apikey` check on `/rest`, `/realtime`, `/storage`, `/functions` — with **four** documented exemptions ([`supabase/README.md`](supabase/README.md)) |
 | **API** | PostgREST JWT verification plus RLS on every table |
 | **Database** | `has_role()` reads `user_roles` directly, so revocation is immediate; `digital_thread` is append-only against `service_role` too |
 | **Edge functions** | Explicit router allow-list; per-function secret scoping; role resolved from the database, never a stale JWT claim |
@@ -726,25 +726,38 @@ callback migration is needed.** That was expected to be the hard part and it is 
 **Builds on:** [`templates/ingress.yaml`](deploy/helm/acs-cymru/templates/ingress.yaml) ·
 `acs-cymru.corsOrigins`
 
-**This item used to open by blaming Kong 2.8, and that reason is gone**: the gateway is on
-`kong:3.9.3`, which interpolates `${{env.VAR}}` in declarative config. The two substituters stayed
-anyway, and deliberately — interpolation would move the service-role key into Kong's environment,
-whereas Compose writes it to an internal volume and Helm renders it into a Secret that never
-appears in a rendered manifest. So `kong.yml` is still a placeholder template substituted twice,
-but now because that is the narrower exposure rather than because Kong cannot do otherwise.
+**Both of this item's original arguments have now been answered by something else, and what is left
+is smaller than it was.** It first opened by blaming Kong 2.8 for the substitution templates; the
+3.9.3 bump removed that. It then rested on CORS — and §4 has since moved the gateway to Envoy, which
+restates origin policy in its own filter.
 
-**What remains is the CORS half, and it is the half that was always the real argument.** Gateway
-API's `HTTPRoute` filters express **route-level CORS declaratively**, which would retire the
-`__CORS_ORIGINS__` placeholder specifically. That matters because the origin list is the stack's
-*only* statement of origin policy — the edge functions deliberately declare none — so it is load
-bearing on its own, with no second layer to fall back on. It has already failed once in exactly the
-way a single unenforced statement fails: four literal localhost origins that were correct on
-Compose and silently wrong on Kubernetes, presenting as a dashboard that logged in and then showed
-empty tables while the gateway reported 200 for every request.
+**So the placeholder this was going to retire is still there, and the reason has changed.**
+`__CORS_ORIGINS__` is now substituted into `envoy.yaml` rather than `kong.yml`, by
+`supabase-envoy-init` on Compose and by an initContainer on Kubernetes. Gateway API's `HTTPRoute`
+filters would still express route-level CORS declaratively and still retire it — **on Kubernetes
+only**, where Envoy would keep its own filter for Compose. That is the same one-target-of-two
+outcome this entry always described; §4 did not change it, it only changed which file the `sed`
+runs against.
 
-**Kubernetes-only, and worth saying so.** `HTTPRoute` does nothing for the Compose target, which
-keeps `kong.yml` and its `sed` either way — so this retires one placeholder on one target rather
-than the templating approach as a whole.
+**§4 answered the sequencing question this entry used to pose.** The old text said whichever of §2
+and §4 landed first should decide where origin policy lives. §4 landed. It lives in the gateway
+config, substituted from `KONG_CORS_ORIGINS` — a variable that deliberately kept its name, because
+renaming it would silently ignore whatever operators had already set and an unset origin list
+presents as a dashboard that logs in and then shows empty tables. Taking §2 now means expressing
+origin policy a **second** way on one target, which is exactly the cost the sequencing note was
+written to avoid, and is the strongest argument for leaving this alone.
+
+**What still recommends it** is unchanged and worth keeping: the origin list is the stack's *only*
+statement of origin policy — the edge functions deliberately declare none — so it is load bearing
+with no second layer to fall back on. It has already failed once in exactly the way a single
+unenforced statement fails: four literal localhost origins that were correct on Compose and silently
+wrong on Kubernetes, presenting as a dashboard that logged in and then showed empty tables while the
+gateway reported 200 for every request. A declarative route-level policy is harder to get wrong than
+a substituted JSON array.
+
+**Do not start this before §4's Kubernetes half.** The chart still deploys Kong; changing how
+Kubernetes expresses CORS while the gateway underneath it is still being replaced means two moving
+parts in the layer that has no fallback.
 
 ---
 
@@ -775,90 +788,138 @@ gigabytes of raw points back into TimescaleDB.
 
 ---
 
-### 4 · Kong → Envoy, following upstream Supabase
+### 4 · Kong → Envoy: done on Compose, drafted for Kubernetes
 
-**Builds on:** [`supabase/kong.yml`](supabase/kong.yml) · `supabase-kong-init` ·
-[`templates/supabase/kong.yaml`](deploy/helm/acs-cymru/templates/supabase/kong.yaml)
+**Builds on:** [`supabase/envoy.yaml`](supabase/envoy.yaml) · `supabase-envoy-init` ·
+[`templates/supabase/envoy.yaml`](deploy/helm/acs-cymru/templates/supabase/envoy.yaml) ·
+[`scripts/check-gateway-surface.mjs`](scripts/check-gateway-surface.mjs) ·
+[`docs/gateway-migration.md`](docs/gateway-migration.md)
 
-**Upstream Supabase has dropped Kong.** Their self-hosted `docker-compose.yml` now fronts the stack
-with `envoyproxy/envoy`, so this fork's gateway is on a path upstream no longer maintains
-configuration for. Nothing is broken by that today — the gateway is on `kong:3.9.3` and does exactly
-four things — but every future Supabase change to routing, key handling or CORS will be expressed in
-Envoy config that has to be translated rather than copied.
+**Compose is migrated. Kubernetes is not, and the gap is deliberate.** `supabase-envoy` publishes
+54321 and answers to `supabase-kong` through a network alias; Kong, `supabase-kong-init` and the
+`kong_config` volume are gone from `docker-compose.yml`. The chart still deploys Kong by default,
+because its Envoy templates are **verified in part, not in full** — which is also why
+`supabase/kong.yml` is still in the repository. It is read by nothing on Compose and by the chart on
+Kubernetes, and the template-hygiene check asserts exactly that pair rather than the tempting
+one-liner "kong.yml is gone".
 
-**What actually has to move** is small, and worth writing down because it is smaller than "replace
-the API gateway" sounds. `kong.yml` declares nine services, the `key-auth` plugin on four of them,
-four deliberate exemptions, one global CORS policy and one Prometheus plugin. That is the whole
-surface. Envoy expresses all of it, but none of it the same way: `key-auth` has no direct
-equivalent, and the closest arrangement is a Lua or ext_authz filter — which turns a declarative
-plugin into code the stack would then own.
+**Why it happened now rather than later.** This entry used to close with "not urgent — a
+divergence-from-upstream question, not a security one". That was true and is no longer the whole
+story: the `sb_publishable_*` / `sb_secret_*` keys §5 has a deadline for are a **gateway feature**.
+They are not JWTs, and nothing downstream ever sees one — the gateway matches the key as a string
+and synthesises the `Authorization: Bearer <JWT>` the upstreams require. Upstream ships that
+translation in Envoy only. So §5 ran through here, and the deadline came with it.
 
-**The exemptions are the part to be careful with**, and they are the reason this is not a mechanical
-translation. Four routes are open by design — `/auth/v1/`, the two userinfo endpoints,
-`/storage/v1/object/public/`, and the Factory+ Directory's `/ping` and `/v1/`. Each is open for a
-stated reason and each is load bearing; a translation that quietly widened one would not fail any
-test that exists today, because `validate.py` asserts the 401s that SHOULD happen and cannot assert
-the absence of a route nobody wrote. Any migration needs the negative assertions first.
+**The negative assertions came first, as this entry always said they must.**
+`check-gateway-surface.mjs` already asserted the declared surface — but by *parsing kong.yml*, which
+would have been rewritten alongside the thing it was guarding. It grew a `--runtime` mode that
+probes a live gateway and asserts only what is observable: a gated route is refused before its
+upstream sees it, an open one gets through. It names no gateway concept, so the same command reads
+against Kong and Envoy, and identical output across both was the migration's steering signal.
 
-**A fifth exemption is now an open question, and it should be answered here rather than drift in.**
+**One pass was not enough, and finding that out is the part worth recording.** The unauthenticated
+probe was green on Envoy the whole time `hide_credentials` was stripping the apikey from the header
+and not from the query string — a form Kong accepts and then removes. PostgREST read the leftover as
+a **column filter** and answered `PGRST100` where Kong answered `200`. No probe that sends no
+credential can see that, so `--authenticated` now presents a valid key by header and by query, and
+an unregistered one, and asserts that **on a route which hides credentials the two forms are
+indistinguishable upstream**. Both passes run in CI.
+
+**Four translation traps, each of which produces a stack that looks fine**, are recorded in
+`envoy.yaml` beside the routes they affect: route order is semantic in Envoy and is not in Kong;
+`key_in_query` is load bearing for Realtime, which cannot set a header on a browser handshake;
+Realtime reads its tenant from the Host *label*, so `host_rewrite_literal` is doing real work; and
+the Directory routes must arrive as `/fplus-directory/…` because the runtime picks its worker from
+the first path segment.
+
+**What remains, and none of it is Compose:**
+
+- **The chart's NetworkPolicy and ServiceMonitor.** Adopting the Service *name* covers the fifteen
+  files carrying `http://supabase-kong:8000`; it does nothing for these two, which select **pod
+  labels**. A ServiceMonitor carried over unchanged scrapes 404 *while reporting the target up* —
+  an unmeasured gateway that reads as an idle one.
+- **Finishing the proof.** It has now been installed into a real cluster, and the load-bearing part
+  holds: the `supabase-kong` Service selects `component=supabase-envoy`, and the unauthenticated
+  probe passes in-cluster with the same 3 gated / 6 open / 4 exemptions Compose reports. Credential
+  handling is right in both directions — a valid key opens the gate, an unregistered one is refused
+  401. What is NOT proven is everything needing the stack's own images: `db-init` and
+  `gateway-credential` are unpublished GHCR tags, so no migrations ran, no edge functions were
+  deployed, and Realtime waits forever on a schema nothing creates. That also leaves the Realtime
+  handshake, the ServiceMonitor scrape (no Prometheus Operator CRDs) and the Ingress itself (no
+  ingress controller) untested. All of it is downstream of CI, not of the chart.
+- **`helm lint` is not verification, and this migration produced the proof**: deleting `kong.yml`
+  left the chart's default render failing on a missing file, and lint stayed green through it.
+  Rendering caught worse — the API's Ingress route was gated on `supabaseKong.enabled`, so
+  promoting removed it entirely and every call would have 404'd at the controller.
+- **The fifth exemption**, below.
+
+**A fifth exemption is still an open question, and it should be answered rather than drift in.**
 `aas-api` serves the IDTA REST surface to exactly the class of client that has no Supabase apikey
 and no way to acquire one — an ERP, a PLM, an AAS browser — which is the argument that already
-exempted the Factory+ Directory and both userinfo endpoints. It was deliberately NOT exempted when
-it landed: `functions-v1` routes it and `key-auth` gates it by default, so today those clients need
-a key. Widening the gateway's open surface is a decision to take deliberately and with the negative
-assertions in place, not one to make as a side effect of shipping an endpoint. Note the asymmetry if
-it is taken: `/description` is meant to be readable before a client holds any credential, exactly as
-the Directory's `/ping` is, while every other route authenticates the caller itself and fails closed.
-
-**It interacts with §2 and should be sequenced against it.** Gateway API's `HTTPRoute` would retire
-the `__CORS_ORIGINS__` placeholder on Kubernetes; Envoy would restate CORS in its own filter on both
-targets. Doing both independently means expressing origin policy a third way before deleting the
-first — so whichever lands first should decide where that policy lives.
-
-**Not urgent, and deliberately not bundled with the 2.8 → 3.9.3 bump** that closed the unmaintained-
-image question. This is a divergence-from-upstream question, not a security one.
+exempted the Factory+ Directory and both userinfo endpoints. It was deliberately not taken as part
+of a translation: `/functions/v1/aas-api/description` falls under the gated catch-all and stays
+gated, with the route to open it written out in a comment in `envoy.yaml`. Taking it fails the probe
+until the inventory gains a row, which is the intended order — the inventory is the review, and the
+gateway follows it. Note the asymmetry if it is taken: only `/description` belongs outside the gate;
+every other `aas-api` route authenticates the caller itself and fails closed.
 
 ---
 
 ### 5 · Supabase's legacy API keys
 
-**Builds on:** [`scripts/setup.mjs`](scripts/setup.mjs) · `kong.yml`'s `key-auth` consumers ·
-`custom_access_token_hook` (`0001`) · the edge-function registry
+**Builds on:** [`scripts/setup.mjs`](scripts/setup.mjs) · the gateway's `apikey` check in
+[`supabase/envoy.yaml`](supabase/envoy.yaml) · `custom_access_token_hook` (`0001`) ·
+the edge-function registry
 
 The `anon` and `service_role` JWTs this stack mints in `setup.mjs` are the key format Supabase has
 since superseded with **publishable and secret keys**. This is a real upstream deprecation with a
 real end date, and it is the only item on this list whose timing is set by somebody else.
 
-**It was split out of the configuration audit deliberately.** It arrived there as a bullet under a
-cleanup entry, and it is not a cleanup — it is a migration through the authentication path, which is
-the wrong thing to leave filed under "tidying" where its deadline is invisible. Nothing about it is
-started.
+**Scoped against the pinned versions, as this entry used to say it must be — and the answer changed
+the plan.** The new keys are **not JWTs**, and no component downstream ever sees one. Given a
+non-JWT bearer, `postgrest v14.12` answers
+`PGRST301 "Expected 3 parts in JWT; got 1"` — measured here, not read. They work because the
+**gateway** matches the key as a string and synthesises the `Authorization: Bearer <JWT>` the
+upstreams require. That makes this a gateway feature, not a component-version upgrade, and it is why
+this item ran through §4: upstream ships the translation in Envoy and Kong has no equivalent.
 
-**The surface is wider than "rotate two keys".** `SUPABASE_ANON_KEY` alone is consumed by twelve
-files — Kong's `key-auth`, the Grafana alert contact point, the frontend bundle, the i3X service and
-both e2e Jobs — and the two keys are structurally different things rather than two of the same
-thing:
+**The rehearsal path this entry called "the first thing to build" now exists**, and it did not have
+to be built. Upstream's Envoy configuration accepts legacy and new keys **simultaneously**, so
+consumers migrate one at a time instead of on a flag day. Translation activates only when all four
+of `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `ANON_KEY_ASYMMETRIC` and
+`SERVICE_ROLE_KEY_ASYMMETRIC` are set; short of that it runs legacy-only, which is what the stack
+does today.
 
-- **`anon` is public by construction.** It is the `anon` role, readable in any built bundle, which
-  is why the chart renders it outside a Secret deliberately. Replacing it is a change to what Kong
-  accepts as a registered key, not a secret rotation.
-- **`service_role` is not.** It is held by the ingestion daemon and every edge function, and
-  `0026`'s whole premise is that a holder of it must not be able to forge an audit row. Anything
-  that changes how it is minted has to leave that property intact.
+**The surface is 67 files, not the twelve this entry used to claim** — but the count matters less
+than the split, which decides the work:
+
+- **Most consumers send the key as `apikey` ONLY**, and are format-agnostic. The i3X service and all
+  eight edge functions pass the *caller's* token as the bearer and use the anon key purely as the
+  gateway credential. Those migrate for free.
+- **`service_role` is always both**, and that is the hard half. Its whole purpose is the `role`
+  claim PostgREST switches on, so it depends on the gateway's synthesis. `0026`'s premise — that a
+  holder of it must not be able to forge an audit row — has to survive whatever mints it.
+- **The unauthenticated browser is the other one.** `supabase-js` sends the anon key as the bearer
+  when there is no session, so it needs the same translation.
+- **`anon` is public by construction**, readable in any built bundle, which is why the chart renders
+  it outside a Secret deliberately. Replacing it changes what the gateway accepts as a registered
+  key, not a secret rotation.
 - **`custom_access_token_hook` shapes the claims** the rest of the stack reads. PostgREST resolves
   RLS from them, and `grafana-userinfo` maps a role out of `public.user_roles` beside them.
 
-**Scope it against the pinned versions before planning it, not against the current documentation.**
-This stack runs specific `supabase/gotrue` and `kong` tags; whether the new format is supported, and
-what it changes about `key-auth` consumer registration, is a question about those tags. The upstream
-guidance describes a hosted platform whose components move independently of a self-hosted compose
-file — the same reasoning that makes "latest on Docker Hub" the wrong upgrade yardstick for this
-repository.
+**Unblocked on Compose; blocked on Kubernetes by §4's remaining half.** The chart still deploys
+Kong, which cannot translate an opaque key, so the two targets would accept different key formats
+until the Envoy templates land. Doing this before then means shipping a stack whose authentication
+differs by deployment target — which is the class of divergence the shared gateway template exists
+to prevent.
 
-**The migration has no rehearsal path today**, which is the first thing to build: there is no way to
-run the stack with both key formats accepted and confirm every consumer still works before the old
-ones are withdrawn. Without it this is a flag day across twelve files, an ingestion daemon and nine
-edge functions.
+**Sources**, since the upstream guidance for the hosted platform and for self-hosting differ and
+this entry was written against the wrong one once already:
+[migrating to new API keys](https://supabase.com/docs/guides/getting-started/migrating-to-new-api-keys) ·
+[self-hosted auth keys](https://supabase.com/docs/guides/self-hosting/self-hosted-auth-keys) ·
+[Envoy API gateway](https://supabase.com/docs/guides/self-hosting/self-hosted-envoy)
+
+---
 
 ### 6 · `documents` → `links`, in the schema
 

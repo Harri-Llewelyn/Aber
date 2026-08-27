@@ -717,8 +717,13 @@ the public surface (NOTES.txt, and the NetworkPolicies) read one definition.
 {{- if .Values.frontend.enabled -}}
 {{- $routes = append $routes (dict "name" "frontend" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "frontend")) "service" "frontend" "port" 3000) -}}
 {{- end -}}
-{{- if .Values.supabaseKong.enabled -}}
-{{- $routes = append $routes (dict "name" "supabase" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "supabase")) "service" "supabase-kong" "port" 8000) -}}
+{{/* EITHER GATEWAY, and the service name follows whichever it is. Gated on supabaseKong alone,
+     promoting to Envoy removed the API's ingress rule entirely: the dashboard loads and every
+     call 404s at the controller, with a rendered Ingress that looks correct because the route it
+     is missing was never written. */}}
+{{- if or .Values.supabaseKong.enabled .Values.supabaseEnvoy.enabled -}}
+{{- $gwSvc := ternary .Values.supabaseEnvoy.serviceName "supabase-kong" .Values.supabaseEnvoy.enabled -}}
+{{- $routes = append $routes (dict "name" "supabase" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "supabase")) "service" $gwSvc "port" 8000) -}}
 {{- end -}}
 {{- if .Values.nodeRed.enabled -}}
 {{- $routes = append $routes (dict "name" "nodered" "host" (include "acs-cymru.hostOf" (dict "ctx" . "name" "nodered")) "service" "node-red" "port" 1880) -}}
@@ -950,4 +955,26 @@ than bolted on beside the Deployment that happens to need it first.
      "invalid redirect_uri". Both are built from publicUrls.nodered so they cannot drift. */}}
 - name: NODERED_OAUTH_CALLBACK_URL
   value: {{ printf "%s/auth/strategy/callback" $nodered | quote }}
+{{- end -}}
+
+{{/*
+The COMPONENT LABEL of whichever gateway is deployed.
+
+NOT the Service name, and the distinction is the whole reason this exists. Promotion works by the
+Envoy Service ADOPTING the name `supabase-kong`, so every consumer's URL keeps resolving -- but
+NetworkPolicy and ServiceMonitor select POD LABELS, which the adopted name does not touch. Hard-
+coding `supabase-kong` in those two leaves the policy denying every flow to the gateway and the
+scrape selecting nothing, both of which present as the gateway being down rather than as a
+mislabelled selector.
+
+Returns `supabase-envoy` when Envoy is enabled, `supabase-kong` otherwise. Both enabled is refused
+by templates/supabase/envoy.yaml when they would share a Service name; while they legitimately run
+side by side, the NetworkPolicy follows Envoy because that is the one being proven.
+*/}}
+{{- define "acs-cymru.gatewayComponent" -}}
+{{- if .Values.supabaseEnvoy.enabled -}}
+supabase-envoy
+{{- else -}}
+supabase-kong
+{{- end -}}
 {{- end -}}

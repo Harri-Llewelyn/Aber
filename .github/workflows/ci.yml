@@ -2067,6 +2067,29 @@ jobs:
           python ingestion/validate.py
 
       # ---------------------------------------------------------------------------------------
+      # The gateway's POSTURE, against the running gateway rather than against its config file.
+      #
+      # THE STATIC CHECK IN THE LINT JOB IS NOT THIS. That one parses kong.yml and asserts its
+      # shape, which is exactly right while Kong is the gateway and says nothing at all once it
+      # is not -- Envoy's configuration is lds.yaml and cds.yaml. This mode probes each route
+      # unauthenticated and asserts only what is observable: a gated route must be refused before
+      # its upstream sees it, an open one must get through.
+      #
+      # It is here rather than in the lint job because it needs a stack, and it runs AFTER
+      # validate.py deliberately: validate.py asserts that the intended surface behaves, this
+      # asserts that the surface is still the intended one. A run where both pass is the
+      # before-and-after evidence roadmap §4's migration is steered by.
+      # BOTH PASSES. The unauthenticated one sends no key, so it cannot see what the gateway does
+      # WITH one -- and that is not hypothetical: the first Envoy translation passed every
+      # unauthenticated assertion while forwarding the apikey out of the query string to PostgREST,
+      # which read it as a column filter and answered 400 where Kong answered 200. --authenticated
+      # is what makes this a promotion gate rather than a comparison.
+      - name: Verify The Live Gateway Surface
+        run: |
+          set -a && . ./.env && set +a
+          node scripts/check-gateway-surface.mjs --runtime --authenticated http://127.0.0.1:54321
+
+      # ---------------------------------------------------------------------------------------
       # Every Prometheus target is actually UP.
       #
       # THE SAME FAILURE THE SERVICEMONITOR GUARD EXISTS FOR, one target lower. A scrape config

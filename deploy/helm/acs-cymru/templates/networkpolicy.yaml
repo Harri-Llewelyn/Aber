@@ -1,5 +1,11 @@
 {{- if .Values.networkPolicy.enabled }}
 {{- $fullname := include "acs-cymru.fullname" . -}}
+{{- $gw := include "acs-cymru.gatewayComponent" . -}}
+{{/* The gateway's SERVICE name, which is not its component: at promotion Envoy adopts the name
+     `supabase-kong` so consumers keep resolving, while its pods still carry `supabase-envoy`.
+     $componentOf below is keyed by service name and must bridge the two, or the ingress
+     controller is denied the gateway and every inbound request is dropped. */}}
+{{- $gwService := ternary .Values.supabaseEnvoy.serviceName "supabase-kong" .Values.supabaseEnvoy.enabled -}}
 {{/*
 =================================================================================================
 M4 -- default-deny, plus one explicit allow per flow.
@@ -53,29 +59,29 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "ingestion"          "to" "timescaledb"        "port" 5432 "why" "telemetry writes")
   (dict "from" "grafana"            "to" "timescaledb"        "port" 5432 "why" "the historian datasource")
 
-  (dict "from" "supabase-db"        "to" "supabase-kong"      "port" 8000 "why" "pg_net: edge functions and REST called from SQL")
+  (dict "from" "supabase-db"        "to" $gw      "port" 8000 "why" "pg_net: edge functions and REST called from SQL")
   (dict "from" "supabase-db"        "to" "node-red"           "port" 1880 "why" "pg_net: THE QUARANTINE WEBHOOK, direct, no retries/DLQ")
 
-  (dict "from" "supabase-kong"      "to" "supabase-auth"      "port" 9999 "why" "/auth/v1/")
-  (dict "from" "supabase-kong"      "to" "supabase-rest"      "port" 3000 "why" "/rest/v1/")
-  (dict "from" "supabase-kong"      "to" "realtime"           "port" 4000 "why" "/realtime/v1/ -> /socket/")
-  (dict "from" "supabase-kong"      "to" "supabase-storage"   "port" 5000 "why" "/storage/v1/")
-  (dict "from" "supabase-kong"      "to" "supabase-functions" "port" 9000 "why" "/functions/v1/")
+  (dict "from" $gw      "to" "supabase-auth"      "port" 9999 "why" "/auth/v1/")
+  (dict "from" $gw      "to" "supabase-rest"      "port" 3000 "why" "/rest/v1/")
+  (dict "from" $gw      "to" "realtime"           "port" 4000 "why" "/realtime/v1/ -> /socket/")
+  (dict "from" $gw      "to" "supabase-storage"   "port" 5000 "why" "/storage/v1/")
+  (dict "from" $gw      "to" "supabase-functions" "port" 9000 "why" "/functions/v1/")
 
   (dict "from" "supabase-storage"   "to" "supabase-rest"      "port" 3000 "why" "resolves the caller's claims through PostgREST")
   (dict "from" "supabase-studio"    "to" "supabase-meta"      "port" 8080 "why" "the Database pages")
-  (dict "from" "supabase-studio"    "to" "supabase-kong"      "port" 8000 "why" "server-side API calls")
-  (dict "from" "supabase-functions" "to" "supabase-kong"      "port" 8000 "why" "functions call back through the gateway")
+  (dict "from" "supabase-studio"    "to" $gw      "port" 8000 "why" "server-side API calls")
+  (dict "from" "supabase-functions" "to" $gw      "port" 8000 "why" "functions call back through the gateway")
   (dict "from" "supabase-functions" "to" "node-red"           "port" 1880 "why" "deploy-nodered pushes to the admin API")
   (dict "from" "supabase-functions" "to" "mosquitto"          "port" (int .Values.gatewayCredential.port) "why" "enroll-gateway mints a gateway's broker credential -- THE ONLY EDGE INTO CREDENTIAL ISSUANCE, and the first of its two layers of protection (the bearer token is the second). The target is `mosquitto` because the issuing service is a SIDECAR in the broker's pod: it shares the PID namespace to SIGHUP the broker, so its port is on those pods even though a separate Service addresses it. Anything else able to reach it could mint an account for any edge node, which mosquitto.acl's %u confinement turns into the ability to publish Sparkplug telemetry as that gateway")
 
   (dict "from" "ingestion"          "to" "mosquitto"          "port" $brokerPort "why" "the spBv1.0/# subscription")
-  (dict "from" "ingestion"          "to" "supabase-kong"      "port" 8000 "why" "device registration and quarantine")
+  (dict "from" "ingestion"          "to" $gw      "port" 8000 "why" "device registration and quarantine")
   (dict "from" "i3x-service"        "to" "mosquitto"          "port" $brokerPort "why" "its own spBv1.0/# subscription -- i3X value subscriptions cannot be fed from Supabase Realtime, because telemetry is a postgres_fdw foreign table whose rows never reach Supabase's WAL")
-  (dict "from" "i3x-service"        "to" "supabase-kong"      "port" 8000 "why" "every metadata and history read, made as the CALLER so RLS applies")
+  (dict "from" "i3x-service"        "to" $gw      "port" 8000 "why" "every metadata and history read, made as the CALLER so RLS applies")
   (dict "from" "node-red"           "to" "mosquitto"          "port" $brokerPort "why" "the broker node")
-  (dict "from" "node-red"           "to" "supabase-kong"      "port" 8000 "why" "OAuth token exchange and nodered-userinfo")
-  (dict "from" "grafana"            "to" "supabase-kong"      "port" 8000 "why" "OAuth token_url and grafana-userinfo")
+  (dict "from" "node-red"           "to" $gw      "port" 8000 "why" "OAuth token exchange and nodered-userinfo")
+  (dict "from" "grafana"            "to" $gw      "port" 8000 "why" "OAuth token_url and grafana-userinfo")
 
   (dict "from" "db-roles-init"      "to" "supabase-db"        "port" 5432 "why" "scoped role passwords")
   (dict "from" "db-init"            "to" "supabase-db"        "port" 5432 "why" "migrations and seed")
@@ -87,21 +93,23 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "e2e-validate"       "to" "supabase-db"        "port" 5432 "why" "audit-row cleanup, out of reach of service_role")
   (dict "from" "e2e-validate"       "to" "timescaledb"        "port" 5432 "why" "telemetry assertions")
   (dict "from" "e2e-validate"       "to" "mosquitto"          "port" 1883 "why" "publishes Sparkplug fixtures")
-  (dict "from" "e2e-validate"       "to" "supabase-kong"      "port" 8000 "why" "seeds through PostgREST")
+  (dict "from" "e2e-validate"       "to" $gw      "port" 8000 "why" "seeds through PostgREST")
   (dict "from" "e2e-validate"       "to" "node-red"           "port" 1880 "why" "check 7 probes all three auth surfaces")
-  (dict "from" "e2e-aas-export"     "to" "supabase-kong"      "port" 8000 "why" "invokes aas-export and signs in")
+  (dict "from" "e2e-aas-export"     "to" $gw      "port" 8000 "why" "invokes aas-export and signs in")
 
   (dict "from" "backup"             "to" "supabase-db"        "port" 5432 "why" "pg_dump")
   (dict "from" "backup"             "to" "timescaledb"        "port" 5432 "why" "pg_dump")
 -}}
 {{- /* Filter to edges whose BOTH ends are actually deployed, so a partial install does not carry
      rules naming absent components -- harmless, but it makes the rendered policy misleading. */ -}}
+{{/* $gw, not a literal: NetworkPolicy selects POD LABELS, which the promoted Service name does
+     not change. A hard-coded "supabase-kong" here denies every flow to Envoy while looking right. */}}
 {{- $enabledComponents := dict
       "timescaledb" .Values.timescaledb.enabled
       "supabase-db" .Values.supabaseDb.enabled
       "supabase-auth" .Values.supabaseAuth.enabled
       "supabase-rest" .Values.supabaseRest.enabled
-      "supabase-kong" .Values.supabaseKong.enabled
+      $gw (or .Values.supabaseKong.enabled .Values.supabaseEnvoy.enabled)
       "supabase-functions" .Values.supabaseFunctions.enabled
       "supabase-storage" .Values.supabaseStorage.enabled
       "supabase-meta" .Values.supabaseMeta.enabled
@@ -144,7 +152,7 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
 {{- $_ := set $published .service (append (index $published .service | default list) .port) -}}
 {{- end -}}
 {{- end -}}
-{{- $componentOf := dict "frontend" "frontend" "supabase-kong" "supabase-kong" "node-red" "node-red" "grafana" "grafana" "supabase-studio" "supabase-studio" "swagger-ui" "swagger-ui" "mosquitto" "mosquitto" -}}
+{{- $componentOf := dict "frontend" "frontend" $gwService $gw "node-red" "node-red" "grafana" "grafana" "supabase-studio" "supabase-studio" "swagger-ui" "swagger-ui" "mosquitto" "mosquitto" -}}
 ---
 {{/*
 DEFAULT DENY, both directions, for every pod in the namespace.
