@@ -1631,7 +1631,8 @@ exists for precisely this kind of change and this change must satisfy it twice.
 ### 16 · `Service_Ingestor`, and taking the service-role key off the daemon
 
 **Builds on:** `record_ingestion_rejection()` (`0026`) · `create_service_principal()` (`0044`) ·
-`0034`'s read-only principal · [`ingestion/ingestion.py`](ingestion/ingestion.py) ·
+`0034`'s read-only principal · `0046_service_ingestor_principal.sql` ·
+[`ingestion/ingestion.py`](ingestion/ingestion.py) ·
 `verify_gateway_binding()` · **not yet filed as an issue**
 
 **Carved out of §13 rather than left inside a section marked built.** That item specified three
@@ -1657,13 +1658,32 @@ built it precisely to replace `service_role`'s direct INSERT on the audit table,
 so. So the pattern is established and applied once; the work is applying it to the remaining writes
 and then reducing the credential.
 
-**Three things to resolve before it is a task rather than a direction.** Which writes still need
-`service_role` after the RPCs exist, and whether any of them can be expressed as a policy on a role
-instead. Whether `Service_Ingestor` should be an `auth.users` principal like `0034`'s — in which
-case it needs a token, and §13's ceiling and audit trail apply to it — or a Postgres role the daemon
-connects as, which is a different trust path and does not go through PostgREST at all. And what
-happens to a deployed daemon mid-upgrade, since the credential it holds is in its environment and
-the RPCs it would need do not exist until the migration runs.
+**The three open questions are now answered, and `0046` is the first of them landing.** That
+migration creates the identity and nothing holds it yet, which is deliberate.
+
+*What the daemon actually writes*, counted rather than estimated — five sites across three tables:
+the quarantine `INSERT` on `devices`, the birth-metrics and status `UPDATE`s on `devices`, the
+`asset_config` upsert of birth parameters, and the health `UPDATE` on `gateways`. Reads are
+`devices`, `gateways`, `device_schemas` and `schemas`. Telemetry is not on this list at all — it
+goes to TimescaleDB over the daemon's own connection and never touches Supabase. That is what makes
+this tractable: it is `0026`'s pattern applied a fixed number of further times, not a rewrite.
+
+*`Service_Ingestor` is an `auth.users` principal*, not a Postgres role. The role would be tighter in
+isolation and was rejected for what it cannot do: it is invisible to `list_service_principals()`
+(`0042`), no token against it can be recorded by `record_service_token_issued()` (`0043`), and the
+Access Control page cannot show it. A machine identity the page built for this purpose cannot see is
+a second trust path, auditable only over psql. `0046` records the full argument.
+
+*It holds `Operator`, which cannot perform any of those five writes* — 0034's observation that
+"every write policy in this schema names Administrator or Shopfloor_Manager" is what makes the RPCs
+the only route rather than the tidy route. `0046`'s self-check asserts exactly that gap, because if
+a later migration ever widens a write policy to admit `Operator`, this credential silently becomes
+as wide as the role and nothing else in the schema would report it.
+
+*The mid-upgrade question is answered by ordering.* Identity, then the write RPCs, then the daemon
+calling them while still holding the service key, and only then the credential swap. Nothing the
+daemon depends on is removed until after it has stopped depending on it, so a deployed daemon keeps
+working at every step.
 
 **The value is not tidiness.** A credential that bypasses RLS is the one thing on this stack whose
 compromise cannot be contained by any policy written anywhere else, and it currently sits in the
