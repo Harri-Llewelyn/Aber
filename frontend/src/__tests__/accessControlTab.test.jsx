@@ -79,7 +79,32 @@ describe('AccessControlTab', () => {
 
     await waitFor(() => expect(screen.getByText(/Generate/)).toBeTruthy())
     expect(screen.getByText(/Bundle/)).toBeTruthy()
-    expect(screen.getByText('Issued')).toBeTruthy()
+    // Twice: the row's badge and the legend's. The legend explains each state PRESENT, once.
+    expect(screen.getAllByText('Issued').length).toBe(2)
+  })
+
+  /**
+   * THE LEGEND EXISTS BECAUSE THE EXPLANATION IS A PROPERTY OF THE STATE, NOT OF THE ROW. Rendered
+   * per row, four gateways in the same state produced the same four-line paragraph four times --
+   * crowding out the badge and the date, which are the only things that vary, and repeating a
+   * caveat the preamble already makes.
+   */
+  it('explains each state once beneath the table, however many rows share it', async () => {
+    api.listGatewayCredentials.mockResolvedValue([
+      provisioned,
+      { ...provisioned, id: '13000000-0000-4000-8000-000000000001', name: 'Sim_Gateway_Cell2_Robotics' },
+      { ...provisioned, id: '14000000-0000-4000-8000-000000000001', name: 'Sim_Gateway_Cell3_OEE' },
+      { ...provisioned, id: '15000000-0000-4000-8000-000000000001', name: 'Sim_Gateway_Site_BMS' }
+    ])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getAllByText('No platform record').length).toBeGreaterThan(0))
+    // Four rows, one explanation.
+    expect(screen.getAllByText(/does not mean the broker holds none/i).length).toBe(1)
+    // Four badges in the table plus one in the legend. SCOPED TO `.badge`, because the preamble
+    // also names the state in prose -- and an unscoped count would be a magic number that changes
+    // whenever that sentence is reworded.
+    expect(screen.getAllByText('No platform record', { selector: '.badge' }).length).toBe(5)
   })
 
   /** Archived gateways are hidden by default and offer no action when shown — 0041 refuses them. */
@@ -88,7 +113,9 @@ describe('AccessControlTab', () => {
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText(/No gateways registered/i)).toBeTruthy())
-    screen.getByLabelText(/Show archived/i).click()
+    // The Devices page's "Needs attention" shape: a toggle button carrying its own count, not a
+    // checkbox -- which was the only control of its kind in the app and read as a form field.
+    screen.getByRole('button', { name: /Archived \(1\)/i }).click()
 
     await waitFor(() => expect(screen.getByText(/Restore to issue/i)).toBeTruthy())
     expect(screen.queryByText(/Generate/)).toBeNull()

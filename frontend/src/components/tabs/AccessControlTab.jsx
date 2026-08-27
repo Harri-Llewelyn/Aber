@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
 import { GatewayCredentialModal } from '../modals/GatewayCredentialModal'
-import { IconDownload, IconLock, IconRefreshCw, IconShieldAlert } from '../common/Icons'
+import { IconArchive, IconDownload, IconLock, IconRefreshCw, IconShieldAlert } from '../common/Icons'
 import {
   CREDENTIAL_STATES,
   credentialAction,
@@ -99,6 +99,28 @@ export function AccessControlTab({ showToast }) {
     return counts
   }, [rows])
 
+  const archivedCount = useMemo(() => rows.filter(r => r.is_archived).length, [rows])
+
+  /**
+   * THE DISTINCT STATES ON SCREEN, each explained ONCE beneath the table.
+   *
+   * The explanation is a property of the STATE, not of the row, and rendering it per row made that
+   * invisible: four gateways with no platform record produced the same four-line paragraph four
+   * times, which crowded out the two things that actually vary -- the badge and the date -- and
+   * repeated a caveat the preamble already makes in red.
+   *
+   * A legend keyed on what is present rather than on the full set, so it never explains a state
+   * nothing on this stack is in.
+   */
+  const legend = useMemo(() => {
+    const seen = new Map()
+    for (const g of visible) {
+      const state = credentialState(g, g.issued_at)
+      if (!seen.has(state)) seen.set(state, g)
+    }
+    return [...seen.entries()]
+  }, [visible])
+
   const afterAction = useCallback(() => {
     setCredentialForGw(null)
     setBundleForGw(null)
@@ -146,27 +168,31 @@ export function AccessControlTab({ showToast }) {
           </div>
         )}
 
-        <div className="card" style={{ padding: '12px', marginTop: '12px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', gap: '14px', fontSize: '12px', color: 'var(--text-muted)' }}>
-              <span><strong style={{ color: 'var(--text-primary)' }}>{summary.issued}</strong> issued</span>
-              <span><strong style={{ color: 'var(--text-primary)' }}>{summary.awaiting}</strong> bundle outstanding</span>
-              <span><strong style={{ color: 'var(--text-primary)' }}>{summary.revoked}</strong> revoked</span>
-              <span><strong style={{ color: 'var(--text-primary)' }}>{summary.unrecorded}</strong> no record</span>
-            </div>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <label style={{ fontSize: '12px', display: 'flex', gap: '5px', alignItems: 'center' }}>
-                <input
-                  type="checkbox"
-                  checked={showArchived}
-                  onChange={e => setShowArchived(e.target.checked)}
-                />
-                Show archived
-              </label>
-              <button className="btn btn-ghost" onClick={() => load()} title="Re-read credentials">
-                <IconRefreshCw size={13} /> Refresh
-              </button>
-            </div>
+        {/* THE SHAPE EVERY OTHER PAGE USES: what you are looking at on the left, what you are
+            looking for on the right. The archived toggle is the Devices page's "Needs attention"
+            control -- a btn-sm that switches between btn-primary and btn-ghost and carries its own
+            count -- rather than a bare checkbox, which was the only control of its kind in the app
+            and read as a form field rather than as a filter. */}
+        <div className="filter-bar">
+          <div style={{ display: 'flex', gap: '14px', fontSize: '12px', color: 'var(--text-muted)' }}>
+            <span><strong style={{ color: 'var(--text-primary)' }}>{summary.issued}</strong> issued</span>
+            <span><strong style={{ color: 'var(--text-primary)' }}>{summary.awaiting}</strong> bundle outstanding</span>
+            <span><strong style={{ color: 'var(--text-primary)' }}>{summary.revoked}</strong> revoked</span>
+            <span><strong style={{ color: 'var(--text-primary)' }}>{summary.unrecorded}</strong> no record</span>
+          </div>
+
+          <div className="filter-bar-spacer" style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <button
+              className={`btn btn-sm ${showArchived ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => setShowArchived(v => !v)}
+              aria-pressed={showArchived}
+              title="Archived gateways keep their row and their history, and 0038 has already rotated their broker credential to a password nobody holds. They can be issued a new one only after being restored."
+            >
+              <IconArchive size={13} /> Archived ({archivedCount})
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={() => load()} title="Re-read credentials">
+              <IconRefreshCw size={13} /> Refresh
+            </button>
           </div>
         </div>
 
@@ -208,14 +234,17 @@ export function AccessControlTab({ showToast }) {
                         so it reads as the string the ACL matches rather than as a label. */}
                     <td className="mono" style={{ fontSize: '12px' }}>{g.sparkplug_id}</td>
                     <td>
-                      <span className={`badge badge-${credentialStateTone(state)}`} style={{ fontSize: '11px' }}>
+                      {/* The badge carries the explanation as its title as well, so the meaning is
+                          reachable from the row without the legend having to be on screen. */}
+                      <span
+                        className={`badge badge-${credentialStateTone(state)}`}
+                        style={{ fontSize: '11px' }}
+                        title={credentialStateExplanation(state, g)}
+                      >
                         {credentialStateLabel(state)}
                       </span>
-                      <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '4px', maxWidth: '46ch' }}>
-                        {credentialStateExplanation(state, g)}
-                      </div>
                       {(g.issued_at || g.enrolled_at) && state !== CREDENTIAL_STATES.REVOKED && (
-                        <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '2px' }}>
+                        <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '4px' }}>
                           {new Date(g.issued_at || g.enrolled_at).toLocaleString()}
                         </div>
                       )}
@@ -258,6 +287,24 @@ export function AccessControlTab({ showToast }) {
               })}
             </tbody>
           </table>
+
+          {legend.length > 0 && (
+            <div style={{ borderTop: '1px solid var(--border)', padding: '10px 12px' }}>
+              {legend.map(([state, sample]) => (
+                <div key={state} style={{ display: 'flex', gap: '8px', alignItems: 'baseline', marginTop: '6px' }}>
+                  <span
+                    className={`badge badge-${credentialStateTone(state)}`}
+                    style={{ fontSize: '11px', flexShrink: 0 }}
+                  >
+                    {credentialStateLabel(state)}
+                  </span>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    {credentialStateExplanation(state, sample)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* =========================================================================================
@@ -277,89 +324,126 @@ export function AccessControlTab({ showToast }) {
           </p>
         </div>
 
-        <div className="card" style={{ marginTop: '12px', padding: '12px' }}>
-          <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '8px' }}>Database principals</div>
+        {/* THE SAME COLUMN RHYTHM AS THE CREDENTIALS TABLE ABOVE, because it is the same kind of
+            question: an identity, what it holds, what that reaches, and where it comes from. These
+            were stacked prose, which meant every row repeated the label words ("The identity…",
+            "Reaches:", "Token minted by") that one header says once. */}
+        <div className="card" style={{ marginTop: '12px', overflowX: 'auto' }}>
+          <div style={{ fontWeight: 600, fontSize: '13px', padding: '12px 12px 0' }}>Database principals</div>
           {principalError && (
-            <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+            <div style={{ color: 'var(--text-muted)', fontSize: '12px', padding: '8px 12px 12px' }}>
               <IconShieldAlert size={12} /> {principalError}
             </div>
           )}
-          {!principalError && principals.length === 0 && (
-            <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
-              No machine identities are registered. Every account on this stack belongs to a person.
-            </div>
-          )}
-          {principals.map(p => {
-            const meta = describePrincipal(p.principal_id)
-            return (
-              <div key={p.principal_id} style={{ padding: '8px 0', borderTop: '1px solid var(--border)' }}>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <strong style={{ fontSize: '13px' }}>{meta.name}</strong>
-                  {(p.roles || []).map(r => (
-                    <span key={r} className="badge badge-neutral" style={{ fontSize: '11px' }}>{r}</span>
-                  ))}
-                  {/* STATED, NOT ASSUMED. It is the property that makes listing these safe, and
-                      0042 returns it rather than letting the page infer it from the predicate. */}
-                  {p.can_sign_in === false && (
-                    <span className="badge badge-ok" style={{ fontSize: '11px' }}>CANNOT SIGN IN</span>
-                  )}
-                </div>
-                <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px' }}>
-                  {p.principal_id}
-                </div>
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', maxWidth: '80ch' }}>
-                  {meta.purpose}
-                </div>
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', maxWidth: '80ch' }}>
-                  <strong>Reaches:</strong> {roleReach(p.roles)}
-                </div>
-                {meta.mintedBy && (
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    Token minted by <code>{meta.mintedBy}</code>
-                  </div>
+          {!principalError && (
+            <table className="data-table" style={{ marginTop: '8px' }}>
+              <thead>
+                <tr>
+                  <th>Identity</th>
+                  <th>Holds</th>
+                  <th>Reaches</th>
+                  <th>Token minted by</th>
+                </tr>
+              </thead>
+              <tbody>
+                {principals.length === 0 && (
+                  <tr><td colSpan={4} style={{ color: 'var(--text-muted)', padding: '14px' }}>
+                    No machine identities are registered. Every account on this stack belongs to a person.
+                  </td></tr>
                 )}
-              </div>
-            )
-          })}
+                {principals.map(p => {
+                  const meta = describePrincipal(p.principal_id)
+                  return (
+                    <tr key={p.principal_id}>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{meta.name}</div>
+                        <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px' }}>
+                          {p.principal_id}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', maxWidth: '48ch' }}>
+                          {meta.purpose}
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+                          {(p.roles || []).map(r => (
+                            <span key={r} className="badge badge-neutral" style={{ fontSize: '11px' }}>{r}</span>
+                          ))}
+                          {/* STATED, NOT ASSUMED. It is the property that makes listing these safe,
+                              and 0042 returns it rather than letting the page infer it from the
+                              predicate it selected on. */}
+                          {p.can_sign_in === false && (
+                            <span className="badge badge-ok" style={{ fontSize: '11px' }}>CANNOT SIGN IN</span>
+                          )}
+                        </div>
+                      </td>
+                      <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '46ch' }}>
+                        {roleReach(p.roles)}
+                      </td>
+                      <td className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                        {meta.mintedBy || '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
 
-        <div className="card" style={{ marginTop: '12px', padding: '12px' }}>
-          <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '8px' }}>Broker principals</div>
+        <div className="card" style={{ marginTop: '12px', overflowX: 'auto' }}>
+          <div style={{ fontWeight: 600, fontSize: '13px', padding: '12px 12px 0' }}>Broker principals</div>
           {/* DECLARED IN THE REPOSITORY, NOT FETCHED, and the page says so rather than implying a
               live read. Mosquitto has no API that lists its principals; check-docs-drift asserts
-              this list against mosquitto.acl. */}
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+              this list against mosquitto.acl, in both directions and including the topic rules. */}
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '6px 12px 0' }}>
             Read from <code>mosquitto.acl</code> in the repository — the broker has no API that lists
             these, so they are declared alongside the file and checked against it at build time.
           </div>
-          {BROKER_PRINCIPALS.map(bp => (
-            <div key={bp.username} style={{ padding: '8px 0', borderTop: '1px solid var(--border)' }}>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <strong className="mono" style={{ fontSize: '12px' }}>{bp.username}</strong>
-                <span className={`badge badge-${bp.writes ? 'pending' : 'ok'}`} style={{ fontSize: '11px' }}>
-                  {bp.writes ? 'CAN PUBLISH' : 'READ ONLY'}
-                </span>
-              </div>
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', maxWidth: '80ch' }}>
-                {bp.purpose}
-              </div>
-              <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                {bp.topics.join('  ·  ')}
-              </div>
-            </div>
-          ))}
-          <div style={{ padding: '8px 0', borderTop: '1px solid var(--border)' }}>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-              <strong style={{ fontSize: '12px' }}>Every gateway</strong>
-              <span className="badge badge-neutral" style={{ fontSize: '11px' }}>ACL PATTERN</span>
-            </div>
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', maxWidth: '80ch' }}>
-              {GATEWAY_ACL_PATTERN.purpose}
-            </div>
-            <div className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-              pattern {GATEWAY_ACL_PATTERN.pattern}
-            </div>
-          </div>
+          <table className="data-table" style={{ marginTop: '8px' }}>
+            <thead>
+              <tr>
+                <th>Principal</th>
+                <th>Access</th>
+                <th>Topic rules</th>
+                <th>Purpose</th>
+              </tr>
+            </thead>
+            <tbody>
+              {BROKER_PRINCIPALS.map(bp => (
+                <tr key={bp.username}>
+                  <td className="mono" style={{ fontSize: '12px' }}>{bp.username}</td>
+                  <td>
+                    <span className={`badge badge-${bp.writes ? 'pending' : 'ok'}`} style={{ fontSize: '11px' }}>
+                      {bp.writes ? 'CAN PUBLISH' : 'READ ONLY'}
+                    </span>
+                  </td>
+                  {/* THE ACL'S OWN STRINGS, not a paraphrase: somebody comparing this page against
+                      the file should be reading the same text on both sides. */}
+                  <td className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'pre-line' }}>
+                    {bp.topics.join('\n')}
+                  </td>
+                  <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '46ch' }}>{bp.purpose}</td>
+                </tr>
+              ))}
+              {/* A ROW, NOT A TRAILING BLOCK. It is not a principal -- there is no account by this
+                  name -- but it IS an entry in the same file granting the same kind of thing, and
+                  rendering it as an orphaned paragraph made it read as a footnote rather than as
+                  the rule most of the fleet actually connects under. The badge says what it is. */}
+              <tr>
+                <td style={{ fontWeight: 600 }}>Every gateway</td>
+                <td>
+                  <span className="badge badge-neutral" style={{ fontSize: '11px' }}>ACL PATTERN</span>
+                </td>
+                <td className="mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  pattern {GATEWAY_ACL_PATTERN.pattern}
+                </td>
+                <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '46ch' }}>
+                  {GATEWAY_ACL_PATTERN.purpose}
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
