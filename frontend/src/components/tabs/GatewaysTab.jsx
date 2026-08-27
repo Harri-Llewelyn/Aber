@@ -21,6 +21,7 @@ import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { ArchiveModal } from '../modals/ArchiveModal'
 import { EntityLinksModal } from '../modals/EntityLinksModal'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
+import { GatewayCredentialModal } from '../modals/GatewayCredentialModal'
 import { FlowBackupUploader } from '../common/FlowBackupUploader'
 import {
   IconRadio,
@@ -35,7 +36,8 @@ import {
   IconShieldAlert,
   IconMap,
   IconX,
-  IconDownload
+  IconDownload,
+  IconLock
 } from '../common/Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useArrivalSelection } from '../../hooks/useArrivalSelection'
@@ -71,6 +73,10 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   // The gateway whose bundle modal is open. Held as the OBJECT rather than an id: the modal needs
   // the name and sparkplug_id, and it stays open across a poll that may reorder the list.
   const [bundleForGw, setBundleForGw] = useState(null)
+  // The VIRTUAL counterpart to bundleForGw. Separate state rather than a mode flag on one
+  // modal: the two are authorised differently, destroy different things, and only one of them
+  // ever puts a password on screen.
+  const [credentialForGw, setCredentialForGw] = useState(null)
   const [filterMode, setFilterMode] = useState('all')
 
   const getInitialSearch = () => {
@@ -753,6 +759,32 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               ? 'This appliance enrolled but has not published. Re-issuing invalidates its current credential.'
               : 'Generate the bootstrap bundle for this gateway and download it'
           },
+          /*
+           * THE VIRTUAL COUNTERPART, AND THE CONDITIONS ARE THE MIRROR OF THE ONE ABOVE.
+           *
+           * `is_virtual` instead of `!is_virtual`, and no `isGatewayPending()`: enrolment is a
+           * lifecycle a physical gateway passes through, and a virtual one has none -- there is no
+           * appliance to wait for, so there is no state in which minting is premature or too late.
+           *
+           * NOT SHOWN ON AN ARCHIVED GATEWAY, matching the bundle action and 0041's own refusal.
+           * 0037 found that a bundle downloaded before archiving stayed redeemable afterwards and
+           * resurrected the row; minting directly is the same hole reached in one step.
+           *
+           * THIS IS THE ONLY PLACE A PASSWORD APPEARS IN THE PRODUCT. Everything else either hands
+           * out a claim (the bundle) or never reveals a secret at all, which is why the modal
+           * confirms unconditionally rather than taking the bundle modal's create-time exemption.
+           */
+          !selected.is_archived && selected.is_virtual && canManage && {
+            label: 'Generate Broker Credential',
+            icon: <IconLock size={13} />,
+            primary: true,
+            onClick: () => setCredentialForGw({
+              gateway_id: selected.gateway_id,
+              gateway_name: selected.gateway_name,
+              sparkplug_id: selected.sparkplug_id
+            }),
+            title: 'Mint this virtual gateway a broker account and show the password once'
+          },
           selected.access_url && {
             label: 'Launch UI', icon: <IconExternalLink size={13} />, href: selected.access_url, primary: true,
             title: 'Open Node-RED / Virtual Gateway Editor'
@@ -845,6 +877,14 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           </div>
         )}
       />
+
+      {credentialForGw && (
+        <GatewayCredentialModal
+          gateway={credentialForGw}
+          onClose={() => setCredentialForGw(null)}
+          showToast={showToast}
+        />
+      )}
 
       {bundleForGw && (
         <GatewayBundleModal

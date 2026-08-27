@@ -546,6 +546,46 @@ const apiMethods = {
   },
 
   /**
+   * Mint a VIRTUAL gateway's broker credential and get it back once.
+   *
+   * `supabase.functions.invoke()` WOULD work here -- the response is JSON, so the decoding trap
+   * above does not apply -- and it is deliberately not used anyway, so both gateway-credential
+   * paths read the same way and the difference between them is the endpoint rather than the
+   * client. The error handling below is the part that matters, and it is identical.
+   *
+   * THE PASSWORD IS RETURNED ONCE AND IS NOT RECOVERABLE. mosquitto_passwd stores a hash and
+   * nothing in this stack keeps a copy, so a caller that drops this value has to mint again --
+   * which replaces the account and invalidates whatever is holding the previous one.
+   */
+  mintGatewayCredential: async (gatewayId) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/gateway-credential`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        // The CALLER's token. authorize_virtual_gateway_credential() is SECURITY DEFINER and
+        // checks has_role() itself, and the audit row is attributed to auth.uid() -- so the anon
+        // key alone would be refused, and would have nobody to attribute the mint to if it were not.
+        Authorization: `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ gateway_id: gatewayId })
+    });
+
+    let body = null;
+    try { body = await res.json(); } catch { /* non-JSON body */ }
+
+    if (!res.ok) {
+      // `details` carries the RPC's own message -- "gateway X is a physical gateway; use an
+      // enrolment bundle", "gateway X is archived" -- which is the sentence an operator can act on.
+      // `error` alone would flatten all of them to "Cannot mint a credential".
+      throw new Error(body?.details || body?.error || `Could not mint a credential (${res.status})`);
+    }
+
+    return body;
+  },
+
+  /**
    * Flow backups for one gateway, newest first.
    *
    * Storage `list()` is scoped to the gateway's own prefix, which is where RLS confines writes
