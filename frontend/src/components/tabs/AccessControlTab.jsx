@@ -130,61 +130,79 @@ export function AccessControlTab({ showToast }) {
             survive the tidying: somebody arriving to answer "does this gateway have a credential"
             needs to know what this page can and cannot see BEFORE they read a row, not after they
             have acted on one. */}
-        <div className="card" style={{ overflowX: 'auto' }}>
-          <div style={{ padding: '14px 14px 0' }}>
-            <div className="settings-preamble-title" style={{ marginBottom: '8px' }}>
-              <IconLock size={15} /> Broker credentials
-            </div>
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '0 0 6px' }}>
-              Every gateway authenticates to the broker as its own Sparkplug ID — the ACL pins the
-              topic’s edge-node segment to the connecting username, so no two gateways can share a
-              connection. This page shows what the platform has issued, and gives you the two ways
-              to issue one.
-            </p>
-            <p className="settings-preamble-warning" style={{ fontSize: '12px', margin: 0 }}>
-              <strong>This is not an inventory of the broker.</strong> Mosquitto’s account file can
-              only be added to, never read back, so a gateway showing{' '}
-              <em>No platform record</em> may still hold a working credential — the ones{' '}
-              <code>npm run provision:gateways</code> creates are issued outside the dashboard and
-              leave no record here.
-            </p>
-          </div>
+        {/* THE REGISTERED SCHEMAS SHAPE, which is the one the rest of the app uses: a `.card-header`
+            carrying the title, its count and the card's own actions on one line; the description
+            full width beneath it; then the rows. This was a title stacked over two paragraphs over a
+            filter bar, which spent four bands of vertical space before the first row and put the
+            list's totals ABOVE the list they summarise. */}
+        <div className="card">
+          <div className="card-header">
+            <h3 className="section-title">
+              Broker credentials{' '}
+              {/* FILTERED OF TOTAL when a filter is on, the same as the schema registry -- a
+                  narrowed list would otherwise read as a short one, which is the wrong thing to
+                  believe about an inventory of who can reach your broker. */}
+              <span
+                className="section-count"
+                title={visible.length === rows.length
+                  ? `${rows.length} gateway${rows.length === 1 ? '' : 's'}`
+                  : `${visible.length} of ${rows.length} gateways shown`}
+              >
+                {visible.length === rows.length ? rows.length : `${visible.length}/${rows.length}`}
+              </span>
+            </h3>
 
-          {loadError && (
-            <div style={{ padding: '10px 14px', color: 'var(--danger)', fontSize: '12px' }}>
-              <IconShieldAlert size={13} /> {loadError}
-            </div>
-          )}
-
-          {/* THE SHAPE EVERY OTHER PAGE USES: what you are looking at on the left, what you are
-              looking for on the right. The archived toggle is the Devices page's "Needs attention"
-              control -- a btn-sm switching between btn-primary and btn-ghost and carrying its own
-              count -- rather than a bare checkbox, which was the only control of its kind in the
-              app and read as a form field rather than as a filter. */}
-          <div className="filter-bar" style={{ marginTop: '10px' }}>
-            <div style={{ display: 'flex', gap: '14px', fontSize: '12px', color: 'var(--text-muted)' }}>
-              <span><strong style={{ color: 'var(--text-primary)' }}>{summary.issued}</strong> issued</span>
-              <span><strong style={{ color: 'var(--text-primary)' }}>{summary.awaiting}</strong> bundle outstanding</span>
-              <span><strong style={{ color: 'var(--text-primary)' }}>{summary.revoked}</strong> revoked</span>
-              <span><strong style={{ color: 'var(--text-primary)' }}>{summary.unrecorded}</strong> no record</span>
-            </div>
-
-            <div className="filter-bar-spacer" style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            {/* The card's actions, in the header of the card they act on. The archived toggle is
+                the Devices page's "Needs attention" control -- a btn-sm switching between
+                btn-primary and btn-ghost, carrying its own count -- rather than a bare checkbox,
+                which was the only control of its kind in the app and read as a form field. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <button
                 className={`btn btn-sm ${showArchived ? 'btn-primary' : 'btn-ghost'}`}
                 onClick={() => setShowArchived(v => !v)}
                 aria-pressed={showArchived}
                 title="Archived gateways keep their row and their history, and 0038 has already rotated their broker credential to a password nobody holds. They can be issued a new one only after being restored."
               >
-                <IconArchive size={13} /> Archived ({archivedCount})
+                <IconArchive size={14} /> Archived ({archivedCount})
               </button>
               <button className="btn btn-ghost btn-sm" onClick={() => load()} title="Re-read credentials">
-                <IconRefreshCw size={13} /> Refresh
+                <IconRefreshCw size={14} /> Refresh
               </button>
             </div>
           </div>
 
-          <table className="data-table">
+          <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '12px 20px 0' }}>
+            Every gateway authenticates to the broker as its own Sparkplug ID — the ACL pins the
+            topic’s edge-node segment to the connecting username, so no two gateways can share a
+            connection. This page shows what the platform has issued, and gives you the two ways to
+            issue one.
+          </p>
+
+          {/* A SHAPE AS WELL AS A COLOUR. This was a red paragraph, which is the weakest form the
+              warning can take: colour alone carries it, so it is invisible to a reader who cannot
+              distinguish it and reads as mere emphasis to everyone else. The tint is deliberately
+              subtle -- this is a standing property of the page, not an error that has just
+              happened, and a full-strength banner that is always present is one people learn to
+              look past. */}
+          <div className="callout callout-warning">
+            <IconShieldAlert size={14} className="callout-icon" />
+            <div>
+              <strong>This is not an inventory of the broker.</strong> Mosquitto’s account file can
+              only be added to, never read back, so a gateway showing <em>No platform record</em> may
+              still hold a working credential — the ones <code>npm run provision:gateways</code>
+              {' '}creates are issued outside the dashboard and leave no record here.
+            </div>
+          </div>
+
+          {loadError && (
+            <div className="callout" style={{ borderColor: 'var(--danger)', color: 'var(--danger-text)' }}>
+              <IconShieldAlert size={14} className="callout-icon" />
+              <div>{loadError}</div>
+            </div>
+          )}
+
+          <div className="table-wrap" style={{ marginTop: '12px' }}>
+          <table>
             <thead>
               <tr>
                 <th>Gateway</th>
@@ -284,6 +302,30 @@ export function AccessControlTab({ showToast }) {
               })}
             </tbody>
           </table>
+          </div>
+
+          {/* A SUMMARY BELONGS AFTER THE THING IT SUMMARISES. These sat in a filter bar above the
+              table, which read as a filter -- four numbers beside two buttons, in the band where
+              every other page puts controls -- and asked the reader to hold four totals in their
+              head before seeing a single row.
+
+              Each count and its label is ONE pill so the pair cannot be split across a wrap: as
+              loose text, "0 issued 0 bundle outstanding 0 revoked" scans as six tokens rather than
+              three facts. */}
+          <div className="table-summary">
+            <span className={`table-summary-pill${summary.issued ? '' : ' table-summary-pill-zero'}`}>
+              <strong>{summary.issued}</strong> issued
+            </span>
+            <span className={`table-summary-pill${summary.awaiting ? '' : ' table-summary-pill-zero'}`}>
+              <strong>{summary.awaiting}</strong> bundle outstanding
+            </span>
+            <span className={`table-summary-pill${summary.revoked ? '' : ' table-summary-pill-zero'}`}>
+              <strong>{summary.revoked}</strong> revoked
+            </span>
+            <span className={`table-summary-pill${summary.unrecorded ? '' : ' table-summary-pill-zero'}`}>
+              <strong>{summary.unrecorded}</strong> no record
+            </span>
+          </div>
         </div>
 
         {/* =========================================================================================
@@ -315,7 +357,7 @@ export function AccessControlTab({ showToast }) {
             </div>
           )}
           {!principalError && (
-            <table className="data-table" style={{ marginTop: '8px' }}>
+            <table style={{ marginTop: '8px' }}>
               <thead>
                 <tr>
                   <th>Identity</th>
@@ -402,7 +444,7 @@ export function AccessControlTab({ showToast }) {
             Read from <code>mosquitto.acl</code> in the repository — the broker has no API that lists
             these, so they are declared alongside the file and checked against it at build time.
           </div>
-          <table className="data-table" style={{ marginTop: '8px' }}>
+          <table style={{ marginTop: '8px' }}>
             <thead>
               <tr>
                 <th>Principal</th>

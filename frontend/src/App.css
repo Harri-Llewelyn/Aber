@@ -886,6 +886,123 @@ tbody tr {
 
 tbody tr:hover { background: var(--bg-glass); }
 
+/* ===== Table summary footer =====
+   A counts bar pinned under a table, for the totals that describe the WHOLE list rather than any
+   row of it. It sat above the table as loose text in a filter bar, which put a summary of the rows
+   before the rows and left the header holding two unrelated jobs.
+
+   `--bg-glass` matches `thead tr`, so the table is bracketed by the same tint at both ends and the
+   footer reads as part of the table rather than as another card that happens to touch it. */
+.table-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  background: var(--bg-glass);
+  border-top: 1px solid var(--border);
+}
+
+/* A count and its label as one pill, so the pair cannot be split across a wrap -- which is what
+   made the loose-text version hard to scan at width: "0 issued 0 bundle outstanding 0 revoked"
+   reads as six tokens rather than three facts. */
+.table-summary-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 11px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.table-summary-pill strong {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  /* Tabular figures so a column of counts does not jitter as it updates, the same reason
+     `.alert-pill-count` carries it. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* ZERO IS DIMMED RATHER THAN HIDDEN. "0 revoked" is a fact worth reading -- it is the difference
+   between "nothing has been revoked" and "revocation is not shown here" -- but it should not
+   compete with a count that is not zero. */
+.table-summary-pill-zero strong { color: var(--text-dim); font-weight: 500; }
+
+/* ===== Callout =====
+   A banner for a caveat the reader must not miss, inside the card it qualifies. This started as a
+   red paragraph, which is the weakest form the warning can take: colour alone carries it, so it is
+   invisible to anyone who cannot distinguish it and merely looks like emphasis to everyone else.
+
+   A bordered, tinted block is a shape as well as a colour, which is what makes it survive both. */
+.callout {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 12px 20px 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-glass);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.callout-icon { flex-shrink: 0; margin-top: 1px; }
+
+/* The tint is deliberately SUBTLE: this is a standing property of the page, not an error that has
+   just happened, and a full-strength danger banner that is always present is one a reader learns
+   to look past. `color-mix` degrades to the border colour on engines without it. */
+.callout-warning {
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
+  background: color-mix(in srgb, var(--warning) 7%, transparent);
+}
+
+.callout-warning .callout-icon { color: var(--warning); }
+.callout strong { color: var(--text-primary); }
+
+/* ===== Group header row =====
+   A collapsible category inside a table body -- the Metric Catalog's AXES / BMS / CONTROLLER rows.
+   Extracted from an inline style so the CONTRAST PROBLEM could be fixed in one place:
+
+   IT USED `--bg-glass`, WHICH IS EXACTLY THE HOVER COLOUR. So a category header looked permanently
+   hovered, a hovered data row looked like a category header, and a run of collapsed categories
+   merged into one slab with nothing separating the rows. Three symptoms, one cause.
+
+   `--bg-card` mixed toward the text colour instead: separated from the row background, and
+   separated from hover, which is what lets both mean something. */
+.table-group-row > td {
+  padding: 0;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text-primary) 5%, var(--bg-card));
+}
+
+/* Hover belongs to the BUTTON, not the row: the whole header is the control, and a row-level rule
+   would also fire when the pointer is over the gap beside it. */
+.table-group-row:hover > td { background: color-mix(in srgb, var(--text-primary) 9%, var(--bg-card)); }
+
+.table-group-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}
+
+.table-group-button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+
 .mono {
   font-family: 'JetBrains Mono', monospace;
   font-size: 13px;

@@ -1335,18 +1335,20 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
                 const open = isGroupOpen(group.label)
                 return (
                 <tbody key={group.label}>
-                  <tr>
-                    <td colSpan={8} style={{ background: 'var(--bg-glass)', padding: 0, borderTop: '1px solid var(--border)' }}>
+                  {/* THE CATEGORY ROW USED `--bg-glass`, WHICH IS EXACTLY THE HOVER COLOUR, and
+                      that one collision produced three symptoms: a category header looked
+                      permanently hovered, a hovered metric row looked like a category header, and a
+                      run of collapsed categories merged into a single slab. `.table-group-row`
+                      mixes toward the text colour instead -- separated from the row background AND
+                      from hover, which is what lets both mean something. */}
+                  <tr className="table-group-row">
+                    <td colSpan={8}>
                       {/* Whole header row is the control, same as the vocabulary panel's sections. */}
                       <button
                         type="button"
+                        className="table-group-button"
                         onClick={() => toggleGroup(group.label)}
                         aria-expanded={open}
-                        style={{
-                          width: '100%', display: 'flex', alignItems: 'center', gap: '8px',
-                          padding: '6px 12px', background: 'none', border: 'none',
-                          cursor: 'pointer', color: 'inherit', textAlign: 'left', font: 'inherit'
-                        }}
                         title={open
                           ? `Collapse ${group.label}`
                           : `Expand ${group.label} (${group.metrics.length} metric${group.metrics.length === 1 ? '' : 's'})`}
