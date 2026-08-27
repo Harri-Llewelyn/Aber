@@ -345,7 +345,7 @@ grants — `DROP VIEW` discards both, which is why they live inside it.
 | :--- | :--- |
 | `cells` | Factory groupings. `name` is still `UNIQUE` — cells are not addressed on the wire |
 | `gateways` | Edge gateways. `sparkplug_id` generated column, `location_scope`, `last_heartbeat` |
-| `devices` | `sparkplug_id`, `is_quarantined`, quarantine diagnostics, `last_birth_metrics`, `model_3d_path`, `cell_id` |
+| `devices` | `sparkplug_id`, `is_quarantined`, quarantine diagnostics, `last_birth_metrics`, `model_3d_path`, `cell_id`, `conformance_policy` (`0050`: `'audit'` records a schema violation and writes the sample anyway, `'enforce'` drops the offending metric) |
 | `links` | Arbitrary labelled URLs against any entity: `(entity_type, entity_id, display_name, url, link_tag)`. Renamed from `documents` / `document_tag` by `0049` — nothing about the model was ever document-specific |
 | `digital_thread` | **Append-only** audit log, written only by trigger |
 | `metric_catalog` | What devices publish. `name` is **immutable** |
