@@ -488,6 +488,13 @@ function edgeFunctionNames() {
       the heartbeat suppression guard or the attribution, which is exactly why 0017 was never
       written. 0026's own self-check asserts both survived, because this list checks that a
       redeclaration was INTENDED and cannot check that it was COMPLETE.`,
+    'public.digital_thread_page': `0039 derives is_purged as an anti-join against cells, gateways
+      and devices, DELIBERATELY not narrowed by entity_type -- its own comment argues that an asset
+      is live if it is still in any of them, which is three index probes rather than a CASE that
+      would have to track the trigger's TG_TABLE_NAME vocabulary. 0043 and 0044 grew that
+      vocabulary: they write entity_type = 'service_principals', which is NOT a table, so every one
+      of their rows answered "absent from all three" and was hidden as a deleted asset. 0045 scopes
+      the question to the three types that can answer it. The anti-join itself is unchanged.`,
     'public.ensure_gateway_status_view': `0025 widens public.gateway_status for the enrolment columns
       and adds the branch that short-circuits PENDING_ENROLLMENT / AWAITING_BIRTH ahead of the
       staleness test. g.* is expanded at CREATE time, so the view cannot be widened in place.`,

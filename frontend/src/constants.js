@@ -48,6 +48,11 @@ export const DIGITAL_THREAD_ACTIONS = {
   UPDATE:           'Update',
   DELETE:           'Delete',
   SCHEMA_REJECTION: 'Schema rejection',
+  // NOT WRITTEN BY THE AUDIT TRIGGER, like SCHEMA_REJECTION above. 0041 records a broker credential
+  // minted for a gateway; 0043 records a long-lived token signed for a service principal. Both are
+  // filterable because both are the reason somebody opens this page -- "who was given what, when".
+  CREDENTIAL_ISSUED: 'Credential issued',
+  TOKEN_MINTED:      'Token minted',
 };
 
 /**

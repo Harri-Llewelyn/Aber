@@ -180,7 +180,11 @@ refuses two things outright: a subject that can sign in, and any expiry beyond
 the only bound that exists — and `0044` adds `create_service_principal()`, which creates a machine
 identity the way `0034` does (`id` alone, so it has no email, no password and no identity provider)
 and accepts **only a read-only role**, since a privileged machine identity becomes an unrevocable
-write credential the moment a token is signed for it — and `0039`
+write credential the moment a token is signed for it — and `0045` scopes `digital_thread_page()`'s
+**deleted-asset filter to the three types that have a table behind them**: `0039` derived it as an
+anti-join against cells, gateways and devices and deliberately did not narrow it by entity type, so
+`service_principals` rows answered *"absent from all three"* and **the audit trail this feature
+exists to produce was hidden as deleted** — and `0039`
 adds `digital_thread_page()`, which applies the **deleted-asset
 filter as a predicate rather than in the browser**, so the page's row budget is spent on rows
 it will actually show: hiding them afterwards had the page list four assets on a stack of

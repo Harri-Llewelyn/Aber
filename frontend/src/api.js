@@ -1070,8 +1070,19 @@ const apiMethods = {
         p_include_purged: includePurged,
         // Normalised to the stored form. The trigger writes TG_TABLE_NAME -- 'cells' / 'gateways' /
         // 'devices' -- and the UI has always offered 'CELL' / 'GATEWAY' / 'DEVICE'.
+        //
+        // `service_principals` is NOT a table name, unlike the other three: 0043 and 0044 write it
+        // for auth.users identities, which live in GoTrue's schema. It is mapped here anyway
+        // because this map is the only thing that turns a dropdown label into what is stored --
+        // an entry missing from it falls through unchanged and matches no row at all, which reads
+        // as "no events" rather than as a broken filter.
         p_entity_type: entityType
-          ? ({ CELL: 'cells', GATEWAY: 'gateways', DEVICE: 'devices' }[entityType.toUpperCase()] || entityType)
+          ? ({
+              CELL: 'cells',
+              GATEWAY: 'gateways',
+              DEVICE: 'devices',
+              'SERVICE IDENTITY': 'service_principals',
+            }[entityType.toUpperCase()] || entityType)
           : null,
         p_action: action || null,
         p_entity_ids: entityIds && entityIds.length ? entityIds : null,

@@ -49,6 +49,14 @@ const ENTITY_KIND = {
   devices: 'DEVICE',
   service_principals: 'SERVICE IDENTITY',
 }
+/**
+ * The kinds the purge test can answer for -- the three that name a real table.
+ *
+ * Absence from `entityNames` means DELETED only for these. For anything else it means the lookup
+ * never covered it, which is not the same fact and must not be rendered as though it were.
+ */
+export const ASSET_ENTITY_KINDS = new Set(['CELL', 'GATEWAY', 'DEVICE'])
+
 export const entityKind = (t) =>
   ENTITY_KIND[String(t || '').toLowerCase()] || String(t || '').toUpperCase()
 
@@ -860,7 +868,13 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
    */
   const events = useMemo(() => {
     if (showPurged || !lookupsLoaded) return allEvents
-    return allEvents.filter(e => entityNames.has(e.entity_id))
+    // SCOPED TO THE ASSET TYPES, mirroring 0045's fix to the server-side predicate. "Purged" means
+    // a row was deleted from cells, gateways or devices -- `entityNames` is built from exactly
+    // those three -- so an entity type with no table behind it is absent for a reason that has
+    // nothing to do with deletion. Applied universally, it hid every service-principal row.
+    return allEvents.filter(e => ASSET_ENTITY_KINDS.has(entityKind(e.entity_type))
+      ? entityNames.has(e.entity_id)
+      : true)
   }, [allEvents, entityNames, showPurged, lookupsLoaded])
 
   /**
@@ -1230,6 +1244,10 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
             <option value="CELL">Cells</option>
             <option value="GATEWAY">Gateways</option>
             <option value="DEVICE">Devices</option>
+            {/* A FOURTH LANE, not an action on one of the three. 0043 and 0044 write rows about
+                machine identities -- who may reach this stack -- and without an option here they
+                were reachable only by clearing the filter entirely. */}
+            <option value="SERVICE IDENTITY">Service identities</option>
           </select>
 
           <input
