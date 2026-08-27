@@ -672,7 +672,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Fifteen extensions, none of them speculative: every one names the code it would build on, because
+Sixteen extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
@@ -684,7 +684,7 @@ arrive from feature requests** — 7-11 from GitHub issues
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63),
 [#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66) and
 [#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58), in that same order of how much already
-exists; 12-15 are not yet filed. Where an entry's heading differs from the issue's title, it is
+exists; 12-16 are not yet filed. Where an entry's heading differs from the issue's title, it is
 because the work that remains is narrower than the title claims.
 
 **One has been retired by being built.** [#65](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/65)
@@ -693,6 +693,14 @@ which is why the numbering below skips from 8 to 9 rather than the list having l
 the item with the most existing code behind it, exactly as the entry predicted. What it left behind
 is one open question rather than one open task, and it is recorded in §4: whether a client with no
 Supabase apikey should become a fifth `key-auth` exemption.
+
+**Two are marked `Built` and keep their numbers, which is a change of practice.** §9 was RETIRED
+when it shipped and the list renumbered around it — fine at the time, because almost nothing cited
+it. That is no longer true: **§13 is named by twelve comments in migrations, scripts and components,
+and §14 by forty-one across twenty-five files**, all of them explaining why that code is the way it
+is. Renumbering would silently redirect every one of them — §13's citations would point at the
+simulator, §14's at gateway nomenclature — and not one would error. A number that is cited from code
+is an identifier, not a position, so a built item stays where it is and says so in its first line.
 
 **None of these are open defects.** Feature requests live here once they have been checked against
 the code; known issues and accepted risks stay in
@@ -1336,6 +1344,11 @@ to — its own header states that its ceiling is what the caller could already d
 That is the property to preserve. A page that mints service JWTs must not become the one place in the
 stack that holds a service-role key in order to do it.
 
+**The third profile did not ship, and it is now §16 rather than a loose end inside a section marked
+built.** `Service_Reader` is what `create_service_principal()` grants as `Operator`, and the
+read-only broker template exists as `factoryplus_i3x`. `Service_Ingestor` is neither: it describes a
+daemon that does not exist yet.
+
 **Two of the three identity profiles have precedents to copy rather than invent.** `0034` created a
 read-only principal for the MCP client and argued the choice at length — not `service_role`, because
 the point is that a model's query returns exactly what the asker is entitled to see; not a demo
@@ -1614,6 +1627,50 @@ column rebuilds `gateway_status`**, because Postgres freezes `SELECT g.*` at cre
 exists for precisely this kind of change and this change must satisfy it twice.
 
 ---
+
+### 16 · `Service_Ingestor`, and taking the service-role key off the daemon
+
+**Builds on:** `record_ingestion_rejection()` (`0026`) · `create_service_principal()` (`0044`) ·
+`0034`'s read-only principal · [`ingestion/ingestion.py`](ingestion/ingestion.py) ·
+`verify_gateway_binding()` · **not yet filed as an issue**
+
+**Carved out of §13 rather than left inside a section marked built.** That item specified three
+identity profiles and shipped the mechanism for two: `Service_Reader` is what
+`create_service_principal()` grants as `Operator`, and the read-only broker template already exists
+as a live account in `factoryplus_i3x`. The third was flagged in §13's own text as different in
+kind — *"`Service_Ingestor` is the genuinely new one — and note it does not describe the current
+daemon, which holds the service-role key and writes telemetry directly"* — and it is a name in a
+list only for as long as nobody looks at what granting it would mean.
+
+**The gap is not a UI gap, and that is why it needs its own item.** Every other service identity in
+this stack is narrow by construction: the MCP principal holds `Operator` and reads five relations,
+`factoryplus_i3x` reads the namespace and publishes nothing, and `gateway-credential-service` can
+add one broker account and do nothing else. The ingestion daemon is the exception — it holds
+`SUPABASE_SERVICE_ROLE_KEY`, which bypasses RLS entirely, and there is currently no smaller
+credential it could hold and still do its job.
+
+**What it actually writes is narrower than what the key permits**, which is what makes this
+tractable rather than a rewrite. Telemetry goes to TimescaleDB over its own connection. Against
+Supabase the daemon registers quarantined devices, records births, updates status and calls
+`record_ingestion_rejection()` — and that last one is already the shape the rest would take: `0026`
+built it precisely to replace `service_role`'s direct INSERT on the audit table, and its header says
+so. So the pattern is established and applied once; the work is applying it to the remaining writes
+and then reducing the credential.
+
+**Three things to resolve before it is a task rather than a direction.** Which writes still need
+`service_role` after the RPCs exist, and whether any of them can be expressed as a policy on a role
+instead. Whether `Service_Ingestor` should be an `auth.users` principal like `0034`'s — in which
+case it needs a token, and §13's ceiling and audit trail apply to it — or a Postgres role the daemon
+connects as, which is a different trust path and does not go through PostgREST at all. And what
+happens to a deployed daemon mid-upgrade, since the credential it holds is in its environment and
+the RPCs it would need do not exist until the migration runs.
+
+**The value is not tidiness.** A credential that bypasses RLS is the one thing on this stack whose
+compromise cannot be contained by any policy written anywhere else, and it currently sits in the
+process most exposed to the plant network.
+
+---
+
 
 ## Contributing
 
