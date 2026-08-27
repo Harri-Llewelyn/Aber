@@ -1,5 +1,6 @@
 -- =============================================================================================
--- 0047 · The ingestion daemon's write surface, as functions. Roadmap §16.
+-- 0047 · The ingestion daemon's write surface, as functions.
+-- See Machine Identities in supabase/README.md.
 -- =============================================================================================
 -- 0046 created `Service_Ingestor` and gave it `Operator`, which cannot perform a single one of the
 -- daemon's writes. This file is the other half: the narrow gates those writes go through instead.
@@ -102,7 +103,8 @@ $fn$;
 COMMENT ON FUNCTION public.is_ingestion_caller() IS
   'True when the caller is the Service_Ingestor principal (0046) or still presenting the '
   'service-role key. Guards every ingest_* write gate. The service_role arm is transitional -- '
-  'roadmap §16 removes it once the deployed daemon holds the narrow credential.';
+  'the arm is removed once the deployed daemon holds the narrow credential -- see Machine '
+  'Identities in supabase/README.md.';
 
 
 CREATE OR REPLACE FUNCTION public.require_ingestion_caller(p_fn text)

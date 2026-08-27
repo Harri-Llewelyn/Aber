@@ -152,7 +152,7 @@ describe('gateway row actions', () => {
  */
 describe('gateway document links', () => {
   const withDocs = (rows, docs) => (path) => {
-    if (path.startsWith('/api/v1/documents')) return Promise.resolve(docs)
+    if (path.startsWith('/api/v1/links')) return Promise.resolve(docs)
     if (path.startsWith('/api/v1/cells')) return Promise.resolve([{ cell_id: 'cell-1', cell_name: 'Assembly Line 1' }])
     if (path.startsWith('/api/v1/gateways')) return Promise.resolve(rows)
     if (path.startsWith('/api/v1/devices')) return Promise.resolve([])
@@ -164,7 +164,7 @@ describe('gateway document links', () => {
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
-    expect(api.get.mock.calls.filter(([p]) => p.startsWith('/api/v1/documents'))).toHaveLength(0)
+    expect(api.get.mock.calls.filter(([p]) => p.startsWith('/api/v1/links'))).toHaveLength(0)
   })
 
   it('still reaches documents through the drawer', async () => {

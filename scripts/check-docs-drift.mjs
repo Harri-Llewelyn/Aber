@@ -237,9 +237,18 @@ function edgeFunctionNames() {
 //
 // The obvious repair was to glob every markdown file, and that would have been WRONG: it makes the
 // check easier to satisfy the more documentation exists, and `supabase/migrations/archive/README.md`
-// alone mentions enough prefixes to pass it vacuously. README is the document that states which
-// migrations are applied -- the original failure was README describing the set as "0001-0003" while
-// 0004 and 0005 existed -- so that is the one to hold to it.
+// alone mentions enough prefixes to pass it vacuously.
+//
+// SO THE SET IS NAMED, NOT GLOBBED. It was README alone until the roadmap stopped carrying built
+// items: retiring an entry moves its substance into the documentation, and the schema half of that
+// lands in supabase/README.md, which is where the migrations it cites are actually explained. A
+// check reading only the root README would then report a migration as undocumented while its
+// documentation sits one directory down -- and the repair for that would be to copy migration
+// numbers back into the front page purely to satisfy a checker, which is the tail wagging the dog.
+//
+// Adding to this list is a deliberate act. It must never become a glob, for the reason above: the
+// archive README is a list of prefixes and nothing else, and admitting it would make this check
+// pass for every migration that has ever existed.
 // -------------------------------------------------------------------------------------------------
 {
   const migs = readdirSync(join(REPO, 'supabase/migrations'))
@@ -247,10 +256,11 @@ function edgeFunctionNames() {
     .map((f) => f.slice(0, 4))
     .filter((v, i, a) => a.indexOf(v) === i)
     .sort();
-  const readme = read('README.md');
-  const missing = migs.filter((m) => !readme.includes(m));
+  const DOCS = ['README.md', 'supabase/README.md'];
+  const corpus = DOCS.map(read).join(' ');
+  const missing = migs.filter((m) => !corpus.includes(m));
   if (missing.length) fail(`no doc mentions migration(s): ${missing.join(', ')}`);
-  else pass(`all ${migs.length} applied migration prefixes are documented`);
+  else pass(`all ${migs.length} applied migration prefixes are documented across ${DOCS.length} doc(s)`);
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -729,11 +739,18 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 10c. The roadmap is a contiguous list, and all of it is inside the roadmap section.
+// 10c. The roadmap is an ascending list of unique numbers, and all of it is inside the section.
 //
-// Retiring an item means deleting it, renumbering the rest and updating the count claim, which is
-// three edits that must agree and which are made by hand. Four items have been retired recently and
-// each renumbered everything below it.
+// NOT CONTIGUOUS ANY MORE, AND THE CHANGE IS THE POINT. The roadmap lists only what is NOT built:
+// an item that ships is deleted from it and its substance moves into the documentation, so the
+// presence of a number answers "is this done?" without anyone reading a status word.
+//
+// Deleting used to mean renumbering everything below it, and that does not survive contact with
+// this repository. The remaining entries are named by dozens of comments in migrations, scripts and
+// components, all explaining why that code is the way it is, and shifting a number would silently
+// redirect every one of them without erroring -- a citation is an identifier, not a position. So
+// retired numbers are left as gaps and never reused, and this check asserts ASCENDING and UNIQUE
+// rather than 1..N. A duplicate or an out-of-order entry is still a real error; a gap is not.
 //
 // THE FAILURE THIS EXISTS FOR HAS ALREADY HAPPENED. Splitting the legacy-API-key work into its own
 // entry appended it to the END OF THE FILE rather than to the end of its section, so it landed
@@ -777,11 +794,32 @@ function edgeFunctionNames() {
       );
     }
 
-    const expected = items.map((_, i) => i + 1);
-    if (items.join(',') !== expected.join(',')) {
+    // RETIRED NUMBERS, DECLARED RATHER THAN INFERRED. A gap can be spotted between two surviving
+    // entries, but 16 was the last item and left no gap to notice -- inferring would silently
+    // under-report exactly the numbers most likely to be reused by someone appending to the end.
+    // Reuse is the failure this guards: every one of these is still cited from code, pointing at
+    // documentation for work that shipped, and a new entry answering to the same number would make
+    // those citations read as open work.
+    // 9 is NOT here. The AAS item was retired long before this practice and the list was
+    // renumbered around it at the time, so 9 is a live entry today -- it was reused legitimately,
+    // under the old convention, and listing it would fail the check against a correct README.
+    const RETIRED = [6, 13, 16];
+    const reused = items.filter((n) => RETIRED.includes(n));
+    if (reused.length) {
       fail(
-        `the roadmap items are numbered ${items.join(', ') || '(none)'} -- expected ` +
-          `${expected.join(', ')}. Retiring an item means renumbering every item below it.`
+        `roadmap item(s) ${reused.join(', ')} reuse a retired number. Retired numbers are never ` +
+          `reused -- code still cites them for work that shipped, and a new entry under the same ` +
+          `number makes those citations read as open work. Append a fresh number instead.`
+      );
+    }
+
+    const ascending = items.every((n, i) => i === 0 || n > items[i - 1]);
+    const duplicates = items.filter((n, i) => items.indexOf(n) !== i);
+    if (!ascending || duplicates.length) {
+      fail(
+        `the roadmap items are numbered ${items.join(', ') || '(none)'} -- expected strictly ` +
+          `ascending and unique. Gaps are fine and mean a built item was retired; a repeat or an ` +
+          `out-of-order entry means two entries answer to one number.`
       );
     } else if (!strays.length) {
       // The count claim in the section's opening sentence, written as a word.
@@ -806,7 +844,11 @@ function edgeFunctionNames() {
           `README.md claims "${claim[1]} extensions" but the roadmap lists ${items.length}.`
         );
       } else {
-        pass(`the roadmap lists ${items.length} contiguously numbered items, all inside its section`);
+        pass(
+          `the roadmap lists ${items.length} ascending, uniquely numbered items, all inside its ` +
+            `section, and reuses none of the ${RETIRED.length} retired number(s) ` +
+            `(${RETIRED.join(', ')})`
+        );
       }
     }
   }
@@ -1762,7 +1804,7 @@ function edgeFunctionNames() {
     } else {
       pass(
         `all ${columns.length} gateway health column(s) in GATEWAY_HEALTH_METRICS are written by ` +
-          `ingest_record_gateway_health() (roadmap §16)`
+          `ingest_record_gateway_health()`
       );
     }
   }

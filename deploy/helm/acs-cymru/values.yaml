@@ -87,7 +87,7 @@ secrets:
   jwtSecret: ""
   anonKey: ""
   serviceRoleKey: ""
-  # The ingestion daemon's own credential (roadmap item 16). Signed by the same jwtSecret, but
+  # The ingestion daemon's own credential (see Machine Identities in supabase/README.md). Signed by the same jwtSecret, but
   # unlike the two above it names a PRINCIPAL rather than a role: claims are
   # {"iss":"supabase","role":"authenticated","sub":"b0000000-0000-4000-8000-000000000002"}.
   # That subject is Service_Ingestor, seeded by migration 0046; it holds Operator and cannot write

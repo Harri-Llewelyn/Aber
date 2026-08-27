@@ -119,7 +119,7 @@ describe('usePermissions hook', () => {
     expect(result.current.hasPermission(PERMISSION_UUIDS.QUARANTINE_APPROVE)).toBe(false)
     expect(result.current.hasPermission(PERMISSION_UUIDS.QUARANTINE_REJECT)).toBe(false)
     expect(result.current.hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)).toBe(false)
-    expect(result.current.hasPermission(PERMISSION_UUIDS.DOCUMENT_MANAGE)).toBe(false)
+    expect(result.current.hasPermission(PERMISSION_UUIDS.LINK_MANAGE)).toBe(false)
     expect(result.current.hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)).toBe(false)
     expect(result.current.hasPermission(PERMISSION_UUIDS.GITOPS_MANAGE)).toBe(false)
 

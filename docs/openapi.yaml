@@ -117,7 +117,7 @@ tags:
   - name: Audit
     description: Append-only Digital Thread audit log.
   - name: Registry
-    description: Schemas, metric catalog, reference vocabularies, documents and services.
+    description: Schemas, metric catalog, reference vocabularies, links and services.
   - name: Storage
     description: 3D asset models in the `asset-3d-models` bucket.
   - name: Realtime
@@ -1188,10 +1188,10 @@ paths:
         '201': { description: Created. }
         '403': { description: 'Caller lacks Administrator or Shopfloor_Manager.' }
 
-  /rest/v1/documents:
+  /rest/v1/links:
     get:
       tags: [Registry]
-      summary: List external document links attached to an asset
+      summary: List external links attached to an asset
       description: 'A link registry, not a file store — `url` points at an external system.'
       parameters:
         - { name: entity_type, in: query, schema: { type: string }, description: '`eq.cell` | `eq.gateway` | `eq.device`' }
@@ -1199,13 +1199,13 @@ paths:
         - $ref: '#/components/parameters/Select'
       responses:
         '200':
-          description: Matching document links.
+          description: Matching links.
           content:
             application/json:
-              schema: { type: array, items: { $ref: '#/components/schemas/Document' } }
+              schema: { type: array, items: { $ref: '#/components/schemas/Link' } }
     post:
       tags: [Registry]
-      summary: Attach a document link
+      summary: Attach a link
       parameters: [{ $ref: '#/components/parameters/Prefer' }]
       requestBody:
         required: true
@@ -1219,13 +1219,13 @@ paths:
                 entity_id: { type: string }
                 display_name: { type: string }
                 url: { type: string, format: uri }
-                document_tag: { type: string, default: other }
+                link_tag: { type: string, default: other }
       responses:
         '201': { description: Created. }
         '403': { $ref: '#/components/responses/Forbidden' }
     delete:
       tags: [Registry]
-      summary: Remove a document link
+      summary: Remove a link
       parameters:
         - { name: id, in: query, required: true, schema: { type: string }, description: 'e.g. `eq.<uuid>`' }
       responses:
@@ -3095,7 +3095,7 @@ components:
           items: { type: string, format: uuid }
           description: 'Resolved through the `device_schemas` view, so join rows and the legacy 1:1 column agree.'
 
-    Document:
+    Link:
       type: object
       description: An external link attached to an asset. No binary is stored by this platform.
       properties:
@@ -3104,6 +3104,6 @@ components:
         entity_id: { type: string }
         display_name: { type: string }
         url: { type: string, format: uri }
-        document_tag: { type: string, default: other }
+        link_tag: { type: string, default: other }
         created_at: { type: string, format: date-time, readOnly: true }
         updated_at: { type: string, format: date-time }

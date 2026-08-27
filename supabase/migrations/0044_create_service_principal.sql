@@ -1,7 +1,8 @@
 -- =============================================================================================
 -- 0044_create_service_principal.sql
 --
--- Create a machine identity from the Access Control page. Roadmap §13.
+-- Create a machine identity from the Access Control page. See Machine Identities in
+-- supabase/README.md.
 --
 -- A SEPARATE FILE FROM 0043 DELIBERATELY. That one records that a token was signed, which is an
 -- observation. This one creates an identity that can hold a role, which is an authority -- and the

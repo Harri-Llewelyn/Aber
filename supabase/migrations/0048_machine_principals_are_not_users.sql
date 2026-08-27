@@ -239,7 +239,8 @@ $fn$;
 
 COMMENT ON FUNCTION public.is_ingestion_caller() IS
   'True only for the Service_Ingestor principal (0046). Guards every ingest_* write gate. The '
-  'transitional service_role arm was removed by 0048, which is what completes roadmap item 16.';
+  'transitional service_role arm was removed by 0048 -- see Machine Identities in '
+  'supabase/README.md.';
 
 
 -- ---------------------------------------------------------------------------------------------

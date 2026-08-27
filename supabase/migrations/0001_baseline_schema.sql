@@ -1017,14 +1017,27 @@ CREATE TABLE IF NOT EXISTS public.directory_services (
     registered_schema_id uuid
 );
 
--- Name: documents; Type: TABLE; Schema: public; Owner: -
-CREATE TABLE IF NOT EXISTS public.documents (
+-- Name: links; Type: TABLE; Schema: public; Owner: -
+-- `links`, not `documents`, and `link_tag`, not `document_tag`. Renamed by 0049
+-- once issue #62 generalised the feature from document links to links of ANY kind -- an asset
+-- register, a file repository, anything with a URL.
+--
+-- CHANGED HERE AS WELL AS IN 0049, for the reason 0004 gives for doing the same thing to
+-- gateways.ip_address: db-init replays every migration on every boot, so a table this file still
+-- created under the old name would be recreated -- empty, with its own index, policies and grants
+-- -- on the next boot after the rename, and would sit beside the real one forever. A fresh install
+-- must never create the old shape at all.
+--
+-- Nothing about the model was ever document-specific: (entity_type, entity_id, display_name, url,
+-- link_tag) is an arbitrary labelled URL against an arbitrary entity, which is why this is a rename
+-- and not a redesign.
+CREATE TABLE IF NOT EXISTS public.links (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     entity_type text NOT NULL,
     entity_id text NOT NULL,
     display_name text NOT NULL,
     url text NOT NULL,
-    document_tag text DEFAULT 'other'::text NOT NULL,
+    link_tag text DEFAULT 'other'::text NOT NULL,
     created_at timestamp with time zone DEFAULT now(),
     updated_at timestamp with time zone DEFAULT now()
 );
@@ -1335,15 +1348,15 @@ BEGIN
   END IF;
 END $baseline$;
 
--- Name: documents documents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: links links_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 DO $baseline$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
-     WHERE conname = 'documents_pkey' AND conrelid = 'public.documents'::regclass
+     WHERE conname = 'links_pkey' AND conrelid = 'public.links'::regclass
   ) THEN
-    ALTER TABLE ONLY public.documents
-        ADD CONSTRAINT documents_pkey PRIMARY KEY (id);
+    ALTER TABLE ONLY public.links
+        ADD CONSTRAINT links_pkey PRIMARY KEY (id);
   END IF;
 END $baseline$;
 
@@ -1593,8 +1606,8 @@ CREATE INDEX IF NOT EXISTS idx_devices_reported_identity ON public.devices USING
 -- Name: idx_devices_sparkplug_id; Type: INDEX; Schema: public; Owner: -
 CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_sparkplug_id ON public.devices USING btree (sparkplug_id);
 
--- Name: idx_documents_entity; Type: INDEX; Schema: public; Owner: -
-CREATE INDEX IF NOT EXISTS idx_documents_entity ON public.documents USING btree (entity_type, entity_id);
+-- Name: idx_links_entity; Type: INDEX; Schema: public; Owner: -
+CREATE INDEX IF NOT EXISTS idx_links_entity ON public.links USING btree (entity_type, entity_id);
 
 -- Name: idx_gateways_name; Type: INDEX; Schema: public; Owner: -
 CREATE INDEX IF NOT EXISTS idx_gateways_name ON public.gateways USING btree (name);
@@ -1914,24 +1927,24 @@ CREATE POLICY directory_services_select_authenticated ON public.directory_servic
 DROP POLICY IF EXISTS directory_services_update_privileged ON public.directory_services;
 CREATE POLICY directory_services_update_privileged ON public.directory_services FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
--- Name: documents; Type: ROW SECURITY; Schema: public; Owner: -
-ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
+-- Name: links; Type: ROW SECURITY; Schema: public; Owner: -
+ALTER TABLE public.links ENABLE ROW LEVEL SECURITY;
 
--- Name: documents documents_delete_privileged; Type: POLICY; Schema: public; Owner: -
-DROP POLICY IF EXISTS documents_delete_privileged ON public.documents;
-CREATE POLICY documents_delete_privileged ON public.documents FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+-- Name: links links_delete_privileged; Type: POLICY; Schema: public; Owner: -
+DROP POLICY IF EXISTS links_delete_privileged ON public.links;
+CREATE POLICY links_delete_privileged ON public.links FOR DELETE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
--- Name: documents documents_insert_privileged; Type: POLICY; Schema: public; Owner: -
-DROP POLICY IF EXISTS documents_insert_privileged ON public.documents;
-CREATE POLICY documents_insert_privileged ON public.documents FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+-- Name: links links_insert_privileged; Type: POLICY; Schema: public; Owner: -
+DROP POLICY IF EXISTS links_insert_privileged ON public.links;
+CREATE POLICY links_insert_privileged ON public.links FOR INSERT TO authenticated WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
--- Name: documents documents_select_authenticated; Type: POLICY; Schema: public; Owner: -
-DROP POLICY IF EXISTS documents_select_authenticated ON public.documents;
-CREATE POLICY documents_select_authenticated ON public.documents FOR SELECT TO authenticated USING (true);
+-- Name: links links_select_authenticated; Type: POLICY; Schema: public; Owner: -
+DROP POLICY IF EXISTS links_select_authenticated ON public.links;
+CREATE POLICY links_select_authenticated ON public.links FOR SELECT TO authenticated USING (true);
 
--- Name: documents documents_update_privileged; Type: POLICY; Schema: public; Owner: -
-DROP POLICY IF EXISTS documents_update_privileged ON public.documents;
-CREATE POLICY documents_update_privileged ON public.documents FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
+-- Name: links links_update_privileged; Type: POLICY; Schema: public; Owner: -
+DROP POLICY IF EXISTS links_update_privileged ON public.links;
+CREATE POLICY links_update_privileged ON public.links FOR UPDATE TO authenticated USING (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text])) WITH CHECK (public.has_role(ARRAY['Administrator'::text, 'Shopfloor_Manager'::text]));
 
 -- Name: gateways; Type: ROW SECURITY; Schema: public; Owner: -
 ALTER TABLE public.gateways ENABLE ROW LEVEL SECURITY;
@@ -2072,7 +2085,7 @@ CREATE POLICY webhook_endpoints_select_privileged ON public.webhook_endpoints FO
 -- every revoke.
 --
 -- Measured, not theorised: without this block the rebuilt database handed `anon` GRANT ALL on
--- cells, devices, digital_thread, documents, directory_services, device_submodels and every view,
+-- cells, devices, digital_thread, links, directory_services, device_submodels and every view,
 -- and upgraded `authenticated` on digital_thread from SELECT to ALL -- on an append-only audit
 -- table whose immutability is the point.
 --
@@ -2244,10 +2257,10 @@ GRANT ALL ON TABLE public.directory_services TO authenticated;
 
 GRANT ALL ON TABLE public.directory_services TO service_role;
 
--- Name: TABLE documents; Type: ACL; Schema: public; Owner: -
-GRANT ALL ON TABLE public.documents TO authenticated;
+-- Name: TABLE links; Type: ACL; Schema: public; Owner: -
+GRANT ALL ON TABLE public.links TO authenticated;
 
-GRANT ALL ON TABLE public.documents TO service_role;
+GRANT ALL ON TABLE public.links TO service_role;
 
 -- Name: TABLE gateway_status; Type: ACL; Schema: public; Owner: -
 GRANT ALL ON TABLE public.gateway_status TO service_role;

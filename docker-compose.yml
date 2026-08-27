@@ -1331,7 +1331,7 @@ services:
       MQTT_TLS_ENABLED: ${MQTT_TLS_ENABLED:-}
       MQTT_TLS_CA_FILE: ${MQTT_TLS_CA_FILE:-}
       SUPABASE_URL: http://supabase-kong:8000
-      # THE SERVICE-ROLE KEY IS DELIBERATELY NOT HERE ANY MORE (roadmap item 16). It bypasses RLS
+      # THE SERVICE-ROLE KEY IS DELIBERATELY NOT HERE ANY MORE (see Machine Identities in supabase/README.md). It bypasses RLS
       # entirely, and it sat in the process most exposed to the plant network -- the one credential
       # on this stack whose compromise no policy written anywhere else can contain.
       #

@@ -58,7 +58,7 @@ const b64url = (input) =>
  * services, not user sessions: a short expiry here would silently take the stack off the air on a
  * date nobody wrote down, and there is no refresh path for them.
  *
- * `subject` NAMES A PRINCIPAL AND IS WHAT MAKES A NARROW SERVICE KEY POSSIBLE (roadmap item 16).
+ * `subject` NAMES A PRINCIPAL AND IS WHAT MAKES A NARROW SERVICE KEY POSSIBLE (see Machine Identities in supabase/README.md).
  * The anon and service-role keys carry a `role` and no `sub`, because they are not anybody --
  * PostgREST switches to the database role and RLS never asks who is calling. A key minted with a
  * `sub` is somebody: `role: authenticated` puts it through RLS like any signed-in user, and
@@ -130,7 +130,7 @@ const generated = {
   SUPABASE_JWT_SECRET: jwtSecret,
   SUPABASE_ANON_KEY: mintJwt('anon', jwtSecret),
   SUPABASE_SERVICE_ROLE_KEY: mintJwt('service_role', jwtSecret),
-  // The ingestion daemon's own credential (roadmap item 16). `authenticated` with a `sub`, not a
+  // The ingestion daemon's own credential (see Machine Identities in supabase/README.md). `authenticated` with a `sub`, not a
   // role that bypasses RLS: it authenticates as Service_Ingestor (migration 0046), which holds
   // Operator and therefore cannot write a single row directly. Every write it makes goes through
   // one of the SECURITY DEFINER gates in 0047, and those check that the caller IS this principal.

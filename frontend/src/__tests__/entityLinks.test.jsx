@@ -8,20 +8,21 @@ import { PERMISSION_UUIDS } from '../constants'
 /**
  * Links, formerly Document Links (issue #62).
  *
- * WHAT CHANGED IS THE VOCABULARY, NOT THE MODEL. `public.documents` is
- * `(entity_type, entity_id, display_name, url, document_tag)` -- an arbitrary labelled URL against
+ * WHAT CHANGED IS THE VOCABULARY, NOT THE MODEL. `public.links` is
+ * `(entity_type, entity_id, display_name, url, link_tag)` -- an arbitrary labelled URL against
  * an arbitrary entity. Nothing about it was ever document-specific, so the name was the only thing
  * stopping anyone attaching an asset-register entry or a file share. The issue asked for a new
  * asset-register FIELD on gateways and devices; a tag on this feature does the same job without a
  * migration, without a form field on two more pages, and without a second place asset URLs live.
  *
- * THE STORED TAG VALUES ARE UNCHANGED AND THESE TESTS PIN THAT. `document_tag` carries no CHECK
+ * THE STORED TAG VALUES ARE UNCHANGED AND THESE TESTS PIN THAT. `link_tag` carries no CHECK
  * constraint, so the frontend's TAG_LABELS is the only enumeration of the vocabulary -- which makes
  * adding a tag free and makes renaming a key silent data loss: every row written before the rename
  * keeps the old string and renders as Other. Labels are display; keys are data.
  *
- * The endpoint and column are still named `documents` / `document_tag`. That divergence is
- * deliberate and is roadmap item 6 in README.md, not drift.
+ * The endpoint and column are now `links` / `link_tag`, matching what the UI has always called
+ * them -- migration 0049. The tag VALUES did not move with them, which is the
+ * distinction the paragraph above turns on.
  */
 
 vi.mock('../api', async () => {
@@ -35,7 +36,7 @@ const link = (overrides = {}) => ({
   entity_id: 'dev-1',
   display_name: 'Operating Manual',
   url: 'https://company.sharepoint.com/documents/manual.pdf',
-  document_tag: 'other',
+  link_tag: 'other',
   ...overrides
 })
 
@@ -45,7 +46,7 @@ const show = async (rows = [link()], canManage = true) => {
     <EntityLinksModal
       entityType="device" entityId="dev-1" entityName="Sim_CNC_Mill_01"
       onClose={vi.fn()} showToast={vi.fn()}
-      hasPermission={(p) => canManage && p === PERMISSION_UUIDS.DOCUMENT_MANAGE}
+      hasPermission={(p) => canManage && p === PERMISSION_UUIDS.LINK_MANAGE}
     />
   )
   await waitFor(() => expect(document.querySelector('.modal')).toBeTruthy())
@@ -124,7 +125,7 @@ describe('stored tag values', () => {
   it('still renders a tag written before the rename', async () => {
     // The keys are data. If `health_and_safety` had been renamed with its label, every existing
     // row would quietly fall through to Other -- and nothing would report it.
-    await show([link({ document_tag: 'health_and_safety' })])
+    await show([link({ link_tag: 'health_and_safety' })])
 
     expect(modal().getByText('Health & Safety')).toBeTruthy()
   })
@@ -139,9 +140,9 @@ describe('stored tag values', () => {
     fireEvent.click(screen.getByRole('button', { name: /Save Link/i }))
 
     await waitFor(() => expect(api.post).toHaveBeenCalled())
-    // The wire still says `documents` and `document_tag` -- roadmap item 6, not drift.
-    expect(api.post).toHaveBeenCalledWith('/api/v1/documents', expect.objectContaining({
-      document_tag: 'asset_register',
+    // Wire and UI now agree -- 0049 closed the divergence this used to pin.
+    expect(api.post).toHaveBeenCalledWith('/api/v1/links', expect.objectContaining({
+      link_tag: 'asset_register',
       entity_type: 'device',
       entity_id: 'dev-1'
     }))
@@ -150,7 +151,7 @@ describe('stored tag values', () => {
   it('falls back to Other for a tag it does not know', async () => {
     // The column has no CHECK constraint, so a row can carry anything. An unknown tag must render
     // as something rather than as a blank badge.
-    await show([link({ document_tag: 'invented_by_someone' })])
+    await show([link({ link_tag: 'invented_by_someone' })])
 
     expect(modal().getByText('Other')).toBeTruthy()
   })

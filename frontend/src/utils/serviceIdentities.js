@@ -14,7 +14,7 @@
  *
  * Nothing holds an identity on both planes. The ingestion daemon connects to the broker as
  * `factoryplus_ingestion` and reaches the database with the service-role key -- which is not an
- * identity at all, which is exactly what roadmap §13 means when it says `Service_Ingestor` "does
+ * identity at all, which is exactly what Machine Identities in supabase/README.md means when it says `Service_Ingestor` "does
  * not describe the current daemon".
  *
  * =================================================================================================
