@@ -4,6 +4,7 @@ import ssl
 import threading
 import time
 from collections import OrderedDict
+from typing import NamedTuple
 import psycopg2
 from psycopg2.extras import execute_values
 import paho.mqtt.client as mqtt
@@ -462,7 +463,7 @@ class TTLCache:
        for both "absent" and "cached as unregistered" would conflate them, and the consequence is
        not a crash: negative caching would quietly stop working, and every message from an
        unregistered device would go back to the directory. `_schema_cache` has the same shape for
-       its own reason -- see attached_modelled_types() on why None and an empty map differ.
+       its own reason -- see device_modelled_constraints() on why None and an empty map differ.
 
     EVICTION IS LRU AND THAT IS NOT AN ARBITRARY CHOICE. The entry a TTL cannot reach is by
     definition one nobody has read, and the least-recently-used entry is exactly that entry. So the
@@ -2194,7 +2195,7 @@ _JSON_TYPES_FOR_VALUE = {
     "bool": frozenset({"boolean"}),
 }
 
-# device_uuid -> modelled_types (or None -- see attached_modelled_types).
+# device_uuid -> ModelledSchema (or None -- see device_modelled_constraints).
 #
 # BOUNDED FOR CONSISTENCY RATHER THAN FOR SAFETY, and the difference is worth stating. This is keyed
 # on a RESOLVED uuid, which only exists because a `devices` row does, so no publisher can push
@@ -2204,25 +2205,73 @@ _JSON_TYPES_FOR_VALUE = {
 _schema_cache = TTLCache(MAX_ENTITIES_PER_CACHE, SCHEMA_CACHE_TTL_SECONDS, "schema")
 
 
-def modelled_types(schema_definitions):
+class MetricConstraint(NamedTuple):
     """
-    Metric name -> the set of JSON Schema types it may carry, across every attached schema.
+    What every attached schema, taken together, permits one metric to carry.
 
-    `None` as a value means "declared, but with no type constraint" -- a metric named in `required`
-    but absent from `properties`, or one whose `properties` entry omits `type`. That is a real and
-    legitimate schema, and it must not be read as "declares no types", which would make every
-    value it carries a mismatch.
+    `None` on any field means UNCONSTRAINED for that facet, which is not the same as absent: a
+    metric named in `required` but not in `properties` is modelled with no constraints at all, and
+    reading that as "declares nothing" would make every value it carries a mismatch.
+    """
+    types:   frozenset = None   # JSON Schema `type`, as a set of names
+    enum:    frozenset = None   # `enum`, as a set of permitted scalars
+    minimum: float     = None
+    maximum: float     = None
+    pattern: str       = None   # `pattern`, a regular expression, strings only
+
+
+class ModelledSchema(NamedTuple):
+    """
+    The resolved schema surface for a device: what each metric may carry, and whether anything NOT
+    named is permitted at all.
+
+    `closed` is `additionalProperties: false` on any attached schema. It sits beside the metric map
+    rather than inside it because it is a statement about the SET, not about any one metric -- and
+    it is the only thing that can make an unmodelled metric a rejectable fault rather than merely a
+    reportable one. JSON Schema's default is to permit unnamed properties, so silence means yes.
+    """
+    metrics: dict
+    closed:  bool = False
+
+
+def _widen(a, b, union):
+    """
+    Combine one facet across two schemas, PERMISSIVELY.
+
+    `None` wins, because the union is what the device is PERMITTED to send and the widest
+    permission is the answer: a schema declaring a metric with no `enum` permits any value, and
+    another schema listing some cannot narrow that.
+    """
+    if a is None or b is None:
+        return None
+    return union(a, b)
+
+
+def modelled_constraints(schema_definitions):
+    """
+    Metric name -> MetricConstraint across every attached schema, plus whether the set is closed.
 
     THE UNION ACROSS SCHEMAS IS DELIBERATE and mirrors modelled_metrics_across() in validate.py: a
     device may carry several submodels, and a metric modelled by any one of them is modelled. A
     per-schema check would flag a device for publishing what another of its own submodels accounts
     for.
+
+    Was `modelled_types()`, which read `type` and nothing else -- so `enum`, `minimum`, `maximum`,
+    `pattern` and `additionalProperties` sat in stored schemas and were read past in silence. The
+    documents were already JSON Schema; only the reader was shallow.
     """
     result = {}
+    closed = False
 
     for definition in schema_definitions or []:
         if not isinstance(definition, dict):
             continue
+
+        # `additionalProperties: false` on ANY attached schema closes the set. Any is the right
+        # quantifier: a schema saying "nothing beyond these" is an assertion about the whole
+        # device, and another submodel staying silent is not a contradiction of it.
+        if definition.get("additionalProperties") is False:
+            closed = True
 
         properties = definition.get("properties")
         properties = properties if isinstance(properties, dict) else {}
@@ -2241,34 +2290,73 @@ def modelled_types(schema_definitions):
         for name, spec in properties.items():
             if not isinstance(name, str):
                 continue
-            declared = spec.get("type") if isinstance(spec, dict) else None
+            if not isinstance(spec, dict):
+                this_schema[name] = MetricConstraint()
+                continue
+
+            declared = spec.get("type")
             if isinstance(declared, str):
-                this_schema[name] = frozenset({declared})
+                types = frozenset({declared})
             elif isinstance(declared, list):
-                this_schema[name] = frozenset(t for t in declared if isinstance(t, str))
+                types = frozenset(t for t in declared if isinstance(t, str))
             else:
-                this_schema[name] = None
+                types = None
+
+            raw_enum = spec.get("enum")
+            if isinstance(raw_enum, list) and raw_enum:
+                enum = frozenset(v for v in raw_enum if isinstance(v, (str, int, float, bool)))
+                enum = enum or None
+            else:
+                enum = None
+
+            # exclusiveMinimum / exclusiveMaximum are deliberately NOT read. Draft 4 spells them as
+            # booleans modifying `minimum`, Draft 6+ as numbers replacing it, and guessing which
+            # dialect a stored document means would move a boundary in whichever direction the
+            # guess was wrong. An unread facet reports nothing; a misread one rejects good
+            # telemetry, and this is the half of the file that can now drop a reading.
+            minimum = _number_or_none(spec.get("minimum"))
+            maximum = _number_or_none(spec.get("maximum"))
+
+            pattern = spec.get("pattern")
+            pattern = pattern if isinstance(pattern, str) and pattern else None
+
+            this_schema[name] = MetricConstraint(types, enum, minimum, maximum, pattern)
 
         for name in definition.get("required") or []:
             if isinstance(name, str):
-                this_schema.setdefault(name, None)
+                this_schema.setdefault(name, MetricConstraint())
 
-        for name, types in this_schema.items():
+        for name, c in this_schema.items():
             if name not in result:
-                result[name] = types
-            elif result[name] is None or types is None:
-                # Unconstrained wins: the union is what the device is PERMITTED to send, and the
-                # widest permission is the answer.
-                result[name] = None
+                result[name] = c
             else:
-                result[name] = result[name] | types
+                prev = result[name]
+                result[name] = MetricConstraint(
+                    types=_widen(prev.types, c.types, lambda x, y: x | y),
+                    enum=_widen(prev.enum, c.enum, lambda x, y: x | y),
+                    # The widest bound survives: a floor of 0 in one schema and 10 in another
+                    # permits anything at or above 0.
+                    minimum=_widen(prev.minimum, c.minimum, min),
+                    maximum=_widen(prev.maximum, c.maximum, max),
+                    # Two patterns cannot be combined into one expression meaning "either" short of
+                    # building an alternation and hoping both are well formed. Differing patterns
+                    # therefore widen to unconstrained, which is the rule every other facet follows.
+                    pattern=_widen(prev.pattern, c.pattern, lambda x, y: x if x == y else None),
+                )
 
-    return result
+    return ModelledSchema(result, closed)
 
 
-def device_modelled_types(device_uuid: str):
+def _number_or_none(value):
+    """A JSON number, or None. `True` is an int in Python and is not a bound."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def device_modelled_constraints(device_uuid: str):
     """
-    The cached type map for a device, or None when it has no schema attached at all.
+    The cached ModelledSchema for a device, or None when it has no schema attached at all.
 
     NONE AND AN EMPTY MAP ARE DIFFERENT ANSWERS and the caller depends on it. None means no schema
     is bound, so there is nothing to judge against and conformance is not evaluated -- the ordinary
@@ -2296,7 +2384,7 @@ def device_modelled_types(device_uuid: str):
             rows = supabase_client.table("schemas").select(
                 "id,schema_definition"
             ).in_("id", ids).execute()
-            result = modelled_types([r.get("schema_definition") for r in (rows.data or [])])
+            result = modelled_constraints([r.get("schema_definition") for r in (rows.data or [])])
     except Exception as e:
         # NOT CACHED, and returned as None so no violation is reported. A directory blip must not
         # be able to write an audit row accusing a device of publishing something unmodelled --
@@ -2311,14 +2399,76 @@ def device_modelled_types(device_uuid: str):
     return result
 
 
+def constraint_violations(name, value_kind, value, constraint):
+    """
+    Every facet of one constraint that this value fails, as (code, detail, extra) tuples.
+
+    SEPARATE FROM payload_violations() SO IT CAN BE TESTED WITH THREE LITERALS. It takes no
+    payload, no client and no device -- which is the same reason payload_violations() itself is
+    pure, applied one level down now that there are five facets rather than one.
+
+    ORDER IS SIGNIFICANT AND TYPE COMES FIRST. A value of the wrong type fails `minimum` and
+    `pattern` too, and reporting three faults for one mistake buries the one that explains the
+    other two. So a type mismatch returns alone.
+    """
+    satisfied = _JSON_TYPES_FOR_VALUE.get(value_kind, frozenset())
+
+    if constraint.types is not None and not (satisfied & constraint.types):
+        return [("type_mismatch",
+                 "schema declares %s" % "/".join(sorted(constraint.types)),
+                 {"expected_types": sorted(constraint.types)})]
+
+    out = []
+
+    if constraint.enum is not None and value not in constraint.enum:
+        # Sorted on the string form: an enum may legitimately mix strings and numbers, which are
+        # not orderable against each other in Python 3.
+        listed = sorted(constraint.enum, key=lambda v: str(v))
+        out.append(("enum_mismatch",
+                    "schema permits %s" % ", ".join(repr(v) for v in listed),
+                    {"permitted": [v for v in listed]}))
+
+    # Bounds apply to numbers only. A string carrying a `minimum` in its schema is a schema fault,
+    # not a telemetry fault, and comparing the two in Python 3 raises rather than answering.
+    if value_kind == "double" and isinstance(value, (int, float)):
+        if constraint.minimum is not None and value < constraint.minimum:
+            out.append(("below_minimum",
+                        "schema sets minimum %g" % constraint.minimum,
+                        {"minimum": constraint.minimum}))
+        if constraint.maximum is not None and value > constraint.maximum:
+            out.append(("above_maximum",
+                        "schema sets maximum %g" % constraint.maximum,
+                        {"maximum": constraint.maximum}))
+
+    if constraint.pattern is not None and value_kind == "string" and isinstance(value, str):
+        try:
+            if re.search(constraint.pattern, value) is None:
+                out.append(("pattern_mismatch",
+                            "schema requires a match for %s" % constraint.pattern,
+                            {"pattern": constraint.pattern}))
+        except re.error:
+            # A stored schema carrying an invalid regular expression is the schema author's fault
+            # and must not be charged to the device. Reported against the SCHEMA so it is visible,
+            # and deliberately never enforced -- see enforceable_violation().
+            out.append(("schema_pattern_invalid",
+                        "schema pattern %s is not a valid regular expression"
+                        % constraint.pattern,
+                        {"pattern": constraint.pattern}))
+
+    return out
+
+
 def payload_violations(observed, dropped, modelled):
     """
     Everything wrong with one DDATA payload, as a list of audit-shaped dicts.
 
-    `observed` -- [(metric_name, value_kind)] for metrics that were written, where value_kind is a
-                  key of _JSON_TYPES_FOR_VALUE.
+    `observed` -- [(metric_name, value_kind, value)] for metrics the loop accepted, where
+                  value_kind is a key of _JSON_TYPES_FOR_VALUE. The VALUE is carried because
+                  `enum`, `minimum`, `maximum` and `pattern` are about values and not about types;
+                  before those were read, the kind alone was enough.
     `dropped`  -- [(metric_name_or_None, code, detail)] for metrics the loop skipped.
-    `modelled` -- the map from device_modelled_types(), or None to skip the schema half entirely.
+    `modelled` -- the ModelledSchema from device_modelled_constraints(), or None to skip the schema
+                  half entirely.
 
     Pure, and that is the point: every branch below is reachable from a unit test with three
     literals, which is not true of anything that has to be handed a protobuf and a live client.
@@ -2337,33 +2487,70 @@ def payload_violations(observed, dropped, modelled):
     if modelled is None:
         return violations
 
-    for name, value_kind in observed:
-        if name not in modelled:
+    for name, value_kind, value in observed:
+        constraint = modelled.metrics.get(name)
+
+        if constraint is None:
             violations.append({
                 "metric": name,
                 "code": "unmodelled_metric",
-                "detail": "no attached schema declares this metric",
+                "detail": ("no attached schema declares this metric, and one of them closes the "
+                           "set with additionalProperties: false"
+                           if modelled.closed else
+                           "no attached schema declares this metric"),
                 "observed_type": value_kind,
                 "dropped": False,
             })
             continue
 
-        allowed = modelled[name]
-        if allowed is None:
-            continue  # Declared without a type constraint; any value conforms.
-
-        satisfied = _JSON_TYPES_FOR_VALUE.get(value_kind, frozenset())
-        if not (satisfied & allowed):
+        for code, detail, extra in constraint_violations(name, value_kind, value, constraint):
             violations.append({
                 "metric": name,
-                "code": "type_mismatch",
-                "detail": "schema declares %s" % "/".join(sorted(allowed)),
+                "code": code,
+                "detail": detail,
                 "observed_type": value_kind,
-                "expected_types": sorted(allowed),
                 "dropped": False,
+                **extra,
             })
 
     return violations
+
+
+def enforceable_violation(violation, closed):
+    """
+    Whether this finding justifies DROPPING the metric, as opposed to only recording it.
+
+    THE TWO ARE NOT THE SAME QUESTION and the difference is the whole of the policy. Recording is
+    free and always correct: the row says what was observed. Dropping discards a reading a machine
+    actually produced, so it is reserved for findings where the schema is unambiguous about the
+    value being wrong.
+
+      * `type_mismatch`, `enum_mismatch`, `below_minimum`, `above_maximum`, `pattern_mismatch`
+        are the device contradicting a constraint its own bound schema states. Enforceable.
+
+      * `unmodelled_metric` is enforceable ONLY when a schema closes the set with
+        `additionalProperties: false`. JSON Schema's default permits unnamed properties, so
+        silence is permission -- dropping on silence would delete every reading from a device that
+        had gained a sensor before anyone updated its schema, which is the ordinary way a fleet
+        changes.
+
+      * `schema_pattern_invalid` is never enforceable. The fault is in the stored schema, and
+        charging it to the device would silence a machine because somebody typed a bad regex.
+
+      * Anything already `dropped` was skipped by the loop for its own reasons -- an unresolved
+        alias, a timestamp outside the sanity window -- and is not this policy's to re-decide.
+    """
+    if violation.get("dropped"):
+        return False
+    code = violation.get("code")
+    if code == "unmodelled_metric":
+        return bool(closed)
+    return code in _ENFORCEABLE_CODES
+
+
+_ENFORCEABLE_CODES = frozenset({
+    "type_mismatch", "enum_mismatch", "below_minimum", "above_maximum", "pattern_mismatch",
+})
 
 
 def _violation_signature(violations):
@@ -2649,7 +2836,15 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
                         ))
                         continue
 
-                    observed.append((metric_name, value_kind))
+                    # The VALUE travels with the kind now: enum, minimum, maximum and pattern
+                    # are constraints on values, and the kind alone answered only `type`.
+                    observed.append((
+                        metric_name,
+                        value_kind,
+                        val_double if value_kind == "double"
+                        else val_string if value_kind == "string"
+                        else val_bool,
+                    ))
 
                     rows.append(
                         (metric_dt, asset_id, metric_name, val_double, val_string, val_bool)
@@ -2742,12 +2937,12 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
     # above rather than falling through.
     # -------------------------------------------------------------------------------------
     # The flag is tested HERE as well as inside record_payload_violations, and the duplication is
-    # deliberate: device_modelled_types() can issue a PostgREST round trip on a cache miss, and a
-    # daemon with auditing switched off must not pay for a lookup whose only consumer is disabled.
+    # deliberate: device_modelled_constraints() can issue a PostgREST round trip on a cache miss,
+    # and a daemon with auditing off must not pay for a lookup whose only consumer is disabled.
     if AUDIT_PAYLOAD_REJECTIONS:
         record_payload_violations(
             device,
-            payload_violations(observed, dropped, device_modelled_types(device["id"])),
+            payload_violations(observed, dropped, device_modelled_constraints(device["id"])),
             payload_dt,
         )
 
