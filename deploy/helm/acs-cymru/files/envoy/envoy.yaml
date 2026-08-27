@@ -1,0 +1,468 @@
+# =================================================================================================
+# Envoy gateway -- a translation of supabase/kong.yml, route for route.
+#
+# THIS IS A TEMPLATE, NOT A CONFIG. `__SUPABASE_ANON_KEY__`, `__SUPABASE_SERVICE_ROLE_KEY__`,
+# `__REALTIME_UPSTREAM_HOST__` and `__CORS_ORIGINS__` are substituted at boot by
+# `supabase-envoy-init`, exactly as `supabase-kong-init` does for kong.yml. A real key committed
+# here would be a leaked key, not a config change -- which is why
+# scripts/check-gateway-surface.mjs asserts the placeholders are still placeholders.
+#
+# -------------------------------------------------------------------------------------------------
+# WHAT THIS IS FOR, AND WHAT IT IS NOT YET
+#
+# Roadmap §4. It runs BESIDE Kong on a second port so the two can be probed against each other --
+# `check-gateway-surface.mjs --runtime` against 54321 and against 54331 must report the same
+# posture before Envoy becomes primary. It is not wired into `docker-compose.yml`; it arrives
+# through `docker-compose.envoy.yml`.
+#
+# -------------------------------------------------------------------------------------------------
+# THE FIVE TRANSLATION TRAPS, each of which produces a stack that looks fine and is not:
+#
+#   1. ROUTE ORDER IS SEMANTIC HERE AND IS NOT IN KONG. Kong matches the LONGEST prefix; Envoy
+#      matches the FIRST that matches. So `/storage/v1/object/public/` must precede `/storage/v1/`
+#      and both userinfo paths must precede `/functions/v1/`, or the public bucket becomes gated
+#      and the whole edge runtime becomes open. Neither fails to start.
+#
+#   2. `key_in_query`. The Realtime client puts the key in the WebSocket URL's query string --
+#      a browser cannot set a header on a handshake. A header-only check leaves Realtime
+#      permanently 401 with nothing in any log saying why.
+#
+#   3. REALTIME'S HOST HEADER. Realtime reads its tenant id from the leading hostname LABEL, not
+#      from the JWT. Kong sends `realtime-dev.supabase-realtime` because `preserve_host` defaults
+#      to false and the upstream Host comes from the service URL. Envoy preserves the client's
+#      Host unless told otherwise, so `host_rewrite_literal` is doing that job here. Without it
+#      every handshake gets a bare 403.
+#
+#   4. `hide_credentials` IS PER ROUTE, not global. Kong strips the apikey before forwarding for
+#      REST, Storage and Functions, and deliberately does NOT for Realtime -- which reads the key
+#      from the query itself to identify the tenant. Strip it there and the handshake breaks.
+#
+#   5. `strip_path: false` ON THE DIRECTORY ROUTES. `/ping` and `/v1/` must arrive at the edge
+#      runtime as `/fplus-directory/...`, because main/index.ts reads the FIRST PATH SEGMENT to
+#      decide which worker to spawn. Rewriting to `/` hands it an empty service name and it
+#      answers 400 naming nothing.
+#
+# -------------------------------------------------------------------------------------------------
+# WHAT IS DELIBERATELY ABSENT
+#
+# i3X, Node-RED and Grafana have NO cluster here, because they have none in kong.yml either --
+# they are published on their own host ports and have never been behind the gateway. Adding them
+# would not be a translation, it would be new exposure, and `--runtime` could not catch it: that
+# mode asserts the posture of routes in the inventory and cannot report a route nobody declared.
+# =================================================================================================
+
+admin:
+  # INTERNAL ONLY, matching KONG_STATUS_LISTEN's treatment: no `ports:` entry publishes 9901.
+  # Envoy's admin interface has no authentication and can drain listeners and read the config,
+  # including the substituted keys.
+  address:
+    socket_address: { address: 0.0.0.0, port_value: 9901 }
+
+static_resources:
+  listeners:
+    - name: gateway
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 8000 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: gateway
+                # Realtime is a WebSocket upstream; without this the handshake is answered 426.
+                upgrade_configs:
+                  - upgrade_type: websocket
+                route_config:
+                  name: supabase
+                  virtual_hosts:
+                    - name: supabase
+                      domains: ["*"]
+                      # -------------------------------------------------------------------------
+                      # CORS -- the only statement of origin policy in the stack.
+                      #
+                      # `supabase/functions/_shared/cors.ts` deliberately carries no
+                      # Access-Control-Allow-Origin: the gateway is the only layer that sees a
+                      # request before deciding to route it, so there is no second layer to fall
+                      # back on if this list is wrong. That is why it is substituted from the same
+                      # variable Kong reads rather than written out again here -- two lists would
+                      # be two statements to keep in step.
+                      # -------------------------------------------------------------------------
+                      typed_per_filter_config:
+                        envoy.filters.http.cors:
+                          "@type": type.googleapis.com/envoy.extensions.filters.http.cors.v3.CorsPolicy
+                          allow_origin_string_match: __CORS_ORIGINS__
+                          allow_methods: "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+                          allow_headers: "*"
+                          allow_credentials: true
+                      routes:
+                        # -----------------------------------------------------------------------
+                        # EXEMPTION 1 of 4 -- sign-in must work before a session exists.
+                        # GoTrue authenticates its own callers.
+                        # -----------------------------------------------------------------------
+                        - name: auth-v1-routes
+                          match: { prefix: "/auth/v1/" }
+                          route:
+                            cluster: auth-v1
+                            prefix_rewrite: "/"
+                          typed_per_filter_config:
+                            envoy.filters.http.lua:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
+                              disabled: true
+
+                        # -----------------------------------------------------------------------
+                        # EXEMPTION 2 of 4 -- an AAS File URL must resolve with no session.
+                        #
+                        # BEFORE /storage/v1/ (trap 1). The upstream path must keep
+                        # `/object/public/`, which storage-api routes on, so the rewrite restores
+                        # it rather than stripping to the root.
+                        # -----------------------------------------------------------------------
+                        - name: storage-v1-public-routes
+                          match: { prefix: "/storage/v1/object/public/" }
+                          route:
+                            cluster: storage-v1
+                            prefix_rewrite: "/object/public/"
+                          typed_per_filter_config:
+                            envoy.filters.http.lua:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
+                              disabled: true
+
+                        - name: storage-v1-routes
+                          match: { prefix: "/storage/v1/" }
+                          route:
+                            cluster: storage-v1
+                            prefix_rewrite: "/"
+
+                        - name: rest-v1-routes
+                          match: { prefix: "/rest/v1/" }
+                          route:
+                            cluster: rest-v1
+                            prefix_rewrite: "/"
+
+                        # -----------------------------------------------------------------------
+                        # Realtime. Gated, but the key is PRESERVED (trap 4) and the Host is
+                        # rewritten (trap 3).
+                        # -----------------------------------------------------------------------
+                        - name: realtime-v1-ws
+                          match: { prefix: "/realtime/v1/" }
+                          route:
+                            cluster: realtime-v1
+                            prefix_rewrite: "/socket/"
+                            host_rewrite_literal: __REALTIME_UPSTREAM_HOST__
+                            # A WebSocket has no response until it is closed.
+                            timeout: 0s
+                          typed_per_filter_config:
+                            envoy.filters.http.lua:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
+                              name: keyauth_preserve
+
+                        # -----------------------------------------------------------------------
+                        # EXEMPTION 3 of 4 -- an OAuth client sends client credentials, never a
+                        # Supabase apikey, and no Grafana or Node-RED setting can add a header to
+                        # `api_url`. Gated, Grafana reports `invalid role: Authenticated`, which
+                        # reads as an RBAC fault rather than a gateway one.
+                        #
+                        # EXACT PATHS, NOT A PREFIX, and BEFORE /functions/v1/ (trap 1): a prefix
+                        # here would re-open the whole runtime, and naming the two endpoints means
+                        # a function added later is gated by default.
+                        # -----------------------------------------------------------------------
+                        - name: functions-v1-grafana-userinfo-route
+                          match: { path: "/functions/v1/grafana-userinfo" }
+                          route:
+                            cluster: functions-v1
+                            prefix_rewrite: "/grafana-userinfo"
+                          typed_per_filter_config:
+                            envoy.filters.http.lua:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
+                              disabled: true
+
+                        - name: functions-v1-nodered-userinfo-route
+                          match: { path: "/functions/v1/nodered-userinfo" }
+                          route:
+                            cluster: functions-v1
+                            prefix_rewrite: "/nodered-userinfo"
+                          typed_per_filter_config:
+                            envoy.filters.http.lua:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
+                              disabled: true
+
+                        # -----------------------------------------------------------------------
+                        # THE FOURTH GATE, and the most important of them: the edge runtime boots
+                        # with VERIFY_JWT="false" because each function performs its own role
+                        # check, so without this an unauthenticated request can start any worker.
+                        #
+                        # `/functions/v1/aas-api/description` FALLS HERE AND IS THEREFORE GATED.
+                        # That is the current, reviewed posture and the inventory in
+                        # check-gateway-surface.mjs asserts it. The AAS specification expects that
+                        # endpoint to be readable before a client holds a credential -- the same
+                        # argument that exempts the Directory's /ping -- so it is a candidate for a
+                        # FIFTH exemption. It is deliberately not taken here: widening the gateway
+                        # is a decision to make on its own, not a side effect of a translation.
+                        # To take it, add this route ABOVE this one and add a matching row to
+                        # EXPECTED, or the runtime probe will fail -- which is the point:
+                        #
+                        #   - name: functions-v1-aas-api-description
+                        #     match: { path: "/functions/v1/aas-api/description" }
+                        #     route: { cluster: functions-v1, prefix_rewrite: "/aas-api/description" }
+                        #     typed_per_filter_config:
+                        #       envoy.filters.http.lua:
+                        #         "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
+                        #         disabled: true
+                        # -----------------------------------------------------------------------
+                        - name: functions-v1-routes
+                          match: { prefix: "/functions/v1/" }
+                          route:
+                            cluster: functions-v1
+                            prefix_rewrite: "/"
+
+                        # -----------------------------------------------------------------------
+                        # EXEMPTION 4 of 4 -- the Factory+ Directory adapter. A Factory+ client has
+                        # no Supabase apikey and no way to acquire one. `/ping` is open by
+                        # specification; `/v1/` is authenticated BY THE FUNCTION, which refuses a
+                        # request with no bearer before it routes and then queries as the caller so
+                        # RLS still applies.
+                        #
+                        # NO PREFIX REWRITE TO ROOT (trap 5): the runtime reads the first path
+                        # segment to pick a worker, so the path must arrive as /fplus-directory/...
+                        # -----------------------------------------------------------------------
+                        - name: fplus-directory-ping
+                          match: { prefix: "/ping" }
+                          route:
+                            cluster: functions-v1
+                            prefix_rewrite: "/fplus-directory/ping"
+                          typed_per_filter_config:
+                            envoy.filters.http.lua:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
+                              disabled: true
+
+                        - name: fplus-directory-v1
+                          match: { prefix: "/v1/" }
+                          route:
+                            cluster: functions-v1
+                            prefix_rewrite: "/fplus-directory/v1/"
+                          typed_per_filter_config:
+                            envoy.filters.http.lua:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.LuaPerRoute
+                              disabled: true
+
+                http_filters:
+                  # CORS FIRST, and the order is load bearing. A browser preflight carries no
+                  # apikey, so a key check ahead of CORS would answer 401 to every OPTIONS and the
+                  # browser would report a CORS failure for a policy that is actually correct.
+                  # Kong reaches the same order by plugin priority (cors 2000 > key-auth 1250).
+                  - name: envoy.filters.http.cors
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.cors.v3.Cors
+
+                  # -------------------------------------------------------------------------
+                  # key-auth.
+                  #
+                  # WHAT KONG'S PLUGIN ACTUALLY DOES, which is less than its name suggests: it
+                  # compares the presented key against the registered consumer keys as a STRING.
+                  # It does not verify a signature, and it does not care that these keys happen
+                  # to be JWTs. So this is an exact-match check and not a weaker translation of
+                  # one -- the same reason upstream's own Envoy gateway can accept opaque
+                  # `sb_publishable_*` keys with no cryptography at the edge.
+                  #
+                  # `default_source_code` gates and STRIPS. `keyauth_preserve` gates and keeps,
+                  # for Realtime alone (trap 4). Exempt routes set `disabled: true`, which is the
+                  # structural equivalent of Kong attaching the plugin per service rather than
+                  # globally.
+                  # -------------------------------------------------------------------------
+                  - name: envoy.filters.http.lua
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+                      default_source_code:
+                        inline_string: |
+                          local ANON = "__SUPABASE_ANON_KEY__"
+                          local SERVICE = "__SUPABASE_SERVICE_ROLE_KEY__"
+
+                          -- The key may arrive in the header or the query string; Kong accepts
+                          -- both (key_in_header + key_in_query) so one configuration serves every
+                          -- client. Returns the value and where it came from.
+                          local function presented_key(handle)
+                            local from_header = handle:headers():get("apikey")
+                            if from_header ~= nil and from_header ~= "" then
+                              return from_header
+                            end
+                            local path = handle:headers():get(":path") or ""
+                            local query = string.match(path, "%?(.*)$")
+                            if query == nil then return nil end
+                            for pair in string.gmatch(query, "[^&]+") do
+                              local k, v = string.match(pair, "^([^=]+)=(.*)$")
+                              if k == "apikey" then return v end
+                            end
+                            return nil
+                          end
+
+                          local function refuse(handle)
+                            -- Kong's own body, verbatim. Clients and this repository's own probe
+                            -- read it, and a translation that changed the wording would be a
+                            -- behaviour change nothing else would report.
+                            handle:respond(
+                              { [":status"] = "401", ["content-type"] = "application/json" },
+                              '{"message":"No API key found in request"}'
+                            )
+                          end
+
+                          -- Remove `apikey` from the query string, preserving every other
+                          -- parameter and their order. Rewriting `:path` is the only way to do
+                          -- this in Envoy -- there is no query-parameter API on the header map.
+                          local function strip_query_key(handle)
+                            local path = handle:headers():get(":path") or ""
+                            local base, query = string.match(path, "^([^?]*)%?(.*)$")
+                            if query == nil then return end
+                            local kept = {}
+                            for pair in string.gmatch(query, "[^&]+") do
+                              local k = string.match(pair, "^([^=]+)")
+                              if k ~= "apikey" then kept[#kept + 1] = pair end
+                            end
+                            if #kept == 0 then
+                              handle:headers():replace(":path", base)
+                            else
+                              handle:headers():replace(":path", base .. "?" .. table.concat(kept, "&"))
+                            end
+                          end
+
+                          function envoy_on_request(handle)
+                            local key = presented_key(handle)
+                            if key == nil then
+                              refuse(handle)
+                              return
+                            end
+                            if key ~= ANON and key ~= SERVICE then
+                              handle:respond(
+                                { [":status"] = "401", ["content-type"] = "application/json" },
+                                -- Kong answers "Unauthorized" for a RECOGNISED-but-wrong key and
+                                -- "No API key found in request" for a missing one. Two different
+                                -- messages for two different faults, and clients that log them
+                                -- would otherwise see the fault change name at the migration.
+                                '{"message":"Unauthorized"}'
+                              )
+                              return
+                            end
+                            -- hide_credentials. PostgREST, storage-api and the edge runtime all
+                            -- authorise on the JWT in Authorization; forwarding the apikey serves
+                            -- no purpose and widens where the service-role key appears in logs.
+                            --
+                            -- BOTH FORMS, and the query half is not optional. This filter first
+                            -- stripped only the header, on the reasoning that Realtime was the
+                            -- one upstream whose clients use the query form. That was wrong:
+                            -- ANY client may put the key in the query, Kong accepts it, and Kong
+                            -- removes it again -- so leaving it on made PostgREST parse
+                            -- `apikey=eyJ...` as a COLUMN FILTER and answer
+                            -- `PGRST100 failed to parse filter`. Kong returned 200 for the same
+                            -- request. Found by diffing the two gateways, not by reading either.
+                            --
+                            -- It is also where a service-role key would end up in an upstream
+                            -- access log, which is the reason hide_credentials exists at all.
+                            handle:headers():remove("apikey")
+                            strip_query_key(handle)
+                          end
+                      source_codes:
+                        keyauth_preserve:
+                          inline_string: |
+                            local ANON = "__SUPABASE_ANON_KEY__"
+                            local SERVICE = "__SUPABASE_SERVICE_ROLE_KEY__"
+
+                            local function presented_key(handle)
+                              local from_header = handle:headers():get("apikey")
+                              if from_header ~= nil and from_header ~= "" then
+                                return from_header
+                              end
+                              local path = handle:headers():get(":path") or ""
+                              local query = string.match(path, "%?(.*)$")
+                              if query == nil then return nil end
+                              for pair in string.gmatch(query, "[^&]+") do
+                                local k, v = string.match(pair, "^([^=]+)=(.*)$")
+                                if k == "apikey" then return v end
+                              end
+                              return nil
+                            end
+
+                            -- NOTHING IS REMOVED HERE. Realtime reads the apikey from the query
+                            -- string itself to identify the tenant and evaluate RLS; stripping it
+                            -- breaks the handshake, which is why Kong sets hide_credentials false
+                            -- on this route and only this one.
+                            function envoy_on_request(handle)
+                              local key = presented_key(handle)
+                              if key == nil then
+                                handle:respond(
+                                  { [":status"] = "401", ["content-type"] = "application/json" },
+                                  '{"message":"No API key found in request"}'
+                                )
+                                return
+                              end
+                              if key ~= ANON and key ~= SERVICE then
+                                handle:respond(
+                                  { [":status"] = "401", ["content-type"] = "application/json" },
+                                  '{"message":"Unauthorized"}'
+                                )
+                              end
+                            end
+
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  # -----------------------------------------------------------------------------------------------
+  # Clusters. One per upstream Kong names, and no others -- see "what is deliberately absent".
+  #
+  # STRICT_DNS, not LOGICAL_DNS: compose service names resolve to a single address that changes
+  # when a container is recreated, and STRICT_DNS re-resolves on its refresh interval rather than
+  # pinning the first answer for the life of the process.
+  # -----------------------------------------------------------------------------------------------
+  clusters:
+    - name: auth-v1
+      type: STRICT_DNS
+      connect_timeout: 5s
+      load_assignment:
+        cluster_name: auth-v1
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: supabase-auth, port_value: 9999 }
+
+    - name: rest-v1
+      type: STRICT_DNS
+      connect_timeout: 5s
+      load_assignment:
+        cluster_name: rest-v1
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: supabase-rest, port_value: 3000 }
+
+    - name: realtime-v1
+      type: STRICT_DNS
+      connect_timeout: 5s
+      load_assignment:
+        cluster_name: realtime-v1
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: supabase-realtime, port_value: 4000 }
+
+    - name: storage-v1
+      type: STRICT_DNS
+      connect_timeout: 5s
+      load_assignment:
+        cluster_name: storage-v1
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: supabase-storage, port_value: 5000 }
+
+    - name: functions-v1
+      type: STRICT_DNS
+      connect_timeout: 5s
+      load_assignment:
+        cluster_name: functions-v1
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address: { address: supabase-functions, port_value: 9000 }

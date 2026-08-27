@@ -183,7 +183,7 @@ services:
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
     # Exec form with a literal block, NOT the folded `>` string form -- same reasoning as
-    # supabase-kong-init, and additionally because `sh -c "a; b; c; echo done"` HAS NO ERROR
+    # supabase-envoy-init, and additionally because `sh -c "a; b; c; echo done"` HAS NO ERROR
     # HANDLING: every psql failure is skipped and the exit status is the echo's, so this Job
     # reported "passwords set successfully" while having set none, and
     # `service_completed_successfully` was satisfied by a Job that did nothing. The cost landed
@@ -466,7 +466,7 @@ services:
     # LABEL of the Host header, not from the JWT. Kong must therefore address it as
     # `realtime-dev.<something>` or every socket handshake is rejected with a bare 403.
     # `realtime-dev` is the tenant SEED_SELF_HOST creates. This alias is what makes the
-    # upstream URL in supabase/kong.yml resolvable -- the two must be changed together.
+    # upstream host in supabase/envoy.yaml resolvable -- the two must be changed together.
     networks:
       default:
         aliases:
@@ -604,62 +604,60 @@ services:
       supabase-storage:
         condition: service_healthy
 
-  # Renders supabase/kong.yml (a template) into the config volume with the real API keys and the
-  # Realtime upstream substituted, because committing the keys into the template would put a copy
-  # of the service-role key in git and make .env no longer authoritative. sed is safe here: a
-  # Supabase JWT is base64url, so it contains no character that could be read as a sed delimiter
-  # or backreference.
+  # ---------------------------------------------------------------------------------------------
+  # Renders the gateway config, substituting the API keys and the origin policy into it.
   #
-  # KONG 3.x COULD DO THIS ITSELF (`${{env.VAR}}` in declarative config, which 2.8 could not) AND
-  # THIS SERVICE STAYS ANYWAY. Interpolation would move the service-role key into Kong's own
-  # ENVIRONMENT, where `docker inspect` prints it, in exchange for deleting a container that runs
-  # once for a second. A file on an internal volume is the narrower exposure, so the 3.x upgrade
-  # turns this from a workaround into a choice rather than making it obsolete.
+  # KEYS NEVER LIVE IN THE TEMPLATE. `supabase/envoy.yaml` is committed with `__UPPER_SNAKE__`
+  # placeholders and this substitutes them into an INTERNAL VOLUME. A real key committed there
+  # would be a leaked key, not a config change, which is why check-gateway-surface.mjs asserts the
+  # placeholders are still placeholders.
   #
-  # THIS SERVICE HAS NO KUBERNETES COUNTERPART -- Helm renders the same template into a Secret
-  # directly. The template is shared; only the substituter differs. Adding a placeholder means
-  # adding it here AND in the chart. See docs/kubernetes-architecture.md §2.3.
-  supabase-kong-init:
-    container_name: acs-cymru_supabase_kong_init
+  # ENVOY COULD NOT DO THIS ITSELF EITHER. Its bootstrap has no environment interpolation for
+  # arbitrary strings, and the Lua filter needs the key as a literal to compare against -- so
+  # unlike Kong 3.x, where this service stayed by choice, here it is load bearing.
+  #
+  # THIS SERVICE HAS NO KUBERNETES COUNTERPART -- Helm renders the same template through an
+  # initContainer. The template is shared; only the substituter differs. Adding a placeholder
+  # means adding it here AND in deploy/helm/acs-cymru/templates/supabase/envoy.yaml.
+  supabase-envoy-init:
+    container_name: acs-cymru_supabase_envoy_init
     image: alpine:3.24
     environment:
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
       # Realtime resolves its tenant from the LEADING HOSTNAME LABEL, so this must begin
       # `realtime-dev.`. On Compose that is the network alias declared on the supabase-realtime
-      # service; on Kubernetes the Service is simply named `realtime-dev` and the chart supplies
-      # `http://realtime-dev:4000/socket/` here instead.
-      REALTIME_UPSTREAM_URL: ${REALTIME_UPSTREAM_URL:-http://realtime-dev.supabase-realtime:4000/socket/}
-      # THE BROWSER ORIGINS Kong will echo an Access-Control-Allow-Origin for.
+      # service; on Kubernetes the Service is simply named `realtime-dev`.
+      #
+      # A HOST, NOT A URL, unlike the Kong variable it replaces: Envoy splits the concern -- the
+      # cluster carries the address, this carries only the Host header rewrite.
+      REALTIME_UPSTREAM_HOST: ${REALTIME_UPSTREAM_HOST:-realtime-dev.supabase-realtime}
+      # THE BROWSER ORIGINS the gateway will echo an Access-Control-Allow-Origin for.
       #
       # This is the whole origin policy for the stack: the edge functions deliberately declare
       # none (supabase/functions/_shared/cors.ts), because the gateway is the only layer that
       # sees a request before deciding to route it. An origin missing from this list is not a
       # degraded response -- it is a browser refusing to read a 200 the gateway happily returned.
       #
-      # A JSON ARRAY, substituted into a YAML flow sequence -- see the note in supabase/kong.yml.
-      # The default covers the two published ports of a stock Compose stack. Override it when the
-      # dashboard is reached by any other name (a LAN hostname, a tunnel, a reverse proxy) --
-      # which is the situation Kubernetes is permanently in, and the reason this is a variable
-      # rather than the four literals it used to be.
+      # STILL NAMED KONG_CORS_ORIGINS. Renaming it would silently ignore whatever operators have
+      # already set, and an unset origin list is the failure described above -- one that presents
+      # as a dashboard that logs in and then shows empty tables. It is a deployment's statement of
+      # who may call the API, not a statement about which gateway reads it.
       KONG_CORS_ORIGINS: '${KONG_CORS_ORIGINS:-["http://localhost:3000","http://127.0.0.1:3000","http://localhost:8088","http://127.0.0.1:8088"]}'
     volumes:
-      - ./supabase/kong.yml:/template/kong.yml:ro
-      - kong_config:/config
+      - ./supabase/envoy.yaml:/template/envoy.yaml:ro
+      - envoy_config:/config
     # Exec form with a literal block, NOT the folded `>` string form. Compose shell-tokenizes a
-    # string entrypoint, and the nested quotes the sed expressions need do not survive that
-    # round trip -- the `-e` flags ended up as arguments to sh itself ("sh: -e: not found").
+    # string entrypoint, and the nested quotes the sed expressions need do not survive that.
     entrypoint:
       - /bin/sh
       - -e
       - -c
       - |
         if [ -z "$$SUPABASE_ANON_KEY" ] || [ -z "$$SUPABASE_SERVICE_ROLE_KEY" ]; then
-          echo 'SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY must be set -- Kong would otherwise register empty API keys, which key-auth accepts.' >&2
+          echo 'SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY must be set -- an empty key substituted into the Lua filter would be accepted from any caller sending an empty apikey.' >&2
           exit 1
         fi
-        # An empty or non-array value renders `origins:` as null, which Kong reads as "no origin
-        # policy": it starts cleanly and then blocks every browser request, logging nothing.
         case "$$KONG_CORS_ORIGINS" in
           '['*']') ;;
           *)
@@ -667,72 +665,103 @@ services:
             exit 1
             ;;
         esac
-        case "$$REALTIME_UPSTREAM_URL" in
-          http://realtime-dev*|https://realtime-dev*) ;;
+        case "$$REALTIME_UPSTREAM_HOST" in
+          realtime-dev*) ;;
           *)
-            echo "REALTIME_UPSTREAM_URL must have 'realtime-dev' as its leading hostname label -- Realtime reads the tenant id from it and answers a bare 403 otherwise. Got: $$REALTIME_UPSTREAM_URL" >&2
+            echo "REALTIME_UPSTREAM_HOST must begin with the label 'realtime-dev' -- Realtime reads the tenant id from it and answers a bare 403 otherwise. Got: $$REALTIME_UPSTREAM_HOST" >&2
             exit 1
             ;;
         esac
+
+        # Kong took origins as a JSON array of strings; Envoy takes a list of string matchers.
+        # One line either way, so `sed` can still substitute it:
+        #   ["a","b"]  ->  [{exact: "a"},{exact: "b"}]
+        #
+        # THE SPACE AFTER THE COLON IS REQUIRED, and its absence is not a formatting preference:
+        # in a YAML flow mapping `{exact:"a"}` is a single scalar KEY, not a key with a value, and
+        # Envoy refuses the entire bootstrap. Found by running it.
+        CORS_MATCHERS=$$(printf '%s' "$$KONG_CORS_ORIGINS" | sed 's/"\([^"]*\)"/{exact: "\1"}/g')
+
+        # `|` as the delimiter, because every value here contains `/`.
         sed -e "s|__SUPABASE_ANON_KEY__|$$SUPABASE_ANON_KEY|g" \
             -e "s|__SUPABASE_SERVICE_ROLE_KEY__|$$SUPABASE_SERVICE_ROLE_KEY|g" \
-            -e "s|__REALTIME_UPSTREAM_URL__|$$REALTIME_UPSTREAM_URL|g" \
-            -e "s|__CORS_ORIGINS__|$$KONG_CORS_ORIGINS|g" \
-            /template/kong.yml > /config/kong.yml
-        # Matches ANY surviving marker, not just the __SUPABASE_ ones. A placeholder added to the
-        # template and forgotten here would otherwise render literally into Kong's config, where
-        # it fails as a routing error rather than as a missing value.
-        #
-        # COMMENT LINES ARE EXCLUDED, and that is not cosmetic: kong.yml's header documents the
-        # placeholder convention by name, so a whole-file scan flags the documentation of the rule
-        # as a violation of it. A real placeholder is always in a value position.
-        LEFTOVER=$$(grep -vE '^[[:space:]]*#' /config/kong.yml | grep -noE '__[A-Z0-9_]+__' || true)
+            -e "s|__REALTIME_UPSTREAM_HOST__|$$REALTIME_UPSTREAM_HOST|g" \
+            -e "s|__CORS_ORIGINS__|$$CORS_MATCHERS|g" \
+            /template/envoy.yaml > /config/envoy.yaml
+
+        # A placeholder added to the template and not taught to this script substitutes to nothing,
+        # and Envoy would boot with the literal `__NAME__` in a route or a key comparison and
+        # refuse everything. Comment lines are excluded: the template's own header documents the
+        # placeholder convention by name.
+        LEFTOVER=$$(grep -vE '^[[:space:]]*#' /config/envoy.yaml | grep -oE '__[A-Z0-9_]+__' | sort -u || true)
         if [ -n "$$LEFTOVER" ]; then
-          echo 'Kong config still contains unsubstituted placeholders:' >&2
-          echo "$$LEFTOVER" >&2
+          echo "Unsubstituted placeholder(s) left in envoy.yaml: $$LEFTOVER" >&2
+          echo "Add them to the sed above, or remove them from supabase/envoy.yaml." >&2
           exit 1
         fi
-        echo 'Rendered Kong declarative config with API key consumers.'
+        echo 'Rendered Envoy gateway config with API key consumers.'
 
-  supabase-kong:
-    container_name: acs-cymru_supabase_kong
-    image: kong:3.9.3
+  # ---------------------------------------------------------------------------------------------
+  # THE API GATEWAY.  Envoy since roadmap §4; Kong until then.
+  #
+  # WHY IT ANSWERS TO `supabase-kong`. The alias below is not nostalgia: `http://supabase-kong:8000`
+  # is carried by Studio, the edge runtime, the ingestion daemon, i3X, Node-RED's token and userinfo
+  # URLs, Grafana's OAuth configuration and migration 0001's `supabase_functions_url` vault secret
+  # -- which is IN THE DATABASE, not in this file, and would not be corrected by editing anything
+  # here. Adopting the name moves the gateway without touching any of them.
+  #
+  # The Kubernetes half has no aliasing and solves the same problem by having the Envoy Service
+  # ADOPT the name `supabase-kong`; see deploy/helm/acs-cymru/templates/supabase/envoy.yaml.
+  #
+  # WHAT WAS VERIFIED BEFORE THIS REPLACED KONG, and how to re-run it: docs/gateway-migration.md.
+  # In short -- identical `--runtime --authenticated` output on both gateways, a 101 Realtime
+  # handshake, identical CORS, both AAS suites and a full validate.py pass through Envoy.
+  # ---------------------------------------------------------------------------------------------
+  supabase-envoy:
+    container_name: acs-cymru_supabase_envoy
+    # PINNED, like every image here. The v3 config API is stable across 1.3x, but a moving tag
+    # would still shift the Lua runtime and the CORS filter's defaults underneath a config that
+    # nothing else in this repository validates.
+    image: envoyproxy/envoy:v1.31.5
     restart: always
     ports:
+      # THE VARIABLE STILL SAYS KONG, deliberately: it is set in existing .env files and in
+      # deployments nobody here can edit. Renaming it would silently move the published port of
+      # every stack that had customised it.
       - "${KONG_HTTP_PORT:-54321}:8000"
-    environment:
-      KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /usr/local/kong/declarative/kong.yml
-      KONG_DNS_ORDER: LAST,A,CNAME
-      # key-auth had to be added explicitly: naming any plugin in KONG_PLUGINS REPLACES the
-      # default `bundled` set rather than adding to it, so key-auth was not merely unused --
-      # it was unavailable, and referencing it in kong.yml would have failed Kong's startup.
-      #
-      # `prometheus` is here for the same reason and MUST STAY IN STEP WITH THE CHART'S OWN LIST:
-      # kong.yml is shared by both targets and declares the plugin globally, so a target missing it
-      # here does not merely lose metrics -- Kong refuses to boot with "plugin 'prometheus' not
-      # enabled". The metrics themselves are served on the STATUS listener, which Compose does not
-      # publish; loading the plugin without it costs a shared-dict counter per request and is what
-      # keeps the two targets' gateway configuration identical.
-      KONG_PLUGINS: request-transformer,cors,key-auth,prometheus
-      # THE PLUGIN ALONE SERVES NOTHING. `prometheus` collects, but the metrics are published on
-      # the STATUS listener, which Kong does not start unless this is set -- so without it the
-      # plugin is enabled, the scrape target is DOWN, and nothing says why. Bound to the compose
-      # network only; it is not in `ports:` and no host publishes it.
-      KONG_STATUS_LISTEN: 0.0.0.0:8100
     volumes:
-      - kong_config:/usr/local/kong/declarative:ro
-    # ADDED so `ingestion` can wait on it -- see that service's depends_on for the failure this
-    # closes. `kong health` checks the local node's own workers, which is the right question here:
-    # "can this container route a request yet", not "is an upstream up".
+      - envoy_config:/etc/envoy:ro
+    command:
+      - envoy
+      - --config-path
+      - /etc/envoy/envoy.yaml
+      - --log-level
+      - ${ENVOY_LOG_LEVEL:-info}
+    networks:
+      default:
+        aliases:
+          # See the header. Every in-network consumer keeps resolving `supabase-kong`.
+          - supabase-kong
+    # `/ready` on the admin listener answers 200 only once the listener is serving -- the same
+    # question `kong health` answered: "can this container route a request yet", not "is an
+    # upstream up". Envoy exits non-zero on a config it cannot parse, so a bad config is a restart
+    # loop rather than a gateway that 404s everything.
     healthcheck:
-      test: ["CMD", "kong", "health"]
+      # THE IMAGE HAS NO HTTP CLIENT -- no curl, no wget, no nc, no python. It does have bash,
+      # so this speaks HTTP over /dev/tcp rather than settling for a TCP-connect test: a bare
+      # connect would pass as soon as the ADMIN listener bound, which is before the PROXY
+      # listener is serving, and this healthcheck answers "can this container route a request
+      # yet". `bash -c` explicitly, because CMD-SHELL is dash and dash has no /dev/tcp.
+      #
+      # Invisible while Envoy ran as an override, because nothing depended on its health. It
+      # surfaced the moment it became primary and the whole stack refused to start behind it.
+      test: ['CMD', 'bash', '-c', 'exec 3<>/dev/tcp/127.0.0.1/9901 && printf "GET /ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200 "']
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 15s
     depends_on:
-      supabase-kong-init:
+      supabase-envoy-init:
         condition: service_completed_successfully
       supabase-auth:
         condition: service_started
@@ -740,8 +769,8 @@ services:
         condition: service_started
       supabase-functions:
         condition: service_started
-      # service_started, not service_healthy, to match its siblings: Kong should
-      # not block stack startup on Realtime finishing its _realtime migrations.
+      # service_started, not service_healthy, to match its siblings: the gateway should not block
+      # stack startup on Realtime finishing its _realtime migrations.
       supabase-realtime:
         condition: service_started
       supabase-storage:
@@ -931,7 +960,7 @@ services:
       retries: 5
       start_period: 40s
     depends_on:
-      supabase-kong:
+      supabase-envoy:
         condition: service_started
       supabase-meta:
         condition: service_started
@@ -947,7 +976,7 @@ services:
       - "${SWAGGER_PORT:-8088}:8080"
     environment:
       # The two curated specs are mounted; the PostgREST entry is fetched by the browser from
-      # Kong, so it needs the CORS origin allowed in supabase/kong.yml.
+      # the gateway, so it needs the CORS origin allowed in supabase/envoy.yaml.
       #
       # i3X is a SECOND spec rather than a section of the first: it is served by i3x-service on
       # 8090, not by Kong, so it cannot share a `servers:` block -- and /v1/schema is already the
@@ -957,7 +986,7 @@ services:
       # THE POSTGREST LIVE-SCHEMA ENTRY WAS REMOVED, and deliberately not repaired. It pointed at
       # /rest/v1/, which Kong gates with key-auth, so Swagger UI fetched it without an apikey and
       # the definition failed to load -- presenting as an authorization error rather than as a
-      # missing key. It could have been made to load (kong.yml sets key_in_query on that route, so
+      # missing key. It could have been made to load (the gateway accepts key_in_query on that route, so
       # `?apikey=<anon>` would work), but it was duplicating docs/openapi.yaml, which is
       # hand-maintained AND enforced: check-docs-drift.mjs asserts it covers every published
       # relation and every edge function. A second, auto-generated view of the same surface that
@@ -1339,7 +1368,7 @@ services:
       #
       # This is here so the daemon's first lookups do not fail for a reason the stack already
       # knows about, which keeps the startup log free of errors that are not faults.
-      supabase-kong:
+      supabase-envoy:
         condition: service_healthy
 
   # i3X 1.0 server (CESMII Industrial Information Interoperability eXchange).
@@ -1395,7 +1424,7 @@ services:
     depends_on:
       mosquitto:
         condition: service_healthy
-      supabase-kong:
+      supabase-envoy:
         condition: service_started
       supabase-db-init:
         condition: service_completed_successfully
@@ -1662,7 +1691,7 @@ services:
     #
     # The placeholder is __DB_PASSWORD__ rather than ${DB_PASSWORD}, so this expression no longer
     # has to escape a shell variable past Compose's substitution as well as sed's. The guard is
-    # the same one supabase-kong-init uses: an unsubstituted marker reaching Grafana surfaces as
+    # the same one supabase-envoy-init uses: an unsubstituted marker reaching Grafana surfaces as
     # "password authentication failed", which points at the database rather than at this line.
     #
     # THIS OVERRIDE HAS NO KUBERNETES COUNTERPART -- Helm renders the same template into a Secret
@@ -1683,7 +1712,7 @@ services:
             -e "s|__PROMETHEUS_URL__|http://prometheus:9090|g" \
             /tmp/datasources-template/datasources.template.yml \
             > /etc/grafana/provisioning/datasources/datasources.yml
-        # Comment lines excluded for the same reason as in supabase-kong-init: the template's own
+        # Comment lines excluded for the same reason as in supabase-envoy-init: the template's own
         # header documents the placeholder convention by name.
         if grep -vE '^[[:space:]]*#' /etc/grafana/provisioning/datasources/datasources.yml \
            | grep -qE '__[A-Z0-9_]+__'; then
@@ -1762,6 +1791,7 @@ volumes:
   studio_snippets:
   deno_cache:
   storage_data:
-  # Holds the rendered Kong declarative config produced by supabase-kong-init. Not a bind mount:
-  # the rendered file contains the service-role key and must not be written into the repository.
-  kong_config:
+  # Holds the rendered Envoy bootstrap produced by supabase-envoy-init. Not a bind mount: the
+  # rendered file contains both API keys -- inlined into the Lua filter that compares against them
+  # -- and must not be written into the repository.
+  envoy_config:
