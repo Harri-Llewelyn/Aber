@@ -546,6 +546,52 @@ const apiMethods = {
   },
 
   /**
+   * Every gateway with what the platform knows about its broker credential.
+   *
+   * TWO READS, NOT A JOIN, and the second is the interesting one. `gateway_status` carries
+   * `enrolled_at` and `credential_revoked_at`, which is the whole story for a PHYSICAL gateway. A
+   * virtual one has neither by construction -- enrolment refuses it -- so its only record is the
+   * CREDENTIAL_ISSUED row 0041 writes, which lives in `digital_thread`.
+   *
+   * PostgREST cannot join those: `digital_thread.entity_id` carries no foreign key, deliberately,
+   * so an audit row survives the purge of the thing it describes. So they are fetched separately
+   * and reduced here.
+   *
+   * BOUNDED, because `digital_thread` is append-only and grows forever. Only CREDENTIAL_ISSUED rows
+   * are selected and only the newest per gateway is kept -- re-minting appends rather than
+   * replaces, and the page is asking "when was the credential this gateway is using issued", which
+   * is the last one.
+   */
+  listGatewayCredentials: async () => {
+    const [gatewaysRes, issuedRes] = await Promise.all([
+      supabase
+        .from('gateway_status')
+        .select('id,name,sparkplug_id,is_virtual,is_archived,status,enrolled_at,credential_revoked_at,live_status')
+        .order('name'),
+      supabase
+        .from('digital_thread')
+        .select('entity_id,recorded_at,changed_by')
+        .eq('action', 'CREDENTIAL_ISSUED')
+        .eq('entity_type', 'gateways')
+        .order('recorded_at', { ascending: false })
+    ]);
+
+    if (gatewaysRes.error) throw new Error(gatewaysRes.error.message || 'Could not read gateways');
+
+    // AN AUDIT READ THAT FAILS IS NOT FATAL. `digital_thread:read` is a separate permission, and a
+    // caller without it should still see the gateway inventory -- with every virtual gateway
+    // reading `No platform record`, which is exactly what that state means from where they stand.
+    const issuedBy = new Map();
+    if (!issuedRes.error) {
+      for (const row of issuedRes.data || []) {
+        if (!issuedBy.has(row.entity_id)) issuedBy.set(row.entity_id, row.recorded_at);
+      }
+    }
+
+    return (gatewaysRes.data || []).map(g => ({ ...g, issued_at: issuedBy.get(g.id) || null }));
+  },
+
+  /**
    * Mint a VIRTUAL gateway's broker credential and get it back once.
    *
    * `supabase.functions.invoke()` WOULD work here -- the response is JSON, so the decoding trap

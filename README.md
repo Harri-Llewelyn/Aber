@@ -1212,6 +1212,24 @@ vocabulary should not be two separate migrations against the same column.
 
 ### 13 · An Access Control page
 
+**Partly built.** The **Access Control** tab lists every gateway with what the platform knows about
+its broker credential, and a virtual gateway can now be issued one from the dashboard —
+`0041_virtual_gateway_credential.sql` · `supabase/functions/gateway-credential` ·
+[`AccessControlTab.jsx`](frontend/src/components/tabs/AccessControlTab.jsx) ·
+[`credentialState.js`](frontend/src/utils/credentialState.js). **What remains is the identity
+profiles and the audit half.**
+
+**The page cannot be an inventory of the broker, and says so rather than implying otherwise.**
+Mosquitto's accounts live in a file reachable only by `gateway-credential-service`, which is add-only
+and cannot list anything back — giving it a LIST verb would hand whoever holds one bearer token the
+whole account table, which is exactly the drift its header forbids. So the page reports what the
+*platform* issued, and the gap is not hypothetical: `provision-gateways.mjs` mints four working
+credentials for the demonstration floor and `record_gateway_credential_issued()` cannot be called on
+its behalf, because `has_role()` resolves through `auth.uid()` and that is NULL for the service-role
+key. Those four read **No platform record** and connect perfectly well. The state is named for the
+record rather than for the credential for precisely that reason — *"No credential"* would be a claim
+about the broker that nothing in the frontend is in a position to make.
+
 **Builds on:** `issue_gateway_enrollment_token()` / `consume_…` / `release_…` (`0025`) ·
 `revoke_gateway_credential()` and its sweep (`0038`) ·
 [`GatewayBundleModal.jsx`](frontend/src/components/modals/GatewayBundleModal.jsx) ·
@@ -1242,11 +1260,17 @@ template exists as a live account rather than as a design. `Service_Ingestor` is
 one — and note it does not describe the current daemon, which holds the service-role key and writes
 telemetry directly.
 
-**§14 adds a subject this page should cover from the start.** A virtual gateway cannot be enrolled
-— `0025` and `gateway-bundle` both refuse one — so its broker credential is still minted by a shell
-script and carried to Node-RED by hand. Minting it through the same reveal-once component, authorised
-by role rather than by a single-use token, retires the last workflow that requires shell access to
-put a gateway on the broker.
+**§14's subject is now covered, and it was the first thing built.** A virtual gateway cannot be
+enrolled — `0025` and `gateway-bundle` both refuse one — so its broker credential was minted by a
+shell script and carried to Node-RED by hand. It is now minted through the same reveal-once
+component, authorised by role rather than by a single-use token, which retires the last workflow
+requiring shell access to put a gateway on the broker.
+
+The authority is worth stating plainly, because it is **more** than `gateway-bundle`'s. That
+function holds no secret at all and its ceiling is what the caller could already do through
+PostgREST; this one cannot match that, because the broker's password file is not reachable from SQL.
+What it preserves is the part that matters — **no service-role key** — and the registry entry in
+`main/index.ts` is where that is stated rather than discovered.
 
 **Two structural notes.** This UI is **tab-based, not routed** — `frontend/src/pages/` holds one file
 and the shell is `components/tabs/` — so `/access-control` is a tab beside Settings, and building it
