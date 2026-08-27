@@ -995,9 +995,12 @@ def sweep_stale_devices(now=None, timeout=None):
     written = []
     for device_id, name in stale_device_ids(now, timeout):
         try:
-            supabase_client.table("devices").update({"status": "OFFLINE"}).eq(
-                "id", device_id
-            ).eq("status", "ONLINE").execute()
+            # The `status = ONLINE` filter this used to carry is now inside the gate, as
+            # `IS DISTINCT FROM 'OFFLINE'` -- see 0047. It is no longer a caller convention that
+            # a future edit here could drop.
+            supabase_client.rpc("ingest_mark_device_offline", {
+                "p_device_id": device_id,
+            }).execute()
             logger.warning(
                 "WATCHDOG: device '%s' has published nothing for over %ds and no DDEATH arrived; "
                 "marked OFFLINE.",
@@ -1386,14 +1389,15 @@ def store_birth_parameters(sparkplug_id: str, payload):
         if not metric.name or metric.name in IDENTITY_METRICS:
             continue
 
+        # No `asset_id` and no `updated_at`: the gate pins both. It takes the asset once as an
+        # argument and ignores whatever the row objects carry, so a malformed batch cannot write
+        # parameters against somebody else's asset -- see 0047.
         row = {
-            "asset_id": sparkplug_id,
             "metric_name": metric.name,
             "val_double": None,
             "val_string": None,
             "val_bool": None,
             "datatype": metric.datatype if metric.HasField("datatype") else None,
-            "updated_at": datetime.now(timezone.utc).isoformat()
         }
 
         if metric.HasField("int_value"):
@@ -1418,10 +1422,13 @@ def store_birth_parameters(sparkplug_id: str, payload):
 
     try:
         # uq_asset_config_metric (asset_id, metric_name) makes this a per-metric upsert,
-        # so a re-birth refreshes values instead of accumulating duplicates.
-        supabase_client.table("asset_config").upsert(
-            rows, on_conflict="asset_id,metric_name"
-        ).execute()
+        # so a re-birth refreshes values instead of accumulating duplicates. The whole batch
+        # goes in one call deliberately: a per-metric gate would turn one round trip into as
+        # many as the birth certificate has metrics, on the hot path.
+        supabase_client.rpc("ingest_store_birth_parameters", {
+            "p_asset_id": sparkplug_id,
+            "p_rows": rows,
+        }).execute()
         logger.info("DBIRTH: Stored %d birth parameters for device '%s'", len(rows), sparkplug_id)
     except Exception as e:
         logger.error("Error storing DBIRTH parameters for '%s': %s", sparkplug_id, e, exc_info=True)
@@ -1467,10 +1474,14 @@ def record_declared_metrics(device: dict, payload):
         return
 
     try:
-        supabase_client.table("devices").update({
-            "last_birth_metrics": declared,
-            "last_birth_metrics_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("id", device["id"]).execute()
+        # The change check above stays: it saves a round trip. It is no longer what the property
+        # depends on, though -- the gate carries the same `IS DISTINCT FROM` test, so a stale or
+        # evicted cache entry can no longer cause an unchanged rewrite. See 0047.
+        supabase_client.rpc("ingest_record_declared_metrics", {
+            "p_device_id": device["id"],
+            "p_metrics": declared,
+            "p_observed_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
 
         # resolve_device caches this same dict, so updating it in place keeps the cached copy
         # in step and stops the next birth inside the TTL from re-detecting the same change.
@@ -1528,23 +1539,23 @@ def quarantine_new_device(wire_id: str, gateway_wire_id: str, reason: str, paylo
         )
 
     now = datetime.now(timezone.utc).isoformat()
-    record = {
-        "name": extract_name_hint(payload) or wire_id,
-        "status": "ONLINE",
-        "is_quarantined": True,
-        "first_dbirth_at": now,
-        "reported_identity": wire_id,
-        "quarantine_reason": reason,
-        "identity_source": SOURCE_REPORTED_IDENTITY,
-        "gateway_id": gateway["id"] if gateway else None,
-        # Carried on the INSERT rather than left to record_declared_metrics' UPDATE, so a newly
-        # discovered device produces one digital_thread entry instead of an insert immediately
-        # chased by an update saying the same thing.
-        "last_birth_metrics": extract_declared_metrics(payload),
-        "last_birth_metrics_at": now,
-    }
 
-    res = supabase_client.table("devices").insert(record).execute()
+    # `status` and `is_quarantined` are no longer passed: the gate pins them. This function is the
+    # quarantine path and nothing else, and a caller able to send is_quarantined=False could have
+    # registered an unknown device as a trusted one -- see 0047.
+    #
+    # `last_birth_metrics` is still carried here rather than left to record_declared_metrics'
+    # UPDATE, so a newly discovered device produces one digital_thread entry instead of an insert
+    # immediately chased by an update saying the same thing.
+    res = supabase_client.rpc("ingest_register_quarantined_device", {
+        "p_name": extract_name_hint(payload) or wire_id,
+        "p_gateway_id": gateway["id"] if gateway else None,
+        "p_reported_identity": wire_id,
+        "p_quarantine_reason": reason,
+        "p_identity_source": SOURCE_REPORTED_IDENTITY,
+        "p_declared_metrics": extract_declared_metrics(payload),
+        "p_observed_at": now,
+    }).execute()
     rows = res.data if res else []
     row = dict(rows[0]) if rows else None
 
@@ -1634,11 +1645,12 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
                 # A registered device publishing a faulty identity, or announced by a gateway
                 # it is not bound to. Re-quarantine it: whatever is on the wire no longer
                 # reliably identifies this asset.
-                supabase_client.table("devices").update({
-                    "is_quarantined": True,
-                    "quarantine_reason": hold_reason,
-                    "reported_identity": wire_id,
-                }).eq("id", device["id"]).execute()
+                # `is_quarantined` is pinned true by the gate: this direction only ever tightens.
+                supabase_client.rpc("ingest_requarantine_device", {
+                    "p_device_id": device["id"],
+                    "p_quarantine_reason": hold_reason,
+                    "p_reported_identity": wire_id,
+                }).execute()
                 _device_cache.pop(wire_id, None)
                 logger.warning(
                     "QUARANTINE ALERT: registered device '%s' was re-quarantined (%s).",
@@ -1660,8 +1672,10 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
                 #
                 # Same shape as record_declared_metrics() below, and for the same reason.
                 #
-                # first_dbirth_at is write-once: only set it the first time this row sees a
-                # real birth, so a later rebirth never overwrites the original timestamp.
+                # first_dbirth_at is write-once. The check below still avoids sending it when the
+                # row already has one, but the gate is what enforces it now: it COALESCEs against
+                # the stored value, so a stale cache entry can no longer move an original birth
+                # timestamp. See 0047.
                 desired = {"status": "ONLINE", "identity_source": device["_identity_source"]}
                 update_fields = {
                     field: value
@@ -1672,7 +1686,14 @@ def process_dbirth(wire_id: str, gateway_wire_id: str, payload, quarantine_reaso
                     update_fields["first_dbirth_at"] = datetime.now(timezone.utc).isoformat()
 
                 if update_fields:
-                    supabase_client.table("devices").update(update_fields).eq("id", device["id"]).execute()
+                    # NULL means "leave alone" in the gate, which is what lets write-only-what-moved
+                    # survive a fixed signature.
+                    supabase_client.rpc("ingest_set_device_state", {
+                        "p_device_id": device["id"],
+                        "p_status": update_fields.get("status"),
+                        "p_identity_source": update_fields.get("identity_source"),
+                        "p_first_dbirth_at": update_fields.get("first_dbirth_at"),
+                    }).execute()
                     # Updated in place so the next birth inside CACHE_TTL_SECONDS sees the new
                     # state and does not re-detect the same change. resolve_device() caches this
                     # exact dict, which is what makes the mutation visible to the next lookup.
@@ -1739,7 +1760,12 @@ def process_ddeath(wire_id: str, gateway_wire_id: str):
         return
 
     try:
-        supabase_client.table("devices").update({"status": "OFFLINE"}).eq("id", device["id"]).execute()
+        # Same gate as the watchdog. This path used to write unconditionally; the gate suppresses
+        # the write when the row is already OFFLINE, which saves a round trip and a realtime
+        # broadcast and reaches the same state either way.
+        supabase_client.rpc("ingest_mark_device_offline", {
+            "p_device_id": device["id"],
+        }).execute()
         # An explicit death certificate is the authoritative answer, so the watchdog stops
         # tracking this device rather than flipping it OFFLINE a second time later.
         forget_device_seen(device["id"])
@@ -2057,23 +2083,26 @@ def process_node_message(edge_node_id: str, msg_type: str, payload, group_id: st
 
     # AFTER the registration check, not before: an unregistered node is dropped either way, and
     # validating its metrics first would log rejections for a gateway nothing is going to write.
-    update = {
-        "status": status,
-        "last_heartbeat": heartbeat_dt.isoformat(),
-    }
+    #
+    # `health_reported_at` is no longer stamped here: the gate stamps it, and only when the health
+    # object is non-empty. That is what makes the column mean what 0035 says it means -- an
+    # appliance on a bundle predating health reporting beats forever and leaves it NULL, reading as
+    # "does not report health" rather than "has stopped reporting it".
     health = extract_gateway_health(group_id, edge_node_id, payload)
     if health:
-        update.update(health)
-        # STAMPED ONLY WHEN SOMETHING WAS RECOGNISED, which is what makes the column mean what
-        # 0035 says it means: an appliance on a bundle predating this beats forever and leaves
-        # `health_reported_at` NULL, which reads as "does not report health" rather than as "has
-        # stopped reporting it". The two need different responses.
-        update["health_reported_at"] = heartbeat_dt.isoformat()
         # The scrapeable half, for the readings that need a trend rather than a current value.
         record_gateway_health_gauges(edge_node_id, health, heartbeat_dt)
 
     try:
-        supabase_client.table("gateways").update(update).eq("id", gateway["id"]).execute()
+        # RESERVED_GATEWAY_STATUSES is enforced by the gate as well as by accept_reported_status()
+        # above. The filter here saves a rejected round trip; the gate is what makes the rule hold
+        # for anything holding this credential. See 0047.
+        supabase_client.rpc("ingest_record_gateway_health", {
+            "p_gateway_id": gateway["id"],
+            "p_status": status,
+            "p_heartbeat_at": heartbeat_dt.isoformat(),
+            "p_health": health or None,
+        }).execute()
 
         # Kept in step with the row resolve_gateway() cached, so the next heartbeat inside
         # CACHE_TTL_SECONDS compares against what was actually written rather than re-reporting

@@ -360,6 +360,14 @@ $fn$;
 -- `devices`, so a sweep that rewrote OFFLINE every tick would append to a deliberately append-only
 -- table forever. The daemon carries `status = 'ONLINE'` as a filter to prevent that; here it is
 -- part of the gate, so a future caller that forgets cannot reintroduce the problem.
+--
+-- `IS DISTINCT FROM 'OFFLINE'` RATHER THAN `= 'ONLINE'`, which is not the same predicate and is
+-- the one the daemon's own comment actually describes: "an already-OFFLINE row matches nothing".
+-- The two agree for every value `devices.status` currently holds -- it is written from four places
+-- and only ever ONLINE or OFFLINE -- and disagree on NULL, which the column permits. The DDEATH
+-- path today writes OFFLINE unconditionally, so `= 'ONLINE'` would have made a NULL-status device
+-- stay NULL where it used to become OFFLINE. Suppressing the rewrite is the intent; refusing to
+-- write anything that is not already ONLINE is an accident of how the filter was spelled.
 CREATE OR REPLACE FUNCTION public.ingest_mark_device_offline(p_device_id uuid)
     RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER
@@ -378,7 +386,7 @@ BEGIN
     UPDATE public.devices d
        SET status = 'OFFLINE'
      WHERE d.id = p_device_id
-       AND d.status = 'ONLINE';
+       AND d.status IS DISTINCT FROM 'OFFLINE';
 
     GET DIAGNOSTICS v_rows = ROW_COUNT;
     RETURN v_rows > 0;
@@ -578,7 +586,12 @@ BEGIN
            mem_available_bytes = COALESCE((p_health->>'mem_available_bytes')::bigint, g.mem_available_bytes),
            disk_free_bytes     = COALESCE((p_health->>'disk_free_bytes')::bigint,     g.disk_free_bytes),
            cert_expires_at     = COALESCE((p_health->>'cert_expires_at')::timestamptz, g.cert_expires_at),
-           flow_hash           = COALESCE( p_health->>'flow_hash',                    g.flow_hash)
+           flow_hash           = COALESCE( p_health->>'flow_hash',                    g.flow_hash),
+           -- `agent_version` is stamped once at enrolment by 0025 and REFRESHED here, which is
+           -- the whole complaint 0035 answers. It is part of GATEWAY_HEALTH_METRICS in
+           -- ingestion.py and belongs in this list; omitting it would drop the reading silently,
+           -- leaving the page showing whatever version enrolled however long ago.
+           agent_version       = COALESCE( p_health->>'agent_version',                g.agent_version)
      WHERE g.id = p_gateway_id;
 
     GET DIAGNOSTICS v_rows = ROW_COUNT;
@@ -694,8 +707,8 @@ BEGIN
             IF public.ingest_mark_device_offline(v_device) THEN
                 RAISE EXCEPTION
                   '0047 self-check: ingest_mark_device_offline() moved an already-OFFLINE row. The '
-                  'status = ONLINE predicate is what stops the watchdog appending an audit row per '
-                  'tick.';
+                  'already-OFFLINE predicate is what stops the watchdog appending an audit row '
+                  'per tick.';
             END IF;
         END IF;
 

@@ -1717,6 +1717,49 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// Every gateway health column the daemon can produce is written by the gate it now goes through.
+//
+// THIS FAILS SILENTLY AND THAT IS WHY IT IS CHECKED. `ingest_record_gateway_health()` (0047) names
+// its columns literally in a SET clause. A metric added to GATEWAY_HEALTH_METRICS but not to that
+// clause is extracted from the payload, logged as recognised, and then dropped on the floor -- the
+// page goes on showing the last value written by some other path, which for `agent_version` is
+// whatever enrolment stamped however long ago. Nothing errors, and the reading looks stale rather
+// than absent, which is the hardest kind of wrong to notice.
+{
+  const py = read('ingestion/ingestion.py');
+  const block = py.match(/GATEWAY_HEALTH_METRICS\s*=\s*\{([\s\S]*?)\n\}/);
+  const sql = read('supabase/migrations/0047_ingestion_write_rpcs.sql');
+  const fn = sql.match(/CREATE OR REPLACE FUNCTION public\.ingest_record_gateway_health[\s\S]*?\$fn\$;/);
+
+  if (!block) {
+    fail('check-docs-drift: could not find GATEWAY_HEALTH_METRICS in ingestion/ingestion.py.');
+  } else if (!fn) {
+    fail('check-docs-drift: could not find ingest_record_gateway_health() in 0047.');
+  } else {
+    // ("Metric_Name": ("column_name", "kind")) -- the column is what has to appear in the gate.
+    // [a-z0-9_] and not [a-z_]: `load_1m` carries a digit, and a class without one drops it from
+    // the corpus silently -- the check then passes while ignoring the column it was meant to guard.
+    const columns = [...block[1].matchAll(/\(\s*"([a-z0-9_]+)"\s*,\s*"[a-z_]+"\s*\)/g)].map((m) => m[1]);
+    const missing = columns.filter((c) => !new RegExp(`\\b${c}\\s*=`).test(fn[0]));
+
+    if (missing.length) {
+      fail(
+        `ingest_record_gateway_health() does not write gateway health column(s): ${missing.join(', ')}.\n` +
+          '      GATEWAY_HEALTH_METRICS in ingestion.py maps a Sparkplug metric onto each of these,\n' +
+          '      so the daemon extracts the value, validates it, and then has nowhere to put it. The\n' +
+          '      write is dropped without an error and the dashboard shows a stale value rather than\n' +
+          '      a missing one.'
+      );
+    } else {
+      pass(
+        `all ${columns.length} gateway health column(s) in GATEWAY_HEALTH_METRICS are written by ` +
+          `ingest_record_gateway_health() (roadmap §16)`
+      );
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 for (const line of ok) console.log(`  ok   ${line}`);
 if (problems.length) {
   console.error('\nDocumentation drift:\n');

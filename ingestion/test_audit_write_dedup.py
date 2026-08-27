@@ -146,8 +146,27 @@ class DBirthDedupTestCase(unittest.TestCase):
                                  None, group_id=GROUP)
 
     def device_updates(self):
-        """Payloads passed to .table('devices').update(...)."""
-        return [c.args[0] for c in self.client.table.return_value.update.call_args_list]
+        """
+        The fields each ingest_set_device_state() call actually changes.
+
+        The write goes through a gate now (roadmap item 16, migration 0047). Its signature is
+        fixed and NULL means "leave alone", so the changed-field set that used to be the UPDATE
+        payload is now the non-NULL parameters -- normalised back to column names here so the
+        assertions keep saying what they said. The property is unchanged: a steady-state rebirth
+        must produce no call at all, because log_digital_thread_event() fires on every UPDATE to
+        `devices` and a birth certificate is repeated on a timer.
+        """
+        columns = (("status", "p_status"),
+                   ("identity_source", "p_identity_source"),
+                   ("first_dbirth_at", "p_first_dbirth_at"))
+        out = []
+        for c in self.client.rpc.call_args_list:
+            if not c.args or c.args[0] != "ingest_set_device_state":
+                continue
+            params = c.args[1]
+            out.append({col: params[key] for col, key in columns
+                        if params.get(key) is not None})
+        return out
 
 
 class TestDBirthWriteDeduplication(DBirthDedupTestCase):
@@ -291,9 +310,7 @@ class TestCachedRowIsUpdatedInPlace(DBirthDedupTestCase):
         Mutating before the write would make a lost update look applied.
         """
         self.device = registered_device(status="OFFLINE")
-        self.client.table.return_value.update.return_value.eq.return_value.execute.side_effect = (
-            RuntimeError("supabase down")
-        )
+        self.client.rpc.return_value.execute.side_effect = RuntimeError("supabase down")
 
         ingestion.process_dbirth(DEVICE_ID, GATEWAY_ID, FakePayload("Systems/TEMPERATURE"),
                                  None, group_id=GROUP)
@@ -352,7 +369,22 @@ class TestHeartbeatStillWritesEveryTime(unittest.TestCase):
         ingestion.process_node_message(GATEWAY_ID, msg_type, FakePayload(), group_id=GROUP)
 
     def gateway_updates(self):
-        return [c.args[0] for c in self.client.table.return_value.update.call_args_list]
+        """
+        The ingest_record_gateway_health() calls, flattened into the column view.
+
+        `last_heartbeat` is the parameter `p_heartbeat_at`; it is still sent on every single
+        heartbeat, which is the property this class exists to protect -- gateway_status derives
+        staleness from it at read time, so a suppressed write reports a live gateway as STALE.
+        """
+        out = []
+        for c in self.client.rpc.call_args_list:
+            if not c.args or c.args[0] != "ingest_record_gateway_health":
+                continue
+            params = c.args[1]
+            flat = {"status": params["p_status"], "last_heartbeat": params["p_heartbeat_at"]}
+            flat.update(params.get("p_health") or {})
+            out.append(flat)
+        return out
 
     def test_every_heartbeat_writes_last_heartbeat(self):
         self.heartbeat()
