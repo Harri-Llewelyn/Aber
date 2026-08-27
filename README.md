@@ -530,6 +530,8 @@ python ingestion/test_payload_conformance.py
 python ingestion/test_metrics_endpoint.py
 python ingestion/test_entity_cache.py
 python ingestion/test_telemetry_batching.py
+# Broker capture and playback -- identity rewriting, timestamp rebasing, wire encodings
+python ingestion/test_capture_playback.py
 python i3x/test_i3x_service.py
 python supabase/functions/approve-quarantine/test_approve_quarantine.py
 python supabase/functions/deploy-nodered/test_deploy_nodered.py
@@ -707,24 +709,25 @@ done?" — no entry here says `Built`, because a checklist that contains finishe
 checklist. Items 6, 13 and 16 left this way and are now documented under
 [Machine identities](#machine-identities) and in
 [`supabase/README.md`](supabase/README.md#machine-identities); item 7 is documented under
-[Schema Conformance](ingestion/README.md#schema-conformance); and item 9's subject was retired the
-same way when `aas-api` shipped.
+[Schema Conformance](ingestion/README.md#schema-conformance); item 11 under
+[Broker Capture and Playback](ingestion/README.md#broker-capture-and-playback); and item 9's subject
+was retired the same way when `aas-api` shipped.
 
-**Retired numbers are not reused, and the list is therefore not contiguous.** The gaps at 6, 7, 13
-and 16 are deliberate. Renumbering on retirement was the earlier practice and it does not survive
+**Retired numbers are not reused, and the list is therefore not contiguous.** The gaps at 6, 7, 11,
+13 and 16 are deliberate. Renumbering on retirement was the earlier practice and it does not survive
 contact with this repository: the remaining entries are named by **48 comments** in migrations,
 scripts and components, all explaining why that code is the way it is, and shifting every number
 below a removal would silently redirect all of them without erroring. A number cited from code is an
 identifier, not a position. Where code refers to work that has since shipped, the citation names the
 documentation rather than a roadmap number.
 
-**Items 1-5 are this repository's own**, ordered by how much of each already exists. **Items 8-15
-arrive from feature requests** — 8-11 from GitHub issues
+**Items 1-5 are this repository's own**, ordered by how much of each already exists, as is 17. **Items 8-15
+arrive from feature requests** — 8, 9 and 10 from GitHub issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
-[#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63),
-[#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66) and
-[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58), in that same order of how much already
-exists; 12 and 15 are not yet filed. Where an entry's heading differs from the issue's title, it is
+[#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
+[#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66), in that same order of how much already
+exists; 12, 15 and 17 are not yet filed.
+[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) was item 11 and is now built. Where an entry's heading differs from the issue's title, it is
 because the work that remains is narrower than the title claims.
 
 **None of these are open defects.** Feature requests live here once they have been checked against
@@ -1113,54 +1116,6 @@ currently prevent.
 
 ---
 
-### 11 · Cassette: recording and replaying the broker
-
-**Builds on:** the JSON fallback parser in [`ingestion/ingestion.py`](ingestion/ingestion.py) ·
-`_timestamp_is_sane()` · the `telemetry` hypertable's primary key ·
-[`scripts/storage-init.mjs`](scripts/storage-init.mjs) ·
-[`supabase/storage-policies.sql`](supabase/storage-policies.sql) ·
-[issue #58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58)
-
-**The most speculative item here, and the most useful if it lands.** Recording live MQTT to a JSON
-file and streaming it back answers three things this stack currently cannot: dashboards verified
-against a machine that was only available for two hours, a fault condition reproduced by editing a
-value by hand, and load testing at a chosen multiple of real time — against a fleet whose measured
-rate is **0.95 msg/s** and whose ingestion ceiling is **≈240 msg/s**, per §1.
-
-**One piece is already in place, and it is the piece that makes hand-editing work.** The daemon's
-payload parser falls back to JSON when protobuf parsing fails, reconstructing `timestamp`, `seq`,
-`uuid` and metrics into the same payload shape the protobuf path produces. A cassette can therefore be
-a readable JSON array that replays through the ordinary ingestion path with no special mode — which is
-exactly what makes a spoofed error indistinguishable from a real one downstream, and is the whole
-point of the feature.
-
-**Timestamps are the hard constraint, and they decide the design rather than decorate it.**
-`_timestamp_is_sane()` rejects any metric more than **24 hours** behind now or 5 minutes ahead, because
-such a row *"lands outside the retention policy, or inside an already-compressed chunk that rejects the
-write"*. A cassette replayed at its original timestamps is therefore useless the day after it was
-recorded: replay must **rebase** onto now, preserving inter-message deltas. That is the same operation
-as the issue's speed multiplier, so there is one mechanism here and not two. Rebasing also sidesteps
-the collision the alternative causes — `telemetry`'s primary key is `(time, asset_id, metric_name)`,
-so replaying a capture verbatim writes rows that already exist.
-
-**Storage has a precedent to copy rather than a decision to make.** `gateway-backups` is already a
-private, size-capped, MIME-restricted bucket holding JSON under `<sparkplug_id>/`, with its RLS in
-`storage-policies.sql`; a cassette bucket is that shape with a different cap. What has no precedent is
-the issue's own open question — **how replayed telemetry should be marked**. A column on the hypertable
-is the obvious answer and the expensive one: it touches the `postgres_fdw` projection, the rollups in
-`0010` and every Grafana query. The cheaper framing is that a cassette replays *as a device*, so an
-ordinary device flagged synthetic carries the marking in `devices`, where retention and dashboards can
-filter on a join they already make. That also answers "how do we test rollups" without needing a second
-answer: synthetic devices roll up exactly like real ones, which is the behaviour under test.
-
-**And replay meets quarantine first.** A cassette recorded from a device this deployment never enrolled
-publishes under an id nobody registered — which is the zero-touch onboarding path working as designed:
-the telemetry is held and dropped until an `Administrator` approves it. That is correct and should stay
-correct. It just means "import a cassette" has an approval step inside it, and the UI has to say so
-rather than let the import look like it failed.
-
----
-
 ### 12 · Retiring the flow-backup bucket, and pointing at repositories instead
 
 **Builds on:** [`frontend/src/components/common/FlowBackupUploader.jsx`](frontend/src/components/common/FlowBackupUploader.jsx) ·
@@ -1421,11 +1376,17 @@ same-row CHECK costing nothing, and **derive** the device rule, because a derive
 refuse.
 
 **Simulated telemetry is treated exactly like real telemetry, and that is a decision rather than an
-omission.** §11 depends on it: a cassette replays *as a device*, and its whole argument is that
-synthetic devices must roll up exactly like real ones, *"which is the behaviour under test"*. Shorter
+omission.** [Broker playback](ingestion/README.md#broker-capture-and-playback) now depends on it,
+which moved this from a prediction to a constraint: a capture replays *as a gateway*, and synthetic
+devices must roll up exactly like real ones because that is the behaviour under test. Shorter
 retention for simulated data would break the one feature that needs synthetic data to behave normally
 — and could not be built cheaply anyway, since retention is one policy on one hypertable dropping
-whole chunks rather than rows. **The flag records provenance; each consumer decides.** The Digital
+whole chunks rather than rows.
+
+**`gateways.is_simulated` already exists** (`0052`), added with playback and taken deliberately from
+this item's design rather than item 11's: the flag is on the gateway and devices inherit it. What
+remains here is `deployment`, the cross-column CHECK that needs both, the `is_virtual` rename, and
+the Simulated lane in `device_locations`. **The flag records provenance; each consumer decides.** The Digital
 Thread page hides simulated assets by default, which is one more predicate in `0039`'s RPC and
 answers the demonstration feedback where it was actually aimed — at what a reader sees, not at what
 is stored. `digital_thread` itself keeps receiving the rows, because someone standing up a simulator
@@ -1449,6 +1410,168 @@ the vocabulary becomes — the chain is immutable, so the old word survives ther
 explains why. Above all, `check-docs-drift.mjs` enforces that **every migration adding a `gateways`
 column rebuilds `gateway_status`**, because Postgres freezes `SELECT g.*` at creation time; that rule
 exists for precisely this kind of change and this change must satisfy it twice.
+
+---
+
+### 17 · Capture and playback orchestration
+
+**Builds on:** [`ingestion/capture.py`](ingestion/capture.py) · `on_message()` and the daemon's
+existing `spBv1.0/#` subscription · `request_node_rebirth()` · the `broker-captures` bucket and
+[`supabase/storage-policies.sql`](supabase/storage-policies.sql) · `gateways.is_simulated` (`0052`) ·
+the gate pattern in `0047` · Supabase Realtime · **not yet filed as an issue**
+
+Capture and playback shipped as a CLI. This is the dashboard in front of it: a page with a
+**Gateways** tab and a **Devices** tab, a **Capture** button per row, one running card at the top,
+and a stored capture per subject that a new recording replaces.
+
+**The heading says playback, not replay, deliberately** — `replay` means migration replay in 192
+places in this repository, including the idempotency contract every migration header rests on.
+
+---
+
+#### The shape of the problem: recording is a server-side act
+
+`capture.py record` opens an MQTT subscription. A browser cannot. Mosquitto listens on **1883 TCP**
+with no WebSocket listener, and the recording principal's password is a server-side secret that a
+bundle would publish — which is the exact thing `mosquitto.acl` was rewritten to prevent. So this is
+**new behaviour in the ingestion daemon with a page in front of it**, not a UI feature with a backend
+detail attached.
+
+**The daemon is the host, and there is no second principal.** It already holds the subscription and
+the credential, so a capture job costs no new broker connection: `on_message()` appends to a buffer
+when a job is active and the topic matches. A separate capture service would need its own broker
+account *and* would split the `seq` stream — `_last_seq` is keyed `(group, edge_node)`, so a second
+subscriber makes the daemon's own gap detection fire permanently. This is §1's `$share` finding
+arriving from the other direction, and it is why "a capture daemon principal with read-only access to
+the topic tree" is a principal this design does not create.
+
+#### 1 · Grants, and the failure that is silent
+
+**`broker_captures_insert_privileged` is already taken** — it is the name of the storage RLS *policy*
+shipped with the bucket, not an RPC. The gate needs its own name.
+
+The daemon authenticates as `Service_Ingestor`, which holds `Operator` and deliberately holds nothing
+else; the bucket's insert policy requires `Administrator` or `Shopfloor_Manager`. So the daemon
+cannot write a capture today, and **the gate is a prerequisite of the page rather than a detail of
+it**: a `SECURITY DEFINER` function in `0047`'s shape, checked with `is_ingestion_caller()`.
+
+This is precisely the defect `0051` fixed — a missing grant answers `42501`, the daemon catches it,
+logs it, and carries on, so the symptom is a capture that never appears rather than an error.
+
+**No telemetry rows are involved.** A capture is a file in Storage plus a row in `capture_jobs`; the
+`telemetry` hypertable is not written by this feature at all. Worth stating because a gate scoped to
+"metadata and telemetry records" would be scoped to something that does not happen.
+
+**Write-only on the bucket is achievable and nearly right.** RLS can grant INSERT without SELECT. But
+"a new recording replaces the old" means the daemon also needs DELETE on its own prefix — or the
+replacement happens browser-side, before the job starts, which keeps the daemon's authority at INSERT
+alone. **The second is better** and is what the modal already implies: the operator confirms the
+deletion, so the operator's session performs it.
+
+#### 2 · The capture engine
+
+**Birth certificates cannot be queried, so they are requested.** A device-scoped capture that records
+only its own `DDATA` omits the `NBIRTH`/`DBIRTH` where the alias table lives, and an alias-optimised
+gateway then yields a capture that replays as `unresolved_alias` and drops every metric — from a file
+that looks complete. The daemon documents this failure at `_alias_map`: *"ingests nothing at all from
+an alias-optimised gateway, and reports no error while doing it."*
+
+But **nothing stores a raw birth payload**. `asset_config` holds birth *parameters* and
+`devices.last_birth_metrics` holds metric *names*; neither can reconstruct a Sparkplug payload. What
+the daemon does have is `request_node_rebirth()` — its one permitted publish. **A capture opens by
+requesting a rebirth from the subject's edge node and recording the answer**, so the birth arrives on
+the wire and is captured as ordinary traffic.
+
+Two consequences to design around rather than discover: a rebirth is a broadcast to that node, so it
+briefly affects the live stream for every subscriber; and `REBIRTH_REQUEST_INTERVAL_SECONDS`
+rate-limits it, so a capture started twice inside that window gets no second birth and must either
+wait or record without one and say so.
+
+**Three caps, auto-terminating on the first met — and they have to agree with the bucket.**
+
+| | proposed | as specified here | why |
+| :--- | :--- | :--- | :--- |
+| duration | 2 hours | **2 hours** | unchanged |
+| messages | 100,000 | **100,000** | ≈29 h at the fleet's 0.95 msg/s; ≈7 min at the 240 msg/s ceiling |
+| size | 500 MB | **50 MiB**, with the bucket raised 25 → 100 MiB | see below |
+
+**500 MB cannot be stored**: `broker-captures` is capped at 26,214,400 bytes, so a capture that hit
+that limit would terminate successfully and then fail to upload. The three caps have to be mutually
+consistent *and* consistent with the bucket, or the outermost one is decorative. 100,000 messages at
+a few hundred bytes is ≈40 MB, so 50 MiB is the smallest size cap that lets the message cap bind
+first, and a 100 MiB bucket leaves headroom.
+
+**It is also buffered in the daemon's memory.** The chart declares no memory limit for `ingestion`,
+so a 500 MB buffer is not refused — it is bounded by node pressure and the process is killed, taking
+ingestion for the whole fleet with it. That is the real argument for the smaller cap.
+
+**Startup reconciliation**: anything left at `RECORDING` when the daemon boots becomes `FAILED`.
+Without it, a restart mid-capture leaves a row counting down forever and a card that never clears.
+
+**Single-flight: one capture at a time, across the stack.** There is no `tenant_id` in this schema —
+it is single-tenant — and a lock per gateway would permit N concurrent captures, which contradicts
+the single card the page shows. A partial unique index on `status = 'recording'` enforces the global
+rule in the database, where two browser tabs cannot race it. *If concurrency is wanted later, the
+index widens to the subject and the card becomes a list; that is a deliberate change, not a default.*
+
+#### 3 · Storage, filing and RLS
+
+**Filed by the subject recorded**, not by the gateway a capture plays back as. The CLI files by
+target because that is the only fact available when a person uploads a file by hand; a page that
+records from a subject knows the subject, which is what makes the two tabs coherent. The two stop
+being the same question, and playback names its own target at the command line.
+
+**The storage RLS gains a `devices` arm** beside `gateways`, so a `dev…` prefix is a legitimate
+folder. Today the `EXISTS` check admits gateway ids only, so a device capture would be refused for a
+reason its filename does not suggest.
+
+#### 4 · The page, the card, and the destructive path
+
+The twelfth page, and the first thing to exercise the `tight` band in `navDensity()` — built for a
+page that turned out not to exist.
+
+**Live progress rides Supabase Realtime, not SSE or a WebSocket.** The daemon serves exactly one HTTP
+endpoint, Prometheus `/metrics` in `ingestion/metrics.py`; there is no REST tier to add SSE to, and
+`/api/v1/…` is a **client-side convention inside `frontend/src/api.js`** that maps onto PostgREST —
+no server answers those paths. So `POST /api/v1/captures/{id}/stop` is an endpoint that would have to
+be invented along with the server hosting it.
+
+Instead the daemon `UPDATE`s `capture_jobs` with `bytes`, `messages` and `elapsed`, and Realtime
+pushes the row. **`capture_jobs` must be added to the `supabase_realtime` publication explicitly** —
+it currently carries `cells`, `devices`, `gateways` and `platform_alerts` only.
+
+**Ending early is a column, not a call**: the page sets `stop_requested`, the daemon observes it on
+its next message, flushes and writes `COMPLETED`. That also survives a page reload, which a fired-off
+POST would not.
+
+**Progress updates must not reach the audit trail.** The digital-thread trigger is opt-in per table —
+`cells`, `devices`, `gateways` each name it explicitly — so `capture_jobs` simply does not get one.
+Stated because adding it would look like consistency and would write a row per progress tick into an
+append-only table no application role can prune, which is `0005`'s heartbeat problem exactly.
+
+**The replace modal names what it destroys**: *"Overwrite the capture of Line 1 Gateway taken
+27 Aug 2026 14:30?"* — not "are you sure". The replace-in-place model bounds storage, and the cost is
+real: **a capture of a rare fault can be destroyed by a routine re-record**, and this modal is the
+only thing standing there.
+
+#### 5 · Playback safety
+
+**Topic remapping is the one proposal that must not be built.** A `replay/<original_topic>` prefix is
+not a Sparkplug topic, and `on_message()` returns immediately when `parts[0] != 'spBv1.0'` — so
+nothing would be ingested at all, and `mosquitto.acl` grants no write on `replay/#`, so the broker
+would drop it silently at QoS 0. It would produce a playback that reports success and does nothing,
+which is the failure mode this whole feature is written to avoid.
+
+**The protection it asks for already exists and is stronger.** A capture *cannot* be published under
+the identity it was recorded from: the ACL pins the topic's edge-node segment to the connecting
+username, so playback rewrites every identity onto the playback gateway's own assets and each device
+needs an explicit `--map` onto a 24-character id. You cannot reach a production asset by accident;
+you would have to type its id.
+
+**What the page can add is enforcement.** The CLI can only warn that a target gateway is not flagged
+`is_simulated`, because it cannot see the directory. The page can, so it should **refuse** to start a
+playback onto a gateway that is not flagged — turning `0052`'s marking from a label into a
+precondition at the one place that has the information to check it.
 
 ---
 

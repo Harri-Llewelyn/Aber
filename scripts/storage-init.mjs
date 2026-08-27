@@ -89,6 +89,38 @@ const FLOW_BACKUP_SIZE_LIMIT = Number.parseInt(
   10,
 );
 
+/**
+ * A broker capture is JSON and nothing else.
+ *
+ * Same list as the flow backups above, and for the same reason: a browser handing back a `.json`
+ * picked from disk reports its type inconsistently across platforms. The uploader checks that the
+ * payload IS a capture -- that it carries `acs_capture_version` and a `messages` array -- before it
+ * is sent, so this list is the coarse outer bound rather than the check.
+ */
+const CAPTURE_MIME_TYPES = [
+  'application/json',
+  'text/json',
+  'text/plain',
+  'application/octet-stream',
+];
+
+/**
+ * 25 MiB for a broker capture.
+ *
+ * Sized from the traffic rather than picked: the fleet's measured rate is 0.95 msg/s and a message
+ * is a few hundred bytes of JSON, so an hour of a real shift is single-digit megabytes and a full
+ * working day fits. What this refuses is a capture taken at the ingestion ceiling -- 240 msg/s
+ * would fill this in about four minutes -- which is a load-test artefact rather than something
+ * anybody needs to keep, and which would otherwise quietly fill the volume.
+ *
+ * Deliberately not FLOW_BACKUP_SIZE_LIMIT: 5 MiB is right for a flow and would refuse an
+ * ordinary morning's capture.
+ */
+const CAPTURE_FILE_SIZE_LIMIT = Number.parseInt(
+  process.env.CAPTURE_FILE_SIZE_LIMIT || '26214400',
+  10,
+);
+
 const BUCKETS = [
   {
     id: process.env.STORAGE_BUCKET || 'asset-3d-models',
@@ -113,6 +145,22 @@ const BUCKETS = [
     file_size_limit: FLOW_BACKUP_SIZE_LIMIT,
     allowed_mime_types: FLOW_BACKUP_MIME_TYPES,
     why: 'Node-RED flow backups from gateway appliances, under <sparkplug_id>/',
+  },
+  {
+    id: process.env.CAPTURE_BUCKET || 'broker-captures',
+    // PRIVATE, FOR THE SAME REASON THE ONE ABOVE IS, and the reason is stronger here rather than
+    // weaker. A capture is a recording of the plant's Sparkplug traffic: every edge node and device
+    // id that spoke during the window, every metric name they publish, and the values. A flows.json
+    // describes what the edge is configured to do; a capture shows what it actually did.
+    //
+    // Note that a capture filed under one gateway's prefix can name OTHER gateways -- it records
+    // whatever was on the wire. That is not a leak across the prefix rule: the roles that can read
+    // this bucket (Administrator, Shopfloor_Manager, Auditor) can already see the whole fleet in
+    // the directory. It is the reason the bucket is not readable by anyone below them.
+    public: false,
+    file_size_limit: CAPTURE_FILE_SIZE_LIMIT,
+    allowed_mime_types: CAPTURE_MIME_TYPES,
+    why: 'broker captures for playback, under <sparkplug_id>/ of the gateway they play back as',
   },
 ];
 

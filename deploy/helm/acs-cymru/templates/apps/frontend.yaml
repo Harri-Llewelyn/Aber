@@ -28,6 +28,7 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   // rename moves the dashboard with the bucket instead of leaving it on the old name.
   VITE_MODEL_3D_BUCKET: %q,
   VITE_GATEWAY_BACKUP_BUCKET: %q,
+  VITE_CAPTURE_BUCKET: %q,
 };
 `
   (include "acs-cymru.supabaseUrl" .)
@@ -36,7 +37,8 @@ window.__ACS_CYMRU_CONFIG__ = window.__ACS_CYMRU_CONFIG__ || {
   .Values.frontend.githubRepoUrl
   (include "acs-cymru.grafanaUrl" .)
   .Values.supabaseStorage.bucket
-  .Values.supabaseStorage.gatewayBackupBucket -}}
+  .Values.supabaseStorage.gatewayBackupBucket
+  .Values.supabaseStorage.captureBucket -}}
 ---
 {{/*
 =================================================================================================

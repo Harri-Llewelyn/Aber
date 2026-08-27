@@ -292,3 +292,115 @@ BEGIN
 
   RAISE NOTICE 'gateway-backups policies reconciled (4 policies; Auditor read-only).';
 END $$;
+
+-- =============================================================================================
+-- broker-captures -- recorded Sparkplug traffic, for playback
+-- =============================================================================================
+--
+-- Modelled on gateway-backups above, with the same four policies, the same role split and the same
+-- prefix rule -- and the differences are worth naming rather than left to be inferred.
+--
+-- WHAT IS IN ONE OF THESE FILES. A capture is a recording of what the plant actually said: every
+-- edge node and device id that spoke during the window, every metric name, and the values. A
+-- flows.json describes what the edge is CONFIGURED to do; a capture shows what it DID. So the
+-- privacy argument for the bucket above applies here at least as strongly.
+--
+-- THE PREFIX IS THE GATEWAY IT PLAYS BACK AS, NOT THE ONE IT WAS RECORDED FROM, and those are
+-- different by construction. `capture.py play` cannot publish under a recorded identity --
+-- mosquitto.acl pins the topic's edge-node segment to the connecting username -- so a capture is
+-- always rewritten onto one gateway's own assets. Filing it under that gateway is the only prefix
+-- that is a fact about the file rather than a guess.
+--
+-- A CONSEQUENCE THAT IS NOT A LEAK: a capture filed under gateway A can name gateway B, because it
+-- records whatever was on the wire. The roles admitted here -- Administrator, Shopfloor_Manager,
+-- Auditor -- can already enumerate the whole fleet through the directory, so this reveals nothing
+-- the reader could not already look up. It IS the reason nobody below them can read the bucket.
+--
+-- AUDITOR IS READ ONLY, re-asserted by the reconcile block at the end of this file for the same
+-- reason it is asserted for the bucket above: an auditor who can overwrite a capture can edit the
+-- evidence they exist to examine, and nothing would ever error.
+-- =============================================================================================
+
+DROP POLICY IF EXISTS "broker_captures_read_privileged" ON storage.objects;
+CREATE POLICY "broker_captures_read_privileged" ON storage.objects
+  FOR SELECT TO authenticated
+  USING (
+    bucket_id = 'broker-captures'
+    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager', 'Auditor'])
+  );
+
+DROP POLICY IF EXISTS "broker_captures_insert_privileged" ON storage.objects;
+CREATE POLICY "broker_captures_insert_privileged" ON storage.objects
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    bucket_id = 'broker-captures'
+    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    -- storage.objects.name, QUALIFIED: public.gateways has a `name` column of its own and would
+    -- otherwise capture this reference. Same trap as the bucket above documents at length.
+    AND EXISTS (
+      SELECT 1 FROM public.gateways g
+       WHERE g.sparkplug_id = (storage.foldername(storage.objects.name))[1]
+    )
+  );
+
+-- UPDATE covers `upsert: true`. Both halves are gated: USING decides which existing objects may be
+-- targeted, WITH CHECK what the result may look like -- so an update cannot move an object out
+-- from under the prefix rule the insert enforced.
+DROP POLICY IF EXISTS "broker_captures_update_privileged" ON storage.objects;
+CREATE POLICY "broker_captures_update_privileged" ON storage.objects
+  FOR UPDATE TO authenticated
+  USING (
+    bucket_id = 'broker-captures'
+    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+  )
+  WITH CHECK (
+    bucket_id = 'broker-captures'
+    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    AND EXISTS (
+      SELECT 1 FROM public.gateways g
+       WHERE g.sparkplug_id = (storage.foldername(storage.objects.name))[1]
+    )
+  );
+
+DROP POLICY IF EXISTS "broker_captures_delete_privileged" ON storage.objects;
+CREATE POLICY "broker_captures_delete_privileged" ON storage.objects
+  FOR DELETE TO authenticated
+  USING (
+    bucket_id = 'broker-captures'
+    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+  );
+
+
+-- ---------------------------------------------------------------------------------------------
+-- Reconcile: broker-captures
+-- ---------------------------------------------------------------------------------------------
+DO $$
+DECLARE
+  v_policies       integer;
+  v_auditor_writes integer;
+BEGIN
+  SELECT count(*) INTO v_policies FROM pg_policies
+   WHERE schemaname = 'storage' AND tablename = 'objects'
+     AND policyname LIKE 'broker_captures_%';
+  IF v_policies <> 4 THEN
+    RAISE EXCEPTION
+      'broker-captures has % policy/policies, expected 4 (select, insert, update, delete). A '
+      'missing one does not error -- storage.objects is RLS-enabled, so the operation simply '
+      'stops working for everyone, which reads as a broken upload rather than a missing policy.',
+      v_policies;
+  END IF;
+
+  SELECT count(*) INTO v_auditor_writes FROM pg_policies
+   WHERE schemaname = 'storage' AND tablename = 'objects'
+     AND policyname LIKE 'broker_captures_%'
+     AND cmd <> 'SELECT'
+     AND (qual LIKE '%Auditor%' OR with_check LIKE '%Auditor%');
+  IF v_auditor_writes <> 0 THEN
+    RAISE EXCEPTION
+      '% broker_captures_* write policy/policies name Auditor. Auditor is READ ONLY on this '
+      'bucket -- write authority is Administrator and Shopfloor_Manager only.', v_auditor_writes;
+  END IF;
+
+  RAISE NOTICE 'broker-captures policies reconciled (4 policies; Auditor read-only).';
+END $$;
+

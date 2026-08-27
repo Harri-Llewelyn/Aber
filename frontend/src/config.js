@@ -48,6 +48,7 @@ export const RUNTIME_SETTING_NAMES = [
   // component nobody had listed as a consumer.
   'VITE_MODEL_3D_BUCKET',
   'VITE_GATEWAY_BACKUP_BUCKET',
+  'VITE_CAPTURE_BUCKET',
 ];
 
 /**
@@ -66,6 +67,7 @@ const BUILD_TIME_SETTINGS = {
   VITE_GRAFANA_URL: import.meta.env.VITE_GRAFANA_URL,
   VITE_MODEL_3D_BUCKET: import.meta.env.VITE_MODEL_3D_BUCKET,
   VITE_GATEWAY_BACKUP_BUCKET: import.meta.env.VITE_GATEWAY_BACKUP_BUCKET,
+  VITE_CAPTURE_BUCKET: import.meta.env.VITE_CAPTURE_BUCKET,
 };
 
 /**

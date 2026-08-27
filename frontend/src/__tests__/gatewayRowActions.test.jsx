@@ -94,7 +94,11 @@ describe('gateway row actions', () => {
 
     expect(panel.getByText(/View Digital Thread/i)).toBeTruthy()
     expect(panel.getByText(/Manage Links/i)).toBeTruthy()
-    expect(panel.getByText(/Edit Details/i)).toBeTruthy()
+    // EXACT, matching the three other assertions about this action in this file. The loose regex
+    // this replaces did substring matching across the whole panel, so it broke the moment another
+    // component in the drawer mentioned the control by name in its prose -- which is a false
+    // failure about an action that is still there.
+    expect(panel.getByText('Edit Details')).toBeTruthy()
   })
 
   it('promotes Restore into the row for an archived gateway', async () => {

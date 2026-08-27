@@ -610,6 +610,12 @@ supabaseStorage:
   # Its own limit, deliberately not fileSizeLimit: that one is sized for 3D geometry, and a
   # flows.json anywhere near 50 MiB is not a flow.
   gatewayBackupFileSizeLimit: 5242880
+  # Broker captures -- recorded Sparkplug traffic for playback, under <sparkplug_id>/ of the
+  # gateway a capture plays back AS. Same must-match-storage-policies.sql rule as above.
+  captureBucket: broker-captures
+  # 25 MiB: sized from the fleet's measured 0.95 msg/s, so a full working day fits. Not
+  # gatewayBackupFileSizeLimit, which at 5 MiB would refuse an ordinary morning's capture.
+  captureFileSizeLimit: 26214400
   # file | s3. s3 (MinIO or cloud) is the better production answer and removes the single-writer
   # constraint; file is the default. See docs/kubernetes-architecture.md §4.4 and §11.
   backend: file
