@@ -158,13 +158,32 @@ describe('grafanaAlertUrl', () => {
    * round trip through the query string intact. A rule renamed to carry a character that needs
    * escaping would otherwise produce a link that silently matched nothing.
    */
+  /*
+   * BOTH RULE FILES, and reading only the provisioned one is what broke this. Roadmap §14 moved the
+   * three MACHINE rules into `simulation/grafana/alerting/shopfloor-alert-rules.yaml` -- they
+   * evaluate machine telemetry at a demonstrator's 10-second interval, so they are opt-in with the
+   * rest of the simulator -- and these three titles are exactly those rules. The assertion went on
+   * naming a file they had left.
+   *
+   * IT IS THE SAME MISS AS check-docs-drift's metric-name check, which had to learn the same thing
+   * in the same commit. Two guards over one pair of files, and only one of them was updated.
+   *
+   * The demonstrator's file is read even though it is NOT PROVISIONED by default: a rule title that
+   * cannot survive a round trip through a query string is broken whether or not it is currently
+   * loaded, and the point of keeping the file in the repository is that enabling it is a copy.
+   */
+  const ALERT_RULE_FILES = [
+    '../../../grafana/provisioning/alerting/alert-rules.yaml',
+    '../../../simulation/grafana/alerting/shopfloor-alert-rules.yaml',
+  ]
+
   it.each(['Thermal Excursion', 'Emergency Stop Engaged', 'Low OEE Availability'])(
-    'round-trips %s from alert-rules.yaml',
+    'round-trips %s from the alert rule files',
     (title) => {
-      const rules = fs.readFileSync(
-        path.resolve(__dirname, '../../../grafana/provisioning/alerting/alert-rules.yaml'), 'utf8'
-      )
-      expect(rules, `${title} is not a rule title in alert-rules.yaml`).toContain(`title: ${title}`)
+      const rules = ALERT_RULE_FILES
+        .map(rel => fs.readFileSync(path.resolve(__dirname, rel), 'utf8'))
+        .join('\n')
+      expect(rules, `${title} is not a rule title in either alert-rules file`).toContain(`title: ${title}`)
       const href = grafanaAlertUrl(title)
       expect(decodeURIComponent(new URL(href).searchParams.get('search'))).toBe(`rule:"${title}"`)
     }
