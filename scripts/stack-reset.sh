@@ -247,9 +247,14 @@ else
     ' .env.gateways .env > .env.reset.tmp && mv .env.reset.tmp .env
     echo "    .env updated from .env.gateways"
 
-    # Node-RED was started before those credentials existed, so it is holding the old ones.
-    step "Reseeding Node-RED with the new credentials"
-    NODE_RED_FORCE_SEED=true docker compose up -d --force-recreate node-red-init node-red
+    # Node-RED was started before those credentials existed, so it is holding the old ones -- and
+    # before §14 it was also started with NO SIMULATOR FLOW AT ALL, which is the default now. Both
+    # flags are needed and they do different things: SEED_SIMULATOR chooses the demonstrator's flow
+    # over the starter flow, FORCE_SEED overrides the first-run-only guard on a volume that has
+    # already been seeded once. Either alone leaves the reset without a publishing simulator.
+    step "Seeding Node-RED with the simulator flow and the new credentials"
+    NODE_RED_SEED_SIMULATOR=true NODE_RED_FORCE_SEED=true \
+      docker compose up -d --force-recreate node-red-init node-red
   fi
 
   # -----------------------------------------------------------------------------------------

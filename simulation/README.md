@@ -27,7 +27,10 @@ physical hardware. It just has nothing to publish about until the assets exist.
 
 ## Turning the demonstrator on
 
-Three things are opt-in, and they are separate because they fail separately.
+**Four things are opt-in, and they are separate because they fail separately.** Steps 1 and 2 are
+the ones that matter; 3 and 4 are Grafana surfaces you can add whenever.
+
+The order of 1 and 2 is not arbitrary — see the note under step 2.
 
 ### 1. The assets — four cells, four gateways, six devices
 
@@ -51,7 +54,34 @@ docker compose restart node-red     # after updating .env from .env.gateways
 `npm run stack:reset` does all of this for you, including replaying the seed afterwards so the
 Digital Thread's causation demonstration has a subject.
 
-### 2. The Grafana dashboard
+### 2. The Node-RED flow
+
+**Node-RED comes up blank.** The editor opens on a one-node *Start here* tab that declares no broker
+nodes and connects to nothing, so a stack nobody has provisioned publishes nothing at all.
+
+```bash
+NODE_RED_SEED_SIMULATOR=true NODE_RED_FORCE_SEED=true \
+  docker compose up -d --force-recreate node-red-init node-red
+```
+
+Two flags, doing different jobs: `SEED_SIMULATOR` chooses the demonstrator's flow over the starter
+flow, and `FORCE_SEED` overrides the first-run-only guard on a volume that has already been seeded.
+The flow is user content, so it is seeded once and then left alone — `FORCE_SEED` is what says *yes,
+overwrite my editor changes*. On a genuinely fresh volume the first flag alone is enough.
+
+**Do step 1 first.** The flow declares four `mqtt-broker` nodes, and `node-red-init` **fails closed**
+when a broker node names a credential pair that is not set — it refuses to start rather than seed a
+connection that cannot authenticate. That is deliberate: the alternative is an empty username, which
+Mosquitto refuses with CONNACK 5 while Node-RED reports only `Connection failed to broker`, naming
+the client id and not the username.
+
+This is also why `npm run setup` no longer mints four gateway passwords. It used to have to: the
+flow was seeded unconditionally, so four credentials were mandatory before a stack existed to
+provision them against — a deadlock that made `docker compose up` exit 1 on
+`service "node-red-init" didn't complete successfully`. With the flow opt-in there are no broker
+nodes by default, so there is nothing to require.
+
+### 3. The Grafana dashboard
 
 Not provisioned by default, because its panels hardcode `Sim_CNC_Mill_01` — on an install running
 real plant it named a machine that does not exist, in a folder an operator would reasonably read as
@@ -62,7 +92,7 @@ cp simulation/grafana/dashboards/*.json grafana/provisioning/dashboards/shopfloo
 docker compose restart grafana
 ```
 
-### 3. The machine alert rules
+### 4. The machine alert rules
 
 Thermal Excursion, Emergency Stop Engaged and Low OEE Availability. They evaluate machine telemetry
 at a 10-second interval, which the group's own comment has always admitted is a demonstrator setting
@@ -82,21 +112,35 @@ onboarding real plant wants them — they just should not arrive before there is
 
 ### On Kubernetes
 
-Steps 2 and 3 are one values flag, because the chart bakes its files in rather than mounting them:
+Steps 2, 3 and 4 are values flags, because the chart bakes its files in rather than mounting them:
 
 ```bash
 helm upgrade acs-cymru deploy/helm/acs-cymru --reuse-values \
+  --set simulation.nodeRed.enabled=true \
   --set simulation.grafana.enabled=true
 ```
 
 Step 1 is unchanged — `npm run provision:gateways -- --target=k8s`.
 
-### What you get instead if you skip all three
+**`simulation.nodeRed.enabled` has the same first-run-only caveat**, and it bites harder here because
+there is no `FORCE_SEED` equivalent to pass on the command line. Flipping it on an install whose PVC
+has already been seeded changes nothing until that volume is re-seeded. That is the guard protecting
+editor changes doing its job, not the flag failing.
 
-An empty shopfloor and a working quarantine queue. Publish under any well-formed `dev`-prefixed id
-and the device is held for approval, which is the zero-touch onboarding path and is now the **first**
-thing a new user meets rather than a footnote. That is better teaching than a floor that was already
-there when you arrived.
+### What you get instead if you skip all four
+
+A blank canvas. No cells, no gateways, no devices, nothing publishing, and a Digital Thread that
+records only what you do next.
+
+The quarantine queue still works, and it is now the **first** thing a new user meets rather than a
+footnote: publish under any well-formed `dev`-prefixed id and the device is held for approval. That
+is the zero-touch onboarding path, and it teaches better than a floor that was already there when
+you arrived.
+
+**Nothing is dropped on the floor in the meantime.** Before this, a default stack ran the simulator
+against four gateway identities that did not exist, so ingestion logged *"unregistered edge node"* on
+a throttle and discarded every message — gateways are never auto-created. Correct behaviour, and an
+odd thing for a stack to be doing before anyone had asked it for anything.
 
 ---
 

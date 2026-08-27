@@ -1008,6 +1008,17 @@ frontend:
 # with no series and three rules in NoData -- which is the honest outcome, and the reason this is
 # not defaulted on.
 simulation:
+  # The Node-RED flow. Off, the editor opens on a one-node "Start here" tab that declares no broker
+  # nodes and connects to nothing. On, it seeds the demonstrator's four-gateway simulator -- which
+  # needs the four MQTT_GW_* credential pairs in the chart Secret, because node-red-init FAILS
+  # CLOSED on a broker node whose declared pair is absent.
+  #
+  # THE PVC IS SEEDED FIRST-RUN-ONLY, because the flow is user content. Flipping this on an
+  # existing install therefore changes nothing until the volume is re-seeded; that is the same
+  # NODE_RED_FORCE_SEED guard Compose has, and it is protecting editor changes rather than being
+  # awkward.
+  nodeRed:
+    enabled: false
   grafana:
     enabled: false
 

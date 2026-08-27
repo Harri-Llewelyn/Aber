@@ -626,12 +626,19 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
   with it `auth.sessions`. The dashboard clears the stale tokens and returns to the login screen.
 - **Swagger UI's "Example Value" is documentation, not data.** Press **Execute** and read the
   **Response body** panel.
-- **A fresh install has no cells, no gateways and no devices, and that is the point.** It used to
-  come up with a four-cell simulated shopfloor seeded by `0002`, which meant every install began
-  with assets nobody had asked for and a Digital Thread already describing them. The floor is now
-  opt-in: `npm run provision:gateways` creates it, and
-  [`simulation/README.md`](simulation/README.md) walks through building one machine by hand
-  instead. `0040` retires it from databases that already have it, once.
+- **A fresh install has no cells, no gateways and no devices, and Node-RED opens on a blank
+  canvas.** It used to come up with a four-cell simulated shopfloor seeded by `0002` and a Node-RED
+  publishing under four gateway identities, which meant every install began with assets nobody had
+  asked for and a Digital Thread already describing them. Both halves are now opt-in:
+  `npm run provision:gateways` creates the floor, `NODE_RED_SEED_SIMULATOR=true` seeds the flow, and
+  `npm run stack:reset` does the whole sequence in one command.
+  [`simulation/README.md`](simulation/README.md) is the tutorial. `0040` retires the seed from
+  databases that already have it, once.
+- **Node-RED's editor shows one "Start here" tab and nothing else.** That is the starter flow, not a
+  failed mount — it declares no broker nodes, so nothing connects and nothing publishes. The tab's
+  info panel carries the three steps. Before this, a default stack ran the simulator against
+  gateways that did not exist and ingestion discarded every message as an *"unregistered edge
+  node"* — correct behaviour, and an odd thing to be doing before anyone had asked for it.
 - **An unrecognised device appears in the quarantine queue, not on the shopfloor map.** That is the
   zero-touch onboarding path working: a device that announces itself under an id nobody registered
   is held and its telemetry dropped until an `Administrator` approves it. With no seeded assets
@@ -1228,6 +1235,23 @@ three machine alert rules, each independently opt-in because each fails independ
 gained the schema attachments, so a device is complete the moment it is created rather than at the
 next boot. The two conformance suites had already been moved onto their own fixture in the commit
 before, which is what made the seed removable at all.
+
+**And the flow itself, which was the last thing still generating.** An empty database was not yet a
+blank canvas: `node-red-init` seeded the simulator on every start, so a fresh stack came up
+publishing under four gateway identities that did not exist. Nothing was created by it — ingestion
+never auto-creates a gateway, so every message was logged as an *"unregistered edge node"* and
+discarded — but a stack running a simulator against nothing, before anyone had asked it for
+anything, is not what "installs blank" means. Node-RED now seeds a one-node **Start here** flow, and
+`NODE_RED_SEED_SIMULATOR` chooses the demonstrator's instead.
+
+**That change removed a deadlock rather than working around one, which is why it is small.**
+`npm run setup` used to mint four gateway passwords eagerly, and `setup.mjs` explained why at
+length: `node-red-init` fails closed when a broker node declares a credential pair it cannot find,
+and it runs during the very `docker compose up` that would bring up the stack provisioning needs.
+The forcing function was the FLOW being unconditional — four broker nodes, four mandatory
+credentials. With the flow opt-in there are no broker nodes by default, so nothing requires a
+credential, `setup` mints none, and `mosquitto-init` creates no accounts for gateways that do not
+exist. One change, three things stopped happening.
 
 **The one-shot problem was the substance of it, and is worth recording because it recurs.** Every
 migration here is replayed on every boot with no applied-migrations ledger, so the house rule is
