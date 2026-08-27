@@ -3,8 +3,21 @@ import { useEffect, useRef } from 'react'
 /**
  * The ambient canvas behind the sign-in card.
  *
- * Adapted from the Codrops "Pipeline" ambient background. Four things changed on the way in, and
- * each is a correctness or fitness issue rather than taste:
+ * Adapted from the Codrops "Pipeline" ambient canvas background.
+ *
+ * PROVENANCE AND LICENCE, recorded here because it is the thing that gets lost first. Codrops
+ * permits the resource to be used freely where it is "integrated or built upon" in personal or
+ * commercial projects including web apps, which is this. What it forbids is taking the resource
+ * as-is and selling, redistributing or re-publishing it, or selling pluginized versions -- none of
+ * which is what a sign-in background inside a larger application does. The visible-mention clause
+ * is scoped to FREE PLUGINS built on the resource, so it does not reach this; the credit above is
+ * kept because attribution is right, not because the licence compels it.
+ *
+ * The licence also says to consider the licences of everything the resource bundles. The only one
+ * was `noise.min.js` (simplex-noise), and point 4 below is that this effect never referenced it --
+ * so it is not imported and there is nothing further to check.
+ *
+ * Four things changed on the way in, and each is a correctness or fitness issue rather than taste:
  *
  *   1. IT IS A COMPONENT, NOT A SCRIPT. The original declares module-level `let`s, binds to
  *      `window.load`, and runs a requestAnimationFrame loop that nothing ever stops. Dropped into
