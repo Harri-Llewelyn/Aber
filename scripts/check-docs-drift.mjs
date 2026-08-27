@@ -583,6 +583,12 @@ function edgeFunctionNames() {
       + 'connection, never over PostgREST. The browser reads the same facts from `gateways` and '
       + '`gateway_status` with RLS applied, which is why publishing a second, RLS-free path to '
       + 'them would be a downgrade rather than a convenience',
+  one_shot_migrations:
+      'The ledger for migrations that must run EXACTLY ONCE rather than on every boot like the '
+      + 'rest of the chain (0040). RLS on with no policy at all and the anon/authenticated grants '
+      + 'revoked, so nothing outside a migration can see it -- and a published path would invite '
+      + 'a caller to delete a row, which is how you get a one-shot migration to run a second time '
+      + 'and re-delete assets an operator has since provisioned on purpose',
   };
 
   const spec = read('docs/openapi.yaml');
@@ -1073,29 +1079,38 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 12. The seeded demonstrator asset agrees with provision-gateways.mjs.
+// 12. `provision-gateways.mjs` owns the demonstration floor, and three files have to agree with it.
 //
-// `0002_seed_data.sql` and `scripts/provision-gateways.mjs` both register the machining cell's
-// gateway and its first CNC, and they have to, for reasons that pull in opposite directions:
+// THE DUPLICATION THIS USED TO POLICE IS GONE, and what replaced it is worth stating because the
+// check inverts rather than disappears. `0002_seed_data.sql` used to seed the same four gateways
+// and six devices the provisioning script creates, so that a row existed wherever the migrations
+// had run -- the Kubernetes path never runs a Compose-side script, and the AAS conformance suite
+// targeted `Sim_CNC_Mill_01` by name. Both halves of that argument have since expired: the suite
+// provisions its own subject through tests/aas_fixture.py, and roadmap §14 makes the floor opt-in
+// because it appeared on every start and, in the words of the person who asked, polluted the
+// Digital Thread.
 //
-//   * PROVISIONING owns the topology. It creates all four gateways, their cells and -- the part
-//     nothing else can do -- a Mosquitto account per gateway, without which a gateway row is a
-//     device that can never connect.
-//   * THE SEED owns existence. Provisioning is a Compose-side script; the Kubernetes path never
-//     runs it, so a row that lives only there does not exist in CI. The AAS conformance suite
-//     targets `Sim_CNC_Mill_01` and asserts against the document it composes, so it needs that
-//     device to be present wherever the migrations have run.
+// So provisioning is now the SOLE owner, and the agreements that matter are:
 //
-// The duplication is therefore deliberate and narrow -- one gateway and one device, not the whole
-// floor -- and this is what keeps it honest. The failure it exists to prevent is quiet: rename the
-// device in provisioning alone and CI still passes (the seeded row is what the suite finds), while
-// every stack that has ever run provisioning carries TWO devices, one of them a duplicate nobody
-// publishes to. `sparkplug_id` is generated from the UUID, so a diverged id is a diverged wire
-// identity as well as a diverged row.
+//   1. 0002 MUST NOT carry the floor any more. A re-seeded row would come back on every boot
+//      underneath a retirement that reported success, which is the failure §14 exists to remove
+//      and would look exactly like it had not been done.
+//   2. 0040 MUST retire every row provisioning owns. A gateway added to the script and missed
+//      there survives the retirement -- one asset on an otherwise empty shopfloor, with nothing
+//      to say why it is the one that stayed.
+//   3. 0022's class-schema attachments MUST match the script's `schemas` lists. Both attach, for
+//      different stacks and at different moments, and a device the script attaches nothing to is
+//      one whose schema arrives only at the next boot -- a blank Configuration Parameters modal,
+//      an AAS shell with no telemetry aspect, and unmodelled detection silently inert until
+//      somebody happens to restart.
+//
+// `sparkplug_id` is generated from the UUID throughout, so a diverged id is a diverged wire
+// identity and not merely an untidy row.
 // -------------------------------------------------------------------------------------------------
 {
   const prov = read('scripts/provision-gateways.mjs');
   const seed = read('supabase/migrations/0002_seed_data.sql');
+  const retire = read('supabase/migrations/0040_retire_demonstration_seed.sql');
 
   // EVERY gateway and EVERY device, not just the first pair. Matched structurally rather than by
   // name, so a rename shows up as a mismatch here instead of making the pattern silently match
@@ -1114,28 +1129,43 @@ function edgeFunctionNames() {
         '      shape, so the seed-vs-provisioning agreement is no longer being checked at all.'
     );
   } else {
-    const absent = [];
-    for (const [, id, name] of gateways) {
-      if (!seed.includes(id)) absent.push(`gateway id ${id} (${name})`);
-      if (!seed.includes(name)) absent.push(`gateway name ${name}`);
-    }
-    for (const [, id, name] of devices) {
-      if (!seed.includes(id)) absent.push(`device id ${id} (${name})`);
-      if (!seed.includes(name)) absent.push(`device name ${name}`);
+    // 12a. THE SEED MUST NOT CARRY THE FLOOR. Matched on the pinned ids, which is the part that
+    // cannot be re-introduced by accident under another name.
+    const reseeded = [...gateways, ...devices]
+      .filter(([, id]) => seed.includes(id))
+      .map(([, id, name]) => `${name} (${id})`);
+
+    if (reseeded.length) {
+      fail(
+        `0002_seed_data.sql seeds ${reseeded.join(', ')} again.\n` +
+          '      Roadmap §14 retired the demonstration floor from the seed so a fresh install comes\n' +
+          '      up empty. A row seeded here returns on EVERY boot, underneath 0040, which would\n' +
+          '      report a successful retirement of assets that are back before anyone looks.'
+      );
+    } else {
+      pass('0002_seed_data.sql seeds none of the demonstration floor (roadmap §14)');
     }
 
-    if (absent.length) {
+    // 12b. THE RETIREMENT MUST COVER ALL OF IT.
+    const unretired = [];
+    for (const [, id, name] of gateways) {
+      if (!retire.includes(id)) unretired.push(`gateway ${name} (${id})`);
+    }
+    for (const [, id, name] of devices) {
+      if (!retire.includes(id)) unretired.push(`device ${name} (${id})`);
+    }
+
+    if (unretired.length) {
       fail(
-        `0002_seed_data.sql does not carry provision-gateways.mjs's ${absent.join(', ')}.\n` +
-          '      The seed and the provisioning script must register the SAME rows: they both write\n' +
-          '      them, and a divergence yields two gateways or two devices where the demonstrator\n' +
-          '      expects one -- with the wrong one holding the broker credential. A diverged id is\n' +
-          '      a diverged sparkplug_id, so it is a diverged wire identity too.'
+        `0040_retire_demonstration_seed.sql does not retire ${unretired.join(', ')}.\n` +
+          '      Every row provision-gateways.mjs owns has to be in the retirement, or a stack that\n' +
+          '      upgrades keeps exactly the assets the migration claims to have removed -- and it\n' +
+          '      records itself as applied, so it never looks at them again.'
       );
     } else {
       pass(
-        `0002 seeds all ${gateways.length} gateways and ${devices.length} devices from ` +
-          'provision-gateways.mjs at the same pinned ids'
+        `0040 retires all ${gateways.length} gateways and ${devices.length} devices ` +
+          'provision-gateways.mjs owns'
       );
     }
 
@@ -1157,6 +1187,66 @@ function edgeFunctionNames() {
     } else {
       pass(`0022 attaches a class schema to all ${devices.length} simulated devices`);
     }
+
+    // 12c. AND THE SCRIPT ATTACHES THE SAME ONES. 0022 addresses schemas by pinned id and the
+    // script by `schema_name`, so the two are joined through 0022's own INSERT -- which is the
+    // only place both appear together.
+    const schemaNames = new Map(
+      [...classSchemas.matchAll(/'(aa[0-9a-f-]{34})',\s*\n\s*'(\w+)',/g)]
+        .map(([, id, name]) => [id, name])
+    );
+    const expected = new Map();
+    for (const [, deviceId, schemaId] of classSchemas.matchAll(
+      /\('([0-9a-f-]{36})'::uuid,\s*'([0-9a-f-]{36})'::uuid\)/g
+    )) {
+      if (!schemaNames.has(schemaId)) continue;
+      if (!expected.has(deviceId)) expected.set(deviceId, []);
+      expected.get(deviceId).push(schemaNames.get(schemaId));
+    }
+
+    // Read the script's own lists. A device with no `schemas:` key at all reads as an empty list
+    // and is reported below rather than skipped -- the omission IS the finding.
+    const declared = new Map(
+      [...prov.matchAll(
+        /\{\s*\n?\s*id:\s*'([0-9a-f-]{36})',\s*name:\s*'Sim_[^']+',[\s\S]{0,200}?\}/g
+      )].map((match) => [
+        match[1],
+        [...match[0].matchAll(/'(\w+_Schema)'/g)].map(([, name]) => name),
+      ])
+    );
+
+    if (schemaNames.size === 0 || expected.size === 0) {
+      fail(
+        'could not read the schema names or the device/schema attachment pairs out of\n' +
+          '      0022_complete_device_schemas.sql. Its INSERT or its attachment VALUES list changed\n' +
+          '      shape, so provisioning is no longer being checked against it at all.'
+      );
+    } else {
+      const mismatched = [];
+      for (const [deviceId, names] of expected) {
+        const have = declared.get(deviceId) || [];
+        const missing = names.filter((n) => !have.includes(n));
+        if (missing.length) {
+          const device = devices.find(([, id]) => id === deviceId);
+          mismatched.push(`${device ? device[2] : deviceId} is missing ${missing.join(', ')}`);
+        }
+      }
+
+      if (mismatched.length) {
+        fail(
+          `provision-gateways.mjs does not attach every schema 0022 does: ${mismatched.join('; ')}.\n` +
+            '      The script is how the floor arrives now, and the migration only reaches a device\n' +
+            '      that already exists -- so a schema listed in one and not the other appears on the\n' +
+            '      NEXT boot rather than at provisioning time, and until then the device has a blank\n' +
+            '      Configuration Parameters modal and exports no telemetry aspect.'
+        );
+      } else {
+        pass(
+          `provision-gateways.mjs attaches every one of 0022's ${expected.size} class-schema ` +
+            'bindings at provisioning time'
+        );
+      }
+    }
   }
 
   // The AAS suite's default target must be a device that is actually seeded. Its `LIVE` guard
@@ -1166,35 +1256,62 @@ function edgeFunctionNames() {
   //
   // Checked against the WHOLE device list rather than the first entry, so re-ordering the topology
   // is not a failure. What matters is that the name resolves to something the migrations create.
+  // THE ASSERTION IS INVERTED FROM WHAT IT WAS, and the inversion is roadmap §14.
+  //
+  // It used to require that the AAS suite target one of the SEEDED devices -- because it did, and a
+  // rename would have emptied the suite rather than failing it. The suites now provision their own
+  // subject through tests/aas_fixture.py, for the reason 0020 records: a conformance suite that
+  // depends on demo data stops testing the moment the demo changes, and says nothing while it does.
+  //
+  // So what is checked now is that they have NOT drifted back: an `AAS_TEST_DEVICE` default naming
+  // a seeded device would silently re-couple them, and would pass every test in both suites.
   const seededNames = devices.map(([, , name]) => name);
   const aas = read('supabase/functions/aas-export/test_aas_export.py');
-  const target = /AAS_TEST_DEVICE",\s*"([^"]+)"/.exec(aas);
-  if (!target) {
-    fail('test_aas_export.py no longer declares an AAS_TEST_DEVICE default');
-  } else if (seededNames.length && !seededNames.includes(target[1])) {
-    fail(
-      `test_aas_export.py targets '${target[1]}', which is not one of the seeded devices ` +
-        `(${seededNames.join(', ')}).\n` +
-        '      The live checks resolve the device by name and SKIP THEMSELVES when it is absent,\n' +
-        '      so this drift does not fail the suite -- it empties it.'
-    );
-  } else if (seededNames.length) {
-    pass(`test_aas_export.py targets a seeded device (${target[1]})`);
+  const api = read('supabase/functions/aas-api/test_aas_api.py');
+
+  for (const [file, text] of [
+    ['test_aas_export.py', aas],
+    ['test_aas_api.py', api],
+  ]) {
+    const target = /AAS_TEST_DEVICE",\s*"([^"]*)"/.exec(text);
+    if (!target) {
+      fail(`${file} no longer declares an AAS_TEST_DEVICE default -- the escape hatch is gone`);
+    } else if (target[1] === '') {
+      if (!text.includes('aas_fixture')) {
+        fail(
+          `${file} defaults AAS_TEST_DEVICE to empty but does not import aas_fixture, so it has ` +
+            'no subject at all and every live check skips itself.'
+        );
+      } else {
+        pass(`${file} provisions its own subject rather than targeting seeded data`);
+      }
+    } else if (seededNames.includes(target[1])) {
+      fail(
+        `${file} defaults AAS_TEST_DEVICE to '${target[1]}', a SEEDED device. Roadmap §14 removes ` +
+          'the seed; a conformance suite pointed at it empties itself rather than failing.\n' +
+          '      Leave the default empty and let tests/aas_fixture.py provision the subject.'
+      );
+    } else {
+      pass(`${file} targets '${target[1]}', which is not seeded data`);
+    }
   }
 
-  // The chart's e2e Job passes the same name explicitly, so it can drift independently of the
-  // default above.
+  // The chart's e2e Job can pin the name independently of the defaults above, so it is checked
+  // separately -- and must now NOT pin one, for the same reason.
   const job = read('deploy/helm/acs-cymru/templates/jobs/e2e-aas-export-job.yaml');
   const jobTarget = /name:\s*AAS_TEST_DEVICE\s*\n\s*value:\s*(\S+)/.exec(job);
-  if (jobTarget && seededNames.length && !seededNames.includes(jobTarget[1])) {
+  if (jobTarget && seededNames.includes(jobTarget[1])) {
     fail(
-      `e2e-aas-export-job.yaml sets AAS_TEST_DEVICE=${jobTarget[1]}, which is not one of the ` +
-        `seeded devices (${seededNames.join(', ')}).`
+      `e2e-aas-export-job.yaml pins AAS_TEST_DEVICE=${jobTarget[1]}, a seeded device. The Job ` +
+        'should let the suite provision its own subject, as the suite now does everywhere else.'
     );
   } else if (jobTarget) {
-    pass(`the chart's AAS e2e Job targets a seeded device (${jobTarget[1]})`);
+    pass(`the chart's AAS e2e Job pins '${jobTarget[1]}', which is not seeded data`);
+  } else {
+    pass("the chart's AAS e2e Job lets the suite provision its own subject");
   }
 }
+
 
 // -------------------------------------------------------------------------------------------------
 // 13. Every metric name a Grafana alert rule queries exists in `metric_catalog`.
@@ -1214,8 +1331,21 @@ function edgeFunctionNames() {
 // how a guard stops being trusted.
 // -------------------------------------------------------------------------------------------------
 {
-  const RULES = 'grafana/provisioning/alerting/alert-rules.yaml';
-  const rules = read(RULES);
+  // BOTH RULE FILES, and reading only the first would have quietly emptied this check. Roadmap §14
+  // split the three MACHINE rules out into simulation/ -- and those are the only rules that name a
+  // metric at all, because the platform and ingestion groups count rows and read views. Pointed at
+  // the provisioning directory alone it finds zero metric names and reports the absence as a shape
+  // change rather than as what it is: the rules moved. (It did exactly that, once, on the commit
+  // that moved them.)
+  //
+  // The demonstrator's file is NOT provisioned by default, and it is checked anyway. A rule is
+  // wrong in the same way whether or not it is currently loaded, and the whole point of keeping it
+  // in the repository is that enabling it is a copy rather than a rewrite.
+  const RULES = [
+    'grafana/provisioning/alerting/alert-rules.yaml',
+    'simulation/grafana/alerting/shopfloor-alert-rules.yaml',
+  ];
+  const rules = RULES.map(read).join('\n');
 
   // `metric_name = 'X'` and `metric_name IN ('X', 'Y')` are the only two shapes the rules use.
   const named = new Set();
@@ -1225,7 +1355,7 @@ function edgeFunctionNames() {
 
   if (named.size === 0) {
     fail(
-      `no metric names found in ${RULES}. The rules changed shape, so the catalog agreement is no\n` +
+      `no metric names found in ${RULES.join(' or ')}. The rules changed shape, so the catalog agreement is no\n` +
         '      longer being checked -- and a misspelled metric evaluates an empty series in silence.'
     );
   } else {

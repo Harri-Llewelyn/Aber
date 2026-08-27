@@ -20,7 +20,7 @@
 -- standalone. An absent secret leaves the corresponding path SHUT, not open -- see the WARNINGs.
 --
 -- What was open before this, and why the webhook token is a capability rather than a credential:
---   simulators/README.md -> "Node-RED authentication"
+--   simulation/README.md -> "Node-RED authentication"
 -- =============================================================================================
 
 \if :{?nodered_oauth_client_secret} \else \set nodered_oauth_client_secret '' \endif
@@ -113,7 +113,7 @@ SELECT set_config('acs_cymru.nodered_oauth_client_secret', '', false);
 -- the edge host by way of a `function` node. HS256 because pgjwt implements only the HS family.
 --
 -- Why the two must not be merged back, and why nodered_admin_token survives as break-glass:
---   simulators/README.md -> "Node-RED authentication"
+--   simulation/README.md -> "Node-RED authentication"
 DO $$
 DECLARE
   v_secret TEXT := current_setting('acs_cymru.nodered_webhook_jwt_secret', true);

@@ -6,10 +6,16 @@
 =================================================================================================
 `supabase/functions/aas-export/test_aas_export.py`, run in-cluster.
 
-ITS SUBJECT IS SEEDED, NOT PRODUCED BY ANOTHER JOB. `Sim_CNC_Mill_01` is registered unquarantined by
-migration 0002 and given its tri-standard schema and its IDTA Digital Nameplate by 0020, so the live
-checks have something to assert against wherever the migrations have run -- no broker, no simulator
-publishing a DBIRTH, and no operator approval required.
+ITS SUBJECT IS PROVISIONED BY THE SUITE, not seeded and not produced by another Job. It creates a
+gateway, a device, a schema, a nameplate and its birth parameters at pinned ids through
+tests/aas_fixture.py, asserts against the document the exporter composes from them, and tears them
+down -- so the live checks need no broker, no simulator publishing a DBIRTH, and no operator
+approval, and no demo data either.
+
+IT USED TO TARGET `Sim_CNC_Mill_01`, registered by migration 0002 and given its schema and nameplate
+by 0020. That made a CONFORMANCE Job depend on DEMONSTRATION data, which roadmap §14 removes -- and
+0020 exists partly because the same coupling bit once before, when the suite's previous subject
+quietly stopped receiving a DBIRTH while the suite went on naming it and reporting success.
 
 That is a CHANGE, and the note it replaces was wrong in a way worth recording: this block used to
 say the ordering below was "a DATA DEPENDENCY -- validate.py is what APPROVES Simulated_CNC_01 out of
@@ -130,8 +136,6 @@ spec:
               value: admin@acs-cymru.local
             - name: AAS_TEST_PASSWORD
               value: acscymru123
-            - name: AAS_TEST_DEVICE
-              value: Sim_CNC_Mill_01
             - name: STORAGE_MODEL_BUCKET
               value: {{ .Values.supabaseStorage.bucket | quote }}
             - name: PYTHONUNBUFFERED

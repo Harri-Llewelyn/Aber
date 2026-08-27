@@ -1,6 +1,6 @@
 # Build-context exclusions for the images built from the REPOSITORY ROOT:
 #   Dockerfile                      -> ingestion daemon
-#   supabase/functions/Dockerfile   -> edge runtime (needs node_red_flow.json, which lives here)
+#   supabase/functions/Dockerfile   -> edge runtime (needs simulation/node_red_flow.json)
 #   tests/Dockerfile                -> conformance test runner
 #
 # ONE .dockerignore SERVES ALL THREE, so an exclusion added for one image can break another. That

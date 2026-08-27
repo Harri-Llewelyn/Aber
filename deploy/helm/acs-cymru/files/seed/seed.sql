@@ -298,10 +298,28 @@ ON CONFLICT (user_id, role_id) DO NOTHING;
 --      writes no audit row. Belt and braces on purpose -- (1) is the cheap one and (2) is the one
 --      that still holds if someone edits (1) carelessly.
 --
--- ROWS ARE ADDRESSED BY THEIR PINNED UUIDs, not by name, matching how 0002_seed_data.sql seeds
--- them. A name is a mutable display label; addressing by it would make this block silently do
--- nothing the first time somebody renames a machine in the dashboard.
--- =============================================================================================
+-- ROWS ARE ADDRESSED BY THEIR PINNED UUIDs, not by name, matching how
+-- `scripts/provision-gateways.mjs` creates them. A name is a mutable display label; addressing by
+-- it would make this block silently do nothing the first time somebody renames a machine in the
+-- dashboard.
+--
+-- ---------------------------------------------------------------------------------------------
+-- ITS SUBJECT IS NO LONGER GUARANTEED TO EXIST, WHICH IS THE POINT OF ROADMAP §14.
+--
+-- These ids used to be seeded by `0002_seed_data.sql` on every boot, so the demonstration always
+-- had something to demonstrate on. `0040_retire_demonstration_seed.sql` retires that seed: a
+-- fresh install has no assets at all, and the four-cell floor arrives only when a reader runs
+-- `npm run provision:gateways`.
+--
+-- THE UPDATEs BELOW ALREADY COPE -- they match no rows and write nothing, which is the same
+-- no-op as the second boot of a seeded stack. THE SELF-CHECK DID NOT: it RAISEd when no causation
+-- group existed, which db-init reports as a failed seed and a failed boot. On a fresh install
+-- that is not a broken demonstration, it is an empty shopfloor working exactly as intended.
+--
+-- So the check now distinguishes the two cases by asking whether the SUBJECT is present, and the
+-- demonstration reappears on the first boot after provisioning -- this file is replayed every
+-- time, so the pair of UPDATEs lands in one transaction then, with the same result it always had.
+-- ==============================================================================================
 
 BEGIN;
 
@@ -340,6 +358,12 @@ COMMIT;
 -- fresh `stack:reset` would come up with the Digital Thread drawer quietly showing no related
 -- changes, and the only symptom would be a demo that does not demonstrate anything.
 --
+-- WHICH IS WHY THE ABSENT-SUBJECT ARM IS A NOTICE AND NOT A QUIETLY RELAXED CHECK. "The floor is
+-- not provisioned" and "the floor is provisioned and the grouping broke" look identical from the
+-- outside -- an empty drawer -- and only one of them is a bug. Weakening the check to `IF v_group
+-- IS NOT NULL THEN assert` would have covered the second case with the first and thrown away the
+-- entire value of the assertion.
+--
 -- ASSERTED AS A PROPERTY OF THE TABLE, NOT OF THIS BOOT: "some transaction grouped a gateway with
 -- more than one device". That holds on a fresh volume and on the hundredth restart alike, and it
 -- does not break if an operator later edits one of these rows by hand.
@@ -358,11 +382,25 @@ BEGIN
    LIMIT 1;
 
   IF v_group IS NULL THEN
+    -- NO GROUP AND NO SUBJECT is the fresh-install steady state: the demonstration floor is
+    -- opt-in, so there is no gateway to commission and nothing was expected to be written.
+    IF NOT EXISTS (
+      SELECT 1 FROM public.gateways WHERE id = '12000000-0000-4000-8000-000000000001'
+    ) THEN
+      RAISE NOTICE
+        'seed: no causation demonstration, because the demonstration floor is not provisioned on '
+        'this stack. Run `npm run provision:gateways` and restart to seed it.';
+      RETURN;
+    END IF;
+
+    -- NO GROUP BUT THE SUBJECT IS THERE is a real regression, and the same one this check was
+    -- written to catch: the rows exist, so the UPDATEs above should have grouped them.
     RAISE EXCEPTION
-      'seed: the Digital Thread causation demonstration is missing. No transaction in '
-      'digital_thread groups a gateway with more than one device, so the "Same transaction" '
-      'control in the drawer will render nothing on this stack. Check that the BEGIN/COMMIT block '
-      'above still commits ONCE, and that the ids it names still exist in 0002_seed_data.sql.';
+      'seed: the Digital Thread causation demonstration is missing even though its gateway is '
+      'registered. No transaction in digital_thread groups a gateway with more than one device, '
+      'so the "Same transaction" control in the drawer will render nothing on this stack. Check '
+      'that the BEGIN/COMMIT block above still commits ONCE, and that the ids it names still '
+      'match scripts/provision-gateways.mjs.';
   END IF;
 
   SELECT count(*) INTO v_rows

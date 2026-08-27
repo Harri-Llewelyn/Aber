@@ -559,5 +559,5 @@ still runs, because its assertions are worth reporting either way.
 ## Related
 
 - [`../supabase/README.md`](../supabase/README.md) — schema, RLS, triggers, edge functions
-- [`../simulators/README.md`](../simulators/README.md) — Node-RED flow and broker topics
+- [`../simulation/README.md`](../simulation/README.md) — Node-RED flow and broker topics
 - [`../mosquitto.acl`](../mosquitto.acl) — per-gateway topic confinement

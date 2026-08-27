@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const FLOW = join(
-  dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'node_red_flow.json'
+  dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'simulation', 'node_red_flow.json'
 )
 const nodes = Object.fromEntries(
   JSON.parse(readFileSync(FLOW, 'utf8')).filter((n) => n.id).map((n) => [n.id, n])

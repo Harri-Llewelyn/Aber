@@ -461,7 +461,7 @@ NS=ghcr.io/harri-llewelyn/acs-cymru
 V=$(grep -E '^appVersion:' deploy/helm/acs-cymru/Chart.yaml | head -1 \
     | sed -E 's/^appVersion:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
 
-# Edge functions — context is the REPOSITORY ROOT, because node_red_flow.json lives there
+# Edge functions — context is the REPOSITORY ROOT, because simulation/node_red_flow.json is outside supabase/functions/
 docker build -f supabase/functions/Dockerfile   -t $NS/edge-runtime:$V .
 
 # Ingestion daemon — also repository root; the Dockerfile compiles sparkplug_b.proto with protoc

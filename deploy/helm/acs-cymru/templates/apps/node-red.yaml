@@ -136,6 +136,22 @@ spec:
               exactly that reason -- one definition, included twice.
             */}}
             {{- include "acs-cymru.noderedAuthEnv" . | nindent 12 }}
+            {{- /*
+              THE SIMULATOR IS OPT-IN (roadmap §14), and this is the Kubernetes half of the same
+              switch `NODE_RED_SEED_SIMULATOR` gives Compose. Unset, node-red-init seeds a one-node
+              "Start here" flow declaring no broker nodes, so a fresh install publishes nothing and
+              generates no assets -- matching a database that now seeds none either.
+
+              THE FLOW ConfigMap IS STILL MOUNTED EITHER WAY, and that is deliberate. It costs one
+              projected volume, it is what `NODE_RED_SEED_SIMULATOR=true` plus a pod restart then
+              reads, and gating the MOUNT as well would turn a values flip into a values flip that
+              also has to be right about which volumes exist.
+
+              It shares `simulation.grafana.enabled`'s parent key rather than inventing a second
+              top-level flag: one `simulation:` block, one thing being switched on.
+            */}}
+            - name: NODE_RED_SEED_SIMULATOR
+              value: {{ .Values.simulation.nodeRed.enabled | quote }}
             # node-red-init also writes the broker credentials into flows_cred.json, so it needs
             # these two on top of the auth block.
             {{- /*

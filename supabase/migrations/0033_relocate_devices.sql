@@ -282,6 +282,7 @@ DECLARE
     v_admin      text;
     v_result     jsonb;
     v_causations bigint[];
+    v_watermark  bigint;
     v_anon_exec  boolean;
 BEGIN
     -- anon must not hold EXECUTE. Checked here rather than trusted, because the REVOKE above is
@@ -338,6 +339,10 @@ BEGIN
                            json_build_object('sub', v_admin, 'role', 'authenticated')::text,
                            true);
 
+        -- Taken IMMEDIATELY before the call and inside the same subtransaction, so every row the
+        -- batch appends is above it and nothing that preceded it can be.
+        SELECT coalesce(max(id), 0) INTO v_watermark FROM public.digital_thread;
+
         -- Both to the same cell, which neither of them is in. Two rows must change, so neither
         -- can be a no-op the trigger suppresses.
         SELECT public.relocate_devices(jsonb_build_array(
@@ -354,10 +359,24 @@ BEGIN
         -- THE ACTUAL POINT. Two devices, two thread rows, ONE causation_id -- read from the audit
         -- table rather than from the function's own return value, which could report a shared
         -- transaction while the trigger stamped nothing.
+        --
+        -- BOUNDED BY A WATERMARK, NOT BY A TIME WINDOW, and the difference is not academic. This
+        -- read `recorded_at > now() - interval '1 minute'`, which is a guess at "rows this batch
+        -- just wrote" and holds only while nothing else has touched these devices lately. Roadmap
+        -- §14 made that assumption false: the demonstration floor is opt-in now, so the documented
+        -- way to get one is `npm run provision:gateways` followed by a restart -- which means
+        -- db-init reaches this check seconds after six devices were CREATED, with their INSERT and
+        -- placement rows still inside the window and each carrying its own causation_id.
+        --
+        -- It fails loudly and blames the wrong thing: "relocate_devices() is no longer one
+        -- transaction", on a stack where it is, because the check counted four causation ids and
+        -- two of them belonged to provisioning. Bounding on the sequence instead asks the question
+        -- the check means to ask -- rows written AFTER the call -- and cannot be widened by
+        -- anything that happened before it.
         SELECT array_agg(DISTINCT causation_id) INTO v_causations
           FROM public.digital_thread
          WHERE entity_id = ANY(v_ids)
-           AND recorded_at > now() - interval '1 minute'
+           AND id > v_watermark
            AND causation_id IS NOT NULL;
 
         IF v_causations IS NULL OR array_length(v_causations, 1) <> 1 THEN
