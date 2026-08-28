@@ -90,6 +90,32 @@ function renderTab(overrides = {}) {
   return { ...result, props }
 }
 
+/**
+ * Open a row's overflow menu and return it.
+ *
+ * THE MENU IS NOT INSIDE THE ROW. ActionMenu portals to document.body precisely because
+ * `.table-wrap` is `overflow-x: auto` and would clip it, so `within(row)` finds nothing once the
+ * menu is open -- which is what these tests asserted against before the row moved to it.
+ */
+function openMenu(row) {
+  fireEvent.click(within(row).getByRole('button', { name: /More actions/ }))
+  return screen.getByRole('menu')
+}
+
+/**
+ * Is an action available on this row at all? Answers without leaving the menu open.
+ *
+ * RETURNS A BOOLEAN, NOT THE ELEMENT, and that is not fussiness. Closing the menu unmounts its
+ * items, so an element returned from here is detached by the time the caller asserts on it --
+ * `toBeInTheDocument()` then fails on an item that was found and was correct.
+ */
+function menuHas(row, name) {
+  const menu = openMenu(row)
+  const found = !!within(menu).queryByRole('menuitem', { name })
+  fireEvent.keyDown(document, { key: 'Escape' })
+  return found
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   api.get.mockImplementation(path =>
@@ -149,7 +175,7 @@ describe('the subject tables', () => {
   it('says nothing is stored when nothing is', async () => {
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    expect(within(row).getByText('None')).toBeInTheDocument()
+    expect(within(row).getByText('—')).toBeInTheDocument()
   })
 })
 
@@ -199,7 +225,7 @@ describe('a stored capture', () => {
     renderTab()
     // The gateway row must NOT claim it.
     const gatewayRow = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    expect(within(gatewayRow).getByText('None')).toBeInTheDocument()
+    expect(within(gatewayRow).getByText('—')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
     const deviceRow = (await screen.findByText('CNC Spindle')).closest('tr')
@@ -369,7 +395,7 @@ describe('deleting and downloading', () => {
     api.listCaptures.mockResolvedValue([CAPTURE])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    fireEvent.click(within(row).getByTitle('Delete this capture'))
+    fireEvent.click(within(openMenu(row)).getByRole('menuitem', { name: /Delete capture/ }))
     const message = await screen.findByText(/Delete the capture recorded/)
     expect(message).toHaveTextContent('pre-trip bearing vibration baseline')
   })
@@ -379,7 +405,7 @@ describe('deleting and downloading', () => {
     api.deleteCapture.mockResolvedValue()
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    fireEvent.click(within(row).getByTitle('Delete this capture'))
+    fireEvent.click(within(openMenu(row)).getByRole('menuitem', { name: /Delete capture/ }))
     fireEvent.click(await screen.findByRole('button', { name: /Delete capture/ }))
     await waitFor(() => expect(api.deleteCapture).toHaveBeenCalledWith(CAPTURE))
   })
@@ -390,7 +416,7 @@ describe('deleting and downloading', () => {
     const open = vi.spyOn(window, 'open').mockImplementation(() => {})
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    fireEvent.click(within(row).getByTitle('Download the capture file'))
+    fireEvent.click(within(openMenu(row)).getByRole('menuitem', { name: /Download/ }))
     await waitFor(() => expect(api.captureUrl).toHaveBeenCalledWith(CAPTURE.storage_path))
     expect(open).toHaveBeenCalledWith('https://example.test/signed', '_blank', 'noopener')
     open.mockRestore()
@@ -407,9 +433,9 @@ describe('the read-only role', () => {
     api.listCaptures.mockResolvedValue([CAPTURE])
     renderTab({ userRole: 'Auditor' })
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    expect(within(row).getByTitle('Download the capture file')).toBeInTheDocument()
+    expect(menuHas(row, /Download/)).toBe(true)
     expect(within(row).queryByRole('button', { name: /Capture/ })).not.toBeInTheDocument()
-    expect(within(row).queryByTitle('Delete this capture')).not.toBeInTheDocument()
+    expect(menuHas(row, /Delete capture/)).toBe(false)
     expect(screen.getByText(/require Administrator or Shopfloor Manager/)).toBeInTheDocument()
   })
 
@@ -418,7 +444,7 @@ describe('the read-only role', () => {
     renderTab({ userRole: 'Shopfloor_Manager' })
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     expect(within(row).getByRole('button', { name: /Capture/ })).toBeInTheDocument()
-    expect(within(row).getByTitle('Delete this capture')).toBeInTheDocument()
+    expect(menuHas(row, /Delete capture/)).toBe(true)
   })
 })
 
@@ -519,7 +545,7 @@ describe('publishing a capture back', () => {
     api.listCaptures.mockResolvedValue([PLAYABLE])
     const rendered = renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    fireEvent.click(within(row).getByRole('button', { name: /Play/ }))
+    fireEvent.click(within(openMenu(row)).getByRole('menuitem', { name: /Play back/ }))
     await screen.findByLabelText('Publish as')
     return rendered
   }
@@ -545,7 +571,7 @@ describe('publishing a capture back', () => {
     api.listCaptures.mockResolvedValue([PLAYABLE])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    fireEvent.click(within(row).getByRole('button', { name: /Play/ }))
+    fireEvent.click(within(openMenu(row)).getByRole('menuitem', { name: /Play back/ }))
     expect(await screen.findByText(/No gateway is marked/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Publish capture/ })).toBeDisabled()
   })
@@ -624,7 +650,7 @@ describe('publishing a capture back', () => {
     ])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    fireEvent.click(within(row).getByRole('button', { name: /Play/ }))
+    fireEvent.click(within(openMenu(row)).getByRole('menuitem', { name: /Play back/ }))
     expect(await screen.findByText(/unresolved_alias/)).toBeInTheDocument()
   })
 
@@ -645,7 +671,7 @@ describe('publishing a capture back', () => {
     ])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    fireEvent.click(within(row).getByRole('button', { name: /Play/ }))
+    fireEvent.click(within(openMenu(row)).getByRole('menuitem', { name: /Play back/ }))
     fireEvent.change(await screen.findByLabelText('Publish as'), { target: { value: 'gw-sim' } })
     expect(await screen.findByText(/publishes no device-level traffic/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Publish capture/ })).not.toBeDisabled()
@@ -655,7 +681,7 @@ describe('publishing a capture back', () => {
     api.listCaptures.mockResolvedValue([PLAYABLE])
     renderTab({ userRole: 'Auditor' })
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    expect(within(row).queryByRole('button', { name: /Play/ })).not.toBeInTheDocument()
+    expect(menuHas(row, /Play back/)).toBe(false)
   })
 })
 
@@ -679,7 +705,7 @@ describe('the playback card', () => {
     api.activePlaybackJob.mockResolvedValue(JOB)
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    expect(within(row).getByRole('button', { name: /Play/ })).toBeDisabled()
+    expect(within(openMenu(row)).getByRole('menuitem', { name: /Play back/ })).toBeDisabled()
   })
 
   it('asks the gate to stop rather than stopping anything itself', async () => {

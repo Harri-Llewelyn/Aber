@@ -4,10 +4,12 @@ import { REALTIME_ENABLED } from '../../constants'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
+import { ActionMenu } from '../common/ActionMenu'
 import CopyableId from '../common/CopyableId'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { StartCaptureModal } from '../modals/StartCaptureModal'
 import { StartPlaybackModal } from '../modals/StartPlaybackModal'
+import { UploadCaptureModal } from '../modals/UploadCaptureModal'
 import {
   IconDownload, IconPlay, IconRecord, IconShieldAlert, IconTrash, IconUpload
 } from '../common/Icons'
@@ -59,7 +61,10 @@ export function CaptureTab({ showToast, userRole }) {
   const [error, setError] = useState(null)
   const [startFor, setStartFor] = useState(null)
   const [deleteFor, setDeleteFor] = useState(null)
-  const [uploadFor, setUploadFor] = useState(null)
+  // `{ file, preset }` -- the dropped or chosen file, and the subject it came from when a row's
+  // menu opened the picker rather than the page-level drop zone.
+  const [uploadFile, setUploadFile] = useState(null)
+  const [dragging, setDragging] = useState(false)
   const [playFor, setPlayFor] = useState(null)
   const [activePlayback, setActivePlayback] = useState(null)
   const [recentPlaybacks, setRecentPlaybacks] = useState([])
@@ -174,12 +179,26 @@ export function CaptureTab({ showToast, userRole }) {
       sparkplugId: subject.sparkplug_id,
       // A device's context is the gateway it publishes through, which is also the edge node a
       // capture of it records the birth certificate from.
-      context: subjectKind === 'gateway'
-        ? (subject.is_simulated ? 'Simulated' : 'Live')
-        : (gatewayName.get(subject.gateway_id) || 'Unbound'),
+      // Only meaningful for a device row now; a gateway's simulated flag is a badge on its name.
+      context: subjectKind === 'device'
+        ? (gatewayName.get(subject.gateway_id) || 'Unbound')
+        : null,
+      isSimulated: subjectKind === 'gateway' && !!subject.is_simulated,
       capture: captureBySubject.get(`${subjectKind}:${subject.id}`) || null
     }))
   }, [subjectKind, gateways, devices, captureBySubject, gatewayName])
+
+  /** Every subject the upload dialog can file a capture against, both tabs at once. */
+  const allSubjects = useMemo(() => ([
+    ...gateways.map(g => ({
+      kind: 'gateway', id: g.id, name: g.name, sparkplugId: g.sparkplug_id,
+      capture: captureBySubject.get(`gateway:${g.id}`) || null
+    })),
+    ...devices.map(d => ({
+      kind: 'device', id: d.id, name: d.name, sparkplugId: d.sparkplug_id,
+      capture: captureBySubject.get(`device:${d.id}`) || null
+    }))
+  ]), [gateways, devices, captureBySubject])
 
   // ------------------------------------------------------------------------------------------
   // Actions
@@ -247,38 +266,35 @@ export function CaptureTab({ showToast, userRole }) {
     await refreshAll()
   }
 
-  const onUploadPicked = async (event) => {
+  // The file picker feeds the same dialog the drop zone does. `pendingPreset` carries the subject
+  // when a row's menu opened it, so the dialog starts on the right one instead of asking a question
+  // the operator has already answered by clicking that row.
+  const pendingPreset = useRef(null)
+  const onFilePicked = (event) => {
     const file = event.target.files?.[0]
     event.target.value = ''
-    if (!file || !uploadFor) return
-    const row = uploadFor
-    setUploadFor(null)
-    setBusyId(row.id)
-    try {
-      const { messages } = await api.uploadCapture({
-        subjectKind: row.kind,
-        subjectId: row.id,
-        sparkplugId: row.sparkplugId,
-        file,
-        note: file.name,
-        // The picker is only offered after the same confirmation a re-record needs, so by the time
-        // a file has been chosen the replacement is already authorised.
-        replace: !!row.capture
-      })
-      showToast(`Uploaded ${messages} message${messages === 1 ? '' : 's'} for ${row.name}.`, 'success')
-    } catch (err) {
-      showToast(err.message, 'error')
-    } finally {
-      setBusyId(null)
-      await refreshAll()
-    }
+    if (!file) return
+    setUploadFile({ file, preset: pendingPreset.current })
+    pendingPreset.current = null
   }
 
   const askUpload = (row) => {
-    if (row.capture) { setUploadFor(row); return }   // confirmed below, then the picker opens
-    setUploadFor(row)
-    // No stored capture: nothing is destroyed, so go straight to the file picker.
-    setTimeout(() => fileRef.current?.click(), 0)
+    pendingPreset.current = { kind: row.kind, id: row.id }
+    fileRef.current?.click()
+  }
+
+  const onUpload = async ({ subject, replace }) => {
+    const { messages } = await api.uploadCapture({
+      subjectKind: subject.kind,
+      subjectId: subject.id,
+      sparkplugId: subject.sparkplugId,
+      file: uploadFile.file,
+      note: uploadFile.file.name,
+      replace
+    })
+    setUploadFile(null)
+    showToast(`Uploaded ${messages} message${messages === 1 ? '' : 's'} for ${subject.name}.`, 'success')
+    await refreshAll()
   }
 
   // ------------------------------------------------------------------------------------------
@@ -288,18 +304,22 @@ export function CaptureTab({ showToast, userRole }) {
 
   return (
     <>
-      <div className="panel">
-        <div className="panel-header">
-          <div>
-            <div className="panel-title">Broker Capture</div>
-            <div className="panel-subtitle">
-              Record what a gateway or a single device actually said, and keep it. A capture is
-              replayed with <code>python ingestion/capture.py play</code> — rebased onto now and
-              rewritten onto a simulated gateway's own assets, because the broker pins every topic's
-              edge-node segment to the account that publishes it.
-            </div>
-          </div>
+      {/* `.card` with a `.card-header`, matching the Schemas page's Registered Schemas table
+          rather than `.panel`. The two looked alike and were not: `.panel-title` sits at a
+          different weight and the header has no room for the controls a table needs beside it. */}
+      <div className="card" style={{ marginBottom: '24px' }}>
+        <div className="card-header">
+          <h3 className="section-title">
+            Broker Capture <span className="section-count">{captures.length}</span>
+          </h3>
         </div>
+
+        <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 4px' }}>
+          Record what a gateway or a single device actually said, and keep it. One capture is stored
+          per subject, and a new recording replaces it. Publishing a capture rewrites every captured
+          identity onto a simulated gateway's own assets, because the broker pins each topic's
+          edge-node segment to the account that publishes it.
+        </p>
 
         {error && (
           <div className="callout" style={{ borderColor: 'var(--danger)', color: 'var(--danger-text)' }}>
@@ -362,14 +382,69 @@ export function CaptureTab({ showToast, userRole }) {
           </button>
         </div>
 
+        {/* THE DROP ZONE IS FOR A FILE, NOT FOR A ROW. Dragging a capture row somewhere to publish
+            it was considered and does not work: a playback needs a target gateway, a device map and
+            a speed, none of which a drag can carry, so it would open the dialog anyway -- a novel
+            gesture that saves nothing and has no keyboard equivalent. Dragging a FILE in is the
+            gesture Model3DUploader and FlowBackupUploader already use, and it means what it looks
+            like: take this thing that is not in the app and put it in.
+
+            It asks which subject afterwards rather than before, because the file is the thing the
+            operator has and the subject is the one question it cannot answer. */}
+        {canManage && (
+          <div
+            role="button"
+            tabIndex={0}
+            aria-label="Upload a capture file"
+            onClick={() => fileRef.current?.click()}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') fileRef.current?.click() }}
+            onDragOver={e => { e.preventDefault(); setDragging(true) }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={e => {
+              e.preventDefault()
+              setDragging(false)
+              const dropped = e.dataTransfer?.files?.[0]
+              if (dropped) setUploadFile({ file: dropped, preset: null })
+            }}
+            style={{
+              marginTop: '12px', padding: '12px', textAlign: 'center', cursor: 'pointer',
+              border: `1px dashed ${dragging ? 'var(--accent)' : 'var(--border)'}`,
+              borderRadius: '8px',
+              background: dragging ? 'rgba(0,212,255,0.06)' : 'transparent',
+              fontSize: '12px', color: 'var(--text-muted)'
+            }}
+            title="Upload a capture recorded elsewhere, or by ingestion/capture.py record"
+          >
+            <IconUpload size={14} style={{ verticalAlign: '-2px', marginRight: '6px' }} />
+            Drop a capture file here, or click to choose one
+          </div>
+        )}
+
         <div className="table-wrap" style={{ marginTop: '12px' }}>
           <table>
             <thead>
               <tr>
-                <th>{subjectKind === 'gateway' ? 'Gateway' : 'Device'}</th>
-                <th>{subjectKind === 'gateway' ? 'Data' : 'Via gateway'}</th>
-                <th>Sparkplug ID</th>
-                <th>Stored capture</th>
+                <th title={subjectKind === 'gateway'
+                  ? 'The edge gateway a capture would record every message from'
+                  : 'A single device, recorded with its gateway’s birth certificate'}>
+                  {subjectKind === 'gateway' ? 'Gateway' : 'Device'}
+                </th>
+                {/* WAS "Data", SHOWING Live/Simulated FOR EVERY GATEWAY. It named nothing, every row
+                    on an ordinary fleet said the same thing, and it silently became the parent
+                    gateway on the Devices tab -- one column with two meanings. `is_simulated` is now
+                    a badge beside the name, where it is only present when it is true and therefore
+                    only present when it says something. */}
+                {subjectKind === 'device' && (
+                  <th title="The edge node this device publishes through, and the one a capture of it also records the birth certificate from">
+                    Gateway
+                  </th>
+                )}
+                <th title="The wire identity. A capture is filed under this, and playback rewrites it onto the target's own assets">
+                  Sparkplug ID
+                </th>
+                <th title="The one capture stored for this subject. Recording again replaces it">
+                  Stored capture
+                </th>
                 <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
@@ -408,8 +483,20 @@ export function CaptureTab({ showToast, userRole }) {
         type="file"
         accept=".json,application/json"
         style={{ display: 'none' }}
-        onChange={onUploadPicked}
+        onChange={onFilePicked}
       />
+
+      {uploadFile && (
+        <UploadCaptureModal
+          file={uploadFile.file}
+          subjects={allSubjects}
+          presetSubject={uploadFile.preset
+            ? allSubjects.find(s => s.kind === uploadFile.preset.kind && s.id === uploadFile.preset.id)
+            : null}
+          onConfirm={onUpload}
+          onCancel={() => setUploadFile(null)}
+        />
+      )}
 
       {startFor && (
         <StartCaptureModal
@@ -420,14 +507,10 @@ export function CaptureTab({ showToast, userRole }) {
         />
       )}
 
-      {uploadFor && uploadFor.capture && (
-        <ConfirmModal
-          message={`Uploading replaces the capture of ${uploadFor.name} recorded ${formatWhen(uploadFor.capture.recorded_at)}${uploadFor.capture.note ? ` — ${uploadFor.capture.note}` : ''}. That recording is destroyed and cannot be recovered.`}
-          confirmLabel="Choose a file"
-          onCancel={() => setUploadFor(null)}
-          onConfirm={() => fileRef.current?.click()}
-        />
-      )}
+      {/* The confirm-then-pick dialog that used to be here is gone: UploadCaptureModal carries the
+          replace warning itself, after the file has been read, so the operator sees what they are
+          about to destroy AND what they are about to store it with -- rather than confirming a
+          replacement before knowing whether the file is even a capture. */}
 
       {playFor && (
         <StartPlaybackModal
@@ -469,7 +552,7 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
       <div style={{ flex: 1 }}>
         <div>
           <strong>{pending ? 'Queued' : 'Recording'} — {subject}</strong>
-          {job.note && <span style={{ color: 'var(--text-muted)' }}> Â· {job.note}</span>}
+          {job.note && <span style={{ color: 'var(--text-muted)' }}> · {job.note}</span>}
         </div>
         {pending ? (
           <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>
@@ -478,9 +561,9 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
           </div>
         ) : (
           <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>
-            {job.messages} message{job.messages === 1 ? '' : 's'} Â· {formatSize(job.bytes)} Â·{' '}
+            {job.messages} message{job.messages === 1 ? '' : 's'} · {formatSize(job.bytes)} ·{' '}
             {job.elapsed_seconds}s of {job.max_seconds}s
-            {' Â· '}
+            {' · '}
             {job.birth_captured
               ? 'birth certificate captured'
               : 'no birth certificate yet'}
@@ -520,8 +603,28 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
  * table looking exactly as it did before anybody pressed anything — which reads as the button not
  * having worked. The `error` column is where the reason is, and this is the only place it surfaces.
  */
+/**
+ * How long a finished failure stays on the page.
+ *
+ * IT USED TO BE FOREVER, and that was wrong in a way a screenshot made obvious: the query takes the
+ * last four finished jobs, so a failure sat at the top of the page until four more jobs pushed it
+ * out -- which on a stack where nobody captures daily is indefinitely. It read as a live fault.
+ *
+ * This banner exists to explain "the thing you just did failed", because the running card clears on
+ * failure and the table otherwise looks exactly as it did before. That job is minutes old. Anything
+ * older is history, and history belongs in the job list rather than shouting from the top of a page.
+ */
+const FAILURE_VISIBLE_MS = 15 * 60 * 1000
+
 function RecentFailures({ jobs, kind = 'capture' }) {
-  const failed = (jobs || []).filter(j => j.status === 'FAILED' || j.status === 'CANCELLED')
+  const cutoff = Date.now() - FAILURE_VISIBLE_MS
+  const failed = (jobs || []).filter(j => {
+    if (j.status !== 'FAILED' && j.status !== 'CANCELLED') return false
+    // No finished_at means it has only just been written; show it rather than hiding a fresh one.
+    if (!j.finished_at) return true
+    const at = new Date(j.finished_at).getTime()
+    return Number.isNaN(at) || at >= cutoff
+  })
   if (failed.length === 0) return null
   return (
     <div style={{ marginTop: '12px' }}>
@@ -592,17 +695,31 @@ function SubjectRow({
   const capture = row.capture
   return (
     <tr>
-      <td>{row.name}</td>
       <td>
-        <span className="badge badge-neutral" style={{ fontSize: '11px' }}>{row.context}</span>
+        {row.name}
+        {/* ONLY WHEN TRUE, which is the whole point of it being a badge rather than a column. A
+            gateway whose telemetry is observed is the ordinary case and needs no label; one whose
+            telemetry is synthetic is the exception, and the only kind a playback may target. */}
+        {row.isSimulated && (
+          <span
+            className="badge badge-neutral"
+            style={{ fontSize: '11px', marginLeft: '8px' }}
+            title="This gateway's telemetry is generated rather than observed (0052). Only a simulated gateway may be a playback target."
+          >
+            SIMULATED
+          </span>
+        )}
       </td>
+      {row.kind === 'device' && (
+        <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{row.context}</td>
+      )}
       <td><CopyableId value={row.sparkplugId} label="Sparkplug ID" /></td>
       <td>
-        {!capture && <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>None</span>}
+        {!capture && <span style={{ color: 'var(--text-dim)' }}>—</span>}
         {capture && (
           <div style={{ fontSize: '12px' }}>
             <div>
-              {capture.message_count} message{capture.message_count === 1 ? '' : 's'} Â·{' '}
+              {capture.message_count} message{capture.message_count === 1 ? '' : 's'} ·{' '}
               {formatSize(capture.size_bytes)}
               {capture.source === 'uploaded' && (
                 <span className="badge badge-neutral" style={{ fontSize: '11px', marginLeft: '6px' }}>
@@ -627,10 +744,16 @@ function SubjectRow({
           </div>
         )}
       </td>
+      {/* THE PRIMARY ACT STAYS A BUTTON; THE REST GO BEHIND THE OVERFLOW MENU. Five buttons in a
+          cell is what this row had, and `.table-wrap` is `overflow-x: auto`, so on a narrow
+          viewport they were the first thing to disappear off the right-hand edge. ActionMenu exists
+          for exactly that -- it portals out of the scroll container, which is why it is a component
+          rather than a few lines of inline JSX. Capture is the verb the page is named after, so it
+          keeps its own button. */}
       <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
         {canManage && (
           <button
-            className="btn btn-ghost"
+            className="btn btn-ghost btn-sm"
             onClick={onCapture}
             disabled={busy || blocked}
             title={blocked
@@ -642,44 +765,46 @@ function SubjectRow({
             <IconRecord size={13} /> Capture
           </button>
         )}
-        {canManage && capture && (
-          <button
-            className="btn btn-ghost"
-            onClick={onPlay}
-            disabled={busy || playbackBlocked}
-            title={playbackBlocked
-              ? 'A playback is already running.'
-              : 'Publish this capture onto a simulated gateway'}
-          >
-            <IconPlay size={13} /> Play
-          </button>
-        )}
-        {capture && (
-          <button className="btn btn-ghost" onClick={onDownload} disabled={busy} title="Download the capture file">
-            <IconDownload size={13} />
-          </button>
-        )}
-        {canManage && (
-          <button
-            className="btn btn-ghost"
-            onClick={onUpload}
-            disabled={busy}
-            title={capture ? 'Upload a capture, replacing the stored one' : 'Upload a capture recorded elsewhere'}
-          >
-            <IconUpload size={13} />
-          </button>
-        )}
-        {canManage && capture && (
-          <button className="btn btn-ghost" onClick={onDelete} disabled={busy} title="Delete this capture">
-            <IconTrash size={13} />
-          </button>
-        )}
+        {/* `label` is the trigger's VISIBLE text, not just its accessible name -- ActionMenu renders
+            it beside the chevron. So the default is used rather than a per-row string, which would
+            put the subject's name in the button twice. */}
+        <ActionMenu
+          disabled={busy}
+          items={[
+            canManage && capture && {
+              label: 'Play back…',
+              icon: <IconPlay size={13} />,
+              disabled: playbackBlocked,
+              title: playbackBlocked
+                ? 'A playback is already running'
+                : 'Publish this capture onto a simulated gateway',
+              onClick: onPlay
+            },
+            capture && {
+              label: 'Download',
+              icon: <IconDownload size={13} />,
+              onClick: onDownload
+            },
+            canManage && {
+              label: capture ? 'Replace by upload…' : 'Upload a capture…',
+              icon: <IconUpload size={13} />,
+              onClick: onUpload
+            },
+            canManage && capture && { separator: true },
+            canManage && capture && {
+              label: 'Delete capture',
+              icon: <IconTrash size={13} />,
+              danger: true,
+              onClick: onDelete
+            }
+          ]}
+        />
       </td>
     </tr>
   )
 }
 
-/** Bytes â†’ a short human string. Local, for the same reason FlowBackupUploader's is. */
+/** Bytes → a short human string. Local, for the same reason FlowBackupUploader's is. */
 export function formatSize(bytes) {
   if (bytes === null || bytes === undefined) return '—'
   if (bytes < 1024) return `${bytes} B`
