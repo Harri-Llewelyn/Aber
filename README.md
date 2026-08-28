@@ -575,6 +575,13 @@ npm run test:lib
 # own default and the stack comes up looking correct on a value nobody chose.
 node scripts/check-env-drift.mjs
 
+# THE MIGRATION MODEL'S CENTRAL INVARIANT — needs the stack up, and replays db-init a second
+# time against it. There is no migrations ledger, so "a second run must match no rows" is what
+# the whole schema rests on, and it used to be upheld by review alone. Asserts only what a
+# migration can move (the schema digest, and digital_thread's `migration` lane) and treats a FALL
+# in operator row counts as failure while ignoring a rise, so a live daemon cannot make it flaky.
+node scripts/check-migration-idempotency.mjs
+
 # Database suites — need Postgres
 python supabase/migrations/test_user_roles_rls.py
 python supabase/migrations/test_schema_versioning.py
