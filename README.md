@@ -1564,7 +1564,7 @@ exists for precisely this kind of change and this change must satisfy it twice.
 
 ---
 
-### 17 · Capture and playback orchestration: the recording engine is built, the page and playback are not
+### 17 · Capture and playback orchestration: capture is built, playback is not
 
 **Builds on:** [`ingestion/capture.py`](ingestion/capture.py) · `on_message()` and the daemon's
 existing `spBv1.0/#` subscription · `request_node_rebirth()` · the `broker-captures` bucket and
@@ -1585,9 +1585,19 @@ places in this repository, including the idempotency contract every migration he
 **Built:** [`0055_capture_orchestration.sql`](supabase/migrations/0055_capture_orchestration.sql)
 (the `captures` and `capture_jobs` tables, single-flight, and every gate),
 [`ingestion/capture_worker.py`](ingestion/capture_worker.py) (the recording engine inside the
-daemon), the bucket's `devices` arm and the daemon's scoped access to it, and the 100 MiB bucket.
-**Not built:** the page itself (§4), and the whole of playback (§5) — a capture recorded today is
-started with an RPC call and played back with `capture.py play`.
+daemon), the bucket's `devices` arm and the daemon's scoped access to it, the 100 MiB bucket, and
+[`CaptureTab.jsx`](frontend/src/components/tabs/CaptureTab.jsx) with
+[`StartCaptureModal.jsx`](frontend/src/components/modals/StartCaptureModal.jsx) — the page of §4,
+which is the **twelfth tab** and the first thing to reach `navDensity()`'s `tight` band.
+**Not built:** the whole of playback (§5) — a capture recorded from the page today is still played
+back with `capture.py play`.
+
+**The per-gateway capture panel on the Gateways page is gone**, and had to be rather than merely
+being tidier elsewhere. It listed the bucket directly — objects with a name, a size and a timestamp
+— and this schema stores one capture per subject at a deterministic path, with the note, the message
+count and the manifest in a table. Left in place it would have shown a single row called
+`capture.json` and none of the facts that decide anything. It also only ever covered gateways, and a
+device is now a subject in its own right.
 
 Four things below turned out to be wrong when measured against the running stack, and the
 paragraphs that state them are corrected in place rather than deleted:

@@ -6,10 +6,15 @@ import { navDensity, TABS } from '../App'
 /**
  * The top bar's density band.
  *
- * WHY THIS IS A UNIT TEST AND NOT A RENDER TEST. The band that matters most is `tight`, and it is
- * for twelve tabs where there are eleven, and no twelfth page exists yet. Asserting it through
- * the DOM would mean it could only be checked once that page shipped, which is the moment it
- * starts being relied on and the worst moment to find the threshold wrong.
+ * WHY THIS IS A UNIT TEST AND NOT A RENDER TEST. The band that matters most is `tight`, and when
+ * this was written it was for twelve tabs where there were eleven -- no twelfth page existed.
+ * Asserting it through the DOM would have meant checking it only once that page shipped, which is
+ * the moment it starts being relied on and the worst moment to find the threshold wrong.
+ *
+ * THE TWELFTH PAGE HAS NOW SHIPPED: broker capture (roadmap item 17), which the note below used to
+ * name as the page that never arrived. The band is live for an Administrator, and writing the test
+ * first paid off in the way it was meant to -- only the session with every tab reaches `tight`, so
+ * a threshold that was one out would have been visible to the person least likely to report it.
  *
  * THE BAND IS NOT COSMETIC. The nav is rigid and the brand and session controls split what is
  * left, so brand space is (viewport − 72px of chrome − nav width) / 2 against a brand wanting
@@ -38,25 +43,29 @@ describe('navDensity', () => {
     expect(navDensity(15)).toBe('tight')
   })
 
-  it('does not abbreviate the wordmark for the eleven tabs that fit today', () => {
-    // THE REGRESSION THIS GUARDS. An Administrator sees eleven, and at 1920 that fits — the
-    // screenshot in the commit is exactly this. A boundary set one lower would have started
-    // shortening the product name on a bar that had no problem.
+  it('does not abbreviate the wordmark for eleven tabs', () => {
+    // THE REGRESSION THIS GUARDS. Eleven fits at 1920 — the screenshot in the commit that added
+    // this is exactly that. A boundary set one lower would have started shortening the product
+    // name on a bar that had no problem. Eleven is now what a Shopfloor Manager or an Auditor
+    // sees rather than an Administrator, which does not change the measurement.
     expect(navDensity(11)).not.toBe('tight')
   })
 })
 
 describe('the tab list this band is measured against', () => {
 
-  it('is eleven tabs, so the tight band is still ahead of us', () => {
-    // If this fails, a page was added or removed and the bands are due a re-measure rather than a
-    // re-count: the arithmetic in App.css is written against these widths.
+  it('is twelve tabs, which is the band this was built for', () => {
+    // If this fails, a page was added or removed and the bands are due a RE-MEASURE rather than a
+    // re-count: the arithmetic in App.css is written against these widths, and a thirteenth tab
+    // does not have a band of its own.
     //
-    // THE TWELFTH PAGE IS NOT SCHEDULED. This band was built expecting one from the roadmap item
-    // that became broker capture and playback, which shipped as a CLI and added no page at all --
-    // so `tight` is still ahead of us, and still worth having: the band that has never run is
-    // exactly the one that cannot be checked by rendering.
-    expect(TABS).toHaveLength(11)
+    // THE TWELFTH PAGE ARRIVED, AND IT IS THE ONE THIS BAND EXPECTED. `tight` was built for a page
+    // from the roadmap item that became broker capture and playback -- which shipped as a CLI
+    // first and added no page at all, so the band sat unreachable and unrenderable. The Capture
+    // page is that page. The band is now live for an Administrator, and its threshold was
+    // measurable for the whole time it was not.
+    expect(TABS).toHaveLength(12)
+    expect(navDensity(TABS.length)).toBe('tight')
   })
 
   it('has a rule in App.css for every band navDensity can return', () => {

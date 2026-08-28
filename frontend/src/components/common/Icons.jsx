@@ -77,6 +77,16 @@ export const IconRadio = ({ size = 16, className = "" }) => (
   </svg>
 )
 
+// A filled record dot inside a ring: the universal "this is recording" mark, and deliberately not
+// IconRadio, which the Gateways tab already owns. Two tabs sharing an icon is how a nav stops being
+// scannable at the density this page's arrival pushes it to.
+export const IconRecord = ({ size = 16, className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <circle cx="12" cy="12" r="9" />
+    <circle cx="12" cy="12" r="4" fill="currentColor" stroke="none" />
+  </svg>
+)
+
 export const IconCpu = ({ size = 16, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
