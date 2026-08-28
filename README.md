@@ -1505,8 +1505,18 @@ first, and a 100 MiB bucket leaves headroom.
 so a 500 MB buffer is not refused — it is bounded by node pressure and the process is killed, taking
 ingestion for the whole fleet with it. That is the real argument for the smaller cap.
 
+**The artifact is a row of its own, not a field on the job.** `playback_jobs.capture_id` has to point
+at something, and a `capture_jobs` row is the wrong target: it records an *act* that happened once,
+and **a capture uploaded through the browser never had one**. Two ways to name a capture — a job id
+for recorded ones, a storage path for uploaded ones — is the kind of split that ends up handled in
+four places and wrongly in one.
+
+So `captures` holds the artifact: subject, storage path, size, the note, and the manifest. Both paths
+write it — the daemon on finalise, the upload on success — and `playback_jobs` references it. The
+job tables stay what they are, records of work attempted.
+
 **A manifest, so the page can say what is in a file it has not downloaded.** The daemon holds every
-payload at finalise time, so `capture_jobs.manifest` (JSONB) costs almost nothing: the metric names
+payload at finalise time, so `captures.manifest` (JSONB) costs almost nothing: the metric names
 seen, `birth_captured`, the topic count, and the observed rate. **`birth_captured` is the one that
 earns its place** — it makes the alias trap visible on the list rather than something discovered when
 a playback ingests nothing.
@@ -1514,6 +1524,10 @@ a playback ingests nothing.
 The metric list is capped the way `record_ingestion_rejection()` caps violations at 50, with the true
 count kept beside it: a chatty device would otherwise put a thousand names into a JSONB column, and a
 truncation nobody can see is worse than a short list.
+
+**The browser has to build one too.** `uploadCapture()` already parses the file to validate it, so
+the same pass fills the manifest — otherwise every uploaded capture shows blank next to every
+recorded one, and the field reads as broken rather than absent.
 
 **Startup reconciliation**: anything left at `RECORDING` when the daemon boots becomes `FAILED`.
 Without it, a restart mid-capture leaves a row counting down forever and a card that never clears.
@@ -1593,6 +1607,11 @@ else. Teaching it to publish asset data would widen the one account the whole AC
 and `verify_gateway_binding()` cannot tell a forged message under a correctly bound device from a
 real one.
 
+**It is a new process, and that is the real cost of this half.** A worker means an image, a service in
+`docker-compose.yml`, a Deployment and its resources in the chart, a health probe, and a place in
+`check-image-tag-parity.mjs` — before it plays a single message. Worth pricing honestly rather than
+discovering: the capture half adds behaviour to something already running, and this half does not.
+
 **The seq objection does not apply here**, and it is worth saying because it ruled out a separate
 principal for *capture*. That objection was about a second SUBSCRIBER: `_last_seq` is keyed
 `(group, edge_node)`, so two consumers split the stream and gap detection fires permanently. A
@@ -1614,6 +1633,35 @@ Two ways to get the guarantee anyway, and the first is strictly better:
   makes the ACL derived state which drifts the moment somebody flips the flag, needs a broker reload
   to take effect, and has to be regenerated and re-asserted. **Rejected.**
 
+**A topic-shaped rule such as `spBv1.0/+/+/simulated_#` is not a narrower version of this — it does
+not parse.** MQTT's `#` is only a wildcard as an entire filter or immediately after a `/`; inside a
+segment it is a literal character. Measured against the pinned image rather than argued from the
+specification:
+
+```
+$ mosquitto -c probe.conf          # eclipse-mosquitto:2.0.22, the pinned tag
+Error: Invalid ACL topic "spBv1.0/+/+/simulated_#" in acl_file "/probe/test.acl".
+Error opening acl file "/probe/test.acl".
+$ echo $?
+3
+```
+
+**It refuses to start, which is the safe failure and worth knowing** — this file's header records
+that mosquitto only *warns* on a MISSING `acl_file`, so the natural worry is that a malformed rule
+degrades to no authorisation at all. It does not: a broker that cannot parse its ACL exits.
+
+**And the namespace it names cannot exist anyway.** The edge-node segment is a gateway's
+`sparkplug_id`, a GENERATED column — `'gwy'` plus 21 hex characters of the row's UUID — and
+`verify_gateway_binding()` rejects any message whose fourth segment is not that exact string. There is
+no way to give a gateway an id beginning `simulated_`, so no topic-shape rule can separate simulated
+traffic from real traffic on this stack, however it is spelled.
+
+**The protection that rule was reaching for is delivered in full by `%u`, at the same layer.** A
+worker connected as `gwyAAA…` cannot publish under `gwyBBB…`: the broker drops it, at the network
+protocol layer, before any subscriber sees it. So *"even if the UI supplies an incorrect mapping,
+Mosquitto rejects the write"* holds exactly as intended — the rule delivering it is per-gateway
+confinement rather than a namespace prefix.
+
 ##### Three tiers, which is the house pattern
 
 | tier | what it stops |
@@ -1626,6 +1674,17 @@ Two ways to get the guarantee anyway, and the first is strictly better:
 writes status — while the **MQTT identity is the target gateway's own**, supplied as a secret the way
 `MQTT_VALIDATOR_USER` is for the validator. The two identities are separate on purpose: one says what
 it may do in the database, the other what the broker will carry.
+
+##### A validation gate is only a gate if it is the only way in
+
+Checking `is_simulated` and `gateway_holds_a_credential()` inside a `SECURITY DEFINER` function is
+right, and it is **advisory until RLS forbids the direct write it is meant to replace**. A policy
+that lets `authenticated` INSERT `playback_jobs`, or UPDATE a row to `PENDING`, leaves the function
+as one of two doors — and the one the UI happens to use, not the one an API caller has to.
+
+Same shape as `0047`: the table takes no direct write from any application role, the RPC is the only
+path, and the check lives inside it. That is what makes "cannot target a production gateway" a
+property of the schema rather than of the client.
 
 ##### The gate it needs before it works at all
 
