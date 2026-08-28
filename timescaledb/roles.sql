@@ -51,6 +51,20 @@
 
 SELECT set_config('acs_cymru.bi_reader_password', :'bi_reader_password', false);
 
+-- The two roles added for roadmap item 18. DEFAULTED TO EMPTY so this file still runs against a
+-- caller that has not been taught to pass them -- the Helm maintenance Job and any operator running
+-- it by hand -- and each role then skips itself rather than being created with a blank password.
+\if :{?ingest_writer_password}
+\else
+  \set ingest_writer_password ''
+\endif
+\if :{?fdw_reader_password}
+\else
+  \set fdw_reader_password ''
+\endif
+SELECT set_config('acs_cymru.ingest_writer_password', :'ingest_writer_password', false);
+SELECT set_config('acs_cymru.fdw_reader_password', :'fdw_reader_password', false);
+
 
 DO $$
 DECLARE
@@ -237,5 +251,218 @@ BEGIN
         'panels will fail';
     END IF;
     RAISE NOTICE 'roles self-check passed: grafana_reader can read every object the dashboard queries.';
+  END IF;
+END $$;
+
+
+-- ---------------------------------------------------------------------------------------------
+-- ingest_writer -- the ingestion daemon, which is the process most exposed to the plant network
+-- ---------------------------------------------------------------------------------------------
+-- IT CONNECTED AS `postgres` UNTIL NOW. The daemon is, in this repository's own words, "the process
+-- most exposed to the plant network", and it held superuser on the historian: it could DROP the
+-- hypertable, rewrite any observation, and read everything. The README's security-model table has
+-- listed "append-only historian writes" as an ingestion-layer control the whole time, and nothing
+-- in the database enforced it -- append-only was a property of the Python.
+--
+-- This is the same debt the stack has already paid twice on the OTHER database: Grafana moved off
+-- the superuser onto grafana_reader, and the daemon moved off SUPABASE_SERVICE_ROLE_KEY onto
+-- Service_Ingestor (0046-0048, 0051). This is the historian's turn.
+--
+-- =============================================================================================
+-- THE GRANT LIST IS MEASURED, NOT REASONED. Every line below was determined by running the
+-- daemon's two actual statements as a probe role and removing privileges until they broke.
+--
+--   assets      INSERT, UPDATE, SELECT
+--   telemetry   INSERT, SELECT
+--
+-- SELECT IS NOT OPTIONAL AND THAT SURPRISED ME. Both statements carry an ON CONFLICT clause --
+-- `DO UPDATE` on assets, `DO NOTHING` on telemetry -- and inferring the arbiter index requires
+-- SELECT on the target. With INSERT and UPDATE alone, `permission denied for table assets`. So
+-- this role is APPEND-ONLY, not write-only, and the roadmap entry that specified "INSERT on
+-- telemetry, INSERT/UPDATE on assets, nothing else" was wrong about the minimum.
+--
+-- The distinction that matters is preserved regardless: it can add rows and it cannot change or
+-- remove one. The self-check below asserts exactly that, in both directions.
+--
+-- THE HYPERTABLE GRANT REACHES THE CHUNKS, verified rather than assumed -- a probe insert that
+-- passed the privilege check and then failed a foreign key named `_hyper_1_5_chunk`, which is the
+-- chunk rather than the parent. Had it not propagated, ingestion would have broken at the moment a
+-- NEW chunk was created, days after the change, with nothing connecting the two.
+--
+-- WHAT IT DELIBERATELY CANNOT REACH: the rollups. The daemon writes raw observations; the
+-- aggregates are derived from them by TimescaleDB itself, and a writer that could read them is a
+-- writer that could be talked into reporting on them.
+-- =============================================================================================
+
+DO $$
+DECLARE
+  v_password text := btrim(coalesce(current_setting('acs_cymru.ingest_writer_password', true), ''));
+  v_role     CONSTANT text := 'ingest_writer';
+  v_dbname   CONSTANT text := current_database();
+BEGIN
+  IF v_password = '' THEN
+    -- SKIPPED, NOT FAILED, and the reason is the migration model: this file replays on every boot,
+    -- and a deployment that has not yet set INGEST_WRITER_PASSWORD must keep starting. The daemon
+    -- goes on connecting as whatever DB_USER says until the operator sets both.
+    RAISE NOTICE
+      'roles: % not configured (ingest_writer_password is empty); skipping. Set '
+      'INGEST_WRITER_PASSWORD and point the ingestion daemon at it to stop it holding superuser '
+      'on the historian.', v_role;
+    RETURN;
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_role) THEN
+    EXECUTE format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT', v_role);
+    RAISE NOTICE 'roles: created %', v_role;
+  END IF;
+
+  EXECUTE format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT '
+                 'PASSWORD %L', v_role, v_password);
+
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', v_dbname, v_role);
+  EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', v_role);
+
+  EXECUTE format('GRANT INSERT, UPDATE, SELECT ON public.assets TO %I', v_role);
+  EXECUTE format('GRANT INSERT, SELECT ON public.telemetry TO %I', v_role);
+
+  -- REVOKED EXPLICITLY rather than left ungranted, for the same reason the readers above do it:
+  -- this file is the authority on the role's reach, not a description of how it was first set up.
+  -- DELETE and TRUNCATE are the two that make "append-only" true, so they are named.
+  EXECUTE format('REVOKE DELETE, TRUNCATE ON public.telemetry FROM %I', v_role);
+  EXECUTE format('REVOKE UPDATE ON public.telemetry FROM %I', v_role);
+  EXECUTE format('REVOKE DELETE, TRUNCATE ON public.assets FROM %I', v_role);
+  -- The rollups: derived data this writer has no business reading, revoked by name.
+  EXECUTE format('REVOKE ALL ON public.telemetry_1m FROM %I', v_role);
+  EXECUTE format('REVOKE ALL ON public.telemetry_5m FROM %I', v_role);
+  EXECUTE format('REVOKE ALL ON public.telemetry_1h FROM %I', v_role);
+
+  EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM %I', v_role);
+
+  RAISE NOTICE
+    'roles: % may INSERT into telemetry and upsert assets, and cannot UPDATE, DELETE or TRUNCATE '
+    'either.', v_role;
+END $$;
+
+
+-- ---------------------------------------------------------------------------------------------
+-- fdw_reader -- what Supabase's foreign tables connect AS
+-- ---------------------------------------------------------------------------------------------
+-- `0001` creates `USER MAPPING FOR PUBLIC` against timescaledb_server with the historian's
+-- superuser. Every FDW session opened on behalf of `authenticated` or `service_role` therefore runs
+-- on THIS side as superuser, and the only containment is the LOCAL grant over in Supabase --
+-- SELECT on `timescale.*`. The remote end contributes nothing.
+--
+-- No application role can abuse that today. What makes it worth closing is that nothing stops the
+-- next change from doing so: a widened local grant, or a new foreign table added against the same
+-- server, silently inherits superuser reach on the historian. The mapping also parks the superuser
+-- password in `pg_user_mappings`, which the backup runbook already has to warn about.
+--
+-- READ-ONLY, AND ONLY THE PROJECTION. The five foreign tables Supabase defines are telemetry,
+-- telemetry_latest, telemetry_1m, telemetry_5m, telemetry_1h and storage_footprint. Nothing on the
+-- Supabase side writes through the FDW -- `public.telemetry` is a security_invoker VIEW over a
+-- foreign table and the historian is written only by the daemon -- so INSERT would be a grant with
+-- no caller.
+
+DO $$
+DECLARE
+  v_password text := btrim(coalesce(current_setting('acs_cymru.fdw_reader_password', true), ''));
+  v_role     CONSTANT text := 'fdw_reader';
+  v_dbname   CONSTANT text := current_database();
+BEGIN
+  IF v_password = '' THEN
+    RAISE NOTICE
+      'roles: % not configured (fdw_reader_password is empty); skipping. Set FDW_READER_PASSWORD '
+      'to stop the FDW user mapping running as the historian superuser.', v_role;
+    RETURN;
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_role) THEN
+    EXECUTE format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT', v_role);
+    RAISE NOTICE 'roles: created %', v_role;
+  END IF;
+
+  EXECUTE format('ALTER ROLE %I WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT '
+                 'PASSWORD %L', v_role, v_password);
+
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', v_dbname, v_role);
+  EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', v_role);
+
+  EXECUTE format('GRANT SELECT ON public.telemetry TO %I', v_role);
+  EXECUTE format('GRANT SELECT ON public.telemetry_latest TO %I', v_role);
+  EXECUTE format('GRANT SELECT ON public.telemetry_1m TO %I', v_role);
+  EXECUTE format('GRANT SELECT ON public.telemetry_5m TO %I', v_role);
+  EXECUTE format('GRANT SELECT ON public.telemetry_1h TO %I', v_role);
+  IF to_regclass('public.storage_footprint') IS NOT NULL THEN
+    EXECUTE format('GRANT SELECT ON public.storage_footprint TO %I', v_role);
+  END IF;
+
+  -- No writes, stated rather than implied.
+  EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.telemetry FROM %I', v_role);
+  EXECUTE format('REVOKE ALL ON public.assets FROM %I', v_role);
+
+  EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM %I', v_role);
+
+  RAISE NOTICE
+    'roles: % may SELECT the six objects Supabase projects and cannot write any of them.', v_role;
+END $$;
+
+
+-- ---------------------------------------------------------------------------------------------
+-- Self-check: both directions, for both roles
+-- ---------------------------------------------------------------------------------------------
+-- ASSERTING ONLY THE GRANTS WOULD BE HALF A CHECK. "ingest_writer can insert" passes just as well
+-- on a role that is secretly superuser; "ingest_writer cannot delete" passes on a role that cannot
+-- do anything at all and has silently stopped the fleet's telemetry. Both halves, or neither is
+-- worth running.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ingest_writer') THEN
+    IF NOT (has_table_privilege('ingest_writer', 'public.telemetry', 'INSERT')
+        AND has_table_privilege('ingest_writer', 'public.telemetry', 'SELECT')
+        AND has_table_privilege('ingest_writer', 'public.assets', 'INSERT')
+        AND has_table_privilege('ingest_writer', 'public.assets', 'UPDATE')
+        AND has_table_privilege('ingest_writer', 'public.assets', 'SELECT')) THEN
+      RAISE EXCEPTION
+        'roles self-check: ingest_writer is missing a privilege its two statements need. SELECT is '
+        'required on both tables because each INSERT carries an ON CONFLICT clause, and inferring '
+        'the arbiter index reads the target. Without it the daemon stops writing telemetry.';
+    END IF;
+
+    IF has_table_privilege('ingest_writer', 'public.telemetry', 'UPDATE')
+       OR has_table_privilege('ingest_writer', 'public.telemetry', 'DELETE')
+       OR has_table_privilege('ingest_writer', 'public.telemetry', 'TRUNCATE') THEN
+      RAISE EXCEPTION
+        'roles self-check: ingest_writer can change or remove telemetry. "Append-only historian '
+        'writes" is a claim the README makes in its security model, and this role is what makes it '
+        'a database fact rather than a property of the Python.';
+    END IF;
+
+    IF (SELECT rolsuper FROM pg_roles WHERE rolname = 'ingest_writer') THEN
+      RAISE EXCEPTION 'roles self-check: ingest_writer is a superuser, which defeats the entire role.';
+    END IF;
+
+    RAISE NOTICE
+      'roles self-check passed: ingest_writer can append telemetry and cannot rewrite or delete it.';
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'fdw_reader') THEN
+    IF NOT has_table_privilege('fdw_reader', 'public.telemetry', 'SELECT') THEN
+      RAISE EXCEPTION
+        'roles self-check: fdw_reader cannot read telemetry, so every dashboard query through the '
+        'foreign table returns permission denied.';
+    END IF;
+    IF has_table_privilege('fdw_reader', 'public.telemetry', 'INSERT')
+       OR has_table_privilege('fdw_reader', 'public.telemetry', 'UPDATE')
+       OR has_table_privilege('fdw_reader', 'public.telemetry', 'DELETE') THEN
+      RAISE EXCEPTION
+        'roles self-check: fdw_reader can write telemetry. It exists so that a Supabase-side FDW '
+        'session is a READER on this database; a writable mapping is the superuser problem again '
+        'with a different name.';
+    END IF;
+    IF (SELECT rolsuper FROM pg_roles WHERE rolname = 'fdw_reader') THEN
+      RAISE EXCEPTION 'roles self-check: fdw_reader is a superuser, which defeats the entire role.';
+    END IF;
+
+    RAISE NOTICE 'roles self-check passed: fdw_reader reads the projection and writes nothing.';
   END IF;
 END $$;
