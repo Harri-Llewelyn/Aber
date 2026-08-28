@@ -428,13 +428,47 @@ unrecognised role produces `403`.
 | Layer | Control |
 | :--- | :--- |
 | **Broker** | `allow_anonymous false`; [`mosquitto.acl`](mosquitto.acl) confines each gateway to `spBv1.0/+/+/<own-id>/#` |
-| **Ingestion** | Gateway↔device binding; quarantine gating; append-only historian writes — **enforced in the daemon, not by the database**: it connects to TimescaleDB as `postgres` and could rewrite history. Roadmap §18 makes this a grant |
+| **Ingestion** | Gateway↔device binding; quarantine gating; append-only historian writes — a **grant**, not a promise, once `INGEST_WRITER_PASSWORD` and `INGEST_DB_USER` are set: `ingest_writer` may INSERT and cannot UPDATE, DELETE or TRUNCATE. Unset, the daemon keeps the admin credential and the guarantee is the Python's again — see [Historian roles](#historian-roles) |
 | **Gateway** | Envoy's `apikey` check on `/rest`, `/realtime`, `/storage`, `/functions` — with **four** documented exemptions ([`supabase/README.md`](supabase/README.md)) |
 | **API** | PostgREST JWT verification plus RLS on every table |
 | **Database** | `has_role()` reads `user_roles` directly, so revocation is immediate; `digital_thread` is append-only against `service_role` too |
 | **Edge functions** | Explicit router allow-list; per-function secret scoping; role resolved from the database, never a stale JWT claim |
 | **Edge automation** | Node-RED's editor, admin API and webhook receiver each authenticate separately |
 | **Supabase Studio** | **No authentication of its own — reachable only from the host.** Bound to `127.0.0.1` on Compose and off the Ingress by default on Kubernetes |
+
+### Historian roles
+
+The historian is a separate database, and a grant issued in a Supabase migration does not reach it.
+Its roles live in [`timescaledb/roles.sql`](timescaledb/roles.sql), reconciled on **every boot** by
+`timescaledb-maintenance` — the same replay-and-reconcile model the migration chain uses, and for
+the same reason: `/docker-entrypoint-initdb.d` runs only on an empty data directory.
+
+| Role | May | Used by |
+| :--- | :--- | :--- |
+| `ingest_writer` | INSERT + SELECT on `telemetry`; upsert `assets` | the ingestion daemon |
+| `fdw_reader` | SELECT the six objects Supabase projects | Supabase's `postgres_fdw` PUBLIC mapping |
+| `grafana_reader` | SELECT everything the dashboards query | Grafana |
+| `powerbi_reader` | SELECT the three rollups only | external BI |
+
+**Each is empty by default and skipped rather than created with a blank password**, so a deployment
+that sets nothing keeps the behaviour it had. Adopting `ingest_writer` is two deliberate steps —
+set the password, verify the role exists, *then* point the daemon at it — because the reverse order
+aims the daemon at a role that does not exist and stops telemetry for the whole fleet.
+
+**`ingest_writer` needs SELECT, which is not obvious.** Both of the daemon's statements carry an
+`ON CONFLICT` clause, and inferring the arbiter index reads the target. So the role is *append-only*
+rather than write-only: it can add a row and cannot change or remove one, which is the distinction
+the security model above depends on.
+
+**Why `fdw_reader` exists at all.** `0001` maps every local Supabase role onto this database through
+`postgres_fdw`. That mapping used the historian's superuser, so an FDW session opened for
+`authenticated` ran here with full rights, contained only by the grant on the *other* database. No
+application role could abuse it — the point is that nothing stopped the next widened grant or new
+foreign table from inheriting that reach silently. The `postgres` mapping is deliberately unchanged:
+it is what a human debugging the FDW connects through.
+
+`timescaledb/test_historian_role_grants.py` asserts both halves for both roles — what they can do,
+and what they must not.
 
 **Supabase Studio is a database console, not a dashboard with admin features**, and it is the one
 component here with no login, no roles and no session. The official Supabase stack fronts it with a
@@ -718,7 +752,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Thirteen extensions, none of them speculative: every one names the code it would build on, because
+Twelve extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
@@ -730,23 +764,24 @@ checklist. Items 6, 13 and 16 left this way and are now documented under
 [Machine identities](#machine-identities) and in
 [`supabase/README.md`](supabase/README.md#machine-identities); item 7 is documented under
 [Schema Conformance](ingestion/README.md#schema-conformance); item 11 under
-[Broker Capture and Playback](ingestion/README.md#broker-capture-and-playback); and item 9's subject
-was retired the same way when `aas-api` shipped.
+[Broker Capture and Playback](ingestion/README.md#broker-capture-and-playback); item 18 under
+[Historian roles](#historian-roles); and item 9's subject was retired the same way when `aas-api`
+shipped.
 
 **Retired numbers are not reused, and the list is therefore not contiguous.** The gaps at 6, 7, 11,
-13 and 16 are deliberate. Renumbering on retirement was the earlier practice and it does not survive
+13, 16 and 18 are deliberate. Renumbering on retirement was the earlier practice and it does not survive
 contact with this repository: the remaining entries are named by **dozens of comments** in migrations,
 scripts and components, all explaining why that code is the way it is, and shifting every number
 below a removal would silently redirect all of them without erroring. A number cited from code is an
 identifier, not a position. Where code refers to work that has since shipped, the citation names the
 documentation rather than a roadmap number.
 
-**Items 1-5 are this repository's own**, ordered by how much of each already exists, as are 17 and 18. **Items 8-15
+**Items 1-5 are this repository's own**, ordered by how much of each already exists, as is 17. **Items 8-15
 arrive from feature requests** — 8, 9 and 10 from GitHub issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
 [#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66), in that same order of how much already
-exists; 12, 15, 17 and 18 are not yet filed.
+exists; 12, 15 and 17 are not yet filed.
 [#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) was item 11 and is now built. Where an entry's heading differs from the issue's title, it is
 because the work that remains is narrower than the title claims.
 
@@ -1751,70 +1786,6 @@ everything a hex or protobuf UI would, and `--override-metric` is the same opera
 surface.
 
 ---
-
-### 18 · The historian's own least-privilege pass
-
-**Builds on:** [`timescaledb/roles.sql`](timescaledb/roles.sql) (`grafana_reader`, `powerbi_reader`
-and their reconciliation idiom) · `get_timescaledb_connection()` ·
-[`0001_baseline_schema.sql`](supabase/migrations/0001_baseline_schema.sql) §3 ·
-[`timescaledb/test_bi_reader_grants.py`](timescaledb/test_bi_reader_grants.py) ·
-**not yet filed as an issue**
-
-**The ingestion daemon connects to the historian as `postgres`.** `docker-compose.yml` passes
-`DB_USER: ${DB_USER:-postgres}`, and the chart does the same — so the process this repository calls
-*"the most exposed to the plant network"* holds superuser on the time-series database.
-
-**This is the pattern the stack has already corrected twice, and missed once.** Grafana moved off
-the superuser onto `grafana_reader`; the daemon moved off `SUPABASE_SERVICE_ROLE_KEY` onto
-`Service_Ingestor` (`0046`–`0048`, `0051`), on exactly the argument that the most-exposed process
-should not hold the strongest credential. Both fixes were on the **Supabase** side. The historian
-credential is the same debt on the other database, and when item 16 retired, nothing was left owning
-it.
-
-**It also makes a documented control real.** The security-model table lists *"append-only historian
-writes"* as an ingestion-layer control. Nothing in the database enforces that: append-only is a
-property of the Python, and a compromised daemon can `UPDATE`, `DELETE` or `DROP` the hypertable and
-rewrite history. An `ingest_writer` role turns a code promise into a database fact.
-
-#### The second half: the FDW maps every local role onto that same superuser
-
-`0001` §3 creates `USER MAPPING FOR PUBLIC` against `timescaledb_server` with `ts_user` defaulting
-to `postgres`. So every FDW session opened for `authenticated` or `service_role` runs on the remote
-side as the historian superuser, and the **only** containment is the local grant — SELECT on
-`timescale.*`. The remote end contributes nothing.
-
-No application role can reach past it today. What makes it worth fixing is that nothing stops the
-next change from doing so: a widened local grant, or a new foreign table added against the same
-server, silently inherits superuser reach. The mapping also parks the superuser password in
-`pg_user_mappings`, which the backup runbook already has to warn about.
-
-A read-only `fdw_reader` on the historian removes the class, using `roles.sql`'s existing
-reconciliation idiom rather than a new mechanism.
-
-#### It ships as one change, or it ships broken
-
-A role created in `roles.sql` that nothing connects as is the *"sits looking applied"* failure the
-sync script's own comments warn about — the least-privilege work would read as done while every
-connection still used `postgres`. So the item is:
-
-- `ingest_writer`: `INSERT` on `telemetry`, `INSERT`/`UPDATE` on `assets`, nothing else;
-- `fdw_reader`: `SELECT` on the read surface, nothing else;
-- both wired on **both targets** — `docker-compose.yml` and the chart — plus `.env.example`;
-- the `USER MAPPING` in `0001` §3 swapped onto `fdw_reader`;
-- assertions in the shape of `test_bi_reader_grants.py`, which already proves this for the BI role.
-
-**One migration-model wrinkle to plan for:** `0001` §3 is replayed on every boot, so the mapping
-swap lands on existing deployments the moment the file changes — before their `.env` necessarily
-carries the new credential. The order is roles first (they can exist unused), then wiring, then the
-mapping.
-
-#### Adjacent debt, named rather than folded in
-
-`log_digital_thread_event()`'s `x-acs-cymru-actor` header lets any `service_role` caller self-declare
-`ingestion` or `migration`. `'user'` is correctly refused and `changed_by` is unaffected, so this
-mislabels automation lanes rather than people. Since `0048` the real daemon is identifiable by
-`auth.uid()`, so the header's `ingestion` arm could be cross-checked or retired — but that touches
-the trigger redeclaration chain and belongs in the next `0048`-family migration, not here.
 
 ---
 
