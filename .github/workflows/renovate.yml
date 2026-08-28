@@ -30,6 +30,21 @@
 # time" and be worth nothing. Daily invocation is what makes the security carve-out real. Most
 # days it finds it is outside the routine window and exits having done nothing, which is the
 # intended and cheap case.
+#
+# THE GUARD BELOW CANNOT SEE THE FAILURE THAT ACTUALLY HAPPENED, and that is worth writing down
+# rather than rediscovering. The RENOVATE_TOKEN check fires INSIDE the job. Since 2026-08-24 the job
+# has not started at all -- every scheduled run completes in three to five seconds with zero steps,
+# which is what an exhausted Actions allowance looks like. The last successful run was 2026-08-23,
+# and the dependency dashboard (issue #53) has been frozen at that date ever since: it still lists
+# `postgrest v12.2.0` and `kong 3.9.3`, one long since bumped and the other deleted from
+# docker-compose entirely.
+#
+# So this file's own warning came true by a route it could not check: "the repository looks as
+# though drift is being watched when it is not". A workflow cannot detect that it was never
+# invoked.
+#
+# `node scripts/check-image-currency.mjs` is the by-hand substitute until minutes return. Delete it
+# then; this is the better mechanism when it can run.
 # =================================================================================================
 name: Renovate
 
