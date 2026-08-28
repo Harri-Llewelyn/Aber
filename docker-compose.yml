@@ -307,15 +307,29 @@ services:
           echo \"Executing migration $$f...\";
           attempt=1;
           while :; do
-            if psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v ts_fdw_user=\"$$TS_FDW_USER\" -v ts_fdw_password=\"$$TS_FDW_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v grafana_public_url=\"$$GRAFANA_PUBLIC_URL\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -v supabase_functions_url=\"http://supabase-kong:8000/functions/v1\" -v supabase_anon_key=\"$$SUPABASE_ANON_KEY\" -v gateway_revoke_secret=\"$$GATEWAY_REVOKE_SECRET\" -h supabase-db -U postgres -d postgres -f \"$$f\" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi;
+            if PGOPTIONS=\"-c lock_timeout=5s\" psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v ts_fdw_user=\"$$TS_FDW_USER\" -v ts_fdw_password=\"$$TS_FDW_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v grafana_public_url=\"$$GRAFANA_PUBLIC_URL\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -v supabase_functions_url=\"http://supabase-kong:8000/functions/v1\" -v supabase_anon_key=\"$$SUPABASE_ANON_KEY\" -v gateway_revoke_secret=\"$$GATEWAY_REVOKE_SECRET\" -h supabase-db -U postgres -d postgres -f \"$$f\" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi;
             cat /tmp/migration.log;
-            # RETRIED ONLY ON A DEADLOCK, never on anything else. Every migration here is
+            # RETRIED ONLY ON LOCK CONTENTION, never on anything else. Every migration here is
             # idempotent and is replayed on every boot already, so re-running one is safe by
             # construction -- but retrying a genuine schema error three times only delays the
-            # failure and prints it three times. A deadlock is the transient case: db-init takes
-            # DDL locks on tables that supabase-realtime is concurrently reading for its
-            # subscriptions, and either side can be chosen as the victim.
-            if [ $$attempt -ge 3 ] || ! grep -q 'deadlock detected' /tmp/migration.log; then
+            # failure and prints it three times.
+            #
+            # TWO SHAPES OF THE SAME FAULT, and `lock_timeout` above is what converts one into the
+            # other. db-init takes DDL locks on tables supabase-realtime is concurrently reading
+            # for its subscriptions:
+            #
+            #   deadlock detected     the lock-order inversion, resolved by Postgres choosing a
+            #                         victim -- and it can choose REALTIME, which takes the
+            #                         dashboard's live updates down to let a migration proceed.
+            #   canceling statement   this side hitting lock_timeout first, which is the same
+            #   due to lock timeout   contention with db-init deciding to yield.
+            #
+            # PGOPTIONS=-c lock_timeout=5s is therefore not only about bounding the wait. It makes
+            # db-init the predictable loser instead of a coin toss: a one-shot Job that retries is
+            # a far better victim than the process serving every open browser. Five seconds is long
+            # enough to ride out a subscription evaluation and short enough that three attempts
+            # stay inside a boot.
+            if [ $$attempt -ge 3 ] || ! grep -qE 'deadlock detected|due to lock timeout' /tmp/migration.log; then
               echo \"Migration $$f failed.\" >&2; exit 1;
             fi;
             echo \"Deadlock on $$f (attempt $$attempt) -- retrying in 3s.\" >&2;

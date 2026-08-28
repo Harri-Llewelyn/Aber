@@ -143,6 +143,13 @@ spec:
             - -e
             - -c
             - |
+              # PGOPTIONS BOUNDS THE DDL WAIT AND PICKS THE VICTIM. db-init takes exclusive
+              # locks on tables supabase-realtime is concurrently reading for its subscriptions,
+              # and without a timeout Postgres resolves the inversion by choosing a deadlock victim
+              # -- which can be REALTIME, taking every open dashboard's live updates down so a
+              # migration can proceed. A one-shot Job that retries is the better loser. Same value
+              # as docker-compose.yml, because the two must not diverge (issue #40).
+              export PGOPTIONS="-c lock_timeout=5s"
               PSQL="psql -v ON_ERROR_STOP=1 -h {{ include "acs-cymru.supabaseDb.host" . }} -p {{ include "acs-cymru.supabaseDb.port" . }} -U postgres -d postgres"
 
               echo 'Configuring PostgreSQL search_path...'
@@ -213,7 +220,7 @@ spec:
                     -v gateway_revoke_secret="$GATEWAY_REVOKE_SECRET" \
                     -f "$f" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi
                   cat /tmp/migration.log
-                  if [ "$attempt" -ge 3 ] || ! grep -q "deadlock detected" /tmp/migration.log; then
+                  if [ "$attempt" -ge 3 ] || ! grep -qE "deadlock detected|due to lock timeout" /tmp/migration.log; then
                     echo "Migration $f failed." >&2; exit 1
                   fi
                   echo "Deadlock on $f (attempt $attempt) -- retrying in 3s." >&2
