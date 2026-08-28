@@ -25,6 +25,12 @@ COPY ingestion/logging_config.py .
 # degraded endpoint.
 COPY ingestion/metrics.py .
 COPY ingestion/validate.py .
+# Dashboard-driven broker capture (roadmap item 17). SAME RULE AS metrics.py ABOVE, and it bites
+# twice here: ingestion.py imports capture_worker at module scope, and capture_worker imports
+# capture -- which was previously a host-run CLI and shipped in no image at all. Either one missing
+# is a crash loop on start rather than a feature that quietly does nothing.
+COPY ingestion/capture_worker.py .
+COPY ingestion/capture.py .
 
 # Compile the Sparkplug B protobuf definition
 RUN protoc --python_out=. sparkplug_b.proto

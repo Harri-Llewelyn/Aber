@@ -639,6 +639,8 @@ python ingestion/test_entity_cache.py
 python ingestion/test_telemetry_batching.py
 # Broker capture and playback -- identity rewriting, timestamp rebasing, wire encodings
 python ingestion/test_capture_playback.py
+# The daemon-side recording engine -- subject matching, the caps, and the manifest
+python ingestion/test_capture_worker.py
 python i3x/test_i3x_service.py
 python supabase/functions/approve-quarantine/test_approve_quarantine.py
 python supabase/functions/deploy-nodered/test_deploy_nodered.py
@@ -828,7 +830,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Thirteen extensions, none of them speculative: every one names the code it would build on, because
+Fifteen extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
@@ -852,7 +854,8 @@ below a removal would silently redirect all of them without erroring. A number c
 identifier, not a position. Where code refers to work that has since shipped, the citation names the
 documentation rather than a roadmap number.
 
-**Items 1-5 are this repository's own**, ordered by how much of each already exists, as is 17. **Items 8-15
+**Items 1-5 are this repository's own**, ordered by how much of each already exists, as are 17, 20
+and 21 — 20 and 21 in that order because 21 cannot ship without the role split 20 makes. **Items 8-15
 arrive from feature requests** — 8, 9 and 10 from GitHub issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
@@ -1559,7 +1562,7 @@ exists for precisely this kind of change and this change must satisfy it twice.
 
 ---
 
-### 17 · Capture and playback orchestration
+### 17 · Capture and playback orchestration: the recording engine is built, the page and playback are not
 
 **Builds on:** [`ingestion/capture.py`](ingestion/capture.py) · `on_message()` and the daemon's
 existing `spBv1.0/#` subscription · `request_node_rebirth()` · the `broker-captures` bucket and
@@ -1572,6 +1575,42 @@ and a stored capture per subject that a new recording replaces.
 
 **The heading says playback, not replay, deliberately** — `replay` means migration replay in 192
 places in this repository, including the idempotency contract every migration header rests on.
+
+---
+
+#### What is built, and what four measurements changed on the way
+
+**Built:** [`0055_capture_orchestration.sql`](supabase/migrations/0055_capture_orchestration.sql)
+(the `captures` and `capture_jobs` tables, single-flight, and every gate),
+[`ingestion/capture_worker.py`](ingestion/capture_worker.py) (the recording engine inside the
+daemon), the bucket's `devices` arm and the daemon's scoped access to it, and the 100 MiB bucket.
+**Not built:** the page itself (§4), and the whole of playback (§5) — a capture recorded today is
+started with an RPC call and played back with `capture.py play`.
+
+Four things below turned out to be wrong when measured against the running stack, and the
+paragraphs that state them are corrected in place rather than deleted:
+
+1. **The daemon's bucket authority cannot be a `SECURITY DEFINER` function** (§1 says it is). A
+   capture's bytes travel over the Storage REST API; no SQL function can carry them into a bucket.
+   It has to be a policy arm.
+2. **That arm cannot be write-only** (§1 prefers it). Replacing a capture is an upsert, storage-api
+   serves that as `INSERT … ON CONFLICT DO UPDATE`, and Postgres checks the **SELECT** policy for
+   the row being conflicted with — so a principal that cannot read an object cannot overwrite it.
+3. **The rebirth throttle is normally already spent** (§2 treats this as an edge case). The daemon
+   asks every node to rebirth at startup *and* on every sequence gap, so by the time anybody presses
+   Capture the 300-second window for that node has usually gone. Two consecutive captures came back
+   `birth_captured=false` before this was fixed.
+4. **`ALTER DEFAULT PRIVILEGES` grants `ALL` on every new `public` table** to `anon`, `authenticated`
+   and `service_role`. Both new tables were born with `anon` holding INSERT, UPDATE and DELETE, with
+   RLS as the only thing in front — so the `GRANT SELECT` lines that looked like the access control
+   were adding a privilege that was already there.
+
+**And one fact about the fixture rather than the code.** The seeded Node-RED fleet publishes `NDATA`
+and `DDATA` only: it emits no `NBIRTH` or `DBIRTH` and does not answer `Node Control/Rebirth`, so
+every capture taken from it honestly reports `birth_captured = false`. The birth path was proved by
+publishing a real `NBIRTH` as the gateway itself — it reaches the file, the manifest and the job
+row, alias intact. Worth knowing before the playback half is built: **captures taken from the
+simulator today carry no alias table**, which is exactly the condition §2 is written about.
 
 ---
 
@@ -1601,6 +1640,13 @@ else; the bucket's insert policy requires `Administrator` or `Shopfloor_Manager`
 cannot write a capture today, and **the gate is a prerequisite of the page rather than a detail of
 it**: a `SECURITY DEFINER` function in `0047`'s shape, checked with `is_ingestion_caller()`.
 
+> **Corrected when built.** The gates in `0047`'s shape are right for `capture_jobs` and `captures`,
+> and that is what `0055` builds. They cannot be the answer for the **bucket**: a capture's bytes go
+> through the Storage REST API, so no SQL function can carry them into it. `storage.objects` is
+> written by storage-api under the caller's own JWT, which means the daemon's authority there can
+> only be a **policy arm** — and `is_ingestion_caller()` does resolve inside a storage request,
+> measured on the running stack.
+
 This is precisely the defect `0051` fixed — a missing grant answers `42501`, the daemon catches it,
 logs it, and carries on, so the symptom is a capture that never appears rather than an error.
 
@@ -1613,6 +1659,26 @@ logs it, and carries on, so the symptom is a capture that never appears rather t
 replacement happens browser-side, before the job starts, which keeps the daemon's authority at INSERT
 alone. **The second is better** and is what the modal already implies: the operator confirms the
 deletion, so the operator's session performs it.
+
+> **Both options were wrong, and the measurement is the interesting part.** Write-only is not
+> achievable at all: each subject has one capture object, so a re-record **overwrites** it,
+> storage-js spells overwrite as `upsert: true`, and storage-api serves that as
+> `INSERT … ON CONFLICT DO UPDATE` — which Postgres evaluates against the SELECT policy as well,
+> because the statement has to see the row it conflicts with. Probed directly: `INSERT` of a new
+> object returned 200 and the upsert immediately after returned
+> `new row violates row-level security policy`.
+>
+> Browser-side deletion is worse than it looks for a different reason: it destroys the stored
+> capture **before** the recording that replaces it exists, so a capture that then fails leaves
+> nothing — and it needs a browser present at the right moment or the bucket accumulates orphans no
+> policy reaches.
+>
+> What `0055` does instead is **scope the arm rather than narrow it**:
+> `is_ingestion_caller() AND is_active_capture_object(name)`. The daemon can read, insert and
+> overwrite exactly the one path named by the job it is running, and with no capture in flight it
+> can reach nothing in the bucket at all. It still never deletes. That is strictly tighter than
+> "the daemon may write captures", it makes an orphan impossible, and nothing is destroyed until
+> the replacement has been written.
 
 #### 2 · The capture engine
 
@@ -1632,6 +1698,19 @@ Two consequences to design around rather than discover: a rebirth is a broadcast
 briefly affects the live stream for every subscriber; and `REBIRTH_REQUEST_INTERVAL_SECONDS`
 rate-limits it, so a capture started twice inside that window gets no second birth and must either
 wait or record without one and say so.
+
+> **The rate limit is not the edge case this paragraph takes it for — it is the normal case.** The
+> daemon requests a rebirth from every node at startup *and* on every sequence gap, both routine
+> here, so the 300-second window for a given node has almost always been spent before anybody
+> presses Capture. Measured: two captures in a row, `birth_captured=false` on both, with the
+> daemon's own request logged seconds earlier.
+>
+> So `request_node_rebirth()` gained a `force` flag and capture is its only caller. The throttle
+> exists to stop a flood driven by **traffic** — one request per message from a node with a broken
+> alias table — and a capture is not that: it is one human pressing one button, and single-flight
+> means one at a time across the whole stack, so the ceiling is an operator's patience. The
+> throttle is still stamped, so a forced request does not leave the node open to being asked again
+> by the next message that notices a gap.
 
 **Three caps, auto-terminating on the first met — and they have to agree with the bucket.**
 
@@ -1924,6 +2003,214 @@ active.
   what to put there are the same moment, and "no gateways yet" is where a reader is most receptive.
 - **Whether it survives translation.** Nothing here is localised today, and a help corpus is the
   first thing that would make that expensive.
+
+### 20 · Microsoft Entra ID sign-in, and a role model worth mapping onto
+
+**Builds on:** `custom_access_token_hook()` and `handle_new_user()` in
+[`supabase/migrations/0001_baseline_schema.sql`](supabase/migrations/0001_baseline_schema.sql) ·
+`has_role()` and its 58 call sites · `GOTRUE_DISABLE_SIGNUP` in [`.env.example`](.env.example) ·
+`acs-cymru.validateSecrets` in
+[`_helpers.tpl`](deploy/helm/acs-cymru/templates/_helpers.tpl)
+
+Sign in with a Microsoft work account, with an organisation's Entra groups deciding which role the
+account lands in, and documentation an IT administrator can follow without reading this repository.
+**Entra only.** Google and GitHub are deliberately out of scope, for a reason given below that is
+not "we ran out of time".
+
+#### Two roles hold identical grants, and five policies already disagree
+
+`Administrator` and `Shopfloor_Manager` are seeded in
+[`0002_seed_data.sql`](supabase/migrations/0002_seed_data.sql) with **the same thirteen
+permissions**. The distinction between them is presentational, and it is worse than cosmetic: a
+Shopfloor_Manager holds `authz:manage`, so a Shopfloor_Manager can promote themselves to
+Administrator through the Access Control tab.
+
+Meanwhile the database has already started separating the two by hand. **Five** policies check
+`has_role(ARRAY['Administrator'])` alone — `system_settings` for read and for write,
+`list_service_principals()`, `create_service_principal()` — against **58** sites that check the
+pair. The divergence exists in the policies; the permission table does not know about it.
+
+Mapping an Entra group onto `Shopfloor_Manager` is not worth doing until that name means something,
+which is why this is the first half of the item rather than a footnote to it. The split that matches
+the five policies already written: **Manager operates the shopfloor, Administrator operates the
+platform.** Manager keeps devices, cells, gateways, links, quarantine approval, telemetry and
+archive. Manager loses `authz:manage`, `schema:manage` and `gitops:manage` — who has access, what
+contract ingestion validates against, and what gets deployed to the edge.
+
+Two costs, both real. It is a **breaking change** for any deployment that has a Shopfloor_Manager
+doing schema or GitOps work. And `DEFAULT_ROLE_PERMISSIONS_MAP` in
+[`frontend/src/hooks/usePermissions.js`](frontend/src/hooks/usePermissions.js) hard-codes both roles
+as `Object.values(PERMISSION_UUIDS)` — a static fallback that would go on rendering controls the
+database then refuses. The seed and the map move together, and no mirror-drift check covers that
+pair today.
+
+#### The tenant URL is the boundary, and it fails open
+
+GoTrue's Azure provider takes an authority URL. Point it at a tenant —
+`https://login.microsoftonline.com/<tenant-id>/v2.0` — and only that organisation's directory can
+produce a session. Leave it unset **with the provider enabled** and GoTrue falls back to its own
+default, which is `common`: every Microsoft account in existence, including personal ones.
+
+So the guard cannot be "ignore a bad value", because the fallback from ignoring it is the worst
+value. It has to refuse to enable the provider at all. Three details that a first attempt gets
+wrong:
+
+- **`common` is not the only bad value.** `organizations` and `consumers` are equally multi-tenant,
+  and `consumers` is personal accounts exclusively. The reject-list is those three plus empty.
+- **The operator should type a tenant GUID, not a URL.** One variable, `ENTRA_TENANT_ID`, empty by
+  default, with compose building the authority around it. A URL field invites a hand-edited
+  authority; a GUID field does not.
+- **A flag cannot be the only check.** `.env` is editable after `npm run setup` has run. The
+  enforcement that holds is a `tid` claim check on the provisioning path, refusing to create a user
+  whose identity does not carry the expected tenant — held in `system_settings`, which is already
+  Administrator-only. That is the same argument as everywhere else here: the control belongs in
+  Postgres, not in a flag.
+
+On the Kubernetes path the flag half is a `acs-cymru.validateEntra` alongside `validateSecrets` and
+`validateRealtime`, failing at template time. On Compose there is no equivalent hook, so it goes in
+[`scripts/setup.mjs`](scripts/setup.mjs), which already hard-fails on a missing assignment.
+
+**The tenant boundary answers "which company", not "which person".** Every employee of that
+directory can obtain a session. `handle_new_user()` handing them `Operator` — read-only, already —
+is the other half of that control and not a separate decision.
+
+#### Closed signup is the collision, and the fix is not to open it
+
+`.env.example` already lists "an upstream identity provider" as one of the three ways an account may
+arrive. That sentence is aspirational: `GOTRUE_DISABLE_SIGNUP=true` is expected to refuse
+first-time external-provider logins too, in which case Entra creates nobody. **Confirming that is
+the cheapest thing in this item and it decides the shape of the rest**, so it happens first.
+
+If it holds, do not flip the variable. Flipping it reopens `POST /auth/v1/signup` for every caller
+who can reach Kong — precisely the regression the block comment in `.env.example` exists to prevent,
+and precisely how `VITE_ALLOW_SIGNUP` failed before it. **Deny the signup route at the edge and
+leave the OAuth callback open.** Route-level deny is a control this stack already uses.
+
+#### The IdP authenticates; `user_roles` still authorises
+
+The obvious design — an administrator stamps a role onto the user in Entra, the application reads it
+— is weaker than what already exists, and one version of it is an escalation path. GoTrue lands
+external-provider profile data in `raw_user_meta_data`, and **that column is writable by the user**
+through `supabase.auth.updateUser({ data })`. Any hook reading a role out of user metadata hands out
+self-service promotion.
+
+`has_role()` reads `public.user_roles` keyed on `auth.uid()`. The JWT claim that
+`custom_access_token_hook()` stamps is decoration; the table is the authority, and every RLS policy
+re-reads it per query. Keep that. A group claim becomes a **provisioning input** — a
+`sso_role_mappings(provider, claim_key, claim_value, role_id)` consulted at sign-in, which *writes*
+`user_roles` — and nothing downstream changes: `has_role()`, all 58 policies, `usePermissions`, the
+Access Control tab.
+
+Whether Entra group or app-role claims survive into `identity_data` at all in `gotrue:v2.189.0` is
+unverified, and the fallbacks differ enough to matter: SAML has attribute mapping, and
+domain-verified auto-provisioning with in-app promotion needs no claims at all. Spike it before
+designing the table.
+
+#### Why Entra alone, and what the documentation has to say
+
+The three providers are not equivalent, and a document implying they are would be wrong. Entra
+expresses groups and app roles. **GitHub org and team membership is not in the OIDC token at all.**
+Google Workspace groups need the Cloud Identity API. So Entra and SAML can map by group; Google and
+GitHub can realistically only map by verified email domain. Supporting one provider properly beats
+three with a footnote.
+
+The document is for an IT administrator who has never seen this repository: the app registration,
+the redirect URI through Kong, the tenant-scoped authority and why `common` is refused, the optional
+claims to enable, and the group-object-ID to role table. It lives in `docs/`, where
+[`scripts/check-docs-drift.mjs`](scripts/check-docs-drift.mjs) can be taught to reach it.
+
+#### Worth deciding early
+
+- **Whether the login screen offers both paths or one.** A stack with Entra configured may still
+  want the seeded password accounts for break-glass, and a login screen with two buttons is a
+  different design from one with a form and a divider.
+- **What happens when a user leaves the group.** Nothing revokes on its own: a mapping consulted
+  only at sign-in leaves the role in `user_roles` until someone removes it. Re-evaluating on every
+  login is the cheap answer and it still leaves a live session valid until `GOTRUE_JWT_EXP`.
+
+### 21 · Multi-factor authentication, and what happens when the phone is lost
+
+**Builds on:** GoTrue v2.189.0's factor API · `has_role()` and the `aal` claim ·
+[`AccessControlTab.jsx`](frontend/src/components/tabs/AccessControlTab.jsx) · the immutable audit in
+[`0003_audit_immutability_and_quarantine_rpc.sql`](supabase/migrations/0003_audit_immutability_and_quarantine_rpc.sql)
+
+TOTP second factors, required of the roles that can change the platform and optional for everyone
+else. Any authenticator that implements TOTP works — Microsoft Authenticator, Google Authenticator,
+Bitwarden, 1Password — which is a documentation fact, not an integration.
+
+**This item depends on item 20's role divergence**, and not incidentally. The reset control below is
+gated on `authz:manage`, which is Administrator-only *only once Manager has given it up*. Shipping
+this first would build an MFA boundary that a Shopfloor_Manager could dissolve.
+
+#### `aal2` is not a switch, and the enforcement belongs in the policies
+
+GoTrue will happily mint an `aal1` token for a user who has a factor enrolled. There is no
+server-side "require MFA" setting to turn on. Sending the browser to a challenge screen when
+`getAuthenticatorAssuranceLevel()` reports `currentLevel: 'aal1', nextLevel: 'aal2'` is necessary
+and it is **not** enforcement — the same JWT still reaches PostgREST directly, and the browser is
+the one component an attacker does not have to use.
+
+Enforcement is `(auth.jwt()->>'aal') = 'aal2'` in the policies, beside `has_role()`. For a platform
+that already puts every real control in RLS, that is the only placement consistent with the rest of
+it. It is also the expensive part: 58 policy sites exist, and deciding which of them are
+privilege-changing enough to demand `aal2` is a judgement per policy, not a find-and-replace.
+
+#### Never prompt a federated user twice
+
+If a user arrived through Entra, Conditional Access has already applied whatever second factor the
+organisation mandates. Prompting them for an application TOTP code afterwards is the clearest single
+tell of enterprise authentication bolted on from outside, and it teaches people to resent the
+control.
+
+So the requirement is conditional on how the session was obtained, which `amr` carries: **federated
+users inherit assurance from the IdP; password users enrol a factor here.** Password users do not go
+away when item 20 ships — the seeded personas, break-glass accounts, and any air-gapped shopfloor
+install with no Entra to reach are all password paths, which is why this cannot simply be delegated
+upward and forgotten.
+
+#### There are no recovery codes, and that is survivable
+
+**GoTrue ships no user-facing recovery codes.** This is worth stating plainly because every
+consumer-grade MFA flow has them and their absence is discovered at the worst moment.
+
+What exists instead is the administrative path, which is how enterprise identity actually works: the
+service role can delete a user's enrolled factor — `supabase.auth.admin.mfa.deleteFactor()` — and
+the user re-enrols at next sign-in. Somebody's phone is lost, an administrator clears the factor,
+they set it up again. That is not a workaround; it is the same flow every corporate helpdesk runs.
+
+So the deliverable is a **Reset MFA control in the Access Control tab, gated on `authz:manage`**,
+written through the digital thread so that clearing a second factor lands in an audit log that
+cannot be edited afterwards. An MFA reset nobody can quietly perform is a property an enterprise
+buyer asks for by name, which turns the missing feature into a present one.
+
+The residual case is a deployment with exactly one Administrator, locked out, and nobody left to
+press the button. Then it is the service-role key from `.env` and a documented one-liner. **For
+self-hosted software that is a legitimate answer** in a way it never would be for a hosted service:
+whoever runs this stack owns the database by definition. Document it as break-glass rather than
+pretending it cannot happen, and recommend two Administrators in the same breath.
+
+Two smaller mitigations belong in the documentation rather than the code. GoTrue permits **more than
+one TOTP factor per user**, so an admin can enrol twice. And a synced vault — Bitwarden, 1Password —
+makes a lost handset an inconvenience, where a single-device authenticator makes it an incident.
+
+#### What this must not touch
+
+Machine identities have no phone.
+[`0048_machine_principals_are_not_users.sql`](supabase/migrations/0048_machine_principals_are_not_users.sql)
+already draws that line, and every `aal2` predicate has to respect it: the ingestion writer, the MCP
+read-only principal, gateway credentials and the Grafana and Node-RED userinfo paths authenticate
+without a browser and cannot answer a challenge. A policy that demands `aal2` on a table a service
+principal writes is an outage, not a hardening.
+
+#### Worth deciding early
+
+- **Whether enrolment can be deferred.** Requiring a factor before an Administrator can act at all
+  is the strong position and it means the first login on a fresh stack is an enrolment screen, which
+  the seeded demo personas would also hit.
+- **Whether home-grown recovery codes are ever worth it.** They are buildable in
+  `supabase/functions/` — hashed single-use codes, redemption triggering a service-role factor
+  delete — but a code can only ever *drop* MFA and force re-enrolment, because nothing but GoTrue
+  can mint an `aal2` session. That is a smaller prize than it first looks.
 
 ---
 
