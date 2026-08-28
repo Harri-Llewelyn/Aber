@@ -253,6 +253,11 @@ services:
       TS_DBNAME: ${DB_NAME:-postgres}
       TS_USER: ${DB_USER:-postgres}
       TS_PASSWORD: ${DB_PASSWORD:-postgres}
+      # What the FDW's PUBLIC user mapping authenticates as (roadmap item 18). BLANK FALLS BACK to
+      # the admin pair above, resolved inside 0001 -- so a deployment that has not created
+      # fdw_reader keeps its read path working across the upgrade that introduces this.
+      TS_FDW_USER: ${TS_FDW_USER:-fdw_reader}
+      TS_FDW_PASSWORD: ${FDW_READER_PASSWORD:-}
       # Seeded into Supabase Vault by 0002_seed_data.sql, which is the only
       # place it can live: the quarantine webhook trigger has to read it from SQL. Empty on
       # the default stack, where Node-RED runs without adminAuth -- the migration then leaves
@@ -302,7 +307,7 @@ services:
           echo \"Executing migration $$f...\";
           attempt=1;
           while :; do
-            if psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v grafana_public_url=\"$$GRAFANA_PUBLIC_URL\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -v supabase_functions_url=\"http://supabase-kong:8000/functions/v1\" -v supabase_anon_key=\"$$SUPABASE_ANON_KEY\" -v gateway_revoke_secret=\"$$GATEWAY_REVOKE_SECRET\" -h supabase-db -U postgres -d postgres -f \"$$f\" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi;
+            if psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v ts_fdw_user=\"$$TS_FDW_USER\" -v ts_fdw_password=\"$$TS_FDW_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v grafana_public_url=\"$$GRAFANA_PUBLIC_URL\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -v supabase_functions_url=\"http://supabase-kong:8000/functions/v1\" -v supabase_anon_key=\"$$SUPABASE_ANON_KEY\" -v gateway_revoke_secret=\"$$GATEWAY_REVOKE_SECRET\" -h supabase-db -U postgres -d postgres -f \"$$f\" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi;
             cat /tmp/migration.log;
             # RETRIED ONLY ON A DEADLOCK, never on anything else. Every migration here is
             # idempotent and is replayed on every boot already, so re-running one is safe by
