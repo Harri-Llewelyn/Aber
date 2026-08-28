@@ -830,7 +830,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Fifteen extensions, none of them speculative: every one names the code it would build on, because
+Sixteen extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
@@ -854,8 +854,10 @@ below a removal would silently redirect all of them without erroring. A number c
 identifier, not a position. Where code refers to work that has since shipped, the citation names the
 documentation rather than a roadmap number.
 
-**Items 1-5 are this repository's own**, ordered by how much of each already exists, as are 17, 20
-and 21 — 20 and 21 in that order because 21 cannot ship without the role split 20 makes. **Items 8-15
+**Items 1-5 are this repository's own**, ordered by how much of each already exists, as are 17 and
+20-22 — 20 first because both 21 and 22 depend on the role split it makes: 21 has nowhere to put an
+Administrator-only control without it, and 22 would hide a lane from a role that could still grant
+itself the ability to see it. **Items 8-15
 arrive from feature requests** — 8, 9 and 10 from GitHub issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
@@ -2211,6 +2213,105 @@ principal writes is an outage, not a hardening.
   `supabase/functions/` — hashed single-use codes, redemption triggering a service-role factor
   delete — but a code can only ever *drop* MFA and force re-enrolment, because nothing but GoTrue
   can mint an `aal2` session. That is a smaller prize than it first looks.
+
+### 22 · An audit trail that covers privileged acts, and one lane an engineer cannot read
+
+**Builds on:** `log_digital_thread_event()` and its three triggers ·
+`digital_thread_select_privileged_or_auditor` · `classifyEvent()` in
+[`DigitalThreadTab.jsx`](frontend/src/components/tabs/DigitalThreadTab.jsx) ·
+`record_gateway_credential_issued()` ([0041](supabase/migrations/0041_virtual_gateway_credential.sql))
+and `record_service_token_issued()` ([0043](supabase/migrations/0043_record_service_token_issued.sql))
+
+The digital thread is asset provenance and it is good at that. This item asks it to also answer
+*who was granted what, by whom, and when* — which it currently cannot — without letting the answer
+be read by everyone who can read the asset history.
+
+#### Three tables are audited, and `user_roles` is not one of them
+
+`log_digital_thread_event()` is attached to `cells`, `devices` and `gateways`. That is the entire
+trigger coverage. **Nothing records a role grant.** An account becoming an Administrator leaves no
+row anywhere, and neither does a change to `system_settings`, a service principal being created, or
+a schema being published.
+
+This is the first question any external assessment asks, and it is the gap where the expensive half
+is already built: an append-only table whose immutability is enforced in
+[`0003`](supabase/migrations/0003_audit_immutability_and_quarantine_rpc.sql), a causation model, a
+page that renders it, and an export. What is missing is the triggers and the RPC-side writes, not
+the machinery.
+
+#### One table, because `causation_id` cannot cross two
+
+The tempting shape is a second table — a security log beside the asset log, with its own policies.
+Rejected, for a reason that is specific rather than aesthetic: **`causation_id` links the rows
+written by a single act, and it can only do that within one table.** A privileged act and its asset
+consequences are routinely the same act — a schema rebound, a quarantined device approved, a gateway
+archived. Splitting the store breaks every chain that crosses the boundary, and buys a second copy
+of 0003's immutability triggers, the retention policy and the purge tests to keep in step.
+
+#### And it cannot be done by hiding a section
+
+The other tempting shape is to leave the rows where they are and not render them for an engineer.
+This repository has already made that mistake once and written down what it cost: *"THIS REPLACES
+`VITE_ALLOW_SIGNUP`, which was a frontend flag and therefore never an access control."* A hidden
+lane is the same object. The rows stay readable through PostgREST with the same token, and
+`listServiceTokens()` in [`api.js`](frontend/src/api.js) is a three-line query anyone can reproduce
+against the endpoint directly.
+
+#### The classification already exists, in the one place it cannot enforce anything
+
+`classifyEvent()` sorts events into `governance`, `critical`, `creation` and `operational`, and it
+sorts them well — `TOKEN_MINTED` is already governance, with a comment explaining that *"who may do
+what is precisely what governance means."* It runs in the browser, so it can colour a row and
+nothing more.
+
+The work is to promote that judgement into the row: an `audit_domain` written at insert time,
+`asset` or `security`, and then a policy per domain rather than one policy over the table. Today
+`digital_thread_select_privileged_or_auditor` grants Administrator, Shopfloor_Manager **and** Auditor
+read over every row, so a Shopfloor_Manager can already read every `CREDENTIAL_ISSUED` and
+`TOKEN_MINTED` row. The concern this item exists to answer is present-tense, not anticipated.
+
+- `asset` → Administrator, Shopfloor_Manager, Auditor, unchanged
+- `security` → Administrator and Auditor
+
+**Auditor stops being a synonym at this point.** The role holds one permission, `digital_thread:read`,
+and today does nothing a read-only Administrator could not. Reviewing privileged acts without being
+able to perform them is separation of duties, which is the thing the role was named for. The UI lanes
+then reflect what RLS enforces rather than standing in for it, and a Manager's empty Security lane is
+honest, because the rows are genuinely not in their result set.
+
+**Sequenced after item 20.** Once Shopfloor_Manager gives up `authz:manage`, "who may perform a
+privileged act" and "who may read that it happened" become the same set, with Auditor as the
+deliberate read-only exception. Done in the other order, the security lane would be hidden from a
+role that could still grant itself the ability to see it.
+
+#### The credential inventory is empty, and that is the worst state it could be in
+
+Both writers require a human session. `record_gateway_credential_issued()` checks `has_role()`, and
+`record_service_token_issued()` is reachable by `service_role` alone and called only by
+`mint-mcp-token.mjs`, which somebody runs by hand. So every credential minted by
+`provision-gateways.mjs` is recorded nowhere — 0043's own header says so: *"the same wall
+`provision-gateways.mjs` hits, and the same one that makes a demonstration floor's credentials
+unrecorded."*
+
+0031 sets the bar at *"a half-legible audit entry is worse than an absent one, because it looks like
+the feature works."* An empty inventory is worse than either, because it does not look like a
+missing feature — **it reads as an assertion that no credentials are outstanding**, which on a
+provisioned stack is false. That half is a defect rather than an extension and is filed as one; it
+is named here because this item is where the general fix lands, and because an item about audit
+coverage that did not mention the one panel actively misinforming would be a strange document.
+
+#### Worth deciding early
+
+- **Whether retention diverges.** `digital_thread` is append-only and nothing prunes it. Security
+  events are normally kept longer than operational ones, and a domain column is what would
+  eventually let the two differ — but a retention policy over an immutable table is its own design.
+- **What a service-role write may claim.** 0043 settled this once, storing the host and OS user
+  under a `claimed` key precisely because the database can verify neither. Every new write path
+  reached without `auth.uid()` inherits that question, and the answer should be the same one rather
+  than a fresh invention per call site.
+- **Whether an export is part of it.** A security lane nobody can ship to a SIEM is a lane that gets
+  read once a quarter. That is a larger question than this item, and worth knowing the answer before
+  the schema is fixed.
 
 ---
 
