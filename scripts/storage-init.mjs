@@ -105,19 +105,30 @@ const CAPTURE_MIME_TYPES = [
 ];
 
 /**
- * 25 MiB for a broker capture.
+ * 100 MiB for a broker capture.
  *
  * Sized from the traffic rather than picked: the fleet's measured rate is 0.95 msg/s and a message
  * is a few hundred bytes of JSON, so an hour of a real shift is single-digit megabytes and a full
- * working day fits. What this refuses is a capture taken at the ingestion ceiling -- 240 msg/s
- * would fill this in about four minutes -- which is a load-test artefact rather than something
- * anybody needs to keep, and which would otherwise quietly fill the volume.
+ * working day fits. What this refuses is a capture taken at the ingestion ceiling -- 240 msg/s --
+ * running for far longer than anybody needs, which would otherwise quietly fill the volume.
  *
  * Deliberately not FLOW_BACKUP_SIZE_LIMIT: 5 MiB is right for a flow and would refuse an
  * ordinary morning's capture.
+ *
+ * ---------------------------------------------------------------------------------------------
+ * RAISED FROM 25 MiB BY 0055, AND THE TWO NUMBERS HAVE TO BE READ TOGETHER.
+ *
+ * `capture_jobs` caps a recording at 50 MiB, and that cap is useless unless the bucket can hold
+ * what it allows. The failure of getting this backwards is the worst possible ordering: a capture
+ * that reached its size cap would terminate SUCCESSFULLY, be uploaded, and be refused -- and by
+ * then the recording exists only in a buffer that is about to be freed. The three job caps are
+ * mutually consistent so that the MESSAGE cap binds first (100,000 messages at a few hundred bytes
+ * is roughly 40 MB); this leaves headroom above the size cap rather than sitting under it.
+ *
+ * Anything raising the job cap in `capture_jobs_caps_are_bounded` has to raise this too.
  */
 const CAPTURE_FILE_SIZE_LIMIT = Number.parseInt(
-  process.env.CAPTURE_FILE_SIZE_LIMIT || '26214400',
+  process.env.CAPTURE_FILE_SIZE_LIMIT || '104857600',
   10,
 );
 

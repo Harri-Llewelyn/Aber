@@ -587,10 +587,14 @@ services:
       # neither errors, so the two files are kept in step by hand.
       GATEWAY_BACKUP_BUCKET: ${GATEWAY_BACKUP_BUCKET:-gateway-backups}
       GATEWAY_BACKUP_FILE_SIZE_LIMIT: ${GATEWAY_BACKUP_FILE_SIZE_LIMIT:-5242880}
-      # Broker captures. Private, under <sparkplug_id>/ of the gateway they play back as; 25 MiB
-      # because a capture is a recording of traffic rather than a description of configuration.
+      # Broker captures. Private, under <sparkplug_id>/ of the SUBJECT RECORDED -- a gateway or a
+      # single device (0055 widened the prefix rule to admit both). 100 MiB because a capture is a
+      # recording of traffic rather than a description of configuration, and because it has to hold
+      # what `capture_jobs` allows a recording to reach: the job cap is 50 MiB, and a bucket
+      # smaller than that would refuse a capture that had already completed successfully, by which
+      # point the recording exists only in a buffer about to be freed.
       CAPTURE_BUCKET: ${CAPTURE_BUCKET:-broker-captures}
-      CAPTURE_FILE_SIZE_LIMIT: ${CAPTURE_FILE_SIZE_LIMIT:-26214400}
+      CAPTURE_FILE_SIZE_LIMIT: ${CAPTURE_FILE_SIZE_LIMIT:-104857600}
     volumes:
       - ./scripts/storage-init.mjs:/app/storage-init.mjs:ro
     command: ["node", "/app/storage-init.mjs"]
