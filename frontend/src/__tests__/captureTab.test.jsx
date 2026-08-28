@@ -847,6 +847,145 @@ describe('the playback card', () => {
     await screen.findByText('Line 1 Gateway')
     expect(screen.getByText(/Nothing is publishing/)).toBeInTheDocument()
   })
+
+  it('offers a drop zone for an edited capture', async () => {
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    expect(screen.getByLabelText('Publish a capture file')).toBeInTheDocument()
+  })
+
+  it('offers an Auditor no such zone', async () => {
+    renderTab({ userRole: 'Auditor' })
+    await screen.findByText('Line 1 Gateway')
+    expect(screen.queryByLabelText('Publish a capture file')).not.toBeInTheDocument()
+  })
+
+  /**
+   * DROP, STORE, PUBLISH -- the loop item 17 §6 invites by keeping the format hand-editable.
+   * The subject is GUESSED from the identities in the file and offered, never filed silently.
+   */
+  it('guesses the subject from the file and goes on to the playback dialog', async () => {
+    api.uploadCapture.mockResolvedValue({
+      id: 'cap-new', messages: 3, manifest: { device_ids: [], birth_captured: true }
+    })
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+
+    const doc = {
+      acs_capture_version: 1,
+      messages: [{ topic: 'spBv1.0/G/NDATA/gwy120000000000400080000', payload: {} }],
+      identities: { edge_nodes: ['gwy120000000000400080000'], devices: [] }
+    }
+    const file = new File([JSON.stringify(doc)], 'edited.json', { type: 'application/json' })
+    fireEvent.drop(screen.getByLabelText('Publish a capture file'), {
+      dataTransfer: { files: [file] }
+    })
+
+    // The upload dialog opens with the subject the file names already chosen.
+    const subject = await screen.findByLabelText('File it against')
+    await waitFor(() => expect(subject.value).toBe('gateway:gw-1'))
+
+    fireEvent.click(screen.getByRole('button', { name: /^Upload$/ }))
+    await waitFor(() => expect(api.uploadCapture).toHaveBeenCalledWith(
+      expect.objectContaining({ subjectKind: 'gateway', subjectId: 'gw-1' })
+    ))
+    // …and then straight into publishing it, rather than back to the table to find it.
+    expect(await screen.findByLabelText('Publish as')).toBeInTheDocument()
+  })
+
+  it('leaves the subject unchosen when the file names nothing this stack knows', async () => {
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    const doc = {
+      acs_capture_version: 1,
+      messages: [{ topic: 'spBv1.0/G/NDATA/gwy999999999999999999999', payload: {} }],
+      identities: { edge_nodes: ['gwy999999999999999999999'], devices: [] }
+    }
+    const file = new File([JSON.stringify(doc)], 'foreign.json', { type: 'application/json' })
+    fireEvent.drop(screen.getByLabelText('Publish a capture file'), {
+      dataTransfer: { files: [file] }
+    })
+    const subject = await screen.findByLabelText('File it against')
+    expect(subject.value).toBe('')
+  })
+})
+
+// =============================================================================================
+describe('the device schema on the panel', () => {
+  const SCHEMA = { schema_uuid: 'sch-1', schema_name: 'CNC Mill', version: 2 }
+
+  beforeEach(() => {
+    api.get.mockImplementation(path => {
+      if (path.includes('schemas')) return Promise.resolve([SCHEMA])
+      if (path.includes('gateways')) return Promise.resolve([GATEWAY, SIM_GATEWAY])
+      return Promise.resolve([{ ...DEVICE, schema_id: 'sch-1' }, UNBOUND_DEVICE])
+    })
+  })
+
+  const openDevice = async () => {
+    renderTab({ onSelectSchema: vi.fn() })
+    await screen.findByText('Line 1 Gateway')
+    fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
+    selectRow((await screen.findByText('CNC Spindle')).closest('tr'))
+  }
+
+  it('names the schema as a button that navigates', async () => {
+    const onSelectSchema = vi.fn()
+    renderTab({ onSelectSchema })
+    await screen.findByText('Line 1 Gateway')
+    fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
+    selectRow((await screen.findByText('CNC Spindle')).closest('tr'))
+
+    const button = screen.getByRole('button', { name: /CNC Mill/ })
+    fireEvent.click(button)
+    expect(onSelectSchema).toHaveBeenCalledWith('sch-1')
+  })
+
+  /** "Unmodelled" is a state the Devices page names and an operator acts on, not a blank field. */
+  it('says Unmodelled when nothing is attached', async () => {
+    api.get.mockImplementation(path => {
+      if (path.includes('schemas')) return Promise.resolve([SCHEMA])
+      if (path.includes('gateways')) return Promise.resolve([GATEWAY, SIM_GATEWAY])
+      return Promise.resolve([DEVICE, UNBOUND_DEVICE])
+    })
+    await openDevice()
+    expect(screen.getByText('Unmodelled')).toBeInTheDocument()
+  })
+
+  /** A gateway has no schema, so the field must not appear at all rather than read "Unmodelled". */
+  it('does not offer the field for a gateway', async () => {
+    renderTab({ onSelectSchema: vi.fn() })
+    selectRow((await screen.findByText('Line 1 Gateway')).closest('tr'))
+    expect(screen.queryByText('Schema')).not.toBeInTheDocument()
+  })
+})
+
+// =============================================================================================
+describe('the gateway filter', () => {
+  it('is offered only on the Devices tab', async () => {
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    // On Gateways it would filter a list of gateways by gateway.
+    expect(screen.queryByLabelText('Gateway filter')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
+    expect(await screen.findByLabelText('Gateway filter')).toBeInTheDocument()
+  })
+
+  it('narrows the devices to one gateway', async () => {
+    api.get.mockImplementation(path =>
+      Promise.resolve(path.includes('gateways')
+        ? [GATEWAY, SIM_GATEWAY]
+        : [DEVICE, { ...DEVICE, id: 'dev-3', name: 'Other Device', gateway_id: 'gw-2' }]))
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
+    expect(await screen.findByText('Other Device')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Gateway filter'), { target: { value: 'gw-1' } })
+    expect(screen.getByText('CNC Spindle')).toBeInTheDocument()
+    expect(screen.queryByText('Other Device')).not.toBeInTheDocument()
+  })
 })
 
 // =============================================================================================

@@ -1062,19 +1062,23 @@ const apiMethods = {
       throw new Error(error.message || 'Upload failed');
     }
 
+    const manifest = captureManifest(parsed);
     const { data: captureId, error: rpcError } = await supabase.rpc('register_uploaded_capture', {
       p_subject_kind: subjectKind,
       p_subject_id: subjectId,
       p_storage_path: path,
       p_size_bytes: file.size,
       p_message_count: parsed.messages.length,
-      p_manifest: captureManifest(parsed),
+      p_manifest: manifest,
       p_note: note || null,
       p_replace: replace
     });
     if (rpcError) throw new Error(rpcError.message || 'The file uploaded but could not be recorded');
 
-    return { id: captureId, path, messages: parsed.messages.length };
+    // THE MANIFEST COMES BACK, so a caller that goes straight on to publish this capture has the
+    // device ids it needs to build a mapping. The alternative is re-reading the list and hunting
+    // for the row that just appeared, which races the refresh that put it there.
+    return { id: captureId, path, messages: parsed.messages.length, manifest };
   },
 
   /**

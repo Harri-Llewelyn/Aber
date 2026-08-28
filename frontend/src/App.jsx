@@ -700,7 +700,7 @@ function Dashboard({ session, onSignOut }) {
               `tab` on a value the nav never offered. `userRole` is passed on rather than a boolean,
               because the page distinguishes read-only Auditor from the two roles that can record. */}
           {tab === 'capture' && ['Administrator', 'Shopfloor_Manager', 'Auditor'].includes(userRole) &&
-            <CaptureTab showToast={showToast} userRole={userRole} />}
+            <CaptureTab showToast={showToast} userRole={userRole} onSelectSchema={showSchema} />}
           {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} />}
           {/* The role is re-checked here, not only in the nav: routing can put `tab` on a value
               the nav never offered. Still a courtesy -- RLS is what refuses the write. */}
