@@ -2071,6 +2071,30 @@ jobs:
           python ingestion/validate.py
 
       # ---------------------------------------------------------------------------------------
+      # THE MIGRATION MODEL'S CENTRAL INVARIANT, CHECKED RATHER THAN REVIEWED.
+      #
+      # There is no migrations ledger: db-init replays EVERY file on EVERY boot, so "a second run
+      # must match no rows" is the property the whole schema rests on. Until this step, it was
+      # upheld by review and by self-checks authors remembered to write, and this job booted the
+      # stack exactly once -- so nothing ever ran the chain twice and compared.
+      #
+      # Three failures the repository records finding the hard way would each have been a one-line
+      # assertion here: 0040's "provision, then restart" landmine, the 0033 time-window false
+      # positive, and 0037/0038's self-checks appending nine audit rows per boot to a table that
+      # cannot be pruned.
+      #
+      # RUNS AFTER validate.py, DELIBERATELY. The stack is fully exercised by then -- devices
+      # discovered, telemetry flowing, audit rows written by real activity -- so the replay happens
+      # against a database in a realistic state rather than a freshly seeded one. A guard that only
+      # ever sees an empty stack is not testing replay, it is testing install.
+      #
+      # The script asserts only what a migration can move (schema digest, the 'migration' audit
+      # lane) and treats a FALL in operator row counts as failure while ignoring a rise, so
+      # concurrent daemon and simulator writes cannot make it flaky.
+      - name: Migration Chain Replays Cleanly
+        run: node scripts/check-migration-idempotency.mjs
+
+      # ---------------------------------------------------------------------------------------
       # The gateway's POSTURE, against the running gateway rather than against its config file.
       #
       # THE STATIC CHECK IN THE LINT JOB IS NOT THIS. That one parses kong.yml and asserts its

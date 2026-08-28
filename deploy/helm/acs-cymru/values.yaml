@@ -517,7 +517,8 @@ supabaseKong:
   #
   # WORTH MORE THAN ANY OTHER SCRAPE IN THIS STACK. Every REST, Auth, Storage, Realtime and edge
   # function request passes through Kong, and none of those components exposes metrics of its own
-  # (PostgREST 12.2.0 has no metrics endpoint at all -- its admin server is health-only). So this
+  # (PostgREST had no metrics endpoint at all through 12.2.0 -- its admin server was health-only;
+  # the pin here is v14.12, so re-check before relying on that.) So this
   # one target measures the entire HTTP surface: per-service latency, status codes, bandwidth.
   #
   # The listener is separate from the proxy port because these metrics are an internal detail:

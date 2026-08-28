@@ -380,6 +380,27 @@ SELECT cron.schedule('sweep-gateway-credential-revocations', '*/15 * * * *',
 -- So this asserts the WIRING and the GUARDS, all of which short-circuit before the HTTP call, and
 -- the end-to-end proof lives where it can be run once and observed: archive a real enrolled
 -- gateway and watch its credential stop working.
+-- THE PROBE IS ROLLED BACK, AND THAT IS NOT TIDINESS. Every INSERT, UPDATE and DELETE below fires
+-- `trg_gateways_digital_thread`, and `digital_thread` is append-only to every application role and
+-- cannot be pruned. Committed, this self-check appended a handful of rows to the audit trail ON
+-- EVERY BOOT -- which is the failure class this repository names twice elsewhere: 0005's heartbeat
+-- problem, and roadmap item 17's warning against "a row per progress tick into an append-only table
+-- no application role can prune".
+--
+-- Measured before the fix: replaying 0037 and 0038 once added 9 rows, and `migration` had become
+-- the LARGEST actor_source in the table -- 517 rows against 135 from real users -- with 496 of them
+-- pointing at probe gateways long since deleted, so they render through the Digital Thread page's
+-- purged-entity fallback. Synthetic noise in the one table whose signal the whole design protects.
+--
+-- The idiom is 0048's: do the work in a sub-block, raise `rollback_selfcheck` at the end, and
+-- swallow only that. A subtransaction that ends in an exception discards everything it wrote, the
+-- audit rows included, while the outer transaction carries on. Any OTHER exception -- including
+-- every assertion below -- is re-raised untouched, so a genuine failure still stops db-init.
+--
+-- THE CLEANUP DELETE STAYS OUTSIDE THE BLOCK, deliberately. It is a no-op on a healthy boot, and on
+-- a database left holding a probe row by an older version of this file it is the one thing that
+-- removes it. Inside, it would be rolled back with everything else and the stale row would live
+-- forever.
 DO $selfcheck$
 DECLARE
   v_gw    CONSTANT uuid := '00000000-0000-4000-8000-00000000f038';
@@ -398,7 +419,10 @@ BEGIN
       '0038 self-check: % of 3 revocation triggers are attached to public.gateways.', v_count;
   END IF;
 
+  -- Cleanup outside the rolled-back block, for the reason given in the header above.
   DELETE FROM public.gateways WHERE id = v_gw;
+
+  BEGIN
   INSERT INTO public.gateways (id, name, is_virtual, location_scope, status)
   VALUES (v_gw, '0038 self-check', false, 'site_wide', 'PENDING_ENROLLMENT');
 
@@ -427,9 +451,15 @@ BEGIN
     RAISE EXCEPTION '0038 self-check: revoke_gateway_credential() accepted a malformed edge node id.';
   END IF;
 
-  DELETE FROM public.gateways WHERE id = v_gw;
+  -- No DELETE here any more: the rollback removes the probe and its audit rows together.
+  RAISE EXCEPTION 'rollback_selfcheck';
+  EXCEPTION
+    WHEN raise_exception THEN
+      IF SQLERRM <> 'rollback_selfcheck' THEN RAISE; END IF;
+  END;
 
   RAISE NOTICE '0038 self-check passed: 3 triggers attached, an unenrolled gateway is not revoked, '
-               'un-archive clears the stamp, and a malformed id is refused.';
+               'un-archive clears the stamp, and a malformed id is refused. Probe rolled back, no '
+               'audit rows written.';
 END;
 $selfcheck$;

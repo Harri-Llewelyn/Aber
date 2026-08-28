@@ -318,6 +318,30 @@ from one group to a request from another — precisely the collision this closes
 > **Adding a column to `gateways` requires `ensure_gateway_status_view()`.** `0008` calls it, and
 > `0001` no longer carries a second, explicit-column copy of the view — see below.
 
+### Migrations that must run once, and the ledger that decides (`0040`, `0053`)
+
+Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
+**deleting** rows, and a second run would delete whatever an operator provisioned afterwards.
+
+`public.one_shot_migrations` is how such a migration knows. It claims its own filename with
+`INSERT … ON CONFLICT DO NOTHING` **inside the same transaction as the work it guards**, so the
+claim and the effect commit together or not at all. The claim is what branches — not a flag, not a
+version number, not the presence of the rows themselves.
+
+**Which makes the claim row load-bearing, and it was writable.** The table has RLS with no policy,
+which correctly denies `anon` and `authenticated` — but `service_role` bypasses RLS and `0040`
+granted it `ALL`. One `DELETE` from any holder of the service key re-arms the purge, and the next
+boot runs it against the current floor, reporting success exactly as it did the first time.
+
+`0053` revokes `INSERT`, `UPDATE`, `DELETE` and `TRUNCATE`. **`SELECT` is deliberately kept**:
+reading the ledger is how an operator answers *"why did the purge not run"*, it discloses a filename
+and a timestamp, and the finding was about the writes. Migrations are unaffected — db-init connects
+as `postgres`, which owns the table.
+
+This is the same narrowing `0026` applied to `digital_thread`, on the argument that *"a convention
+is not what an audit trail rests on"*. The table guarding a destructive replay had been left out of
+it.
+
 ### `0001` builds `gateway_status` by calling the function, not inline
 
 `pg_dump` expanded the view into an **explicit column list** when the baseline was squashed, while

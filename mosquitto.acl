@@ -26,7 +26,16 @@
 #   simulation/README.md -> "Broker topic authorisation"
 #
 # ---------------------------------------------------------------------------------------------
-# VERIFIED BEHAVIOUR OF THIS FILE, against eclipse-mosquitto:2.0.20, the pinned image:
+# VERIFIED BEHAVIOUR OF THIS FILE, against eclipse-mosquitto:2.0.20. THE PIN IS NOW 2.0.22, and
+# this note says the version it was measured on rather than following the pin, because a number
+# bumped without re-running the measurement is a claim nobody made.
+#
+# What DOES follow the pin automatically: `scripts/check-broker-config.mjs` reads the tag straight
+# out of docker-compose.yml and re-runs its assertions against whatever is pinned, so the
+# confinement claims below are exercised on the current image on every run. The delivery-time
+# semantics in the fourth bullet are the load-bearing part and are covered there.
+#
+# Bump this line only alongside a re-run of that script on the new tag.
 #
 #   * A gateway publishing under its OWN edge node succeeds; under ANOTHER edge node the message
 #     is dropped by the broker and reaches no subscriber.

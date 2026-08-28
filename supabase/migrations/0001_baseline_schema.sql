@@ -140,6 +140,24 @@ CREATE SCHEMA IF NOT EXISTS timescale;
 
 -- Recreated on every run so connection settings and column definitions stay in step with
 -- docker-compose.yml and timescaledb/init/001_schema.sql.
+--
+-- CASCADE TAKES THE WHOLE TELEMETRY READ SURFACE WITH IT, AND THERE IS A WINDOW. Everything
+-- downstream of this server is dropped here and rebuilt later: `public.telemetry` in section 4 of
+-- this file, and the rollup foreign tables and their views in 0010. So between this statement and
+-- the end of 0010 the read surface does not exist.
+--
+-- On a healthy boot that window is milliseconds and nothing is serving yet. The case worth knowing
+-- about is a file BETWEEN 0001 AND 0010 aborting: db-init stops, the rest of the stack is up, and
+-- PostgREST answers requests for `telemetry` with a missing-relation error. That reads as schema
+-- drift or a bad deploy rather than as a half-finished init, which is a long way from the cause.
+--
+-- Self-healing: the next successful replay rebuilds all of it, and db-init replays the whole chain
+-- on every boot. Recreating only when the options actually change (compare `srvoptions` first)
+-- would remove the window entirely and is the fix if this ever bites in anger -- it is not done
+-- here because an unconditional recreate is the thing that keeps the definition honest against
+-- edits to this file, and that trade has been worth it so far.
+--
+-- Recorded by the architecture audit of 2026-08-27 (F3).
 DROP SERVER IF EXISTS timescaledb_server CASCADE;
 
 CREATE SERVER timescaledb_server

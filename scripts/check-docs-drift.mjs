@@ -113,6 +113,70 @@ const MARKDOWN = allFiles.filter((f) => f.endsWith('.md'));
 }
 
 // -------------------------------------------------------------------------------------------------
+// 2b. The service directory names every Compose service, and only real ones. BOTH DIRECTIONS.
+//
+// Check 2 above validates image TAGS for rows it can match, one way. That is blind to the two
+// failures that actually happened:
+//
+//   * a row for `supabase-kong-init`, a service retired with Kong on Compose, survived a rewrite of
+//     the gateway because the image it named (`alpine:3.24`) still existed somewhere. The row was
+//     matched, the tag agreed, the check passed, and the table sent readers to a service that had
+//     not existed for weeks;
+//   * five live services -- storage-policies, mosquitto-tls-init, gateway-credential, i3x-service,
+//     timescaledb-maintenance -- were simply absent. Nothing looks for a row that is not there.
+//
+// This is the same "in BOTH directions" reasoning check-env-drift.mjs already applies to variables.
+// A directory that is only checked one way certifies the half you happened to write down.
+// -------------------------------------------------------------------------------------------------
+{
+  const composeRaw = read('docker-compose.yml');
+
+  // Service keys are the two-space-indented mapping under `services:`. Parsed by shape rather than
+  // with a YAML dependency, which this repo deliberately does not carry for its guards.
+  const services = new Set();
+  let inServices = false;
+  for (const line of composeRaw.split('\n')) {
+    if (/^services:\s*$/.test(line)) { inServices = true; continue; }
+    if (inServices && /^\S/.test(line)) break;           // dedent out of `services:`
+    const m = line.match(/^ {2}([a-z0-9][a-z0-9._-]*):\s*$/);
+    if (inServices && m) services.add(m[1]);
+  }
+
+  const readme = read('README.md');
+  const section = readme.slice(readme.indexOf('## Service port directory'));
+  const table = section.slice(0, section.indexOf('\n---'));
+
+  // First cell of each row, which is the service name.
+  const listed = new Set();
+  for (const [, name] of table.matchAll(/^\|\s*`([a-z0-9][a-z0-9._-]*)`\s*\|/gm)) listed.add(name);
+
+  if (services.size === 0 || listed.size === 0) {
+    fail('service directory check could not parse docker-compose.yml or the README table');
+  } else {
+    const ghosts = [...listed].filter((n) => !services.has(n));
+    const missing = [...services].filter((n) => !listed.has(n));
+
+    if (ghosts.length) {
+      fail(
+        `README service directory names ${ghosts.length} service(s) docker-compose.yml does not ` +
+        `define: ${ghosts.join(', ')}. A row naming a dead service still passes the image-tag ` +
+        `check whenever the image survives it, which is how supabase-kong-init outlived Kong.`
+      );
+    }
+    if (missing.length) {
+      fail(
+        `docker-compose.yml defines ${missing.length} service(s) the README service directory ` +
+        `omits: ${missing.join(', ')}. The table is the answer to "what runs here", so an absent ` +
+        `row is a service nobody reading the docs knows about.`
+      );
+    }
+    if (!ghosts.length && !missing.length) {
+      pass(`README service directory matches docker-compose in both directions (${services.size} services)`);
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 3. README names every job in every workflow, and no job it does not have.
 //
 // Found stale: "runs three jobs" when there were five. Someone reading it would not know the chart
