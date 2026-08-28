@@ -111,6 +111,9 @@ secrets:
   # with an Elixir stacktrace.
   realtimeDbEncKey: ""
   realtimeSecretKeyBase: ""
+  # Mandatory from realtime v2.102.3 -- the container refuses to boot without it. Signs the
+  # bearer token its /metrics endpoint requires.
+  realtimeMetricsJwtSecret: ""
 
   # postgres-meta encrypts stored connection strings with this; Studio must be given the same.
   pgMetaCryptoKey: acs-cymru-pg-meta-crypto-key
@@ -381,7 +384,7 @@ realtime:
   enabled: true
   image:
     repository: supabase/realtime
-    tag: v2.34.47
+    tag: v2.102.3
     pullPolicy: IfNotPresent
   # Never more than one. Realtime holds a LOGICAL REPLICATION SLOT, which is per-instance state,
   # and clustering additional nodes needs DNS_NODES configuration this stack does not have.
@@ -610,7 +613,7 @@ supabaseStorage:
   enabled: true
   image:
     repository: supabase/storage-api
-    tag: v1.11.13
+    tag: v1.60.4
     pullPolicy: IfNotPresent
   # ONE REPLICA on the file backend: it is a single-writer local filesystem on a ReadWriteOnce
   # PVC. Switch backend to s3 (below) to lift that.
