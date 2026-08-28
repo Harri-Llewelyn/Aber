@@ -2415,32 +2415,40 @@ ON CONFLICT (schema_name) DO NOTHING;
 -- removes it from databases seeded before this. That id is retired, not reused.
 -- -------------------------------------------------------------------------------------------
 
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000001', 'Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+-- SEEDED UNKNOWN, WITH NO HEARTBEAT, and that is the correction 0054 exists for. These rows used
+-- to carry the literal 'ACTIVE' and the moment they were seeded, so every stack reported fifteen
+-- healthy services at every age -- a green badge that would have said ACTIVE for something down a
+-- week, and a timestamp that described an INSERT rather than an observation.
+--
+-- refresh_directory_liveness() overwrites both within a minute of boot, writing ACTIVE or DOWN for
+-- the six services Prometheus scrapes and leaving the rest UNKNOWN. Seeding UNKNOWN means the gap
+-- between boot and the first probe says "not yet known" instead of asserting health nobody checked.
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000001', 'Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
 -- ON CONFLICT (id), not (service_name), for this row alone: a database seeded before 0016 holds
 -- this id under the OLD name, and a name-targeted clause does not catch a primary-key collision
 -- -- the insert would raise on every boot instead of being skipped. 0016 then does the rename.
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000003', 'Node-RED (Virtual Edge Gateway Simulator)', 'EDGE_NODE', 'http://localhost:1880', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000003', 'Node-RED (Virtual Edge Gateway Simulator)', 'EDGE_NODE', 'http://localhost:1880', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (id) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000004', 'Mosquitto MQTT Broker', 'MQTT_BROKER', 'mqtt://localhost:1883', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000004', 'Mosquitto MQTT Broker', 'MQTT_BROKER', 'mqtt://localhost:1883', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000005', 'TimescaleDB Telemetry Store', 'TIME_SERIES_DB', 'postgres://localhost:5433', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000005', 'TimescaleDB Telemetry Store', 'TIME_SERIES_DB', 'postgres://localhost:5433', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000006', 'Grafana Dashboards', 'MONITORING', 'http://localhost:3002', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000006', 'Grafana Dashboards', 'MONITORING', 'http://localhost:3002', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000007', 'Supabase API Gateway (Kong)', 'API_GATEWAY', 'http://127.0.0.1:54321', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000007', 'Supabase API Gateway (Kong)', 'API_GATEWAY', 'http://127.0.0.1:54321', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000008', 'Supabase Auth (GoTrue)', 'AUTHENTICATION', 'http://127.0.0.1:54321/auth/v1', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000008', 'Supabase Auth (GoTrue)', 'AUTHENTICATION', 'http://127.0.0.1:54321/auth/v1', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000009', 'Supabase PostgREST API', 'REST_API', 'http://127.0.0.1:54321/rest/v1', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000009', 'Supabase PostgREST API', 'REST_API', 'http://127.0.0.1:54321/rest/v1', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000a', 'Supabase Edge Functions', 'SERVERLESS', 'http://127.0.0.1:54321/functions/v1', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000a', 'Supabase Edge Functions', 'SERVERLESS', 'http://127.0.0.1:54321/functions/v1', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000b', 'Supabase PostgreSQL', 'DATABASE', 'postgres://localhost:54322', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000b', 'Supabase PostgreSQL', 'DATABASE', 'postgres://localhost:54322', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000c', 'Sparkplug B Ingestion Engine', 'INGESTION', 'mqtt://mosquitto:1883/spBv1.0/#', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000c', 'Sparkplug B Ingestion Engine', 'INGESTION', 'mqtt://mosquitto:1883/spBv1.0/#', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000d', 'API Reference (Swagger UI)', 'DOCUMENTATION', 'http://localhost:8088', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000d', 'API Reference (Swagger UI)', 'DOCUMENTATION', 'http://localhost:8088', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
 
 -- ---------------------------------------------------------------------------------------------
@@ -2473,11 +2481,11 @@ ON CONFLICT (service_name) DO NOTHING;
 -- inventory is the more misleading of the two options. The in-network URL is what makes the
 -- distinction visible rather than hidden: a reader who tries it learns something true.
 -- ---------------------------------------------------------------------------------------------
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000e', 'Prometheus Metrics Store', 'MONITORING', 'http://localhost:9090', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000e', 'Prometheus Metrics Store', 'MONITORING', 'http://localhost:9090', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000f', 'Host Metrics Exporter (node_exporter)', 'METRICS_EXPORTER', 'http://node-exporter:9100/metrics', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-00000000000f', 'Host Metrics Exporter (node_exporter)', 'METRICS_EXPORTER', 'http://node-exporter:9100/metrics', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
-INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000010', 'Ingestion Metrics Endpoint', 'INGESTION', 'http://localhost:9108/metrics', 'ACTIVE', '2026-08-02 05:44:29.276449+00', NULL)
+INSERT INTO public.directory_services VALUES ('f1111111-0000-0000-0000-000000000010', 'Ingestion Metrics Endpoint', 'INGESTION', 'http://localhost:9108/metrics', 'UNKNOWN', NULL, NULL)
 ON CONFLICT (service_name) DO NOTHING;
 
 

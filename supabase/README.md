@@ -318,6 +318,47 @@ from one group to a request from another — precisely the collision this closes
 > **Adding a column to `gateways` requires `ensure_gateway_status_view()`.** `0008` calls it, and
 > `0001` no longer carries a second, explicit-column copy of the view — see below.
 
+### The Directory reports liveness it observed (`0054`)
+
+`directory_services.status` and `.last_heartbeat` were **never written by anything**. The only
+writes were `0002`'s seed INSERTs, which contain the literal `'ACTIVE'` — so every stack reported
+fifteen healthy services at every age, and `last_heartbeat` held the moment the row was seeded.
+
+**The green pill was the more harmful half**, which is the opposite of how it looks. A stale date
+reads as stale and makes a reader suspicious on their own; a green badge is *believed*, and it
+would have said ACTIVE for a service that had been down a week. The Directory page had already
+corrected this exact class of fabrication once — it used to render a hardcoded `SYNCED / a8f3e4b`
+for Node-RED, removed because nothing can observe what Node-RED is running.
+
+`refresh_directory_liveness()` writes both every minute from Prometheus's `up` series.
+
+| | |
+| :--- | :--- |
+| `ACTIVE` | Prometheus scraped the target and it answered |
+| `DOWN` | Prometheus scraped it and it did not |
+| `UNKNOWN` | **nothing observes this service** |
+
+**Six of the fifteen are scraped; nine are not, and `UNKNOWN` is the point rather than a shortfall.**
+Replacing a fabricated `ACTIVE` with a fabricated probe result would be the same defect in better
+clothes. `endpoint_url` holds *browser* addresses — `http://localhost:8088`,
+`postgres://localhost:54322` — which from inside any container name the container itself, so a
+probe against them would answer a question about the wrong host and report it as service health.
+
+**No edge function, because none was needed.** `supabase-db` reaches `prometheus:9090` directly and
+`pg_net` is already in this schema. Measured before choosing: `net.http_get()` against the Prometheus
+query API returns 200 with the whole `up` vector in one call. So this is a migration and a cron
+entry — no new deployable, no thirteenth entry in the router allow-list.
+
+`pg_net` is asynchronous, so each run **collects the previous probe and fires the next**. Status is
+one tick old, which at a one-minute schedule is well inside the staleness it describes.
+
+**Everything unmapped is set `UNKNOWN` on every run, not only the first.** If a job is renamed in
+`prometheus.yml`, or a service renamed so the map stops matching, the row falls back to `UNKNOWN`
+rather than keeping the last `ACTIVE` it was given — which would be a fabricated status with a real
+timestamp, the most convincing kind. `scripts/check-docs-drift.mjs` asserts every mapped job still
+exists in `prometheus.yml`; the issue that requested this named `kong`, which had already become
+`envoy` by the time it was built.
+
 ### Migrations that must run once, and the ledger that decides (`0040`, `0053`)
 
 Every migration replays on every boot. A handful cannot: `0040` retires the demonstration seed by
