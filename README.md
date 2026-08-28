@@ -40,7 +40,7 @@ flowchart TB
 
     subgraph Processing ["Ingestion & Serverless"]
         ING["Python Ingestion Engine<br/>identity - quarantine - binding"]
-        EF["Edge Functions<br/>approve-quarantine - deploy-nodered - aas-export<br/>aas-api - grafana-userinfo - nodered-userinfo<br/>fplus-directory - grafana-alert-webhook - enroll-gateway<br/>gateway-bundle - revoke-gateway-credential"]
+        EF["Edge Functions<br/>approve-quarantine - deploy-nodered - aas-export<br/>aas-api - grafana-userinfo - nodered-userinfo<br/>fplus-directory - grafana-alert-webhook - enroll-gateway<br/>gateway-bundle - revoke-gateway-credential - gateway-credential"]
     end
 
     subgraph Supabase ["Supabase BaaS"]
@@ -381,6 +381,11 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 
 ## Service port directory
 
+**Every Compose service appears here and every row names a real one**, asserted in both directions
+by `scripts/check-docs-drift.mjs`. It used to be checked one way and only for image tags, which is
+how a row for `supabase-kong-init` — a service retired with Kong on Compose — survived while five
+live services went unlisted: the tag it named (`alpine:3.24`) still existed, so the check passed.
+
 | Service | Container | Image | Port |
 | :--- | :--- | :--- | :--- |
 | `supabase-db` | `acs-cymru_supabase_db` | `supabase/postgres:17.6.1.160` | `54322:5432` |
@@ -388,19 +393,24 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | `supabase-db-init` | `acs-cymru_supabase_db_init` | `supabase/postgres:17.6.1.160` | — |
 | `supabase-auth` | `acs-cymru_supabase_auth` | `supabase/gotrue:v2.189.0` | — |
 | `supabase-rest` | `acs-cymru_supabase_rest` | `postgrest/postgrest:v14.12` | — |
-| `supabase-kong-init` | `acs-cymru_supabase_kong_init` | `alpine:3.24` | — |
+| `supabase-envoy-init` | `acs-cymru_supabase_envoy_init` | `alpine:3.24` | — |
 | `supabase-envoy` | `acs-cymru_supabase_envoy` | `envoyproxy/envoy:v1.31.5` | `54321:8000` |
 | `supabase-functions` | `acs-cymru_supabase_functions` | `supabase/edge-runtime:v1.74.2` | — |
 | `supabase-realtime` | `acs-cymru_supabase_realtime` | `supabase/realtime:v2.34.47` | — |
 | `supabase-storage` | `acs-cymru_supabase_storage` | `supabase/storage-api:v1.11.13` | — |
 | `supabase-storage-init` | `acs-cymru_supabase_storage_init` | `node:24-alpine` | — |
+| `supabase-storage-policies` | `acs-cymru_supabase_storage_policies` | `supabase/postgres:17.6.1.160` | — |
 | `supabase-meta` | `acs-cymru_supabase_meta` | `supabase/postgres-meta:v0.96.6` | — |
 | `supabase-studio` | `acs-cymru_supabase_studio` | `supabase/studio:2026.07.07-sha-a6a04f2` | `127.0.0.1:54323:3000` (loopback only — see below) |
 | `timescaledb` | `acs-cymru_timescaledb` | `timescale/timescaledb:2.29.2-pg17` | `5433:5432` |
+| `timescaledb-maintenance` | `acs-cymru_timescaledb_maintenance` | `timescale/timescaledb:2.29.2-pg17` | — |
+| `mosquitto-tls-init` | `acs-cymru_mosquitto_tls_init` | `./mosquitto-tls-init/Dockerfile` | — |
 | `mosquitto-init` | `acs-cymru_mosquitto_init` | `eclipse-mosquitto:2.0.22` | — |
 | `mosquitto` | `acs-cymru_mosquitto` | `eclipse-mosquitto:2.0.22` | `1883`, `9001` |
 | `frontend` | `acs-cymru_frontend` | `./frontend/Dockerfile` | `3000:3000` |
 | `ingestion` | `acs-cymru_ingestion` | `./Dockerfile` | `9108:9108` |
+| `i3x-service` | `acs-cymru_i3x` | `./i3x/Dockerfile` | `8090:8090` |
+| `gateway-credential` | `acs-cymru_gateway_credential` | `./gateway-credential/Dockerfile` | — |
 | `node-red-init` | `acs-cymru_node_red_init` | `./node-red/Dockerfile` | — |
 | `node-red` | `acs-cymru_node_red` | `./node-red/Dockerfile` | `1880:1880` |
 | `grafana` | `acs-cymru_grafana` | `grafana/grafana:13.2.0` | `3002:3000` |
@@ -418,7 +428,7 @@ unrecognised role produces `403`.
 | Layer | Control |
 | :--- | :--- |
 | **Broker** | `allow_anonymous false`; [`mosquitto.acl`](mosquitto.acl) confines each gateway to `spBv1.0/+/+/<own-id>/#` |
-| **Ingestion** | Gateway↔device binding; quarantine gating; append-only historian writes |
+| **Ingestion** | Gateway↔device binding; quarantine gating; append-only historian writes — **enforced in the daemon, not by the database**: it connects to TimescaleDB as `postgres` and could rewrite history. Roadmap §18 makes this a grant |
 | **Gateway** | Envoy's `apikey` check on `/rest`, `/realtime`, `/storage`, `/functions` — with **four** documented exemptions ([`supabase/README.md`](supabase/README.md)) |
 | **API** | PostgREST JWT verification plus RLS on every table |
 | **Database** | `has_role()` reads `user_roles` directly, so revocation is immediate; `digital_thread` is append-only against `service_role` too |
@@ -698,7 +708,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Twelve extensions, none of them speculative: every one names the code it would build on, because
+Thirteen extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
@@ -715,18 +725,18 @@ was retired the same way when `aas-api` shipped.
 
 **Retired numbers are not reused, and the list is therefore not contiguous.** The gaps at 6, 7, 11,
 13 and 16 are deliberate. Renumbering on retirement was the earlier practice and it does not survive
-contact with this repository: the remaining entries are named by **48 comments** in migrations,
+contact with this repository: the remaining entries are named by **dozens of comments** in migrations,
 scripts and components, all explaining why that code is the way it is, and shifting every number
 below a removal would silently redirect all of them without erroring. A number cited from code is an
 identifier, not a position. Where code refers to work that has since shipped, the citation names the
 documentation rather than a roadmap number.
 
-**Items 1-5 are this repository's own**, ordered by how much of each already exists, as is 17. **Items 8-15
+**Items 1-5 are this repository's own**, ordered by how much of each already exists, as are 17 and 18. **Items 8-15
 arrive from feature requests** — 8, 9 and 10 from GitHub issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
 [#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66), in that same order of how much already
-exists; 12, 15 and 17 are not yet filed.
+exists; 12, 15, 17 and 18 are not yet filed.
 [#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) was item 11 and is now built. Where an entry's heading differs from the issue's title, it is
 because the work that remains is narrower than the title claims.
 
@@ -747,7 +757,7 @@ assertion, not a measurement. `acs_ingestion_write_seconds` now ships, so there 
 
 | | |
 |---|---|
-| mean write | **≈ 4.1 ms** (0.0744 s over 18 writes) |
+| mean write | **≈ 4.1 ms** (0.0744 s over 18 writes, measured 2026-08-21) |
 | p90 | **12.6 ms**, via `histogram_quantile` |
 | implied single-thread ceiling | **≈ 240 msg/s**, and this is an *upper* bound |
 | current fleet rate | **≈ 0.95 msg/s** |
@@ -843,6 +853,15 @@ parts in the layer that has no fallback.
 **Builds on:** TimescaleDB retention policies · `telemetry` hypertable · Edge Functions · Apache
 Parquet · `public.system_settings` (`0031`, `0032`)
 
+**Written in the conditional throughout, deliberately.** None of the machinery below exists, and
+this entry previously described it in the present tense — which reads, in a section whose whole
+premise is that it lists only what is NOT built, as though the feature had shipped.
+
+**The name is already taken.** `ArchivesTab.jsx` ships today and means *entity* archives — archived
+cells, gateways and devices — which has nothing to do with cold telemetry. Whatever this item's page
+is called, it is not "Archives", and the collision should be settled before the page is built rather
+than by whoever gets there second.
+
 **Its configuration has somewhere to live, and the split is already decided.** The settings plane
 shipped, so the S3 **endpoint**, bucket and tiering threshold are declared here by this item's own
 migration, beside the code that reads them — that is what the closed key set means. The S3
@@ -857,10 +876,10 @@ Apache Parquet files on S3-compatible or Azure Blob storage once the hot hyperta
 window expires (e.g., >90 days).
 
 **Preserves long-horizon traceability without re-bloating the operational database.** A scheduled
-maintenance task exports date-partitioned chunks to compressed `.parquet` files, verifies storage,
-records a manifest row in `telemetry_archive_manifest`, and safely drops the raw chunk. The React
-Archives view renders the catalog and allows operators to query historical months in place via
-short-lived presigned URLs and DuckDB—rendering historical charts on demand without rehydrating
+maintenance task **would** export date-partitioned chunks to compressed `.parquet` files, verify
+storage, record a manifest row in `telemetry_archive_manifest`, and only then drop the raw chunk. A
+catalog view **would** render it and let operators query historical months in place via short-lived
+presigned URLs and DuckDB — rendering historical charts on demand without rehydrating
 gigabytes of raw points back into TimescaleDB.
 
 ---
@@ -909,12 +928,15 @@ Realtime reads its tenant from the Host *label*, so `host_rewrite_literal` is do
 the Directory routes must arrive as `/fplus-directory/…` because the runtime picks its worker from
 the first path segment.
 
+**Already done, and recorded here because this list previously said otherwise:** the chart's
+NetworkPolicy and ServiceMonitor both select through `acs-cymru.gatewayComponent`, so the pod-label
+problem — a ServiceMonitor carried over unchanged scrapes 404 *while reporting the target up* — is
+closed rather than pending. The entry led with it for weeks, which is the failure this section's own
+preamble exists to prevent: a reader planning this item's completion would have re-done finished work
+while the genuine remainder sat underneath it.
+
 **What remains, and none of it is Compose:**
 
-- **The chart's NetworkPolicy and ServiceMonitor.** Adopting the Service *name* covers the fifteen
-  files carrying `http://supabase-kong:8000`; it does nothing for these two, which select **pod
-  labels**. A ServiceMonitor carried over unchanged scrapes 404 *while reporting the target up* —
-  an unmeasured gateway that reads as an idle one.
 - **Finishing the proof.** It has now been installed into a real cluster, and the load-bearing part
   holds: the `supabase-kong` Service selects `component=supabase-envoy`, and the unauthenticated
   probe passes in-cluster with the same 3 gated / 6 open / 4 exemptions Compose reports. Credential
@@ -1720,6 +1742,72 @@ surface.
 
 ---
 
+### 18 · The historian's own least-privilege pass
+
+**Builds on:** [`timescaledb/roles.sql`](timescaledb/roles.sql) (`grafana_reader`, `powerbi_reader`
+and their reconciliation idiom) · `get_timescaledb_connection()` ·
+[`0001_baseline_schema.sql`](supabase/migrations/0001_baseline_schema.sql) §3 ·
+[`timescaledb/test_bi_reader_grants.py`](timescaledb/test_bi_reader_grants.py) ·
+**not yet filed as an issue**
+
+**The ingestion daemon connects to the historian as `postgres`.** `docker-compose.yml` passes
+`DB_USER: ${DB_USER:-postgres}`, and the chart does the same — so the process this repository calls
+*"the most exposed to the plant network"* holds superuser on the time-series database.
+
+**This is the pattern the stack has already corrected twice, and missed once.** Grafana moved off
+the superuser onto `grafana_reader`; the daemon moved off `SUPABASE_SERVICE_ROLE_KEY` onto
+`Service_Ingestor` (`0046`–`0048`, `0051`), on exactly the argument that the most-exposed process
+should not hold the strongest credential. Both fixes were on the **Supabase** side. The historian
+credential is the same debt on the other database, and when item 16 retired, nothing was left owning
+it.
+
+**It also makes a documented control real.** The security-model table lists *"append-only historian
+writes"* as an ingestion-layer control. Nothing in the database enforces that: append-only is a
+property of the Python, and a compromised daemon can `UPDATE`, `DELETE` or `DROP` the hypertable and
+rewrite history. An `ingest_writer` role turns a code promise into a database fact.
+
+#### The second half: the FDW maps every local role onto that same superuser
+
+`0001` §3 creates `USER MAPPING FOR PUBLIC` against `timescaledb_server` with `ts_user` defaulting
+to `postgres`. So every FDW session opened for `authenticated` or `service_role` runs on the remote
+side as the historian superuser, and the **only** containment is the local grant — SELECT on
+`timescale.*`. The remote end contributes nothing.
+
+No application role can reach past it today. What makes it worth fixing is that nothing stops the
+next change from doing so: a widened local grant, or a new foreign table added against the same
+server, silently inherits superuser reach. The mapping also parks the superuser password in
+`pg_user_mappings`, which the backup runbook already has to warn about.
+
+A read-only `fdw_reader` on the historian removes the class, using `roles.sql`'s existing
+reconciliation idiom rather than a new mechanism.
+
+#### It ships as one change, or it ships broken
+
+A role created in `roles.sql` that nothing connects as is the *"sits looking applied"* failure the
+sync script's own comments warn about — the least-privilege work would read as done while every
+connection still used `postgres`. So the item is:
+
+- `ingest_writer`: `INSERT` on `telemetry`, `INSERT`/`UPDATE` on `assets`, nothing else;
+- `fdw_reader`: `SELECT` on the read surface, nothing else;
+- both wired on **both targets** — `docker-compose.yml` and the chart — plus `.env.example`;
+- the `USER MAPPING` in `0001` §3 swapped onto `fdw_reader`;
+- assertions in the shape of `test_bi_reader_grants.py`, which already proves this for the BI role.
+
+**One migration-model wrinkle to plan for:** `0001` §3 is replayed on every boot, so the mapping
+swap lands on existing deployments the moment the file changes — before their `.env` necessarily
+carries the new credential. The order is roles first (they can exist unused), then wiring, then the
+mapping.
+
+#### Adjacent debt, named rather than folded in
+
+`log_digital_thread_event()`'s `x-acs-cymru-actor` header lets any `service_role` caller self-declare
+`ingestion` or `migration`. `'user'` is correctly refused and `changed_by` is unaffected, so this
+mislabels automation lanes rather than people. Since `0048` the real daemon is identifiable by
+`auth.uid()`, so the header's `ingestion` arm could be cross-checked or retired — but that touches
+the trigger redeclaration chain and belongs in the next `0048`-family migration, not here.
+
+---
+
 ## Contributing
 
 **The reasoning lives next to the thing it constrains**, not in one design document. A migration's
@@ -1737,7 +1825,16 @@ Two rules worth stating up front:
   rename — a device is configured against that exact string.
 - **Add schema changes as a new numbered migration.** Every migration is replayed on every boot —
   there is no applied-migrations ledger — so a new one must be idempotent. The baseline pair is
-  additionally guarded to be a no-op once applied; editing it reaches a fresh database only.
+  additionally guarded so that re-running it changes no DATA: its `CREATE TABLE`s are
+  `IF NOT EXISTS` and `0002`'s seed rows are `ON CONFLICT`.
+
+  **That is not the same as "edits reach a fresh database only", which this line used to say and
+  which is false.** `0001` recreates every function and view with `CREATE OR REPLACE` and drops and
+  rebuilds the FDW server outright, so editing a function body there redefines it on every existing
+  deployment's next boot. `0002`'s own header is explicit that vocabulary rows use `DO UPDATE`
+  precisely because "an edit has to reach a database that already exists". Change the baseline pair
+  with the same care as any other migration; the rule that new work arrives as a new numbered file
+  is about keeping the chain readable, not about the pair being inert.
 
 ### Packaging a hand-off
 

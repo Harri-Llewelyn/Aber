@@ -1131,9 +1131,16 @@ and init script, and Grafana's `grafana.ini`, datasource template, dashboards an
 Both targets must keep working, and `ingestion/validate.py` is the conformance check for either.
 Where they differ, they differ deliberately:
 
+**This table is the only stated contract for what may differ**, and no CI guard parses it — so it
+rots silently and a stale row certifies the wrong thing. The Kong → Envoy migration left two rows
+describing a Compose service that no longer exists, while the divergence it actually created — Envoy
+on Compose, Kong in the chart — appeared nowhere, which by this table's own closing rule made the
+best-argued difference in the repository formally *drift*. Anyone adding a divergence adds a row;
+anyone retiring one deletes it, in the same commit as the change.
+
 | Compose | Kubernetes | Why |
 |---|---|---|
-| `supabase-kong-init` renders `kong.yml` with `sed` | Helm renders the same template into a Secret | Compose has no templating; Helm does. Same template file, different substituter |
+| `supabase-envoy-init` renders `envoy.yaml` with `sed` | An initContainer renders it into the pod | Compose has no templating; Kubernetes has initContainers. Same template file, different substituter |
 | Grafana entrypoint `sed`s the datasource template | Helm renders it into a Secret; stock `/run.sh` | Same |
 | Frontend build args bake `VITE_*` into the bundle | `VITE_RUNTIME_CONFIG=true` + a ConfigMap at `/config.js` | One image cannot serve two environments if the values are baked |
 | `supabase-functions` bind-mounts the repo | `supabase/functions/Dockerfile` bakes them | No repository on a cluster node; functions must version with the image |
@@ -1142,8 +1149,9 @@ Where they differ, they differ deliberately:
 | `node-red-init` runs `chown -R 1000:1000 /data` | `podSecurityContext.fsGroup: 1000` | Kubernetes does it natively on mount |
 | `mosquitto-init` writes the password file once | initContainer assembles it, sidecar reloads it | Gateway credentials become reviewable Secret state instead of something typed into a container |
 | Gateway provisioning via `docker exec` | `--target=k8s`: patch the Secret, then force the reload | Same script, two backends, so the ACL reasoning stays in one place |
+| **The gateway is Envoy** (`supabase-envoy`; Kong and `kong.yml` are gone from `docker-compose.yml`) | **The chart deploys Kong by default** (`supabaseKong.enabled: true`, `supabaseEnvoy.enabled: false`) | The largest divergence on this list, and TEMPORARY. The chart's Envoy templates are verified in part, not in full — see roadmap §4. **Exit condition:** the remaining in-cluster proof lands, `supabaseEnvoy.enabled` becomes the default, and this row is deleted |
 | Ingestion has no healthcheck | Liveness probe on the heartbeat file's age | A wedged paho loop is invisible on Compose; Kubernetes can restart it |
-| Kong CORS origins default to `localhost:3000` / `:8088` | Derived from `publicBaseDomain` by `acs-cymru.corsOrigins` | Compose serves the dashboard on a published port; the chart serves it on `app.<domain>` and calls the API on `api.<domain>`, which is cross-origin. Same `__CORS_ORIGINS__` placeholder, different substituter |
+| Gateway CORS origins default to `localhost:3000` / `:8088` | Derived from `publicBaseDomain` by `acs-cymru.corsOrigins` | Compose serves the dashboard on a published port; the chart serves it on `app.<domain>` and calls the API on `api.<domain>`, which is cross-origin. Same `__CORS_ORIGINS__` placeholder, different substituter — substituted into `envoy.yaml` on Compose and into whichever gateway the chart deploys |
 
 **Image tags must match between the two targets, and CI enforces it.**
 
