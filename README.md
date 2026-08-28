@@ -535,8 +535,59 @@ no revocation an accurate inventory *is* the safety story.
 The full argument, including the three revocation designs that were checked and rejected, is in
 [`supabase/README.md`](supabase/README.md#machine-identities).
 
-Known issues and accepted risks are tracked as
-[GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues).
+**Known issues** — things that can be worked on — are tracked as
+[GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues). **Accepted risks are not**, and
+live below.
+
+### Accepted risks
+
+An accepted risk is a decision, not a task. Kept here rather than in the issue tracker because an
+issue is a bulletin of work somebody could pick up, and one that will never be picked up teaches
+readers to skim the list. It also decays differently: an open issue nobody acts on starts to look
+like neglect, where a documented decision reads as what it is.
+
+**Each says what would change the decision**, which is the part that stops an accepted risk becoming
+a forgotten one. Nothing here is accepted permanently; each is accepted *for a stated deployment
+model*, and the model is what to re-check.
+
+#### Realtime leaks the timing of changes, though not their contents
+
+An unauthenticated subscriber that can reach the Realtime WebSocket receives the change **envelope**
+for every published table. Realtime redacts the payload to `{}` and attaches a 401, but the message
+arrives — so the **fact and timing** of a change leak, even though its contents do not. `cells`,
+`gateways` and `devices` are published because the dashboard needs them live, so an observer can
+infer when an asset was created, edited, archived or changed state. In practice that is a timing
+side-channel on shift patterns, commissioning activity and the rate of configuration change.
+
+**It cannot be fixed here** — it is upstream `supabase/realtime` behaviour. The gateway's `apikey`
+check does not mitigate it either: the anon key is a registered key that is necessarily shipped to
+every browser, so holding it proves nothing about the caller. What *was* done is narrowing the
+publication: `digital_thread` was removed from it, being the most operationally sensitive stream and
+one nothing subscribed to.
+
+**Accepted because** the target environment is an isolated shopfloor network reached over VPN, with
+services behind an internal CA. Reaching the socket at all means already being inside that boundary,
+where an observer has considerably more direct means of learning the same facts — and the exposure
+does not justify degrading the dashboard's live updates.
+
+**Revisit if** the stack is exposed to a network where reaching the WebSocket is not already
+evidence of access: a public or partner-facing deployment, a shared cluster, or any move to
+multi-tenancy. At that point the choice is dropping the three tables from the publication and
+polling instead, or waiting for upstream to authenticate before delivering the envelope.
+
+#### There is no credential revocation; expiry is the only bound
+
+Described in full under [Machine identities](#machine-identities) — a token cannot be withdrawn without rotating
+`SUPABASE_JWT_SECRET` and invalidating every key in the stack, so expiry is the only bound that
+exists: 90 days for a token a person holds, ten years for an infrastructure key a container holds.
+
+**Accepted because** the three revocation designs that would fix it were checked and rejected for
+reasons recorded in [`supabase/README.md`](supabase/README.md#machine-identities), and because an
+accurate inventory is the compensating control — which is what the **Access Control** tab exists to
+provide.
+
+**Revisit if** tokens are ever issued to parties outside the operating organisation, or if the
+ten-year infrastructure keys outlive the deployment that minted them.
 
 ---
 
@@ -770,7 +821,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Twelve extensions, none of them speculative: every one names the code it would build on, because
+Thirteen extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
@@ -799,13 +850,16 @@ arrive from feature requests** — 8, 9 and 10 from GitHub issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
 [#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66), in that same order of how much already
-exists; 12, 15 and 17 are not yet filed.
+exists; 12, 15 and 17 are not yet filed. 19 arrives from
+[#39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39).
 [#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) was item 11 and is now built. Where an entry's heading differs from the issue's title, it is
 because the work that remains is narrower than the title claims.
 
 **None of these are open defects.** Feature requests live here once they have been checked against
-the code; known issues and accepted risks stay in
-[GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues).
+the code; **known issues** stay in
+[GitHub issues](https://github.com/Harri-Llewelyn/ACS-Cymru/issues), and **accepted risks** live
+under [Accepted risks](#accepted-risks) — a decision nobody will action is not a bulletin item, and
+leaving it in the tracker teaches people to skim it.
 
 ### 1 · Horizontal ingestion scaling
 
@@ -1804,6 +1858,65 @@ everything a hex or protobuf UI would, and `--override-metric` is the same opera
 surface.
 
 ---
+
+---
+
+### 19 · Contextual help, and where the documentation actually lives
+
+**Builds on:** [`frontend/src/App.jsx`](frontend/src/App.jsx)'s top bar and `navDensity()` ·
+[`README.md`](README.md) and the six subsystem READMEs ·
+[issue #39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39)
+
+**The request, and it is a fair one:** *"There's a lot to unpack with this application and going to
+the GitHub to read the documentation takes a lot of time."* A help control in the top bar that opens
+a panel for the page you are on — Gateways explains gateways — rather than a link that drops you at
+the top of a long file.
+
+#### The hard part is not the button
+
+It is that **the documentation this would surface does not exist in a form a panel can use.** What
+exists is excellent and is written for a different reader: `README.md` and the subsystem READMEs
+argue *why* the stack is built as it is, at length, for somebody changing it. A help panel needs the
+other half — what this page is for, what the controls do, what the states mean — in a few hundred
+words per page.
+
+So the work is mostly writing, and the button is the small end of it. An item that shipped the
+control first would produce a help system whose honest content is a link to the README, which is
+what the request already finds too slow.
+
+#### A GitHub wiki is the wrong store, and this is the decision to make first
+
+The issue proposes one. Against it: **a wiki is not in the repository**, so it cannot be reviewed in
+a pull request, cannot be checked by `scripts/check-docs-drift.mjs`, and drifts from the code with
+nothing to catch it. This repository has spent real effort making documentation checkable — the
+service directory, the migration mentions, the roadmap numbering, the Prometheus job map — and a
+wiki opts out of all of it.
+
+**Markdown in `docs/help/<page>.md`, bundled into the frontend**, keeps every one of those
+properties: reviewed with the change that motivated it, greppable, and checkable by a guard that
+asserts every navigable page has a help file and every help file names a real page. That is the
+same bidirectional shape the service-directory check already uses.
+
+The cost is that help ships with the image rather than being editable in a browser. For a stack
+whose dashboard is versioned and deployed as one artefact, that is the right side of the trade.
+
+#### What the top bar can absorb
+
+`navDensity()` already bands the header at 10 and 12 tabs, and the bar currently carries eleven. A
+help control is a **button beside the session controls, not a twelfth tab** — it belongs with the
+things that act rather than the things that navigate, and putting it there costs the brand no width
+at any band.
+
+**Not a page.** A page called Help that lists everything is the README again with more clicks; the
+request is specifically for *contextual* help, which means the panel opens knowing which tab is
+active.
+
+#### Worth deciding early
+
+- **Whether it is also the empty state.** A page with nothing on it and a page whose help explains
+  what to put there are the same moment, and "no gateways yet" is where a reader is most receptive.
+- **Whether it survives translation.** Nothing here is localised today, and a help corpus is the
+  first thing that would make that expensive.
 
 ---
 
