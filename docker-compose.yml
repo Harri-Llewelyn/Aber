@@ -455,7 +455,7 @@ services:
     container_name: acs-cymru_supabase_realtime
     # Pinned rather than :latest -- Realtime runs its own migrations against the
     # _realtime schema on boot and is coupled to the Postgres image version.
-    image: supabase/realtime:v2.34.47
+    image: supabase/realtime:v2.102.3
     restart: always
     environment:
       PORT: 4000
@@ -472,6 +472,12 @@ services:
       # subscriber is rejected at the socket handshake.
       API_JWT_SECRET: ${SUPABASE_JWT_SECRET}
       SECRET_KEY_BASE: ${REALTIME_SECRET_KEY_BASE}
+      # METRICS_JWT_SECRET became MANDATORY in realtime v2.102.3 -- `System.fetch_env!`, so the
+      # container refuses to boot without it rather than defaulting. It signs the bearer token its
+      # /metrics endpoint requires. Nothing scrapes that endpoint here yet, so the value only has to
+      # exist and be secret; giving it SUPABASE_JWT_SECRET would have let anyone holding the API
+      # signing key mint metrics tokens, which is a wider grant for no gain.
+      METRICS_JWT_SECRET: ${REALTIME_METRICS_JWT_SECRET:?REALTIME_METRICS_JWT_SECRET is required from realtime v2.102.3; run `npm run setup` or copy it from .env.example}
       ERL_AFLAGS: -proto_dist inet_tcp
       DNS_NODES: "''"
       # The image's /app/run.sh runs `ulimit -n $RLIMIT_NOFILE` under `set -u`, so

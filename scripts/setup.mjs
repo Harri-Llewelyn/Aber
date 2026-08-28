@@ -143,6 +143,11 @@ const generated = {
   PG_META_CRYPTO_KEY: hex(32),
   REALTIME_DB_ENC_KEY: hex(8),          // EXACTLY 16 chars
   REALTIME_SECRET_KEY_BASE: hex(32),    // AT LEAST 64 chars
+  // Mandatory from realtime v2.102.3 -- `System.fetch_env!`, so the container refuses to boot
+  // without it. Signs the bearer token its /metrics endpoint requires. Its own secret rather
+  // than SUPABASE_JWT_SECRET: sharing the API signing key would let any holder of that mint
+  // metrics tokens, for no gain.
+  REALTIME_METRICS_JWT_SECRET: hex(32),
   // ONE MQTT PASSWORD PER PRINCIPAL, independently generated on purpose. mosquitto.acl confines
   // each account to a different subtree, which is worth nothing if one leaked password opens the
   // rest. The USERNAMES are not generated: most are `sparkplug_id`s derived from pinned UUIDs, and

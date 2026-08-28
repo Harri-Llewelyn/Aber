@@ -396,7 +396,7 @@ live services went unlisted: the tag it named (`alpine:3.24`) still existed, so 
 | `supabase-envoy-init` | `acs-cymru_supabase_envoy_init` | `alpine:3.24` | — |
 | `supabase-envoy` | `acs-cymru_supabase_envoy` | `envoyproxy/envoy:v1.31.5` | `54321:8000` |
 | `supabase-functions` | `acs-cymru_supabase_functions` | `supabase/edge-runtime:v1.74.2` | — |
-| `supabase-realtime` | `acs-cymru_supabase_realtime` | `supabase/realtime:v2.34.47` | — |
+| `supabase-realtime` | `acs-cymru_supabase_realtime` | `supabase/realtime:v2.102.3` | — |
 | `supabase-storage` | `acs-cymru_supabase_storage` | `supabase/storage-api:v1.11.13` | — |
 | `supabase-storage-init` | `acs-cymru_supabase_storage_init` | `node:24-alpine` | — |
 | `supabase-storage-policies` | `acs-cymru_supabase_storage_policies` | `supabase/postgres:17.6.1.160` | — |
