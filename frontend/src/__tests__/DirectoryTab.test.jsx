@@ -308,23 +308,88 @@ describe('DirectoryTab service groups', () => {
   })
 
   /*
-   * NO STATUS PILL AND NO LAST HEARTBEAT, and this test is the previous one inverted.
+   * THE LIVENESS COLUMN, AND THE DISTINCTION IT HAS TO MAKE.
    *
-   * It used to assert that a live service rendered as the standard online pill. Nothing in the
-   * stack writes `directory_services.status` -- the only writes anywhere are the seed INSERTs in
-   * migration 0002, and `fplus-directory` only SELECTs -- so the pill said ACTIVE on every row
-   * unconditionally, and would have said ACTIVE for a service down for a week.
+   * This test was once the inverse of itself: it asserted the page claimed NO liveness, because
+   * nothing wrote `directory_services.status` and the pill said ACTIVE on all fifteen rows
+   * unconditionally -- it would have said ACTIVE for a service down for a week.
    *
-   * `last_heartbeat` went for the same reason, and the PILL was the more dangerous of the two: a
-   * stale date reads as stale, where a green pill is believed.
+   * `refresh_directory_liveness()` (migration 0054) writes it now, from Prometheus's `up` series.
+   * So the column is back, and what these tests protect is no longer "claims nothing" but "claims
+   * only what was observed".
+   *
+   * THE DISTINCTION THAT MATTERS IS NOT HEALTHY-VS-UNHEALTHY, IT IS OBSERVED-VS-UNOBSERVED. Six of
+   * the fifteen services are scraped; nine are not, and a service can be perfectly fine while
+   * unobserved. A page that rendered the nine as a blank or a dash would let a reader assume they
+   * are fine -- the same fabrication as the old green pill, in a quieter font.
    */
-  it('claims no liveness it cannot observe', async () => {
+  it('shows an observed service as ACTIVE', async () => {
+    await renderTab(vi.fn().mockReturnValue(true))
+    expect(screen.getAllByText('ACTIVE').length).toBeGreaterThan(0)
+  })
+
+  it('shows an observed-and-failing service as DOWN', async () => {
+    api.get.mockResolvedValue([
+      { ...svc('Grafana Dashboards', 'MONITORING', 'http://localhost:3002'),
+        status: 'DOWN', last_heartbeat: null }
+    ])
+    await renderTab(vi.fn().mockReturnValue(true))
+    expect(screen.getByText('DOWN')).toBeInTheDocument()
+  })
+
+  it('says "not observed" rather than leaving a blank', async () => {
+    // THE ONE THAT CARRIES THE DESIGN. A dash or an empty cell reads as "no data yet" or as a
+    // rendering gap, and either reading lets somebody conclude the service is fine. The honest
+    // answer to "is it up?" for these nine is "nobody is looking", and it has to be in words.
+    api.get.mockResolvedValue([
+      { ...svc('Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323'),
+        status: 'UNKNOWN', last_heartbeat: null }
+    ])
     await renderTab(vi.fn().mockReturnValue(true))
 
-    expect(screen.queryByTitle(/Operational Status/)).not.toBeInTheDocument()
-    expect(document.querySelector('.badge-online')).toBeNull()
-    expect(screen.queryByText(/Last Heartbeat/i)).not.toBeInTheDocument()
-    expect(screen.queryByText(/^Status$/)).not.toBeInTheDocument()
+    expect(screen.getByText(/not observed/i)).toBeInTheDocument()
+    expect(screen.queryByText('ACTIVE')).not.toBeInTheDocument()
+    expect(screen.queryByText('—')).not.toBeInTheDocument()
+  })
+
+  it('explains WHY an unobserved service cannot be probed', async () => {
+    // Otherwise "not observed" reads as a gap somebody should close, and the next person adds a
+    // probe against endpoint_url -- which is a browser address, so from inside a container it
+    // would answer about the wrong host and report that as service health.
+    api.get.mockResolvedValue([
+      { ...svc('Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323'),
+        status: 'UNKNOWN', last_heartbeat: null }
+    ])
+    await renderTab(vi.fn().mockReturnValue(true))
+
+    expect(screen.getByTitle(/browser address/i)).toBeInTheDocument()
+  })
+
+  it('does not show a heartbeat beside a service that is not up', async () => {
+    // 0054 clears last_heartbeat for DOWN and UNKNOWN precisely so a timestamp cannot linger
+    // beside a red badge and read as "last seen at" -- a different, more reassuring claim than
+    // the row is making. The UI must not reintroduce it from a stale cached row either.
+    api.get.mockResolvedValue([
+      { ...svc('Grafana Dashboards', 'MONITORING', 'http://localhost:3002'),
+        status: 'DOWN', last_heartbeat: HEARTBEAT }
+    ])
+    await renderTab(vi.fn().mockReturnValue(true))
+
+    const badge = screen.getByText('DOWN')
+    expect(badge.getAttribute('title')).not.toMatch(/\d{2}:\d{2}/)
+  })
+
+  it('distinguishes unobserved from failing by more than colour', async () => {
+    // Colour alone is not a distinction a colourblind reader can make, and these two mean opposite
+    // things about whether anybody should act.
+    api.get.mockResolvedValue([
+      { ...svc('A', 'MONITORING', 'http://localhost:1'), status: 'DOWN', last_heartbeat: null },
+      { ...svc('B', 'MONITORING', 'http://localhost:2'), status: 'UNKNOWN', last_heartbeat: null }
+    ])
+    await renderTab(vi.fn().mockReturnValue(true))
+
+    expect(screen.getByText('DOWN')).toBeInTheDocument()
+    expect(screen.getByText(/not observed/i)).toBeInTheDocument()
   })
 
   it('still lists what is deployed and how to reach it', async () => {

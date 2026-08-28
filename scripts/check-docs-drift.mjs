@@ -177,6 +177,47 @@ const MARKDOWN = allFiles.filter((f) => f.endsWith('.md'));
 }
 
 // -------------------------------------------------------------------------------------------------
+// 2c. Every Prometheus job the Directory maps still exists in prometheus.yml.
+//
+// `directory_liveness_job_map()` (0054) turns a scrape job into a service's liveness. A job renamed
+// in prometheus.yml and not here fails SILENTLY and in the most misleading direction: the JOIN
+// matches nothing, the service falls into the UNKNOWN sweep, and the Directory page reports "not
+// observed" for something Prometheus is scraping perfectly well. That reads as a missing exporter
+// rather than a stale mapping.
+//
+// This is not hypothetical. The issue that asked for this feature listed `kong` as the gateway job;
+// by the time it was built the job was `envoy`, because Compose had migrated off Kong. A mapping
+// written from that list would have shipped reporting the gateway as unobserved.
+// -------------------------------------------------------------------------------------------------
+{
+  const prom = read('prometheus/prometheus.yml');
+  const jobs = new Set(
+    [...prom.matchAll(/^\s*-\s*job_name:\s*["']?([A-Za-z0-9._-]+)/gm)].map((m) => m[1])
+  );
+
+  const migration = read('supabase/migrations/0054_directory_liveness.sql');
+  const mapStart = migration.indexOf('CREATE OR REPLACE FUNCTION public.directory_liveness_job_map()');
+  const mapEnd = migration.indexOf('$fn$;', mapStart);
+  const mapped = [...migration.slice(mapStart, mapEnd).matchAll(/\(\s*'([a-z0-9._-]+)'\s*,/g)]
+    .map((m) => m[1]);
+
+  if (!jobs.size || !mapped.length) {
+    fail("could not parse prometheus.yml job names or 0054's liveness map");
+  } else {
+    const orphaned = mapped.filter((j) => !jobs.has(j));
+    if (orphaned.length) {
+      fail(
+        `0054's directory_liveness_job_map() names Prometheus job(s) that prometheus.yml does not ` +
+        `define: ${orphaned.join(', ')}. The join matches nothing, so those services report as ` +
+        `UNKNOWN on the Directory page -- which reads as a missing exporter, not a stale mapping.`
+      );
+    } else {
+      pass(`all ${mapped.length} Directory liveness job(s) exist in prometheus.yml`);
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 3. README names every job in every workflow, and no job it does not have.
 //
 // Found stale: "runs three jobs" when there were five. Someone reading it would not know the chart
@@ -654,6 +695,10 @@ function edgeFunctionNames() {
   // An exclusion needs a justification here; the point of the check is that nothing falls out
   // quietly, and an unexplained name in this list is indistinguishable from an oversight.
   const NOT_PUBLISHED = {
+    directory_liveness_probe:
+      'one row holding the in-flight pg_net request id for the Prometheus liveness probe (0054). ' +
+      'RLS on with no policy and the anon/authenticated grants revoked -- infrastructure, and a ' +
+      'writable request-id table would let a caller redirect where the probe reads liveness from',
     roles: 'RBAC internals — managed by migrations and Studio, not an app-facing endpoint',
     permissions: 'RBAC internals',
     role_permissions: 'RBAC internals',

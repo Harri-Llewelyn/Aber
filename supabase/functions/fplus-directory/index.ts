@@ -248,6 +248,15 @@ export default async function handler(req: Request): Promise<Response> {
     // GET /v1/service -- advertised services
     // -------------------------------------------------------------------------------------
     if (path === "/v1/service") {
+      // `status` IS NOW AN OBSERVATION, AND CAN BE "UNKNOWN". Until migration 0054 nothing wrote
+      // this column, so it was the literal 'ACTIVE' on every row -- this endpoint has been serving
+      // that to any Factory+ consumer since it was written.
+      //
+      // It is now ACTIVE / DOWN / UNKNOWN, written every minute from Prometheus's `up` series.
+      // UNKNOWN means nothing observes that service, which is true of nine of the fifteen: their
+      // endpoint_url values are browser addresses, so no probe from inside the stack could answer
+      // honestly. Passed through rather than flattened to ACTIVE, because a consumer deciding
+      // whether to route to a service should be able to tell "up" from "nobody is looking".
       const { data, error } = await supabase
         .from("directory_services")
         .select("id,service_name,service_type,endpoint_url,status");

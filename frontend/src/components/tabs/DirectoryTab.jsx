@@ -162,27 +162,78 @@ export function groupServices(services) {
  * tables that each sized their columns from their own rows.
  */
 /*
- * NO STATUS COLUMN AND NO LAST HEARTBEAT, AND BOTH WERE REMOVED FOR THE SAME REASON.
+ * THE STATUS COLUMN IS BACK, AND IT NOW DESCRIBES SOMETHING THAT WAS OBSERVED.
  *
- * NOTHING IN THIS STACK WRITES EITHER ONE. The only writes to `directory_services` anywhere are
- * the seed INSERTs in migration 0002 -- there is no UPDATE, no probe, no heartbeat writer, and
- * `fplus-directory` only SELECTs. So `status` was the literal string 'ACTIVE' on all fifteen rows,
- * unconditionally, and `last_heartbeat` was the timestamp the row was seeded at.
+ * It was removed because nothing wrote it. The only writes to `directory_services` were the seed
+ * INSERTs in `0002`, so `status` was the literal string 'ACTIVE' on all fifteen rows at every age,
+ * and `last_heartbeat` was the moment the row was seeded. The pill was the more dangerous half: a
+ * stale date reads as stale and makes a reader suspicious, whereas a green ACTIVE badge is
+ * believed -- and it would have said ACTIVE for a service down a week.
  *
- * THE PILL WAS THE MORE DANGEROUS OF THE TWO, which is the opposite of how it looked. A stale date
- * at least reads as stale -- someone seeing 02/08 grows suspicious. A green ACTIVE pill is
- * believable, and it would have said ACTIVE for a service that had been down for a week.
+ * `refresh_directory_liveness()` (migration 0054) now writes both, every minute, from Prometheus's
+ * `up` series. Six of the fifteen are genuinely scraped.
  *
- * This page has already corrected exactly this once: the GitOps card above used to render a
- * hardcoded SYNCED / a8f3e4b, removed because nothing in the stack can observe what Node-RED is
- * running. Same fabrication, same file, two columns over.
+ * ---------------------------------------------------------------------------------------------
+ * THE OTHER NINE ARE THE WHOLE DESIGN PROBLEM, AND `UNKNOWN` IS NOT A BLANK.
  *
- * WHAT IS LEFT IS WHAT THIS PAGE HONESTLY IS: an inventory of what is deployed and how to reach it.
- * The database columns stay -- `fplus-directory` serves `status` in its Factory+ contract response,
- * so dropping them is a separate decision with an external consumer. Real liveness is tracked
- * separately; Prometheus now knows the true `up` state of several of these, which is a path that
- * did not exist before.
+ * A page showing green for six services and nothing for nine invites the reader to assume the
+ * blanks are fine -- which is the same fabrication in a quieter font. So `UNKNOWN` renders as its
+ * own visible state with its own words: "not observed", not an empty cell and not a grey dash that
+ * could be mistaken for a rendering gap.
+ *
+ * The distinction the reader has to be able to make at a glance is NOT healthy-vs-unhealthy. It is
+ * OBSERVED-vs-UNOBSERVED. A service can be perfectly fine and still be unobserved, and a page that
+ * blurred the two would be back to asserting things nobody checked.
+ *
+ * WHY NINE SERVICES CANNOT BE PROBED, since "add a probe" is the obvious next thought:
+ * `endpoint_url` holds BROWSER addresses -- `http://localhost:8088`, `postgres://localhost:54322`.
+ * From inside any container those name the container itself, so a probe against them would be
+ * answering a question about the wrong host and reporting it as service health. That is a worse
+ * defect than admitting the gap.
  */
+/**
+ * One service's observed liveness.
+ *
+ * THREE STATES, AND THE THIRD IS THE ONE THAT MATTERS. ACTIVE and DOWN are both OBSERVATIONS --
+ * Prometheus scraped the target and it answered, or it did not. UNKNOWN means nothing scrapes this
+ * service at all, which is neither good news nor bad news and must not be dressed as either.
+ *
+ * So UNKNOWN is not a grey dash: a dash reads as "no data yet" or as a rendering gap, and either
+ * reading lets somebody assume it is fine. It says "not observed", in words, with a tooltip that
+ * explains why -- because the honest answer to "is it up?" here is "nobody is looking".
+ *
+ * `last_heartbeat` is only shown beside ACTIVE. 0054 clears it for DOWN and UNKNOWN precisely so a
+ * timestamp cannot linger beside a red badge and read as "last seen at", which is a different and
+ * more reassuring claim than the row is making.
+ */
+function LivenessCell({ status, lastHeartbeat }) {
+  if (status === 'ACTIVE') {
+    return (
+      <span className="badge badge-success" title={lastHeartbeat
+        ? `Prometheus scraped this successfully at ${new Date(lastHeartbeat).toLocaleTimeString()}`
+        : 'Prometheus reports this target as up'}>
+        ACTIVE
+      </span>
+    )
+  }
+  if (status === 'DOWN') {
+    return (
+      <span className="badge badge-danger" title="Prometheus scraped this target and it did not answer">
+        DOWN
+      </span>
+    )
+  }
+  return (
+    <span
+      className="badge badge-neutral"
+      style={{ opacity: 0.75 }}
+      title="Nothing in this stack observes this service. Its endpoint_url is a browser address, so a probe from inside a container would be asking about the wrong host — see migration 0054."
+    >
+      not observed
+    </span>
+  )
+}
+
 function ServiceTable({ rows, onNotify }) {
   return (
     <div className="table-wrap">
@@ -192,6 +243,7 @@ function ServiceTable({ rows, onNotify }) {
             <th title="Service name">Service Name</th>
             <th title="Architecture category">Service Type</th>
             <th title="Web endpoints open in a new tab; everything else copies to the clipboard">Endpoint URL</th>
+            <th title="Observed liveness. Written every minute from Prometheus's up series; services nothing scrapes read as not observed">Liveness</th>
           </tr>
         </thead>
         <tbody>
@@ -201,6 +253,9 @@ function ServiceTable({ rows, onNotify }) {
               <td><span className="badge badge-neutral">{s.service_type}</span></td>
               <td className="cell-endpoint">
                 <EndpointCell url={s.endpoint_url} onNotify={onNotify} />
+              </td>
+              <td>
+                <LivenessCell status={s.status} lastHeartbeat={s.last_heartbeat} />
               </td>
             </tr>
           ))}
