@@ -724,6 +724,17 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
             </div>
           </div>
 
+          {/* A DESCRIPTION, LIKE EVERY OTHER CARD ON THE STACK. This one had a title and a legend
+              and no sentence saying what it is showing -- and it is the one card where that costs
+              most, because a grid of tiles is the least self-explanatory thing here. The legend
+              decodes the dots; this says what a tile IS. */}
+          <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '0 0 16px' }}>
+            Every cell on the shopfloor, with the devices that resolve to it. A device sits in its
+            own cell if it names one and in its gateway's otherwise, so this is where the two
+            disagreeing becomes visible. The lanes at the front hold what belongs to no single
+            cell — site-wide assets, and anything still waiting to be placed.
+          </p>
+
           {/* Shown only while the mode is on, so the page carries no standing instruction about a
               gesture that is usually unavailable — and so it is obvious the map is live. */}
           {canRearrange && (

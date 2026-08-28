@@ -271,6 +271,32 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
     <div className="page-layout">
       <div className="page-main">
 
+      {/* One card: title, description, primary action, filters, table. See CellsTab's note on why
+          the filter bar came inside rather than floating above. */}
+      <div className="card">
+        <div className="card-header">
+          <h3 className="section-title">
+            Edge Gateways <span className="section-count">{gateways.length}</span>
+          </h3>
+          <button
+            className={`btn btn-primary btn-sm ${!canManage ? 'btn-disabled' : ''}`}
+            style={{ marginLeft: 'auto' }}
+            disabled={!canManage}
+            onClick={() => canManage && (setEditing(null), setForm(blank), setShowForm(true))}
+            title={!canManage ? 'Requires Admin permissions' : 'Register new edge gateway'}
+          >
+            <IconPlus size={14} /> New Gateway
+          </button>
+        </div>
+
+        <div className="card-body">
+          <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 12px' }}>
+            A gateway is an edge node: the thing that publishes to the broker, and the identity every
+            topic beneath it is pinned to. Its devices reach the platform through it, so a gateway
+            that goes quiet takes their telemetry with it — which is why status here is derived from
+            the last heartbeat rather than from anything the gateway asserts about itself.
+          </p>
+
       <div className="filter-bar">
         {/* Lifecycle lives here rather than as a separate segmented control in the header: it is
             a filter like the rest, and having two filter surfaces on one page meant the header
@@ -325,17 +351,6 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           </button>
         )}
 
-        {/* The page's one primary action, at the far end of the row it shares with the filters.
-            It had a row of its own -- a 34px band holding a single button, above a filter bar that
-            was already the page's control surface. `.filter-bar-spacer` pushes it right. */}
-        <button
-          className={`btn btn-primary btn-sm filter-bar-spacer ${!canManage ? 'btn-disabled' : ''}`}
-          disabled={!canManage}
-          onClick={() => canManage && (setEditing(null), setForm(blank), setShowForm(true))}
-          title={!canManage ? 'Requires Admin permissions' : 'Register new edge gateway'}
-        >
-          <IconPlus size={14} /> New Gateway
-        </button>
       </div>
 
       {unassignedDevices.length > 0 && (
@@ -345,8 +360,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           Assign them from the Devices page.
         </div>
       )}
+        </div>{/* .card-body */}
 
-      <div className="card">
         {loading ? <div className="loading-wrap"><div className="spinner" /> Loading gateways…</div> :
          filteredGateways.length === 0 ? (
            <div className="empty-state">

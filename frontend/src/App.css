@@ -711,7 +711,8 @@ html, body, #root {
    near-white and the boundary reads as a blur rather than an edge. The same 1px the card header
    already uses on its own underside, so a card with a body reads as header / body / table rather
    than as one continuous surface. */
-.card-body + .table-wrap {
+.card-body + .table-wrap,
+.card-body + .card-body {
   border-top: 1px solid var(--border);
 }
 

@@ -230,6 +230,40 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   return (
     <div className="page-layout">
       <div className="page-main">
+      {/* ONE CARD, COMPOSED THE SAME WAY EVERY CARD IN THE APP IS: a title, a description, the
+          primary action, then the filters that narrow what is below.
+
+          The filter bar used to float above this card as a panel of its own. That was defensible on
+          a page with a single table -- nothing else it could have been filtering -- but it made the
+          page a different SHAPE from every card that does have a header, and on the pages where two
+          cards compete it actively misleads. A rule that holds everywhere is worth more than an
+          arrangement that is only ambiguous sometimes. */}
+      <div className="card">
+        <div className="card-header">
+          <h3 className="section-title">
+            Shopfloor Cells <span className="section-count">{cells.length}</span>
+          </h3>
+          {/* The primary action moves into the header, where every other card keeps its. It sat at
+              the far end of the filter bar behind `.filter-bar-spacer`, which put "create a thing"
+              in the row for "narrow the things". */}
+          <button
+            className={`btn btn-primary btn-sm ${!canManage ? 'btn-disabled' : ''}`}
+            style={{ marginLeft: 'auto' }}
+            disabled={!canManage}
+            onClick={() => canManage && (setEditing(null), setFormVal(blank), setShowForm(true))}
+            title={!canManage ? 'Requires Admin permissions' : 'Configure new shopfloor cell zone'}
+          >
+            <IconPlus size={14} /> New Cell
+          </button>
+        </div>
+
+        <div className="card-body">
+          <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 12px' }}>
+            A cell is a zone of the shopfloor, and what groups the assets in it. A gateway belongs
+            to one, and a device inherits its gateway's unless it names its own — so a cell is the
+            unit the dashboard, the alerts and the Grafana folders are all organised by.
+          </p>
+
       <div className="filter-bar">
         {/* Lifecycle lives here rather than as a separate segmented control in the header: it is
             a filter like the rest, and having two filter surfaces on one page meant the header
@@ -281,17 +315,6 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
           </button>
         )}
 
-        {/* The page's one primary action, at the far end of the row it shares with the filters.
-            It had a row of its own -- a 34px band holding a single button, above a filter bar that
-            was already the page's control surface. `.filter-bar-spacer` is what pushes it right. */}
-        <button
-          className={`btn btn-primary btn-sm filter-bar-spacer ${!canManage ? 'btn-disabled' : ''}`}
-          disabled={!canManage}
-          onClick={() => canManage && (setEditing(null), setFormVal(blank), setShowForm(true))}
-          title={!canManage ? 'Requires Admin permissions' : 'Configure new shopfloor cell zone'}
-        >
-          <IconPlus size={14} /> New Cell
-        </button>
       </div>
 
       {unlinkedDevices.length > 0 && (
@@ -305,6 +328,7 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
           </div>
         </div>
       )}
+        </div>{/* .card-body */}
 
       {/* ONE TABLE, NOT A CARD PER CELL (issue #61).
           Every cell rendered a card carrying its own header plus two full sub-tables -- gateways
@@ -316,7 +340,6 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
           So the card body is GONE rather than relocated, and what is left is the shape the other
           two asset pages use. A cell now reads as one row, and the drawer is where its detail
           lives -- which is what makes Gateways and Devices scannable at any fleet size. */}
-      <div className="card">
         {loading ? (
           <div className="loading-wrap"><div className="spinner" /> Loading shopfloor cells…</div>
         ) : filteredCells.length === 0 ? (

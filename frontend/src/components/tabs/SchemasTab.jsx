@@ -782,48 +782,6 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           meet them in exactly once -- the first time you create one. Every visit after that is to
           read or version a schema that already exists, and those were below ~600 rows of metric
           groups. The page now opens on its subject and keeps the raw material underneath it. */}
-      {/* THE PAGE'S FIRST FILTER BAR (issue #60), and the shape the other five list pages already
-          use. The registry gains a row per PUBLISH rather than per schema, so it outgrows a plain
-          list faster than anything else here, and it had no search at all -- while the metric
-          catalog directly below it has had one for some time. */}
-      <div className="filter-bar">
-        <select
-          className="form-control"
-          style={{ width: '190px' }}
-          value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
-          aria-label="Filter schemas by lifecycle state"
-          title="Filter by lifecycle state. Current hides superseded versions."
-        >
-          {/* Counts in the labels, as on Cells and Gateways: it is how the archived count survived
-              losing its badge, and it answers "is there any history at all?" without selecting. */}
-          <option value="current">Current ({currentCount})</option>
-          <option value={SCHEMA_STATUS.ACTIVE}>Active ({activeCount})</option>
-          <option value={SCHEMA_STATUS.DRAFT}>Draft ({draftCount})</option>
-          <option value={SCHEMA_STATUS.ARCHIVED}>Archived ({archivedCount})</option>
-          <option value="all">All versions ({schemas.length})</option>
-        </select>
-
-        <input
-          className="form-control"
-          style={{ width: '260px' }}
-          value={schemaSearch}
-          onChange={e => setSchemaSearch(e.target.value)}
-          placeholder="Search name, UUID or description…"
-          aria-label="Search the schema registry"
-          title="Filter schemas by name, UUID or change description"
-        />
-
-        {schemaFilterCount > 0 && (
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={clearSchemaFilters}
-            title="Clear every filter"
-          >
-            <IconX size={13} /> Clear filters ({schemaFilterCount})
-          </button>
-        )}
-      </div>
 
       <div className="card" style={{ marginBottom: '24px' }}>
         <div className="card-header">
@@ -873,6 +831,56 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
               primary actions, which is what `.filter-bar` exists to make possible. */}
           </div>
         </div>
+
+        <div className="card-body">
+          <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 12px' }}>
+            A schema declares what a device is modelled to publish. Versions are a lineage: a draft
+            is editable, publishing it supersedes its parent, and the devices provisioned against
+            each version are what make a supersession worth doing carefully.
+          </p>
+      {/* THE PAGE'S FIRST FILTER BAR (issue #60), and the shape the other five list pages already
+          use. The registry gains a row per PUBLISH rather than per schema, so it outgrows a plain
+          list faster than anything else here, and it had no search at all -- while the metric
+          catalog directly below it has had one for some time. */}
+      <div className="filter-bar">
+        <select
+          className="form-control"
+          style={{ width: '190px' }}
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          aria-label="Filter schemas by lifecycle state"
+          title="Filter by lifecycle state. Current hides superseded versions."
+        >
+          {/* Counts in the labels, as on Cells and Gateways: it is how the archived count survived
+              losing its badge, and it answers "is there any history at all?" without selecting. */}
+          <option value="current">Current ({currentCount})</option>
+          <option value={SCHEMA_STATUS.ACTIVE}>Active ({activeCount})</option>
+          <option value={SCHEMA_STATUS.DRAFT}>Draft ({draftCount})</option>
+          <option value={SCHEMA_STATUS.ARCHIVED}>Archived ({archivedCount})</option>
+          <option value="all">All versions ({schemas.length})</option>
+        </select>
+
+        <input
+          className="form-control"
+          style={{ width: '260px' }}
+          value={schemaSearch}
+          onChange={e => setSchemaSearch(e.target.value)}
+          placeholder="Search name, UUID or description…"
+          aria-label="Search the schema registry"
+          title="Filter schemas by name, UUID or change description"
+        />
+
+        {schemaFilterCount > 0 && (
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={clearSchemaFilters}
+            title="Clear every filter"
+          >
+            <IconX size={13} /> Clear filters ({schemaFilterCount})
+          </button>
+        )}
+      </div>
+        </div>{/* .card-body */}
         <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '12px 20px 0' }}>
           A published schema is <strong>read-only</strong>. Devices are provisioned against the exact metric names it
           models, so changing one in place would silently redefine the contract a fleet is judged against. Changes are
@@ -1007,7 +1015,12 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           </button>
         </div>
 
-        <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '12px 20px 0' }}>
+        {/* `.card-body`, not a hand-rolled `margin: 12px 20px 0`. That inset matched the header's
+            horizontal padding and nothing else -- there was no rule saying the two should agree, so
+            they agreed until somebody changed one. It also left no space at all between the
+            paragraph and the table below it. */}
+        <div className="card-body">
+        <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: 0 }}>
           Metrics are grouped by the first segment of their name — <span className="mono">Axes/C/ANGLE</span> and{' '}
           <span className="mono">Axes/X/POSITION</span> both belong to <strong>Axes</strong>. The <span className="mono">/</span>{' '}
           separator is the one Sparkplug B uses for its own names (<span className="mono">Node Control/Rebirth</span>),
@@ -1015,6 +1028,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           so it is visible in MQTT, TimescaleDB and Grafana, and — like the name itself — cannot be edited afterwards.
           Names without a separator are listed under <strong>Ungrouped</strong>.
         </p>
+        </div>{/* .card-body */}
 
         {showAddMetric && (
           <div style={{ margin: '16px 20px', padding: '12px', background: 'var(--bg-glass)', borderRadius: 'var(--radius)' }}>
