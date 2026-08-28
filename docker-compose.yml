@@ -534,7 +534,7 @@ services:
   # schema on boot and is coupled to the Postgres image version.
   supabase-storage:
     container_name: acs-cymru_supabase_storage
-    image: supabase/storage-api:v1.11.13
+    image: supabase/storage-api:v1.60.4
     restart: always
     environment:
       ANON_KEY: ${SUPABASE_ANON_KEY}

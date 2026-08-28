@@ -613,7 +613,7 @@ supabaseStorage:
   enabled: true
   image:
     repository: supabase/storage-api
-    tag: v1.11.13
+    tag: v1.60.4
     pullPolicy: IfNotPresent
   # ONE REPLICA on the file backend: it is a single-writer local filesystem on a ReadWriteOnce
   # PVC. Switch backend to s3 (below) to lift that.
