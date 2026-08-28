@@ -594,6 +594,9 @@ python supabase/migrations/test_metric_catalog_seed.py
 python supabase/migrations/test_gateway_enrollment.py
 # Needs the TimescaleDB historian (port 5433), not Supabase — the rollups live there
 python timescaledb/test_bi_reader_grants.py
+# The daemon's and the FDW's own roles (item 18). Each skips itself when its password is unset,
+# because roles.sql skips creating the role on the same condition.
+python timescaledb/test_historian_role_grants.py
 
 # End-to-end — needs the running stack
 set -a && . ./.env && set +a && unset MQTT_HOST DB_HOST DB_PORT

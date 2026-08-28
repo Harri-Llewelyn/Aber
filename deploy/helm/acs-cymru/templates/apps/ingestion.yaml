@@ -126,9 +126,28 @@ spec:
               value: {{ include "acs-cymru.timescale.port" . | quote }}
             - name: DB_NAME
               value: {{ .Values.timescaledb.database | quote }}
+            {{- /*
+              ROADMAP ITEM 18 -- WHICH ROLE THIS DAEMON HOLDS ON THE HISTORIAN.
+
+              It connected as the admin user, which is superuser there: the process most exposed to
+              the plant network could DROP the hypertable and rewrite any observation, while the
+              README's security model listed "append-only historian writes" as a control at this
+              layer. `ingest_writer` (timescaledb/roles.sql) makes that claim a grant.
+
+              THE PASSWORD FOLLOWS THE USER rather than being set beside it. One setting decides
+              both, so they cannot disagree -- a dbUser of `ingest_writer` paired with the admin
+              password is a stack that fails to authenticate and reports it as a database outage.
+
+              DEFAULTS TO WHAT IT WAS. An upgrade that sets nothing keeps the admin credential, so
+              this cannot break a deployment that has not opted in. Set ingestion.dbUser only AFTER
+              secrets.ingestWriterPassword is set and the maintenance Job has created the role --
+              the reverse order points the daemon at a role that does not exist.
+            */}}
+            {{- $ingestUser := .Values.ingestion.dbUser | default .Values.timescaledb.username }}
+            {{- $ingestPwKey := ternary "INGEST_WRITER_PASSWORD" "DB_PASSWORD" (eq $ingestUser "ingest_writer") }}
             - name: DB_USER
-              value: {{ .Values.timescaledb.username | quote }}
-            {{- include "acs-cymru.secretEnv" (dict "name" "DB_PASSWORD" "secretName" $secretName "key" "DB_PASSWORD") | nindent 12 }}
+              value: {{ $ingestUser | quote }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "DB_PASSWORD" "secretName" $secretName "key" $ingestPwKey) | nindent 12 }}
             {{- /* Host, port and TLS from one shared helper, so this and Node-RED cannot drift. */}}
             {{- include "acs-cymru.brokerClientEnv" . | nindent 12 }}
             {{- /*

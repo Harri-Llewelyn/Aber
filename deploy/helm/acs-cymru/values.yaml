@@ -214,6 +214,23 @@ secrets:
   # and `telemetry_latest`. Setting it here rotates the password on the next install or upgrade.
   biReaderPassword: ""
 
+  # --- Historian least privilege (roadmap item 18) ---------------------------------------------
+  #
+  # EMPTY MEANS NO ROLE for both, matching biReaderPassword above: timescaledb/roles.sql skips a
+  # role rather than creating it with a blank password, so an upgrade that sets neither changes
+  # nothing.
+  #
+  # ingestWriterPassword creates `ingest_writer` -- INSERT and SELECT on telemetry, upsert on
+  # assets, and no UPDATE, DELETE or TRUNCATE on either. It is what makes the security model's
+  # "append-only historian writes" a database fact rather than a property of the Python. Setting it
+  # does NOT move the daemon; `ingestion.dbUser` does, and the two steps are separate on purpose so
+  # the role can be verified while nothing depends on it.
+  ingestWriterPassword: ""
+  # fdwReaderPassword creates `fdw_reader`, which is what Supabase's postgres_fdw PUBLIC user
+  # mapping authenticates as. Unset, that mapping falls back to the historian superuser -- which is
+  # what it has always been, and what item 18 exists to stop.
+  fdwReaderPassword: ""
+
   noderedCredentialSecret: ""
   noderedOAuthClientSecret: ""
   noderedWebhookJwtSecret: ""
@@ -888,6 +905,13 @@ mosquitto:
     limits: { memory: 256Mi }
 
 ingestion:
+  # WHICH ROLE THE DAEMON CONNECTS TO THE HISTORIAN AS (roadmap item 18). Defaults to the admin
+  # user, which is what it has always been -- so an upgrade that changes nothing keeps working.
+  #
+  # Set to `ingest_writer` ONLY AFTER secrets.ingestWriterPassword is set and the maintenance Job
+  # has run, because the role does not exist until then and a daemon pointed at a missing role
+  # stops telemetry for the whole fleet.
+  dbUser: ""
   enabled: true
   image:
     # BUILT FROM the repository-root Dockerfile, not pulled:
