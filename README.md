@@ -2296,9 +2296,10 @@ unrecorded."*
 0031 sets the bar at *"a half-legible audit entry is worse than an absent one, because it looks like
 the feature works."* An empty inventory is worse than either, because it does not look like a
 missing feature — **it reads as an assertion that no credentials are outstanding**, which on a
-provisioned stack is false. That half is a defect rather than an extension and is filed as one; it
-is named here because this item is where the general fix lands, and because an item about audit
-coverage that did not mention the one panel actively misinforming would be a strange document.
+provisioned stack is false. That half is a defect rather than an extension and is filed as
+[#91](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/91); it is named here because this item is
+where the general fix lands, and because an item about audit coverage that did not mention the one
+panel actively misinforming would be a strange document.
 
 #### Worth deciding early
 
