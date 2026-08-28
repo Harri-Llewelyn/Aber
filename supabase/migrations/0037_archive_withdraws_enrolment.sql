@@ -190,6 +190,27 @@ REVOKE ALL ON FUNCTION public.consume_gateway_enrollment_token(text) FROM PUBLIC
 -- ASSERTS THE REPRODUCTION, not the presence of the code. A trigger that exists and a function that
 -- was replaced prove nothing about whether the sequence still works, and that sequence is the whole
 -- reason this migration exists.
+-- THE PROBE IS ROLLED BACK, AND THAT IS NOT TIDINESS. Every INSERT, UPDATE and DELETE below fires
+-- `trg_gateways_digital_thread`, and `digital_thread` is append-only to every application role and
+-- cannot be pruned. Committed, this self-check appended a handful of rows to the audit trail ON
+-- EVERY BOOT -- which is the failure class this repository names twice elsewhere: 0005's heartbeat
+-- problem, and roadmap item 17's warning against "a row per progress tick into an append-only table
+-- no application role can prune".
+--
+-- Measured before the fix: replaying 0037 and 0038 once added 9 rows, and `migration` had become
+-- the LARGEST actor_source in the table -- 517 rows against 135 from real users -- with 496 of them
+-- pointing at probe gateways long since deleted, so they render through the Digital Thread page's
+-- purged-entity fallback. Synthetic noise in the one table whose signal the whole design protects.
+--
+-- The idiom is 0048's: do the work in a sub-block, raise `rollback_selfcheck` at the end, and
+-- swallow only that. A subtransaction that ends in an exception discards everything it wrote, the
+-- audit rows included, while the outer transaction carries on. Any OTHER exception -- including
+-- every assertion below -- is re-raised untouched, so a genuine failure still stops db-init.
+--
+-- THE CLEANUP DELETE STAYS OUTSIDE THE BLOCK, deliberately. It is a no-op on a healthy boot, and on
+-- a database left holding a probe row by an older version of this file it is the one thing that
+-- removes it. Inside, it would be rolled back with everything else and the stale row would live
+-- forever.
 DO $selfcheck$
 DECLARE
   v_gw    CONSTANT uuid := '00000000-0000-4000-8000-00000000f037';
@@ -199,6 +220,7 @@ DECLARE
 BEGIN
   DELETE FROM public.gateways WHERE id = v_gw;
 
+  BEGIN
   INSERT INTO public.gateways (id, name, is_virtual, location_scope, status)
   VALUES (v_gw, '0037 self-check', false, 'site_wide', 'PENDING_ENROLLMENT');
 
@@ -241,10 +263,18 @@ BEGIN
       'term has broken ordinary enrolment.', v_rows;
   END IF;
 
-  DELETE FROM public.gateways WHERE id = v_gw;
+  -- No DELETE here any more: the rollback below removes the probe and its audit rows together,
+  -- and an explicit delete would only add a row for the rollback to discard.
+  RAISE EXCEPTION 'rollback_selfcheck';
+  EXCEPTION
+    WHEN raise_exception THEN
+      -- Only ours. Every assertion above raises through here and must keep its message and its
+      -- power to stop the boot.
+      IF SQLERRM <> 'rollback_selfcheck' THEN RAISE; END IF;
+  END;
 
   RAISE NOTICE
     '0037 self-check passed: archive withdraws the bundle, an archived gateway cannot be enrolled, '
-    'and ordinary enrolment still works.';
+    'and ordinary enrolment still works. Probe rolled back, no audit rows written.';
 END;
 $selfcheck$;
