@@ -230,6 +230,22 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   return (
     <div className="page-layout">
       <div className="page-main">
+      {/* ABOVE THE CARD, NOT INSIDE IT. This is a page-level finding -- devices that belong to no
+          cell at all -- and it is the first thing worth knowing on arrival, before any question
+          about which cells to look at. Inside the card body it sat below the filters, which is
+          behind a control an operator has no reason to touch until they have read this. */}
+      {unlinkedDevices.length > 0 && (
+        <div style={{ marginBottom: '20px', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px 16px', fontSize: '13px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <IconShieldAlert size={18} />
+          <div>
+            <strong>{unlinkedDevices.length} device{unlinkedDevices.length === 1 ? '' : 's'} not linked to any cell zone:</strong>{' '}
+            {unlinkedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unlinkedDevices.length > 5 ? ', …' : ''}.
+            Set a cell on each device from the Devices page, give its gateway a cell on the Gateways page,
+            or mark it Site-Wide if it belongs to no single cell.
+          </div>
+        </div>
+      )}
+
       {/* ONE CARD, COMPOSED THE SAME WAY EVERY CARD IN THE APP IS: a title, a description, the
           primary action, then the filters that narrow what is below.
 
@@ -317,17 +333,6 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
 
       </div>
 
-      {unlinkedDevices.length > 0 && (
-        <div style={{ marginBottom: '20px', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px 16px', fontSize: '13px', color: 'var(--warning-text)', display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <IconShieldAlert size={18} />
-          <div>
-            <strong>{unlinkedDevices.length} device{unlinkedDevices.length === 1 ? '' : 's'} not linked to any cell zone:</strong>{' '}
-            {unlinkedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unlinkedDevices.length > 5 ? ', …' : ''}.
-            Set a cell on each device from the Devices page, give its gateway a cell on the Gateways page,
-            or mark it Site-Wide if it belongs to no single cell.
-          </div>
-        </div>
-      )}
         </div>{/* .card-body */}
 
       {/* ONE TABLE, NOT A CARD PER CELL (issue #61).

@@ -385,6 +385,17 @@ export function AccessControlTab({ showToast }) {
               </span>
             </h3>
           </div>
+
+          <div className="card-body">
+            <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>
+              The identities the stack's own processes authenticate as. Each has no email and no
+              password, so none of them can sign in — they exist to be named by a token, and every
+              write they make goes through a gate that checks which one is calling. They hold
+              <strong> Operator</strong> and can write nothing directly, which is what makes the
+              gates the whole of their authority rather than a convention they follow.
+            </p>
+          </div>
+
           {principalError && (
             <div className="callout" style={{ borderColor: 'var(--danger)', color: 'var(--danger-text)' }}>
               <IconShieldAlert size={14} className="callout-icon" />

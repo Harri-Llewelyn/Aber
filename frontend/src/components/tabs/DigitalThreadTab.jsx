@@ -1232,15 +1232,25 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
             is the part the top bar cannot carry, and this page needs one more than most, because
             what the digital thread does and does not record is not guessable from a list of rows.
 
-            EXPORT STAYS IN THE FILTER BAR rather than moving to the header with the other pages'
-            primary actions, and that is deliberate: what it writes is decided by the filters, so it
-            belongs at the end of the row that decides it. Its count is the filtered count for the
-            same reason. A create button has no such relationship and does belong in the header. */}
+            EXPORT IS AN ACTION, SO IT SITS WITH THE ACTIONS. It was kept in the filter bar on the
+            grounds that what it writes is decided by the filters, so it belonged at the end of the
+            row that decides it. That is an argument about proximity; the stronger one is about what
+            the control IS -- it does not filter anything, and every other card keeps its actions in
+            the header at title height. The COUNT stays the filtered count, which is the half of the
+            proximity argument worth keeping: the button still says how many rows it will write. */}
         <div className="card">
           <div className="card-header">
             <h3 className="section-title">
               Digital Thread <span className="section-count">{events.length}</span>
             </h3>
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ marginLeft: 'auto' }}
+              onClick={() => downloadCSV(exportRows(), 'digital-thread-export.csv')}
+              title="Download the events matching the current filters as CSV"
+            >
+              <IconDownload size={13} /> Export CSV ({events.length})
+            </button>
           </div>
 
           <div className="card-body">
@@ -1373,7 +1383,6 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
                 and chose a value -- and the same widget then offered 1s and 5s against an audit
                 log that changes when an operator does something. A fixed 60s poll below does what
                 the control was there to arrange, without asking. */}
-            <button className="btn btn-ghost btn-sm" onClick={() => downloadCSV(exportRows(), 'digital-thread-export.csv')} title="Download audit events as CSV"><IconDownload size={13} /> Export CSV ({events.length})</button>
           </div>
         </div>
           </div>{/* .card-body */}

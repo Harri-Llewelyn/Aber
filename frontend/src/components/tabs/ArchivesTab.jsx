@@ -60,9 +60,19 @@ export function ArchivesTab({ showToast, hasPermission }) {
       <div className="card">
         <div className="card-header">
           <h3 className="section-title">Archived Entities (Out of Commission) <span className="section-count">{archives.length}</span></h3>
-          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            Retention timers run to the auto-purge date; Restore returns an entity to service.
-          </span>
+        </div>
+
+        {/* A DESCRIPTION, IN THE BODY. The sentence about retention was already here as a `<span>`
+            in the HEADER, sharing the row with the title -- so it was competing with the title for
+            the same line rather than explaining it, and it stopped at the one fact it had room for.
+            Cards carry their description in the body; this is that. */}
+        <div className="card-body">
+          <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>
+            An archived entity is out of commission but not gone: it keeps its identity and its
+            history, stops appearing on the asset pages, and runs a retention timer to an auto-purge
+            date. Restore returns it to service with everything intact — which is what makes
+            archiving the reversible half of decommissioning, and deletion the other one.
+          </p>
         </div>
         {loading ? <div className="loading-wrap"><div className="spinner" /> Loading archives…</div> :
          archives.length === 0 ? (

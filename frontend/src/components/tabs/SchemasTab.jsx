@@ -838,6 +838,16 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
             is editable, publishing it supersedes its parent, and the devices provisioned against
             each version are what make a supersession worth doing carefully.
           </p>
+          {/* THE SECOND HALF OF THE DESCRIPTION, and it was left below the filter bar when the bar
+              came inside -- so the description read as two paragraphs with a row of controls
+              wedged between them. A description is one block; the filters come after all of it. */}
+          <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '0 0 12px' }}>
+            A published schema is <strong>read-only</strong>. Devices are provisioned against the exact metric names it
+            models, so changing one in place would silently redefine the contract a fleet is judged against. Changes are
+            made by creating the next version — <span className="mono">v1 → v2 → v3</span> — which forks the definition into
+            an editable draft. Publishing a draft activates it, archives its predecessor, and moves every device across in
+            one transaction. Version numbers are assigned by the database and cannot be chosen.
+          </p>
       {/* THE PAGE'S FIRST FILTER BAR (issue #60), and the shape the other five list pages already
           use. The registry gains a row per PUBLISH rather than per schema, so it outgrows a plain
           list faster than anything else here, and it had no search at all -- while the metric
@@ -881,13 +891,6 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         )}
       </div>
         </div>{/* .card-body */}
-        <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '12px 20px 0' }}>
-          A published schema is <strong>read-only</strong>. Devices are provisioned against the exact metric names it
-          models, so changing one in place would silently redefine the contract a fleet is judged against. Changes are
-          made by creating the next version — <span className="mono">v1 → v2 → v3</span> — which forks the definition into
-          an editable draft. Publishing a draft activates it, archives its predecessor, and moves every device across in
-          one transaction. Version numbers are assigned by the database and cannot be chosen.
-        </p>
         {loading ? <div className="loading-wrap"><div className="spinner" /> Loading schemas…</div> : visibleSchemas.length === 0 ? (
           /* SAYS WHY IT IS EMPTY, the same way the catalog's empty state below does. A registry
              that always has rows in it rendering as a blank table reads as a failed load rather

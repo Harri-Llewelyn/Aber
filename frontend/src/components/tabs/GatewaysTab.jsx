@@ -271,6 +271,16 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
     <div className="page-layout">
       <div className="page-main">
 
+      {/* Above the card: a page-level finding, and the first thing worth knowing on arrival. See
+          CellsTab's note on why it is not in the card body. */}
+      {unassignedDevices.length > 0 && (
+        <div style={{ marginBottom: '20px', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px 16px', fontSize: '13px', color: 'var(--warning-text)' }}>
+          <strong>{unassignedDevices.length} device{unassignedDevices.length === 1 ? '' : 's'} not assigned to any gateway:</strong>{' '}
+          {unassignedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unassignedDevices.length > 5 ? ', …' : ''}.
+          Assign them from the Devices page.
+        </div>
+      )}
+
       {/* One card: title, description, primary action, filters, table. See CellsTab's note on why
           the filter bar came inside rather than floating above. */}
       <div className="card">
@@ -353,13 +363,6 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
 
       </div>
 
-      {unassignedDevices.length > 0 && (
-        <div style={{ marginBottom: '20px', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px 16px', fontSize: '13px', color: 'var(--warning-text)' }}>
-          <strong>{unassignedDevices.length} device{unassignedDevices.length === 1 ? '' : 's'} not assigned to any gateway:</strong>{' '}
-          {unassignedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unassignedDevices.length > 5 ? ', …' : ''}.
-          Assign them from the Devices page.
-        </div>
-      )}
         </div>{/* .card-body */}
 
         {loading ? <div className="loading-wrap"><div className="spinner" /> Loading gateways…</div> :
