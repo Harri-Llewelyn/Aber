@@ -372,6 +372,16 @@ END $$;
 --    is what replaces it.
 -- ---------------------------------------------------------------------------------------------
 
+-- THREE WAYS IN, AND TWO OF THEM ARE MACHINES CONFINED TO ONE FILE EACH.
+--
+--   a person          Administrator, Shopfloor_Manager or Auditor, reading the whole bucket
+--   the daemon        the object of the capture job it is RECORDING (0055)
+--   the worker        the object of the playback job it is RUNNING (0056)
+--
+-- THE PLAYBACK ARM IS A PREREQUISITE, NOT A REFINEMENT. `Service_Playback` holds `Operator`, so
+-- without it every playback fails at the first read with 42501 -- caught, logged, and visible only
+-- as a job that failed for a reason nothing surfaces. That is 0051's defect for the third time,
+-- which is why it is asserted below rather than trusted to this text.
 DROP POLICY IF EXISTS "broker_captures_read_privileged" ON storage.objects;
 CREATE POLICY "broker_captures_read_privileged" ON storage.objects
   FOR SELECT TO authenticated
@@ -381,6 +391,8 @@ CREATE POLICY "broker_captures_read_privileged" ON storage.objects
       public.has_role(ARRAY['Administrator', 'Shopfloor_Manager', 'Auditor'])
       OR (public.is_ingestion_caller()
           AND public.is_active_capture_object(storage.objects.name))
+      OR (public.is_playback_caller()
+          AND public.is_active_playback_capture(storage.objects.name))
     )
   );
 
@@ -517,6 +529,39 @@ BEGIN
     RAISE EXCEPTION
       'broker-captures: the DELETE policy admits the ingestion daemon. It has no reason to destroy '
       'a capture -- replacing one is an overwrite -- and every reason not to be able to.';
+  END IF;
+
+  -- ---------------------------------------------------------------------------------------------
+  -- THE PLAYBACK WORKER READS, AND DOES NOTHING ELSE.
+  --
+  -- Missing entirely, every playback fails at its first read with 42501 -- 0051's defect for the
+  -- third time on this bucket. Present on any policy but SELECT, a process that already holds
+  -- broker publish rights could also overwrite or destroy the recordings it is meant to replay,
+  -- which is the one combination worth ruling out explicitly.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+     WHERE schemaname = 'storage' AND tablename = 'objects'
+       AND policyname = 'broker_captures_read_privileged'
+       AND coalesce(qual, '') LIKE '%is_playback_caller%'
+       AND coalesce(qual, '') LIKE '%is_active_playback_capture%'
+  ) THEN
+    RAISE EXCEPTION
+      'broker-captures: the SELECT policy does not admit the playback worker, confined to the '
+      'capture of its running job. Service_Playback holds Operator, so every playback would fail '
+      'at its first read with 42501 -- caught, logged, and seen only as a job that failed for no '
+      'stated reason. See 0056.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+     WHERE schemaname = 'storage' AND tablename = 'objects'
+       AND policyname LIKE 'broker_captures_%' AND cmd <> 'SELECT'
+       AND (coalesce(qual, '') || coalesce(with_check, '')) LIKE '%is_playback_caller%'
+  ) THEN
+    RAISE EXCEPTION
+      'broker-captures: a write policy admits the playback worker. It publishes captures and must '
+      'not be able to alter or destroy them -- it holds broker publish rights, which is exactly '
+      'the process that should not also be able to edit the evidence of what it published.';
   END IF;
 
   RAISE NOTICE

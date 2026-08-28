@@ -31,6 +31,14 @@ COPY ingestion/validate.py .
 # is a crash loop on start rather than a feature that quietly does nothing.
 COPY ingestion/capture_worker.py .
 COPY ingestion/capture.py .
+# The playback worker (roadmap item 17 §5), which runs from THIS IMAGE under a different command.
+#
+# THE ROADMAP PRICED A SECOND IMAGE AND IT IS NOT NEEDED. What playback requires that is genuinely
+# new is a separate PROCESS with a separate Supabase principal and its own broker credentials --
+# none of which an image boundary provides. It publishes using capture.py's own `plan_playback()`,
+# which is already here, so a second image would be this one minus two files plus a second build,
+# a second tag to keep in step, and a second entry in check-image-tag-parity.mjs.
+COPY ingestion/playback_worker.py .
 
 # Compile the Sparkplug B protobuf definition
 RUN protoc --python_out=. sparkplug_b.proto

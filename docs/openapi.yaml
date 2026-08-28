@@ -1144,6 +1144,48 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/CaptureJob' } }
         '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
 
+  /rest/v1/playback_jobs:
+    get:
+      tags: [Storage]
+      summary: Read broker playback jobs, running and finished
+      description: |
+        One row per playback attempted — a stored capture published back into the stack as a
+        simulated gateway, through the real broker and down the real ingestion path.
+
+        At most one row is `PENDING` or `RUNNING` **per target gateway**, enforced by a partial
+        unique index. That is narrower than the capture equivalent on purpose: two publishers on one
+        edge node interleave their Sparkplug sequence numbers, which the daemon reports as permanent
+        message loss. Playbacks onto *different* simulated gateways conflict with nothing.
+
+        **Starting one is `start_playback_job()`, and there is no other way.** The table takes no
+        direct write from any application role, because the checks that matter live inside that
+        function: the target must be marked `is_simulated` (0052), it must hold a broker credential
+        the platform issued, and every entry in `device_map` must name an active device *of that
+        gateway* — an unmapped or foreign device id publishes under the target's edge node and is
+        quarantined by `verify_gateway_binding()`, which reads as a fleet fault rather than a
+        mapping one.
+
+        **Stopping one is `request_playback_stop()`**, which sets `stop_requested`; the worker
+        observes it on its next progress tick. Progress arrives over Realtime.
+
+        `speed` divides both the send schedule and the timestamp rebasing, so it is bounded to
+        `(0, 60]`. Zero is refused rather than treated as "as fast as possible": the historian
+        inserts `ON CONFLICT (time, asset_id, metric_name) DO NOTHING`, so a burst would write one
+        row per metric and silently discard the rest.
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [PENDING, RUNNING, COMPLETED, FAILED, CANCELLED] } }
+        - { name: target_gateway_id, in: query, schema: { type: string, format: uuid } }
+        - { name: capture_id, in: query, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+      responses:
+        '200':
+          description: Playback jobs visible to the caller.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/PlaybackJob' } }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
+
   /rest/v1/system_settings:
     get:
       tags: [Registry]
@@ -3187,6 +3229,51 @@ components:
             Set by `request_capture_stop()`. The daemon observes it on its next message, then
             flushes and completes. A column rather than an endpoint, so it survives a page reload.
         capture_id: { type: string, format: uuid, nullable: true }
+        error: { type: string, nullable: true }
+        requested_by: { type: string, format: uuid, nullable: true }
+        created_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time, nullable: true }
+        finished_at: { type: string, format: date-time, nullable: true }
+
+    PlaybackJob:
+      type: object
+      description: |
+        One playback attempted. Written only through the gates in `0056`; progress arrives over
+        Realtime.
+      properties:
+        id: { type: string, format: uuid }
+        capture_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: |
+            Null once the capture has been deleted. The playback still happened, and the telemetry
+            it wrote outlives both rows, which is why this is SET NULL rather than a cascade.
+        capture_storage_path: { type: string, example: gwy120000000000400080000/capture.json }
+        target_gateway_id: { type: string, format: uuid }
+        target_edge_node_id:
+          type: string
+          description: |
+            The target's `sparkplug_id`, and also the MQTT USERNAME the worker connects as — which
+            is what lets `pattern readwrite spBv1.0/+/+/%u/#` confine a playback to one edge node
+            with no ACL change.
+          example: gwy130000000000400080000
+        sparkplug_group: { type: string, example: ACS-Cymru }
+        device_map:
+          type: object
+          additionalProperties: { type: string }
+          description: |
+            `{"<captured device id>": "<target device id>"}`. Every target must be an active device
+            of the target gateway.
+          example: { dev270000000000400080000: dev310000000000400080000 }
+        speed: { type: number, description: 'Greater than 0 and at most 60. Zero is refused.' }
+        status: { type: string, enum: [PENDING, RUNNING, COMPLETED, FAILED, CANCELLED] }
+        messages_total: { type: integer }
+        messages_sent: { type: integer }
+        elapsed_seconds: { type: integer }
+        stop_requested:
+          type: boolean
+          description: 'Set by request_playback_stop(); observed by the worker on its next tick.'
         error: { type: string, nullable: true }
         requested_by: { type: string, format: uuid, nullable: true }
         created_at: { type: string, format: date-time }

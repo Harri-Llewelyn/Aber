@@ -231,7 +231,9 @@ def _storage_client():
     from storage3 import create_client as create_storage_client
 
     return create_storage_client(
-        SUPABASE_URL.rstrip("/") + "/storage/v1",
+        # TRAILING SLASH: storage3 warns and corrects it otherwise, and a UserWarning on every boot
+        # is noise that trains a reader to skip the startup lines.
+        SUPABASE_URL.rstrip("/") + "/storage/v1/",
         {
             "apikey": SUPABASE_ANON_KEY,
             "Authorization": "Bearer " + (SUPABASE_INGESTION_KEY or SUPABASE_ANON_KEY),

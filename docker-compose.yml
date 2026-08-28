@@ -1444,6 +1444,69 @@ services:
       supabase-envoy:
         condition: service_healthy
 
+  # Broker playback (roadmap item 17 §5): publishes a stored capture back into the stack.
+  #
+  # THE SAME IMAGE AS `ingestion`, UNDER A DIFFERENT COMMAND, AND THAT IS NOT A SHORTCUT. What
+  # playback genuinely needs that is new is a separate PROCESS holding a separate Supabase principal
+  # and its own broker credentials -- none of which an image boundary provides. It publishes using
+  # `capture.py`'s own plan_playback(), which is already in this image, so a second image would be
+  # this one minus two files plus a second build, a second tag to keep in step, and a second entry
+  # in check-image-tag-parity.mjs. The roadmap priced an image; the image turned out to be the part
+  # that was free.
+  #
+  # WHAT IS NOT SHARED IS EVERYTHING THAT MATTERS. This service holds no historian credential, no
+  # ingestion MQTT account and no SUPABASE_INGESTION_KEY. Its Supabase identity is Service_Playback
+  # (migration 0056), which reaches four gates and one storage object; its MQTT identity is the
+  # TARGET GATEWAY'S OWN, which is what makes `pattern readwrite spBv1.0/+/+/%u/#` confine it with
+  # no ACL change at all.
+  playback:
+    container_name: acs-cymru_playback
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "playback_worker.py"]
+    restart: always
+    environment:
+      MQTT_HOST: ${MQTT_HOST:-mosquitto}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      # ONE PASSWORD PER TARGET GATEWAY, as a JSON object keyed by sparkplug_id:
+      #
+      #   MQTT_PLAYBACK_CREDENTIALS={"gwy130000000000400080000":"..."}
+      #
+      # EMPTY BY DEFAULT, and the worker starts anyway. A stack that has issued no playback targets
+      # is correctly configured for having none; the worker says so once at boot and refuses each
+      # job with a message naming the gateway it lacks a credential for, rather than failing to
+      # start and taking the diagnosis with it.
+      #
+      # These are the SAME credentials the Access Control page issues for a gateway. Playback does
+      # not get an account of its own at the broker -- it borrows the target's, which is the only
+      # identity the ACL will let publish under that edge node.
+      MQTT_PLAYBACK_CREDENTIALS: ${MQTT_PLAYBACK_CREDENTIALS:-}
+      # The single-target fallback, which is what `.env` already carries for `capture.py play`.
+      MQTT_PLAYBACK_USER: ${MQTT_PLAYBACK_USER:-}
+      MQTT_PLAYBACK_PASSWORD: ${MQTT_PLAYBACK_PASSWORD:-}
+      MQTT_TLS_ENABLED: ${MQTT_TLS_ENABLED:-}
+      MQTT_TLS_CA_FILE: ${MQTT_TLS_CA_FILE:-}
+      SUPABASE_URL: http://supabase-kong:8000
+      # Both, for the reason the ingestion service gives above: the anon key is the apikey the
+      # gateway checks, and the playback key is the Authorization bearer naming Service_Playback.
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_PLAYBACK_KEY: ${SUPABASE_PLAYBACK_KEY:?SUPABASE_PLAYBACK_KEY is required -- the playback worker authenticates as Service_Playback (migration 0056) and can claim nothing without it. Run `npm run setup`, or copy it from .env.example.}
+      CAPTURE_BUCKET: ${CAPTURE_BUCKET:-broker-captures}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - mosquitto_certs:/etc/acs-cymru/broker-ca:ro
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      supabase-db-init:
+        condition: service_completed_successfully
+      # It reads the capture out of Storage through the gateway, so both have to be up. Ordering
+      # only: a worker that cannot reach either fails the job it claimed with the reason, which is
+      # the right behaviour long after boot when no depends_on helps.
+      supabase-envoy:
+        condition: service_healthy
+
   # i3X 1.0 server (CESMII Industrial Information Interoperability eXchange).
   #
   # A READ-SIDE ADAPTER, alongside ingestion rather than inside it. It holds its own `spBv1.0/#`

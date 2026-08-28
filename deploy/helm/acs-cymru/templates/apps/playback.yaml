@@ -1,0 +1,109 @@
+{{- if .Values.playback.enabled }}
+{{- $component := "playback" -}}
+{{- $secretName := include "acs-cymru.secretName" . -}}
+{{/*
+=================================================================================================
+The broker playback worker: a stored capture -> MQTT, published as a simulated gateway.
+
+THE SAME IMAGE AS `ingestion`, UNDER A DIFFERENT COMMAND, and that is deliberate rather than
+economical. What playback genuinely needs that is new is a separate PROCESS holding a separate
+Supabase principal and its own broker credentials -- none of which an image boundary provides. It
+publishes using capture.py's plan_playback(), which is already in that image, so a second image
+would be this one minus two files plus a second build, a second tag to keep in step, and a second
+entry in check-image-tag-parity.mjs.
+
+`ingestion.image` IS THEREFORE REFERENCED DIRECTLY, with no `playback.image` of its own. A separate
+values key would let a deployment run the two from different builds, which is a way to get a worker
+whose capture.py disagrees with the daemon's about the file format.
+
+NO SERVICE, AND NO PROBE. It is a pure producer: nothing calls it, and it serves no HTTP endpoint
+of any kind -- unlike ingestion, which publishes /metrics. A liveness probe would need one, and
+inventing an endpoint so that a probe has something to read is the wrong order to do that in. What
+a restart costs is bounded and visible: `playback_reconcile_jobs()` fails whatever was in flight,
+with a message saying the worker restarted, and the row stops blocking further playbacks onto that
+gateway.
+=================================================================================================
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: playback
+  labels:
+    {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
+spec:
+  {{/*
+    EXACTLY ONE REPLICA, and the reason differs from ingestion's. That daemon must not be scaled
+    because every replica CONSUMES the same messages. This one must not be scaled because two
+    workers would each claim jobs and publish concurrently -- and `playback_claim_job()` uses
+    FOR UPDATE SKIP LOCKED, so they would not collide on the same ROW but could easily run two
+    playbacks onto two gateways at once, which the schema permits and this worker's queue does not
+    expect. The per-target unique index is what protects the invariant that matters: never two
+    publishers on one edge node.
+  */}}
+  replicas: 1
+  strategy:
+    # Recreate rather than RollingUpdate: a rolling update runs a second worker alongside the first,
+    # which is the two-replica case above for the length of a deploy.
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "acs-cymru.selectorLabels" (dict "ctx" . "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        {{/*
+          The worker reads its capture out of Storage through the API gateway, so it has to be up.
+          ORDERING ONLY: a worker that cannot reach it fails the job it claimed with the reason,
+          which is the behaviour that matters long after boot when no initContainer helps.
+        */}}
+        {{- include "acs-cymru.waitFor" (dict "ctx" . "name" "wait-for-kong" "image" "curlimages/curl:8.10.1" "command" "curl -sf -o /dev/null http://supabase-kong:8000/auth/v1/health" "describe" "supabase-kong (the capture is read through it)") | nindent 8 }}
+      containers:
+        - name: playback
+          image: {{ include "acs-cymru.image" (dict "image" .Values.ingestion.image "ctx" $) | quote }}
+          imagePullPolicy: {{ .Values.ingestion.image.pullPolicy }}
+          command: ["python", "playback_worker.py"]
+          env:
+            {{- /*
+              NO MQTT_HOST OR MQTT_PORT, matching ingestion.yaml: `mosquitto` on 1883 is
+              playback_worker.py's default and is the in-cluster Service name, so setting them
+              would only create a second place for the two targets to disagree.
+
+              NO MQTT_USER OR MQTT_PASSWORD EITHER, and that is not an omission. This worker has no
+              broker account of its own: it authenticates AS THE TARGET GATEWAY, username equal to
+              that gateway's sparkplug_id, which is what lets `pattern readwrite spBv1.0/+/+/%u/#`
+              confine it with no ACL change at all. The passwords are below, one per gateway.
+            */}}
+            {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_PLAYBACK_CREDENTIALS" "secretName" $secretName "key" "MQTT_PLAYBACK_CREDENTIALS") | nindent 12 }}
+            - name: SUPABASE_URL
+              value: {{ include "acs-cymru.supabase.internalUrl" . | quote }}
+            {{- /*
+              Both, doing different jobs, exactly as for ingestion: the anon key is the apikey the
+              gateway's filter checks -- it admits two literal keys -- and the playback key is the
+              Authorization bearer that names Service_Playback.
+            */}}
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_PLAYBACK_KEY" "secretName" $secretName "key" "SUPABASE_PLAYBACK_KEY") | nindent 12 }}
+            - name: CAPTURE_BUCKET
+              value: {{ .Values.supabaseStorage.captureBucket | quote }}
+            - name: PLAYBACK_POLL_INTERVAL_SECONDS
+              value: {{ .Values.playback.pollIntervalSeconds | quote }}
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          resources:
+            {{- toYaml .Values.playback.resources | nindent 12 }}
+          {{- if and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients }}
+          volumeMounts:
+            {{- include "acs-cymru.brokerClientCaMount" . | nindent 12 }}
+          {{- end }}
+      {{- if and .Values.mosquitto.tls.enabled .Values.mosquitto.tls.internalClients }}
+      volumes:
+        {{- include "acs-cymru.brokerClientCaVolume" . | nindent 8 }}
+      {{- end }}
+{{- end }}

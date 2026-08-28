@@ -93,9 +93,30 @@ secrets:
   # That subject is Service_Ingestor, seeded by migration 0046; it holds Operator and cannot write
   # a row directly, so every write goes through a gate in 0047 that checks the caller is it.
   #
-  # PART OF THE SAME MATCHING SET as anonKey and serviceRoleKey -- re-sign all three together when
-  # jwtSecret changes. `scripts/setup.mjs` mints all three for the Compose path.
+  # PART OF THE SAME MATCHING SET as anonKey and serviceRoleKey -- re-sign all FOUR together when
+  # jwtSecret changes. `scripts/setup.mjs` mints them all for the Compose path.
   ingestionKey: ""
+
+  # The playback worker's own JWT, same shape, subject b0000000-0000-4000-8000-000000000003 --
+  # Service_Playback, seeded by migration 0056.
+  #
+  # A SECOND IDENTITY BECAUSE THE BROKER RIGHTS DIFFER. The ingestion daemon may publish
+  # `spBv1.0/+/NCMD/+` and nothing else; this worker publishes asset data as one gateway. Sharing
+  # ingestionKey between them would mean one leaked credential reached both sets of gates -- and the
+  # storage policy that admits this principal for exactly one object would be admitting the daemon.
+  #
+  # Also part of the matching set: re-sign it when jwtSecret changes.
+  playbackKey: ""
+
+  # The broker passwords the playback worker holds, keyed by gateway sparkplug_id:
+  #
+  #   mqttPlaybackCredentials: '{"gwy130000000000400080000":"..."}'
+  #
+  # EMPTY IS A VALID DEPLOYMENT. A stack that has issued no playback targets has none of these; the
+  # worker starts, says so once, and refuses each job by naming the gateway it lacks a credential
+  # for. These are the same credentials the Access Control page issues -- playback borrows the
+  # target gateway's account rather than holding one of its own.
+  mqttPlaybackCredentials: ""
 
   # Superuser password for Supabase Postgres, and the password set on the scoped roles
   # (supabase_auth_admin, authenticator, supabase_storage_admin) by the roles-init Job.
@@ -908,6 +929,27 @@ mosquitto:
     plaintext: true
   resources:
     requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+# The broker playback worker (roadmap item 17 §5). Publishes a stored capture back into the stack
+# as a simulated gateway.
+#
+# NO `image` OF ITS OWN, DELIBERATELY. It runs from `ingestion.image` under a different command,
+# because it publishes using capture.py's own plan_playback() -- which is in that image already. A
+# separate image key would let a deployment run the two from different builds, which is a way to
+# get a worker whose capture.py disagrees with the daemon's about the capture format.
+playback:
+  # OFF BY DEFAULT, unlike ingestion. Ingestion is what makes the stack do anything at all; playback
+  # is a diagnostic tool, and a cluster with no simulated gateways has nothing for it to publish as.
+  # It costs a pod that polls an empty queue forever, which is a small waste and a standing process
+  # holding a Supabase principal for no reason.
+  enabled: false
+  # How often an idle worker looks for a queued job. This is the delay between pressing Play and
+  # the card appearing, and there is nothing to be gained by making it shorter -- a playback is
+  # minutes long.
+  pollIntervalSeconds: 3
+  resources:
+    requests: { cpu: 25m, memory: 96Mi }
     limits: { memory: 256Mi }
 
 ingestion:

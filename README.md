@@ -409,6 +409,7 @@ live services went unlisted: the tag it named (`alpine:3.24`) still existed, so 
 | `mosquitto` | `acs-cymru_mosquitto` | `eclipse-mosquitto:2.0.22` | `1883`, `9001` |
 | `frontend` | `acs-cymru_frontend` | `./frontend/Dockerfile` | `3000:3000` |
 | `ingestion` | `acs-cymru_ingestion` | `./Dockerfile` | `9108:9108` |
+| `playback` | `acs-cymru_playback` | `./Dockerfile` (same image as `ingestion`, different command) | — |
 | `i3x-service` | `acs-cymru_i3x` | `./i3x/Dockerfile` | `8090:8090` |
 | `gateway-credential` | `acs-cymru_gateway_credential` | `./gateway-credential/Dockerfile` | — |
 | `node-red-init` | `acs-cymru_node_red_init` | `./node-red/Dockerfile` | — |
@@ -1564,7 +1565,7 @@ exists for precisely this kind of change and this change must satisfy it twice.
 
 ---
 
-### 17 · Capture and playback orchestration: capture is built, playback is not
+### 17 · Capture and playback orchestration: built, less the playback page
 
 **Builds on:** [`ingestion/capture.py`](ingestion/capture.py) · `on_message()` and the daemon's
 existing `spBv1.0/#` subscription · `request_node_rebirth()` · the `broker-captures` bucket and
@@ -1588,9 +1589,42 @@ places in this repository, including the idempotency contract every migration he
 daemon), the bucket's `devices` arm and the daemon's scoped access to it, the 100 MiB bucket, and
 [`CaptureTab.jsx`](frontend/src/components/tabs/CaptureTab.jsx) with
 [`StartCaptureModal.jsx`](frontend/src/components/modals/StartCaptureModal.jsx) — the page of §4,
-which is the **twelfth tab** and the first thing to reach `navDensity()`'s `tight` band.
-**Not built:** the whole of playback (§5) — a capture recorded from the page today is still played
-back with `capture.py play`.
+which is the **twelfth tab** and the first thing to reach `navDensity()`'s `tight` band; and
+[`0056_playback_orchestration.sql`](supabase/migrations/0056_playback_orchestration.sql) with
+[`ingestion/playback_worker.py`](ingestion/playback_worker.py) — the `Service_Playback` principal,
+`playback_jobs`, the three tiers, and the worker that publishes.
+**Not built:** the playback half of the page. A playback is started with an RPC today; the device
+map still has to be assembled by hand rather than from the dropdowns §5 describes.
+
+**The worker needed no image of its own, and the roadmap priced one.** What playback genuinely
+requires that is new is a separate *process* holding a separate Supabase principal and its own
+broker credentials — none of which an image boundary provides. It publishes using `capture.py`'s
+`plan_playback()`, which is already in the ingestion image, so it runs from that image under a
+different command. A second image would have been the first one minus two files, plus a second
+build, a second tag to keep in step, and a second entry in `check-image-tag-parity.mjs`. The
+Deployment, the service, the values and the resources were all real; the image was the part that
+turned out to be free.
+
+**Two more measurements changed the design, both about the credential check:**
+
+5. **`gateway_holds_a_credential()` is the wrong predicate, and §5 names it directly.** It is
+   `NOT g.is_virtual AND g.enrolled_at IS NOT NULL` — "is this a physical appliance that completed
+   enrolment". For playback that is *inverted*: it refuses every virtual gateway, which is what a
+   playback target normally is, and admits only real hardware, which is exactly what a playback must
+   never publish as. [`0041`](supabase/migrations/0041_virtual_gateway_credential.sql) had already
+   written this down — *"a virtual gateway is outside its scope by definition"*. Found by running
+   it: an end-to-end run created a simulated gateway, minted its credential through the same edge
+   function the Access Control page calls, and was still refused. `0056` adds
+   `gateway_has_broker_credential()`, which asks the question of **both** routes — physical
+   enrolment, or the `CREDENTIAL_ISSUED` audit row that is the *only* record a virtual mint leaves —
+   and subtracts revocation.
+6. **`birth_captured` means the node's birth, not a device's**, and the two do different work. An
+   `NBIRTH` carries the alias table, which is what §2 is about and what makes a capture replayable.
+   Announcing a *device* takes a `DBIRTH`, and only `process_dbirth()` sets a device `ONLINE`. So a
+   replayed capture containing an NBIRTH brings the target edge node up, delivers its telemetry to
+   the historian, and leaves its devices `OFFLINE` — all three correct, and not what the single flag
+   suggests. Splitting the field into node and device halves belongs with the capture manifest and
+   is not done here.
 
 **The per-gateway capture panel on the Gateways page is gone**, and had to be rather than merely
 being tidier elsewhere. It listed the bucket directly — objects with a name, a size and a timestamp
@@ -1940,6 +1974,12 @@ surfaces. **A read gate is a prerequisite, exactly as the write gate is for capt
   and NOT `status = 'ONLINE'`: a playback target is legitimately OFFLINE, because nothing publishes
   as it until a playback runs. Requiring liveness would refuse every first playback and pass only
   after one had already succeeded.
+
+  > **The half about `ONLINE` is right and the predicate named is wrong.** `gateway_holds_a_credential()`
+  > is `NOT g.is_virtual AND g.enrolled_at IS NOT NULL`, so it refuses every virtual gateway and
+  > admits only enrolled physical hardware — the opposite of what a playback target is. `0056` uses
+  > `gateway_has_broker_credential()` instead, which asks the same question of both routes. See the
+  > correction at the head of this item.
 
 #### 6 · Non-goals, recorded so they are not proposed again
 
