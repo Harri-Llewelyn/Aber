@@ -200,6 +200,12 @@ const generated = {
   // like the rest so a local stack never runs a reporting tool as the `postgres` superuser, which
   // is what the Grafana datasource did before this existed.
   BI_READER_PASSWORD: hex(24),
+  // The two historian roles the stack cannot run without: the ingestion daemon connects as
+  // `ingest_writer`, and Supabase's postgres_fdw mapping as `fdw_reader`. Generated rather than
+  // left empty for the same reason as the line above -- the only alternative credential is the
+  // historian superuser, and a stack that comes up on it says nothing about having done so.
+  INGEST_WRITER_PASSWORD: hex(24),
+  FDW_READER_PASSWORD: hex(24),
 };
 
 /**

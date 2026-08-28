@@ -158,6 +158,12 @@ in CrashLoopBackOff reporting a database it cannot authenticate against.
 {{- if and .Values.grafana.enabled (not .Values.secrets.biReaderPassword) -}}
 {{- $missing = append $missing "secrets.biReaderPassword (BI_READER_PASSWORD, required when grafana.enabled)" -}}
 {{- end -}}
+{{- if and (eq (.Values.ingestion.dbUser | default "") "ingest_writer") (not .Values.secrets.ingestWriterPassword) -}}
+{{- $missing = append $missing "secrets.ingestWriterPassword (INGEST_WRITER_PASSWORD, required while ingestion.dbUser is ingest_writer -- the role does not exist without it, and the only other historian credential is the superuser)" -}}
+{{- end -}}
+{{- if not .Values.secrets.fdwReaderPassword -}}
+{{- $missing = append $missing "secrets.fdwReaderPassword (FDW_READER_PASSWORD, required -- Supabase's postgres_fdw mapping authenticates as fdw_reader, and the only alternative is the historian superuser)" -}}
+{{- end -}}
 {{/*
 THE CREDENTIAL SERVICE'S TOKEN, for the same reason one line up and with a worse blast radius.
 

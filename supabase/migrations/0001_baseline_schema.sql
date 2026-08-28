@@ -158,6 +158,42 @@ CREATE SCHEMA IF NOT EXISTS timescale;
 -- edits to this file, and that trade has been worth it so far.
 --
 -- Recorded by the architecture audit of 2026-08-27 (F3).
+-- ---------------------------------------------------------------------------------------------
+-- The FDW's own credential (roadmap item 18), resolved before it is used.
+--
+-- TWO SEPARATE "NOT SET" CASES, AND ONLY ONE OF THEM IS VISIBLE TO `\if`:
+--
+--   UNDEFINED  an operator running this file by hand passes no such variable at all, and psql
+--              ABORTS on an undefined :'var' rather than treating it as empty. `\if :{?name}` is
+--              the only thing that can test for that, so it comes first.
+--
+--   BLANK      db-init ALWAYS passes the variable, so on a deployment that has not set
+--              FDW_READER_PASSWORD it arrives defined and empty. `\if` cannot see the difference
+--              -- it takes a literal or a \gset result, never a string comparison -- so the SQL
+--              below decides it, and covers both cases at once.
+--
+-- Getting this wrong is not a loud failure: the mapping would authenticate as a user with no
+-- password, and every dashboard query would fail with a connection error naming neither this file
+-- nor that variable.
+--
+-- BOTH FIELDS SWITCH ON THE USER, not one each. A blank user with a non-blank password is not a
+-- half-configured state worth honouring -- it is a typo, and pairing the fallback to a single
+-- condition is what stops it becoming `fdw_reader` authenticating with the superuser's password.
+\if :{?ts_fdw_user}
+\else
+  \set ts_fdw_user ''
+\endif
+\if :{?ts_fdw_password}
+\else
+  \set ts_fdw_password ''
+\endif
+
+SELECT CASE WHEN btrim(:'ts_fdw_user') = '' THEN :'ts_user'     ELSE :'ts_fdw_user'     END
+         AS ts_fdw_user,
+       CASE WHEN btrim(:'ts_fdw_user') = '' THEN :'ts_password' ELSE :'ts_fdw_password' END
+         AS ts_fdw_password
+\gset
+
 DROP SERVER IF EXISTS timescaledb_server CASCADE;
 
 CREATE SERVER timescaledb_server
@@ -168,13 +204,40 @@ CREATE SERVER timescaledb_server
 -- other local role (authenticated, service_role), since the view runs security_invoker and each
 -- querying role needs its own path through the FDW. `anon` still reaches none of it -- it has
 -- SELECT on neither the view nor the foreign table.
+--
+-- =============================================================================================
+-- THE PUBLIC MAPPING NO LONGER RUNS AS THE HISTORIAN SUPERUSER, WHEN ONE IS CONFIGURED.
+--
+-- It used to, unconditionally: every FDW session opened on behalf of `authenticated` or
+-- `service_role` ran on the REMOTE side as that database's superuser, and the only containment was
+-- the LOCAL grant -- SELECT on `timescale.*`. The remote end contributed nothing.
+--
+-- No application role could abuse it, and that was never the argument. The argument is that
+-- nothing stopped the NEXT change from doing so: a widened local grant, or a new foreign table
+-- added against this same server, would have inherited superuser reach on the historian silently.
+-- The mapping also parks the password in `pg_user_mappings`, which the backup runbook has to warn
+-- about -- and a read-only role's password is a smaller thing to park there.
+--
+-- `fdw_reader` (timescaledb/roles.sql) has SELECT on the six objects Supabase projects and no
+-- write of any kind. See roadmap item 18.
+--
+-- WHY THE ADMIN MAPPING IS LEFT ALONE. `postgres` here is the SUPABASE superuser, and its mapping
+-- is what a human debugging the FDW connects through. Narrowing it would mean an operator with
+-- full rights on one database silently losing them across the link, which is a confusing place to
+-- economise -- and it is not the mapping the application uses.
+--
+-- FALLS BACK WHEN UNCONFIGURED, and it has to. This file replays on every boot, so it reaches a
+-- deployment that has not set FDW_READER_PASSWORD yet -- and on that stack `fdw_reader` does not
+-- exist, because roles.sql skips a role with no password. Defaulting to `ts_user` is what keeps
+-- the read path working through the upgrade that introduces this.
+-- =============================================================================================
 CREATE USER MAPPING FOR postgres
   SERVER timescaledb_server
   OPTIONS (user :'ts_user', password :'ts_password');
 
 CREATE USER MAPPING FOR PUBLIC
   SERVER timescaledb_server
-  OPTIONS (user :'ts_user', password :'ts_password');
+  OPTIONS (user :'ts_fdw_user', password :'ts_fdw_password');
 
 CREATE FOREIGN TABLE timescale.telemetry (
     "time"      TIMESTAMPTZ      NOT NULL,

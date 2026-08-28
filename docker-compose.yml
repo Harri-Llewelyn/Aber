@@ -89,6 +89,10 @@ services:
       PGPASSWORD: ${DB_PASSWORD}
       TS_DBNAME: ${DB_NAME:-postgres}
       TS_USER: ${DB_USER:-postgres}
+      # Roadmap item 18. EMPTY MEANS NO ROLE -- roles.sql skips each one rather than creating it
+      # with a blank password, so a deployment that has not set these keeps booting unchanged.
+      INGEST_WRITER_PASSWORD: ${INGEST_WRITER_PASSWORD:?INGEST_WRITER_PASSWORD is required; run `npm run setup`}
+      FDW_READER_PASSWORD: ${FDW_READER_PASSWORD:?FDW_READER_PASSWORD is required; run `npm run setup`}
       TIMESCALE_COMPRESS_AFTER: ${TIMESCALE_COMPRESS_AFTER:-7 days}
       TIMESCALE_RETAIN_FOR: ${TIMESCALE_RETAIN_FOR:-90 days}
       # The rollups outlive the raw data deliberately -- see aggregates.sql. Each is far smaller
@@ -125,7 +129,7 @@ services:
       echo 'Reconciling the storage footprint view...';
       psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -f /storage.sql;
       echo 'Reconciling read-only BI role...';
-      psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -f /roles.sql;
+      psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -v ingest_writer_password=\"$$INGEST_WRITER_PASSWORD\" -v fdw_reader_password=\"$$FDW_READER_PASSWORD\" -f /roles.sql;
       "
     depends_on:
       timescaledb:
@@ -249,6 +253,11 @@ services:
       TS_DBNAME: ${DB_NAME:-postgres}
       TS_USER: ${DB_USER:-postgres}
       TS_PASSWORD: ${DB_PASSWORD:-postgres}
+      # What the FDW's PUBLIC user mapping authenticates as (roadmap item 18). BLANK FALLS BACK to
+      # the admin pair above, resolved inside 0001 -- so a deployment that has not created
+      # fdw_reader keeps its read path working across the upgrade that introduces this.
+      TS_FDW_USER: ${TS_FDW_USER:-fdw_reader}
+      TS_FDW_PASSWORD: ${FDW_READER_PASSWORD:?FDW_READER_PASSWORD is required -- Supabase's postgres_fdw mapping authenticates as fdw_reader, and the only alternative is the historian superuser. Run `npm run setup`.}
       # Seeded into Supabase Vault by 0002_seed_data.sql, which is the only
       # place it can live: the quarantine webhook trigger has to read it from SQL. Empty on
       # the default stack, where Node-RED runs without adminAuth -- the migration then leaves
@@ -298,7 +307,7 @@ services:
           echo \"Executing migration $$f...\";
           attempt=1;
           while :; do
-            if psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v grafana_public_url=\"$$GRAFANA_PUBLIC_URL\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -v supabase_functions_url=\"http://supabase-kong:8000/functions/v1\" -v supabase_anon_key=\"$$SUPABASE_ANON_KEY\" -v gateway_revoke_secret=\"$$GATEWAY_REVOKE_SECRET\" -h supabase-db -U postgres -d postgres -f \"$$f\" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi;
+            if psql -v ON_ERROR_STOP=1 -v ts_host=\"$$TS_HOST\" -v ts_port=\"$$TS_PORT\" -v ts_dbname=\"$$TS_DBNAME\" -v ts_user=\"$$TS_USER\" -v ts_password=\"$$TS_PASSWORD\" -v ts_fdw_user=\"$$TS_FDW_USER\" -v ts_fdw_password=\"$$TS_FDW_PASSWORD\" -v nodered_admin_token=\"$$NODERED_ADMIN_TOKEN\" -v grafana_oauth_client_secret=\"$$GRAFANA_OAUTH_CLIENT_SECRET\" -v grafana_public_url=\"$$GRAFANA_PUBLIC_URL\" -v nodered_oauth_client_secret=\"$$NODERED_OAUTH_CLIENT_SECRET\" -v nodered_webhook_jwt_secret=\"$$NODERED_WEBHOOK_JWT_SECRET\" -v nodered_redirect_uri=\"$$NODERED_OAUTH_CALLBACK_URL\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -v supabase_functions_url=\"http://supabase-kong:8000/functions/v1\" -v supabase_anon_key=\"$$SUPABASE_ANON_KEY\" -v gateway_revoke_secret=\"$$GATEWAY_REVOKE_SECRET\" -h supabase-db -U postgres -d postgres -f \"$$f\" > /tmp/migration.log 2>&1; then cat /tmp/migration.log; break; fi;
             cat /tmp/migration.log;
             # RETRIED ONLY ON A DEADLOCK, never on anything else. Every migration here is
             # idempotent and is replayed on every boot already, so re-running one is safe by
@@ -1319,8 +1328,26 @@ services:
       DB_HOST: ${DB_HOST:-timescaledb}
       DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${DB_NAME:-postgres}
-      DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD}
+      # THE HISTORIAN CREDENTIAL. `ingest_writer` may INSERT telemetry and upsert assets, and
+      # cannot UPDATE, DELETE or TRUNCATE either -- which is what makes the README's "append-only
+      # historian writes" a grant rather than a property of the Python.
+      #
+      # DEFAULT-ON, AND THE PASSWORD IS REQUIRED RATHER THAN DEFAULTED. This daemon is the process
+      # most exposed to the plant network; the credential it used to hold was superuser on the
+      # historian, able to DROP the hypertable. A missing password now stops the stack with a
+      # message naming the fix, because the alternative is starting with that credential again and
+      # saying nothing.
+      #
+      # THE OVERRIDE IS A PAIR, AND IT HAS TO BE. Handing the daemon admin rights for a recovery
+      # means changing the user AND the password together -- INGEST_DB_USER alone would point it at
+      # `postgres` while still sending ingest_writer's password, which authenticates as nothing.
+      #
+      # That is not hypothetical: the first version of this shipped with only the user overridable,
+      # and the daemon then ran indefinitely logging `password authentication failed` once per
+      # message while discarding every reading. Compose cannot express "if the user was overridden,
+      # take the other password", so both are named and .env.example says to set them together.
+      DB_USER: ${INGEST_DB_USER:-ingest_writer}
+      DB_PASSWORD: ${INGEST_DB_PASSWORD:-${INGEST_WRITER_PASSWORD:?INGEST_WRITER_PASSWORD is required -- the ingestion daemon connects to the historian as ingest_writer, and the only alternative is the superuser it replaced. Run `npm run setup`, or set it in .env.}}
       MQTT_HOST: ${MQTT_HOST:-mosquitto}
       MQTT_PORT: ${MQTT_PORT:-1883}
       # The ingestion principal: reads spBv1.0/# and may publish ONLY rebirth NCMDs. It cannot
@@ -1370,6 +1397,13 @@ services:
       mosquitto:
         condition: service_healthy
       supabase-db-init:
+        condition: service_completed_successfully
+      # THE ROLES MUST EXIST BEFORE THIS CONNECTS. timescaledb-maintenance applies roles.sql, which
+      # creates `ingest_writer` -- the credential below. Without this edge there is a race on a
+      # fresh volume: the daemon starts, authenticates as a role that does not exist yet, and the
+      # failure names a password rather than an ordering. It also reconciles retention and the
+      # rollups, which this daemon writes underneath.
+      timescaledb-maintenance:
         condition: service_completed_successfully
       # EVERY DEVICE LOOKUP GOES THROUGH KONG (SUPABASE_URL above is http://supabase-kong:8000),
       # and this dependency was missing. `supabase-db-init` completing says the DATA is there; it

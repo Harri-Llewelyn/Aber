@@ -111,6 +111,8 @@ spec:
               also land in the Job spec stored in the cluster.
             */}}
             {{- include "acs-cymru.secretEnv" (dict "name" "BI_READER_PASSWORD" "secretName" $secretName "key" "BI_READER_PASSWORD") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "INGEST_WRITER_PASSWORD" "secretName" $secretName "key" "INGEST_WRITER_PASSWORD") | nindent 12 }}
+            {{- include "acs-cymru.secretEnv" (dict "name" "FDW_READER_PASSWORD" "secretName" $secretName "key" "FDW_READER_PASSWORD") | nindent 12 }}
           {{- /*
             Values are passed as psql VARIABLES rather than substituted into the SQL at render
             time, so the chart's copies stay byte-identical to the repository's -- the same files
@@ -150,7 +152,9 @@ spec:
               $PSQL -f /sql/storage.sql
 
               echo 'Reconciling read-only BI role...'
-              $PSQL -v bi_reader_password="$BI_READER_PASSWORD" -f /sql/roles.sql
+              $PSQL -v bi_reader_password="$BI_READER_PASSWORD" \
+                    -v ingest_writer_password="$INGEST_WRITER_PASSWORD" \
+                    -v fdw_reader_password="$FDW_READER_PASSWORD" -f /sql/roles.sql
               {{- else }}
 
               echo 'Rollups disabled (timescaledb.rollups.enabled=false); skipping aggregates.sql.'
