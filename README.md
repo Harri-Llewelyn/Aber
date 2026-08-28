@@ -450,10 +450,22 @@ the same reason: `/docker-entrypoint-initdb.d` runs only on an empty data direct
 | `grafana_reader` | SELECT everything the dashboards query | Grafana |
 | `powerbi_reader` | SELECT the three rollups only | external BI |
 
-**Each is empty by default and skipped rather than created with a blank password**, so a deployment
-that sets nothing keeps the behaviour it had. Adopting `ingest_writer` is two deliberate steps —
-set the password, verify the role exists, *then* point the daemon at it — because the reverse order
-aims the daemon at a role that does not exist and stops telemetry for the whole fleet.
+**`ingest_writer` and `fdw_reader` are required; the two readers are optional.** BI and Grafana are
+consumers a stack can simply not have. The daemon and the FDW are not — each must authenticate as
+*something* on every query, and the only alternative to these roles is the superuser they replaced.
+So `npm run setup` mints both passwords, Compose refuses to start without them, and the chart fails
+to render. A stack that comes up on the superuser saying nothing is the state this closes.
+
+**The daemon checks its own credential at startup** and refuses to run as a superuser on the
+historian, naming `ALLOW_HISTORIAN_SUPERUSER=true` as the deliberate way to say otherwise. Every
+other guarantee here is enforced where it can be observed — the broker ACL by delivery, the write
+gates by `is_ingestion_caller()`, the audit trail by a trigger. This one used to depend on nobody
+having changed a variable, and it was wrong for months without anything noticing.
+
+**An authentication failure is fatal; an unreachable historian is not.** The daemon is built to
+survive a database that is down — it warns, drops what it cannot store, and resumes. A refused
+credential never resolves by retrying, so it exits instead of running indefinitely discarding every
+reading. Those two wore the same clothes until a wrong password was tried on purpose.
 
 **`ingest_writer` needs SELECT, which is not obvious.** Both of the daemon's statements carry an
 `ON CONFLICT` clause, and inferring the arbiter index reads the target. So the role is *append-only*

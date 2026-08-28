@@ -300,15 +300,18 @@ DECLARE
   v_role     CONSTANT text := 'ingest_writer';
   v_dbname   CONSTANT text := current_database();
 BEGIN
+  -- REQUIRED, UNLIKE THE TWO READERS ABOVE, and the difference is not an inconsistency. BI and
+  -- Grafana are optional consumers: a stack with neither is a stack that skips those roles and is
+  -- complete. The ingestion daemon is not optional -- it must connect to this database as
+  -- SOMETHING, and the only alternative to this role is the superuser it was created to replace.
+  -- Skipping quietly would leave the stack running with the exact property this file exists to
+  -- remove, and reporting that as a NOTICE nobody reads is how it stayed that way for months.
   IF v_password = '' THEN
-    -- SKIPPED, NOT FAILED, and the reason is the migration model: this file replays on every boot,
-    -- and a deployment that has not yet set INGEST_WRITER_PASSWORD must keep starting. The daemon
-    -- goes on connecting as whatever DB_USER says until the operator sets both.
-    RAISE NOTICE
-      'roles: % not configured (ingest_writer_password is empty); skipping. Set '
-      'INGEST_WRITER_PASSWORD and point the ingestion daemon at it to stop it holding superuser '
-      'on the historian.', v_role;
-    RETURN;
+    RAISE EXCEPTION
+      'roles: ingest_writer_password is empty. The ingestion daemon connects to the historian as '
+      'this role, and without it the only credential available is the superuser -- which can DROP '
+      'the hypertable and rewrite any observation. Set INGEST_WRITER_PASSWORD (npm run setup mints '
+      'one) and re-run.';
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_role) THEN
@@ -369,11 +372,13 @@ DECLARE
   v_role     CONSTANT text := 'fdw_reader';
   v_dbname   CONSTANT text := current_database();
 BEGIN
+  -- Required for the same reason: Supabase's FDW mapping authenticates as SOMETHING on every
+  -- query, and the alternative is the superuser.
   IF v_password = '' THEN
-    RAISE NOTICE
-      'roles: % not configured (fdw_reader_password is empty); skipping. Set FDW_READER_PASSWORD '
-      'to stop the FDW user mapping running as the historian superuser.', v_role;
-    RETURN;
+    RAISE EXCEPTION
+      'roles: fdw_reader_password is empty. Supabase''s postgres_fdw user mapping authenticates as '
+      'this role; without it every dashboard query reaches this database with superuser rights. '
+      'Set FDW_READER_PASSWORD (npm run setup mints one) and re-run.';
   END IF;
 
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_role) THEN
@@ -416,6 +421,7 @@ END $$;
 -- worth running.
 DO $$
 BEGIN
+  -- No `IF EXISTS` guard: both roles are required above, so absence is already an error.
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ingest_writer') THEN
     IF NOT (has_table_privilege('ingest_writer', 'public.telemetry', 'INSERT')
         AND has_table_privilege('ingest_writer', 'public.telemetry', 'SELECT')

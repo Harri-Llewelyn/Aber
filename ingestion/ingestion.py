@@ -269,6 +269,112 @@ def _open_timescaledb_connection():
     )
 
 
+# The escape hatch for the check below. Deliberately a separate variable from INGEST_DB_USER: the
+# credential and the permission to use a dangerous one are different decisions, and requiring both
+# means nobody reaches this state by editing one line.
+ALLOW_HISTORIAN_SUPERUSER = os.getenv(
+    "ALLOW_HISTORIAN_SUPERUSER", ""
+).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _is_authentication_failure(err):
+    """
+    True for a credential the server actively refused, as opposed to one it never saw.
+
+    MATCHED ON SQLSTATE FIRST, text second. psycopg2 surfaces the server's code as `pgcode` --
+    28P01 is `invalid_password` and 28000 `invalid_authorization_specification` -- and those are
+    the authority. The string check is the fallback for a driver-level failure that carries no
+    code, and is kept narrow so a connection refused or a DNS failure is NOT caught here: those
+    are transient, and treating them as fatal would make the daemon crash-loop through an ordinary
+    database restart.
+    """
+    code = getattr(err, "pgcode", None)
+    if code in ("28P01", "28000"):
+        return True
+    text = str(err).lower()
+    return "password authentication failed" in text or "no password supplied" in text
+
+
+def _connect_timescaledb():
+    """
+    One connection attempt, with the exception left to the caller.
+
+    Separate from get_timescaledb_connection() because that function's contract is to absorb
+    failures and return None -- which is right on the message path and useless at startup, where
+    the DIFFERENCE between failures is the whole question.
+    """
+    if TIMESCALEDB_URL:
+        return psycopg2.connect(TIMESCALEDB_URL)
+    return psycopg2.connect(
+        host=DB_HOST, port=DB_PORT, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD
+    )
+
+
+def _assert_historian_is_least_privilege(conn):
+    """
+    Refuse to run as a superuser on the historian.
+
+    WHY THE DAEMON CHECKS THIS ITSELF rather than trusting configuration. Every other guarantee
+    here is enforced where it can be observed: the broker ACL is asserted by delivery, the write
+    gates by `is_ingestion_caller()`, the audit trail by a trigger. "Append-only historian writes"
+    was the exception -- a claim in the README's security model that depended on nobody having
+    changed DB_USER, and it was wrong for months without anything noticing.
+
+    A grant can be widened, a compose file edited, a Helm value overridden. What cannot be argued
+    with is asking the database, at startup, what this connection actually is.
+
+    REFUSES RATHER THAN WARNS, because a warning in a startup log is exactly how the original
+    problem survived. Recovery still has a door: ALLOW_HISTORIAN_SUPERUSER=true, which is a
+    deliberate sentence someone has to write.
+
+    SUPERUSER IS THE ONLY THING TESTED, not the full grant list. The precise grants are asserted by
+    timescaledb/roles.sql's own self-check and by test_historian_role_grants.py, which run against
+    the database rather than through this process. What this adds is the one property those cannot
+    see: which role THIS connection actually holds.
+    """
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT current_user, usesuper FROM pg_user WHERE usename = current_user")
+            row = cur.fetchone()
+    except Exception as err:
+        # Not fatal. An unreadable catalog is a database problem, and refusing to ingest over a
+        # failed self-check would turn a diagnostic into an outage.
+        logger.warning("Could not determine the historian role's privileges: %s", err)
+        return
+
+    if not row:
+        logger.warning("Could not determine the historian role's privileges: no pg_user row.")
+        return
+
+    user, is_super = row[0], bool(row[1])
+    if not is_super:
+        logger.info(
+            "Historian credential: connected as '%s', which is not a superuser. Telemetry writes "
+            "are append-only by grant.", user
+        )
+        return
+
+    if ALLOW_HISTORIAN_SUPERUSER:
+        logger.warning(
+            "HISTORIAN SUPERUSER IN USE: connected as '%s', which can UPDATE, DELETE and DROP the "
+            "telemetry hypertable. ALLOW_HISTORIAN_SUPERUSER is set, so this is permitted -- but "
+            "the security model's 'append-only historian writes' is not being enforced by the "
+            "database while it is.", user
+        )
+        return
+
+    logger.critical(
+        "CRITICAL CONFIGURATION ERROR: connected to the historian as '%s', which is a SUPERUSER. "
+        "This process is the most exposed to the plant network, and that credential can DROP the "
+        "telemetry hypertable and rewrite any observation -- so 'append-only historian writes' in "
+        "the security model would be a claim nothing enforces. Set INGEST_DB_USER=ingest_writer "
+        "with INGEST_WRITER_PASSWORD (npm run setup mints one; timescaledb/roles.sql creates the "
+        "role). If admin rights are genuinely needed for a recovery, set "
+        "ALLOW_HISTORIAN_SUPERUSER=true and say so out loud.", user
+    )
+    raise SystemExit(1)
+
+
 def get_timescaledb_connection():
     """
     The daemon's single TimescaleDB connection, reconnecting when it has gone away.
@@ -3485,6 +3591,43 @@ def start_metrics_endpoint():
 def main():
     logger.info("Initializing Supabase + TimescaleDB Ingestion Daemon...")
     _require_credentials()
+
+    # BEFORE THE MQTT LOOP, so a misconfigured credential is a startup failure rather than
+    # something discovered from the shape of the data months later.
+    #
+    # TWO KINDS OF FAILURE, AND THEY DESERVE OPPOSITE ANSWERS. A historian that is DOWN is a
+    # transient fault this daemon is built to survive -- it warns per message, drops what it cannot
+    # store, and resumes when the database returns, which is the right behaviour for a process
+    # watching a plant. A historian that REFUSES THE CREDENTIAL is permanent: no amount of retrying
+    # fixes a wrong password, and the daemon would run indefinitely discarding every reading while
+    # logging `password authentication failed` once per message.
+    #
+    # That is not a hypothetical either -- it is what this stack did when the credential override
+    # was introduced with only half of it settable. Nothing distinguished the two cases, so the
+    # loud permanent fault wore the clothes of the quiet transient one.
+    _startup_conn = None
+    try:
+        _startup_conn = _connect_timescaledb()
+    except Exception as err:
+        if _is_authentication_failure(err):
+            logger.critical(
+                "CRITICAL CONFIGURATION ERROR: the historian refused this daemon's credential "
+                "(%s). This never resolves by retrying, and the daemon would otherwise run "
+                "indefinitely discarding every reading. DB_USER is '%s' -- check that "
+                "INGEST_WRITER_PASSWORD matches the role timescaledb/roles.sql created, and that "
+                "INGEST_DB_USER and INGEST_DB_PASSWORD are set together if either is set.",
+                str(err).strip().splitlines()[-1] if str(err).strip() else err, DB_USER,
+            )
+            raise SystemExit(1)
+        logger.warning(
+            "Could not reach the historian at startup, so its privileges were not checked: %s. "
+            "This is treated as transient -- the per-message retry path covers a database that is "
+            "merely down.", err
+        )
+
+    if _startup_conn is not None:
+        _assert_historian_is_least_privilege(_startup_conn)
+        _startup_conn.close()
     if supabase_client is None:
         logger.critical(
             "CRITICAL SECURITY ERROR: Supabase client is uninitialized! SUPABASE_URL, "
