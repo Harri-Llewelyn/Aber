@@ -7,8 +7,9 @@ import { ActionButton } from '../common/ActionButton'
 import CopyableId from '../common/CopyableId'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { StartCaptureModal } from '../modals/StartCaptureModal'
+import { StartPlaybackModal } from '../modals/StartPlaybackModal'
 import {
-  IconDownload, IconRecord, IconShieldAlert, IconTrash, IconUpload
+  IconDownload, IconPlay, IconRecord, IconShieldAlert, IconTrash, IconUpload
 } from '../common/Icons'
 
 /**
@@ -59,9 +60,13 @@ export function CaptureTab({ showToast, userRole }) {
   const [startFor, setStartFor] = useState(null)
   const [deleteFor, setDeleteFor] = useState(null)
   const [uploadFor, setUploadFor] = useState(null)
+  const [playFor, setPlayFor] = useState(null)
+  const [activePlayback, setActivePlayback] = useState(null)
+  const [recentPlaybacks, setRecentPlaybacks] = useState([])
   const [busyId, setBusyId] = useState(null)
   const fileRef = useRef(null)
   const [stopPending, runStop] = usePendingAction()
+  const [stopPlayPending, runStopPlay] = usePendingAction()
 
   const canManage = userRole === 'Administrator' || userRole === 'Shopfloor_Manager'
 
@@ -82,12 +87,16 @@ export function CaptureTab({ showToast, userRole }) {
   }, [])
 
   const loadJobs = useCallback(async () => {
-    const [active, recent] = await Promise.all([
+    const [active, recent, activePlay, recentPlay] = await Promise.all([
       api.activeCaptureJob(),
-      api.recentCaptureJobs(4)
+      api.recentCaptureJobs(4),
+      api.activePlaybackJob(),
+      api.recentPlaybackJobs(4)
     ])
     setActiveJob(active)
     setRecentJobs(recent)
+    setActivePlayback(activePlay)
+    setRecentPlaybacks(recentPlay)
     return active
   }, [])
 
@@ -121,13 +130,14 @@ export function CaptureTab({ showToast, userRole }) {
    * never told. A capture that finished during that gap would leave a card counting up forever.
    * The timer runs ONLY while something is in flight — an idle page opens no interval at all.
    */
-  useRealtimeTable('capture_jobs', refreshAll, { enabled: REALTIME_ENABLED, debounceMs: 400 })
+  useRealtimeTable(['capture_jobs', 'playback_jobs'], refreshAll,
+    { enabled: REALTIME_ENABLED, debounceMs: 400 })
 
   useEffect(() => {
-    if (!activeJob) return
+    if (!activeJob && !activePlayback) return
     const timer = setInterval(refreshAll, REALTIME_ENABLED ? 10000 : 2000)
     return () => clearInterval(timer)
-  }, [activeJob, refreshAll])
+  }, [activeJob, activePlayback, refreshAll])
 
   // Refetch the stored captures when a job finishes: the row that replaces the old capture is
   // written by the daemon at finalise, and nothing about the job's own change payload carries it.
@@ -188,6 +198,23 @@ export function CaptureTab({ showToast, userRole }) {
     try {
       const stopped = await api.stopCapture(activeJob.id)
       showToast(stopped ? 'Stopping — the daemon finishes on its next message.' : 'That capture had already finished.', 'success')
+      await refreshAll()
+    } catch (err) {
+      showToast(err.message, 'error')
+    }
+  })
+
+  const onPlay = async ({ targetGatewayId, deviceMap, speed }) => {
+    await api.startPlayback({ captureId: playFor.id, targetGatewayId, deviceMap, speed })
+    setPlayFor(null)
+    showToast('Publishing the capture…', 'success')
+    await refreshAll()
+  }
+
+  const onStopPlayback = () => runStopPlay(async () => {
+    try {
+      const stopped = await api.stopPlayback(activePlayback.id)
+      showToast(stopped ? 'Stopping the playback.' : 'That playback had already finished.', 'success')
       await refreshAll()
     } catch (err) {
       showToast(err.message, 'error')
@@ -292,7 +319,14 @@ export function CaptureTab({ showToast, userRole }) {
         )}
 
         <RunningCard job={activeJob} onStop={onStop} stopPending={stopPending} canManage={canManage} />
+        <PlaybackCard
+          job={activePlayback}
+          onStop={onStopPlayback}
+          stopPending={stopPlayPending}
+          canManage={canManage}
+        />
         <RecentFailures jobs={recentJobs} />
+        <RecentFailures jobs={recentPlaybacks} kind="playback" />
 
         {/* Two tabs rather than two pages: the question "what do I want to record" has exactly two
             answers, and a device capture is a gateway capture narrowed to one device — it still
@@ -358,6 +392,8 @@ export function CaptureTab({ showToast, userRole }) {
                   onDownload={() => onDownload(row.capture)}
                   onDelete={() => setDeleteFor(row.capture)}
                   onUpload={() => askUpload(row)}
+                  onPlay={() => setPlayFor(row.capture)}
+                  playbackBlocked={!!activePlayback}
                 />
               ))}
             </tbody>
@@ -390,6 +426,14 @@ export function CaptureTab({ showToast, userRole }) {
           confirmLabel="Choose a file"
           onCancel={() => setUploadFor(null)}
           onConfirm={() => fileRef.current?.click()}
+        />
+      )}
+
+      {playFor && (
+        <StartPlaybackModal
+          capture={playFor}
+          onConfirm={onPlay}
+          onCancel={() => setPlayFor(null)}
         />
       )}
 
@@ -476,7 +520,7 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
  * table looking exactly as it did before anybody pressed anything — which reads as the button not
  * having worked. The `error` column is where the reason is, and this is the only place it surfaces.
  */
-function RecentFailures({ jobs }) {
+function RecentFailures({ jobs, kind = 'capture' }) {
   const failed = (jobs || []).filter(j => j.status === 'FAILED' || j.status === 'CANCELLED')
   if (failed.length === 0) return null
   return (
@@ -485,8 +529,12 @@ function RecentFailures({ jobs }) {
         <div key={job.id} className="callout" style={{ borderColor: 'var(--danger)', marginTop: '6px' }}>
           <IconShieldAlert size={14} className="callout-icon" />
           <div style={{ fontSize: '12px' }}>
-            <strong>{job.devices?.name || job.gateways?.name || job.subject_sparkplug_id}</strong>
-            {' — '}{job.status === 'CANCELLED' ? 'cancelled' : 'failed'}
+            <strong>
+              {job.devices?.name || job.gateways?.name
+                || job.subject_sparkplug_id || job.target_edge_node_id}
+            </strong>
+            {' — '}{kind === 'playback' ? 'playback ' : ''}
+            {job.status === 'CANCELLED' ? 'cancelled' : 'failed'}
             {job.error ? `: ${job.error}` : '.'}
           </div>
         </div>
@@ -495,7 +543,52 @@ function RecentFailures({ jobs }) {
   )
 }
 
-function SubjectRow({ row, canManage, busy, blocked, onCapture, onDownload, onDelete, onUpload }) {
+/**
+ * The playback in flight.
+ *
+ * A SEPARATE CARD FROM THE CAPTURE ONE, not a shared "job" card, because they are different acts
+ * with different stakes and different stop semantics. A capture consumes; a playback WRITES to the
+ * historian under a gateway's identity, and the card says which gateway so that is never a guess.
+ */
+function PlaybackCard({ job, onStop, stopPending, canManage }) {
+  if (!job) return null
+  const target = job.gateways?.name || job.target_edge_node_id
+  const pending = job.status === 'PENDING'
+  const total = job.messages_total || 0
+
+  return (
+    <div className="callout" style={{ borderColor: 'var(--accent)', marginTop: '12px' }}>
+      <IconPlay size={14} className="callout-icon" />
+      <div style={{ flex: 1 }}>
+        <div>
+          <strong>{pending ? 'Queued' : 'Publishing'} as {target}</strong>
+          <span style={{ color: 'var(--text-muted)' }}> · {job.speed}× speed</span>
+        </div>
+        <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>
+          {pending
+            ? 'Waiting for the playback worker to pick it up. If this does not start within a few seconds, the worker is not running.'
+            : `${job.messages_sent}${total ? ` of ${total}` : ''} message${job.messages_sent === 1 ? '' : 's'} published · ${job.elapsed_seconds}s`}
+        </div>
+      </div>
+      {canManage && (
+        <ActionButton
+          className="btn btn-ghost"
+          pending={stopPending}
+          pendingLabel="Stopping…"
+          onClick={onStop}
+          title="Stop publishing now. What has already been published stays in the historian."
+        >
+          Stop
+        </ActionButton>
+      )}
+    </div>
+  )
+}
+
+function SubjectRow({
+  row, canManage, busy, blocked, playbackBlocked,
+  onCapture, onDownload, onDelete, onUpload, onPlay
+}) {
   const capture = row.capture
   return (
     <tr>
@@ -547,6 +640,18 @@ function SubjectRow({ row, canManage, busy, blocked, onCapture, onDownload, onDe
                 : 'Record this subject'}
           >
             <IconRecord size={13} /> Capture
+          </button>
+        )}
+        {canManage && capture && (
+          <button
+            className="btn btn-ghost"
+            onClick={onPlay}
+            disabled={busy || playbackBlocked}
+            title={playbackBlocked
+              ? 'A playback is already running.'
+              : 'Publish this capture onto a simulated gateway'}
+          >
+            <IconPlay size={13} /> Play
           </button>
         )}
         {capture && (

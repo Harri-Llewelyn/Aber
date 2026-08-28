@@ -130,10 +130,13 @@ COMMENT ON TABLE public.captures IS
 
 COMMENT ON COLUMN public.captures.manifest IS
   'What is in the file, so the list can describe a capture nobody has downloaded: metric_names '
-  '(capped at 50, with metric_name_count beside it), topic_count, observed_rate_hz and '
-  'birth_captured. birth_captured=false means the recording contains no NBIRTH/DBIRTH, so an '
-  'alias-optimised gateway will replay as unresolved_alias and drop every metric -- from a file '
-  'that otherwise looks complete.';
+  '(capped at 50, with metric_name_count beside it), topic_count, observed_rate_hz, '
+  'birth_captured, and the edge_node_ids / device_ids the recording publishes under. '
+  'birth_captured=false means the recording contains no NBIRTH/DBIRTH, so an alias-optimised '
+  'gateway will replay as unresolved_alias and drop every metric -- from a file that otherwise '
+  'looks complete. Note it means the NODE''s birth: announcing a DEVICE takes a DBIRTH, and only '
+  'that sets a device ONLINE. device_ids is what the playback dialog builds its device map from, '
+  'which is why it is here rather than read out of a file that may be 100 MiB.';
 
 
 -- ---------------------------------------------------------------------------------------------

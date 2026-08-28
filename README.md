@@ -1565,7 +1565,7 @@ exists for precisely this kind of change and this change must satisfy it twice.
 
 ---
 
-### 17 · Capture and playback orchestration: built, less the playback page
+### 17 · Capture and playback orchestration: built
 
 **Builds on:** [`ingestion/capture.py`](ingestion/capture.py) · `on_message()` and the daemon's
 existing `spBv1.0/#` subscription · `request_node_rebirth()` · the `broker-captures` bucket and
@@ -1592,9 +1592,16 @@ daemon), the bucket's `devices` arm and the daemon's scoped access to it, the 10
 which is the **twelfth tab** and the first thing to reach `navDensity()`'s `tight` band; and
 [`0056_playback_orchestration.sql`](supabase/migrations/0056_playback_orchestration.sql) with
 [`ingestion/playback_worker.py`](ingestion/playback_worker.py) — the `Service_Playback` principal,
-`playback_jobs`, the three tiers, and the worker that publishes.
-**Not built:** the playback half of the page. A playback is started with an RPC today; the device
-map still has to be assembled by hand rather than from the dropdowns §5 describes.
+`playback_jobs`, the three tiers, and the worker that publishes; and
+[`StartPlaybackModal.jsx`](frontend/src/components/modals/StartPlaybackModal.jsx), which is the half
+of §5 the CLI cannot do — the target list carrying only simulated gateways, the credential state
+shown *before* the click using the gate's own predicate as a computed field, and the device map
+built from the devices actually bound to the target.
+
+**The captured device ids moved into the manifest to make that dialog possible.** It has to offer
+one dropdown per device in the capture, and the alternative was downloading a file of up to 100 MiB
+to populate a select. `manifest.device_ids` and `edge_node_ids` are written by both writers; a
+capture recorded before them falls back to reading the file, which is slower and correct.
 
 **The worker needed no image of its own, and the roadmap priced one.** What playback genuinely
 requires that is new is a separate *process* holding a separate Supabase principal and its own

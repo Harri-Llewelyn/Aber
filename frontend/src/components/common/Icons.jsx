@@ -87,6 +87,14 @@ export const IconRecord = ({ size = 16, className = "" }) => (
   </svg>
 )
 
+// Publishing a capture back into the stack. A filled triangle rather than an outline, so it reads
+// as the counterpart of IconRecord's filled dot on the same row.
+export const IconPlay = ({ size = 16, className = "", style = {} }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style}>
+    <path d="M6 4l14 8-14 8V4z" fill="currentColor" stroke="none" />
+  </svg>
+)
+
 export const IconCpu = ({ size = 16, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />

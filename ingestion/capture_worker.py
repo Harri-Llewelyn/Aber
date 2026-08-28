@@ -397,6 +397,13 @@ def _manifest(messages, state):
             if name and name not in seen:
                 seen.add(name)
                 names.append(name)
+
+    # THE IDENTITIES, SO PLAYBACK CAN BE SET UP WITHOUT DOWNLOADING THE FILE. Every captured device
+    # id has to be mapped onto a device of the target gateway before a playback will start, and the
+    # page builds that map from dropdowns -- so it needs to know which ids are in here. Without this
+    # the dialog would have to fetch up to 100 MiB to populate a select.
+    edge_nodes, devices = capture.capture_identities(messages)
+
     duration_s = max(messages[-1]["offset_ms"] / 1000.0, 0.001)
     return {
         "metric_names": names,
@@ -404,6 +411,8 @@ def _manifest(messages, state):
         "observed_rate_hz": round(len(messages) / duration_s, 3),
         "birth_captured": state.birth_captured,
         "rebirth_requested": state.rebirth_requested,
+        "edge_node_ids": edge_nodes,
+        "device_ids": devices,
     }
 
 

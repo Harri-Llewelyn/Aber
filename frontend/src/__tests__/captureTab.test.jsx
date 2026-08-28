@@ -38,7 +38,12 @@ vi.mock('../api', async () => {
       stopCapture: vi.fn(),
       uploadCapture: vi.fn(),
       captureUrl: vi.fn(),
-      deleteCapture: vi.fn()
+      deleteCapture: vi.fn(),
+      playbackTargets: vi.fn(),
+      activePlaybackJob: vi.fn(),
+      recentPlaybackJobs: vi.fn(),
+      startPlayback: vi.fn(),
+      stopPlayback: vi.fn()
     }
   }
 })
@@ -92,7 +97,23 @@ beforeEach(() => {
   api.listCaptures.mockResolvedValue([])
   api.activeCaptureJob.mockResolvedValue(null)
   api.recentCaptureJobs.mockResolvedValue([])
+  api.activePlaybackJob.mockResolvedValue(null)
+  api.recentPlaybackJobs.mockResolvedValue([])
+  api.playbackTargets.mockResolvedValue([TARGET])
 })
+
+const TARGET = {
+  id: 'gw-sim', name: 'Playback Target', sparkplug_id: 'gwy130000000000400080000',
+  sparkplug_group: 'ACS-Cymru', is_archived: false, gateway_has_broker_credential: true,
+  devices: [
+    { id: 'tdev-1', name: 'Sim Spindle', sparkplug_id: 'dev310000000000400080000', is_archived: false }
+  ]
+}
+
+const PLAYABLE = {
+  ...CAPTURE,
+  manifest: { ...CAPTURE.manifest, device_ids: ['dev270000000000400080000'] }
+}
 
 // =============================================================================================
 describe('the subject tables', () => {
@@ -467,6 +488,217 @@ describe('the manifest the browser builds for an uploaded capture', () => {
     expect(manifest.metric_names).toEqual([])
     expect(manifest.observed_rate_hz).toBe(0)
     expect(manifest.birth_captured).toBe(false)
+  })
+
+  /**
+   * THE IDS THE PLAYBACK DIALOG BUILDS ITS DEVICE MAP FROM. Without them that dialog would have to
+   * download a file of up to 100 MiB to populate a select.
+   */
+  it('records the edge nodes and devices the capture publishes under', () => {
+    const manifest = captureManifest(file)
+    expect(manifest.edge_node_ids).toEqual(['gwy1'])
+    expect(manifest.device_ids).toEqual(['dev1'])
+  })
+
+  it('lists a device once however many messages it sent', () => {
+    const manifest = captureManifest({
+      duration_ms: 1000,
+      messages: [
+        { topic: 'spBv1.0/G/DDATA/gwy1/dev1', payload: {} },
+        { topic: 'spBv1.0/G/DDATA/gwy1/dev1', payload: {} },
+        { topic: 'spBv1.0/G/DDATA/gwy1/dev2', payload: {} }
+      ]
+    })
+    expect(manifest.device_ids).toEqual(['dev1', 'dev2'])
+  })
+})
+
+// =============================================================================================
+describe('publishing a capture back', () => {
+  const open = async () => {
+    api.listCaptures.mockResolvedValue([PLAYABLE])
+    const rendered = renderTab()
+    const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
+    fireEvent.click(within(row).getByRole('button', { name: /Play/ }))
+    await screen.findByLabelText('Publish as')
+    return rendered
+  }
+
+  /**
+   * ONLY SIMULATED GATEWAYS ARE OFFERED, because `start_playback_job()` refuses anything else.
+   * Listing a real gateway would be offering a click that is always refused — and the refusal is
+   * the last line of defence against synthetic telemetry on a real machine's identity, not a
+   * validation message.
+   */
+  it('offers only the targets the gate will accept', async () => {
+    await open()
+    const select = screen.getByLabelText('Publish as')
+    expect(within(select).getByText(/Playback Target/)).toBeInTheDocument()
+    expect(within(select).queryByText(/Line 1 Gateway/)).not.toBeInTheDocument()
+    await waitFor(() => expect(api.playbackTargets).toHaveBeenCalled())
+  })
+
+  // NOT VIA open(), which waits for the select: with no targets there is deliberately no select to
+  // wait for, only the explanation of why.
+  it('says so when nothing is marked simulated', async () => {
+    api.playbackTargets.mockResolvedValue([])
+    api.listCaptures.mockResolvedValue([PLAYABLE])
+    renderTab()
+    const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
+    fireEvent.click(within(row).getByRole('button', { name: /Play/ }))
+    expect(await screen.findByText(/No gateway is marked/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Publish capture/ })).toBeDisabled()
+  })
+
+  /** The credential check, shown before the click rather than arriving as a refusal after it. */
+  it('names a target that holds no broker credential, and refuses to start', async () => {
+    api.playbackTargets.mockResolvedValue([{ ...TARGET, gateway_has_broker_credential: false }])
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    expect(await screen.findByText(/holds no broker credential/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Publish capture/ })).toBeDisabled()
+  })
+
+  /**
+   * THE DEVICE MAP FROM DROPDOWNS, which is the thing the CLI cannot do: `capture.py play` needs
+   * `--map dev…=dev…` typed by hand for every captured device.
+   */
+  it('builds the device map from the devices bound to the target', async () => {
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    const mapSelect = await screen.findByLabelText('Target device for dev270000000000400080000')
+    expect(within(mapSelect).getByText(/Sim Spindle/)).toBeInTheDocument()
+  })
+
+  it('will not start while a captured device is unmapped', async () => {
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    await screen.findByLabelText('Target device for dev270000000000400080000')
+    const publish = screen.getByRole('button', { name: /Publish capture/ })
+    expect(publish).toBeDisabled()
+    expect(publish).toHaveAttribute('title', expect.stringContaining('to map'))
+  })
+
+  it('passes the target, the map and the speed to the gate', async () => {
+    api.startPlayback.mockResolvedValue('play-1')
+    const { props } = await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
+      { target: { value: 'dev310000000000400080000' } })
+    fireEvent.change(screen.getByLabelText('Speed'), { target: { value: '4' } })
+    fireEvent.click(screen.getByRole('button', { name: /Publish capture/ }))
+
+    await waitFor(() => expect(api.startPlayback).toHaveBeenCalledWith({
+      captureId: 'cap-1',
+      targetGatewayId: 'gw-sim',
+      deviceMap: { dev270000000000400080000: 'dev310000000000400080000' },
+      speed: 4
+    }))
+    expect(props.showToast).toHaveBeenCalled()
+  })
+
+  /**
+   * Changing the target must clear the map: a device id from the previous gateway is exactly what
+   * the gate refuses, and carrying one over silently turns a dropdown change into a refusal the
+   * operator did not cause.
+   */
+  it('clears the mapping when the target changes', async () => {
+    api.playbackTargets.mockResolvedValue([
+      TARGET,
+      { ...TARGET, id: 'gw-sim2', name: 'Other Target', sparkplug_id: 'gwy140000000000400080000' }
+    ])
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    const mapSelect = await screen.findByLabelText('Target device for dev270000000000400080000')
+    fireEvent.change(mapSelect, { target: { value: 'dev310000000000400080000' } })
+    expect(mapSelect.value).toBe('dev310000000000400080000')
+
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim2' } })
+    const after = await screen.findByLabelText('Target device for dev270000000000400080000')
+    expect(after.value).toBe('')
+  })
+
+  it('warns that a birthless capture will replay as unresolved aliases', async () => {
+    api.listCaptures.mockResolvedValue([
+      { ...PLAYABLE, manifest: { ...PLAYABLE.manifest, birth_captured: false } }
+    ])
+    renderTab()
+    const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
+    fireEvent.click(within(row).getByRole('button', { name: /Play/ }))
+    expect(await screen.findByText(/unresolved_alias/)).toBeInTheDocument()
+  })
+
+  it('shows the gate refusal in the dialog', async () => {
+    api.startPlayback.mockRejectedValue(new Error('gateway X is not marked simulated'))
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
+      { target: { value: 'dev310000000000400080000' } })
+    fireEvent.click(screen.getByRole('button', { name: /Publish capture/ }))
+    expect(await screen.findByText(/not marked simulated/)).toBeInTheDocument()
+  })
+
+  /** A capture with no device-level traffic has nothing to map, and must still be publishable. */
+  it('needs no mapping for a capture that publishes only node-level traffic', async () => {
+    api.listCaptures.mockResolvedValue([
+      { ...PLAYABLE, manifest: { ...PLAYABLE.manifest, device_ids: [] } }
+    ])
+    renderTab()
+    const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
+    fireEvent.click(within(row).getByRole('button', { name: /Play/ }))
+    fireEvent.change(await screen.findByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    expect(await screen.findByText(/publishes no device-level traffic/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Publish capture/ })).not.toBeDisabled()
+  })
+
+  it('does not offer Play to an Auditor', async () => {
+    api.listCaptures.mockResolvedValue([PLAYABLE])
+    renderTab({ userRole: 'Auditor' })
+    const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
+    expect(within(row).queryByRole('button', { name: /Play/ })).not.toBeInTheDocument()
+  })
+})
+
+// =============================================================================================
+describe('the playback card', () => {
+  const JOB = {
+    id: 'play-1', status: 'RUNNING', target_edge_node_id: 'gwy130000000000400080000',
+    gateways: { name: 'Playback Target' }, speed: 4,
+    messages_sent: 30, messages_total: 120, elapsed_seconds: 7
+  }
+
+  it('names the gateway it is publishing as', async () => {
+    api.activePlaybackJob.mockResolvedValue(JOB)
+    renderTab()
+    expect(await screen.findByText(/Publishing as Playback Target/)).toBeInTheDocument()
+    expect(screen.getByText(/30 of 120 messages/)).toBeInTheDocument()
+  })
+
+  it('blocks Play on every row while one is running', async () => {
+    api.listCaptures.mockResolvedValue([PLAYABLE])
+    api.activePlaybackJob.mockResolvedValue(JOB)
+    renderTab()
+    const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
+    expect(within(row).getByRole('button', { name: /Play/ })).toBeDisabled()
+  })
+
+  it('asks the gate to stop rather than stopping anything itself', async () => {
+    api.activePlaybackJob.mockResolvedValue(JOB)
+    api.stopPlayback.mockResolvedValue(true)
+    renderTab()
+    // Two Stop buttons would be ambiguous; only the playback card is present here.
+    fireEvent.click(await screen.findByRole('button', { name: /Stop/ }))
+    await waitFor(() => expect(api.stopPlayback).toHaveBeenCalledWith('play-1'))
+  })
+
+  it('surfaces a failed playback after its card has gone', async () => {
+    api.recentPlaybackJobs.mockResolvedValue([{
+      id: 'play-9', status: 'FAILED', target_edge_node_id: 'gwy130000000000400080000',
+      gateways: { name: 'Playback Target' },
+      error: 'this worker holds no broker credential for gwy130000000000400080000'
+    }])
+    renderTab()
+    expect(await screen.findByText(/holds no broker credential/)).toBeInTheDocument()
   })
 })
 

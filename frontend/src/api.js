@@ -458,14 +458,22 @@ export function captureManifest(parsed) {
   const names = [];
   const seen = new Set();
   const topics = new Set();
+  // The identities in the file, so a playback can be set up without downloading it again. Every
+  // captured device id has to be mapped onto a device of the target gateway, and the dialog builds
+  // that from dropdowns.
+  const edgeNodes = [];
+  const devices = [];
   let birth = false;
 
   for (const message of messages) {
     if (message?.topic) {
       topics.add(message.topic);
-      // spBv1.0/<group>/<type>/<edge>[/<device>] -- the third segment is the message type.
-      const type = String(message.topic).split('/')[2];
+      // spBv1.0/<group>/<type>/<edge>[/<device>]
+      const parts = String(message.topic).split('/');
+      const type = parts[2];
       if (type === 'NBIRTH' || type === 'DBIRTH') birth = true;
+      if (parts[3] && !edgeNodes.includes(parts[3])) edgeNodes.push(parts[3]);
+      if (parts[4] && !devices.includes(parts[4])) devices.push(parts[4]);
     }
     for (const metric of message?.payload?.metrics || []) {
       if (metric?.name && !seen.has(metric.name)) {
@@ -485,7 +493,9 @@ export function captureManifest(parsed) {
     birth_captured: birth,
     // Absent rather than false: nobody asked this file's gateway for a rebirth, so claiming either
     // way would be inventing a fact about a recording this stack did not make.
-    rebirth_requested: null
+    rebirth_requested: null,
+    edge_node_ids: edgeNodes,
+    device_ids: devices
   };
 }
 
@@ -1065,6 +1075,85 @@ const apiMethods = {
     if (rpcError) throw new Error(rpcError.message || 'The file uploaded but could not be recorded');
 
     return { id: captureId, path, messages: parsed.messages.length };
+  },
+
+  /**
+   * Gateways a capture may be published onto, with their devices and their credential state.
+   *
+   * SIMULATED ONLY, because `start_playback_job()` refuses anything else -- offering a real gateway
+   * in this dropdown would be offering a click that is always refused, and the refusal is the last
+   * line of defence rather than a validation message.
+   *
+   * `gateway_has_broker_credential` IS A COMPUTED FIELD, not a second request. PostgREST exposes a
+   * function taking the table's row type as a selectable column, so the gate's own predicate is
+   * what the dialog displays -- rather than a second implementation of "does this look ready",
+   * which is how a UI ends up disagreeing with the check it is describing.
+   */
+  playbackTargets: async () => {
+    const { data, error } = await supabase
+      .from('gateways')
+      .select('id, name, sparkplug_id, sparkplug_group, is_archived, gateway_has_broker_credential, devices(id, name, sparkplug_id, is_archived)')
+      .eq('is_simulated', true)
+      .eq('is_archived', false)
+      .order('name');
+    if (error) throw new Error(error.message || 'Could not list playback targets');
+    return (data || []).map(g => ({
+      ...g,
+      devices: (g.devices || []).filter(d => !d.is_archived)
+    }));
+  },
+
+  activePlaybackJob: async () => {
+    const { data, error } = await supabase
+      .from('playback_jobs')
+      .select('*, gateways(name, sparkplug_id), captures(note, subject_sparkplug_id)')
+      .in('status', ['PENDING', 'RUNNING'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'Could not read playback jobs');
+    return data || null;
+  },
+
+  recentPlaybackJobs: async (limit = 4) => {
+    const { data, error } = await supabase
+      .from('playback_jobs')
+      .select('*, gateways(name, sparkplug_id)')
+      .in('status', ['COMPLETED', 'FAILED', 'CANCELLED'])
+      .order('finished_at', { ascending: false })
+      .limit(limit);
+    if (error) throw new Error(error.message || 'Could not read playback jobs');
+    return data || [];
+  },
+
+  /**
+   * Queue a playback. Returns the job id.
+   *
+   * EVERY REFUSAL COMES BACK VERBATIM. The gate names what it objected to -- a target that is not
+   * simulated, one with no broker credential, a device mapped onto another gateway's device, a
+   * playback already running onto that edge node -- and each of those is a different thing for the
+   * operator to do next. Flattening them to "could not start playback" would throw that away.
+   */
+  startPlayback: async ({ captureId, targetGatewayId, deviceMap, speed }) => {
+    const { data, error } = await supabase.rpc('start_playback_job', {
+      p_capture_id: captureId,
+      p_target_gateway_id: targetGatewayId,
+      p_device_map: deviceMap || {},
+      p_speed: speed
+    });
+    if (error) {
+      if (/insufficient_privilege|requires Administrator/i.test(error.message || '')) {
+        throw new Error('Publishing a capture requires Administrator or Shopfloor Manager.');
+      }
+      throw new Error(error.message || 'Could not start the playback');
+    }
+    return data;
+  },
+
+  stopPlayback: async (jobId) => {
+    const { data, error } = await supabase.rpc('request_playback_stop', { p_job_id: jobId });
+    if (error) throw new Error(error.message || 'Could not stop the playback');
+    return data === true;
   },
 
   /** A short-lived signed URL. Signed because the bucket is private -- there is no public URL. */
