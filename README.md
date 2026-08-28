@@ -681,6 +681,13 @@ node scripts/check-env-drift.mjs
 # running on a partially-migrated database -- with the telemetry read surface DROPPED rather than
 # stale, because 0001 removes it with CASCADE before later files recreate it. Checks the objects
 # that abort would leave missing, and names the migration that should have made them.
+# HOW FAR BEHIND UPSTREAM IS EACH PINNED IMAGE? Needs the network, not the stack. Renovate
+# answers this properly and has not run since 2026-08-24 -- its scheduled job exits in seconds
+# with zero steps, so the dependency dashboard is frozen at that date. Delete this script when
+# Actions minutes return. It compares like with like: a candidate must match the SHAPE of our own
+# pin before it counts as newer, because sorting a registry by recency returns `nightly-slim`.
+node scripts/check-image-currency.mjs
+
 node scripts/check-schema-surface.mjs
 
 node scripts/check-migration-idempotency.mjs
