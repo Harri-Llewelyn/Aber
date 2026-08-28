@@ -89,6 +89,10 @@ services:
       PGPASSWORD: ${DB_PASSWORD}
       TS_DBNAME: ${DB_NAME:-postgres}
       TS_USER: ${DB_USER:-postgres}
+      # Roadmap item 18. EMPTY MEANS NO ROLE -- roles.sql skips each one rather than creating it
+      # with a blank password, so a deployment that has not set these keeps booting unchanged.
+      INGEST_WRITER_PASSWORD: ${INGEST_WRITER_PASSWORD:-}
+      FDW_READER_PASSWORD: ${FDW_READER_PASSWORD:-}
       TIMESCALE_COMPRESS_AFTER: ${TIMESCALE_COMPRESS_AFTER:-7 days}
       TIMESCALE_RETAIN_FOR: ${TIMESCALE_RETAIN_FOR:-90 days}
       # The rollups outlive the raw data deliberately -- see aggregates.sql. Each is far smaller
@@ -125,7 +129,7 @@ services:
       echo 'Reconciling the storage footprint view...';
       psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -f /storage.sql;
       echo 'Reconciling read-only BI role...';
-      psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -f /roles.sql;
+      psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -v ingest_writer_password=\"$$INGEST_WRITER_PASSWORD\" -v fdw_reader_password=\"$$FDW_READER_PASSWORD\" -f /roles.sql;
       "
     depends_on:
       timescaledb:
@@ -1319,8 +1323,23 @@ services:
       DB_HOST: ${DB_HOST:-timescaledb}
       DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${DB_NAME:-postgres}
-      DB_USER: ${DB_USER:-postgres}
-      DB_PASSWORD: ${DB_PASSWORD}
+      # THE HISTORIAN CREDENTIAL, AND IT DEFAULTS TO THE OLD ONE ON PURPOSE (roadmap item 18).
+      #
+      # This daemon is the process most exposed to the plant network and it connected as `postgres`
+      # -- superuser on the historian, able to DROP the hypertable and rewrite any observation. The
+      # README's security model lists "append-only historian writes" as a control here, and until
+      # `ingest_writer` existed nothing in the database enforced it.
+      #
+      # THE SWITCH IS TWO DELIBERATE STEPS, and the split is the safety. Setting
+      # INGEST_WRITER_PASSWORD alone creates the role and changes nothing about this container --
+      # so the role can be verified before anything depends on it. Setting INGEST_DB_USER after
+      # that is what moves the daemon onto it. Reversing the order points the daemon at a role
+      # that does not exist yet and stops telemetry for the whole fleet.
+      #
+      # Defaulting to DB_USER/DB_PASSWORD is what keeps an existing deployment working across the
+      # upgrade that introduces this: doing nothing leaves it exactly as it was.
+      DB_USER: ${INGEST_DB_USER:-${DB_USER:-postgres}}
+      DB_PASSWORD: ${INGEST_WRITER_PASSWORD:-${DB_PASSWORD}}
       MQTT_HOST: ${MQTT_HOST:-mosquitto}
       MQTT_PORT: ${MQTT_PORT:-1883}
       # The ingestion principal: reads spBv1.0/# and may publish ONLY rebirth NCMDs. It cannot
