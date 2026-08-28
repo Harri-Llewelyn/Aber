@@ -705,6 +705,16 @@ html, body, #root {
   border: none;
 }
 
+/* The seam between a card's body and the table it introduces.
+   Dropping the filter bar's own frame (above) removed the only thing separating a row of controls
+   from the header row of the table beneath it -- most visible in light mode, where both sit on
+   near-white and the boundary reads as a blur rather than an edge. The same 1px the card header
+   already uses on its own underside, so a card with a body reads as header / body / table rather
+   than as one continuous surface. */
+.card-body + .table-wrap {
+  border-top: 1px solid var(--border);
+}
+
 /* ===== Filter Bar =====
    The list pages outgrew a single header row once schema/status/relationship filters arrived.
    Filters live on their own row so the header keeps only the title and primary actions, and so

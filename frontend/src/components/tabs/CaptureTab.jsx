@@ -487,7 +487,10 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             <div
               role="tablist"
               aria-label="Capture subject"
-              style={{ display: 'flex', gap: '4px', marginLeft: 'auto' }}
+              // 8px, not the 4px this started with: at 4 the two pills read as one segmented
+              // control with a hairline in it, which is what a segmented control looks like when
+              // it is broken. They are two buttons and should look like two.
+              style={{ display: 'flex', gap: '8px', marginLeft: 'auto' }}
             >
               <button
                 role="tab"
