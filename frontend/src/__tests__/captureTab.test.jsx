@@ -91,29 +91,21 @@ function renderTab(overrides = {}) {
 }
 
 /**
- * Open a row's overflow menu and return it.
+ * Select a row, which is what opens the details panel.
  *
- * THE MENU IS NOT INSIDE THE ROW. ActionMenu portals to document.body precisely because
- * `.table-wrap` is `overflow-x: auto` and would clip it, so `within(row)` finds nothing once the
- * menu is open -- which is what these tests asserted against before the row moved to it.
+ * THE ACTIONS ARE NOT IN THE ROW ANY MORE. They were five controls in a last column, and
+ * `.table-wrap` is `overflow-x: auto`, so they were the first thing to go off the right-hand edge
+ * on a narrow viewport. They live in the ContextPanel now, which also has room to say WHY one is
+ * unavailable.
  */
-function openMenu(row) {
-  fireEvent.click(within(row).getByRole('button', { name: /More actions/ }))
-  return screen.getByRole('menu')
+function selectRow(row) {
+  fireEvent.click(row)
+  return screen.getByRole('complementary', { hidden: true })
 }
 
-/**
- * Is an action available on this row at all? Answers without leaving the menu open.
- *
- * RETURNS A BOOLEAN, NOT THE ELEMENT, and that is not fussiness. Closing the menu unmounts its
- * items, so an element returned from here is detached by the time the caller asserts on it --
- * `toBeInTheDocument()` then fails on an item that was found and was correct.
- */
-function menuHas(row, name) {
-  const menu = openMenu(row)
-  const found = !!within(menu).queryByRole('menuitem', { name })
-  fireEvent.keyDown(document, { key: 'Escape' })
-  return found
+/** The panel's action list, by accessible name. Returns the button or null. */
+function panelAction(name) {
+  return screen.queryByRole('button', { name })
 }
 
 beforeEach(() => {
@@ -239,7 +231,7 @@ describe('starting a capture', () => {
     api.startCapture.mockResolvedValue('job-1')
     const { props } = renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    fireEvent.click(within(row).getByRole('button', { name: /Capture/ }))
+    selectRow(row); fireEvent.click(panelAction(/Record/))
 
     fireEvent.change(await screen.findByLabelText(/Note/), { target: { value: 'night shift' } })
     fireEvent.change(screen.getByLabelText(/Record for/), { target: { value: '600' } })
@@ -259,7 +251,7 @@ describe('starting a capture', () => {
     api.listCaptures.mockResolvedValue([CAPTURE])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    fireEvent.click(within(row).getByRole('button', { name: /Capture/ }))
+    selectRow(row); fireEvent.click(panelAction(/Record/))
 
     const dialog = await screen.findByText(/This replaces the capture recorded/)
     expect(dialog).toHaveTextContent('pre-trip bearing vibration baseline')
@@ -272,7 +264,7 @@ describe('starting a capture', () => {
     api.startCapture.mockResolvedValue('job-1')
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    fireEvent.click(within(row).getByRole('button', { name: /Capture/ }))
+    selectRow(row); fireEvent.click(panelAction(/Record/))
     fireEvent.click(await screen.findByRole('button', { name: /Replace and record/ }))
 
     await waitFor(() => expect(api.startCapture).toHaveBeenCalledWith(
@@ -288,7 +280,7 @@ describe('starting a capture', () => {
     api.startCapture.mockRejectedValue(new Error('a capture of gwy999 is already recording'))
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    fireEvent.click(within(row).getByRole('button', { name: /Capture/ }))
+    selectRow(row); fireEvent.click(panelAction(/Record/))
     fireEvent.click(await screen.findByRole('button', { name: /Start recording/ }))
 
     expect(await screen.findByText(/already recording/)).toBeInTheDocument()
@@ -299,7 +291,7 @@ describe('starting a capture', () => {
     await screen.findByText('Line 1 Gateway')
     fireEvent.click(screen.getByRole('tab', { name: /Devices/ }))
     const row = (await screen.findByText('CNC Spindle')).closest('tr')
-    fireEvent.click(within(row).getByRole('button', { name: /Capture/ }))
+    selectRow(row); fireEvent.click(panelAction(/Record/))
     expect(await screen.findByText(/where the alias table lives/)).toBeInTheDocument()
   })
 })
@@ -321,11 +313,12 @@ describe('the running card', () => {
   })
 
   /** One capture at a time is a database constraint; disabling the buttons is the courtesy. */
-  it('disables every Capture button while one is running', async () => {
+  it('refuses to record any other subject while one is running', async () => {
     api.activeCaptureJob.mockResolvedValue(JOB)
     renderTab()
     const row = (await screen.findByText('Playback Target')).closest('tr')
-    const button = within(row).getByRole('button', { name: /Capture/ })
+    selectRow(row)
+    const button = panelAction(/Record/)
     expect(button).toBeDisabled()
     expect(button).toHaveAttribute('title', expect.stringContaining('One at a time'))
   })
@@ -395,7 +388,7 @@ describe('deleting and downloading', () => {
     api.listCaptures.mockResolvedValue([CAPTURE])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    fireEvent.click(within(openMenu(row)).getByRole('menuitem', { name: /Delete capture/ }))
+    selectRow(row); fireEvent.click(panelAction(/Delete capture/))
     const message = await screen.findByText(/Delete the capture recorded/)
     expect(message).toHaveTextContent('pre-trip bearing vibration baseline')
   })
@@ -405,8 +398,12 @@ describe('deleting and downloading', () => {
     api.deleteCapture.mockResolvedValue()
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    fireEvent.click(within(openMenu(row)).getByRole('menuitem', { name: /Delete capture/ }))
-    fireEvent.click(await screen.findByRole('button', { name: /Delete capture/ }))
+    selectRow(row); fireEvent.click(panelAction(/Delete capture/))
+    // SCOPED TO THE DIALOG. The panel's action and the confirmation's button now carry the same
+    // name -- deliberately, since "Delete capture" is the clearest label for both -- so an
+    // unscoped query matches two elements and clicks whichever came first.
+    const dialog = document.querySelector('.modal')
+    fireEvent.click(within(dialog).getByRole('button', { name: /Delete capture/ }))
     await waitFor(() => expect(api.deleteCapture).toHaveBeenCalledWith(CAPTURE))
   })
 
@@ -416,7 +413,7 @@ describe('deleting and downloading', () => {
     const open = vi.spyOn(window, 'open').mockImplementation(() => {})
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    fireEvent.click(within(openMenu(row)).getByRole('menuitem', { name: /Download/ }))
+    selectRow(row); fireEvent.click(panelAction(/Download/))
     await waitFor(() => expect(api.captureUrl).toHaveBeenCalledWith(CAPTURE.storage_path))
     expect(open).toHaveBeenCalledWith('https://example.test/signed', '_blank', 'noopener')
     open.mockRestore()
@@ -433,9 +430,9 @@ describe('the read-only role', () => {
     api.listCaptures.mockResolvedValue([CAPTURE])
     renderTab({ userRole: 'Auditor' })
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    expect(menuHas(row, /Download/)).toBe(true)
-    expect(within(row).queryByRole('button', { name: /Capture/ })).not.toBeInTheDocument()
-    expect(menuHas(row, /Delete capture/)).toBe(false)
+    selectRow(row); expect(panelAction(/Download/)).toBeInTheDocument()
+    expect(panelAction(/Record/)).toBeNull()
+    expect(panelAction(/Delete capture/)).toBeNull()
     expect(screen.getByText(/require Administrator or Shopfloor Manager/)).toBeInTheDocument()
   })
 
@@ -443,8 +440,8 @@ describe('the read-only role', () => {
     api.listCaptures.mockResolvedValue([CAPTURE])
     renderTab({ userRole: 'Shopfloor_Manager' })
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    expect(within(row).getByRole('button', { name: /Capture/ })).toBeInTheDocument()
-    expect(menuHas(row, /Delete capture/)).toBe(true)
+    selectRow(row); expect(panelAction(/Record/)).toBeInTheDocument()
+    expect(panelAction(/Delete capture/)).toBeInTheDocument()
   })
 })
 
@@ -545,7 +542,7 @@ describe('publishing a capture back', () => {
     api.listCaptures.mockResolvedValue([PLAYABLE])
     const rendered = renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    fireEvent.click(within(openMenu(row)).getByRole('menuitem', { name: /Play back/ }))
+    selectRow(row); fireEvent.click(panelAction(/Play back/))
     await screen.findByLabelText('Publish as')
     return rendered
   }
@@ -571,7 +568,7 @@ describe('publishing a capture back', () => {
     api.listCaptures.mockResolvedValue([PLAYABLE])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    fireEvent.click(within(openMenu(row)).getByRole('menuitem', { name: /Play back/ }))
+    selectRow(row); fireEvent.click(panelAction(/Play back/))
     expect(await screen.findByText(/No gateway is marked/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Publish capture/ })).toBeDisabled()
   })
@@ -650,7 +647,7 @@ describe('publishing a capture back', () => {
     ])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    fireEvent.click(within(openMenu(row)).getByRole('menuitem', { name: /Play back/ }))
+    selectRow(row); fireEvent.click(panelAction(/Play back/))
     expect(await screen.findByText(/unresolved_alias/)).toBeInTheDocument()
   })
 
@@ -671,7 +668,7 @@ describe('publishing a capture back', () => {
     ])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    fireEvent.click(within(openMenu(row)).getByRole('menuitem', { name: /Play back/ }))
+    selectRow(row); fireEvent.click(panelAction(/Play back/))
     fireEvent.change(await screen.findByLabelText('Publish as'), { target: { value: 'gw-sim' } })
     expect(await screen.findByText(/publishes no device-level traffic/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Publish capture/ })).not.toBeDisabled()
@@ -681,7 +678,7 @@ describe('publishing a capture back', () => {
     api.listCaptures.mockResolvedValue([PLAYABLE])
     renderTab({ userRole: 'Auditor' })
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    expect(menuHas(row, /Play back/)).toBe(false)
+    selectRow(row); expect(panelAction(/Play back/)).toBeNull()
   })
 })
 
@@ -705,7 +702,7 @@ describe('the playback card', () => {
     api.activePlaybackJob.mockResolvedValue(JOB)
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
-    expect(within(openMenu(row)).getByRole('menuitem', { name: /Play back/ })).toBeDisabled()
+    selectRow(row); expect(panelAction(/Play back/)).toBeDisabled()
   })
 
   it('asks the gate to stop rather than stopping anything itself', async () => {
@@ -725,6 +722,130 @@ describe('the playback card', () => {
     }])
     renderTab()
     expect(await screen.findByText(/holds no broker credential/)).toBeInTheDocument()
+  })
+})
+
+// =============================================================================================
+describe('the filter bar', () => {
+  it('narrows to subjects that have a capture', async () => {
+    api.listCaptures.mockResolvedValue([CAPTURE])
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    expect(screen.getByText('Playback Target')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Stored capture filter'), { target: { value: 'with' } })
+    expect(screen.getByText('Line 1 Gateway')).toBeInTheDocument()
+    expect(screen.queryByText('Playback Target')).not.toBeInTheDocument()
+  })
+
+  it('narrows to subjects that have none', async () => {
+    api.listCaptures.mockResolvedValue([CAPTURE])
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    fireEvent.change(screen.getByLabelText('Stored capture filter'), { target: { value: 'without' } })
+    expect(screen.queryByText('Line 1 Gateway')).not.toBeInTheDocument()
+    expect(screen.getByText('Playback Target')).toBeInTheDocument()
+  })
+
+  /** The wire identity is the thing an operator pastes in from a broker client or a log line. */
+  it('searches the name and the Sparkplug ID', async () => {
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+
+    fireEvent.change(screen.getByLabelText('Search subjects'), { target: { value: 'playback' } })
+    expect(screen.queryByText('Line 1 Gateway')).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Search subjects'), { target: { value: 'gwy12' } })
+    expect(screen.getByText('Line 1 Gateway')).toBeInTheDocument()
+    expect(screen.queryByText('Playback Target')).not.toBeInTheDocument()
+  })
+
+  it('says when the filters match nothing, rather than looking like an empty fleet', async () => {
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    fireEvent.change(screen.getByLabelText('Search subjects'), { target: { value: 'zzz' } })
+    expect(screen.getByText(/No subject matches these filters/)).toBeInTheDocument()
+  })
+
+  it('clears every filter at once, and only offers to when there is something to clear', async () => {
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    expect(screen.queryByRole('button', { name: /Clear filters/ })).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Search subjects'), { target: { value: 'zzz' } })
+    fireEvent.change(screen.getByLabelText('Stored capture filter'), { target: { value: 'with' } })
+    fireEvent.click(screen.getByRole('button', { name: /Clear filters \(2\)/ }))
+
+    expect(screen.getByText('Line 1 Gateway')).toBeInTheDocument()
+    expect(screen.getByText('Playback Target')).toBeInTheDocument()
+  })
+})
+
+// =============================================================================================
+describe('the details panel', () => {
+  it('opens on a row click and describes the subject', async () => {
+    api.listCaptures.mockResolvedValue([CAPTURE])
+    renderTab()
+    const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
+    // Scoped to the panel: the note is shown in the row too, so an unscoped query matches both.
+    const panel = selectRow(row)
+    expect(within(panel).getByText('6 messages stored')).toBeInTheDocument()
+    expect(within(panel).getByText(/pre-trip bearing vibration baseline/)).toBeInTheDocument()
+  })
+
+  /** The one field on the panel that changes what an operator does next. */
+  it('calls out a capture with no birth certificate', async () => {
+    api.listCaptures.mockResolvedValue([
+      { ...CAPTURE, manifest: { ...CAPTURE.manifest, birth_captured: false } }
+    ])
+    renderTab()
+    selectRow((await screen.findByText('Line 1 Gateway')).closest('tr'))
+    expect(screen.getByText('Not captured')).toBeInTheDocument()
+  })
+
+  it('offers no capture-specific action when nothing is stored', async () => {
+    renderTab()
+    selectRow((await screen.findByText('Line 1 Gateway')).closest('tr'))
+    expect(panelAction(/Record capture/)).toBeInTheDocument()
+    expect(panelAction(/Play back/)).toBeNull()
+    expect(panelAction(/Download/)).toBeNull()
+    expect(panelAction(/Delete capture/)).toBeNull()
+  })
+
+  /**
+   * THE DROP ZONE KNOWS ITS SUBJECT, which is why it lives here rather than on the page. The
+   * page-level one it replaces had to ask which subject a dropped file belonged to.
+   */
+  it('carries a drop zone scoped to the selected subject', async () => {
+    renderTab()
+    selectRow((await screen.findByText('Line 1 Gateway')).closest('tr'))
+    expect(screen.getByLabelText('Upload a capture for Line 1 Gateway')).toBeInTheDocument()
+  })
+
+  it('offers an Auditor no drop zone', async () => {
+    renderTab({ userRole: 'Auditor' })
+    selectRow((await screen.findByText('Line 1 Gateway')).closest('tr'))
+    expect(screen.queryByLabelText(/Upload a capture for/)).not.toBeInTheDocument()
+  })
+
+  it('closes when the same row is clicked again', async () => {
+    api.listCaptures.mockResolvedValue([CAPTURE])
+    renderTab()
+    const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
+    selectRow(row)
+    expect(panelAction(/Download/)).toBeInTheDocument()
+    fireEvent.click(row)
+    expect(panelAction(/Download/)).toBeNull()
+  })
+})
+
+// =============================================================================================
+describe('the playback card', () => {
+  /** A card whose body vanishes reads as broken rather than idle, and this one owns a card. */
+  it('explains how to start one when nothing is publishing', async () => {
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    expect(screen.getByText(/Nothing is publishing/)).toBeInTheDocument()
   })
 })
 

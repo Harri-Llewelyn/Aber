@@ -4,18 +4,18 @@ import { REALTIME_ENABLED } from '../../constants'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
-import { ActionMenu } from '../common/ActionMenu'
 import CopyableId from '../common/CopyableId'
+import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { StartCaptureModal } from '../modals/StartCaptureModal'
 import { StartPlaybackModal } from '../modals/StartPlaybackModal'
 import { UploadCaptureModal } from '../modals/UploadCaptureModal'
 import {
-  IconDownload, IconPlay, IconRecord, IconShieldAlert, IconTrash, IconUpload
+  IconDownload, IconPlay, IconRecord, IconShieldAlert, IconTrash, IconUpload, IconX
 } from '../common/Icons'
 
 /**
- * Recording the broker, from the dashboard.
+ * Recording the broker, and publishing a recording back.
  *
  * `ingestion/capture.py record` records live Sparkplug traffic to a file and publishes it back
  * rebased onto now — a dashboard verified against a machine that was on site for two hours, a fault
@@ -24,31 +24,26 @@ import {
  * the only copy of a fault nobody can reproduce on demand.
  *
  * ---------------------------------------------------------------------------------------------
- * NOTHING ON THIS PAGE RECORDS ANYTHING. A browser cannot open an MQTT subscription: mosquitto
- * listens on 1883 TCP with no WebSocket listener, and the recording credential is a server-side
- * secret a bundle would publish. The page queues a row and the INGESTION DAEMON does the work — it
- * already holds `spBv1.0/#` and the credential, so a capture costs no second broker connection and
- * does not split the `seq` stream the daemon's own gap detection depends on.
+ * NOTHING ON THIS PAGE RECORDS OR PUBLISHES ANYTHING. A browser cannot open an MQTT subscription:
+ * mosquitto listens on 1883 TCP with no WebSocket listener, and both credentials are server-side
+ * secrets a bundle would publish. The page queues a row and one of two server processes does the
+ * work — the ingestion daemon for a capture, the playback worker for a publication.
  *
- * What that means here is that every button is a database call and every result arrives
- * asynchronously. There is no request whose response is the outcome.
- *
- * ---------------------------------------------------------------------------------------------
- * ONE CAPTURE AT A TIME, AND THE DATABASE IS WHAT SAYS SO. A partial unique index on
- * `capture_jobs` admits one PENDING-or-RECORDING row across the whole stack, so two browser tabs
- * cannot race it. The single card below is the interface to that fact, not an implementation of it:
- * disabling the buttons is a courtesy, and the refusal that arrives anyway names the capture
- * already running.
- *
- * ONE STORED CAPTURE PER SUBJECT, likewise — two partial unique indexes. A new recording replaces
- * the old, which is what bounds the bucket, and the cost is real: a capture of a rare fault can be
- * destroyed by a routine re-record. `StartCaptureModal` is the only thing standing there, which is
- * why it names the capture and its note rather than asking whether you are sure.
+ * What that means here is that every action is a database call and every result arrives
+ * asynchronously over Realtime. There is no request whose response is the outcome.
  *
  * ---------------------------------------------------------------------------------------------
- * THE ROLE GATES MIRROR THE RLS, THEY DO NOT IMPLEMENT IT. `0055` grants SELECT on both tables to
- * Administrator, Shopfloor_Manager and Auditor, and the gates refuse a start to anyone but the
- * first two. `canManage` decides what is offered; the database decides what happens.
+ * TWO CARDS, BECAUSE THEY ARE TWO ACTS WITH DIFFERENT STAKES. Capture consumes: it reads what is
+ * already on the wire. Playback WRITES, under a gateway's own identity, into the historian that
+ * everything downstream reads. Putting a running playback in among the capture rows made the more
+ * consequential of the two the quieter one on the page.
+ *
+ * ONE CAPTURE AT A TIME AND ONE STORED CAPTURE PER SUBJECT, both enforced by partial unique
+ * indexes rather than by this component: two browser tabs cannot race a database constraint. The
+ * cards and the disabled buttons are the interface to those facts, not an implementation of them.
+ *
+ * THE ROLE GATES MIRROR THE RLS, THEY DO NOT IMPLEMENT IT. `0055` and `0056` grant SELECT to
+ * Administrator, Shopfloor_Manager and Auditor, and refuse every write to anyone but the first two.
  */
 export function CaptureTab({ showToast, userRole }) {
   const [subjectKind, setSubjectKind] = useState('gateway')
@@ -57,18 +52,22 @@ export function CaptureTab({ showToast, userRole }) {
   const [captures, setCaptures] = useState([])
   const [activeJob, setActiveJob] = useState(null)
   const [recentJobs, setRecentJobs] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [startFor, setStartFor] = useState(null)
-  const [deleteFor, setDeleteFor] = useState(null)
-  // `{ file, preset }` -- the dropped or chosen file, and the subject it came from when a row's
-  // menu opened the picker rather than the page-level drop zone.
-  const [uploadFile, setUploadFile] = useState(null)
-  const [dragging, setDragging] = useState(false)
-  const [playFor, setPlayFor] = useState(null)
   const [activePlayback, setActivePlayback] = useState(null)
   const [recentPlaybacks, setRecentPlaybacks] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  const [selectedId, setSelectedId] = useState(null)
+  const [startFor, setStartFor] = useState(null)
+  const [deleteFor, setDeleteFor] = useState(null)
+  const [playFor, setPlayFor] = useState(null)
+  const [uploadFile, setUploadFile] = useState(null)
+  const [dragging, setDragging] = useState(false)
   const [busyId, setBusyId] = useState(null)
+
+  const [storedFilter, setStoredFilter] = useState('all')
+  const [search, setSearch] = useState('')
+
   const fileRef = useRef(null)
   const [stopPending, runStop] = usePendingAction()
   const [stopPlayPending, runStopPlay] = usePendingAction()
@@ -127,13 +126,13 @@ export function CaptureTab({ showToast, userRole }) {
   }, [loadSubjects, loadCaptures, loadJobs])
 
   /**
-   * Progress arrives over Realtime, which is why `capture_jobs` is in the publication and carries
+   * Progress arrives over Realtime, which is why both job tables are in the publication and carry
    * REPLICA IDENTITY FULL.
    *
    * PAIRED WITH A TIMER, not trusted alone, for the reason useRealtimeTable's own header gives:
    * Realtime has no replay, so a dropped socket loses every change in the gap and the client is
-   * never told. A capture that finished during that gap would leave a card counting up forever.
-   * The timer runs ONLY while something is in flight — an idle page opens no interval at all.
+   * never told. A job that finished during that gap would leave a card counting up forever. The
+   * timer runs ONLY while something is in flight — an idle page opens no interval at all.
    */
   useRealtimeTable(['capture_jobs', 'playback_jobs'], refreshAll,
     { enabled: REALTIME_ENABLED, debounceMs: 400 })
@@ -144,8 +143,8 @@ export function CaptureTab({ showToast, userRole }) {
     return () => clearInterval(timer)
   }, [activeJob, activePlayback, refreshAll])
 
-  // Refetch the stored captures when a job finishes: the row that replaces the old capture is
-  // written by the daemon at finalise, and nothing about the job's own change payload carries it.
+  // Refetch the stored captures when a capture job finishes: the row that replaces the old capture
+  // is written by the daemon at finalise, and the job's own change payload does not carry it.
   const lastJobId = useRef(null)
   useEffect(() => {
     if (activeJob) { lastJobId.current = activeJob.id; return }
@@ -170,16 +169,14 @@ export function CaptureTab({ showToast, userRole }) {
     return map
   }, [gateways])
 
-  const rows = useMemo(() => {
+  const allRows = useMemo(() => {
     const source = subjectKind === 'gateway' ? gateways : devices
     return source.map(subject => ({
       id: subject.id,
       kind: subjectKind,
       name: subject.name,
       sparkplugId: subject.sparkplug_id,
-      // A device's context is the gateway it publishes through, which is also the edge node a
-      // capture of it records the birth certificate from.
-      // Only meaningful for a device row now; a gateway's simulated flag is a badge on its name.
+      // Only meaningful for a device row; a gateway's simulated flag is a badge on its name.
       context: subjectKind === 'device'
         ? (gatewayName.get(subject.gateway_id) || 'Unbound')
         : null,
@@ -187,6 +184,20 @@ export function CaptureTab({ showToast, userRole }) {
       capture: captureBySubject.get(`${subjectKind}:${subject.id}`) || null
     }))
   }, [subjectKind, gateways, devices, captureBySubject, gatewayName])
+
+  const rows = useMemo(() => {
+    const needle = search.trim().toLowerCase()
+    return allRows.filter(row => {
+      if (storedFilter === 'with' && !row.capture) return false
+      if (storedFilter === 'without' && row.capture) return false
+      if (!needle) return true
+      return row.name.toLowerCase().includes(needle)
+        || (row.sparkplugId || '').toLowerCase().includes(needle)
+    })
+  }, [allRows, storedFilter, search])
+
+  const activeFilterCount = (storedFilter !== 'all' ? 1 : 0) + (search.trim() ? 1 : 0)
+  const withCapture = allRows.filter(r => r.capture).length
 
   /** Every subject the upload dialog can file a capture against, both tabs at once. */
   const allSubjects = useMemo(() => ([
@@ -200,14 +211,17 @@ export function CaptureTab({ showToast, userRole }) {
     }))
   ]), [gateways, devices, captureBySubject])
 
+  // Resolved from the CURRENT rows rather than captured on click: this page refreshes on a timer
+  // and over Realtime, so a held object would freeze at the moment it was selected — the panel
+  // would show a capture that had since been replaced, beside a table row that had updated.
+  const selected = allRows.find(r => r.id === selectedId) || null
+
   // ------------------------------------------------------------------------------------------
   // Actions
   // ------------------------------------------------------------------------------------------
   const onStart = async ({ note, seconds, replace }) => {
     const row = startFor
-    await api.startCapture({
-      subjectKind: row.kind, subjectId: row.id, note, seconds, replace
-    })
+    await api.startCapture({ subjectKind: row.kind, subjectId: row.id, note, seconds, replace })
     setStartFor(null)
     showToast(`Recording ${row.name}…`, 'success')
     await refreshAll()
@@ -255,9 +269,8 @@ export function CaptureTab({ showToast, userRole }) {
   }
 
   const onDelete = async () => {
-    const capture = deleteFor
     try {
-      await api.deleteCapture(capture)
+      await api.deleteCapture(deleteFor)
       showToast('Capture deleted.', 'success')
     } catch (err) {
       showToast(err.message, 'error')
@@ -266,21 +279,10 @@ export function CaptureTab({ showToast, userRole }) {
     await refreshAll()
   }
 
-  // The file picker feeds the same dialog the drop zone does. `pendingPreset` carries the subject
-  // when a row's menu opened it, so the dialog starts on the right one instead of asking a question
-  // the operator has already answered by clicking that row.
-  const pendingPreset = useRef(null)
   const onFilePicked = (event) => {
     const file = event.target.files?.[0]
     event.target.value = ''
-    if (!file) return
-    setUploadFile({ file, preset: pendingPreset.current })
-    pendingPreset.current = null
-  }
-
-  const askUpload = (row) => {
-    pendingPreset.current = { kind: row.kind, id: row.id }
-    fileRef.current?.click()
+    if (file && selected) setUploadFile({ file, preset: { kind: selected.kind, id: selected.id } })
   }
 
   const onUpload = async ({ subject, replace }) => {
@@ -302,182 +304,327 @@ export function CaptureTab({ showToast, userRole }) {
     return <div style={{ color: 'var(--text-muted)', padding: '24px 0' }}>Loading captures…</div>
   }
 
+  const capture = selected?.capture || null
+
   return (
-    <>
-      {/* `.card` with a `.card-header`, matching the Schemas page's Registered Schemas table
-          rather than `.panel`. The two looked alike and were not: `.panel-title` sits at a
-          different weight and the header has no room for the controls a table needs beside it. */}
-      <div className="card" style={{ marginBottom: '24px' }}>
-        <div className="card-header">
-          <h3 className="section-title">
-            Broker Capture <span className="section-count">{captures.length}</span>
-          </h3>
+    <div className="page-layout">
+      <div className="page-main">
+
+        {/* ====================================================================================
+            PLAYBACK, IN A CARD OF ITS OWN AND ABOVE CAPTURE.
+            It is the act with consequences: it writes into the historian under a gateway's own
+            identity, and everything downstream reads that. As one banner among the capture rows it
+            was the quieter of the two, which is backwards.
+            ==================================================================================== */}
+        <div className="card" style={{ marginBottom: '24px' }}>
+          <div className="card-header">
+            <h3 className="section-title">Broker Playback</h3>
+          </div>
+          <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 12px' }}>
+            Publish a stored capture back into the stack as a simulated gateway — through the real
+            broker, down the real ingestion path, rebased onto now. Every captured identity is
+            rewritten onto the target's own assets, because the broker pins each topic's edge-node
+            segment to the account that publishes it. Start one from a capture below.
+          </p>
+
+          <PlaybackCard
+            job={activePlayback}
+            onStop={onStopPlayback}
+            stopPending={stopPlayPending}
+            canManage={canManage}
+          />
+          <RecentFailures jobs={recentPlaybacks} kind="playback" />
         </div>
 
-        <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 4px' }}>
-          Record what a gateway or a single device actually said, and keep it. One capture is stored
-          per subject, and a new recording replaces it. Publishing a capture rewrites every captured
-          identity onto a simulated gateway's own assets, because the broker pins each topic's
-          edge-node segment to the account that publishes it.
-        </p>
+        {/* ==================================================================================== */}
+        <div className="card">
+          <div className="card-header">
+            <h3 className="section-title">
+              Broker Capture <span className="section-count">{withCapture}</span>
+            </h3>
 
-        {error && (
-          <div className="callout" style={{ borderColor: 'var(--danger)', color: 'var(--danger-text)' }}>
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div>{error}</div>
-          </div>
-        )}
-
-        {!canManage && (
-          <div className="callout">
-            <IconShieldAlert size={14} className="callout-icon" />
-            <div>
-              You can read captures and download them. Recording one, replacing one and deleting one
-              require Administrator or Shopfloor Manager.
+            {/* THE SUBJECT SWITCH LIVES IN THE HEADER, NOT THE FILTER BAR. It changes WHAT IS
+                LISTED rather than narrowing a list, and the counts belong beside it. Same markup
+                the Vocabulary panel uses for its standards: `btn btn-sm` with the selected one
+                primary, inside a flex `role="tablist"`. */}
+            <div
+              role="tablist"
+              aria-label="Capture subject"
+              style={{ display: 'flex', gap: '4px', marginLeft: 'auto' }}
+            >
+              <button
+                role="tab"
+                aria-selected={subjectKind === 'gateway'}
+                className={`btn btn-sm ${subjectKind === 'gateway' ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => { setSubjectKind('gateway'); setSelectedId(null) }}
+                title="Record everything one gateway publishes, every device beneath it included"
+              >
+                Gateways <span className="section-count">{gateways.length}</span>
+              </button>
+              <button
+                role="tab"
+                aria-selected={subjectKind === 'device'}
+                className={`btn btn-sm ${subjectKind === 'device' ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => { setSubjectKind('device'); setSelectedId(null) }}
+                title="Record one device, plus its gateway's birth certificate"
+              >
+                Devices <span className="section-count">{devices.length}</span>
+              </button>
             </div>
           </div>
-        )}
 
-        <RunningCard job={activeJob} onStop={onStop} stopPending={stopPending} canManage={canManage} />
-        <PlaybackCard
-          job={activePlayback}
-          onStop={onStopPlayback}
-          stopPending={stopPlayPending}
-          canManage={canManage}
-        />
-        <RecentFailures jobs={recentJobs} />
-        <RecentFailures jobs={recentPlaybacks} kind="playback" />
+          <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 12px' }}>
+            Record what a gateway or a single device actually said, and keep it. One capture is
+            stored per subject, and a new recording replaces it. Select a row to inspect it, upload
+            a capture, or publish one.
+          </p>
 
-        {/* Two tabs rather than two pages: the question "what do I want to record" has exactly two
-            answers, and a device capture is a gateway capture narrowed to one device — it still
-            records the edge node's birth certificate, which is where the alias table lives. */}
-        {/* The same markup the Vocabulary panel uses for its standards, rather than classes of this
-            page's own: `btn btn-sm` with the selected one primary, inside a flex `role="tablist"`.
-            A `.subtab` class would have needed a rule in App.css that does not exist, and an
-            unstyled button looks like a bug rather than a tab. */}
-        <div
-          role="tablist"
-          aria-label="Capture subject"
-          style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '16px' }}
-        >
-          <button
-            role="tab"
-            aria-selected={subjectKind === 'gateway'}
-            className={`btn btn-sm ${subjectKind === 'gateway' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setSubjectKind('gateway')}
-            title="Record everything one gateway publishes, every device beneath it included"
-          >
-            Gateways
-            <span className="section-count" style={{ marginLeft: '6px' }}>{gateways.length}</span>
-          </button>
-          <button
-            role="tab"
-            aria-selected={subjectKind === 'device'}
-            className={`btn btn-sm ${subjectKind === 'device' ? 'btn-primary' : 'btn-ghost'}`}
-            onClick={() => setSubjectKind('device')}
-            title="Record one device, plus its gateway's birth certificate"
-          >
-            Devices
-            <span className="section-count" style={{ marginLeft: '6px' }}>{devices.length}</span>
-          </button>
-        </div>
+          {error && (
+            <div className="callout" style={{ borderColor: 'var(--danger)', color: 'var(--danger-text)' }}>
+              <IconShieldAlert size={14} className="callout-icon" />
+              <div>{error}</div>
+            </div>
+          )}
 
-        {/* THE DROP ZONE IS FOR A FILE, NOT FOR A ROW. Dragging a capture row somewhere to publish
-            it was considered and does not work: a playback needs a target gateway, a device map and
-            a speed, none of which a drag can carry, so it would open the dialog anyway -- a novel
-            gesture that saves nothing and has no keyboard equivalent. Dragging a FILE in is the
-            gesture Model3DUploader and FlowBackupUploader already use, and it means what it looks
-            like: take this thing that is not in the app and put it in.
+          {!canManage && (
+            <div className="callout">
+              <IconShieldAlert size={14} className="callout-icon" />
+              <div>
+                You can read captures and download them. Recording, replacing, publishing and
+                deleting require Administrator or Shopfloor Manager.
+              </div>
+            </div>
+          )}
 
-            It asks which subject afterwards rather than before, because the file is the thing the
-            operator has and the subject is the one question it cannot answer. */}
-        {canManage && (
-          <div
-            role="button"
-            tabIndex={0}
-            aria-label="Upload a capture file"
-            onClick={() => fileRef.current?.click()}
-            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') fileRef.current?.click() }}
-            onDragOver={e => { e.preventDefault(); setDragging(true) }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={e => {
-              e.preventDefault()
-              setDragging(false)
-              const dropped = e.dataTransfer?.files?.[0]
-              if (dropped) setUploadFile({ file: dropped, preset: null })
-            }}
-            style={{
-              marginTop: '12px', padding: '12px', textAlign: 'center', cursor: 'pointer',
-              border: `1px dashed ${dragging ? 'var(--accent)' : 'var(--border)'}`,
-              borderRadius: '8px',
-              background: dragging ? 'rgba(0,212,255,0.06)' : 'transparent',
-              fontSize: '12px', color: 'var(--text-muted)'
-            }}
-            title="Upload a capture recorded elsewhere, or by ingestion/capture.py record"
-          >
-            <IconUpload size={14} style={{ verticalAlign: '-2px', marginRight: '6px' }} />
-            Drop a capture file here, or click to choose one
+          <RunningCard job={activeJob} onStop={onStop} stopPending={stopPending} canManage={canManage} />
+          <RecentFailures jobs={recentJobs} />
+
+          <div className="filter-bar">
+            <select
+              className="form-control"
+              style={{ width: '190px' }}
+              value={storedFilter}
+              onChange={e => setStoredFilter(e.target.value)}
+              title="Filter by whether a capture is stored for the subject"
+              aria-label="Stored capture filter"
+            >
+              <option value="all">All subjects ({allRows.length})</option>
+              <option value="with">With a capture ({withCapture})</option>
+              <option value="without">Without a capture ({allRows.length - withCapture})</option>
+            </select>
+
+            <input
+              className="form-control"
+              style={{ width: '220px' }}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search name or Sparkplug ID…"
+              aria-label="Search subjects"
+              title="Filter by display name or wire identity"
+            />
+
+            {activeFilterCount > 0 && (
+              <button
+                className="btn btn-ghost btn-sm filter-bar-spacer"
+                onClick={() => { setStoredFilter('all'); setSearch('') }}
+                title="Clear every filter"
+              >
+                <IconX size={13} /> Clear filters ({activeFilterCount})
+              </button>
+            )}
           </div>
-        )}
 
-        <div className="table-wrap" style={{ marginTop: '12px' }}>
-          <table>
-            <thead>
-              <tr>
-                <th title={subjectKind === 'gateway'
-                  ? 'The edge gateway a capture would record every message from'
-                  : 'A single device, recorded with its gateway’s birth certificate'}>
-                  {subjectKind === 'gateway' ? 'Gateway' : 'Device'}
-                </th>
-                {/* WAS "Data", SHOWING Live/Simulated FOR EVERY GATEWAY. It named nothing, every row
-                    on an ordinary fleet said the same thing, and it silently became the parent
-                    gateway on the Devices tab -- one column with two meanings. `is_simulated` is now
-                    a badge beside the name, where it is only present when it is true and therefore
-                    only present when it says something. */}
-                {subjectKind === 'device' && (
-                  <th title="The edge node this device publishes through, and the one a capture of it also records the birth certificate from">
-                    Gateway
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th title={subjectKind === 'gateway'
+                    ? 'The edge gateway a capture would record every message from'
+                    : 'A single device, recorded with its gateway’s birth certificate'}>
+                    {subjectKind === 'gateway' ? 'Gateway' : 'Device'}
                   </th>
+                  {subjectKind === 'device' && (
+                    <th title="The edge node this device publishes through, and the one a capture of it also records the birth certificate from">
+                      Gateway
+                    </th>
+                  )}
+                  <th title="The wire identity. A capture is filed under this, and playback rewrites it onto the target's own assets">
+                    Sparkplug ID
+                  </th>
+                  <th title="The one capture stored for this subject. Recording again replaces it">
+                    Stored capture
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 && (
+                  <tr><td colSpan={4} style={{ color: 'var(--text-muted)', padding: '14px' }}>
+                    {allRows.length === 0
+                      ? (subjectKind === 'gateway'
+                        ? 'No gateways registered. Create one on the Gateways tab.'
+                        : 'No devices bound to a gateway. A device with no gateway has no edge node to record from.')
+                      : 'No subject matches these filters.'}
+                  </td></tr>
                 )}
-                <th title="The wire identity. A capture is filed under this, and playback rewrites it onto the target's own assets">
-                  Sparkplug ID
-                </th>
-                <th title="The one capture stored for this subject. Recording again replaces it">
-                  Stored capture
-                </th>
-                <th style={{ textAlign: 'right' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 && (
-                <tr><td colSpan={5} style={{ color: 'var(--text-muted)', padding: '14px' }}>
-                  {subjectKind === 'gateway'
-                    ? 'No gateways registered. Create one on the Gateways tab.'
-                    : 'No devices bound to a gateway. A device with no gateway has no edge node to record from.'}
-                </td></tr>
-              )}
-              {rows.map(row => (
-                <SubjectRow
-                  key={row.id}
-                  row={row}
-                  canManage={canManage}
-                  busy={busyId === row.id}
-                  blocked={!!activeJob}
-                  onCapture={() => setStartFor(row)}
-                  onDownload={() => onDownload(row.capture)}
-                  onDelete={() => setDeleteFor(row.capture)}
-                  onUpload={() => askUpload(row)}
-                  onPlay={() => setPlayFor(row.capture)}
-                  playbackBlocked={!!activePlayback}
-                />
-              ))}
-            </tbody>
-          </table>
+                {rows.map(row => (
+                  <SubjectRow
+                    key={row.id}
+                    row={row}
+                    selected={selectedId === row.id}
+                    onSelect={() => setSelectedId(id => id === row.id ? null : row.id)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
-      {/* One input for every row. Rendered once and pointed at whichever row asked, because a
-          file input per row is a hundred hidden inputs on a large fleet. */}
+      {/* ======================================================================================
+          THE ACTIONS LEFT THE TABLE AND LIVE HERE.
+          Five controls in a last column is what this had, and `.table-wrap` is `overflow-x: auto`,
+          so they were the first thing to go off the right-hand edge on a narrow viewport. The panel
+          also has room to say WHY an action is unavailable, which a greyed-out icon cannot.
+          ====================================================================================== */}
+      <ContextPanel
+        open={!!selected}
+        onClose={() => setSelectedId(null)}
+        type={selected?.kind === 'device' ? 'DEVICE' : 'GATEWAY'}
+        onCopy={showToast}
+        title={selected?.name || ''}
+        subtitle={selected && (
+          <>
+            {selected.isSimulated && (
+              <span className="badge badge-neutral" style={{ fontSize: '11px', marginRight: '6px' }}>
+                SIMULATED
+              </span>
+            )}
+            {capture
+              ? `${capture.message_count} message${capture.message_count === 1 ? '' : 's'} stored`
+              : 'No capture stored'}
+          </>
+        )}
+        fields={selected ? [
+          { label: 'Sparkplug ID', value: selected.sparkplugId, mono: true, copyable: true,
+            title: 'The wire identity. A capture is filed under this prefix.' },
+          ...(selected.kind === 'device'
+            ? [{ label: 'Via gateway', value: selected.context }]
+            : []),
+          ...(capture ? [
+            { label: 'Recorded', value: formatWhen(capture.recorded_at) },
+            { label: 'Size', value: formatSize(capture.size_bytes) },
+            { label: 'Messages', value: String(capture.message_count) },
+            { label: 'Source', value: capture.source === 'uploaded' ? 'Uploaded' : 'Recorded here' },
+            { label: 'Note', value: capture.note, full: true },
+            {
+              label: 'Birth certificate',
+              // The one field on this panel that changes what an operator does next.
+              value: capture.manifest?.birth_captured === false ? 'Not captured' : 'Captured',
+              danger: capture.manifest?.birth_captured === false,
+              title: capture.manifest?.birth_captured === false
+                ? 'No NBIRTH or DBIRTH was recorded, so this capture replays as unresolved_alias against an alias-optimised gateway and drops every metric.'
+                : 'The recording contains a birth certificate, so a playback can resolve metric aliases.',
+              full: true
+            }
+          ] : [])
+        ] : []}
+        beforeActions={capture?.manifest?.metric_names?.length > 0 && (
+          <div>
+            <div className="context-panel-section-label">
+              Metrics in the capture
+              <span className="section-count" style={{ marginLeft: '6px' }}>
+                {capture.manifest.metric_name_count ?? capture.manifest.metric_names.length}
+              </span>
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.7 }}>
+              {capture.manifest.metric_names.join(', ')}
+              {/* The cap is the database's, not this list's -- see capped_capture_manifest(). Said
+                  out loud so a short list is not read as a short capture. */}
+              {capture.manifest.metric_name_count > capture.manifest.metric_names.length && (
+                <span style={{ color: 'var(--text-dim)' }}>
+                  {' '}… and {capture.manifest.metric_name_count - capture.manifest.metric_names.length} more
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+        actions={selected ? [
+          canManage && {
+            label: capture ? 'Record again' : 'Record capture',
+            icon: <IconRecord size={13} />,
+            primary: true,
+            disabled: !!activeJob,
+            title: activeJob
+              ? 'A capture is already running. One at a time on this stack.'
+              : capture
+                ? 'Record again — this replaces the stored capture'
+                : 'Record this subject',
+            onClick: () => setStartFor(selected)
+          },
+          canManage && capture && {
+            label: 'Play back…',
+            icon: <IconPlay size={13} />,
+            disabled: !!activePlayback,
+            title: activePlayback
+              ? 'A playback is already running'
+              : 'Publish this capture onto a simulated gateway',
+            onClick: () => setPlayFor(capture)
+          },
+          capture && {
+            label: 'Download',
+            icon: <IconDownload size={13} />,
+            pending: busyId === capture.id,
+            pendingLabel: 'Preparing…',
+            title: 'Download the capture file',
+            onClick: () => onDownload(capture)
+          },
+          canManage && capture && {
+            label: 'Delete capture',
+            icon: <IconTrash size={13} />,
+            danger: true,
+            title: 'Remove this capture and its file',
+            onClick: () => setDeleteFor(capture)
+          }
+        ].filter(Boolean) : []}
+      >
+        {/* THE DROP ZONE KNOWS ITS SUBJECT, which the page-level one it replaces did not — that one
+            had to ask afterwards. This is the Model3DUploader gesture on the Devices page: a
+            control that belongs to the entity the panel is describing. */}
+        {canManage && selected && (
+          <div>
+            <div className="context-panel-section-label">
+              {capture ? 'Replace by upload' : 'Upload a capture'}
+            </div>
+            <div
+              role="button"
+              tabIndex={0}
+              aria-label={`Upload a capture for ${selected.name}`}
+              onClick={() => fileRef.current?.click()}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') fileRef.current?.click() }}
+              onDragOver={e => { e.preventDefault(); setDragging(true) }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={e => {
+                e.preventDefault()
+                setDragging(false)
+                const dropped = e.dataTransfer?.files?.[0]
+                if (dropped) setUploadFile({ file: dropped, preset: { kind: selected.kind, id: selected.id } })
+              }}
+              style={{
+                padding: '12px', textAlign: 'center', cursor: 'pointer',
+                border: `1px dashed ${dragging ? 'var(--accent)' : 'var(--border)'}`,
+                borderRadius: '8px',
+                background: dragging ? 'rgba(0,212,255,0.06)' : 'transparent',
+                fontSize: '12px', color: 'var(--text-muted)'
+              }}
+              title="Upload a capture recorded elsewhere, or by ingestion/capture.py record"
+            >
+              <IconUpload size={14} style={{ verticalAlign: '-2px', marginRight: '6px' }} />
+              Drop a capture file here, or click to choose one
+            </div>
+          </div>
+        )}
+      </ContextPanel>
+
       <input
         ref={fileRef}
         type="file"
@@ -507,11 +654,6 @@ export function CaptureTab({ showToast, userRole }) {
         />
       )}
 
-      {/* The confirm-then-pick dialog that used to be here is gone: UploadCaptureModal carries the
-          replace warning itself, after the file has been read, so the operator sees what they are
-          about to destroy AND what they are about to store it with -- rather than confirming a
-          replacement before knowing whether the file is even a capture. */}
-
       {playFor && (
         <StartPlaybackModal
           capture={playFor}
@@ -529,7 +671,7 @@ export function CaptureTab({ showToast, userRole }) {
           onConfirm={onDelete}
         />
       )}
-    </>
+    </div>
   )
 }
 
@@ -547,7 +689,7 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
   const pending = job.status === 'PENDING'
 
   return (
-    <div className="callout" style={{ borderColor: 'var(--accent)', marginTop: '12px' }}>
+    <div className="callout" style={{ borderColor: 'var(--accent)', marginBottom: '12px' }}>
       <IconRecord size={14} className="callout-icon" />
       <div style={{ flex: 1 }}>
         <div>
@@ -564,9 +706,7 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
             {job.messages} message{job.messages === 1 ? '' : 's'} · {formatSize(job.bytes)} ·{' '}
             {job.elapsed_seconds}s of {job.max_seconds}s
             {' · '}
-            {job.birth_captured
-              ? 'birth certificate captured'
-              : 'no birth certificate yet'}
+            {job.birth_captured ? 'birth certificate captured' : 'no birth certificate yet'}
           </div>
         )}
         {/* THE BANNER SETTLES RATHER THAN VANISHING. This warning is only on screen while the card
@@ -597,70 +737,30 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
 }
 
 /**
- * Recently failed jobs.
+ * The playback in flight, or the reason there is not one.
  *
- * SHOWN BECAUSE THE CARD GOES AWAY. A capture that fails clears the running card and leaves the
- * table looking exactly as it did before anybody pressed anything — which reads as the button not
- * having worked. The `error` column is where the reason is, and this is the only place it surfaces.
- */
-/**
- * How long a finished failure stays on the page.
- *
- * IT USED TO BE FOREVER, and that was wrong in a way a screenshot made obvious: the query takes the
- * last four finished jobs, so a failure sat at the top of the page until four more jobs pushed it
- * out -- which on a stack where nobody captures daily is indefinitely. It read as a live fault.
- *
- * This banner exists to explain "the thing you just did failed", because the running card clears on
- * failure and the table otherwise looks exactly as it did before. That job is minutes old. Anything
- * older is history, and history belongs in the job list rather than shouting from the top of a page.
- */
-const FAILURE_VISIBLE_MS = 15 * 60 * 1000
-
-function RecentFailures({ jobs, kind = 'capture' }) {
-  const cutoff = Date.now() - FAILURE_VISIBLE_MS
-  const failed = (jobs || []).filter(j => {
-    if (j.status !== 'FAILED' && j.status !== 'CANCELLED') return false
-    // No finished_at means it has only just been written; show it rather than hiding a fresh one.
-    if (!j.finished_at) return true
-    const at = new Date(j.finished_at).getTime()
-    return Number.isNaN(at) || at >= cutoff
-  })
-  if (failed.length === 0) return null
-  return (
-    <div style={{ marginTop: '12px' }}>
-      {failed.map(job => (
-        <div key={job.id} className="callout" style={{ borderColor: 'var(--danger)', marginTop: '6px' }}>
-          <IconShieldAlert size={14} className="callout-icon" />
-          <div style={{ fontSize: '12px' }}>
-            <strong>
-              {job.devices?.name || job.gateways?.name
-                || job.subject_sparkplug_id || job.target_edge_node_id}
-            </strong>
-            {' — '}{kind === 'playback' ? 'playback ' : ''}
-            {job.status === 'CANCELLED' ? 'cancelled' : 'failed'}
-            {job.error ? `: ${job.error}` : '.'}
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-/**
- * The playback in flight.
- *
- * A SEPARATE CARD FROM THE CAPTURE ONE, not a shared "job" card, because they are different acts
- * with different stakes and different stop semantics. A capture consumes; a playback WRITES to the
- * historian under a gateway's identity, and the card says which gateway so that is never a guess.
+ * IT RENDERS AN EMPTY STATE RATHER THAN NOTHING, unlike the capture card above it. This one owns a
+ * card of its own, and a card whose body disappears entirely reads as a broken section rather than
+ * an idle one — and the empty state is where the two-step "select a capture, then publish it"
+ * gets explained.
  */
 function PlaybackCard({ job, onStop, stopPending, canManage }) {
-  if (!job) return null
+  if (!job) {
+    return (
+      <div style={{ color: 'var(--text-dim)', fontSize: '12px', padding: '10px 0' }}>
+        Nothing is publishing. Select a subject with a stored capture below, then choose
+        <strong> Play back</strong> — the dialog asks which simulated gateway to publish as, and
+        maps each captured device onto one of that gateway's own.
+      </div>
+    )
+  }
+
   const target = job.gateways?.name || job.target_edge_node_id
   const pending = job.status === 'PENDING'
   const total = job.messages_total || 0
 
   return (
-    <div className="callout" style={{ borderColor: 'var(--accent)', marginTop: '12px' }}>
+    <div className="callout" style={{ borderColor: 'var(--accent)' }}>
       <IconPlay size={14} className="callout-icon" />
       <div style={{ flex: 1 }}>
         <div>
@@ -688,13 +788,58 @@ function PlaybackCard({ job, onStop, stopPending, canManage }) {
   )
 }
 
-function SubjectRow({
-  row, canManage, busy, blocked, playbackBlocked,
-  onCapture, onDownload, onDelete, onUpload, onPlay
-}) {
+/**
+ * How long a finished failure stays on the page.
+ *
+ * IT USED TO BE FOREVER, and that was wrong in a way a screenshot made obvious: the query takes the
+ * last four finished jobs, so a failure sat at the top of the page until four more jobs pushed it
+ * out — which on a stack where nobody captures daily is indefinitely. It read as a live fault.
+ *
+ * This banner exists to explain "the thing you just did failed", because the running card clears on
+ * failure and the table otherwise looks exactly as it did before. That job is minutes old. Anything
+ * older is history, and history belongs in the job record rather than shouting from a card.
+ */
+const FAILURE_VISIBLE_MS = 15 * 60 * 1000
+
+function RecentFailures({ jobs, kind = 'capture' }) {
+  const cutoff = Date.now() - FAILURE_VISIBLE_MS
+  const failed = (jobs || []).filter(j => {
+    if (j.status !== 'FAILED' && j.status !== 'CANCELLED') return false
+    // No finished_at means it has only just been written; show it rather than hiding a fresh one.
+    if (!j.finished_at) return true
+    const at = new Date(j.finished_at).getTime()
+    return Number.isNaN(at) || at >= cutoff
+  })
+  if (failed.length === 0) return null
+
+  return (
+    <div style={{ marginBottom: '12px' }}>
+      {failed.map(job => (
+        <div key={job.id} className="callout" style={{ borderColor: 'var(--danger)', marginTop: '6px' }}>
+          <IconShieldAlert size={14} className="callout-icon" />
+          <div style={{ fontSize: '12px' }}>
+            <strong>
+              {job.devices?.name || job.gateways?.name
+                || job.subject_sparkplug_id || job.target_edge_node_id}
+            </strong>
+            {' — '}{kind === 'playback' ? 'playback ' : ''}
+            {job.status === 'CANCELLED' ? 'cancelled' : 'failed'}
+            {job.error ? `: ${job.error}` : '.'}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function SubjectRow({ row, selected, onSelect }) {
   const capture = row.capture
   return (
-    <tr>
+    <tr
+      className={`row-selectable${selected ? ' row-selected' : ''}`}
+      onClick={rowSelectHandler(onSelect)}
+      title="Click to inspect this subject in the details panel"
+    >
       <td>
         {row.name}
         {/* ONLY WHEN TRUE, which is the whole point of it being a badge rather than a column. A
@@ -726,7 +871,7 @@ function SubjectRow({
                   UPLOADED
                 </span>
               )}
-              {/* THE ONE BADGE ON THIS PAGE THAT CHANGES A DECISION. Everything else here is
+              {/* THE ONE BADGE IN THIS TABLE THAT CHANGES A DECISION. Everything else here is
                   provenance; this says whether the file will actually replay. */}
               {capture.manifest?.birth_captured === false && (
                 <span
@@ -743,62 +888,6 @@ function SubjectRow({
             </div>
           </div>
         )}
-      </td>
-      {/* THE PRIMARY ACT STAYS A BUTTON; THE REST GO BEHIND THE OVERFLOW MENU. Five buttons in a
-          cell is what this row had, and `.table-wrap` is `overflow-x: auto`, so on a narrow
-          viewport they were the first thing to disappear off the right-hand edge. ActionMenu exists
-          for exactly that -- it portals out of the scroll container, which is why it is a component
-          rather than a few lines of inline JSX. Capture is the verb the page is named after, so it
-          keeps its own button. */}
-      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-        {canManage && (
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={onCapture}
-            disabled={busy || blocked}
-            title={blocked
-              ? 'A capture is already running. One at a time on this stack.'
-              : capture
-                ? 'Record again — this replaces the stored capture'
-                : 'Record this subject'}
-          >
-            <IconRecord size={13} /> Capture
-          </button>
-        )}
-        {/* `label` is the trigger's VISIBLE text, not just its accessible name -- ActionMenu renders
-            it beside the chevron. So the default is used rather than a per-row string, which would
-            put the subject's name in the button twice. */}
-        <ActionMenu
-          disabled={busy}
-          items={[
-            canManage && capture && {
-              label: 'Play back…',
-              icon: <IconPlay size={13} />,
-              disabled: playbackBlocked,
-              title: playbackBlocked
-                ? 'A playback is already running'
-                : 'Publish this capture onto a simulated gateway',
-              onClick: onPlay
-            },
-            capture && {
-              label: 'Download',
-              icon: <IconDownload size={13} />,
-              onClick: onDownload
-            },
-            canManage && {
-              label: capture ? 'Replace by upload…' : 'Upload a capture…',
-              icon: <IconUpload size={13} />,
-              onClick: onUpload
-            },
-            canManage && capture && { separator: true },
-            canManage && capture && {
-              label: 'Delete capture',
-              icon: <IconTrash size={13} />,
-              danger: true,
-              onClick: onDelete
-            }
-          ]}
-        />
       </td>
     </tr>
   )
