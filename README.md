@@ -1505,6 +1505,30 @@ first, and a 100 MiB bucket leaves headroom.
 so a 500 MB buffer is not refused — it is bounded by node pressure and the process is killed, taking
 ingestion for the whole fleet with it. That is the real argument for the smaller cap.
 
+**The artifact is a row of its own, not a field on the job.** `playback_jobs.capture_id` has to point
+at something, and a `capture_jobs` row is the wrong target: it records an *act* that happened once,
+and **a capture uploaded through the browser never had one**. Two ways to name a capture — a job id
+for recorded ones, a storage path for uploaded ones — is the kind of split that ends up handled in
+four places and wrongly in one.
+
+So `captures` holds the artifact: subject, storage path, size, the note, and the manifest. Both paths
+write it — the daemon on finalise, the upload on success — and `playback_jobs` references it. The
+job tables stay what they are, records of work attempted.
+
+**A manifest, so the page can say what is in a file it has not downloaded.** The daemon holds every
+payload at finalise time, so `captures.manifest` (JSONB) costs almost nothing: the metric names
+seen, `birth_captured`, the topic count, and the observed rate. **`birth_captured` is the one that
+earns its place** — it makes the alias trap visible on the list rather than something discovered when
+a playback ingests nothing.
+
+The metric list is capped the way `record_ingestion_rejection()` caps violations at 50, with the true
+count kept beside it: a chatty device would otherwise put a thousand names into a JSONB column, and a
+truncation nobody can see is worse than a short list.
+
+**The browser has to build one too.** `uploadCapture()` already parses the file to validate it, so
+the same pass fills the manifest — otherwise every uploaded capture shows blank next to every
+recorded one, and the field reads as broken rather than absent.
+
 **Startup reconciliation**: anything left at `RECORDING` when the daemon boots becomes `FAILED`.
 Without it, a restart mid-capture leaves a row counting down forever and a card that never clears.
 
@@ -1549,29 +1573,150 @@ POST would not.
 Stated because adding it would look like consistency and would write a row per progress tick into an
 append-only table no application role can prune, which is `0005`'s heartbeat problem exactly.
 
+**A one-line note, and it belongs in the modal.** An optional label given when a capture is started
+— *"pre-trip bearing vibration baseline"* — shown on the list and, critically, **inside the replace
+confirmation**. "Overwrite the capture of Line 1 Gateway from 27 Aug 14:30 — pre-trip bearing
+vibration baseline?" is a different decision from the same modal without that line, and mitigating
+the destroy-a-rare-fault risk is the entire reason the field exists. A note visible only on the list
+does not do the job it is for.
+
+**The rebirth banner has to settle, not vanish.** If no `NBIRTH`/`DBIRTH` arrives within the first
+ten seconds — rate limit, or a slow edge node — the running card says so. But the card clears when
+the capture ends, so the warning would exist only during the ten seconds nobody is watching. It
+resolves into `birth_captured = false` on the finished record, where a file that cannot replay
+properly stops looking identical to one that can.
+
 **The replace modal names what it destroys**: *"Overwrite the capture of Line 1 Gateway taken
 27 Aug 2026 14:30?"* — not "are you sure". The replace-in-place model bounds storage, and the cost is
 real: **a capture of a rare fault can be destroyed by a routine re-record**, and this modal is the
 only thing standing there.
 
-#### 5 · Playback safety
+#### 5 · Playback is orchestrated too, by a worker that is not the daemon
 
-**Topic remapping is the one proposal that must not be built.** A `replay/<original_topic>` prefix is
-not a Sparkplug topic, and `on_message()` returns immediately when `parts[0] != 'spBv1.0'` — so
-nothing would be ingested at all, and `mosquitto.acl` grants no write on `replay/#`, so the broker
-would drop it silently at QoS 0. It would produce a playback that reports success and does nothing,
-which is the failure mode this whole feature is written to avoid.
+**Driven from the page, not the CLI.** A feature reachable only over SSH is not reachable by most of
+the people this dashboard exists for, and the ergonomics are the point: the page knows the target
+gateway and the devices bound to it, so it can build the device map from dropdowns instead of asking
+somebody to type 24-character ids.
 
-**The protection it asks for already exists and is stronger.** A capture *cannot* be published under
-the identity it was recorded from: the ACL pins the topic's edge-node segment to the connecting
-username, so playback rewrites every identity onto the playback gateway's own assets and each device
-needs an explicit `--map` onto a 24-character id. You cannot reach a production asset by accident;
-you would have to type its id.
+`playback_jobs` mirrors `capture_jobs` — target, capture path, speed, device map, status, progress,
+`stop_requested` — with progress on Realtime and the same startup reconciliation.
 
-**What the page can add is enforcement.** The CLI can only warn that a target gateway is not flagged
-`is_simulated`, because it cannot see the directory. The page can, so it should **refuse** to start a
-playback onto a gateway that is not flagged — turning `0052`'s marking from a label into a
-precondition at the one place that has the information to check it.
+**A separate `Service_Playback` worker, and NOT the ingestion daemon.** `mosquitto.acl` grants the
+ingestion principal `read spBv1.0/#` and `write spBv1.0/+/NCMD/+` — rebirth requests and nothing
+else. Teaching it to publish asset data would widen the one account the whole ACL is built around,
+and `verify_gateway_binding()` cannot tell a forged message under a correctly bound device from a
+real one.
+
+**It is a new process, and that is the real cost of this half.** A worker means an image, a service in
+`docker-compose.yml`, a Deployment and its resources in the chart, a health probe, and a place in
+`check-image-tag-parity.mjs` — before it plays a single message. Worth pricing honestly rather than
+discovering: the capture half adds behaviour to something already running, and this half does not.
+
+**The seq objection does not apply here**, and it is worth saying because it ruled out a separate
+principal for *capture*. That objection was about a second SUBSCRIBER: `_last_seq` is keyed
+`(group, edge_node)`, so two consumers split the stream and gap detection fires permanently. A
+playback worker only publishes. It holds no subscription and takes nothing away from the daemon.
+
+##### The ACL cannot say "simulated gateways", and does not need to
+
+`mosquitto.acl` is a static file. It supports `%u` substitution and per-user literal or wildcard
+topic rules; its wildcards are `+` (one segment) and `#` (the rest). There is no prefix match, and no
+way for it to consult Postgres. **`is_simulated` is a database predicate and cannot be an ACL rule.**
+
+Two ways to get the guarantee anyway, and the first is strictly better:
+
+- **The worker authenticates AS the target gateway** — username is that gateway's `sparkplug_id` —
+  and `pattern readwrite spBv1.0/+/+/%u/#` confines it to that edge node with **no ACL change at
+  all**. This is the mechanism every gateway on the stack already uses, and it is why a playback
+  worker needs no new rule in the file that `check-broker-config.mjs` asserts.
+- Enumerating one `topic write` line per simulated gateway under a `factoryplus_playback` user. That
+  makes the ACL derived state which drifts the moment somebody flips the flag, needs a broker reload
+  to take effect, and has to be regenerated and re-asserted. **Rejected.**
+
+**A topic-shaped rule such as `spBv1.0/+/+/simulated_#` is not a narrower version of this — it does
+not parse.** MQTT's `#` is only a wildcard as an entire filter or immediately after a `/`; inside a
+segment it is a literal character. Measured against the pinned image rather than argued from the
+specification:
+
+```
+$ mosquitto -c probe.conf          # eclipse-mosquitto:2.0.22, the pinned tag
+Error: Invalid ACL topic "spBv1.0/+/+/simulated_#" in acl_file "/probe/test.acl".
+Error opening acl file "/probe/test.acl".
+$ echo $?
+3
+```
+
+**It refuses to start, which is the safe failure and worth knowing** — this file's header records
+that mosquitto only *warns* on a MISSING `acl_file`, so the natural worry is that a malformed rule
+degrades to no authorisation at all. It does not: a broker that cannot parse its ACL exits.
+
+**And the namespace it names cannot exist anyway.** The edge-node segment is a gateway's
+`sparkplug_id`, a GENERATED column — `'gwy'` plus 21 hex characters of the row's UUID — and
+`verify_gateway_binding()` rejects any message whose fourth segment is not that exact string. There is
+no way to give a gateway an id beginning `simulated_`, so no topic-shape rule can separate simulated
+traffic from real traffic on this stack, however it is spelled.
+
+**The protection that rule was reaching for is delivered in full by `%u`, at the same layer.** A
+worker connected as `gwyAAA…` cannot publish under `gwyBBB…`: the broker drops it, at the network
+protocol layer, before any subscriber sees it. So *"even if the UI supplies an incorrect mapping,
+Mosquitto rejects the write"* holds exactly as intended — the rule delivering it is per-gateway
+confinement rather than a namespace prefix.
+
+##### Three tiers, which is the house pattern
+
+| tier | what it stops |
+| :--- | :--- |
+| the job gate | `playback_jobs` refuses a target where `is_simulated = false`, in the database rather than the UI |
+| credential possession | the worker holds credentials only for gateways issued as playback targets, so it cannot authenticate as a real one |
+| the broker ACL | each credential is confined to its own edge node by `%u`, so even a compromised worker reaches one gateway |
+
+`Service_Playback` is therefore a **Supabase** principal — it reads the queue, reads the capture and
+writes status — while the **MQTT identity is the target gateway's own**, supplied as a secret the way
+`MQTT_VALIDATOR_USER` is for the validator. The two identities are separate on purpose: one says what
+it may do in the database, the other what the broker will carry.
+
+##### A validation gate is only a gate if it is the only way in
+
+Checking `is_simulated` and `gateway_holds_a_credential()` inside a `SECURITY DEFINER` function is
+right, and it is **advisory until RLS forbids the direct write it is meant to replace**. A policy
+that lets `authenticated` INSERT `playback_jobs`, or UPDATE a row to `PENDING`, leaves the function
+as one of two doors — and the one the UI happens to use, not the one an API caller has to.
+
+Same shape as `0047`: the table takes no direct write from any application role, the RPC is the only
+path, and the check lives inside it. That is what makes "cannot target a production gateway" a
+property of the schema rather than of the client.
+
+##### The gate it needs before it works at all
+
+The worker must READ the capture out of Storage, and `broker_captures_read_privileged` admits
+`Administrator`, `Shopfloor_Manager` and `Auditor`. A worker holding `Operator` gets `42501` — the
+same class of defect as `0051`, with the same symptom of a job that fails for a reason nothing
+surfaces. **A read gate is a prerequisite, exactly as the write gate is for capture.**
+
+##### What the page adds that the CLI cannot
+
+- **The device map from dropdowns**, built from the devices bound to the target gateway.
+- **Refusal rather than warning** when the target is not flagged `is_simulated`. The CLI can only
+  warn, having no view of the directory; the page has one, which turns `0052`'s marking from a label
+  into a precondition.
+- **A credential check before starting.** `gateway_holds_a_credential()` (`0038`) is the predicate,
+  and NOT `status = 'ONLINE'`: a playback target is legitimately OFFLINE, because nothing publishes
+  as it until a playback runs. Requiring liveness would refuse every first playback and pass only
+  after one had already succeeded.
+
+#### 6 · Non-goals, recorded so they are not proposed again
+
+**No burst mode, and `--speed 0` stays refused.** Speed divides both the send schedule and the
+timestamp rebasing, so as it rises every message converges on one millisecond — and the historian
+inserts `ON CONFLICT (time, asset_id, metric_name) DO NOTHING`. A burst replay of 100,000 messages
+would write one row per metric and silently discard the rest: a successful-looking run against an
+almost-empty table. Publishing flat out while still advancing timestamps by the recorded intervals is
+a different feature with a different argument, and is not this one.
+
+**No in-browser payload editor.** The capture file is JSON *specifically* so it can be hand-edited,
+and playback re-encodes to whatever encoding each message arrived in. A text editor already does
+everything a hex or protobuf UI would, and `--override-metric` is the same operation with more
+surface.
 
 ---
 
