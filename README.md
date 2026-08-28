@@ -626,6 +626,12 @@ node scripts/check-env-drift.mjs
 # the whole schema rests on, and it used to be upheld by review alone. Asserts only what a
 # migration can move (the schema digest, and digital_thread's `migration` lane) and treats a FALL
 # in operator row counts as failure while ignoring a rise, so a live daemon cannot make it flaky.
+# DID THE CHAIN FINISH? There is no migrations ledger, and an aborted db-init leaves the stack
+# running on a partially-migrated database -- with the telemetry read surface DROPPED rather than
+# stale, because 0001 removes it with CASCADE before later files recreate it. Checks the objects
+# that abort would leave missing, and names the migration that should have made them.
+node scripts/check-schema-surface.mjs
+
 node scripts/check-migration-idempotency.mjs
 
 # Database suites — need Postgres

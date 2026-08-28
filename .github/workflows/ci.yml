@@ -2091,6 +2091,18 @@ jobs:
       # The script asserts only what a migration can move (schema digest, the 'migration' audit
       # lane) and treats a FALL in operator row counts as failure while ignoring a rise, so
       # concurrent daemon and simulator writes cannot make it flaky.
+      # ---------------------------------------------------------------------------------------
+      # DID THE CHAIN FINISH? There is no applied-migrations ledger, and `docker compose up -d`
+      # reports db-init's exit code exactly once. An abort part-way leaves the stack RUNNING on a
+      # partially-migrated database -- and because 0001 drops the whole telemetry read surface
+      # with `DROP SERVER ... CASCADE` before later files put it back, "partially migrated" can
+      # mean "the views the dashboard queries do not exist".
+      #
+      # Observed on this stack (issue #40): a deadlock at 0023 aborted the chain, 0027 never ran,
+      # and Grafana reported "Database Connection OK" while every data-lifecycle panel failed.
+      - name: Migration Chain Completed
+        run: node scripts/check-schema-surface.mjs
+
       - name: Migration Chain Replays Cleanly
         run: node scripts/check-migration-idempotency.mjs
 
