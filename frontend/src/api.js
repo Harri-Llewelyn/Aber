@@ -95,7 +95,7 @@ const DEVICE_EMBED =
   'is_archived, gateway_id, cell_id, location_scope, created_at, model_3d_path';
 const GATEWAY_EMBED =
   `id, name, description, sparkplug_id, cell_id, location_scope, access_url, status, last_heartbeat, ` +
-  `is_virtual, is_simulated, is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
+  `is_virtual, is_simulated, is_shadow, is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
 
 /**
  * Effective cell per device, keyed by device id, read from public.device_locations.
@@ -776,7 +776,10 @@ const apiMethods = {
     const [gatewaysRes, issuedRes] = await Promise.all([
       supabase
         .from('gateway_status')
-        .select('id,name,sparkplug_id,is_virtual,is_archived,status,enrolled_at,credential_revoked_at,live_status')
+        // `is_shadow` so the credential dialog can tell an operator where the password actually
+        // goes: a playback gateway has no Node-RED broker node, so the .env pairing it would
+        // otherwise print is advice that cannot be followed.
+        .select('id,name,sparkplug_id,is_virtual,is_shadow,is_archived,status,enrolled_at,credential_revoked_at,live_status')
         .order('name'),
       supabase
         .from('digital_thread')

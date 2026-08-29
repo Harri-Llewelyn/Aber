@@ -282,7 +282,10 @@ export function AccessControlTab({ showToast }) {
                         <button
                           className="btn btn-ghost"
                           onClick={() => setCredentialForGw({
-                            gateway_id: g.id, gateway_name: g.name, sparkplug_id: g.sparkplug_id
+                            gateway_id: g.id, gateway_name: g.name, sparkplug_id: g.sparkplug_id,
+                            // Decides which .env pairing the dialog prints. Without it a playback
+                            // gateway is told to edit a Node-RED node it does not have.
+                            is_shadow: g.is_shadow
                           })}
                           title="Mint a broker credential and show it once"
                         >
