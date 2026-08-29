@@ -507,6 +507,30 @@ export function gatewayBackupPath(sparkplugId, when = new Date()) {
   return `${sparkplugId}/${stamp}-flows.json`;
 }
 
+/**
+ * A signed storage URL that a NEW TAB can actually open.
+ *
+ * THE SIGNED URL ALONE IS NOT ENOUGH BEHIND THIS GATEWAY, and the failure names the wrong thing.
+ * storage-js returns `/storage/v1/object/sign/<bucket>/<path>?token=…`, which is correct and which
+ * the browser then requests with NO HEADERS -- and the API gateway in front of Supabase rejects any
+ * request carrying no `apikey` before storage-api ever sees the token:
+ *
+ *     GET …/object/sign/broker-captures/gwy…/capture.json?token=…
+ *     -> 401 {"message":"No API key found in request"}
+ *
+ * So every "Download" on this stack that opened a signed URL in a tab was broken -- captures and
+ * gateway flow backups both -- and the message points at an API key when what is missing is a query
+ * parameter. Measured, not inferred; appending the key returns 200 with the file.
+ *
+ * PUTTING THE ANON KEY IN A URL IS NOT A LEAK. It is in the bundle every visitor already downloads;
+ * the gateway's filter is a ROUTING check rather than an authorisation one. What authorises this
+ * request is the signed token, which is scoped to one object and expires in sixty seconds.
+ */
+function withApiKey(signedUrl) {
+  if (!signedUrl) return signedUrl;
+  return signedUrl + (signedUrl.includes('?') ? '&' : '?') + `apikey=${SUPABASE_ANON_KEY}`;
+}
+
 /** The public URL for a stored model path. Composed, never stored -- see archived migration 0035. */
 export function model3dPublicUrl(path) {
   if (!path) return null;
@@ -889,9 +913,11 @@ const apiMethods = {
   gatewayBackupUrl: async (path) => {
     const { data, error } = await supabase.storage
       .from(GATEWAY_BACKUP_BUCKET)
-      .createSignedUrl(path, 60);
+      // Same two fixes as captureUrl: the gateway refuses a headerless request without an apikey,
+      // and a flows.json renders in the tab rather than saving without `download`.
+      .createSignedUrl(path, 60, { download: path.split('/').pop() || 'flows.json' });
     if (error) throw new Error(error.message || 'Could not create a download link');
-    return data.signedUrl;
+    return withApiKey(data.signedUrl);
   },
 
   deleteGatewayBackup: async (path) => {
@@ -1160,11 +1186,20 @@ const apiMethods = {
     return data === true;
   },
 
-  /** A short-lived signed URL. Signed because the bucket is private -- there is no public URL. */
+  /**
+   * A short-lived signed URL. Signed because the bucket is private -- there is no public URL.
+   *
+   * `download` NAMES THE SAVED FILE AND FORCES AN ATTACHMENT. A capture is JSON, so without it the
+   * browser renders the file in the tab instead of saving it -- which for a 50 MiB recording is a
+   * tab that hangs rather than a download. The name is the subject's own, so a folder of captures
+   * from four gateways is not four files called `capture.json`.
+   */
   captureUrl: async (path) => {
-    const { data, error } = await supabase.storage.from(CAPTURE_BUCKET).createSignedUrl(path, 60);
+    const filename = `${(path.split('/')[0] || 'capture')}.capture.json`;
+    const { data, error } = await supabase.storage
+      .from(CAPTURE_BUCKET).createSignedUrl(path, 60, { download: filename });
     if (error) throw new Error(error.message || 'Could not create a download link');
-    return data.signedUrl;
+    return withApiKey(data.signedUrl);
   },
 
   /**

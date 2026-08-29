@@ -227,20 +227,29 @@ export function SettingsTab({ showToast }) {
             the list cannot be added to from here, and nothing secret is stored here. Someone
             looking for where to put an S3 key should find the answer on this page rather than
             after putting it somewhere it can be read by every signed-in user. */}
-        <div className="settings-preamble card">
-          <div className="settings-preamble-title">
-            <IconSettings size={15} /> Runtime configuration
+        {/* THE PAGE ALREADY HAD ITS DESCRIPTION; what it did not have was the shape every other
+            card uses. `.settings-preamble-title` was a 12px uppercase div doing a heading's job,
+            so this page named its one section differently from the eleven others -- the same
+            improvised-style problem the Access Control page was corrected for. Header, then body. */}
+        <div className="card settings-preamble" style={{ marginBottom: '12px' }}>
+          <div className="card-header">
+            <h3 className="section-title">
+              <IconSettings size={15} style={{ verticalAlign: '-2px', marginRight: '6px' }} />
+              Runtime configuration
+            </h3>
           </div>
-          <p>
-            These take effect without a restart and override the environment defaults they name.
-            The list is fixed: a setting appears here because code reads it, so new ones arrive
-            with the feature that needs them rather than being added by hand.
-          </p>
-          <p className="settings-preamble-warning">
-            <strong>Nothing secret is stored here.</strong> Every signed-in user can read this
-            page. Credentials — S3 keys, OIDC client secrets — belong in the secret store, not in
-            a setting.
-          </p>
+          <div className="card-body">
+            <p>
+              These take effect without a restart and override the environment defaults they name.
+              The list is fixed: a setting appears here because code reads it, so new ones arrive
+              with the feature that needs them rather than being added by hand.
+            </p>
+            <p className="settings-preamble-warning">
+              <strong>Nothing secret is stored here.</strong> Every signed-in user can read this
+              page. Credentials — S3 keys, OIDC client secrets — belong in the secret store, not in
+              a setting.
+            </p>
+          </div>
         </div>
 
         {loadError && <div className="card settings-load-error">{loadError}</div>}

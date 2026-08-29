@@ -3716,9 +3716,10 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
    cheaper to say here than to discover: the list cannot be added to, and nothing secret may be
    stored in it. Someone hunting for where to put an S3 key should meet that sentence BEFORE
    putting it somewhere every signed-in user can read. */
+/* The padding moved to `.card-body`, which every card now uses. What is left is the type: this
+   preamble reads at 12px rather than the 13px a table description uses, because it is two
+   paragraphs rather than one and the second is a warning. */
 .settings-preamble {
-  padding: 14px 16px;
-  margin-bottom: 12px;
   font-size: 12px;
   color: var(--text-muted);
   line-height: 1.55;

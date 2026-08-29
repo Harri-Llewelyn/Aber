@@ -301,7 +301,10 @@ describe('the running card', () => {
   const JOB = {
     id: 'job-1', status: 'RECORDING', subject_sparkplug_id: 'gwy120000000000400080000',
     gateways: { name: 'Line 1 Gateway' }, devices: null, note: 'night shift',
-    messages: 120, bytes: 45000, elapsed_seconds: 3, max_seconds: 600, birth_captured: true
+    messages: 120, bytes: 45000, elapsed_seconds: 3, max_seconds: 600, birth_captured: true,
+    // The three caps a recording stops at. NOT NULL on the row, so a fixture without them was
+    // testing a shape the database cannot produce.
+    max_messages: 100000, max_bytes: 52428800
   }
 
   it('shows progress for the one running capture', async () => {

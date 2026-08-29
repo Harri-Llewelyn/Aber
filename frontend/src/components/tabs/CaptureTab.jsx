@@ -929,12 +929,44 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
             seconds, the daemon is not running.
           </div>
         ) : (
-          <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>
-            {job.messages} message{job.messages === 1 ? '' : 's'} · {formatSize(job.bytes)} ·{' '}
-            {job.elapsed_seconds}s of {job.max_seconds}s
-            {' · '}
-            {job.birth_captured ? 'birth certificate captured' : 'no birth certificate yet'}
-          </div>
+          <>
+            {/* A BAR FOR THE CLOCK, NUMBERS FOR THE OTHER TWO CAPS, and the split is the point.
+                A recording stops at whichever of THREE limits binds first -- duration, 100,000
+                messages, 50 MiB -- so a single bar at 10% would promise 90% remaining when the
+                message cap might fire in two seconds. The bar is labelled as the DURATION only and
+                the other two stay as figures beside it, which is the same reason this card counts
+                up rather than down. */}
+            <div
+              style={{
+                height: '4px', borderRadius: '2px', background: 'var(--bg-glass)',
+                overflow: 'hidden', margin: '8px 0 6px'
+              }}
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={job.max_seconds}
+              aria-valuenow={Math.min(job.elapsed_seconds, job.max_seconds)}
+              aria-label="Elapsed against the duration cap"
+              // The caps are NOT NULL columns, so they are always present on a real row -- but the
+              // title is cosmetic and must not be the thing that throws if one is ever absent.
+              title={`${job.elapsed_seconds}s of the ${job.max_seconds}s duration cap.`
+                + (job.max_messages && job.max_bytes
+                  ? ` The recording also stops at ${job.max_messages.toLocaleString()} messages or ${formatSize(job.max_bytes)}, whichever comes first.`
+                  : '')}
+            >
+              <div
+                style={{
+                  width: `${Math.min(100, (job.elapsed_seconds / Math.max(job.max_seconds, 1)) * 100)}%`,
+                  height: '100%', background: 'var(--accent)', transition: 'width 1s linear'
+                }}
+              />
+            </div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+              {job.elapsed_seconds}s of {job.max_seconds}s ·{' '}
+              {job.messages} message{job.messages === 1 ? '' : 's'} · {formatSize(job.bytes)}
+              {' · '}
+              {job.birth_captured ? 'birth certificate captured' : 'no birth certificate yet'}
+            </div>
+          </>
         )}
         {/* THE BANNER SETTLES RATHER THAN VANISHING. This warning is only on screen while the card
             is, which is exactly the window nobody is watching — so it also resolves into
