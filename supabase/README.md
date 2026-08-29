@@ -456,6 +456,31 @@ the nameplate, and a self-check fails if a shadow ever gains one: `device_namepl
 IDTA Nameplate and holds a serial number, so a copy would make the AAS Part 5 export emit two shells
 asserting the same asset identity.
 
+### What is stale, and what is merely quiet (`0029`, `0061`)
+
+`platform_health` is the one view Grafana's platform rules read, and its `gateway_stale` arm is the
+only thing standing between an appliance going quiet and somebody being told. It is therefore also
+the arm most easily ruined, and it was: `0029` excluded archived gateways and nothing else, which
+was correct until `0060` seeded a gateway that is *never* expected to heartbeat.
+
+**Nothing publishes as the `Playback` gateway until a playback runs**, which is deliberate — it is
+why `start_playback_job()` gates on credential possession rather than on `status = 'ONLINE'`. So it
+was permanently stale, permanently in the view, and `acs-gateway-stale` fired five minutes after
+every boot and never cleared. `0061` adds `AND NOT g.is_shadow`, for exactly the reason `0029`
+already gives for archived appliances: *"alerting on it would train an operator to ignore the
+rule."*
+
+**`is_shadow`, and not one of the other three flags.** `is_simulated` is carried by every simulator
+gateway, and those do heartbeat — their silence is a real fault. `is_virtual` answers whether an
+appliance physically exists, not whether anything publishes as it. `is_archived` would mean
+archiving the gateway, which `0060`'s trigger forbids: it requires exactly one live shadow gateway
+to exist.
+
+**The panel is a separate question from the alert, and is deliberately left open.** `gateway_health`
+(`0036`) carries the same archived-only exclusion, so the Playback lane still appears there with a
+stale heartbeat. A panel is an inventory and an alert is a demand for action; answering both with
+one predicate would be fixing the second by reflex.
+
 ### `0001` builds `gateway_status` by calling the function, not inline
 
 `pg_dump` expanded the view into an **explicit column list** when the baseline was squashed, while

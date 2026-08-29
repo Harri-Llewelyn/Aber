@@ -642,6 +642,17 @@ function edgeFunctionNames() {
       vocabulary: they write entity_type = 'service_principals', which is NOT a table, so every one
       of their rows answered "absent from all three" and was hidden as a deleted asset. 0045 scopes
       the question to the three types that can answer it. The anti-join itself is unchanged.`,
+    'public.platform_health_rows': `0029 excludes archived gateways from the gateway_stale arm and
+      nothing else, which was right when it was written; 0061 ALSO excludes shadow gateways. The
+      Playback gateway (0060) is never expected to heartbeat -- nothing publishes as it until a
+      playback runs -- so it sat permanently in the view and fired acs-gateway-stale five minutes
+      after every boot, which is precisely the "trains an operator to ignore the rule" cost 0029's
+      own comment names for archived appliances. THE BODY IS REPRODUCED IN FULL rather than patched:
+      the enrolment and quarantine arms are unchanged, and leaving them in a different migration
+      from the live definition would make a reader assemble the function from two files. 0061's
+      self-check asserts the view emits exactly the gateways the predicate names, in both
+      directions, because this list can check that a redeclaration was INTENDED and not that it was
+      COMPLETE.`,
     'public.ensure_gateway_status_view': `0025 widens public.gateway_status for the enrolment columns
       and adds the branch that short-circuits PENDING_ENROLLMENT / AWAITING_BIRTH ahead of the
       staleness test. g.* is expanded at CREATE time, so the view cannot be widened in place.`,
