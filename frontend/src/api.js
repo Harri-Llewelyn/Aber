@@ -1138,6 +1138,26 @@ const apiMethods = {
     }));
   },
 
+  /**
+   * What the playback worker can actually publish as, and when it last said so.
+   *
+   * THE THIRD FACT THE DIALOG NEEDS, and the only one the database cannot derive. A target can be
+   * `is_simulated` and hold a platform-issued credential and still be unreachable, because the
+   * password is minted in a browser and pasted into the worker's environment by hand — two acts,
+   * and nothing until now noticed when only the first had happened.
+   *
+   * Returns null when nothing has ever reported, which the caller treats the same as stale: in
+   * both cases the honest thing to say is that the worker is not running.
+   */
+  playbackWorkerStatus: async () => {
+    const { data, error } = await supabase
+      .from('playback_worker_status')
+      .select('held_edge_nodes, reported_at')
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'Could not read the playback worker status');
+    return data || null;
+  },
+
   activePlaybackJob: async () => {
     const { data, error } = await supabase
       .from('playback_jobs')

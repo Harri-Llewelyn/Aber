@@ -16,10 +16,11 @@ import { tabIsVisible, navDensity, TABS } from '../App'
  *      routine re-record. The dialog is the only thing standing there, and a dialog that says "are
  *      you sure" does not do the job -- so the tests assert the timestamp AND the note are in it.
  *
- *   2. `birth_captured = false` HAS TO BE VISIBLE ON THE LIST. A capture with no NBIRTH replays as
- *      `unresolved_alias` against an alias-optimised gateway and drops every metric, from a file
- *      whose size and message count look entirely normal. If the badge is missing, nothing else on
- *      the page distinguishes the two.
+ *   2. `birth_captured = false` HAS TO BE VISIBLE ON THE LIST, AND MUST NOT OVERSTATE ITSELF. A
+ *      capture with no NBIRTH drops every metric only when it USES ALIASES; one whose metrics carry
+ *      their full names replays perfectly well and merely leaves the devices unannounced. The badge
+ *      shipped saying the first about both, which told operators a good capture was broken — so
+ *      both branches are pinned below.
  *
  * The rest is the shape the daemon and the schema require: a device capture is a subject in its own
  * right, one capture runs at a time, and the page never records anything itself.
@@ -42,6 +43,7 @@ vi.mock('../api', async () => {
       playbackTargets: vi.fn(),
       activePlaybackJob: vi.fn(),
       recentPlaybackJobs: vi.fn(),
+      playbackWorkerStatus: vi.fn(),
       startPlayback: vi.fn(),
       stopPlayback: vi.fn()
     }
@@ -118,6 +120,11 @@ beforeEach(() => {
   api.activePlaybackJob.mockResolvedValue(null)
   api.recentPlaybackJobs.mockResolvedValue([])
   api.playbackTargets.mockResolvedValue([TARGET])
+  // A live worker holding the target's password: the ordinary case, so the existing tests are
+  // about what they were about rather than about a worker that has never reported.
+  api.playbackWorkerStatus.mockResolvedValue({
+    held_edge_nodes: ['gwy130000000000400080000'], reported_at: new Date().toISOString()
+  })
 })
 
 const TARGET = {
@@ -701,6 +708,48 @@ describe('publishing a capture back', () => {
     selectRow(row); fireEvent.click(panelAction(/Play back/))
     fireEvent.change(await screen.findByLabelText('Publish as'), { target: { value: 'gw-sim' } })
     expect(await screen.findByText(/publishes no device-level traffic/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Publish capture/ })).not.toBeDisabled()
+  })
+
+  /**
+   * TIER TWO, MADE VISIBLE. `gateway_has_broker_credential` says the PLATFORM issued a credential;
+   * only the worker knows whether it was given the password. Minting it and pasting it into the
+   * worker's environment are two acts, and until this the dialog could not tell they had come
+   * apart — it showed a green target and the job failed a second later.
+   */
+  it('refuses a target whose password the worker was not given', async () => {
+    api.playbackWorkerStatus.mockResolvedValue({
+      held_edge_nodes: [], reported_at: new Date().toISOString()
+    })
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+
+    expect(await screen.findByText(/was not given/)).toBeInTheDocument()
+    expect(screen.getByText(/MQTT_PLAYBACK_CREDENTIALS/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Publish capture/ })).toBeDisabled()
+  })
+
+  /** "Holds nothing" and "is not running" are different problems, and only the heartbeat tells them apart. */
+  it('says the worker is not running when its report is stale', async () => {
+    api.playbackWorkerStatus.mockResolvedValue({
+      held_edge_nodes: ['gwy130000000000400080000'],
+      reported_at: new Date(Date.now() - 10 * 60 * 1000).toISOString()
+    })
+    await open()
+    expect(await screen.findByText(/has not reported recently/)).toBeInTheDocument()
+  })
+
+  /**
+   * A STALE WORKER MUST NOT BLOCK A PLAYBACK. Its credential list is unknown, not empty — and the
+   * gate and the worker still refuse whatever they always refused. A dialog that stopped a job
+   * because a courtesy row was old would be worse than the failure it prevents.
+   */
+  it('still allows a playback when the worker status is unknown', async () => {
+    api.playbackWorkerStatus.mockResolvedValue(null)
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
+      { target: { value: 'dev310000000000400080000' } })
     expect(screen.getByRole('button', { name: /Publish capture/ })).not.toBeDisabled()
   })
 

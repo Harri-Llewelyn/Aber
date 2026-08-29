@@ -1186,6 +1186,40 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/PlaybackJob' } }
         '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
 
+  /rest/v1/playback_worker_status:
+    get:
+      tags: [Storage]
+      summary: Read what the playback worker can publish as
+      description: |
+        One row, holding the gateway `sparkplug_id`s the playback worker has broker passwords for
+        and when it last said so.
+
+        **It exists because the database cannot know this.** `gateway_has_broker_credential()`
+        answers whether the *platform* issued a gateway a credential — an audit row, or an enrolment
+        stamp. Whether the *worker* was given that password is a fact about a process's environment,
+        and minting a credential and pasting it into the worker are two separate acts. Before this,
+        the playback dialog showed a target as ready and the job failed a second later with
+        `this worker holds no broker credential for …`.
+
+        **`reported_at` is a heartbeat, and the distinction it draws matters.** An empty
+        `held_edge_nodes` with a recent timestamp means the worker is running and holds nothing; a
+        stale timestamp means the worker is not running. Those are different problems with different
+        fixes, and an empty list alone cannot tell them apart.
+
+        **No secret is here.** A `sparkplug_id` is a public identifier — it is on the Gateways page,
+        in every topic, and is the MQTT username. The passwords are deliberately absent, for the
+        reason `0041` gives about credentials in readable tables.
+
+        Written only by `playback_report_credentials()`, which the worker's principal alone may
+        call. The table takes no direct write from any application role.
+      responses:
+        '200':
+          description: The worker's most recent report.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlaybackWorkerStatus' }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
+
   /rest/v1/system_settings:
     get:
       tags: [Registry]
@@ -3234,6 +3268,25 @@ components:
         created_at: { type: string, format: date-time }
         started_at: { type: string, format: date-time, nullable: true }
         finished_at: { type: string, format: date-time, nullable: true }
+
+    PlaybackWorkerStatus:
+      type: object
+      description: |
+        What the playback worker can authenticate as, and when it last said so. One row.
+      properties:
+        held_edge_nodes:
+          type: array
+          items: { type: string }
+          description: |
+            Gateway `sparkplug_id`s this worker holds a broker password for. Public identifiers; the
+            passwords are not stored anywhere readable.
+          example: ['gwy130000000000400080000']
+        reported_at:
+          type: string
+          format: date-time
+          description: |
+            Heartbeat, restated every 30 seconds. Stale means the worker is not running — which is a
+            different problem from an empty list, and is why the timestamp is here.
 
     PlaybackJob:
       type: object

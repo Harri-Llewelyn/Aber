@@ -1959,6 +1959,25 @@ protocol layer, before any subscriber sees it. So *"even if the UI supplies an i
 Mosquitto rejects the write"* holds exactly as intended — the rule delivering it is per-gateway
 confinement rather than a namespace prefix.
 
+##### The middle tier was invisible, and a job is where you found out
+
+[`0057`](supabase/migrations/0057_playback_worker_reports_its_reach.sql) exists because
+`gateway_has_broker_credential()` answers the wrong half of the question. It says whether the
+**platform** issued a gateway a credential; it cannot say whether the **worker** was given the
+password, because nothing in the database knows what secrets a process holds. Minting a credential
+shows it once and an operator pastes it into the worker's environment — two acts, and between them
+the dialog showed a green target and the job failed a second later with a message that was correct
+and far too late.
+
+So the worker reports what it holds, on a heartbeat, and the dialog reads it. **The timestamp is the
+part that earns its place**: an empty list with a recent report means the worker is running and holds
+nothing, while no recent report means the worker is down — different problems, different fixes, and
+an empty list alone cannot tell them apart. A stale report never *blocks* a playback: the list is
+then unknown rather than empty, and the gate and the worker still refuse whatever they always
+refused.
+
+Nothing secret is stored. A `sparkplug_id` is the MQTT username and is on the Gateways page already.
+
 ##### Three tiers, which is the house pattern
 
 | tier | what it stops |

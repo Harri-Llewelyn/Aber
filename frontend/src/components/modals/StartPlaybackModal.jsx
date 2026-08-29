@@ -45,6 +45,7 @@ const SPEEDS = [
  */
 export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
   const [targets, setTargets] = useState(null)
+  const [worker, setWorker] = useState(undefined)   // undefined = not loaded, null = never reported
   const [targetId, setTargetId] = useState('')
   const [deviceMap, setDeviceMap] = useState({})
   const [speed, setSpeed] = useState(1)
@@ -59,6 +60,12 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
     api.playbackTargets()
       .then(rows => { if (!cancelled) setTargets(rows) })
       .catch(err => { if (!cancelled) { setTargets([]); setError(err.message) } })
+    // Non-fatal: a status read that fails leaves the dialog exactly as it was before this existed
+    // -- the gate and the worker still refuse what they always refused. It is a courtesy, not a
+    // control, and it must not be able to stop a playback that would have worked.
+    api.playbackWorkerStatus()
+      .then(row => { if (!cancelled) setWorker(row) })
+      .catch(() => { if (!cancelled) setWorker(null) })
     return () => { cancelled = true }
   }, [])
 
@@ -89,8 +96,28 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
   // change into a refusal the operator did not cause.
   useEffect(() => { setDeviceMap({}) }, [targetId])
 
+  /**
+   * Is the worker running, and can it publish as this target?
+   *
+   * STALE IS TREATED AS DOWN. The worker restates its credentials every 30 seconds, so a report
+   * older than a couple of minutes means the process is gone — and a list of gateways from a dead
+   * worker is worse than no list, because it describes what playback COULD do rather than what it
+   * can. Two minutes rather than thirty seconds so a slow tick is not read as a death.
+   */
+  const WORKER_STALE_MS = 2 * 60 * 1000
+  const workerLive = !!worker?.reported_at
+    && (Date.now() - new Date(worker.reported_at).getTime()) < WORKER_STALE_MS
+  const heldByWorker = workerLive ? (worker.held_edge_nodes || []) : []
+  const workerHolds = (t) => !!t && heldByWorker.includes(t.sparkplug_id)
+
   const unmapped = (capturedDevices || []).filter(d => !deviceMap[d])
-  const ready = !!target && target.gateway_has_broker_credential && unmapped.length === 0
+  // The worker check is NOT part of `ready` when the status is unknown -- see the loader. A dialog
+  // that refuses because it could not read a courtesy row would be worse than the failure it is
+  // trying to prevent.
+  const ready = !!target
+    && target.gateway_has_broker_credential
+    && (worker === undefined || !workerLive || workerHolds(target))
+    && unmapped.length === 0
 
   const submit = () => run(async () => {
     setError(null)
@@ -168,7 +195,9 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
                 {targets.map(t => (
                   <option key={t.id} value={t.id}>
                     {t.name} ({t.sparkplug_id})
-                    {t.gateway_has_broker_credential ? '' : ' — no broker credential'}
+                    {!t.gateway_has_broker_credential
+                      ? ' — no broker credential'
+                      : (workerLive && !workerHolds(t) ? ' — worker has no password' : '')}
                   </option>
                 ))}
               </select>
@@ -189,6 +218,37 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
               <strong>{target.name}</strong> holds no broker credential, so nothing can authenticate
               as it. Issue one from the Access Control page — that is also how you obtain the
               password the playback worker needs, and it is shown only once.
+            </div>
+          </div>
+        )}
+
+        {/* TIER TWO, SAID BEFORE THE CLICK. The platform having issued a credential and the WORKER
+            having been given it are two different facts, and only the worker knows the second. It
+            reports what it holds on a heartbeat; this is that report, read back. Without it the
+            dialog showed a green target and the job failed a second later with the same sentence. */}
+        {target && target.gateway_has_broker_credential && workerLive && !workerHolds(target) && (
+          <div className="callout" style={{ borderColor: 'var(--danger)', marginTop: '10px' }}>
+            <IconShieldAlert size={14} className="callout-icon" />
+            <div style={{ fontSize: '12px' }}>
+              <strong>{target.name}</strong> has a credential, but the playback worker was not given
+              its password, so it cannot authenticate as this gateway. Add it to{' '}
+              <code>MQTT_PLAYBACK_CREDENTIALS</code> as{' '}
+              <code>{`{"${target.sparkplug_id}": "…"}`}</code> and restart the worker. The password
+              is shown only when the credential is minted — issue a new one from Access Control if
+              it was not kept.
+            </div>
+          </div>
+        )}
+
+        {/* "Holds nothing" and "is not running" are different problems with different fixes, and an
+            empty list cannot tell them apart. The heartbeat is what separates them. */}
+        {worker !== undefined && !workerLive && (
+          <div className="callout callout-warning" style={{ marginTop: '10px' }}>
+            <IconShieldAlert size={14} className="callout-icon" />
+            <div style={{ fontSize: '12px' }}>
+              The playback worker has not reported recently, so which gateways it can publish as is
+              unknown. A job started now will queue and wait. Check that the <code>playback</code>
+              {' '}service is running.
             </div>
           </div>
         )}
@@ -294,7 +354,9 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
             title={ready ? undefined : (
               !target ? 'Choose a target gateway'
                 : !target.gateway_has_broker_credential ? 'This gateway holds no broker credential'
-                  : `${unmapped.length} device${unmapped.length === 1 ? '' : 's'} still to map`
+                  : (workerLive && !workerHolds(target))
+                    ? 'The playback worker was not given this gateway’s password'
+                    : `${unmapped.length} device${unmapped.length === 1 ? '' : 's'} still to map`
             )}
             onClick={submit}
           >
