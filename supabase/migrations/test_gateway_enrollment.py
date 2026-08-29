@@ -146,11 +146,11 @@ class GatewayEnrollmentBase(unittest.TestCase):
             # mint a broker credential nothing could ever present.
             cur.execute(
                 """
-                INSERT INTO public.gateways (id, name, status, is_virtual)
-                VALUES (%s, 'Test_Physical_Gateway', 'OFFLINE', false),
-                       (%s, 'Test_Virtual_Gateway',  'OFFLINE', true)
+                INSERT INTO public.gateways (id, name, status, deployment)
+                VALUES (%s, 'Test_Remote_Gateway',   'OFFLINE', 'remote'),
+                       (%s, 'Test_Host_Run_Gateway', 'OFFLINE', 'host')
                 ON CONFLICT (id) DO UPDATE
-                   SET is_virtual = EXCLUDED.is_virtual, status = 'OFFLINE';
+                   SET deployment = EXCLUDED.deployment, status = 'OFFLINE';
                 """,
                 (PHYSICAL_GW, VIRTUAL_GW),
             )
@@ -347,7 +347,7 @@ class TestRedeeming(GatewayEnrollmentBase):
         # appliance falling through to the group-agnostic arm, which works until a second group
         # exists and then silently stops.
         self.assertTrue(sparkplug_group)
-        self.assertEqual(name, "Test_Physical_Gateway")
+        self.assertEqual(name, "Test_Remote_Gateway")
 
     def test_token_is_single_use(self):
         token, _ = self.issue()

@@ -9,9 +9,13 @@ import {
   formatCertExpiry, isCertExpiring, formatBytes, CERT_EXPIRY_WARN_DAYS
 } from '../../utils/gatewayStatus'
 import { gatewaySparkplugId } from '../../utils/sparkplugId'
+import {
+  GATEWAY_TYPES, SELECTABLE_TYPES, gatewayType, gatewayTypeFields,
+  gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone,
+} from '../../utils/gatewayType'
 import { deviceLifecycleStatus, deviceStatusDotColor, deviceStatusTitle, deviceDotColor } from '../../utils/deviceStatus'
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
-import { SCOPE_CELL, SCOPE_SITE_WIDE } from '../../utils/cellResolution'
+import { SCOPE_CELL, SCOPE_SITE_WIDE, gatewayAcceptsCell } from '../../utils/cellResolution'
 import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
 import { StatusBadge } from '../common/StatusBadge'
@@ -64,11 +68,23 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   // as live as the row it came from, and it closes itself if the entity disappears.
   const [selectedId, setSelectedId] = useState(null)
   // location_scope defaults to 'cell' -- an edge node belongs in some cell until someone says
-  // otherwise. is_virtual is deliberately NOT the same question: virtual is a deployment fact
-  // (this connector runs on the app host), site-wide is a claim about location. A virtual
-  // gateway is usually site-wide, but conflating them would relocate assets on a checkbox.
-  const blank = { gateway_id: '', gateway_name: '', status: 'OFFLINE', is_virtual: false, is_simulated: false, access_url: '', cell_id: '', location_scope: SCOPE_CELL }
+  // otherwise. `deployment` is deliberately NOT the same question: it says where the connector
+  // RUNS, site-wide is a claim about where the assets ARE. A host-run gateway is usually
+  // site-wide, but conflating them would relocate assets on a checkbox.
+  //
+  // 'remote' is the default because it is the case that needs setup: a remote gateway leaves this
+  // form with a bundle to install, and defaulting to the one that finishes on save would let an
+  // operator create a gateway that silently never gets an appliance.
+  const blank = { gateway_id: '', gateway_name: '', status: 'OFFLINE', deployment: 'remote', is_simulated: false, access_url: '', cell_id: '', location_scope: SCOPE_CELL }
   const [form, setForm]         = useState(blank)
+  // DERIVED, NOT A SECOND PIECE OF STATE. The form carries `deployment` and `is_simulated` because
+  // that is what the API takes; the select carries one word. Storing both would be two things to
+  // keep in step for one decision -- the bug class this whole item is about.
+  const formType = gatewayType(form)
+  // Derived the same way and for the same reason, off the flags rather than off `formType`: the
+  // rule belongs to `gateways_synthetic_has_no_cell`, which is written in terms of the two
+  // columns, so reading them keeps this true if a fourth type is ever added.
+  const formAcceptsCell = gatewayAcceptsCell(form)
   const [docsForGw, setDocsForGw] = useState(null)
   // The gateway whose bundle modal is open. Held as the OBJECT rather than an id: the modal needs
   // the name and sparkplug_id, and it stays open across a poll that may reorder the list.
@@ -181,14 +197,14 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
        * The row is seconds old, so there is no earlier bundle for this one to invalidate -- the
        * whole reason that confirmation exists is absent here. See GatewayBundleModal.
        */
-      if (!form.is_virtual) {
+      if (form.deployment === 'remote') {
         setBundleForGw({
           gateway_id: created.id || created.gateway_id,
           gateway_name: created.name || form.gateway_name,
           sparkplug_id: created.sparkplug_id,
           confirmFirst: false
         })
-        showToast('Physical gateway created — download its bundle to finish setup', 'success')
+        showToast('Remote gateway created — download its bundle to finish setup', 'success')
       } else {
         showToast('Gateway created', 'success')
       }
@@ -245,8 +261,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
       if (!haystack.includes(q)) return false
     }
     if (liveStatusFilter && gatewayLiveStatus(g) !== liveStatusFilter) return false
-    if (kindFilter === 'virtual'  && !g.is_virtual) return false
-    if (kindFilter === 'physical' && g.is_virtual) return false
+    // Compared against the derived type, not against `deployment`: Simulated and Host are the same
+    // deployment and differ only in the flag beside it.
+    if (kindFilter && gatewayType(g) !== kindFilter) return false
     if (quarantineOnly && !gatewaysWithQuarantine.has(g.gateway_id)) return false
     return true
   })
@@ -344,10 +361,16 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           <option value="OFFLINE">Offline</option>
         </select>
 
-        <select className="form-control" style={{ width: '160px' }} value={kindFilter} onChange={e => setKindFilter(e.target.value)} title="Separate simulated/virtual edge nodes from physical hardware">
-          <option value="">Any kind</option>
-          <option value="physical">Physical</option>
-          <option value="virtual">Virtual</option>
+        {/* FILTERS ON THE SAME VALUE THE Type COLUMN PRINTS, through the same helper. It used to
+            filter on `deployment` alone and offer "On an appliance" / "On this host", which could
+            not express Simulated at all: a simulated gateway is host-run, so "On this host"
+            returned it alongside the real connectors and there was no way to separate them --
+            while the column beside it had been telling them apart since 0064. */}
+        <select className="form-control" style={{ width: '160px' }} value={kindFilter} onChange={e => setKindFilter(e.target.value)} title="Filter by the Type column: Remote (an appliance on the plant network), Host (a connector inside this stack), or Simulated (host-run, readings generated)">
+          <option value="">Any type</option>
+          {SELECTABLE_TYPES.map(t => (
+            <option key={t} value={t}>{gatewayTypeLabel(t)}</option>
+          ))}
         </select>
 
         <button
@@ -381,6 +404,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                  <tr>
                    <th title="Human-readable gateway name">Gateway Name</th>
                    <th title="Sparkplug B edge node id this gateway publishes under">Sparkplug ID</th>
+                   <th title="Where this gateway's connector runs, and whether its readings are real: Remote (an appliance on the plant network), Host (inside this stack), Simulated (host-run, readings generated), Shadow (republishes recorded captures)">Type</th>
                    <th title="Shopfloor cell zone this gateway serves">Cell Zone</th>
                    <th title="Network connectivity status">Gateway Status</th>
                    <th title="Age of the last Sparkplug B node heartbeat (NBIRTH/NDATA/NDEATH)">Last Heartbeat</th>
@@ -406,21 +430,15 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                        >
                          <td>
                            <strong>{g.gateway_name}</strong>
-                           {g.is_virtual && (
-                             <span className="badge badge-warning" style={{ background: 'rgba(0,212,255,0.15)', color: 'var(--accent)', border: '1px solid var(--accent)', marginLeft: '8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="ACS-Cymru Cloud Virtual Gateway">
-                               <IconZap size={11} /> VIRTUAL
-                             </span>
-                           )}
-                           {/* SEPARATE FROM VIRTUAL, AND BOTH CAN BE SHOWN AT ONCE. Virtual is
-                               about whether an edge appliance exists; this is about whether the
-                               readings are real. A physical appliance replaying a capture is
-                               virtual=false, simulated=true, which is why neither implies the
-                               other and the badges do not merge. */}
-                           {g.is_simulated && (
-                             <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Telemetry from this gateway is generated, not observed -- a simulator or a broker playback target">
-                               SIMULATED
-                             </span>
-                           )}
+                           {/* THE KIND OF GATEWAY IS A COLUMN NOW, not two badges beside the name.
+                               They were VIRTUAL and SIMULATED, could both appear at once, and
+                               between them said three things -- where it runs, whether the numbers
+                               are real, and (in the tooltip) "Cloud", which contradicted the first.
+                               One Type column answers the question once, and sorts.
+
+                               ARCHIVED STAYS HERE, because it is not a kind: a gateway of any type
+                               can be decommissioned, and it is the state that changes what the row
+                               MEANS rather than what the gateway IS. */}
                            {g.is_archived && (
                              <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Decommissioned gateway">
                                <IconArchive size={11} /> ARCHIVED
@@ -429,14 +447,38 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                          </td>
                          <td><CopyableId value={g.sparkplug_id || gatewaySparkplugId(g.gateway_id)} label="Sparkplug edge node id" onNotify={showToast} /></td>
                          <td>
-                           {/* Three states, not two. Site-Wide is an answer -- a host-run
-                               connector serving the facility -- and must not read as the
-                               unanswered case, or nobody ever stops trying to "fix" it. */}
-                           {g.location_scope === SCOPE_SITE_WIDE
-                             ? <span className="badge badge-neutral" style={{ fontSize: '11px' }} title="Serves the whole facility rather than one cell. Its devices need their own cell.">Site-Wide</span>
-                             : g.cell_id
-                               ? (cells.find(c => c.cell_id === g.cell_id)?.cell_name || <span className="mono">{g.cell_id}</span>)
-                               : <span style={{ fontSize: '11px', color: 'var(--warning-text)', fontStyle: 'italic' }} title="Devices on this gateway inherit no cell, so they land in the Unassigned queue">No cell</span>}
+                           <span
+                             className={`badge badge-${gatewayTypeTone(gatewayType(g))}`}
+                             style={{ fontSize: '11px' }}
+                             title={gatewayTypeDescription(gatewayType(g))}
+                           >
+                             {gatewayTypeLabel(gatewayType(g))}
+                           </span>
+                         </td>
+                         <td>
+                           {/* FOUR STATES, AND THE FIRST ONE IS "THE QUESTION DOES NOT APPLY".
+                               A synthetic gateway cannot hold a cell -- gateways_synthetic_has_no_cell
+                               (0059) -- so `location_scope` on one is inert: `device_locations`
+                               resolves simulated and shadow AHEAD of it, and the value changes
+                               nothing about where anything lands.
+
+                               It was still being PRINTED, which is how four simulated gateways came
+                               to report three different cell zones between them: the one seeded
+                               `site_wide` read "Site-Wide" and the others read "No cell", a
+                               difference with no behaviour behind it. Worse, "No cell" is rendered
+                               as a warning promising devices in the Unassigned queue, and theirs
+                               are in the Simulated lane. Both were answering a question this row
+                               does not have.
+
+                               Site-Wide is still an answer for every other gateway, and must not
+                               read as the unanswered case, or nobody ever stops trying to fix it. */}
+                           {!gatewayAcceptsCell(g)
+                             ? <span style={{ fontSize: '11px', color: 'var(--text-dim)' }} title={`${gatewayTypeLabel(gatewayType(g))} gateways have no cell: their devices resolve to the ${gatewayTypeLabel(gatewayType(g))} lane, which takes precedence over cell membership.`}>—</span>
+                             : g.location_scope === SCOPE_SITE_WIDE
+                               ? <span className="badge badge-neutral" style={{ fontSize: '11px' }} title="Serves the whole facility rather than one cell. Its devices need their own cell.">Site-Wide</span>
+                               : g.cell_id
+                                 ? (cells.find(c => c.cell_id === g.cell_id)?.cell_name || <span className="mono">{g.cell_id}</span>)
+                                 : <span style={{ fontSize: '11px', color: 'var(--warning-text)', fontStyle: 'italic' }} title="Devices on this gateway inherit no cell, so they land in the Unassigned queue">No cell</span>}
                          </td>
                          <td>
                            {g.is_archived ? (
@@ -532,79 +574,110 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 Optional, and read by nothing — a note for whoever comes to this next.
               </div>
             </div>
+            {/* ONE CONTROL, NOT TWO CHECKBOXES, AND THE SCHEMA STILL HOLDS TWO FACTS.
+
+                It was "Runs on this host" plus "Telemetry is simulated or replayed", which offered
+                four combinations where the database permits three: `gateways_simulated_is_host`
+                (0064) forbids a remote simulator, so one of the four was a write that would be
+                refused after the operator had ticked it. A select over the legal states cannot
+                express the refused one.
+
+                This is a rendering of the constraint rather than a collapse of the model -- see
+                utils/gatewayType.js. If a remote simulator is ever wanted, the CHECK relaxes in one
+                line and a fourth option appears here with no data migration behind it.
+
+                IT COMES BEFORE THE CELL ZONE BECAUSE IT GOVERNS IT. Choosing Simulated makes the
+                field below unavailable, and a control that disables the one above it makes an
+                operator re-read a decision they had already taken. */}
             <div className="form-group">
-              <label className="form-label">Shopfloor Cell Zone</label>
+              <label className="form-label" htmlFor="gateway-type">Type</label>
               <select
+                id="gateway-type"
                 className="form-control"
-                value={form.location_scope === SCOPE_SITE_WIDE ? '' : (form.cell_id || '')}
-                disabled={form.location_scope === SCOPE_SITE_WIDE}
-                onChange={e => setForm(f => ({ ...f, cell_id: e.target.value }))}
-                title="Cell this gateway serves — its devices inherit this cell unless they carry one of their own"
+                value={formType}
+                onChange={e => setForm(f => ({
+                  ...f,
+                  ...gatewayTypeFields(e.target.value),
+                  // CLEARED HERE, NOT LEFT FOR THE SAVE TO DISCOVER.
+                  // `gateways_synthetic_has_no_cell` (0059) refuses a simulated gateway that holds
+                  // a cell, so carrying a stale cell_id through this change turns the Save button
+                  // into a constraint violation -- with the offending field disabled and the
+                  // operator unable to see, let alone clear, the value being rejected.
+                  ...(e.target.value === GATEWAY_TYPES.SIMULATED
+                    ? { cell_id: '', location_scope: SCOPE_CELL }
+                    : {})
+                }))}
+                title="Where this gateway's connector runs, and whether its readings are real"
+              >
+                {SELECTABLE_TYPES.map(t => (
+                  <option key={t} value={t}>{gatewayTypeLabel(t)}</option>
+                ))}
+              </select>
+            </div>
+            {/* THE CONSEQUENCE, SAID BEFORE IT IS CHOSEN. Remote means a bundle to download and
+                hardware to run it on; the other two mean the row is finished on save. That
+                difference used to be invisible until after the gateway existed.
+
+                Shown for every type rather than only on create, unlike the note it replaces: the
+                Simulated description is about what the READINGS are, which an operator editing an
+                existing row has as much reason to read as one creating it. */}
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '-6px', marginBottom: '12px' }}>
+              {gatewayTypeDescription(formType)}
+              {!editing && formType === GATEWAY_TYPES.REMOTE
+                && ' On save you will be given a bundle to copy to that machine; it enrols itself and appears here as online.'}
+            </div>
+            {/* SITE-WIDE IS AN OPTION IN THIS LIST, NOT A CHECKBOX BESIDE IT.
+
+                The two controls answered ONE question -- where does this gateway sit -- and the
+                answers are mutually exclusive by CHECK (`gateways_site_wide_has_no_cell`): "it is
+                in no particular cell" and "it is in Bay 4" cannot both be true. Splitting one
+                question across a select and a tick box made the exclusion something the form had
+                to enforce by clearing the other control, and made Site-Wide look like a modifier
+                on a cell choice rather than an alternative to it.
+
+                Its option value is SCOPE_SITE_WIDE, which cannot collide with a cell id: those are
+                UUIDs. */}
+            <div className="form-group">
+              <label className="form-label" htmlFor="gateway-cell-zone">Shopfloor Cell Zone</label>
+              <select
+                id="gateway-cell-zone"
+                className="form-control"
+                // READS AS "NO CELL" FOR A SYNTHETIC GATEWAY WHATEVER IS STORED, which is the
+                // reported bug in its other half: the seeded BMS simulator carries
+                // `location_scope = 'site_wide'` from before 0059 made the flag win, so a disabled
+                // box would have shown "Site-Wide" directly above a note saying simulated gateways
+                // have no cell. The stored value is inert -- device_locations resolves `simulated`
+                // ahead of it -- and this is a display fallback, not a write: nothing is cleared
+                // here, only on the type change that would make the row unsavable.
+                value={!formAcceptsCell
+                  ? ''
+                  : form.location_scope === SCOPE_SITE_WIDE ? SCOPE_SITE_WIDE : (form.cell_id || '')}
+                disabled={!formAcceptsCell}
+                onChange={e => setForm(f => (e.target.value === SCOPE_SITE_WIDE
+                  ? { ...f, location_scope: SCOPE_SITE_WIDE, cell_id: '' }
+                  : { ...f, location_scope: SCOPE_CELL, cell_id: e.target.value }))}
+                title={formAcceptsCell
+                  ? 'Cell this gateway serves — its devices inherit this cell unless they carry one of their own'
+                  : 'A simulated gateway belongs to the Simulated lane, which resolves ahead of any cell'}
               >
                 <option value="">— No cell assigned —</option>
+                <option value={SCOPE_SITE_WIDE}>Site-Wide — serves no single cell</option>
                 {cells.filter(c => !c.is_archived).map(c => (
                   <option key={c.cell_id} value={c.cell_id}>{c.cell_name}</option>
                 ))}
               </select>
 
-              {/* Site-Wide is what a host-run or central connector actually is: it serves the
-                  facility, not a bay. Ticking it clears the cell, mirroring
-                  gateways_site_wide_has_no_cell -- "it is in no particular cell" and "it is in
-                  Bay 4" cannot both be true. */}
-              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px', fontSize: '12px', cursor: 'pointer' }}
-                     title="For a host-run or central gateway that serves the whole facility rather than one cell">
-                <input
-                  type="checkbox"
-                  checked={form.location_scope === SCOPE_SITE_WIDE}
-                  onChange={e => setForm(f => ({
-                    ...f,
-                    location_scope: e.target.checked ? SCOPE_SITE_WIDE : SCOPE_CELL,
-                    cell_id: e.target.checked ? '' : f.cell_id
-                  }))}
-                />
-                <span>Site-Wide — this gateway serves no single cell</span>
-              </label>
-
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
-                {form.location_scope === SCOPE_SITE_WIDE
-                  ? 'Its devices inherit nothing from it, so each one needs its own cell — or its own Site-Wide mark. Scope is not inherited: a machine reached through a host-run connector is still in a cell.'
-                  : form.cell_id
-                    ? 'Devices served by this gateway appear under this cell, unless a device carries a cell of its own.'
-                    : 'With no cell here, devices served by this gateway land in the Unassigned queue unless each is given one. If this connector serves the whole facility, mark it Site-Wide instead.'}
+                {!formAcceptsCell
+                  /* Says which lane it lands in instead, so the disabled control reads as an
+                     answer already given rather than as a field that failed to load. */
+                  ? 'Simulated gateways have no cell: their devices resolve to the Simulated lane, which takes precedence over cell membership. gateways_synthetic_has_no_cell (0059) refuses the pairing outright.'
+                  : form.location_scope === SCOPE_SITE_WIDE
+                    ? 'Its devices inherit nothing from it, so each one needs its own cell — or its own Site-Wide mark. Scope is not inherited: a machine reached through a host-run connector is still in a cell.'
+                    : form.cell_id
+                      ? 'Devices served by this gateway appear under this cell, unless a device carries a cell of its own.'
+                      : null}
               </div>
-            </div>
-            {/* .form-group-check rather than an inline 12px/12px pair: this was the one field in
-                the app on its own vertical rhythm, which read as a gap where a field had been
-                deleted rather than as a deliberately tighter row. */}
-            <div className="form-group form-group-check">
-              <input type="checkbox" id="is_virtual" checked={form.is_virtual || false} onChange={e => setForm(f => ({ ...f, is_virtual: e.target.checked }))} />
-              <label htmlFor="is_virtual" className="form-label">⚡ Mark as Virtual Gateway (Cloud / Server-Simulated)</label>
-            </div>
-            {/* THE CONSEQUENCE OF THE CHECKBOX, SAID BEFORE IT IS TICKED. Leaving it clear means a
-                bundle to download and hardware to run it on; ticking it means the row is finished on
-                save. That difference used to be invisible until after the gateway existed. Shown only
-                when creating: an existing gateway's enrolment is not re-run by editing its row. */}
-            {!editing && (
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '-6px', marginBottom: '12px' }}>
-                {form.is_virtual
-                  ? 'Runs on the application host. Nothing to install — this gateway is ready once saved.'
-                  : 'Runs on its own hardware. On save you will be given a bundle to copy to that machine; it enrols itself and appears here as online.'}
-              </div>
-            )}
-            <div className="form-group form-group-check">
-              <input type="checkbox" id="is_simulated" checked={form.is_simulated || false} onChange={e => setForm(f => ({ ...f, is_simulated: e.target.checked }))} />
-              <label htmlFor="is_simulated" className="form-label">Telemetry is simulated or replayed</label>
-            </div>
-            {/* WHAT TICKING IT MEANS, SAID WHERE IT IS TICKED. It changes no behaviour on the
-                ingestion path -- a simulated gateway is ingested exactly like a real one, which is
-                the point of broker playback -- so the only thing it does is let everything
-                downstream tell the difference. Saying so stops it reading as a switch that
-                quarantines or diverts the data. */}
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '-6px', marginBottom: '12px' }}>
-              Marks this gateway's readings as generated rather than observed — a simulator, or a
-              target for <code>capture.py play</code>. Its devices inherit the mark; they have no
-              setting of their own. Ingestion is unchanged: this is a label for dashboards,
-              retention and reports, not a filter on the data path.
             </div>
             <div className="form-group">
               <label className="form-label">Gateway Access URL (Optional UI Console)</label>
@@ -646,7 +719,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
         subtitle={selected && (
           <>
             <StatusBadge status={gatewayLiveStatus(selected)} />
-            {selected.is_virtual && <span className="badge badge-neutral" style={{ fontSize: '11px' }}>VIRTUAL</span>}
+            {selected.deployment === 'host' && <span className="badge badge-neutral" style={{ fontSize: '11px' }}>HOST-RUN</span>}
             {selected.is_simulated && <span className="badge badge-neutral" style={{ fontSize: '11px' }} title="Telemetry from this gateway is generated, not observed">SIMULATED</span>}
             {selected.is_archived && <span className="badge badge-warning" style={{ fontSize: '11px' }}>ARCHIVED</span>}
           </>
@@ -675,23 +748,29 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             // A LINK when there is a cell to open. Site-Wide is deliberately left as plain text --
             // it is the assertion that this gateway belongs to no cell, so a chip styled like the
             // others but leading nowhere would promise an affordance that cannot exist.
-            value: selected.location_scope === SCOPE_SITE_WIDE
-              ? 'Site-Wide'
-              : selectedCell
-                ? (
-                    <button
-                      className="chip chip-link"
-                      onClick={() => onSelectCell?.(selectedCell.cell_id)}
-                      title="Open this cell on the Cells page"
-                    >
-                      <IconMap size={11} />
-                      <span className="chip-name">{selectedCell.cell_name}</span>
-                    </button>
-                  )
-                : (selected.cell_id || null),
-            title: selected.location_scope === SCOPE_SITE_WIDE
-              ? 'A host-run or central connector serving the whole facility. Its devices inherit no cell from it.'
-              : 'Devices served by this gateway resolve to this cell unless they carry one of their own.'
+            // Same three-way as the column, for the same reason: on a synthetic gateway the stored
+            // scope is inert, so printing it here would contradict the row it was opened from.
+            value: !gatewayAcceptsCell(selected)
+              ? `${gatewayTypeLabel(gatewayType(selected))} — no cell`
+              : selected.location_scope === SCOPE_SITE_WIDE
+                ? 'Site-Wide'
+                : selectedCell
+                  ? (
+                      <button
+                        className="chip chip-link"
+                        onClick={() => onSelectCell?.(selectedCell.cell_id)}
+                        title="Open this cell on the Cells page"
+                      >
+                        <IconMap size={11} />
+                        <span className="chip-name">{selectedCell.cell_name}</span>
+                      </button>
+                    )
+                  : (selected.cell_id || null),
+            title: !gatewayAcceptsCell(selected)
+              ? `Its devices resolve to the ${gatewayTypeLabel(gatewayType(selected))} lane, which takes precedence over cell membership. gateways_synthetic_has_no_cell (0059) refuses the pairing.`
+              : selected.location_scope === SCOPE_SITE_WIDE
+                ? 'A host-run or central connector serving the whole facility. Its devices inherit no cell from it.'
+                : 'Devices served by this gateway resolve to this cell unless they carry one of their own.'
           },
           { label: 'Last Heartbeat', value: formatHeartbeat(selected.last_heartbeat), title: 'Age of the last NBIRTH/NDATA/NDEATH. STALE after 90 seconds of silence.' },
           /**
@@ -791,8 +870,15 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
            * here -- see 0058.
            *
            * NOT ON AN ARCHIVED GATEWAY, where nothing is listening.
+           *
+           * AND NOT ON A SHADOW GATEWAY, where nothing is listening either -- for a different
+           * reason worth keeping distinct. The playback worker only PUBLISHES: it holds no
+           * subscription (see playback_worker.py, which says so at the top and explains that this
+           * is why the `seq` objection that kept capture inside the daemon does not apply to it).
+           * So an NCMD addressed to the playback edge node is received by nobody, and the request
+           * would sit in `rebirth_requests` recording something that can never be answered.
            */
-          !selected.is_archived && canManage && {
+          !selected.is_archived && !selected.is_shadow && canManage && {
             label: 'Request Rebirth',
             icon: <IconRefreshCw size={13} />,
             title: 'Ask this edge node to republish its birth certificate. Harmless — it restates '
@@ -825,7 +911,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
            * broker credential an appliance is holding. Issuing destroys whichever it has, so the
            * modal asks for the gateway's name before it mints anything.
            */
-          !selected.is_archived && !selected.is_virtual && isGatewayPending(selected) && canManage && {
+          !selected.is_archived && selected.deployment === 'remote' && isGatewayPending(selected) && canManage && {
             label: selected.status === 'AWAITING_BIRTH' ? 'Re-issue Bundle' : 'Download Setup Bundle',
             icon: <IconDownload size={13} />,
             primary: true,
@@ -841,11 +927,13 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               : 'Generate the bootstrap bundle for this gateway and download it'
           },
           /*
-           * THE VIRTUAL COUNTERPART, AND THE CONDITIONS ARE THE MIRROR OF THE ONE ABOVE.
+           * THE HOST-RUN COUNTERPART, AND THE CONDITIONS ARE THE MIRROR OF THE ONE ABOVE.
            *
-           * `is_virtual` instead of `!is_virtual`, and no `isGatewayPending()`: enrolment is a
-           * lifecycle a physical gateway passes through, and a virtual one has none -- there is no
-           * appliance to wait for, so there is no state in which minting is premature or too late.
+           * `deployment === 'host'` instead of `'remote'`, and no `isGatewayPending()`: enrolment is
+           * a lifecycle a remote appliance passes through, and a host-run gateway has none -- there
+           * is no appliance to wait for, so there is no state in which minting is premature or too
+           * late. The two RPCs behind these buttons are mirror images on the same axis, which is
+           * the argument roadmap 15 makes for the column being named for it.
            *
            * NOT SHOWN ON AN ARCHIVED GATEWAY, matching the bundle action and 0041's own refusal.
            * 0037 found that a bundle downloaded before archiving stayed redeemable afterwards and
@@ -855,7 +943,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
            * out a claim (the bundle) or never reveals a secret at all, which is why the modal
            * confirms unconditionally rather than taking the bundle modal's create-time exemption.
            */
-          !selected.is_archived && selected.is_virtual && canManage && {
+          !selected.is_archived && selected.deployment === 'host' && canManage && {
             label: 'Generate Broker Credential',
             icon: <IconLock size={13} />,
             primary: true,
@@ -896,7 +984,15 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             onClick: () => setDocsForGw(selected),
             title: 'Attach or edit links for this gateway — documents, an asset register, a file repository, any URL'
           },
-          !selected.is_archived && {
+          /* NOT OFFERED FOR THE PLAYBACK GATEWAY, and 0067 refuses it in the database as well --
+             this only stops an operator being shown a button whose failure is a database error.
+
+             Archiving the last shadow gateway leaves broker playback with no edge node to publish
+             as, and `ensure_shadow_devices()` finds it by flag, so the failure surfaces weeks later
+             at the moment somebody starts a job. The archive itself reports success and reads as
+             ordinary housekeeping. Swapping in a second shadow gateway first is legitimate and is
+             allowed; the database is where that distinction is enforced. */
+          !selected.is_archived && !selected.is_shadow && {
             label: 'Archive Gateway', icon: <IconArchive size={13} />,
             onClick: () => setArchiveTarget(selected),
             disabled: !canArchive,

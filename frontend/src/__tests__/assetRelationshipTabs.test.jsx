@@ -25,7 +25,7 @@ const gateway = {
   // site-wide are independent: this fixture is a virtual gateway that has been given a cell.
   location_scope: 'cell',
   status: 'ONLINE',
-  is_virtual: true,
+  deployment: 'host',
   is_archived: false,
   last_heartbeat: new Date(NOW - 20_000).toISOString(),
   device_count: 1,
@@ -121,11 +121,12 @@ const applyRearrange = async () => {
 /** The single batch the page sent, as an array of moves. */
 const sentBatch = () => api.relocateDevices.mock.calls[0][0]
 
-// The shopfloor grid now holds the two derived lanes AND the physical cells, so "a tile" is no
-// longer "the first .shopfloor-zone". Cells carry .shopfloor-cell; lanes carry .shopfloor-lane.
+// TWO GRIDS. The derived lanes have a row of their own above the cells, so neither "a tile" nor
+// "the first .shopfloor-zone" identifies anything on its own. Cells carry .shopfloor-cell and live
+// in .shopfloor-grid; lanes carry .shopfloor-lane and live in .shopfloor-lanes.
 const cellTiles = () => [...document.querySelectorAll('.shopfloor-grid > .shopfloor-cell')]
 const cellTileFor = (name) => cellTiles().find(z => within(z).queryByText(name))
-const laneTiles = () => [...document.querySelectorAll('.shopfloor-grid > .shopfloor-lane')]
+const laneTiles = () => [...document.querySelectorAll('.shopfloor-lanes > .shopfloor-lane')]
 const kpiItem = (label) => [...document.querySelectorAll('.kpi-item')]
   .find(n => label.test(n.textContent))
 
@@ -215,7 +216,7 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
     expect(screen.queryByText('No cell')).not.toBeInTheDocument()
   })
 
-  it('clears the cell when a gateway is marked Site-Wide, mirroring the CHECK constraint', async () => {
+  it('clears the cell when a gateway is set to Site-Wide, mirroring the CHECK constraint', async () => {
     api.get.mockImplementation(routeGet())
     api.put.mockResolvedValue({})
 
@@ -225,14 +226,17 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
     // Edit moved into the context panel with the rest of the gateway ACTIONS column.
     fireEvent.click(within(document.querySelector('.page-main')).getByText('Virtual_Gateway_NodeRED'))
     fireEvent.click(within(document.querySelector('.context-panel')).getByText('Edit Details'))
-    fireEvent.click(screen.getByLabelText(/Site-Wide/i))
+    // Site-Wide is an OPTION in the cell picker now, not a checkbox beside it: one question, one
+    // control. The exclusion it used to enforce by reaching over and clearing the select is now
+    // structural -- you cannot choose Site-Wide and a cell, because they are the same field.
+    fireEvent.change(document.querySelector('#gateway-cell-zone'), { target: { value: 'site_wide' } })
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.put.mock.calls[0][1]).toMatchObject({ location_scope: 'site_wide', cell_id: '' })
   })
 
-  it('does not treat the Virtual checkbox as a location assertion', async () => {
+  it('does not treat the Type control as a location assertion', async () => {
     // Virtual is a deployment fact; site-wide is a claim about location. A virtual gateway is
     // usually site-wide, but tying them together would relocate assets on a checkbox.
     api.get.mockImplementation(routeGet())
@@ -243,7 +247,10 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
 
     fireEvent.click(within(document.querySelector('.page-main')).getByText('Virtual_Gateway_NodeRED'))
     fireEvent.click(within(document.querySelector('.context-panel')).getByText('Edit Details'))
-    fireEvent.click(screen.getByLabelText(/Mark as Virtual Gateway/i))
+    // Changing the TYPE must not move the cell. They are different questions -- where the connector
+    // runs versus where its assets are -- and conflating them would relocate a plant's devices on a
+    // dropdown.
+    fireEvent.change(document.querySelector('#gateway-type'), { target: { value: 'host' } })
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
@@ -629,7 +636,7 @@ describe('OverviewTab shopfloor map', () => {
       expect(within(lane).getByText(/All clear/i)).toBeInTheDocument()
     })
 
-    it('keeps the lanes and the cells in one grid, at one tile size', async () => {
+    it('gives the lanes a row of their own, at the same tile size as the cells', async () => {
       api.get.mockImplementation(routeGet())
 
       const { container } = render(
@@ -638,10 +645,15 @@ describe('OverviewTab shopfloor map', () => {
       )
       await waitFor(() => expect(screen.getByText('Unassigned')).toBeInTheDocument())
 
-      // The separate full-width lane stack above the grid is gone.
-      expect(container.querySelector('.shopfloor-lanes')).toBeNull()
+      // SEPARATE GRIDS, ONE TILE SHAPE. The lanes shared the cell grid and were held at its front
+      // by CSS `order`, which pinned their position without separating them: at most widths they
+      // sat on the same row as the first bays and the boundary between "derived" and "on the
+      // floor" was visible only to a reader who already knew where it was.
+      expect(container.querySelector('.shopfloor-lanes')).not.toBeNull()
       expect(laneTiles()).toHaveLength(3)
-      // No tile opts out of the shared shape.
+      // No lane leaked into the cell grid, which is what the split has to guarantee.
+      expect(container.querySelectorAll('.shopfloor-grid > .shopfloor-lane')).toHaveLength(0)
+      // Still the same object in a different place -- no tile opts out of the shared shape.
       expect(container.querySelectorAll('.shopfloor-zone-mini')).toHaveLength(0)
     })
 
@@ -791,10 +803,11 @@ describe('OverviewTab shopfloor map', () => {
     })
   })
 
-  it('pins the lanes to the front of the grid, ahead of every cell', async () => {
-    // They share the cell grid now, so what stops the queue moving as cells are added is the
-    // pinning -- document order plus the CSS `order` that .shopfloor-lane sets. Without both,
-    // the queue lands somewhere new on every render, and a queue nobody can find never drains.
+  it('puts every lane above the cell grid, and nothing else with them', async () => {
+    // What stops the queue moving as cells are added is now structural rather than a CSS `order`
+    // hint: it is in a different grid. A queue nobody can find never drains, and the guarantee is
+    // stronger this way -- `order` held the lanes at the front of a row that cells could still
+    // join, so the tile beside the queue changed as the floor grew.
     api.get.mockImplementation(routeGet())
 
     const { container } = render(
@@ -803,12 +816,16 @@ describe('OverviewTab shopfloor map', () => {
     )
     await waitFor(() => expect(screen.getByText('Site-Wide')).toBeInTheDocument())
 
+    const lanes = container.querySelector('.shopfloor-lanes')
     const grid = container.querySelector('.shopfloor-grid')
-    const tiles = [...grid.querySelectorAll(':scope > .shopfloor-zone')]
 
-    // Every lane is in the grid, and they are its first tiles.
-    expect(tiles.slice(0, 3)).toEqual(laneTiles())
-    expect(tiles.slice(3).every(t => t.className.includes('shopfloor-cell'))).toBe(true)
+    // The lane row holds the lanes and only the lanes.
+    expect([...lanes.querySelectorAll(':scope > .shopfloor-zone')]).toEqual(laneTiles())
+    // The cell grid holds cells and only cells.
+    expect([...grid.querySelectorAll(':scope > .shopfloor-zone')]
+      .every(t => t.className.includes('shopfloor-cell'))).toBe(true)
+    // And the lanes come first in the document, which is what "above" means without layout.
+    expect(lanes.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('orders the lanes infrastructure-first, context-second, queue-last', async () => {

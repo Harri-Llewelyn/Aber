@@ -642,6 +642,42 @@ function edgeFunctionNames() {
       vocabulary: they write entity_type = 'service_principals', which is NOT a table, so every one
       of their rows answered "absent from all three" and was hidden as a deleted asset. 0045 scopes
       the question to the three types that can answer it. The anti-join itself is unchanged.`,
+    // -------------------------------------------------------------------------------------------
+    // SIX OF THESE ARE ONE CHANGE. 0065 moves every SQL predicate off `gateways.is_virtual` and on
+    // to `deployment` (0064), because that word carries three incompatible definitions and every
+    // behaviour branching on it is about a fourth -- roadmap 15, and three defects that each cost a
+    // migration to fix locally: 0056, 0062 and 0063.
+    //
+    // REPRODUCTION IS FORCED RATHER THAN CHOSEN HERE: CREATE OR REPLACE FUNCTION takes a whole
+    // body, so there is no patching form. Each entry says only what is specific to that function;
+    // the translation itself is one line, `NOT is_virtual` -> `deployment = 'remote'`, and 0064's
+    // trigger keeps the columns in agreement so every one of them answers exactly as it did.
+    // -------------------------------------------------------------------------------------------
+    'public.gateway_holds_a_credential': `0038 declares it as \`NOT is_virtual AND enrolled_at IS
+      NOT NULL\`; 0065 declares the same question against \`deployment = 'remote'\`. Still
+      IMMUTABLE and still called from triggers. 0056's self-check, which asserts it refuses a
+      host-run gateway, passes unchanged -- that is the point: the answer is identical and only the
+      column it reads has a name that means one thing.`,
+    'public.gateway_has_broker_credential': `0056 declares it; 0065 moves both arms onto
+      \`deployment\`. The arms are what make it usable by revocation (0063) without creating
+      accounts, and they are unchanged in substance: a remote appliance that enrolled, or a
+      host-run gateway with a CREDENTIAL_ISSUED row, minus revocation.`,
+    'public.authorize_virtual_gateway_credential': `0041 declares it; 0065 swaps its one predicate.
+      The function keeps its name deliberately -- it is cited from the frontend and from 0041's own
+      header, and renaming an RPC is a client-visible change that belongs with the frontend half of
+      roadmap 15 rather than smuggled into a body swap.`,
+    'public.issue_gateway_enrollment_token': `0025 declares it; 0065 swaps the check that refuses a
+      gateway with no appliance to carry a bundle to. The clearest case for the whole item: the
+      question was always "is there a machine out there", and \`is_virtual\` was three other claims
+      wearing that name.`,
+    'public.record_gateway_credential_issued': `0041 declares it; 0065 swaps the \`is_virtual\` key
+      in the audit row's new_data for \`deployment\`. ROWS ALREADY WRITTEN KEEP THE OLD KEY, which
+      is correct: an audit row records what was true in the vocabulary of its time, and rewriting
+      history to use a word coined later would be a lie about a table whose value is that it cannot
+      be edited. Nothing reads either key -- the Digital Thread page renders new_data generically.`,
+    'public.record_gateway_credential_issued_by_service': `0062 declares it; 0065 makes the same
+      new_data change as its operator-path twin above, for the same reason and with the same
+      consequence for rows already written.`,
     'public.revoke_credential_on_decommission': `0038 gates both arms on
       gateway_holds_a_credential(), which is \`NOT is_virtual AND enrolled_at IS NOT NULL\` and is
       therefore false for every gateway a provisioned stack has; 0063 gates them on
@@ -963,7 +999,7 @@ function edgeFunctionNames() {
     // 9 is NOT here. The AAS item was retired long before this practice and the list was
     // renumbered around it at the time, so 9 is a live entry today -- it was reused legitimately,
     // under the old convention, and listing it would fail the check against a correct README.
-    const RETIRED = [6, 7, 11, 13, 16, 17, 18];
+    const RETIRED = [6, 7, 11, 13, 15, 16, 17, 18];
     const reused = items.filter((n) => RETIRED.includes(n));
     if (reused.length) {
       fail(

@@ -8,8 +8,8 @@ import {
   credentialStateLabel,
 } from '../utils/credentialState'
 
-const physical = (over = {}) => ({ is_virtual: false, is_archived: false, status: 'OFFLINE', ...over })
-const virtual = (over = {}) => ({ is_virtual: true, is_archived: false, status: 'OFFLINE', ...over })
+const physical = (over = {}) => ({ deployment: 'remote', is_archived: false, status: 'OFFLINE', ...over })
+const virtual = (over = {}) => ({ deployment: 'host', is_archived: false, status: 'OFFLINE', ...over })
 
 describe('credentialState', () => {
   /**
@@ -66,7 +66,7 @@ describe('credentialState', () => {
   })
 
   it('never reports a virtual gateway as awaiting enrolment', () => {
-    // It cannot be: issue_gateway_enrollment_token() raises on is_virtual, so there is no bundle
+    // It cannot be: issue_gateway_enrollment_token() raises on a host-run gateway, so no bundle
     // for a virtual gateway to be waiting on.
     expect(credentialState(virtual({ status: 'PENDING_ENROLLMENT' }), null))
       .toBe(CREDENTIAL_STATES.UNRECORDED)

@@ -167,10 +167,10 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
-    // Read the gateway BEFORE minting anything, so a bad id or a virtual gateway costs no token.
+    // Read the gateway BEFORE minting anything, so a bad id or a host-run gateway costs no token.
     const { data: gateway, error: gatewayError } = await supabaseUser
       .from("gateways")
-      .select("id, name, sparkplug_id, sparkplug_group, is_virtual")
+      .select("id, name, sparkplug_id, sparkplug_group, deployment")
       .eq("id", gatewayId)
       .maybeSingle();
 
@@ -180,9 +180,9 @@ export default async function handler(req: Request): Promise<Response> {
     if (!gateway) {
       return json(404, { error: "No such gateway" });
     }
-    if (gateway.is_virtual) {
+    if (gateway.deployment === "host") {
       // The RPC refuses this too; caught here so the message names the reason rather than arriving
-      // as a database error. A virtual gateway has no appliance, so a bundle for one would mint a
+      // as a database error. A host-run gateway has no appliance, so a bundle for one would mint a
       // broker credential nothing could ever present.
       return json(400, {
         error: "That gateway is virtual",

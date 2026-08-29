@@ -49,7 +49,10 @@ const device = (overrides = {}) => ({
 
 const GATEWAYS = [
   { gateway_id: 'gw-1', gateway_name: 'Line_A_Gateway', sparkplug_id: 'gwy-1-sparkplug', cell_id: CELL_1, location_scope: 'cell', status: 'ONLINE', is_archived: false, devices: [] },
-  { gateway_id: 'gw-virtual', gateway_name: 'Virtual_Gateway', cell_id: null, location_scope: 'cell', is_virtual: true, status: 'ONLINE', is_archived: false, devices: [] }
+  { gateway_id: 'gw-virtual', gateway_name: 'Virtual_Gateway', cell_id: null, location_scope: 'cell', deployment: 'host', status: 'ONLINE', is_archived: false, devices: [] },
+  // `gateways_synthetic_has_no_cell` (0059) forbids a cell here, so cell_id is null by constraint
+  // rather than by omission -- the fixture cannot be written any other way.
+  { gateway_id: 'gw-sim', gateway_name: 'Sim_Gateway', cell_id: null, location_scope: 'cell', deployment: 'host', is_simulated: true, status: 'ONLINE', is_archived: false, devices: [] }
 ]
 
 const CELLS = [
@@ -125,6 +128,43 @@ describe('the cell column', () => {
     })])
     expect(within(cellColumn()).getByText('Site-Wide')).toBeInTheDocument()
     expect(within(cellColumn()).queryByText(/Unassigned/)).not.toBeInTheDocument()
+  })
+
+  it('reports a simulated device as Simulated, not as Unassigned', async () => {
+    // THE BUG THIS COLUMN HAD. It tested `site_wide` by hand and let every other cell-less lane
+    // fall through to "no cell name, therefore Unassigned" -- so a whole simulated fleet was
+    // reported as a queue to drain while device_locations had answered `simulated` for all of it.
+    //
+    // The two are not interchangeable in either direction: Unassigned means nobody has decided,
+    // and it is the lane that should empty; Simulated means the decision cannot be taken, because
+    // gateways_synthetic_has_no_cell (0059) refuses the gateway a cell to inherit.
+    await show([device({
+      active_gateway_id: 'gw-sim', effective_cell_id: null, gateway_cell_id: null,
+      location_source: 'simulated'
+    })])
+    expect(within(cellColumn()).getByText('Simulated')).toBeInTheDocument()
+    expect(within(cellColumn()).queryByText(/Unassigned/)).not.toBeInTheDocument()
+  })
+
+  it('reports a shadow device as Shadow rather than folding it into Simulated', async () => {
+    // The precedence the view keeps and this column has to keep with it: a replayed reading DID
+    // happen, which is the opposite answer to a generated one.
+    await show([device({
+      active_gateway_id: 'gw-sim', effective_cell_id: null, gateway_cell_id: null,
+      location_source: 'shadow'
+    })])
+    expect(within(cellColumn()).getByText('Shadow')).toBeInTheDocument()
+  })
+
+  it('does not offer unassigned advice to a simulated device', async () => {
+    // unassignedHint() has no advice for a synthetic asset, because there is none to give: you
+    // cannot file it in a cell, and you cannot give its gateway one either. The warning triangle
+    // was promising a fix that does not exist.
+    await show([device({
+      active_gateway_id: 'gw-sim', effective_cell_id: null, gateway_cell_id: null,
+      location_source: 'simulated'
+    })])
+    expect(within(cellColumn()).queryByText(/needs a cell|not assigned to a cell/i)).toBeNull()
   })
 })
 
@@ -214,10 +254,12 @@ describe('the edit form', () => {
     expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: CELL_2 })
   })
 
-  it('clears the cell when Site-Wide is ticked, mirroring the CHECK constraint', async () => {
+  it('clears the cell when Site-Wide is chosen, mirroring the CHECK constraint', async () => {
     await show([device({ cell_id: CELL_2, effective_cell_id: CELL_2, location_source: 'explicit' })])
     openEdit()
-    fireEvent.click(screen.getByLabelText(/Site-Wide/i))
+    // An option in the cell picker rather than a checkbox below it: `devices_site_wide_has_no_cell`
+    // makes the two answers exclusive, and one control cannot hold both.
+    fireEvent.change(document.querySelector('#device-cell-zone'), { target: { value: 'site_wide' } })
     fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
@@ -239,6 +281,39 @@ describe('the edit form', () => {
     await show([device({ cell_id: 'cell-old', effective_cell_id: 'cell-old', location_source: 'explicit' })], { cells })
     openEdit()
     expect(within(cellPicker()).getByText(/Decommissioned Bay \(archived\)/)).toBeInTheDocument()
+  })
+
+  it('offers Site-Wide inside the picker rather than as a checkbox beside it', async () => {
+    await show([device()])
+    openEdit()
+    expect(within(cellPicker()).getByRole('option', { name: /Site-Wide/i })).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: /Site-Wide/i })).toBeNull()
+  })
+
+  it('disables the picker when the serving gateway is simulated, and says which lane instead', async () => {
+    // There is no CHECK on the device side, so a cell chosen here would be ACCEPTED and then
+    // ignored -- device_locations resolves `simulated` ahead of every cell arm. Offering the
+    // control would let somebody file an asset and watch it not move, which is worse than a
+    // refusal: nothing reports an error.
+    await show([device({ active_gateway_id: 'gw-sim', effective_cell_id: null, location_source: 'simulated' })])
+    openEdit()
+    expect(document.querySelector('#device-cell-zone').disabled).toBe(true)
+    expect(screen.getByText(/belong to the Simulated lane/i)).toBeInTheDocument()
+  })
+
+  it('keeps a cell already stored on a device whose gateway went simulated', async () => {
+    // DELIBERATELY UNLIKE THE GATEWAY FORM, which clears. Nothing here would be refused on save,
+    // so clearing would destroy an operator's filing to enforce a rule the database does not have
+    // -- and the value comes back into force by itself if the gateway stops being synthetic.
+    api.put.mockResolvedValue({})
+    await show([device({
+      active_gateway_id: 'gw-sim', cell_id: CELL_2, effective_cell_id: null, location_source: 'simulated'
+    })])
+    openEdit()
+    fireEvent.click(screen.getByRole('button', { name: /Save Configuration/i }))
+
+    await waitFor(() => expect(api.put).toHaveBeenCalled())
+    expect(api.put.mock.calls[0][1]).toMatchObject({ cell_id: CELL_2 })
   })
 })
 

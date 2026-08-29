@@ -24,7 +24,7 @@ const gateway = (devices) => ({
   sparkplug_id: 'gwy100000000000400080000',
   cell_id: 'cell-1',
   status: 'ONLINE',
-  is_virtual: false,
+  deployment: 'remote',
   is_archived: false,
   last_heartbeat: new Date().toISOString(),
   device_count: devices.length,

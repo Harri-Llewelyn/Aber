@@ -24,7 +24,7 @@ const DAY = 24 * 60 * 60 * 1000
 
 const onlineGateway = {
   gateway_id: 'gw-1', gateway_name: 'Line_A_Gateway', sparkplug_id: 'gwy100000000000400080000',
-  cell_id: 'cell-1', status: 'ONLINE', is_virtual: false, is_archived: false,
+  cell_id: 'cell-1', status: 'ONLINE', deployment: 'remote', is_archived: false,
   last_heartbeat: new Date(NOW - 20_000).toISOString(), device_count: 2, devices: []
 }
 // Heartbeat older than the 90s staleness threshold, so gatewayLiveStatus() reports STALE even
@@ -32,7 +32,7 @@ const onlineGateway = {
 const staleVirtualGateway = {
   ...onlineGateway,
   gateway_id: 'gw-2', gateway_name: 'Sim_Gateway', sparkplug_id: 'gwy200000000000400080000',
-  cell_id: 'cell-2', is_virtual: true,
+  cell_id: 'cell-2', deployment: 'host',
   last_heartbeat: new Date(NOW - 10 * 60_000).toISOString(), device_count: 1
 }
 
@@ -264,14 +264,38 @@ describe('GatewaysTab filters', () => {
     expect(screen.getByText('Sim_Gateway')).toBeTruthy()
   })
 
-  it('separates virtual gateways from physical hardware', async () => {
+  it('separates gateways by the type the column reports', async () => {
+    // The filter asked "physical or virtual" until roadmap 15, and `virtual` meant three things at
+    // once. It then asked where the connector RUNS -- better, but still not the question the Type
+    // column answers: a simulated gateway is host-run, so "On this host" returned it alongside the
+    // real connectors and no option separated them. It filters on the derived type now, through
+    // the same helper that prints the column.
     api.get.mockImplementation(routeGet())
     renderGateways()
     await waitFor(() => expect(screen.getByText('Line_A_Gateway')).toBeTruthy())
 
-    fireEvent.change(screen.getByTitle(/simulated\/virtual edge nodes/i), { target: { value: 'physical' } })
+    fireEvent.change(screen.getByTitle(/filter by the type column/i), { target: { value: 'remote' } })
     await waitFor(() => expect(screen.queryByText('Sim_Gateway')).toBeNull())
     expect(screen.getByText('Line_A_Gateway')).toBeTruthy()
+  })
+
+  it('tells a simulated gateway apart from the host-run connector it shares a deployment with', async () => {
+    // THE CASE THE OLD FILTER COULD NOT EXPRESS AT ALL. Both of these are `deployment: 'host'` --
+    // gateways_simulated_is_host (0064) requires it of the simulated one -- so a filter reading
+    // that column alone returned the pair together under "On this host", with nothing to separate
+    // them. The Type column had told them apart since 0064; the filter beside it could not.
+    api.get.mockImplementation(routeGet({
+      gateways: [
+        { ...staleVirtualGateway, gateway_name: 'Host_Connector', is_simulated: false },
+        { ...staleVirtualGateway, gateway_id: 'gw-3', gateway_name: 'Sim_Fleet', is_simulated: true }
+      ]
+    }))
+    renderGateways()
+    await waitFor(() => expect(screen.getByText('Host_Connector')).toBeTruthy())
+
+    fireEvent.change(screen.getByTitle(/filter by the type column/i), { target: { value: 'simulated' } })
+    await waitFor(() => expect(screen.queryByText('Host_Connector')).toBeNull())
+    expect(screen.getByText('Sim_Fleet')).toBeTruthy()
   })
 
   it('points at the gateway reporting quarantined devices', async () => {

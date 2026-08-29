@@ -73,17 +73,17 @@ export function credentialState(gateway, issuedAt = null) {
   // Ordered deliberately -- see the note on CREDENTIAL_STATES.
   if (gateway.credential_revoked_at) return CREDENTIAL_STATES.REVOKED;
 
-  // A VIRTUAL GATEWAY'S ONLY RECORD IS THE AUDIT ROW. It has no enrolment: `enrolled_at` is set by
-  // enroll-gateway, which refuses a virtual gateway outright, so reading it here would be reading a
-  // column that is NULL by construction and calling the result an answer.
+  // A HOST-RUN GATEWAY'S ONLY RECORD IS THE AUDIT ROW. It has no enrolment: `enrolled_at` is set
+  // by enroll-gateway, which refuses a host-run gateway outright, so reading it here would be
+  // reading a column that is NULL by construction and calling the result an answer.
   if (issuedAt) return CREDENTIAL_STATES.ISSUED;
 
   if (gateway.enrolled_at) return CREDENTIAL_STATES.ISSUED;
 
-  // PHYSICAL AND MID-ENROLMENT. `PENDING_ENROLLMENT` means a bundle was issued and not yet
+  // REMOTE AND MID-ENROLMENT. `PENDING_ENROLLMENT` means a bundle was issued and not yet
   // redeemed; `AWAITING_BIRTH` means it WAS redeemed -- a credential exists -- but the appliance
   // has not published. The second is covered by `enrolled_at` above, so only the first lands here.
-  if (!gateway.is_virtual && gateway.status === 'PENDING_ENROLLMENT') {
+  if (gateway.deployment === 'remote' && gateway.status === 'PENDING_ENROLLMENT') {
     return CREDENTIAL_STATES.AWAITING_ENROLMENT;
   }
 
@@ -108,7 +108,7 @@ export function credentialStateExplanation(state, gateway) {
       return 'Rotated to a password nobody holds when this gateway was archived or deleted. '
         + 'It cannot connect until a new credential is issued.';
     case CREDENTIAL_STATES.ISSUED:
-      return gateway?.is_virtual
+      return gateway?.deployment === 'host'
         ? 'Minted through the dashboard and shown once. The password is not recoverable.'
         : 'Minted on the appliance when it redeemed its enrolment bundle. The password never '
           + 'left the device.';
@@ -126,11 +126,17 @@ export function credentialStateExplanation(state, gateway) {
  * Which action, if any, this gateway offers.
  *
  * MIRRORS GatewaysTab's own conditions rather than inventing a second set, because two predicates
- * deciding one question is how a page ends up offering a button the API then refuses. A physical
- * gateway gets a bundle; a virtual one gets a mint; an archived one gets neither, which is 0041's
+ * deciding one question is how a page ends up offering a button the API then refuses. A REMOTE
+ * gateway gets a bundle, because the credential is minted on the appliance; a HOST-RUN one gets a
+ * mint, because there is no appliance to mint it on; an archived one gets neither, which is 0041's
  * refusal and 0037's reason.
+ *
+ * This read `is_virtual` until roadmap 15 retired it. The question was always about where the
+ * connector runs -- `authorize_virtual_gateway_credential()` and `issue_gateway_enrollment_token()`
+ * are mirror images of each other on exactly that axis -- and `deployment` is that question with
+ * one meaning instead of three.
  */
 export function credentialAction(gateway) {
   if (!gateway || gateway.is_archived) return null;
-  return gateway.is_virtual ? 'mint' : 'bundle';
+  return gateway.deployment === 'host' ? 'mint' : 'bundle';
 }

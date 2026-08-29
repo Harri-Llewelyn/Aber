@@ -93,12 +93,12 @@ python supabase/migrations/test_gateway_enrollment.py
 # The machine-path credential recorder (0062), and the grant that decides whether it is a fix.
 # Every test rolls back: the rows it writes are audit rows, and that table cannot be pruned.
 python supabase/migrations/test_credential_recorder.py
-# Revocation reaching a virtual gateway (0063), and still passing over one that holds nothing.
+# Revocation reaching a host-run gateway (0063), and still passing over one that holds nothing.
 # Rolls back for a second reason: net.http_post queues inside the transaction, so the rotation
 # requests these tests provoke are un-queued rather than sent.
 python supabase/migrations/test_credential_revocation.py
-# `deployment` and `is_virtual` agreeing whichever generation of writer touched the row (0064).
-# Not the rename -- the property that makes the rename possible later.
+# The `deployment` constraints, and the view that has to be rebuilt when a gateways column moves
+# (0064, 0066). Its transitional half went when is_virtual did -- see the suite's own header.
 python supabase/migrations/test_gateway_deployment.py
 # Needs the TimescaleDB historian (port 5433), not Supabase — the rollups live there
 python timescaledb/test_bi_reader_grants.py

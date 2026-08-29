@@ -376,7 +376,7 @@ describe('CellsTab save button', () => {
 
 const dropGateway = {
   gateway_id: 'gw-1', gateway_name: 'Virtual_Gateway_NodeRED', cell_id: 'cell-1',
-  location_scope: 'cell', status: 'ONLINE', is_virtual: true, is_archived: false,
+  location_scope: 'cell', status: 'ONLINE', deployment: 'host', is_archived: false,
   last_heartbeat: new Date().toISOString(), device_count: 1, devices: []
 }
 

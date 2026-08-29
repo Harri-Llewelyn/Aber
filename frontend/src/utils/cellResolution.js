@@ -71,6 +71,42 @@ export function locationSourceLabel(source) {
 export const NON_CELL_SOURCES = new Set([SOURCE_SITE_WIDE, SOURCE_SIMULATED, SOURCE_SHADOW])
 
 /**
+ * Whether a cell can be stored against this gateway at all.
+ *
+ * MIRRORS `gateways_synthetic_has_no_cell` (0059):
+ *
+ *     CHECK (((NOT is_simulated) AND (NOT is_shadow)) OR cell_id IS NULL)
+ *
+ * so this is a rendering of a constraint, not a policy of its own -- the same relationship the
+ * Type control has to `gateways_simulated_is_host`. A form that offers a cell here is offering a
+ * write the database refuses, which is the failure mode the two checkboxes had before 0064.
+ *
+ * IT ALSO ANSWERS THE SOFTER QUESTION for a DEVICE behind such a gateway, where there is no CHECK
+ * and the value would be accepted and then ignored: `device_locations` resolves `simulated` and
+ * `shadow` AHEAD of any cell, so a cell stored there is inert. Offering the picker would let
+ * somebody file an asset and watch it not move.
+ *
+ * Null-safe in the permissive direction: a device with no gateway yet can still be given a cell.
+ */
+export function gatewayAcceptsCell(gateway) {
+  return !(gateway?.is_simulated || gateway?.is_shadow)
+}
+
+/**
+ * Why the cell picker is unavailable, as a sentence, or null when it is available.
+ *
+ * Kept beside the predicate because a disabled control with no explanation is the version of this
+ * that generates support questions -- and the two kinds of synthetic gateway are disabled for
+ * reasons an operator would act on differently.
+ */
+export function noCellReason(gateway) {
+  if (gatewayAcceptsCell(gateway)) return null
+  return gateway?.is_shadow
+    ? 'Its gateway republishes recorded captures, so its assets belong to the Shadow lane rather than to a cell.'
+    : 'Its gateway is simulated, so its assets belong to the Simulated lane rather than to a cell.'
+}
+
+/**
  * Resolve one device against its serving gateway.
  *
  * `gateway` may be null -- a device with no gateway is unassigned rather than an error, which is
@@ -192,16 +228,17 @@ export const UNASSIGNED_GATEWAY_SITE_WIDE = 'gateway_site_wide'
 /**
  * Why a device is unassigned, or null if it is not.
  *
- * The three cases call for different fixes, which is why they are not collapsed. A physical
- * gateway with no cell is fixed once on the Gateways page and every device behind it follows;
- * a site-wide or virtual gateway can never supply a cell by inheritance, so each of its devices
- * has to be filed individually. Telling an operator to "assign the gateway a cell" when the
- * gateway is a host-run proxy is advice that cannot be taken.
+ * The three cases call for different fixes, which is why they are not collapsed. A REMOTE gateway
+ * with no cell is fixed once on the Gateways page and every device behind it follows; a site-wide
+ * or HOST-RUN gateway can never supply a cell by inheritance, so each of its devices has to be
+ * filed individually. Telling an operator to "assign the gateway a cell" when the gateway is a
+ * host-run proxy is advice that cannot be taken -- which is why this asks where the connector runs
+ * rather than what `is_virtual` used to mean (roadmap 15).
  */
 export function unassignedReason(device, gateway) {
   if (!isUnassigned(device, gateway)) return null
   if (!gateway) return UNASSIGNED_NO_GATEWAY
-  if (gateway.location_scope === SCOPE_SITE_WIDE || gateway.is_virtual) return UNASSIGNED_GATEWAY_SITE_WIDE
+  if (gateway.location_scope === SCOPE_SITE_WIDE || gateway.deployment === 'host') return UNASSIGNED_GATEWAY_SITE_WIDE
   return UNASSIGNED_GATEWAY_HAS_NO_CELL
 }
 

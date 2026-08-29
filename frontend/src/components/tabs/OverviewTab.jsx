@@ -475,9 +475,9 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
       <span
         key={g.gateway_id}
         className="chip chip-gw"
-        title={`Gateway ${g.gateway_name} [${g.gateway_id}] ${g.is_virtual ? '(Virtual Gateway)' : ''} ${isGwArch ? '(Archived)' : `(${gwStatus}, heartbeat ${formatHeartbeat(g.last_heartbeat)})`} — ${g.device_count} device(s) — Click to view on Gateways page`}
+        title={`Gateway ${g.gateway_name} [${g.gateway_id}] ${g.deployment === 'host' ? '(Host-run gateway)' : ''} ${isGwArch ? '(Archived)' : `(${gwStatus}, heartbeat ${formatHeartbeat(g.last_heartbeat)})`} — ${g.device_count} device(s) — Click to view on Gateways page`}
         onClick={() => onSelectGateway(g.gateway_id)}
-        style={{ cursor: 'pointer', borderColor: isGwArch ? 'var(--warning)' : g.is_virtual ? 'var(--accent)' : undefined, opacity: isGwArch ? 0.75 : 1 }}
+        style={{ cursor: 'pointer', borderColor: isGwArch ? 'var(--warning)' : g.deployment === 'host' ? 'var(--accent)' : undefined, opacity: isGwArch ? 0.75 : 1 }}
       >
         {/* THREE OUTCOMES, NOT TWO. A red dot on a gateway nobody has installed yet is a fault report
             on an unfinished task -- see the .badge-pending block in App.css. */}
@@ -494,7 +494,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
             single flags for the same reason -- a bordered pill left no room for the name it
             describes. */}
         <span className="chip-name mono">{g.gateway_name}</span>
-        {g.is_virtual && !isGwArch && <span className="chip-flag" style={{ color: 'var(--accent)' }} title="Virtual Gateway"><IconZap size={9} /></span>}
+        {g.deployment === 'host' && !isGwArch && <span className="chip-flag" style={{ color: 'var(--accent)' }} title="Runs on this host"><IconZap size={9} /></span>}
         {isGwArch && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>ARCH</span>}
       </span>
     )
@@ -817,23 +817,25 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
             </div>
           )}
 
-          {/* ONE GRID. The derived lanes are its first two tiles, pinned there by CSS `order`
-              (see .shopfloor-lane) so they cannot drift as cells are added -- which is the
-              guarantee the separate full-width stack above the grid used to buy, at the cost of a
-              section label and a row of its own.
+          {/* TWO GRIDS, BECAUSE LANES AND CELLS ARE DIFFERENT KINDS OF THING.
+              The lanes held positions 1-3 of a single grid by CSS `order`, which pinned them but
+              did not SEPARATE them: at most widths they sat on the same row as the first cells, so
+              the map read as one run of tiles in which three happened to be coloured differently.
+              A reader had to already know which were derived to see the boundary.
+
+              A row of their own draws it structurally instead. The lanes are the assets that
+              belong to NO cell -- and every one of them is a fact about the data path, not a place
+              on the floor -- so the plant reads as the grid beneath them.
+
+              This reverses the merge that put them in one grid, and the reason it is now the
+              cheaper choice is that there are three lanes rather than two: three tiles fill a row
+              on their own, so the height that merging saved is no longer there to save.
 
               Each lane holds BOTH gateways and devices. A gateway with no cell is exactly as
               stranded as a device with no cell -- and it is usually the CAUSE of the devices
               beside it being stranded, since they had nothing to inherit. Showing only the
               devices left the reason off-screen. */}
-          <div className="shopfloor-grid">
-            {cells.length === 0 && laneViews.every(v => v.gateways.length === 0 && v.devices.length === 0) && (
-              <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
-                <div className="empty-icon"><IconFactory size={36} /></div>
-                <div className="empty-text">No active cells configured to display on the shopfloor blueprint.</div>
-              </div>
-            )}
-
+          <div className="shopfloor-lanes">
             {laneViews.map(({ lane, devices: laneAssets, gateways: laneGateways }) => floorTile({
               key: lane.key,
               className: lane.className,
@@ -855,6 +857,29 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
               // tile's name. The colour and the border now carry "not a cell" on their own.
               nameTitle: `${lane.title} — a derived lane, not a cell: it has no record in the database`
             }))}
+          </div>
+
+          {/* THE PLANT ITSELF, BELOW THE LANES. */}
+          <div className="shopfloor-grid">
+            {cells.length === 0 && (
+              /* AN EMPTY STATE OF ITS OWN, now that this grid can be empty while the lanes above
+                 are full -- which is the ordinary state of a stack running only the simulator,
+                 since gateways_synthetic_has_no_cell (0059) means the demonstration floor has no
+                 cells at all. Under one grid that case rendered nothing here and the section
+                 simply stopped, reading as a map that had failed to load.
+
+                 It says where the assets went, because the previous wording ("No active cells
+                 configured") answered a question nobody had asked while leaving the obvious one
+                 -- then where is everything? -- to the tiles above it. */
+              <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
+                <div className="empty-icon"><IconFactory size={36} /></div>
+                <div className="empty-text">
+                  {laneViews.some(v => v.gateways.length > 0 || v.devices.length > 0)
+                    ? 'No cell zones configured — every asset resolves to one of the lanes above.'
+                    : 'No active cells configured to display on the shopfloor blueprint.'}
+                </div>
+              </div>
+            )}
 
             {cells.map(c => {
               // Cells own gateways; gateways own devices. Deriving the gateway list

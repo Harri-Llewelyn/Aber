@@ -326,9 +326,9 @@ reports can tell replayed data apart through a join they already make, and synth
 exactly like real ones — which is the behaviour under test when the question is "do the rollups
 work".
 
-**Distinct from `is_virtual`**, which is about whether an edge appliance exists rather than whether
-the readings are real. A physical appliance replaying a capture is `is_virtual = false`,
-`is_simulated = true`.
+**Distinct from `deployment`**, which is about where the connector runs rather than whether the
+readings are real. An appliance out on the plant network replaying a capture is
+`deployment = 'remote'`, `is_simulated = true`.
 
 ### Where captures are kept
 
@@ -511,7 +511,7 @@ the client. The worker also needs a read gate for Storage: `broker_captures_read
 `42501` — a job failing for a reason nothing surfaces.
 
 **The credential predicate is `gateway_has_broker_credential()`, not
-`gateway_holds_a_credential()`.** The latter is `NOT g.is_virtual AND g.enrolled_at IS NOT NULL` —
+`gateway_holds_a_credential()`.** The latter is `g.deployment = 'remote' AND g.enrolled_at IS NOT NULL` —
 "is this a physical appliance that completed enrolment" — which for playback is inverted: it refuses
 every virtual gateway, which is what a playback target normally is, and admits only real hardware,
 which is exactly what a playback must never publish as. `0056`'s predicate asks the question of both

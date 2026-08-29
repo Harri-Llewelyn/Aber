@@ -43,7 +43,7 @@ const gateway = {
   cell_id: 'cell-1',
   location_scope: 'cell',
   status: 'ONLINE',
-  is_virtual: true,
+  deployment: 'host',
   is_archived: false,
   last_heartbeat: new Date(NOW - 20_000).toISOString(),
   device_count: 1,

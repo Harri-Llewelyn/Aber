@@ -719,6 +719,67 @@ an auditor reads to check that did not happen, exactly the thing it was written 
 none: it is bounded by revocation (`0038`), not by a countdown. Inventing an `expires_at` would put a
 reassuring date against a credential that has no such date.
 
+### Three kinds of gateway, and two lanes for what is not real (`0052`, `0059`)
+
+**`is_simulated` (`0052`) records provenance and each consumer decides what to do with it.** It sits
+on the gateway and devices inherit it through `gateway_id` rather than carrying a copy: a stored
+device-level flag would need two triggers to maintain an invariant the join gives for nothing, and
+`verify_gateway_binding()` already guarantees a device's data reaches storage only from the gateway
+it is bound to.
+
+**`is_shadow` (`0059`) is a second lane, because provenance is not one axis.** A shadow gateway is
+necessarily simulated — `start_playback_job()` refuses a target that is not — so one lane could have
+covered both, and the second had to earn itself. It does: a **simulated** spindle reporting 4000 RPM
+never turned, and a **shadow** spindle reporting 4000 RPM *did* turn, on a real machine, on the day
+the capture was recorded. Both are "not a machine running right now", and they give opposite answers
+to *is this number true* — which is the question being asked at the moment anyone consults a lane.
+
+Precedence is `shadow > simulated > site_wide > explicit > inherited > unassigned`, most specific
+first: both flags are true of a shadow device, so without an explicit order it lands in Simulated and
+the more informative lane is silently unreachable. `device_locations` computes it and
+`utils/cellResolution.js` mirrors it, with `check-mirror-drift.mjs` pinning the label list literally
+— adding a lane is a deliberate two-file change with a check that fails until both sides agree.
+
+**Neither lane is a row in `cells`.** A magic cell would put semantics in a free-text `name` — the
+trap `devices.asset_type` was retired for — and `gateways.cell_id ON DELETE CASCADE` would delete
+every host-run gateway with it. `unassigned` is already never stored; it is the `ELSE` arm, and these
+join it as labels rather than as data.
+
+**Simulated telemetry is treated exactly like real telemetry**, and that is a decision rather than an
+omission. Broker playback depends on it: synthetic devices must roll up exactly like real ones,
+because that is the behaviour under test. Shorter retention for simulated data would break the one
+feature that needs synthetic data to behave normally, and could not be built cheaply anyway —
+retention is one policy on one hypertable dropping whole chunks rather than rows.
+
+### The playback gateway is visible and almost inert (`0067`)
+
+It stays on the Gateways and Access Control pages deliberately: it holds a broker credential an
+operator has to mint — `0060`'s own `NOTICE` says so, with the `sparkplug_id` filled in — and its
+shadow devices hang off it. Hiding it would make the one gateway that needs setting up the one
+nobody can see.
+
+What it does not offer is the two acts that are wrong for it, for different reasons:
+
+- **Archiving it** removes the only edge node broker playback can publish as. `ensure_shadow_devices()`
+  looks the gateway up by flag (`WHERE is_shadow AND NOT is_archived`), so the failure lands at the
+  moment somebody starts a job — possibly weeks later, on a page that says nothing about gateways —
+  while the archive itself reports success and reads as housekeeping. `0067` refuses it in the
+  database and the button is hidden; the UI is not the rule.
+- **Requesting a rebirth** is addressed to a node nobody is listening as. The playback worker only
+  publishes and holds no subscription at all, so the NCMD reaches nothing and `rebirth_requests`
+  would record something that can never be answered.
+
+**The rule is "not the last one", not "never".** `ensure_shadow_devices()` finds the gateway by flag
+precisely so a stack can have more than one — two playbacks at once need two edge nodes — so
+`0067` refuses only the archive that would leave none, and its message names the way through: mark
+another gateway `is_shadow` first. Deletion is not guarded, because `0060` re-seeds the row on the
+next boot; archiving is the act that survives one.
+
+**It is also not a capture subject.** Recording from a shadow gateway means capturing a capture, and
+its shadow devices exist to receive a replay rather than to report a machine, so both are filtered
+out of the Capture page's subject tables. Starting a playback is unaffected — that query selects on
+`is_shadow` because that is exactly the lane a playback publishes into.
+
 ### `deployment`, and the word it is replacing (`0064`)
 
 `is_virtual` carries three incompatible definitions — *"no physical edge appliance behind this
@@ -735,9 +796,39 @@ three-way enum, so the fourth combination stays *sayable*: folding them together
 simulator on a separate load-generation box inexpressible.
 
 **The rename is not in that migration**, deliberately — 126 references across 47 files, and §15's
-own rule is that a rename beside a feature is a rename nobody reviews. Until it happens
+own rule is that a rename beside a feature is a rename nobody reviews. Until it completes,
 `sync_gateway_deployment()` keeps the two columns in agreement in both directions, so every writer
-in the repository — none of which knows the new column — keeps working and gets it filled correctly.
+that still names `is_virtual` keeps working and gets the new column filled correctly.
+
+**`0066` finishes it**: `gateway_health_rows()` moves last, because `is_virtual` was in its
+`RETURNS TABLE` signature and a return type cannot be replaced in place — the function and the view
+built on it are dropped and recreated together. Then the transitional trigger goes, and the column
+with it. `gateway_status` has to be dropped first and rebuilt after: it is `SELECT g.*`, which
+PostgreSQL freezes into an explicit column list, and that frozen list is a hard dependency. The same
+fact that makes `ensure_gateway_status_view()` necessary when a column is *added* is what blocks a
+drop.
+
+Three things deliberately keep the old word: migration filenames (the chain is immutable),
+`authorize_virtual_gateway_credential()` (an RPC name is client-visible, and renaming it is its own
+change), and every `CREDENTIAL_ISSUED` row written before `0065`.
+
+**`0065` moves the SQL half**, and it went first because that is where the ambiguity has actually
+cost something: `gateway_holds_a_credential()`, `gateway_has_broker_credential()`,
+`authorize_virtual_gateway_credential()`, `issue_gateway_enrollment_token()` and both credential
+recorders. Three defects — `0056`, `0062`, `0063` — were the same predicate misread three ways, and
+all three lived in a `WHERE` clause. The translation is mechanical (`NOT is_virtual` →
+`deployment = 'remote'`) and `0064`'s trigger means every one of them answers exactly as it did.
+
+Two things `0065` records that are easy to miss:
+
+- **The audit rows now carry `deployment`**, and rows already written keep `is_virtual`. That is
+  correct rather than untidy: an audit row records what was true in the vocabulary of its time, and
+  rewriting history to use a word coined later would be a lie about a table whose whole value is
+  that it cannot be edited.
+- **Its self-check strips comments before looking for stragglers.** `prosrc` is the whole body,
+  prose included, and the first version failed on a function whose new comment *explains* that it
+  used to read `is_virtual`. A check that cannot tell a mention from a use forces documentation to
+  be thinned to keep it quiet.
 
 **On UPDATE there is no conflict to resolve, and that is arithmetic rather than policy.** Both
 columns are two-valued and every row starts in agreement, so an update changing both necessarily

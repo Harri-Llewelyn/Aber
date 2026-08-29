@@ -131,7 +131,7 @@ describe('unassigned devices needing an operator decision', () => {
   it('distinguishes the three reasons, because the fixes differ', () => {
     expect(unassignedReason({ cell_id: null }, null)).toBe(UNASSIGNED_NO_GATEWAY);
     expect(unassignedReason({ cell_id: null }, { id: 'gw', cell_id: null })).toBe(UNASSIGNED_GATEWAY_HAS_NO_CELL);
-    expect(unassignedReason({ cell_id: null }, { id: 'gw', cell_id: null, is_virtual: true }))
+    expect(unassignedReason({ cell_id: null }, { id: 'gw', cell_id: null, deployment: 'host' }))
       .toBe(UNASSIGNED_GATEWAY_SITE_WIDE);
     expect(unassignedReason({ cell_id: null }, { id: 'gw', cell_id: null, location_scope: SCOPE_SITE_WIDE }))
       .toBe(UNASSIGNED_GATEWAY_SITE_WIDE);
@@ -143,7 +143,7 @@ describe('unassigned devices needing an operator decision', () => {
   });
 
   it('never tells an operator to give a host-run gateway a cell', () => {
-    const hint = unassignedHint({ cell_id: null }, { id: 'gw', cell_id: null, is_virtual: true });
+    const hint = unassignedHint({ cell_id: null }, { id: 'gw', cell_id: null, deployment: 'host' });
     expect(hint).toMatch(/host-level proxy/);
     expect(hint).toMatch(/Site-Wide/);
   });

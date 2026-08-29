@@ -180,6 +180,51 @@ describe('the subject tables', () => {
 })
 
 // =============================================================================================
+/**
+ * THE PLAYBACK LANE IS NOT A CAPTURE SUBJECT.
+ *
+ * Recording from a shadow gateway means capturing a capture: it publishes only while a playback is
+ * running, so the file would contain another file, replayed. Its shadow devices are the same thing
+ * one level down -- `shadow_of` says they exist to RECEIVE a replay rather than to report a machine.
+ *
+ * Starting a playback is a different question and is unaffected: `playbackTargets()` selects on
+ * `is_shadow` precisely because that IS the lane a playback publishes into.
+ */
+describe('the playback lane', () => {
+  const SHADOW_GATEWAY = {
+    id: 'gw-shadow', name: 'Playback', sparkplug_id: 'gwy160000000000400080000',
+    is_simulated: true, is_shadow: true, deployment: 'host', is_archived: false,
+  }
+  const SHADOW_DEVICE = {
+    id: 'dev-shadow', name: 'Shadow Spindle', sparkplug_id: 'dev990000000000400080000',
+    gateway_id: 'gw-shadow', shadow_of: 'dev-1', is_archived: false,
+  }
+
+  it('leaves the playback gateway out of the gateway table', async () => {
+    api.get.mockImplementation(path => Promise.resolve(
+      path.includes('gateways') ? [GATEWAY, SHADOW_GATEWAY] : [DEVICE]
+    ))
+    renderTab()
+    expect(await screen.findByText('Line 1 Gateway')).toBeInTheDocument()
+    // SCOPED TO THE TABLE. The word appears elsewhere on this page by design -- the playback
+    // controls are here too -- so an unscoped query asserts the wrong thing and fails against
+    // correct behaviour.
+    const table = within(document.querySelector('table'))
+    expect(table.queryByText('Playback')).toBeNull()
+  })
+
+  it('leaves shadow devices out of the device table', async () => {
+    api.get.mockImplementation(path => Promise.resolve(
+      path.includes('gateways') ? [GATEWAY] : [DEVICE, SHADOW_DEVICE]
+    ))
+    renderTab()
+    expect(await screen.findByText('Line 1 Gateway')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: /devices/i }))
+    expect(await screen.findByText('CNC Spindle')).toBeInTheDocument()
+    expect(within(document.querySelector('table')).queryByText('Shadow Spindle')).toBeNull()
+  })
+})
+
 describe('a stored capture', () => {
   it('shows its size, message count and note', async () => {
     api.listCaptures.mockResolvedValue([CAPTURE])

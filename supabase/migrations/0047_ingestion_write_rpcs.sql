@@ -715,14 +715,26 @@ BEGIN
         END IF;
 
         -- The reserved-status rule must refuse.
+        --
+        -- GUARDED ON A GATEWAY EXISTING, and the absence of that guard broke every FRESH INSTALL
+        -- from the day 0040 made the demonstration floor opt-in. With no gateways the subselect is
+        -- NULL, `ingest_record_gateway_health()` raises `p_gateway_id is required` --
+        -- `null_value_not_allowed`, NOT the `invalid_parameter_value` this handler catches -- so it
+        -- propagated out of the DO block and db-init exited 1 on migration 0047.
+        --
+        -- Nothing noticed because nothing had started from an empty database since: the assertion
+        -- below already anticipated an empty fleet, so the intent was there and only the CALL was
+        -- unguarded. The device half three blocks up has the shape this now copies.
         v_denied := false;
-        BEGIN
-            PERFORM public.ingest_record_gateway_health(
-                (SELECT id FROM public.gateways ORDER BY created_at LIMIT 1),
-                'AWAITING_BIRTH', now(), NULL);
-        EXCEPTION WHEN invalid_parameter_value THEN
-            v_denied := true;
-        END;
+        IF EXISTS (SELECT 1 FROM public.gateways) THEN
+            BEGIN
+                PERFORM public.ingest_record_gateway_health(
+                    (SELECT id FROM public.gateways ORDER BY created_at LIMIT 1),
+                    'AWAITING_BIRTH', now(), NULL);
+            EXCEPTION WHEN invalid_parameter_value THEN
+                v_denied := true;
+            END;
+        END IF;
         IF NOT v_denied AND EXISTS (SELECT 1 FROM public.gateways) THEN
             RAISE EXCEPTION
               '0047 self-check: a gateway was allowed to assert AWAITING_BIRTH about itself. That '
@@ -730,13 +742,17 @@ BEGIN
               'gateway looking healthy.';
         END IF;
 
-        -- An unknown quarantine code must refuse.
+        -- An unknown quarantine code must refuse. Guarded like the block above and for the same
+        -- reason: with no devices, `v_device` is NULL and the gate raises `p_device_id is required`
+        -- -- a different SQLSTATE from the one being probed for, which escapes the handler.
         v_denied := false;
-        BEGIN
-            PERFORM public.ingest_requarantine_device(v_device, 'NOT_A_REAL_CODE', 'probe');
-        EXCEPTION WHEN invalid_parameter_value THEN
-            v_denied := true;
-        END;
+        IF v_device IS NOT NULL THEN
+            BEGIN
+                PERFORM public.ingest_requarantine_device(v_device, 'NOT_A_REAL_CODE', 'probe');
+            EXCEPTION WHEN invalid_parameter_value THEN
+                v_denied := true;
+            END;
+        END IF;
         IF NOT v_denied AND v_device IS NOT NULL THEN
             RAISE EXCEPTION
               '0047 self-check: an unrecognised quarantine reason was accepted; the vocabulary is '
@@ -759,11 +775,13 @@ BEGIN
         END IF;
 
         v_denied := false;
-        BEGIN
-            PERFORM public.ingest_mark_device_offline(v_device);
-        EXCEPTION WHEN insufficient_privilege THEN
-            v_denied := true;
-        END;
+        IF v_device IS NOT NULL THEN
+            BEGIN
+                PERFORM public.ingest_mark_device_offline(v_device);
+            EXCEPTION WHEN insufficient_privilege THEN
+                v_denied := true;
+            END;
+        END IF;
         IF NOT v_denied AND v_device IS NOT NULL THEN
             RAISE EXCEPTION
               '0047 self-check: a non-ingestion principal called ingest_mark_device_offline().';
@@ -779,8 +797,16 @@ BEGIN
             IF SQLERRM <> 'rollback_selfcheck' THEN RAISE; END IF;
     END;
 
-    RAISE NOTICE '0047 self-check passed: the ingestion principal reaches all seven write gates, '
-                 'write-on-change and the reserved-status rule hold, and no other authenticated '
-                 'principal can call them.';
+    -- SAYS WHICH HALF RAN. On a fresh install there are no assets to round-trip, so the identity
+    -- half is all that is asserted -- and a notice claiming more than was checked is how an empty
+    -- fleet's skipped coverage reads as coverage.
+    IF v_device IS NULL THEN
+        RAISE NOTICE '0047 self-check passed (identity half only -- no assets present): the '
+                     'ingestion principal is recognised and no other authenticated principal is.';
+    ELSE
+        RAISE NOTICE '0047 self-check passed: the ingestion principal reaches all seven write '
+                     'gates, write-on-change and the reserved-status rule hold, and no other '
+                     'authenticated principal can call them.';
+    END IF;
 END;
 $selfcheck$;

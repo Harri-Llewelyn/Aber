@@ -92,10 +92,13 @@ const mapGatewayRow = (g, locations) => {
 // device_locations read fails -- see loadDeviceLocations().
 const DEVICE_EMBED =
   'id, name, description, sparkplug_id, reported_identity, identity_source, status, is_quarantined, ' +
-  'is_archived, gateway_id, cell_id, location_scope, created_at, model_3d_path';
+  // `shadow_of` (0060) says this device exists to RECEIVE a replay rather than to report a machine.
+  // Selected because the Capture page filters on it: a shadow device is not a capture subject, and
+  // without the column the filter silently matches nothing.
+  'is_archived, gateway_id, cell_id, location_scope, created_at, model_3d_path, shadow_of';
 const GATEWAY_EMBED =
   `id, name, description, sparkplug_id, cell_id, location_scope, access_url, status, last_heartbeat, ` +
-  `is_virtual, is_simulated, is_shadow, is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
+  `deployment, is_simulated, is_shadow, is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
 
 /**
  * Effective cell per device, keyed by device id, read from public.device_locations.
@@ -779,7 +782,7 @@ const apiMethods = {
         // `is_shadow` so the credential dialog can tell an operator where the password actually
         // goes: a playback gateway has no Node-RED broker node, so the .env pairing it would
         // otherwise print is advice that cannot be followed.
-        .select('id,name,sparkplug_id,is_virtual,is_shadow,is_archived,status,enrolled_at,credential_revoked_at,live_status')
+        .select('id,name,sparkplug_id,deployment,is_shadow,is_archived,status,enrolled_at,credential_revoked_at,live_status')
         .order('name'),
       supabase
         .from('digital_thread')
@@ -1505,7 +1508,12 @@ const apiMethods = {
       const [{ data, error }, locations] = await Promise.all([
         supabase
           .from('devices')
-          .select('*, gateways(id, name, cell_id, location_scope, status, is_archived)')
+          // `is_simulated` and `is_shadow` are selected for the FALLBACK path, not for the happy
+          // one: device_locations already resolves the lanes server-side, but when that read fails
+          // resolveDeviceLocation() re-derives locally, and without these two every simulated
+          // device would degrade to Unassigned -- the exact misreport this embed exists to avoid
+          // for cell_id.
+          .select('*, gateways(id, name, cell_id, location_scope, is_simulated, is_shadow, status, is_archived)')
           .order('created_at', { ascending: false }),
         loadDeviceLocations()
       ]);
@@ -1638,7 +1646,7 @@ const apiMethods = {
       // is what the approval modal has to show to be worth showing at all.
       const { data, error } = await supabase
         .from('devices')
-        .select('*, gateways(id, name, cell_id, location_scope)')
+        .select('*, gateways(id, name, cell_id, location_scope, is_simulated, is_shadow)')
         .eq('is_quarantined', true);
       if (error) throw error;
 
@@ -1966,7 +1974,10 @@ const apiMethods = {
         name: body.gateway_name,
         description: emptyToNull(body.description),
         access_url: body.access_url,
-        is_virtual: !!body.is_virtual,
+        // 'remote' when the caller says nothing, matching the create form's own default: the
+        // case that needs an appliance is the one an operator must opt OUT of, or a gateway can be
+        // created that quietly never gets hardware.
+        deployment: body.deployment === 'host' ? 'host' : 'remote',
         // Defaulted rather than omitted so a gateway created for playback can be flagged in one
         // step. The column is NOT NULL DEFAULT false (0052), so `false` here and an absent key
         // reach the same row -- being explicit is for the reader, not the database.
@@ -2288,15 +2299,17 @@ const apiMethods = {
         name: body.gateway_name,
         access_url: body.access_url
       };
-      if ('is_virtual' in body)  patch.is_virtual = !!body.is_virtual;
-      // Separate from is_virtual and not derived from it: a physical appliance replaying a capture
-      // is virtual=false, simulated=true. Folding them would make that gateway unrepresentable.
+      if ('deployment' in body) patch.deployment = body.deployment === 'host' ? 'host' : 'remote';
+      // Separate from deployment and not derived from it: an appliance out on the plant network
+      // replaying a capture is remote and simulated at once. Folding them would make that gateway
+      // unrepresentable -- which is why 0064 added a column beside is_simulated rather than an enum
+      // over both.
       if ('is_simulated' in body) patch.is_simulated = !!body.is_simulated;
       // See the devices patch: emptyToNull so clearing the field stores NULL, not ''.
       if ('description' in body) patch.description = emptyToNull(body.description);
       // Same pairing rule as devices: marking a gateway Site-Wide clears its cell rather than
-      // letting the CHECK reject the write. is_virtual is NOT what decides this -- a virtual
-      // gateway is a deployment fact, site-wide is an operator's assertion about location, and
+      // letting the CHECK reject the write. `deployment` is NOT what decides this -- it says where
+      // the connector runs, site-wide is an operator's assertion about where the assets are, and
       // conflating them would relocate assets on a checkbox.
       Object.assign(patch, locationFieldsFrom(body));
 

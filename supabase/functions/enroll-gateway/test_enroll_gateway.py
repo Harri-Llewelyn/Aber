@@ -138,10 +138,10 @@ class EnrollGatewayBase(unittest.TestCase):
                 "id": TEST_GW_ID,
                 "name": "Test_Physical_Gateway_Enrol",
                 "status": "OFFLINE",
-                # is_virtual FALSE is the precondition: issue_gateway_enrollment_token() refuses a
-                # virtual gateway, because a bundle for one would mint a broker credential that
+                # deployment 'remote' is the precondition: issue_gateway_enrollment_token() refuses
+                # a host-run gateway, because a bundle for one would mint a broker credential that
                 # nothing could ever present.
-                "is_virtual": False,
+                "deployment": "remote",
             },
         )
         if status >= 300:

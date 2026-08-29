@@ -5,25 +5,27 @@ import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { api } from '../api'
 
 /**
- * `gateways.is_simulated` (migration 0052) in the Gateways tab.
+ * The Type column and the control behind it, in the Gateways tab.
  *
- * WHAT THIS FLAG IS FOR. Broker playback (`ingestion/capture.py`) publishes a recorded capture
- * back through the real broker down the real ingestion path -- deliberately, because a spoofed
- * fault is only useful if it is indistinguishable from a real one downstream. Once it lands,
- * this flag is the only thing that says the reading was replayed.
+ * WHAT THIS REPLACED. Two badges beside the gateway name (VIRTUAL, SIMULATED) and two checkboxes in
+ * the form. Between them they said three things -- where it runs, whether the numbers are real, and
+ * in a tooltip "Cloud", which contradicted the first -- and the two checkboxes offered FOUR
+ * combinations where the database permits three: `gateways_simulated_is_host` (0064) forbids a
+ * remote simulator, so one of the four was a write that would be refused after it was ticked.
  *
- * THE TWO WAYS THE CONTROL CAN MISLEAD, which is what is asserted here rather than that it
- * renders:
+ * WHAT IS ASSERTED HERE is the part that can mislead rather than the markup:
  *
- *   1. BEING CONFUSED WITH `is_virtual`. They are different questions -- virtual is about whether
- *      an edge appliance exists, simulated is about whether the readings are real -- and a
- *      physical appliance replaying a capture is virtual=false, simulated=true. If one ever
- *      implied the other, that gateway becomes unrepresentable and the marking silently stops
- *      meaning what it says.
- *
- *   2. READING AS A DATA-PATH SWITCH. Ticking it changes nothing about ingestion. An operator who
- *      believed it quarantined or diverted the replayed data would be wrong in the direction that
- *      matters, so the form says so where it is ticked.
+ *   1. THE FOUR VALUES ARE NOT INTERCHANGEABLE, and Shadow is the one that earns the column its
+ *      fourth. A SIMULATED spindle reporting 4000 RPM never turned; a SHADOW spindle reporting
+ *      4000 RPM did turn, on a real machine, on the day the capture was recorded. Both are "not a
+ *      machine running now" and they give opposite answers to *is this number true*.
+ *   2. SHADOW CANNOT BE CHOSEN. 0060 seeds the single Playback gateway and a trigger refuses any
+ *      other; offering it would be offering to fabricate one.
+ *   3. ONE CONTROL STILL WRITES TWO COLUMNS. The schema keeps them separate on purpose, so the
+ *      translation happens in one place and the form does not quietly become the model.
+ *   4. IT IS NOT A DATA-PATH SWITCH. Choosing Simulated changes nothing about ingestion, and an
+ *      operator who believed it quarantined or diverted the replayed data would be wrong in the
+ *      direction that matters.
  */
 
 vi.mock('../api', async () => {
@@ -40,8 +42,9 @@ const gateway = (overrides = {}) => ({
   gateway_name: 'Playback_Lab',
   sparkplug_id: 'gwy110000000000400080000',
   status: 'ONLINE',
-  is_virtual: false,
+  deployment: 'remote',
   is_simulated: false,
+  is_shadow: false,
   is_archived: false,
   cell_id: 'cell-1',
   location_scope: 'cell',
@@ -69,91 +72,225 @@ const openEdit = () => {
   fireEvent.click(within(document.querySelector('.context-panel')).getByText('Edit Details'))
 }
 
-const simulatedCheckbox = () => document.querySelector('#is_simulated')
-const virtualCheckbox = () => document.querySelector('#is_virtual')
+const typeSelect = () => document.querySelector('#gateway-type')
+/**
+ * The row's Type cell -- the one in the TABLE, not a badge in the drawer and not an option in the
+ * filter bar.
+ *
+ * SCOPED TO THE TABLE, which it has to be: the type filter beside the search box renders an
+ * <option> per selectable type, so a search across the whole page matched "Remote" in the filter
+ * before reaching any row, and every one of these read Remote whatever the fixture said. The
+ * previous scope only worked while nothing above the table happened to use these four words.
+ */
+const typeCell = () => within(document.querySelector('table')).getAllByText(
+  /^(Host|Remote|Simulated|Shadow)$/
+)[0]
 
 beforeEach(() => vi.clearAllMocks())
 
-describe('the SIMULATED badge', () => {
+describe('the Type column', () => {
 
-  it('is shown for a simulated gateway', async () => {
-    await show([gateway({ is_simulated: true })])
-    expect(screen.getAllByText('SIMULATED').length).toBeGreaterThan(0)
+  it('reports a simulated gateway as Simulated', async () => {
+    await show([gateway({ deployment: 'host', is_simulated: true })])
+    expect(typeCell().textContent).toBe('Simulated')
   })
 
-  it('is absent for an ordinary one', async () => {
-    await show([gateway()])
-    expect(screen.queryByText('SIMULATED')).toBeNull()
+  it('reports a host-run gateway as Host', async () => {
+    await show([gateway({ deployment: 'host' })])
+    expect(typeCell().textContent).toBe('Host')
   })
 
-  it('appears alongside VIRTUAL rather than instead of it', async () => {
-    // THE COMBINATION THAT MUST STAY SAYABLE. A cloud connector generating test data is both.
-    await show([gateway({ is_virtual: true, is_simulated: true })])
-    expect(screen.getAllByText('SIMULATED').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('VIRTUAL').length).toBeGreaterThan(0)
+  it('reports an appliance as Remote', async () => {
+    await show([gateway({ deployment: 'remote' })])
+    expect(typeCell().textContent).toBe('Remote')
   })
 
-  it('is shown for a simulated gateway that is not virtual', async () => {
-    // The case that makes the two flags irreducible: a real appliance replaying a capture.
-    await show([gateway({ is_virtual: false, is_simulated: true })])
-    expect(screen.getAllByText('SIMULATED').length).toBeGreaterThan(0)
+  it('reports a shadow gateway as Shadow, not Simulated', async () => {
+    // THE PRECEDENCE THAT EARNS THE FOURTH VALUE. A shadow gateway is necessarily simulated too, so
+    // without an explicit order it lands in Simulated and the more informative answer -- these
+    // readings actually happened -- becomes unreachable.
+    await show([gateway({ deployment: 'host', is_simulated: true, is_shadow: true })])
+    expect(typeCell().textContent).toBe('Shadow')
+  })
+
+  it('reports a row with no deployment as Remote rather than Host', async () => {
+    // A row read through an older select list, or a fixture written before 0064. Host is the type
+    // with no appliance and no enrolment, so claiming it wrongly hides the kind that needs setting
+    // up -- the safe direction is the one that says "there may be hardware to install".
+    const g = gateway()
+    delete g.deployment
+    await show([g])
+    expect(typeCell().textContent).toBe('Remote')
+  })
+
+  it('no longer shows the badges it replaced', async () => {
+    await show([gateway({ deployment: 'host', is_simulated: true })])
     expect(screen.queryByText('VIRTUAL')).toBeNull()
+    expect(screen.queryByText('SIMULATED')).toBeNull()
   })
 })
 
-describe('the simulated checkbox', () => {
+describe('the Type control', () => {
+
+  it('offers exactly the three types a person may set', async () => {
+    await show([gateway()])
+    openEdit()
+    const values = [...typeSelect().options].map(o => o.value)
+    expect(values).toEqual(['remote', 'host', 'simulated'])
+  })
+
+  it('does not offer Shadow', async () => {
+    // 0060 seeds the one shadow gateway and a BEFORE INSERT trigger on playback_jobs refuses any
+    // other target. Offering it here would be offering to fabricate the row that exists to be
+    // unique.
+    await show([gateway()])
+    openEdit()
+    expect([...typeSelect().options].map(o => o.value)).not.toContain('shadow')
+  })
 
   it('reflects the gateway it is editing', async () => {
-    await show([gateway({ is_simulated: true })])
+    await show([gateway({ deployment: 'host', is_simulated: true })])
     openEdit()
-    expect(simulatedCheckbox().checked).toBe(true)
+    expect(typeSelect().value).toBe('simulated')
   })
 
-  it('defaults to false for a gateway saved before 0052', async () => {
-    // A row cached or created before the column existed has no such key. Absent must read as
-    // false, which is what the column defaults to, rather than rendering indeterminate.
-    const g = gateway()
-    delete g.is_simulated
-    await show([g])
-    openEdit()
-    expect(simulatedCheckbox().checked).toBe(false)
-  })
-
-  it('is independent of the virtual checkbox', async () => {
-    // Ticking one must not move the other. If they were ever wired together the flag would stop
-    // meaning what the column comment says it means.
-    await show([gateway()])
-    openEdit()
-    fireEvent.click(simulatedCheckbox())
-    expect(simulatedCheckbox().checked).toBe(true)
-    expect(virtualCheckbox().checked).toBe(false)
-  })
-
-  it('says that ingestion is unchanged', async () => {
-    // THE MISREADING THIS PREVENTS: that ticking it diverts or quarantines the data. It does not,
-    // and an operator who believed otherwise would be wrong in the direction that matters.
-    await show([gateway()])
-    openEdit()
-    expect(screen.getByText(/Ingestion is unchanged/i)).toBeInTheDocument()
-  })
-
-  it('says that devices inherit it', async () => {
-    // The design decision from 0052, surfaced where somebody would otherwise go looking for a
-    // per-device setting that deliberately does not exist.
-    await show([gateway()])
-    openEdit()
-    expect(screen.getByText(/devices inherit the mark/i)).toBeInTheDocument()
-  })
-
-  it('sends the flag on save', async () => {
+  it('writes both columns when Simulated is chosen', async () => {
+    // ONE CONTROL, TWO COLUMNS. The schema keeps them separate deliberately; this is the single
+    // place the translation happens, and the assertion is that it happens completely.
     api.put.mockResolvedValue({})
     await show([gateway()])
     openEdit()
-    fireEvent.click(simulatedCheckbox())
+    fireEvent.change(typeSelect(), { target: { value: 'simulated' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     const [, body] = api.put.mock.calls[0]
     expect(body.is_simulated).toBe(true)
+    expect(body.deployment).toBe('host')
+  })
+
+  it('clears the simulated flag when the type moves back to Remote', async () => {
+    // The combination the database refuses. Leaving is_simulated set while deployment became
+    // 'remote' would send a write that gateways_simulated_is_host rejects -- an error an operator
+    // caused by choosing something the form offered.
+    api.put.mockResolvedValue({})
+    await show([gateway({ deployment: 'host', is_simulated: true })])
+    openEdit()
+    fireEvent.change(typeSelect(), { target: { value: 'remote' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(api.put).toHaveBeenCalled())
+    const [, body] = api.put.mock.calls[0]
+    expect(body.deployment).toBe('remote')
+    expect(body.is_simulated).toBe(false)
+  })
+
+  it('says that ingestion is unchanged', async () => {
+    // THE MISREADING THIS PREVENTS: that choosing Simulated diverts or quarantines the data. It
+    // does not, and the sentence lives beside the control rather than in a migration header.
+    await show([gateway({ deployment: 'host', is_simulated: true })])
+    openEdit()
+    expect(screen.getByText(/Ingestion is unchanged/i)).toBeInTheDocument()
+  })
+
+  it('says that devices inherit the mark', async () => {
+    // 0052's design decision, surfaced where somebody would otherwise go looking for a per-device
+    // setting that deliberately does not exist.
+    await show([gateway({ deployment: 'host', is_simulated: true })])
+    openEdit()
+    expect(screen.getByText(/devices inherit the mark/i)).toBeInTheDocument()
+  })
+})
+
+/**
+ * THE CELL ZONE CONTROL, which the Type control governs.
+ *
+ * `gateways_synthetic_has_no_cell` (0059) makes the two mutually exclusive in the database:
+ *
+ *     CHECK (((NOT is_simulated) AND (NOT is_shadow)) OR cell_id IS NULL)
+ *
+ * so everything here is a rendering of that constraint, in the same relationship the Type control
+ * has to `gateways_simulated_is_host`. The failure it prevents is the one the two checkboxes had:
+ * a combination the form offers and the database then refuses.
+ */
+describe('the Cell Zone control', () => {
+
+  const cellSelect = () => document.querySelector('#gateway-cell-zone')
+
+  it('reports no cell zone for a simulated gateway, whatever scope is stored', async () => {
+    // THE REPORTED INCONSISTENCY, in one assertion. Four simulated gateways showed three different
+    // cell zones between them: the one seeded `site_wide` read "Site-Wide" and the rest read "No
+    // cell" -- a difference with no behaviour behind it, since device_locations resolves
+    // `simulated` ahead of both. "No cell" is also rendered as a warning promising devices in the
+    // Unassigned queue, and theirs are in the Simulated lane.
+    // The first keeps the harness's name so show() can wait on it; the pair is what matters here,
+    // since the bug was the two of them disagreeing.
+    await show([
+      gateway({ gateway_id: 'gw-a', deployment: 'host', is_simulated: true,
+                cell_id: null, location_scope: 'site_wide' }),
+      gateway({ gateway_id: 'gw-b', gateway_name: 'Sim_Plain', deployment: 'host', is_simulated: true,
+                cell_id: null, location_scope: 'cell' })
+    ])
+
+    const table = within(document.querySelector('table'))
+    expect(table.queryByText('Site-Wide')).toBeNull()
+    expect(table.queryByText('No cell')).toBeNull()
+  })
+
+  it('still reports Site-Wide for a gateway that can hold a cell', async () => {
+    // The guard against over-correcting: Site-Wide is a real answer for every non-synthetic
+    // gateway, and must not read as the unanswered case or nobody stops trying to "fix" it.
+    await show([gateway({ deployment: 'host', cell_id: null, location_scope: 'site_wide' })])
+    expect(within(document.querySelector('table')).getByText('Site-Wide')).toBeInTheDocument()
+  })
+
+  it('offers Site-Wide inside the cell picker rather than as a checkbox beside it', async () => {
+    await show([gateway()])
+    openEdit()
+    expect(within(cellSelect()).getByRole('option', { name: /Site-Wide/i })).toBeInTheDocument()
+    // One question, one control: the tick box that had to reach over and clear the select is gone.
+    expect(screen.queryByRole('checkbox', { name: /Site-Wide/i })).toBeNull()
+  })
+
+  it('disables the cell picker for a simulated gateway and says why', async () => {
+    await show([gateway({ deployment: 'host', is_simulated: true, cell_id: null })])
+    openEdit()
+    expect(cellSelect().disabled).toBe(true)
+    // A disabled control with no explanation is the version of this that generates support
+    // questions -- it has to say which lane the assets land in instead.
+    expect(screen.getByText(/resolve to the Simulated lane/i)).toBeInTheDocument()
+  })
+
+  it('does not show a stored site-wide scope on a gateway that cannot hold a cell', async () => {
+    // The same inconsistency one layer in: the seeded BMS simulator carries `site_wide` from before
+    // 0059 made the flag win, and a disabled box reading "Site-Wide" directly above a note saying
+    // simulated gateways have no cell contradicts itself.
+    await show([gateway({ deployment: 'host', is_simulated: true, cell_id: null, location_scope: 'site_wide' })])
+    openEdit()
+    expect(cellSelect().value).toBe('')
+  })
+
+  it('clears a cell when the type changes to Simulated, rather than letting the save be refused', async () => {
+    // WITHOUT THIS THE SAVE IS A CONSTRAINT VIOLATION, and an unusually cruel one: the offending
+    // field is disabled by the same change, so the operator cannot see or clear the value being
+    // rejected.
+    api.put.mockResolvedValue({})
+    await show([gateway({ deployment: 'remote', cell_id: 'cell-1' })])
+    openEdit()
+    fireEvent.change(typeSelect(), { target: { value: 'simulated' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(api.put).toHaveBeenCalled())
+    const [, body] = api.put.mock.calls[0]
+    expect(body.is_simulated).toBe(true)
+    expect(body.cell_id).toBeFalsy()
+  })
+
+  it('asks for the type before the cell zone it governs', async () => {
+    // A control that disables the one above it makes an operator re-read a decision already taken.
+    await show([gateway()])
+    openEdit()
+    expect(typeSelect().compareDocumentPosition(cellSelect()) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy()
   })
 })

@@ -1655,13 +1655,13 @@ paths:
         response. It is shown once and is not recoverable afterwards: the broker stores only a
         hash, and nothing in this stack keeps a copy.
 
-        **The mirror image of `/functions/v1/gateway-bundle`.** A physical gateway gets a bundle
+        **The mirror image of `/functions/v1/gateway-bundle`.** A remote gateway gets a bundle
         carrying a single-use claim, and the appliance mints its own credential at first boot —
-        the password never travels through a browser. A virtual gateway has no appliance, so both
+        the password never travels through a browser. A host-run gateway has no appliance, so both
         halves of that path refuse it outright (`issue_gateway_enrollment_token()` raises on
-        `is_virtual`), and this endpoint is what replaces them.
+        `deployment = 'host'`), and this endpoint is what replaces them.
 
-        **A physical gateway is refused here for the same reason, in reverse.** Offering this
+        **A remote gateway is refused here for the same reason, in reverse.** Offering this
         beside a working bundle would be offering the worse of two options with nothing to say so.
 
         Requires `Administrator` or `Shopfloor_Manager`. The authority decision is made by
@@ -2778,7 +2778,7 @@ components:
           nullable: true
           readOnly: true
           description: Receipt time of the last node-level Sparkplug B message. NULL means none has ever arrived.
-        is_virtual: { type: boolean, default: false }
+        deployment: { type: string, enum: [host, remote], description: "Where this gateway's connector runs. Replaced is_virtual, which meant three different things (roadmap 15)." }
         is_archived: { type: boolean, default: false }
         archived_at: { type: string, format: date-time, nullable: true }
         auto_delete_at: { type: string, format: date-time, nullable: true }
@@ -2796,7 +2796,7 @@ components:
         location_scope: { $ref: '#/components/schemas/LocationScope' }
         access_url: { type: string, nullable: true }
         status: { type: string, enum: [ONLINE, OFFLINE] }
-        is_virtual: { type: boolean }
+        deployment: { type: string, enum: [host, remote] }
         is_archived: { type: boolean }
 
     GatewayStatus:
