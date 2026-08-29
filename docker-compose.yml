@@ -48,6 +48,48 @@ services:
     container_name: acs-cymru_timescaledb
     image: timescale/timescaledb:2.29.2-pg17
     restart: always
+    # THE WORKER POOL IS CHOSEN HERE RATHER THAN INHERITED, and until it was, the two halves of it
+    # disagreed. Postgres defaults `max_worker_processes` to 8; TimescaleDB defaults
+    # `max_background_workers` to 16; and the same 8 slots also serve parallel query workers. Every
+    # one of those read `source = default` on a running stack -- two projects' defaults meeting in
+    # the middle, chosen by nobody -- and the historian logged 189 of these:
+    #
+    #   WARNING: failed to launch job 2211 "Refresh Continuous Aggregate Policy [2211]": failed to
+    #            start a background worker
+    #
+    # A policy that cannot launch is not one that runs late by design. Refreshes feed every trend
+    # panel and retention is a HARD DELETE, so a skipped window is invisible in both directions --
+    # and the only trace is a WARNING in a log nobody tails.
+    #
+    # THE ARITHMETIC, WHICH IS UPSTREAM'S: max_worker_processes >= 1 + max_background_workers +
+    # max_parallel_workers -- the launcher, plus the pool TimescaleDB may schedule jobs into
+    # (one of which is the per-database scheduler), plus whatever a parallel query takes. 1 + 16 +
+    # 8 = 25. All three are stated because the sum is only meaningful if its terms are pinned: a
+    # future default moving under any one of them would restore exactly the mismatch this fixes.
+    #
+    # The slots are cheap -- a worker process exists only while a job runs -- so this is not a
+    # memory decision, and 16 background workers is the number the ten policy jobs (which grow with
+    # the rollups) need to be able to burst into.
+    #
+    # `shared_preload_libraries = timescaledb` is NOT repeated here. The image writes it into
+    # postgresql.conf and these `-c` flags override individual settings without displacing the file
+    # -- losing that line would start a server that no longer knows what a hypertable is.
+    #
+    # TELEMETRY OFF, and it is a decision rather than tidying. The extension reports usage to
+    # Timescale once a day; this stack has no egress to it, so the reporter failed 19 times out of
+    # 23 and sat permanently red in `timescaledb_information.jobs`. An industrial historian that
+    # phones home is a thing an operator should be told about either way -- so it is stated, and
+    # `basic` restores upstream's default for anyone who wants it.
+    command:
+      - postgres
+      - -c
+      - max_worker_processes=25
+      - -c
+      - timescaledb.max_background_workers=16
+      - -c
+      - max_parallel_workers=8
+      - -c
+      - timescaledb.telemetry_level=off
     environment:
       POSTGRES_DB: ${DB_NAME:-postgres}
       POSTGRES_USER: ${DB_USER:-postgres}

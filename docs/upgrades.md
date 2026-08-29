@@ -184,6 +184,7 @@ to look at if you want positive confirmation rather than absence of complaints:
 | :--- | :--- |
 | Every migration applied cleanly | `docker compose logs supabase-db-init` — it exits non-zero on any failure |
 | The historian's extension matches its image | `docker compose logs timescaledb-maintenance` — the first step names the version, and fails the step if it drifted |
+| Policy jobs are getting workers | `docker compose logs timescaledb \| grep -c 'failed to start a background worker'` — expect `0` |
 | Gateways still reporting | Dashboard → Gateways: `Last Heartbeat` under 90s |
 | Telemetry still landing | Grafana → *Stack & Ingestion Health* → rows ingested per second |
 | The daemon is not dropping anything new | `curl localhost:9108/metrics \| grep dropped` — every reason is a separate series |
