@@ -47,6 +47,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { hostname } from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -718,6 +719,41 @@ function provisionCredential(sparkplugId, gatewayIsNew) {
   return password;
 }
 
+/**
+ * Record, in the platform's own audit trail, that this script issued a broker credential.
+ *
+ * WHY IT IS A SEPARATE RPC FROM THE ONE THE DASHBOARD CALLS. `record_gateway_credential_issued()`
+ * (0041) gates on `has_role()`, which resolves through `auth.uid()` -- NULL for the service-role
+ * key this script authenticates with. So every credential provisioning issued was recorded
+ * nowhere, and the Access Control page reported `No platform record` for three of the five
+ * gateways on a demonstrator that was publishing from all of them.
+ *
+ * THAT IS NOT COSMETIC. These credentials cannot be revoked by the platform in any general sense --
+ * see 0043's header -- so the inventory IS the compensating control, and README.md's Accepted risks
+ * section says as much by name. An inventory that under-reports is the mitigation not working.
+ *
+ * `rotated` MATTERS AND IS NOT DECORATION: mosquitto holds one password per username, so reissuing
+ * REPLACES rather than adds. A reader counting two CREDENTIAL_ISSUED rows for one gateway as two
+ * live credentials would be wrong in the opposite direction from the bug being fixed.
+ *
+ * The host and OS user are CLAIMED. 0062 stores them under a `claimed` key because the database
+ * can verify neither, and this script is not in a position to prove anything about itself either.
+ */
+async function recordCredentialIssued(gatewayId, { rotated }) {
+  await rest('/rpc/record_gateway_credential_issued_by_service', {
+    method: 'POST',
+    body: JSON.stringify({
+      p_gateway_id: gatewayId,
+      p_context: {
+        rotated,
+        os_user: process.env.USER || process.env.USERNAME || null,
+        host: hostname(),
+        script: 'scripts/provision-gateways.mjs',
+      },
+    }),
+  });
+}
+
 // --- main -------------------------------------------------------------------------------------
 async function main() {
   assertDistinctIds();
@@ -726,6 +762,9 @@ async function main() {
 
   const results = [];
   const devices = [];
+  // Credentials that reached the broker and not the audit trail. Reported at the end rather than
+  // thrown at the moment, so one failure does not abandon a run that is issuing several.
+  const unrecorded = [];
   for (const spec of GATEWAYS) {
     console.log(`\n${spec.name} -- ${spec.description}`);
     const { row, created } = await ensureGateway(spec);
@@ -765,6 +804,19 @@ async function main() {
       results.push({
         name: spec.name, envKey: spec.envKey, sparkplugId: row.sparkplug_id, password,
       });
+
+      // AFTER THE BROKER, NOT BEFORE, and the ordering is a choice between two wrong-in-different
+      // -directions failures. Recording first and then failing to provision would write a record of
+      // a credential that never existed, into a table whose rows cannot be deleted. Provisioning
+      // first and then failing to record leaves a live credential unrecorded -- which is the defect
+      // being fixed, so it is not shrugged off: it is collected and the run exits non-zero below,
+      // with the password still written out, because an operator who has the password and an error
+      // can act, and one who has neither cannot.
+      try {
+        await recordCredentialIssued(row.id, { rotated: !created });
+      } catch (err) {
+        unrecorded.push({ name: spec.name, sparkplugId: row.sparkplug_id, reason: err.message });
+      }
     }
   }
 
@@ -819,6 +871,29 @@ async function main() {
     'These passwords are NOT RECOVERABLE -- mosquitto_passwd stores only a hash. Record them now.\n' +
     'Re-running this script rotates them; it does not read them back.'
   );
+
+  // ---------------------------------------------------------------------------------------------
+  // A CREDENTIAL THAT REACHED THE BROKER AND NOT THE AUDIT TRAIL FAILS THE RUN, after the passwords
+  // have been printed and written.
+  //
+  // The alternative -- a warning -- restores the defect this whole change closes, quietly: the
+  // account works, the demonstrator comes up, and the only symptom is a page that says `No platform
+  // record` for a gateway that holds one. Nobody reads a warning in a script that ended with a
+  // success message and a block of credentials.
+  // ---------------------------------------------------------------------------------------------
+  if (unrecorded.length > 0) {
+    console.error(
+      `\n${unrecorded.length} credential(s) were issued at the broker and NOT recorded in the ` +
+      'audit trail:\n' +
+      unrecorded.map((u) => `  ${u.name} (${u.sparkplugId}): ${u.reason}`).join('\n') +
+      '\n\nThe passwords above are live and usable. What is missing is the platform\'s record ' +
+      'that they exist,\nwhich is what the Access Control page reports as the credential ' +
+      'inventory -- and, because these\ncredentials cannot be revoked, that inventory is the ' +
+      'compensating control rather than a nicety.\n\n' +
+      'Check that migration 0062 has been applied (db-init replays it on every boot) and re-run.'
+    );
+    process.exitCode = 1;
+  }
 }
 
 main().catch((err) => {

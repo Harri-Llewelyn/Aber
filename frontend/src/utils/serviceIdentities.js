@@ -198,8 +198,16 @@ export function tokenStatusTone(status) {
 /** The line under the badge: the date that matters, and which date it is. */
 export function tokenStatusDetail(status, now = Date.now()) {
   if (!status || status.state === TOKEN_STATES.NONE) {
-    return 'Nothing has been minted for this identity through scripts/mint-mcp-token.mjs. A token '
-      + 'issued before that script recorded its issues would not appear here.'
+    // "NOTHING RECORDED", NOT "NOTHING OUTSTANDING", and the distinction is the whole point of this
+    // string. Two of the three principals this stack ships with hold keys that are in use right
+    // now -- SUPABASE_INGESTION_KEY and SUPABASE_PLAYBACK_KEY -- and neither can appear here: they
+    // are minted by `npm run setup` before this database exists, and they run for ten years, which
+    // record_service_token_issued() refuses because the ceiling exists precisely for tokens that
+    // cannot be revoked. So an empty inventory is a statement about the RECORD, and saying
+    // otherwise is the defect this wording was rewritten to close. The coverage note under the
+    // table carries the detail; this is the cell, and it has 34ch.
+    return 'No token recorded for this identity. That is not the same as none existing — see the '
+      + 'coverage note below.'
   }
   if (status.state === TOKEN_STATES.EXPIRED) {
     return `The last token expired on ${new Date(status.lastExpiry).toLocaleDateString()}.`

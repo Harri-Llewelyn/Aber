@@ -688,6 +688,53 @@ The daemon presents the **anon key as the gateway `apikey` and its own token as 
 is not redundancy: the gateway's filter admits exactly two literal keys, so the ingestion token is
 refused at the edge if sent as the apikey.
 
+### Two recorders, because a host script cannot satisfy `has_role()` (`0041`, `0062`)
+
+`record_gateway_credential_issued()` (`0041`) is the **operator** path: it gates on `has_role()`,
+which resolves through `auth.uid()`, and it writes the caller's own id into `changed_by`. That is
+right for the Access Control page and unreachable for anything else, because a host script
+authenticates with the service-role key, for which `auth.uid()` is NULL.
+
+**So provisioning issued credentials that nothing recorded.** Measured on a provisioned stack before
+`0062`: five gateways holding live broker accounts, two `CREDENTIAL_ISSUED` rows, and an Access
+Control page reporting `No platform record` for three gateways that were publishing at the time.
+
+`record_gateway_credential_issued_by_service()` (`0062`) is the **machine** path — the shape
+`record_ingestion_rejection()` (`0026`) and `record_service_token_issued()` (`0043`) already use:
+revoked from `PUBLIC`, `anon` and `authenticated`, reachable by `service_role` alone, `actor_source`
+pinned to `service` and `changed_by` NULL. The host and OS user it claims to run as are stored under
+a `claimed` key, because the database can verify neither.
+
+**Widening `0041` instead was the other option and is worse.** One function whose authorisation
+depends on which caller reached it, and whose row means a different thing in each case, is harder to
+read than two functions that each mean one thing. Both write the same `CREDENTIAL_ISSUED` action on
+purpose: an inventory asking *"does this gateway hold a credential"* must not have to know which
+route minted it, and the route is in `actor_source` for anyone who does.
+
+**It refuses an archived gateway.** `0037` withdraws enrolment on archive so a decommissioned
+appliance cannot return through a credential; recording one as routine would document, in the table
+an auditor reads to check that did not happen, exactly the thing it was written to prevent.
+
+**No expiry, and that is the difference from a token rather than an omission.** A broker password has
+none: it is bounded by revocation (`0038`), not by a countdown. Inventing an `expires_at` would put a
+reassuring date against a credential that has no such date.
+
+### What the inventory still cannot see
+
+`npm run setup` mints `SUPABASE_INGESTION_KEY` and `SUPABASE_PLAYBACK_KEY` — the keys the ingestion
+daemon and the playback worker authenticate with — **before this database exists**, and signs them
+for ten years. Measured: 3650 days and ~2440 days, with no `jti`.
+
+`record_service_token_issued()` refuses both, and correctly: `service_token_max_days()` is 90, and
+that ceiling exists *because* these tokens cannot be revoked. So the gap cannot be closed by
+recording harder. Closing it properly means either shortening those two keys' lifetime — for which
+there is no rotation path today — or raising a ceiling that is load-bearing.
+
+Until that is decided, the Access Control page **states the gap on its face** rather than rendering
+an empty list that reads as "nothing outstanding". An inventory whose coverage is unstated is one an
+operator will over-trust, and this inventory is the compensating control
+[Accepted risks](../README.md#accepted-risks) names by name.
+
 ### There is no revocation, so expiry is the whole safety story
 
 `mint-mcp-token.mjs` records the constraint the rest of the design follows from: PostgREST checks

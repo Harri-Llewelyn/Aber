@@ -1,7 +1,7 @@
 # Testing
 
 ```bash
-# Frontend — 1647 tests
+# Frontend — 1,600+ tests
 cd frontend && npm test
 
 # Python unit suites — no stack required
@@ -87,6 +87,9 @@ python supabase/migrations/test_system_settings_rls.py
 python supabase/migrations/test_relocate_devices.py
 python supabase/migrations/test_metric_catalog_seed.py
 python supabase/migrations/test_gateway_enrollment.py
+# The machine-path credential recorder (0062), and the grant that decides whether it is a fix.
+# Every test rolls back: the rows it writes are audit rows, and that table cannot be pruned.
+python supabase/migrations/test_credential_recorder.py
 # Needs the TimescaleDB historian (port 5433), not Supabase — the rollups live there
 python timescaledb/test_bi_reader_grants.py
 # The installed extension against the version the image ships, plus the two deployment paths that
@@ -104,6 +107,11 @@ set -a && . ./.env && set +a && unset MQTT_HOST DB_HOST DB_PORT
 export MQTT_USER="$MQTT_VALIDATOR_USER" MQTT_PASSWORD="$MQTT_VALIDATOR_PASSWORD"
 python ingestion/validate.py
 ```
+
+**The frontend figure is a lower bound rather than a count**, and deliberately: it moved four times
+in one afternoon and each move made both documents wrong until somebody noticed. A bound only ever
+becomes conservative, which is the failure worth having — `npm test` prints the exact number, and it
+is the only place that can be right on every branch at once.
 
 Three suites have a second half elsewhere, and both halves must move together:
 `test_modelled_metrics_contract.py` and `test_rbe_telemetry.py` each pair with a JavaScript suite in
