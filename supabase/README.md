@@ -751,6 +751,35 @@ because that is the behaviour under test. Shorter retention for simulated data w
 feature that needs synthetic data to behave normally, and could not be built cheaply anyway —
 retention is one policy on one hypertable dropping whole chunks rather than rows.
 
+### The playback gateway is visible and almost inert (`0067`)
+
+It stays on the Gateways and Access Control pages deliberately: it holds a broker credential an
+operator has to mint — `0060`'s own `NOTICE` says so, with the `sparkplug_id` filled in — and its
+shadow devices hang off it. Hiding it would make the one gateway that needs setting up the one
+nobody can see.
+
+What it does not offer is the two acts that are wrong for it, for different reasons:
+
+- **Archiving it** removes the only edge node broker playback can publish as. `ensure_shadow_devices()`
+  looks the gateway up by flag (`WHERE is_shadow AND NOT is_archived`), so the failure lands at the
+  moment somebody starts a job — possibly weeks later, on a page that says nothing about gateways —
+  while the archive itself reports success and reads as housekeeping. `0067` refuses it in the
+  database and the button is hidden; the UI is not the rule.
+- **Requesting a rebirth** is addressed to a node nobody is listening as. The playback worker only
+  publishes and holds no subscription at all, so the NCMD reaches nothing and `rebirth_requests`
+  would record something that can never be answered.
+
+**The rule is "not the last one", not "never".** `ensure_shadow_devices()` finds the gateway by flag
+precisely so a stack can have more than one — two playbacks at once need two edge nodes — so
+`0067` refuses only the archive that would leave none, and its message names the way through: mark
+another gateway `is_shadow` first. Deletion is not guarded, because `0060` re-seeds the row on the
+next boot; archiving is the act that survives one.
+
+**It is also not a capture subject.** Recording from a shadow gateway means capturing a capture, and
+its shadow devices exist to receive a replay rather than to report a machine, so both are filtered
+out of the Capture page's subject tables. Starting a playback is unaffected — that query selects on
+`is_shadow` because that is exactly the lane a playback publishes into.
+
 ### `deployment`, and the word it is replacing (`0064`)
 
 `is_virtual` carries three incompatible definitions — *"no physical edge appliance behind this

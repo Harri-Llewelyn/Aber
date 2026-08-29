@@ -92,7 +92,10 @@ const mapGatewayRow = (g, locations) => {
 // device_locations read fails -- see loadDeviceLocations().
 const DEVICE_EMBED =
   'id, name, description, sparkplug_id, reported_identity, identity_source, status, is_quarantined, ' +
-  'is_archived, gateway_id, cell_id, location_scope, created_at, model_3d_path';
+  // `shadow_of` (0060) says this device exists to RECEIVE a replay rather than to report a machine.
+  // Selected because the Capture page filters on it: a shadow device is not a capture subject, and
+  // without the column the filter silently matches nothing.
+  'is_archived, gateway_id, cell_id, location_scope, created_at, model_3d_path, shadow_of';
 const GATEWAY_EMBED =
   `id, name, description, sparkplug_id, cell_id, location_scope, access_url, status, last_heartbeat, ` +
   `deployment, is_simulated, is_shadow, is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;

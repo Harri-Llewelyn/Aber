@@ -154,6 +154,62 @@ describe('gateway row actions', () => {
  * Documents are still reachable, and still counted -- EntityLinksModal issues its own
  * per-entity read when it opens, which is the only place the figure was ever shown.
  */
+/**
+ * THE PLAYBACK GATEWAY IS VISIBLE AND ALMOST INERT.
+ *
+ * It is seeded by 0060 and stays on this page deliberately -- it holds a broker credential an
+ * operator has to mint, its shadow devices hang off it, and hiding it would make the one gateway
+ * that needs setting up the one nobody can see. What it must NOT offer is the two actions that are
+ * wrong for it, for different reasons:
+ *
+ *   * ARCHIVE removes the only edge node broker playback can publish as. ensure_shadow_devices()
+ *     finds it by flag, so the failure lands weeks later when somebody starts a job, and the
+ *     archive itself reports success. 0067 refuses it in the database; this is the button.
+ *   * REQUEST REBIRTH is addressed to a node nobody is listening as. The playback worker only
+ *     publishes -- it holds no subscription at all -- so the NCMD reaches nothing and the request
+ *     records something that can never be answered.
+ *
+ * MINTING A CREDENTIAL IS NOT IN THAT LIST, and that is the point worth pinning: playback cannot
+ * authenticate without one, and 0060's own NOTICE tells the operator to mint it here and put it in
+ * MQTT_PLAYBACK_CREDENTIALS.
+ */
+describe('the playback gateway', () => {
+  const playback = () => gateway({
+    gateway_id: 'gw-shadow',
+    gateway_name: 'Playback',
+    sparkplug_id: 'gwy160000000000400080000',
+    cell_id: null,
+    is_simulated: true,
+    is_shadow: true,
+  })
+
+  it('cannot be archived from the drawer', async () => {
+    await show([playback()])
+    expect(openPanel('Playback').queryByText('Archive Gateway')).toBeNull()
+  })
+
+  it('is not offered a rebirth', async () => {
+    await show([playback()])
+    expect(openPanel('Playback').queryByText('Request Rebirth')).toBeNull()
+  })
+
+  it('still offers its broker credential, which playback cannot run without', async () => {
+    await show([playback()])
+    // The action exists for every host-run gateway and this one is no exception: 0060's NOTICE
+    // names this page as where the playback credential comes from.
+    expect(openPanel('Playback').queryByText(/Credential/i)).not.toBeNull()
+  })
+
+  it('leaves both actions on an ordinary gateway', async () => {
+    // The guard is about the shadow flag, not about gateways in general -- asserted so a change
+    // that hid these everywhere would fail here rather than be discovered on the page.
+    await show([gateway()])
+    const panel = openPanel()
+    expect(panel.queryByText('Archive Gateway')).not.toBeNull()
+    expect(panel.queryByText('Request Rebirth')).not.toBeNull()
+  })
+})
+
 describe('gateway document links', () => {
   const withDocs = (rows, docs) => (path) => {
     if (path.startsWith('/api/v1/links')) return Promise.resolve(docs)

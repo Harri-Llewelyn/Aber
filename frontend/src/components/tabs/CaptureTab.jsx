@@ -192,7 +192,18 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
   }, [gateways])
 
   const allRows = useMemo(() => {
-    const source = subjectKind === 'gateway' ? gateways : devices
+    // THE PLAYBACK LANE IS NOT A CAPTURE SUBJECT, in either tab.
+    //
+    // A shadow gateway publishes only while a playback is running, so recording from it means
+    // capturing a capture -- a file whose contents are another file, replayed. Its shadow devices
+    // are the same thing one level down: `shadow_of` says they exist to receive a replay, not to
+    // report a machine.
+    //
+    // Offering them read as an oversight rather than a choice, because everything else on this page
+    // is a subject somebody might genuinely want to record. Starting a playback is unaffected:
+    // `playbackTargets()` selects on `is_shadow` and is a different query for a different question.
+    const source = (subjectKind === 'gateway' ? gateways : devices)
+      .filter(s => subjectKind === 'gateway' ? !s.is_shadow : !s.shadow_of)
     return source.map(subject => ({
       id: subject.id,
       kind: subjectKind,

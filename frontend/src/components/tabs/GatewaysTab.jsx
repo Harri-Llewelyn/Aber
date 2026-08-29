@@ -814,8 +814,15 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
            * here -- see 0058.
            *
            * NOT ON AN ARCHIVED GATEWAY, where nothing is listening.
+           *
+           * AND NOT ON A SHADOW GATEWAY, where nothing is listening either -- for a different
+           * reason worth keeping distinct. The playback worker only PUBLISHES: it holds no
+           * subscription (see playback_worker.py, which says so at the top and explains that this
+           * is why the `seq` objection that kept capture inside the daemon does not apply to it).
+           * So an NCMD addressed to the playback edge node is received by nobody, and the request
+           * would sit in `rebirth_requests` recording something that can never be answered.
            */
-          !selected.is_archived && canManage && {
+          !selected.is_archived && !selected.is_shadow && canManage && {
             label: 'Request Rebirth',
             icon: <IconRefreshCw size={13} />,
             title: 'Ask this edge node to republish its birth certificate. Harmless — it restates '
@@ -921,7 +928,15 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             onClick: () => setDocsForGw(selected),
             title: 'Attach or edit links for this gateway — documents, an asset register, a file repository, any URL'
           },
-          !selected.is_archived && {
+          /* NOT OFFERED FOR THE PLAYBACK GATEWAY, and 0067 refuses it in the database as well --
+             this only stops an operator being shown a button whose failure is a database error.
+
+             Archiving the last shadow gateway leaves broker playback with no edge node to publish
+             as, and `ensure_shadow_devices()` finds it by flag, so the failure surfaces weeks later
+             at the moment somebody starts a job. The archive itself reports success and reads as
+             ordinary housekeeping. Swapping in a second shadow gateway first is legitimate and is
+             allowed; the database is where that distinction is enforced. */
+          !selected.is_archived && !selected.is_shadow && {
             label: 'Archive Gateway', icon: <IconArchive size={13} />,
             onClick: () => setArchiveTarget(selected),
             disabled: !canArchive,
