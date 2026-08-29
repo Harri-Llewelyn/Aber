@@ -95,6 +95,31 @@ spec:
         - name: timescaledb
           image: "{{ .Values.timescaledb.image.repository }}:{{ .Values.timescaledb.image.tag }}"
           imagePullPolicy: {{ .Values.timescaledb.image.pullPolicy }}
+          {{- /*
+            THE WORKER POOL, PASSED AS SERVER FLAGS RATHER THAN A postgresql.conf.
+
+            The image writes `shared_preload_libraries = timescaledb` into its own conf on first
+            init; `-c` overrides individual settings without displacing that file, while mounting a
+            conf of our own would replace it and start a server that does not know what a
+            hypertable is.
+
+            max_worker_processes is COMPUTED (1 + background + parallel), not a value anyone can
+            set: it is only correct in relation to the other two, and the whole defect this closes
+            was two numbers chosen independently. See values.yaml.
+
+            A change here needs a pod restart to take effect -- these are postmaster settings, and
+            the StatefulSet's RollingUpdate does exactly that on upgrade.
+          */}}
+          args:
+            - postgres
+            - -c
+            - max_worker_processes={{ add1 (add .Values.timescaledb.workers.background .Values.timescaledb.workers.parallel) }}
+            - -c
+            - timescaledb.max_background_workers={{ .Values.timescaledb.workers.background }}
+            - -c
+            - max_parallel_workers={{ .Values.timescaledb.workers.parallel }}
+            - -c
+            - timescaledb.telemetry_level={{ .Values.timescaledb.telemetryLevel }}
           ports:
             - name: postgres
               containerPort: 5432

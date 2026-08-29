@@ -299,6 +299,30 @@ timescaledb:
   podSecurityContext:
     fsGroup: 70
     fsGroupChangePolicy: OnRootMismatch
+  # --- The worker pool ---------------------------------------------------------------------------
+  # CHOSEN, NOT INHERITED, and until it was the two halves disagreed: Postgres defaults
+  # `max_worker_processes` to 8, TimescaleDB defaults `max_background_workers` to 16, and the same 8
+  # slots also serve parallel query workers. Every one read `source = default` on a running stack,
+  # and the historian logged 189 of `failed to launch job ...: failed to start a background worker`.
+  # A refresh policy feeds every trend panel and a retention policy is a HARD DELETE, so a window
+  # skipped because no worker was free is invisible in both directions.
+  #
+  # `maxWorkerProcesses` IS NOT A VALUE, deliberately. The template computes it as
+  # 1 + background + parallel -- upstream's own arithmetic, one launcher plus the pool TimescaleDB
+  # may schedule into plus whatever a parallel query takes -- so the invariant cannot be broken by
+  # setting one number and forgetting the other. Raise `background` for a fleet with more rollups
+  # and the pool follows it.
+  #
+  # Slots are cheap: a worker process exists only while a job runs, so this is not a memory
+  # decision and does not need to track `resources` below.
+  workers:
+    background: 16
+    parallel: 8
+  # The extension reports usage to Timescale once a day. This stack has no egress to it, so the
+  # reporter failed 19 runs out of 23 and sat permanently red in `timescaledb_information.jobs`.
+  # `off` states the decision; `basic` restores upstream's default for a deployment that wants it.
+  # An industrial historian that phones home is a thing an operator should be told about either way.
+  telemetryLevel: "off"
   # --- Telemetry lifecycle --------------------------------------------------------------------
   # Applied by the `timescaledb-retention` hook Job on every install AND every upgrade, so these
   # values are authoritative against a database that already holds data. That is the whole reason
