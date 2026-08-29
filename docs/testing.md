@@ -97,6 +97,9 @@ python supabase/migrations/test_credential_recorder.py
 # Rolls back for a second reason: net.http_post queues inside the transaction, so the rotation
 # requests these tests provoke are un-queued rather than sent.
 python supabase/migrations/test_credential_revocation.py
+# `deployment` and `is_virtual` agreeing whichever generation of writer touched the row (0064).
+# Not the rename -- the property that makes the rename possible later.
+python supabase/migrations/test_gateway_deployment.py
 # Needs the TimescaleDB historian (port 5433), not Supabase — the rollups live there
 python timescaledb/test_bi_reader_grants.py
 # The installed extension against the version the image ships, plus the two deployment paths that
