@@ -1354,7 +1354,13 @@ const apiMethods = {
         name: g.name,
         entity_type: 'gateway',
         archived_at: g.archived_at,
-        auto_delete_at: g.auto_delete_at
+        auto_delete_at: g.auto_delete_at,
+        // WHAT ARCHIVING TOOK, so the restore dialog can say it as a fact rather than a hedge.
+        // `revoke_credential_on_decommission()` (0038, repredicated by 0063) rotates a gateway's
+        // broker credential to a password nobody records when it is archived -- and restoring
+        // flips `is_archived` back and nothing else, so the account does not come back with it.
+        // Free to carry: the select above is already `*`.
+        credential_revoked_at: g.credential_revoked_at
       }));
 
       const devices = (devicesRes.data || []).map(d => ({

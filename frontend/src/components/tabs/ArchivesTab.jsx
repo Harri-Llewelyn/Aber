@@ -2,8 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api'
 import { PERMISSION_UUIDS } from '../../constants'
 import CopyableId from '../common/CopyableId'
-import { ActionButton } from '../common/ActionButton'
-import { usePendingKey } from '../../hooks/usePendingAction'
+// No ActionButton or usePendingKey here any more: both actions on this page run from inside a
+// ConfirmModal, which owns its own pending state. A row-level spinner would have nothing to
+// report -- the row's buttons now only open a dialog.
 import { ConfirmModal } from '../modals/ConfirmModal'
 import { IconArchive, IconRefreshCw, IconTrash } from '../common/Icons'
 
@@ -11,6 +12,7 @@ export function ArchivesTab({ showToast, hasPermission }) {
   const [archives, setArchives] = useState([])
   const [loading, setLoading]   = useState(true)
   const [confirmPurge, setConfirmPurge] = useState(null)
+  const [confirmRestore, setConfirmRestore] = useState(null)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -19,13 +21,11 @@ export function ArchivesTab({ showToast, hasPermission }) {
 
   useEffect(() => { load() }, [load])
 
-  // Which row is mid-restore. This table mixes cells, gateways and devices, so the row identity
-  // is what the operator is tracking; one shared boolean would spin all of them.
-  const [restoringId, runRestore] = usePendingKey()
-
   const restore = async (item) => {
     try {
       await api.post(`/api/v1/${item.entity_type}s/${item.entity_id}/restore`, {})
+      // Dismissed after the write, for the same reason as purge() below.
+      setConfirmRestore(null)
       load(); showToast(`Entity '${item.name}' restored to active service`, 'success')
     } catch (e) { showToast(e.message, 'error') }
   }
@@ -103,16 +103,14 @@ export function ArchivesTab({ showToast, hasPermission }) {
                          delete only takes on its danger colour when pointed at. A row of two
                          filled buttons invites the wrong one to be clicked at a glance. */}
                      <td className="row-actions">
-                       <ActionButton
+                       <button
                          className={`btn btn-sm btn-ghost ${!canArchive ? 'btn-disabled' : ''}`}
                          disabled={!canArchive}
-                         pending={restoringId === a.entity_id}
-                         pendingLabel="Restoring…"
-                         onClick={() => runRestore(a.entity_id, () => restore(a))}
+                         onClick={() => canArchive && setConfirmRestore(a)}
                          title={!canArchive ? 'Requires Admin permissions' : 'Restore entity back to active service'}
                        >
                          <IconRefreshCw size={12} /> Restore
-                       </ActionButton>
+                       </button>
                        <button
                          className={`btn btn-sm btn-danger btn-danger-reveal ${!canArchive ? 'btn-disabled' : ''}`}
                          disabled={!canArchive}
@@ -138,6 +136,46 @@ export function ArchivesTab({ showToast, hasPermission }) {
           here and elsewhere -- guards something recoverable, archiving being a soft flag with a
           Restore button beside it, and gating all of them would train people to type through the
           one dialog where reading it matters. Friction only buys attention while it is rare. */}
+      {/* RESTORE ASKS FIRST NOW (issue #100), AND IT IS NOT GATED ON TYPING THE NAME.
+          The rule the dialog below sets stands: friction only buys attention while it is rare, and
+          restore is recoverable -- you can archive it again. What restore is NOT is consequence-free,
+          which is why this asks at all rather than being left as a one-click act on a table of
+          look-alike rows.
+
+          IT NAMES THE TWO CONSEQUENCES THAT ARE NOT OBVIOUS, because "you can just archive it
+          again" is the reason a confirmation here could look like ceremony, and it is not quite
+          true:
+
+            * THE RETENTION TIMER IS CLEARED, not paused. `/restore` sets `auto_delete_at` to NULL,
+              and re-archiving computes a fresh window from today -- so an entity one day from
+              auto-purge, restored by accident and put back, is now thirty days from it. The undo
+              does not restore the clock.
+
+            * A GATEWAY'S BROKER CREDENTIAL DOES NOT COME BACK. Archiving one rotates it to a
+              password nobody records (0038, repredicated by 0063); restore flips `is_archived` and
+              nothing else. So the gateway returns to the asset pages looking active and cannot
+              authenticate -- the failure lands at the broker, not here. This says so, from
+              `credential_revoked_at` rather than from a guess about whether it ever had one. */}
+      {confirmRestore && (
+        <ConfirmModal
+          message={
+            `Restore the ${confirmRestore.entity_type} '${confirmRestore.name}' to active service? ` +
+            'It reappears on the asset pages with its history intact, and its auto-purge timer is ' +
+            'cleared — archiving it again starts a fresh retention window rather than resuming the ' +
+            'one it had.' +
+            (confirmRestore.entity_type === 'gateway' && confirmRestore.credential_revoked_at
+              ? ' Its broker credential was revoked when it was archived and is not restored with it:' +
+                ' mint a new one on the Access Control page before it can publish again.'
+              : '')
+          }
+          confirmLabel="Restore"
+          pendingLabel="Restoring…"
+          confirmClassName="btn btn-primary"
+          onConfirm={() => restore(confirmRestore)}
+          onCancel={() => setConfirmRestore(null)}
+        />
+      )}
+
       {confirmPurge && (
         <ConfirmModal
           message={
