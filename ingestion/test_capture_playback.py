@@ -52,10 +52,23 @@ sys.path.insert(0, INGESTION_DIR)
 # displaced: if `sparkplug_b_pb2` is already the real module, it is left alone -- re-importing a
 # generated protobuf module registers its descriptors a second time and raises.
 # =============================================================================================
+#
+# DROPPING THE STUB IS NO LONGER ENOUGH, AND THE REASON IS ROADMAP ITEM 17. `capture` used to be
+# reachable only from this file, so deleting `sparkplug_b_pb2` and importing it fresh was the whole
+# dance. ingestion.py now imports `capture_worker`, which imports `capture` -- so by the time this
+# file runs, a sibling that imported the daemon has ALREADY loaded `capture` bound to the stub, and
+# `import capture` below would hand back that cached module. Every encoding test then fails with
+# "'object' object has no attribute 'timestamp'", exactly as before, from a cause one import
+# further away.
+#
+# Neither module registers protobuf descriptors of its own, so re-importing them is free -- unlike
+# the generated module, which is why only a STUB of that is ever displaced.
 _installed = sys.modules.get("sparkplug_b_pb2")
 _is_stub = _installed is not None and getattr(_installed, "Payload", None) is object
 if _is_stub:
     del sys.modules["sparkplug_b_pb2"]
+    for _bound in ("capture", "capture_worker"):
+        sys.modules.pop(_bound, None)
 
 import sparkplug_b_pb2  # noqa: E402  (the real generated module, not the siblings' stub)
 import capture  # noqa: E402  (must follow, so it binds the real one)

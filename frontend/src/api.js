@@ -412,24 +412,91 @@ export function filenameFromDisposition(header) {
 }
 
 /**
- * `<sparkplug_id>/<iso-timestamp>-<label>.capture.json`.
+ * `<sparkplug_id>/capture.json` -- one path per subject, derived rather than composed.
  *
- * The timestamp leads for the same reason it does for a flow backup -- the name sorts
- * chronologically, so `list()` ordered by name is ordered by age without reading metadata.
+ * DETERMINISTIC SINCE 0055, AND IT USED TO CARRY A TIMESTAMP AND A SLUG. That was right while a
+ * gateway could hold any number of captures; the schema now stores exactly ONE per subject, and
+ * making the path a function of the subject alone is what makes an orphaned object impossible: a
+ * re-record OVERWRITES this key rather than leaving the previous file behind for something to
+ * sweep. It also means the path satisfies the bucket's prefix policy by construction instead of
+ * because the caller assembled it correctly.
  *
- * THE LABEL IS SLUGGED RATHER THAN TRUSTED. It comes from the uploaded filename, and an operator
- * naming a capture "morning shift / line 2" would otherwise put a `/` in the key, which storage
- * reads as a folder separator -- silently filing the object one level deeper, outside the prefix
- * the RLS policy checks, where the insert is then refused for a reason the name does not suggest.
+ * THE SLUG WENT WITH THE TIMESTAMP, and the trap it existed for is now handled better. An operator
+ * naming a capture "morning shift / line 2" would have put a `/` into the key, which storage reads
+ * as a folder separator -- filing the object outside the prefix RLS checks, where the insert is
+ * refused for a reason the filename does not suggest. That label is now `captures.note`, a column,
+ * where a slash is simply a character.
+ *
+ * `sparkplugId` is the SUBJECT's -- a `gwy…` for a gateway capture and a `dev…` for a device one.
+ * Captures are filed by what was recorded, not by the gateway a capture plays back as.
  */
-export function capturePath(sparkplugId, label, when = new Date()) {
-  const stamp = when.toISOString().replace(/[:.]/g, '-');
-  const slug = String(label || 'capture')
-    .replace(/\.capture\.json$|\.json$/i, '')
-    .replace(/[^A-Za-z0-9_-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 48) || 'capture';
-  return `${sparkplugId}/${stamp}-${slug}.capture.json`;
+export function capturePath(sparkplugId) {
+  return `${sparkplugId}/capture.json`;
+}
+
+/**
+ * The manifest for a capture uploaded through the browser.
+ *
+ * THE OTHER HALF OF A CONTRACT THE DAEMON WRITES. `capture_worker._manifest()` fills these same
+ * fields for a recorded capture, and the two have to agree or the list shows one kind of capture
+ * described and the other blank -- which reads as a broken column rather than an absent value.
+ * Nothing derives one from the other, so they are kept in step by hand; the fields are named in
+ * `captures.manifest`'s COMMENT, which is the authority.
+ *
+ * `birth_captured` IS THE ONE THAT MATTERS, and it is computed rather than trusted: an uploaded
+ * file could claim anything, and the question -- does this capture contain an NBIRTH or DBIRTH --
+ * is answerable from the messages themselves. False means the capture replays as
+ * `unresolved_alias` against an alias-optimised gateway and drops every metric, from a file that
+ * otherwise looks complete.
+ *
+ * Names are NOT capped here. `capped_capture_manifest()` in 0055 keeps 50 and records the true
+ * count beside them, and doing it in one place is what stops the two writers disagreeing about
+ * where the line is.
+ */
+export function captureManifest(parsed) {
+  const messages = Array.isArray(parsed?.messages) ? parsed.messages : [];
+  const names = [];
+  const seen = new Set();
+  const topics = new Set();
+  // The identities in the file, so a playback can be set up without downloading it again. Every
+  // captured device id has to be mapped onto a device of the target gateway, and the dialog builds
+  // that from dropdowns.
+  const edgeNodes = [];
+  const devices = [];
+  let birth = false;
+
+  for (const message of messages) {
+    if (message?.topic) {
+      topics.add(message.topic);
+      // spBv1.0/<group>/<type>/<edge>[/<device>]
+      const parts = String(message.topic).split('/');
+      const type = parts[2];
+      if (type === 'NBIRTH' || type === 'DBIRTH') birth = true;
+      if (parts[3] && !edgeNodes.includes(parts[3])) edgeNodes.push(parts[3]);
+      if (parts[4] && !devices.includes(parts[4])) devices.push(parts[4]);
+    }
+    for (const metric of message?.payload?.metrics || []) {
+      if (metric?.name && !seen.has(metric.name)) {
+        seen.add(metric.name);
+        names.push(metric.name);
+      }
+    }
+  }
+
+  const durationMs = Number(parsed?.duration_ms) || 0;
+  return {
+    metric_names: names,
+    topic_count: topics.size,
+    observed_rate_hz: durationMs > 0
+      ? Math.round((messages.length / (durationMs / 1000)) * 1000) / 1000
+      : 0,
+    birth_captured: birth,
+    // Absent rather than false: nobody asked this file's gateway for a rebirth, so claiming either
+    // way would be inventing a fact about a recording this stack did not make.
+    rebirth_requested: null,
+    edge_node_ids: edgeNodes,
+    device_ids: devices
+  };
 }
 
 /** `<sparkplug_id>/<iso-timestamp>-flows.json`, sortable by name so the newest is last. */
@@ -838,30 +905,100 @@ const apiMethods = {
   },
 
   /**
-   * Captures stored against one gateway, newest first.
+   * Every stored capture, with the subject it was recorded from.
    *
-   * Same empty-list caveat as listGatewayBackups: storage-api applies the SELECT policy and returns
-   * an EMPTY ARRAY to an unauthorised caller rather than an error, so the UI must decide what to
-   * show from the caller's role and never from the length of this.
+   * READ FROM THE TABLE, NOT FROM STORAGE, and that is the change 0055 makes. Listing the bucket
+   * returned objects: a name, a size and a timestamp, and nothing about what is IN one. The table
+   * carries the note, the message count and the manifest -- including `birth_captured`, which is
+   * the field that decides whether a capture will replay at all on an alias-optimised gateway.
+   *
+   * It also fixes an ambiguity the old shape could not: storage-api returns an EMPTY ARRAY to an
+   * unauthorised caller rather than an error, so an empty listing could not be told from a denial.
+   * PostgREST applies RLS the same way, but the page no longer infers permission from length --
+   * `canManage` comes from the session's role.
    */
-  listCaptures: async (sparkplugId) => {
-    const { data, error } = await supabase.storage
-      .from(CAPTURE_BUCKET)
-      .list(sparkplugId, { limit: 100, sortBy: { column: 'name', order: 'desc' } });
-
+  listCaptures: async () => {
+    const { data, error } = await supabase
+      .from('captures')
+      .select('*, gateways(name, sparkplug_id, is_simulated), devices(name, sparkplug_id)')
+      .order('recorded_at', { ascending: false });
     if (error) throw new Error(error.message || 'Could not list captures');
-    return (data || [])
-      .filter(o => o.name && !o.name.startsWith('.'))
-      .map(o => ({
-        name: o.name,
-        path: `${sparkplugId}/${o.name}`,
-        size: o.metadata?.size ?? null,
-        createdAt: o.created_at || o.updated_at || null
-      }));
+    return data || [];
   },
 
   /**
-   * Upload a capture file.
+   * The capture that is queued or running, or null.
+   *
+   * AT MOST ONE EXISTS, enforced by a partial unique index rather than by this query's LIMIT: two
+   * browser tabs cannot race a database constraint. `maybeSingle()` is what makes "none" an
+   * ordinary answer instead of an error, which is the state this returns almost every time.
+   */
+  activeCaptureJob: async () => {
+    const { data, error } = await supabase
+      .from('capture_jobs')
+      .select('*, gateways(name, sparkplug_id), devices(name, sparkplug_id)')
+      .in('status', ['PENDING', 'RECORDING'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'Could not read capture jobs');
+    return data || null;
+  },
+
+  /** The last few finished jobs, so a failure is visible after its card has gone. */
+  recentCaptureJobs: async (limit = 5) => {
+    const { data, error } = await supabase
+      .from('capture_jobs')
+      .select('*, gateways(name, sparkplug_id), devices(name, sparkplug_id)')
+      .in('status', ['COMPLETED', 'FAILED', 'CANCELLED'])
+      .order('finished_at', { ascending: false })
+      .limit(limit);
+    if (error) throw new Error(error.message || 'Could not read capture jobs');
+    return data || [];
+  },
+
+  /**
+   * Queue a recording. Returns the job id.
+   *
+   * `replace` IS THE MODAL, EXPRESSED AS AN ARGUMENT. The gate refuses when a capture of the
+   * subject already exists unless this is true, so the confirmation is a precondition in the
+   * database rather than a convention of this client -- an API caller that never saw the dialog is
+   * refused too. The refusal names the capture it is protecting, note included, which is why the
+   * message is surfaced verbatim rather than replaced with something friendlier.
+   */
+  startCapture: async ({ subjectKind, subjectId, note, seconds, replace = false }) => {
+    const { data, error } = await supabase.rpc('start_capture_job', {
+      p_subject_kind: subjectKind,
+      p_subject_id: subjectId,
+      p_note: note || null,
+      p_max_seconds: seconds,
+      p_replace: replace
+    });
+    if (error) {
+      if (/insufficient_privilege|only .* may/i.test(error.message || '')) {
+        throw new Error('Recording the broker requires Administrator or Shopfloor Manager.');
+      }
+      throw new Error(error.message || 'Could not start the capture');
+    }
+    return data;
+  },
+
+  /**
+   * Ask a running capture to finish now.
+   *
+   * A COLUMN, NOT A CALL, on the other side: the daemon observes `stop_requested` on its next
+   * message, flushes and completes. Returns false when the job had already finished, which is not
+   * an error -- a capture can complete between the click and this request, and showing a failure
+   * for something that did exactly what was asked would be wrong.
+   */
+  stopCapture: async (jobId) => {
+    const { data, error } = await supabase.rpc('request_capture_stop', { p_job_id: jobId });
+    if (error) throw new Error(error.message || 'Could not stop the capture');
+    return data === true;
+  },
+
+  /**
+   * Upload a capture recorded elsewhere -- by `capture.py record`, or downloaded from another stack.
    *
    * VALIDATED AS A CAPTURE BEFORE IT IS SENT, not merely as JSON. The bucket accepts a handful of
    * JSON-ish MIME types because browsers report a hand-picked .json inconsistently, so the type is
@@ -869,11 +1006,16 @@ const apiMethods = {
    * somebody tries to PLAY it, which is both the worst moment and the one furthest from the
    * mistake.
    *
-   * The version is checked too, and refused rather than accepted hopefully: `capture.py play`
-   * refuses a version it does not know, so storing one would be filing something the tool on the
-   * other side will not read.
+   * TWO STEPS, IN THIS ORDER, AND THE ORDER MATTERS. The object goes up first and the row is
+   * written second: a row pointing at bytes that are not there offers a capture the list can show
+   * and nothing can download, which is worse than an object no row references -- the path is
+   * deterministic, so the next upload for that subject overwrites the stray one.
+   *
+   * THE MANIFEST IS BUILT HERE because this file is already being parsed to validate it. Without
+   * that, every uploaded capture would show blank beside every recorded one and the column would
+   * read as broken rather than absent.
    */
-  uploadCapture: async (sparkplugId, file) => {
+  uploadCapture: async ({ subjectKind, subjectId, sparkplugId, file, note, replace = false }) => {
     const text = await file.text();
     let parsed;
     try {
@@ -886,7 +1028,7 @@ const apiMethods = {
     }
     if (parsed.acs_capture_version === undefined) {
       // The likeliest wrong file in this dialog by a distance, since both are JSON and both are
-      // things an engineer downloads from this same panel.
+      // things an engineer downloads from this same application.
       if (Array.isArray(parsed)) {
         throw new Error('That looks like a Node-RED flow export, not a capture.');
       }
@@ -902,23 +1044,120 @@ const apiMethods = {
       throw new Error('That capture contains no messages, so there would be nothing to play back.');
     }
 
-    const path = capturePath(sparkplugId, file.name);
+    const path = capturePath(sparkplugId);
     const { error } = await supabase.storage
       .from(CAPTURE_BUCKET)
-      // upsert FALSE: the path carries a timestamp, so every upload is a new file and a
-      // double-click cannot overwrite the previous one.
-      .upload(path, file, { upsert: false, contentType: 'application/json' });
+      // upsert TRUE, where this used to be false. The path no longer carries a timestamp, so the
+      // one capture a subject holds lives at one key and replacing it IS an overwrite. The
+      // confirmation that authorises it happens before this call, not here.
+      .upload(path, file, { upsert: true, contentType: 'application/json' });
 
     if (error) {
       if (/row-level security|Unauthorized/i.test(error.message || '')) {
-        throw new Error('You do not have permission to upload a capture for this gateway.');
+        throw new Error('You do not have permission to upload a capture for this subject.');
       }
       if (/exceeded the maximum allowed size|Payload too large/i.test(error.message || '')) {
         throw new Error('That capture is over the bucket limit. Record a shorter window.');
       }
       throw new Error(error.message || 'Upload failed');
     }
-    return { path, messages: parsed.messages.length };
+
+    const manifest = captureManifest(parsed);
+    const { data: captureId, error: rpcError } = await supabase.rpc('register_uploaded_capture', {
+      p_subject_kind: subjectKind,
+      p_subject_id: subjectId,
+      p_storage_path: path,
+      p_size_bytes: file.size,
+      p_message_count: parsed.messages.length,
+      p_manifest: manifest,
+      p_note: note || null,
+      p_replace: replace
+    });
+    if (rpcError) throw new Error(rpcError.message || 'The file uploaded but could not be recorded');
+
+    // THE MANIFEST COMES BACK, so a caller that goes straight on to publish this capture has the
+    // device ids it needs to build a mapping. The alternative is re-reading the list and hunting
+    // for the row that just appeared, which races the refresh that put it there.
+    return { id: captureId, path, messages: parsed.messages.length, manifest };
+  },
+
+  /**
+   * Gateways a capture may be published onto, with their devices and their credential state.
+   *
+   * SIMULATED ONLY, because `start_playback_job()` refuses anything else -- offering a real gateway
+   * in this dropdown would be offering a click that is always refused, and the refusal is the last
+   * line of defence rather than a validation message.
+   *
+   * `gateway_has_broker_credential` IS A COMPUTED FIELD, not a second request. PostgREST exposes a
+   * function taking the table's row type as a selectable column, so the gate's own predicate is
+   * what the dialog displays -- rather than a second implementation of "does this look ready",
+   * which is how a UI ends up disagreeing with the check it is describing.
+   */
+  playbackTargets: async () => {
+    const { data, error } = await supabase
+      .from('gateways')
+      .select('id, name, sparkplug_id, sparkplug_group, is_archived, gateway_has_broker_credential, devices(id, name, sparkplug_id, is_archived)')
+      .eq('is_simulated', true)
+      .eq('is_archived', false)
+      .order('name');
+    if (error) throw new Error(error.message || 'Could not list playback targets');
+    return (data || []).map(g => ({
+      ...g,
+      devices: (g.devices || []).filter(d => !d.is_archived)
+    }));
+  },
+
+  activePlaybackJob: async () => {
+    const { data, error } = await supabase
+      .from('playback_jobs')
+      .select('*, gateways(name, sparkplug_id), captures(note, subject_sparkplug_id)')
+      .in('status', ['PENDING', 'RUNNING'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'Could not read playback jobs');
+    return data || null;
+  },
+
+  recentPlaybackJobs: async (limit = 4) => {
+    const { data, error } = await supabase
+      .from('playback_jobs')
+      .select('*, gateways(name, sparkplug_id)')
+      .in('status', ['COMPLETED', 'FAILED', 'CANCELLED'])
+      .order('finished_at', { ascending: false })
+      .limit(limit);
+    if (error) throw new Error(error.message || 'Could not read playback jobs');
+    return data || [];
+  },
+
+  /**
+   * Queue a playback. Returns the job id.
+   *
+   * EVERY REFUSAL COMES BACK VERBATIM. The gate names what it objected to -- a target that is not
+   * simulated, one with no broker credential, a device mapped onto another gateway's device, a
+   * playback already running onto that edge node -- and each of those is a different thing for the
+   * operator to do next. Flattening them to "could not start playback" would throw that away.
+   */
+  startPlayback: async ({ captureId, targetGatewayId, deviceMap, speed }) => {
+    const { data, error } = await supabase.rpc('start_playback_job', {
+      p_capture_id: captureId,
+      p_target_gateway_id: targetGatewayId,
+      p_device_map: deviceMap || {},
+      p_speed: speed
+    });
+    if (error) {
+      if (/insufficient_privilege|requires Administrator/i.test(error.message || '')) {
+        throw new Error('Publishing a capture requires Administrator or Shopfloor Manager.');
+      }
+      throw new Error(error.message || 'Could not start the playback');
+    }
+    return data;
+  },
+
+  stopPlayback: async (jobId) => {
+    const { data, error } = await supabase.rpc('request_playback_stop', { p_job_id: jobId });
+    if (error) throw new Error(error.message || 'Could not stop the playback');
+    return data === true;
   },
 
   /** A short-lived signed URL. Signed because the bucket is private -- there is no public URL. */
@@ -928,13 +1167,29 @@ const apiMethods = {
     return data.signedUrl;
   },
 
-  deleteCapture: async (path) => {
-    const { error } = await supabase.storage.from(CAPTURE_BUCKET).remove([path]);
+  /**
+   * Remove a capture: the row and the object.
+   *
+   * THE ROW GOES FIRST, which is the opposite of the upload order and for the same reason. If the
+   * object delete then fails, what is left is bytes nothing references -- invisible, and overwritten
+   * by the next capture of that subject. Deleting the object first and failing on the row would
+   * leave the list offering a capture that cannot be downloaded.
+   */
+  deleteCapture: async (capture) => {
+    const { error } = await supabase.from('captures').delete().eq('id', capture.id);
     if (error) {
-      if (/row-level security|Unauthorized/i.test(error.message || '')) {
+      if (/row-level security|Unauthorized|denied/i.test(error.message || '')) {
         throw new Error('You do not have permission to delete captures.');
       }
       throw new Error(error.message || 'Delete failed');
+    }
+    const { error: objectError } = await supabase.storage
+      .from(CAPTURE_BUCKET).remove([capture.storage_path]);
+    if (objectError) {
+      throw new Error(
+        `The capture was removed from the list, but its file could not be deleted: ` +
+        `${objectError.message}. It will be overwritten by the next capture of this subject.`
+      );
     }
   },
 

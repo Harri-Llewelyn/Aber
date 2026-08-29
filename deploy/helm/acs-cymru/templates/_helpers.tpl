@@ -182,6 +182,20 @@ the cause nor anywhere near it.
 {{- if and .Values.gatewayCredential.enabled (lt (len (.Values.secrets.mqttCredentialServiceToken | default "")) 32) -}}
 {{- $missing = append $missing "secrets.mqttCredentialServiceToken (MQTT_CREDENTIAL_SERVICE_TOKEN, 32+ characters, required when gatewayCredential.enabled)" -}}
 {{- end -}}
+{{/*
+CONDITIONAL, LIKE THE TOKEN ABOVE, because playback is off by default and a cluster that never
+enables it needs no key at all.
+
+The failure this catches is quiet in the way this whole block exists for: playback_worker.py refuses
+to start without the key, so the pod CrashLoopBackOffs -- which is at least visible -- but the
+message names an environment variable rather than the values key that fills it, and the operator who
+set `playback.enabled: true` has no reason to connect the two. `mqttPlaybackCredentials` is NOT
+required beside it: a worker with no broker credentials is a correct state for a stack that has
+issued no playback targets yet.
+*/}}
+{{- if and .Values.playback.enabled (not .Values.secrets.playbackKey) -}}
+{{- $missing = append $missing "secrets.playbackKey (SUPABASE_PLAYBACK_KEY, required when playback.enabled -- a JWT signed by jwtSecret for subject b0000000-0000-4000-8000-000000000003, Service_Playback)" -}}
+{{- end -}}
 {{- if $missing -}}
 {{- fail (printf "\n\nacs-cymru: required credentials are not set:\n  - %s\n\nThese are a SET, not independent values: anonKey and serviceRoleKey are JWTs signed by\njwtSecret, so supplying some and not others yields a stack that reports healthy and rejects\nevery request at the gateway. The chart deliberately does not generate them.\n\nFor a local k3s stack:   helm install ... -f values-dev.yaml\nFor anything else:       copy values-prod.yaml.example and supply a matching set.\n" (join "\n  - " $missing)) -}}
 {{- end -}}

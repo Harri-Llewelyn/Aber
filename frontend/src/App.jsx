@@ -41,6 +41,7 @@ import {
   IconClipboardList,
   IconFileCode,
   IconArchive,
+  IconRecord,
   IconSettings,
   IconLock,
   IconBookOpen,
@@ -72,6 +73,7 @@ const SchemasTab       = lazy(() => import('./components/tabs/SchemasTab').then(
 const VocabularyTab    = lazy(() => import('./components/tabs/VocabularyTab').then(m => ({ default: m.VocabularyTab })))
 const DirectoryTab     = lazy(() => import('./components/tabs/DirectoryTab').then(m => ({ default: m.DirectoryTab })))
 const ArchivesTab      = lazy(() => import('./components/tabs/ArchivesTab').then(m => ({ default: m.ArchivesTab })))
+const CaptureTab       = lazy(() => import('./components/tabs/CaptureTab').then(m => ({ default: m.CaptureTab })))
 const SettingsTab      = lazy(() => import('./components/tabs/SettingsTab').then(m => ({ default: m.SettingsTab })))
 const AccessControlTab = lazy(() => import('./components/tabs/AccessControlTab').then(m => ({ default: m.AccessControlTab })))
 
@@ -86,6 +88,12 @@ export const TABS = [
   // reference you read, and the reference half grows with every standard adopted.
   { id: 'vocabulary',     label: 'Vocabulary',        icon: <IconFileCode size={15} /> },
   { id: 'directory',      label: 'Directory',         icon: <IconBookOpen size={15} /> },
+  // THE THREE ROLES THE DATABASE ADMITS, named here rather than reduced to one. 0055 grants SELECT
+  // on `captures` and `capture_jobs` to Administrator, Shopfloor_Manager and Auditor; the first two
+  // can also record and delete. Operator is absent from both, which is why the tab is gated at all
+  // -- an Operator opening this page would see an empty table and no explanation, because RLS
+  // returns no rows rather than an error.
+  { id: 'capture',        label: 'Capture',           icon: <IconRecord size={15} />, role: ['Administrator', 'Shopfloor_Manager', 'Auditor'] },
   { id: 'archives',       label: 'Archives',          icon: <IconArchive size={15} />, permission: PERMISSION_UUIDS.ARCHIVE_MANAGE },
   // GATED ON THE ROLE, NOT ON A PERMISSION, because the DATABASE gates on the role: 0031's UPDATE
   // policy is `has_role(ARRAY['Administrator'])`. Inventing a SETTINGS_MANAGE permission for the
@@ -117,10 +125,15 @@ export const TABS = [
 /**
  * Which density band the top bar is in, from the number of tabs this session can see.
  *
- * NAMED AND EXPORTED SO IT CAN BE TESTED, because the case it exists for does not exist yet: the
- * `tight` band is for twelve tabs and there are eleven. Reading it out of the rendered DOM would
- * mean it could only be checked once a twelfth page shipped -- which is the moment it starts being
- * relied upon and the worst moment to discover the threshold was wrong.
+ * NAMED AND EXPORTED SO IT COULD BE TESTED BEFORE IT WAS REACHABLE. When this was written the
+ * `tight` band was for twelve tabs and there were eleven, so reading it out of the rendered DOM
+ * would have meant checking it only once a twelfth page shipped -- the moment it starts being
+ * relied upon and the worst moment to find the threshold wrong.
+ *
+ * THE CAPTURE PAGE IS THAT TWELFTH TAB, and the band is live for an Administrator from here on.
+ * Writing the test first turned out to be worth it: the rule fires on the session that has every
+ * tab, and the two smaller roles never reach it, so a threshold that was one out would have been
+ * visible only to the person least likely to file it.
  *
  * The bands are measured; the arithmetic is in App.css beside the rules that use them. 11 tabs fit
  * at 1920 and must not start abbreviating; 12 do not and must.
@@ -134,7 +147,15 @@ export function navDensity(visibleTabCount) {
 }
 
 export function tabIsVisible(tabDef, hasPermission, userRole) {
-  if (tabDef.role && userRole !== tabDef.role) return false
+  // `role` TAKES A LIST AS WELL AS A STRING. Every tab that had one named a single role, and the
+  // Capture page cannot: 0055 grants read on `captures` to Administrator, Shopfloor_Manager AND
+  // Auditor, so a single-role gate would either hide the page from two roles the database admits
+  // or invent a permission that no policy consults -- which is two predicates deciding one
+  // question, and the day they disagree the page is visible and every call fails.
+  if (tabDef.role) {
+    const allowed = Array.isArray(tabDef.role) ? tabDef.role : [tabDef.role]
+    if (!allowed.includes(userRole)) return false
+  }
   if (!tabDef.permission) return true
   return hasPermission(tabDef.permission)
 }
@@ -675,6 +696,11 @@ function Dashboard({ session, onSignOut }) {
           {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={showDevicesForSchema} onSelectDevice={showDevice} initialSchemaId={selectedSchemaId} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} />}
           {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('schemas') }} />}
           {tab === 'directory'      && <DirectoryTab showToast={showToast} hasPermission={hasPermission} />}
+          {/* The role is re-checked here for the same reason Access Control's is: routing can put
+              `tab` on a value the nav never offered. `userRole` is passed on rather than a boolean,
+              because the page distinguishes read-only Auditor from the two roles that can record. */}
+          {tab === 'capture' && ['Administrator', 'Shopfloor_Manager', 'Auditor'].includes(userRole) &&
+            <CaptureTab showToast={showToast} userRole={userRole} onSelectSchema={showSchema} />}
           {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} />}
           {/* The role is re-checked here, not only in the nav: routing can put `tab` on a value
               the nav never offered. Still a courtesy -- RLS is what refuses the write. */}

@@ -13,6 +13,10 @@ from datetime import datetime, timezone
 from logging_config import get_logger
 import metrics
 from metrics import start_metrics_server
+# Roadmap item 17. Imports capture.py for the file format, so the daemon and the CLI cannot produce
+# capture files that differ -- and so the encoding-preservation that cost a debugging session to
+# discover is shared rather than reimplemented.
+import capture_worker
 
 logger = get_logger("ingestion")
 
@@ -952,7 +956,7 @@ def build_rebirth_payload():
     return payload.SerializeToString()
 
 
-def request_node_rebirth(client, group_id, edge_node_id):
+def request_node_rebirth(client, group_id, edge_node_id, force=False):
     """
     Ask an edge node to republish its birth certificates. Returns True if a request was sent.
 
@@ -963,13 +967,33 @@ def request_node_rebirth(client, group_id, edge_node_id):
 
     RATE LIMITED PER NODE, and that is the load-bearing part. A gateway that responds to a rebirth
     by restarting, or one that never responds at all, would otherwise be asked once per message.
+
+    `force` SKIPS THE WAIT, AND ONLY BROKER CAPTURE USES IT. The throttle protects against a flood
+    driven by TRAFFIC -- one request per message from a node with a broken alias table -- and a
+    capture is not that: it is one human pressing one button, and only one capture runs at a time
+    on the whole stack, so the ceiling is an operator's patience rather than the plant's message
+    rate.
+
+    Without it the feature mostly does not work. The daemon requests a rebirth from every node at
+    startup AND on every sequence gap, both of which are routine here, so by the time anybody
+    presses Capture the 300-second throttle for that node is usually already spent -- and a capture
+    that opens without an NBIRTH is one that replays as `unresolved_alias` and drops every metric
+    from an alias-optimised gateway. Measured on the seeded fleet before this argument existed:
+    two captures in a row, `birth_captured=false` on both.
+
+    The throttle is still STAMPED, so a forced request does not leave the node open to being asked
+    again by the next message that notices a gap.
     """
     if client is None or not edge_node_id:
         return False
 
     key = "%s/%s" % (group_id or "", edge_node_id)
-    if not _throttled(_rebirth_requested, key, REBIRTH_REQUEST_INTERVAL_SECONDS):
+    if not _throttled(_rebirth_requested, key, REBIRTH_REQUEST_INTERVAL_SECONDS) and not force:
         return False
+    if force:
+        # Consume the window even when the check above already had, so the two paths leave the same
+        # state behind and an ordinary gap cannot chase a capture's request straight away.
+        _rebirth_requested[key] = time.time()
 
     topic = "spBv1.0/%s/NCMD/%s" % (group_id or "", edge_node_id)
     try:
@@ -3349,6 +3373,15 @@ def on_message(client, userdata, msg):
     if msg_type in ("NCMD", "DCMD"):
         return
 
+    # A capture in flight takes a copy of what the daemon is about to ingest. Placed HERE rather
+    # than at the top of this function on purpose: everything above is what makes the message
+    # ingestible at all, so a capture records what the daemon acted on rather than everything the
+    # wildcard subscription delivered -- and command topics stay out of capture files, where a
+    # replayed rebirth request would be a command issued to the plant.
+    #
+    # A no-op and one global read when nothing is recording, which is almost always.
+    capture_worker.observe(msg.topic, msg.payload, parts)
+
     # Counted AFTER the parse and the command-topic filter, so this is messages the daemon
     # actually acted on rather than everything the wildcard subscription delivered.
     count("messages_total")
@@ -3671,6 +3704,20 @@ def main():
     # with it. `acs_ingestion_up` is 1 and every throughput counter is flat -- which is exactly
     # what "connected to nothing" looks like, and is distinguishable from a dead target.
     start_metrics_endpoint()
+    # AFTER the client exists, because a capture opens by asking its subject's edge node to
+    # rebirth and that is a publish. Before the connect loop for the same reason as the others: a
+    # daemon retrying the broker should still sweep the jobs a restart abandoned, or the
+    # single-flight index leaves every future capture refused with nothing to point at.
+    #
+    # The rebirth function is passed in rather than imported: capture_worker is imported HERE, so
+    # reaching back for this would be a cycle.
+    capture_worker.start(
+        supabase_client,
+        # force=True: see request_node_rebirth(). A capture is one button press, single-flight
+        # across the stack, and worthless without the birth certificate it opens by asking for.
+        rebirth=lambda group_id, edge_node_id: request_node_rebirth(
+            client, group_id, edge_node_id, force=True),
+    )
 
     while True:
         try:

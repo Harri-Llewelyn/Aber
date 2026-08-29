@@ -23,7 +23,6 @@ import { EntityLinksModal } from '../modals/EntityLinksModal'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
 import { GatewayCredentialModal } from '../modals/GatewayCredentialModal'
 import { FlowBackupUploader } from '../common/FlowBackupUploader'
-import { CaptureLibrary } from '../common/CaptureLibrary'
 import {
   IconRadio,
   IconPlus,
@@ -902,25 +901,17 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               </div>
             )}
 
-            {/* SAME ROLE GATES AS THE FLOW BACKUPS ABOVE, because the two buckets carry the same
-                storage policies -- read for Administrator, Shopfloor_Manager and Auditor, write for
-                the first two. Reusing the flags rather than adding a second pair keeps the UI from
-                disagreeing with RLS in one panel and not the other.
+            {/* THE CAPTURE LIBRARY THAT WAS HERE MOVED TO THE CAPTURE PAGE, and it had to rather
+                than merely being tidier there. This panel listed the bucket directly: objects with
+                a name, a size and a timestamp. 0055 stores ONE capture per subject at a
+                deterministic path, with the note, the message count and the manifest -- including
+                `birth_captured`, which decides whether a capture will replay at all -- in a table.
+                Left here it would have shown a single row called `capture.json` and none of the
+                facts that matter, which is worse than not showing it.
 
-                SHOWN FOR VIRTUAL GATEWAYS TOO, unlike the flow backups. A virtual gateway has no
-                appliance and therefore no flow of its own to lose -- but it is a perfectly good
-                playback target, and arguably the best one, since nothing else is publishing under
-                its edge node to collide with a capture's sequence numbers. */}
-            {!selected.is_archived && (
-              <div style={{ marginTop: '14px' }}>
-                <CaptureLibrary
-                  gateway={selected}
-                  canRead={canReadBackups}
-                  canManage={canManageBackups}
-                  showToast={showToast}
-                />
-              </div>
-            )}
+                It also only ever covered GATEWAYS. Captures are filed by the subject recorded, and
+                a device is now a subject in its own right; a per-gateway panel has nowhere to put
+                that. */}
           </div>
         )}
       />

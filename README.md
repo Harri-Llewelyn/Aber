@@ -409,6 +409,7 @@ live services went unlisted: the tag it named (`alpine:3.24`) still existed, so 
 | `mosquitto` | `acs-cymru_mosquitto` | `eclipse-mosquitto:2.0.22` | `1883`, `9001` |
 | `frontend` | `acs-cymru_frontend` | `./frontend/Dockerfile` | `3000:3000` |
 | `ingestion` | `acs-cymru_ingestion` | `./Dockerfile` | `9108:9108` |
+| `playback` | `acs-cymru_playback` | `./Dockerfile` (same image as `ingestion`, different command) | — |
 | `i3x-service` | `acs-cymru_i3x` | `./i3x/Dockerfile` | `8090:8090` |
 | `gateway-credential` | `acs-cymru_gateway_credential` | `./gateway-credential/Dockerfile` | — |
 | `node-red-init` | `acs-cymru_node_red_init` | `./node-red/Dockerfile` | — |
@@ -639,6 +640,8 @@ python ingestion/test_entity_cache.py
 python ingestion/test_telemetry_batching.py
 # Broker capture and playback -- identity rewriting, timestamp rebasing, wire encodings
 python ingestion/test_capture_playback.py
+# The daemon-side recording engine -- subject matching, the caps, and the manifest
+python ingestion/test_capture_worker.py
 python i3x/test_i3x_service.py
 python supabase/functions/approve-quarantine/test_approve_quarantine.py
 python supabase/functions/deploy-nodered/test_deploy_nodered.py
@@ -828,7 +831,7 @@ are in [`deploy/k8s/README.md`](deploy/k8s/README.md#publishing-a-release).
 
 ## Roadmap & Future Extensions
 
-Thirteen extensions, none of them speculative: every one names the code it would build on, because
+Sixteen extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
@@ -852,7 +855,10 @@ below a removal would silently redirect all of them without erroring. A number c
 identifier, not a position. Where code refers to work that has since shipped, the citation names the
 documentation rather than a roadmap number.
 
-**Items 1-5 are this repository's own**, ordered by how much of each already exists, as is 17. **Items 8-15
+**Items 1-5 are this repository's own**, ordered by how much of each already exists, as are 17 and
+20-22 — 20 first because both 21 and 22 depend on the role split it makes: 21 has nowhere to put an
+Administrator-only control without it, and 22 would hide a lane from a role that could still grant
+itself the ability to see it. **Items 8-15
 arrive from feature requests** — 8, 9 and 10 from GitHub issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
@@ -1559,7 +1565,7 @@ exists for precisely this kind of change and this change must satisfy it twice.
 
 ---
 
-### 17 · Capture and playback orchestration
+### 17 · Capture and playback orchestration: built
 
 **Builds on:** [`ingestion/capture.py`](ingestion/capture.py) · `on_message()` and the daemon's
 existing `spBv1.0/#` subscription · `request_node_rebirth()` · the `broker-captures` bucket and
@@ -1572,6 +1578,92 @@ and a stored capture per subject that a new recording replaces.
 
 **The heading says playback, not replay, deliberately** — `replay` means migration replay in 192
 places in this repository, including the idempotency contract every migration header rests on.
+
+---
+
+#### What is built, and what four measurements changed on the way
+
+**Built:** [`0055_capture_orchestration.sql`](supabase/migrations/0055_capture_orchestration.sql)
+(the `captures` and `capture_jobs` tables, single-flight, and every gate),
+[`ingestion/capture_worker.py`](ingestion/capture_worker.py) (the recording engine inside the
+daemon), the bucket's `devices` arm and the daemon's scoped access to it, the 100 MiB bucket, and
+[`CaptureTab.jsx`](frontend/src/components/tabs/CaptureTab.jsx) with
+[`StartCaptureModal.jsx`](frontend/src/components/modals/StartCaptureModal.jsx) — the page of §4,
+which is the **twelfth tab** and the first thing to reach `navDensity()`'s `tight` band; and
+[`0056_playback_orchestration.sql`](supabase/migrations/0056_playback_orchestration.sql) with
+[`ingestion/playback_worker.py`](ingestion/playback_worker.py) — the `Service_Playback` principal,
+`playback_jobs`, the three tiers, and the worker that publishes; and
+[`StartPlaybackModal.jsx`](frontend/src/components/modals/StartPlaybackModal.jsx), which is the half
+of §5 the CLI cannot do — the target list carrying only simulated gateways, the credential state
+shown *before* the click using the gate's own predicate as a computed field, and the device map
+built from the devices actually bound to the target.
+
+**The captured device ids moved into the manifest to make that dialog possible.** It has to offer
+one dropdown per device in the capture, and the alternative was downloading a file of up to 100 MiB
+to populate a select. `manifest.device_ids` and `edge_node_ids` are written by both writers; a
+capture recorded before them falls back to reading the file, which is slower and correct.
+
+**The worker needed no image of its own, and the roadmap priced one.** What playback genuinely
+requires that is new is a separate *process* holding a separate Supabase principal and its own
+broker credentials — none of which an image boundary provides. It publishes using `capture.py`'s
+`plan_playback()`, which is already in the ingestion image, so it runs from that image under a
+different command. A second image would have been the first one minus two files, plus a second
+build, a second tag to keep in step, and a second entry in `check-image-tag-parity.mjs`. The
+Deployment, the service, the values and the resources were all real; the image was the part that
+turned out to be free.
+
+**Two more measurements changed the design, both about the credential check:**
+
+5. **`gateway_holds_a_credential()` is the wrong predicate, and §5 names it directly.** It is
+   `NOT g.is_virtual AND g.enrolled_at IS NOT NULL` — "is this a physical appliance that completed
+   enrolment". For playback that is *inverted*: it refuses every virtual gateway, which is what a
+   playback target normally is, and admits only real hardware, which is exactly what a playback must
+   never publish as. [`0041`](supabase/migrations/0041_virtual_gateway_credential.sql) had already
+   written this down — *"a virtual gateway is outside its scope by definition"*. Found by running
+   it: an end-to-end run created a simulated gateway, minted its credential through the same edge
+   function the Access Control page calls, and was still refused. `0056` adds
+   `gateway_has_broker_credential()`, which asks the question of **both** routes — physical
+   enrolment, or the `CREDENTIAL_ISSUED` audit row that is the *only* record a virtual mint leaves —
+   and subtracts revocation.
+6. **`birth_captured` means the node's birth, not a device's**, and the two do different work. An
+   `NBIRTH` carries the alias table, which is what §2 is about and what makes a capture replayable.
+   Announcing a *device* takes a `DBIRTH`, and only `process_dbirth()` sets a device `ONLINE`. So a
+   replayed capture containing an NBIRTH brings the target edge node up, delivers its telemetry to
+   the historian, and leaves its devices `OFFLINE` — all three correct, and not what the single flag
+   suggests. Splitting the field into node and device halves belongs with the capture manifest and
+   is not done here.
+
+**The per-gateway capture panel on the Gateways page is gone**, and had to be rather than merely
+being tidier elsewhere. It listed the bucket directly — objects with a name, a size and a timestamp
+— and this schema stores one capture per subject at a deterministic path, with the note, the message
+count and the manifest in a table. Left in place it would have shown a single row called
+`capture.json` and none of the facts that decide anything. It also only ever covered gateways, and a
+device is now a subject in its own right.
+
+Four things below turned out to be wrong when measured against the running stack, and the
+paragraphs that state them are corrected in place rather than deleted:
+
+1. **The daemon's bucket authority cannot be a `SECURITY DEFINER` function** (§1 says it is). A
+   capture's bytes travel over the Storage REST API; no SQL function can carry them into a bucket.
+   It has to be a policy arm.
+2. **That arm cannot be write-only** (§1 prefers it). Replacing a capture is an upsert, storage-api
+   serves that as `INSERT … ON CONFLICT DO UPDATE`, and Postgres checks the **SELECT** policy for
+   the row being conflicted with — so a principal that cannot read an object cannot overwrite it.
+3. **The rebirth throttle is normally already spent** (§2 treats this as an edge case). The daemon
+   asks every node to rebirth at startup *and* on every sequence gap, so by the time anybody presses
+   Capture the 300-second window for that node has usually gone. Two consecutive captures came back
+   `birth_captured=false` before this was fixed.
+4. **`ALTER DEFAULT PRIVILEGES` grants `ALL` on every new `public` table** to `anon`, `authenticated`
+   and `service_role`. Both new tables were born with `anon` holding INSERT, UPDATE and DELETE, with
+   RLS as the only thing in front — so the `GRANT SELECT` lines that looked like the access control
+   were adding a privilege that was already there.
+
+**And one fact about the fixture rather than the code.** The seeded Node-RED fleet publishes `NDATA`
+and `DDATA` only: it emits no `NBIRTH` or `DBIRTH` and does not answer `Node Control/Rebirth`, so
+every capture taken from it honestly reports `birth_captured = false`. The birth path was proved by
+publishing a real `NBIRTH` as the gateway itself — it reaches the file, the manifest and the job
+row, alias intact. Worth knowing before the playback half is built: **captures taken from the
+simulator today carry no alias table**, which is exactly the condition §2 is written about.
 
 ---
 
@@ -1601,6 +1693,13 @@ else; the bucket's insert policy requires `Administrator` or `Shopfloor_Manager`
 cannot write a capture today, and **the gate is a prerequisite of the page rather than a detail of
 it**: a `SECURITY DEFINER` function in `0047`'s shape, checked with `is_ingestion_caller()`.
 
+> **Corrected when built.** The gates in `0047`'s shape are right for `capture_jobs` and `captures`,
+> and that is what `0055` builds. They cannot be the answer for the **bucket**: a capture's bytes go
+> through the Storage REST API, so no SQL function can carry them into it. `storage.objects` is
+> written by storage-api under the caller's own JWT, which means the daemon's authority there can
+> only be a **policy arm** — and `is_ingestion_caller()` does resolve inside a storage request,
+> measured on the running stack.
+
 This is precisely the defect `0051` fixed — a missing grant answers `42501`, the daemon catches it,
 logs it, and carries on, so the symptom is a capture that never appears rather than an error.
 
@@ -1613,6 +1712,26 @@ logs it, and carries on, so the symptom is a capture that never appears rather t
 replacement happens browser-side, before the job starts, which keeps the daemon's authority at INSERT
 alone. **The second is better** and is what the modal already implies: the operator confirms the
 deletion, so the operator's session performs it.
+
+> **Both options were wrong, and the measurement is the interesting part.** Write-only is not
+> achievable at all: each subject has one capture object, so a re-record **overwrites** it,
+> storage-js spells overwrite as `upsert: true`, and storage-api serves that as
+> `INSERT … ON CONFLICT DO UPDATE` — which Postgres evaluates against the SELECT policy as well,
+> because the statement has to see the row it conflicts with. Probed directly: `INSERT` of a new
+> object returned 200 and the upsert immediately after returned
+> `new row violates row-level security policy`.
+>
+> Browser-side deletion is worse than it looks for a different reason: it destroys the stored
+> capture **before** the recording that replaces it exists, so a capture that then fails leaves
+> nothing — and it needs a browser present at the right moment or the bucket accumulates orphans no
+> policy reaches.
+>
+> What `0055` does instead is **scope the arm rather than narrow it**:
+> `is_ingestion_caller() AND is_active_capture_object(name)`. The daemon can read, insert and
+> overwrite exactly the one path named by the job it is running, and with no capture in flight it
+> can reach nothing in the bucket at all. It still never deletes. That is strictly tighter than
+> "the daemon may write captures", it makes an orphan impossible, and nothing is destroyed until
+> the replacement has been written.
 
 #### 2 · The capture engine
 
@@ -1632,6 +1751,19 @@ Two consequences to design around rather than discover: a rebirth is a broadcast
 briefly affects the live stream for every subscriber; and `REBIRTH_REQUEST_INTERVAL_SECONDS`
 rate-limits it, so a capture started twice inside that window gets no second birth and must either
 wait or record without one and say so.
+
+> **The rate limit is not the edge case this paragraph takes it for — it is the normal case.** The
+> daemon requests a rebirth from every node at startup *and* on every sequence gap, both routine
+> here, so the 300-second window for a given node has almost always been spent before anybody
+> presses Capture. Measured: two captures in a row, `birth_captured=false` on both, with the
+> daemon's own request logged seconds earlier.
+>
+> So `request_node_rebirth()` gained a `force` flag and capture is its only caller. The throttle
+> exists to stop a flood driven by **traffic** — one request per message from a node with a broken
+> alias table — and a capture is not that: it is one human pressing one button, and single-flight
+> means one at a time across the whole stack, so the ceiling is an operator's patience. The
+> throttle is still stamped, so a forced request does not leave the node open to being asked again
+> by the next message that notices a gap.
 
 **Three caps, auto-terminating on the first met — and they have to agree with the bucket.**
 
@@ -1850,6 +1982,12 @@ surfaces. **A read gate is a prerequisite, exactly as the write gate is for capt
   as it until a playback runs. Requiring liveness would refuse every first playback and pass only
   after one had already succeeded.
 
+  > **The half about `ONLINE` is right and the predicate named is wrong.** `gateway_holds_a_credential()`
+  > is `NOT g.is_virtual AND g.enrolled_at IS NOT NULL`, so it refuses every virtual gateway and
+  > admits only enrolled physical hardware — the opposite of what a playback target is. `0056` uses
+  > `gateway_has_broker_credential()` instead, which asks the same question of both routes. See the
+  > correction at the head of this item.
+
 #### 6 · Non-goals, recorded so they are not proposed again
 
 **No burst mode, and `--speed 0` stays refused.** Speed divides both the send schedule and the
@@ -1924,6 +2062,314 @@ active.
   what to put there are the same moment, and "no gateways yet" is where a reader is most receptive.
 - **Whether it survives translation.** Nothing here is localised today, and a help corpus is the
   first thing that would make that expensive.
+
+### 20 · Microsoft Entra ID sign-in, and a role model worth mapping onto
+
+**Builds on:** `custom_access_token_hook()` and `handle_new_user()` in
+[`supabase/migrations/0001_baseline_schema.sql`](supabase/migrations/0001_baseline_schema.sql) ·
+`has_role()` and its 58 call sites · `GOTRUE_DISABLE_SIGNUP` in [`.env.example`](.env.example) ·
+`acs-cymru.validateSecrets` in
+[`_helpers.tpl`](deploy/helm/acs-cymru/templates/_helpers.tpl)
+
+Sign in with a Microsoft work account, with an organisation's Entra groups deciding which role the
+account lands in, and documentation an IT administrator can follow without reading this repository.
+**Entra only.** Google and GitHub are deliberately out of scope, for a reason given below that is
+not "we ran out of time".
+
+#### Two roles hold identical grants, and five policies already disagree
+
+`Administrator` and `Shopfloor_Manager` are seeded in
+[`0002_seed_data.sql`](supabase/migrations/0002_seed_data.sql) with **the same thirteen
+permissions**. The distinction between them is presentational, and it is worse than cosmetic: a
+Shopfloor_Manager holds `authz:manage`, so a Shopfloor_Manager can promote themselves to
+Administrator through the Access Control tab.
+
+Meanwhile the database has already started separating the two by hand. **Five** policies check
+`has_role(ARRAY['Administrator'])` alone — `system_settings` for read and for write,
+`list_service_principals()`, `create_service_principal()` — against **58** sites that check the
+pair. The divergence exists in the policies; the permission table does not know about it.
+
+Mapping an Entra group onto `Shopfloor_Manager` is not worth doing until that name means something,
+which is why this is the first half of the item rather than a footnote to it. The split that matches
+the five policies already written: **Manager operates the shopfloor, Administrator operates the
+platform.** Manager keeps devices, cells, gateways, links, quarantine approval, telemetry and
+archive. Manager loses `authz:manage`, `schema:manage` and `gitops:manage` — who has access, what
+contract ingestion validates against, and what gets deployed to the edge.
+
+Two costs, both real. It is a **breaking change** for any deployment that has a Shopfloor_Manager
+doing schema or GitOps work. And `DEFAULT_ROLE_PERMISSIONS_MAP` in
+[`frontend/src/hooks/usePermissions.js`](frontend/src/hooks/usePermissions.js) hard-codes both roles
+as `Object.values(PERMISSION_UUIDS)` — a static fallback that would go on rendering controls the
+database then refuses. The seed and the map move together, and no mirror-drift check covers that
+pair today.
+
+#### The tenant URL is the boundary, and it fails open
+
+GoTrue's Azure provider takes an authority URL. Point it at a tenant —
+`https://login.microsoftonline.com/<tenant-id>/v2.0` — and only that organisation's directory can
+produce a session. Leave it unset **with the provider enabled** and GoTrue falls back to its own
+default, which is `common`: every Microsoft account in existence, including personal ones.
+
+So the guard cannot be "ignore a bad value", because the fallback from ignoring it is the worst
+value. It has to refuse to enable the provider at all. Three details that a first attempt gets
+wrong:
+
+- **`common` is not the only bad value.** `organizations` and `consumers` are equally multi-tenant,
+  and `consumers` is personal accounts exclusively. The reject-list is those three plus empty.
+- **The operator should type a tenant GUID, not a URL.** One variable, `ENTRA_TENANT_ID`, empty by
+  default, with compose building the authority around it. A URL field invites a hand-edited
+  authority; a GUID field does not.
+- **A flag cannot be the only check.** `.env` is editable after `npm run setup` has run. The
+  enforcement that holds is a `tid` claim check on the provisioning path, refusing to create a user
+  whose identity does not carry the expected tenant — held in `system_settings`, which is already
+  Administrator-only. That is the same argument as everywhere else here: the control belongs in
+  Postgres, not in a flag.
+
+On the Kubernetes path the flag half is a `acs-cymru.validateEntra` alongside `validateSecrets` and
+`validateRealtime`, failing at template time. On Compose there is no equivalent hook, so it goes in
+[`scripts/setup.mjs`](scripts/setup.mjs), which already hard-fails on a missing assignment.
+
+**The tenant boundary answers "which company", not "which person".** Every employee of that
+directory can obtain a session. `handle_new_user()` handing them `Operator` — read-only, already —
+is the other half of that control and not a separate decision.
+
+#### Closed signup is the collision, and the fix is not to open it
+
+`.env.example` already lists "an upstream identity provider" as one of the three ways an account may
+arrive. That sentence is aspirational: `GOTRUE_DISABLE_SIGNUP=true` is expected to refuse
+first-time external-provider logins too, in which case Entra creates nobody. **Confirming that is
+the cheapest thing in this item and it decides the shape of the rest**, so it happens first.
+
+If it holds, do not flip the variable. Flipping it reopens `POST /auth/v1/signup` for every caller
+who can reach Kong — precisely the regression the block comment in `.env.example` exists to prevent,
+and precisely how `VITE_ALLOW_SIGNUP` failed before it. **Deny the signup route at the edge and
+leave the OAuth callback open.** Route-level deny is a control this stack already uses.
+
+#### The IdP authenticates; `user_roles` still authorises
+
+The obvious design — an administrator stamps a role onto the user in Entra, the application reads it
+— is weaker than what already exists, and one version of it is an escalation path. GoTrue lands
+external-provider profile data in `raw_user_meta_data`, and **that column is writable by the user**
+through `supabase.auth.updateUser({ data })`. Any hook reading a role out of user metadata hands out
+self-service promotion.
+
+`has_role()` reads `public.user_roles` keyed on `auth.uid()`. The JWT claim that
+`custom_access_token_hook()` stamps is decoration; the table is the authority, and every RLS policy
+re-reads it per query. Keep that. A group claim becomes a **provisioning input** — a
+`sso_role_mappings(provider, claim_key, claim_value, role_id)` consulted at sign-in, which *writes*
+`user_roles` — and nothing downstream changes: `has_role()`, all 58 policies, `usePermissions`, the
+Access Control tab.
+
+Whether Entra group or app-role claims survive into `identity_data` at all in `gotrue:v2.189.0` is
+unverified, and the fallbacks differ enough to matter: SAML has attribute mapping, and
+domain-verified auto-provisioning with in-app promotion needs no claims at all. Spike it before
+designing the table.
+
+#### Why Entra alone, and what the documentation has to say
+
+The three providers are not equivalent, and a document implying they are would be wrong. Entra
+expresses groups and app roles. **GitHub org and team membership is not in the OIDC token at all.**
+Google Workspace groups need the Cloud Identity API. So Entra and SAML can map by group; Google and
+GitHub can realistically only map by verified email domain. Supporting one provider properly beats
+three with a footnote.
+
+The document is for an IT administrator who has never seen this repository: the app registration,
+the redirect URI through Kong, the tenant-scoped authority and why `common` is refused, the optional
+claims to enable, and the group-object-ID to role table. It lives in `docs/`, where
+[`scripts/check-docs-drift.mjs`](scripts/check-docs-drift.mjs) can be taught to reach it.
+
+#### Worth deciding early
+
+- **Whether the login screen offers both paths or one.** A stack with Entra configured may still
+  want the seeded password accounts for break-glass, and a login screen with two buttons is a
+  different design from one with a form and a divider.
+- **What happens when a user leaves the group.** Nothing revokes on its own: a mapping consulted
+  only at sign-in leaves the role in `user_roles` until someone removes it. Re-evaluating on every
+  login is the cheap answer and it still leaves a live session valid until `GOTRUE_JWT_EXP`.
+
+### 21 · Multi-factor authentication, and what happens when the phone is lost
+
+**Builds on:** GoTrue v2.189.0's factor API · `has_role()` and the `aal` claim ·
+[`AccessControlTab.jsx`](frontend/src/components/tabs/AccessControlTab.jsx) · the immutable audit in
+[`0003_audit_immutability_and_quarantine_rpc.sql`](supabase/migrations/0003_audit_immutability_and_quarantine_rpc.sql)
+
+TOTP second factors, required of the roles that can change the platform and optional for everyone
+else. Any authenticator that implements TOTP works — Microsoft Authenticator, Google Authenticator,
+Bitwarden, 1Password — which is a documentation fact, not an integration.
+
+**This item depends on item 20's role divergence**, and not incidentally. The reset control below is
+gated on `authz:manage`, which is Administrator-only *only once Manager has given it up*. Shipping
+this first would build an MFA boundary that a Shopfloor_Manager could dissolve.
+
+#### `aal2` is not a switch, and the enforcement belongs in the policies
+
+GoTrue will happily mint an `aal1` token for a user who has a factor enrolled. There is no
+server-side "require MFA" setting to turn on. Sending the browser to a challenge screen when
+`getAuthenticatorAssuranceLevel()` reports `currentLevel: 'aal1', nextLevel: 'aal2'` is necessary
+and it is **not** enforcement — the same JWT still reaches PostgREST directly, and the browser is
+the one component an attacker does not have to use.
+
+Enforcement is `(auth.jwt()->>'aal') = 'aal2'` in the policies, beside `has_role()`. For a platform
+that already puts every real control in RLS, that is the only placement consistent with the rest of
+it. It is also the expensive part: 58 policy sites exist, and deciding which of them are
+privilege-changing enough to demand `aal2` is a judgement per policy, not a find-and-replace.
+
+#### Never prompt a federated user twice
+
+If a user arrived through Entra, Conditional Access has already applied whatever second factor the
+organisation mandates. Prompting them for an application TOTP code afterwards is the clearest single
+tell of enterprise authentication bolted on from outside, and it teaches people to resent the
+control.
+
+So the requirement is conditional on how the session was obtained, which `amr` carries: **federated
+users inherit assurance from the IdP; password users enrol a factor here.** Password users do not go
+away when item 20 ships — the seeded personas, break-glass accounts, and any air-gapped shopfloor
+install with no Entra to reach are all password paths, which is why this cannot simply be delegated
+upward and forgotten.
+
+#### There are no recovery codes, and that is survivable
+
+**GoTrue ships no user-facing recovery codes.** This is worth stating plainly because every
+consumer-grade MFA flow has them and their absence is discovered at the worst moment.
+
+What exists instead is the administrative path, which is how enterprise identity actually works: the
+service role can delete a user's enrolled factor — `supabase.auth.admin.mfa.deleteFactor()` — and
+the user re-enrols at next sign-in. Somebody's phone is lost, an administrator clears the factor,
+they set it up again. That is not a workaround; it is the same flow every corporate helpdesk runs.
+
+So the deliverable is a **Reset MFA control in the Access Control tab, gated on `authz:manage`**,
+written through the digital thread so that clearing a second factor lands in an audit log that
+cannot be edited afterwards. An MFA reset nobody can quietly perform is a property an enterprise
+buyer asks for by name, which turns the missing feature into a present one.
+
+The residual case is a deployment with exactly one Administrator, locked out, and nobody left to
+press the button. Then it is the service-role key from `.env` and a documented one-liner. **For
+self-hosted software that is a legitimate answer** in a way it never would be for a hosted service:
+whoever runs this stack owns the database by definition. Document it as break-glass rather than
+pretending it cannot happen, and recommend two Administrators in the same breath.
+
+Two smaller mitigations belong in the documentation rather than the code. GoTrue permits **more than
+one TOTP factor per user**, so an admin can enrol twice. And a synced vault — Bitwarden, 1Password —
+makes a lost handset an inconvenience, where a single-device authenticator makes it an incident.
+
+#### What this must not touch
+
+Machine identities have no phone.
+[`0048_machine_principals_are_not_users.sql`](supabase/migrations/0048_machine_principals_are_not_users.sql)
+already draws that line, and every `aal2` predicate has to respect it: the ingestion writer, the MCP
+read-only principal, gateway credentials and the Grafana and Node-RED userinfo paths authenticate
+without a browser and cannot answer a challenge. A policy that demands `aal2` on a table a service
+principal writes is an outage, not a hardening.
+
+#### Worth deciding early
+
+- **Whether enrolment can be deferred.** Requiring a factor before an Administrator can act at all
+  is the strong position and it means the first login on a fresh stack is an enrolment screen, which
+  the seeded demo personas would also hit.
+- **Whether home-grown recovery codes are ever worth it.** They are buildable in
+  `supabase/functions/` — hashed single-use codes, redemption triggering a service-role factor
+  delete — but a code can only ever *drop* MFA and force re-enrolment, because nothing but GoTrue
+  can mint an `aal2` session. That is a smaller prize than it first looks.
+
+### 22 · An audit trail that covers privileged acts, and one lane an engineer cannot read
+
+**Builds on:** `log_digital_thread_event()` and its three triggers ·
+`digital_thread_select_privileged_or_auditor` · `classifyEvent()` in
+[`DigitalThreadTab.jsx`](frontend/src/components/tabs/DigitalThreadTab.jsx) ·
+`record_gateway_credential_issued()` ([0041](supabase/migrations/0041_virtual_gateway_credential.sql))
+and `record_service_token_issued()` ([0043](supabase/migrations/0043_record_service_token_issued.sql))
+
+The digital thread is asset provenance and it is good at that. This item asks it to also answer
+*who was granted what, by whom, and when* — which it currently cannot — without letting the answer
+be read by everyone who can read the asset history.
+
+#### Three tables are audited, and `user_roles` is not one of them
+
+`log_digital_thread_event()` is attached to `cells`, `devices` and `gateways`. That is the entire
+trigger coverage. **Nothing records a role grant.** An account becoming an Administrator leaves no
+row anywhere, and neither does a change to `system_settings`, a service principal being created, or
+a schema being published.
+
+This is the first question any external assessment asks, and it is the gap where the expensive half
+is already built: an append-only table whose immutability is enforced in
+[`0003`](supabase/migrations/0003_audit_immutability_and_quarantine_rpc.sql), a causation model, a
+page that renders it, and an export. What is missing is the triggers and the RPC-side writes, not
+the machinery.
+
+#### One table, because `causation_id` cannot cross two
+
+The tempting shape is a second table — a security log beside the asset log, with its own policies.
+Rejected, for a reason that is specific rather than aesthetic: **`causation_id` links the rows
+written by a single act, and it can only do that within one table.** A privileged act and its asset
+consequences are routinely the same act — a schema rebound, a quarantined device approved, a gateway
+archived. Splitting the store breaks every chain that crosses the boundary, and buys a second copy
+of 0003's immutability triggers, the retention policy and the purge tests to keep in step.
+
+#### And it cannot be done by hiding a section
+
+The other tempting shape is to leave the rows where they are and not render them for an engineer.
+This repository has already made that mistake once and written down what it cost: *"THIS REPLACES
+`VITE_ALLOW_SIGNUP`, which was a frontend flag and therefore never an access control."* A hidden
+lane is the same object. The rows stay readable through PostgREST with the same token, and
+`listServiceTokens()` in [`api.js`](frontend/src/api.js) is a three-line query anyone can reproduce
+against the endpoint directly.
+
+#### The classification already exists, in the one place it cannot enforce anything
+
+`classifyEvent()` sorts events into `governance`, `critical`, `creation` and `operational`, and it
+sorts them well — `TOKEN_MINTED` is already governance, with a comment explaining that *"who may do
+what is precisely what governance means."* It runs in the browser, so it can colour a row and
+nothing more.
+
+The work is to promote that judgement into the row: an `audit_domain` written at insert time,
+`asset` or `security`, and then a policy per domain rather than one policy over the table. Today
+`digital_thread_select_privileged_or_auditor` grants Administrator, Shopfloor_Manager **and** Auditor
+read over every row, so a Shopfloor_Manager can already read every `CREDENTIAL_ISSUED` and
+`TOKEN_MINTED` row. The concern this item exists to answer is present-tense, not anticipated.
+
+- `asset` → Administrator, Shopfloor_Manager, Auditor, unchanged
+- `security` → Administrator and Auditor
+
+**Auditor stops being a synonym at this point.** The role holds one permission, `digital_thread:read`,
+and today does nothing a read-only Administrator could not. Reviewing privileged acts without being
+able to perform them is separation of duties, which is the thing the role was named for. The UI lanes
+then reflect what RLS enforces rather than standing in for it, and a Manager's empty Security lane is
+honest, because the rows are genuinely not in their result set.
+
+**Sequenced after item 20.** Once Shopfloor_Manager gives up `authz:manage`, "who may perform a
+privileged act" and "who may read that it happened" become the same set, with Auditor as the
+deliberate read-only exception. Done in the other order, the security lane would be hidden from a
+role that could still grant itself the ability to see it.
+
+#### The credential inventory is empty, and that is the worst state it could be in
+
+Both writers require a human session. `record_gateway_credential_issued()` checks `has_role()`, and
+`record_service_token_issued()` is reachable by `service_role` alone and called only by
+`mint-mcp-token.mjs`, which somebody runs by hand. So every credential minted by
+`provision-gateways.mjs` is recorded nowhere — 0043's own header says so: *"the same wall
+`provision-gateways.mjs` hits, and the same one that makes a demonstration floor's credentials
+unrecorded."*
+
+0031 sets the bar at *"a half-legible audit entry is worse than an absent one, because it looks like
+the feature works."* An empty inventory is worse than either, because it does not look like a
+missing feature — **it reads as an assertion that no credentials are outstanding**, which on a
+provisioned stack is false. That half is a defect rather than an extension and is filed as
+[#91](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/91); it is named here because this item is
+where the general fix lands, and because an item about audit coverage that did not mention the one
+panel actively misinforming would be a strange document.
+
+#### Worth deciding early
+
+- **Whether retention diverges.** `digital_thread` is append-only and nothing prunes it. Security
+  events are normally kept longer than operational ones, and a domain column is what would
+  eventually let the two differ — but a retention policy over an immutable table is its own design.
+- **What a service-role write may claim.** 0043 settled this once, storing the host and OS user
+  under a `claimed` key precisely because the database can verify neither. Every new write path
+  reached without `auth.uid()` inherits that question, and the answer should be the same one rather
+  than a fresh invention per call site.
+- **Whether an export is part of it.** A security lane nobody can ship to a SIEM is a lane that gets
+  read once a quarter. That is a larger question than this item, and worth knowing the answer before
+  the schema is fixed.
 
 ---
 

@@ -118,6 +118,16 @@ const jwtSecret = hex(32);
 const INGESTION_PRINCIPAL = 'b0000000-0000-4000-8000-000000000002';
 
 /**
+ * Service_Playback, seeded by migration 0056. Pinned for the same reason.
+ *
+ * A SECOND MACHINE IDENTITY RATHER THAN A SECOND USE OF THE FIRST, and the difference is what the
+ * two hold at the BROKER. The ingestion principal may publish `spBv1.0/+/NCMD/+` and nothing else;
+ * the playback worker publishes asset data as one gateway. Sharing a Supabase token between them
+ * would mean a single leaked credential reached both sets of gates.
+ */
+const PLAYBACK_PRINCIPAL = 'b0000000-0000-4000-8000-000000000003';
+
+/**
  * Every value replaced, and why each is the length it is.
  *
  * Two carry hard limits enforced by the container rather than by taste — supabase/realtime refuses
@@ -140,6 +150,12 @@ const generated = {
   // were sent as the apikey. It travels as the Authorization bearer, the way i3X passes a caller's
   // own token through to PostgREST.
   SUPABASE_INGESTION_KEY: mintJwt('authenticated', jwtSecret, INGESTION_PRINCIPAL),
+  // The playback worker's own credential (migration 0056). Same shape and same reasoning as the
+  // line above: `authenticated` with a `sub`, because every write it makes goes through a gate
+  // that checks the caller IS Service_Playback. Its narrowness is what makes the storage read arm
+  // meaningful -- that policy admits this principal for exactly one object, the capture of the
+  // job it is currently running.
+  SUPABASE_PLAYBACK_KEY: mintJwt('authenticated', jwtSecret, PLAYBACK_PRINCIPAL),
   PG_META_CRYPTO_KEY: hex(32),
   REALTIME_DB_ENC_KEY: hex(8),          // EXACTLY 16 chars
   REALTIME_SECRET_KEY_BASE: hex(32),    // AT LEAST 64 chars

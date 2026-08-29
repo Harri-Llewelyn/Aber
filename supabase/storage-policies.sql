@@ -321,12 +321,79 @@ END $$;
 -- evidence they exist to examine, and nothing would ever error.
 -- =============================================================================================
 
+-- ---------------------------------------------------------------------------------------------
+-- TWO CHANGES FROM THE BUCKET ABOVE, BOTH REQUIRED BY THE CAPTURE PAGE (0055, roadmap item 17).
+--
+-- 1. THE PREFIX RULE ADMITS DEVICES AS WELL AS GATEWAYS. Captures are filed by the SUBJECT
+--    RECORDED, and the page records from a gateway OR from a single device. The rule is
+--    `public.is_capture_subject_prefix()` rather than an inlined EXISTS so that the two policies
+--    below and the gate that builds the path cannot drift apart -- see its comment in 0055.
+--
+-- 2. THE INGESTION DAEMON MAY WRITE, AND ONLY WRITE. Recording is a server-side act: a browser
+--    cannot open an MQTT subscription, mosquitto has no WebSocket listener, and the recording
+--    credential is a server-side secret. The daemon is the host, and it authenticates as
+--    `Service_Ingestor`, which holds `Operator` -- so without an arm here every capture it records
+--    would be uploaded, refused with 42501, caught, logged, and lost. That is 0051's defect
+--    exactly: the symptom is a capture that never appears rather than an error anybody sees.
+--
+--    THE ROADMAP ENTRY CALLED THIS "a SECURITY DEFINER function in 0047's shape", AND IT CANNOT BE.
+--    A capture's bytes go through the Storage REST API, not through Postgres; no SQL function can
+--    carry a 50 MiB body into a bucket. The row in `storage.objects` is written by storage-api
+--    under the caller's own JWT, so the only place this authority can live is a policy arm. The
+--    gates in 0055 remain what that paragraph is right about -- they are how `capture_jobs` and
+--    `captures` are written -- but the bucket needs this.
+--
+--    UPDATE IS INCLUDED AND INSERT ALONE IS NOT ENOUGH, which is a deliberate widening beyond what
+--    item 17 §1 proposed. Each subject has exactly ONE capture object, at a path derived from its
+--    sparkplug id, so a re-record overwrites that key -- and storage-js spells overwrite as
+--    `upsert: true`, which needs both. The alternative §1 preferred, deleting browser-side before
+--    the job starts, keeps the daemon at INSERT and costs more than it saves: it destroys the old
+--    capture before the new one exists, so a recording that then fails leaves nothing, and it needs
+--    a browser present at exactly the right moment or the bucket accumulates orphans no policy
+--    reaches. Overwriting in place makes an orphan impossible and destroys nothing until the
+--    replacement is written.
+--
+--    THE DAEMON'S ARM IS SCOPED TO THE OBJECT OF THE JOB IT IS RUNNING, not to the bucket. It is
+--    `is_ingestion_caller() AND is_active_capture_object(name)`, so with no capture in flight the
+--    daemon can reach nothing here at all, and while one is it can reach exactly one path -- the
+--    one `start_capture_job()` derived from the subject. See that function's comment in 0055.
+--
+--    IT READS AS WELL AS WRITES, WHICH THE FIRST VERSION OF THIS REFUSED TO ALLOW AND WAS WRONG
+--    ABOUT. Write-only is the obvious posture and it is not achievable: an overwrite is
+--    `INSERT ... ON CONFLICT DO UPDATE`, and Postgres checks the SELECT policy for the row being
+--    conflicted with, so a principal that cannot read an object cannot replace it. Measured
+--    against the running stack, not inferred -- INSERT of a new object returned 200 and the upsert
+--    that followed returned `new row violates row-level security policy`. Confined to the active
+--    job the read gives up almost nothing: the daemon may read back the file it is at that moment
+--    writing, and holds its contents in memory regardless.
+--
+--    THERE IS STILL NO DELETE ARM. Removing a capture is a human act with a confirmation in front
+--    of it, and nothing about recording requires destroying an earlier recording -- the overwrite
+--    is what replaces it.
+-- ---------------------------------------------------------------------------------------------
+
+-- THREE WAYS IN, AND TWO OF THEM ARE MACHINES CONFINED TO ONE FILE EACH.
+--
+--   a person          Administrator, Shopfloor_Manager or Auditor, reading the whole bucket
+--   the daemon        the object of the capture job it is RECORDING (0055)
+--   the worker        the object of the playback job it is RUNNING (0056)
+--
+-- THE PLAYBACK ARM IS A PREREQUISITE, NOT A REFINEMENT. `Service_Playback` holds `Operator`, so
+-- without it every playback fails at the first read with 42501 -- caught, logged, and visible only
+-- as a job that failed for a reason nothing surfaces. That is 0051's defect for the third time,
+-- which is why it is asserted below rather than trusted to this text.
 DROP POLICY IF EXISTS "broker_captures_read_privileged" ON storage.objects;
 CREATE POLICY "broker_captures_read_privileged" ON storage.objects
   FOR SELECT TO authenticated
   USING (
     bucket_id = 'broker-captures'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager', 'Auditor'])
+    AND (
+      public.has_role(ARRAY['Administrator', 'Shopfloor_Manager', 'Auditor'])
+      OR (public.is_ingestion_caller()
+          AND public.is_active_capture_object(storage.objects.name))
+      OR (public.is_playback_caller()
+          AND public.is_active_playback_capture(storage.objects.name))
+    )
   );
 
 DROP POLICY IF EXISTS "broker_captures_insert_privileged" ON storage.objects;
@@ -334,31 +401,38 @@ CREATE POLICY "broker_captures_insert_privileged" ON storage.objects
   FOR INSERT TO authenticated
   WITH CHECK (
     bucket_id = 'broker-captures'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
-    -- storage.objects.name, QUALIFIED: public.gateways has a `name` column of its own and would
-    -- otherwise capture this reference. Same trap as the bucket above documents at length.
-    AND EXISTS (
-      SELECT 1 FROM public.gateways g
-       WHERE g.sparkplug_id = (storage.foldername(storage.objects.name))[1]
+    AND (
+      -- storage.objects.name, QUALIFIED: public.gateways has a `name` column of its own and would
+      -- otherwise capture this reference. Same trap as the bucket above documents at length.
+      (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+       AND public.is_capture_subject_prefix((storage.foldername(storage.objects.name))[1]))
+      OR (public.is_ingestion_caller()
+          AND public.is_active_capture_object(storage.objects.name))
     )
   );
 
--- UPDATE covers `upsert: true`. Both halves are gated: USING decides which existing objects may be
--- targeted, WITH CHECK what the result may look like -- so an update cannot move an object out
--- from under the prefix rule the insert enforced.
+-- UPDATE covers `upsert: true`, which is how a re-record replaces the one capture stored for a
+-- subject. Both halves are gated: USING decides which existing objects may be targeted, WITH CHECK
+-- what the result may look like -- so an update cannot move an object out from under the rule that
+-- admitted the insert.
 DROP POLICY IF EXISTS "broker_captures_update_privileged" ON storage.objects;
 CREATE POLICY "broker_captures_update_privileged" ON storage.objects
   FOR UPDATE TO authenticated
   USING (
     bucket_id = 'broker-captures'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+    AND (
+      public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+      OR (public.is_ingestion_caller()
+          AND public.is_active_capture_object(storage.objects.name))
+    )
   )
   WITH CHECK (
     bucket_id = 'broker-captures'
-    AND public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
-    AND EXISTS (
-      SELECT 1 FROM public.gateways g
-       WHERE g.sparkplug_id = (storage.foldername(storage.objects.name))[1]
+    AND (
+      (public.has_role(ARRAY['Administrator', 'Shopfloor_Manager'])
+       AND public.is_capture_subject_prefix((storage.foldername(storage.objects.name))[1]))
+      OR (public.is_ingestion_caller()
+          AND public.is_active_capture_object(storage.objects.name))
     )
   );
 
@@ -378,6 +452,8 @@ DO $$
 DECLARE
   v_policies       integer;
   v_auditor_writes integer;
+  v_daemon_reads   integer;
+  v_daemon_writes  integer;
 BEGIN
   SELECT count(*) INTO v_policies FROM pg_policies
    WHERE schemaname = 'storage' AND tablename = 'objects'
@@ -401,6 +477,95 @@ BEGIN
       'bucket -- write authority is Administrator and Shopfloor_Manager only.', v_auditor_writes;
   END IF;
 
-  RAISE NOTICE 'broker-captures policies reconciled (4 policies; Auditor read-only).';
+  -- THE DAEMON REACHES THREE OF THE FOUR POLICIES, AND EVERY ARM IT HAS IS CONFINED TO ONE FILE.
+  --
+  -- Too NARROW is silent in the way 0051 was: the daemon uploads, is refused with 42501, catches
+  -- it, logs it, and the operator sees a capture that recorded successfully and then never
+  -- appeared. SELECT belongs in this count for a reason that is not obvious and was MEASURED
+  -- rather than reasoned: replacing a capture is an upsert, which storage-api serves as
+  -- `INSERT ... ON CONFLICT DO UPDATE`, and Postgres evaluates that against the SELECT policy as
+  -- well -- so omitting the read arm breaks re-recording, and only re-recording.
+  SELECT count(*) INTO v_daemon_writes FROM pg_policies
+   WHERE schemaname = 'storage' AND tablename = 'objects'
+     AND policyname LIKE 'broker_captures_%'
+     AND cmd IN ('SELECT', 'INSERT', 'UPDATE')
+     AND (coalesce(qual, '') LIKE '%is_ingestion_caller%'
+       OR coalesce(with_check, '') LIKE '%is_ingestion_caller%');
+  IF v_daemon_writes <> 3 THEN
+    RAISE EXCEPTION
+      'broker-captures: the ingestion daemon appears in % of the 3 policies it needs (SELECT, '
+      'INSERT, UPDATE). Recording is a server-side act performed by the daemon, which holds '
+      'Operator and would otherwise have every upload refused with 42501 -- caught, logged, and '
+      'seen only as a capture that never appears. See 0055 and roadmap item 17.', v_daemon_writes;
+  END IF;
+
+  -- EVERY ONE OF THOSE ARMS MUST BE SCOPED TO THE ACTIVE JOB. A bare `is_ingestion_caller()` is
+  -- the widening this design exists to avoid: standing authority over every capture in the bucket,
+  -- held by the process most exposed to the plant network. Paired with is_active_capture_object(),
+  -- the same principal reaches exactly one path while a capture runs and nothing at all when none
+  -- does.
+  SELECT count(*) INTO v_daemon_reads FROM pg_policies
+   WHERE schemaname = 'storage' AND tablename = 'objects'
+     AND policyname LIKE 'broker_captures_%'
+     AND (coalesce(qual, '') LIKE '%is_ingestion_caller%'
+       OR coalesce(with_check, '') LIKE '%is_ingestion_caller%')
+     AND (coalesce(qual, '') || coalesce(with_check, '')) NOT LIKE '%is_active_capture_object%';
+  IF v_daemon_reads <> 0 THEN
+    RAISE EXCEPTION
+      'broker-captures: % polic(ies) admit the ingestion daemon WITHOUT confining it to the object '
+      'of the capture job it is running. is_ingestion_caller() alone is standing authority over '
+      'every capture in the bucket; it must be paired with is_active_capture_object(name).',
+      v_daemon_reads;
+  END IF;
+
+  -- AND IT NEVER DELETES. Removing a capture is a human act with a confirmation in front of it;
+  -- recording never requires destroying an earlier recording, because the overwrite replaces it.
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+     WHERE schemaname = 'storage' AND tablename = 'objects'
+       AND policyname LIKE 'broker_captures_%' AND cmd = 'DELETE'
+       AND coalesce(qual, '') LIKE '%is_ingestion_caller%'
+  ) THEN
+    RAISE EXCEPTION
+      'broker-captures: the DELETE policy admits the ingestion daemon. It has no reason to destroy '
+      'a capture -- replacing one is an overwrite -- and every reason not to be able to.';
+  END IF;
+
+  -- ---------------------------------------------------------------------------------------------
+  -- THE PLAYBACK WORKER READS, AND DOES NOTHING ELSE.
+  --
+  -- Missing entirely, every playback fails at its first read with 42501 -- 0051's defect for the
+  -- third time on this bucket. Present on any policy but SELECT, a process that already holds
+  -- broker publish rights could also overwrite or destroy the recordings it is meant to replay,
+  -- which is the one combination worth ruling out explicitly.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+     WHERE schemaname = 'storage' AND tablename = 'objects'
+       AND policyname = 'broker_captures_read_privileged'
+       AND coalesce(qual, '') LIKE '%is_playback_caller%'
+       AND coalesce(qual, '') LIKE '%is_active_playback_capture%'
+  ) THEN
+    RAISE EXCEPTION
+      'broker-captures: the SELECT policy does not admit the playback worker, confined to the '
+      'capture of its running job. Service_Playback holds Operator, so every playback would fail '
+      'at its first read with 42501 -- caught, logged, and seen only as a job that failed for no '
+      'stated reason. See 0056.';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+     WHERE schemaname = 'storage' AND tablename = 'objects'
+       AND policyname LIKE 'broker_captures_%' AND cmd <> 'SELECT'
+       AND (coalesce(qual, '') || coalesce(with_check, '')) LIKE '%is_playback_caller%'
+  ) THEN
+    RAISE EXCEPTION
+      'broker-captures: a write policy admits the playback worker. It publishes captures and must '
+      'not be able to alter or destroy them -- it holds broker publish rights, which is exactly '
+      'the process that should not also be able to edit the evidence of what it published.';
+  END IF;
+
+  RAISE NOTICE
+    'broker-captures policies reconciled (4 policies; Auditor read-only; the ingestion daemon '
+    'confined to the object of its running job, and never deleting).';
 END $$;
 
