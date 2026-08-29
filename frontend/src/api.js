@@ -464,6 +464,7 @@ export function captureManifest(parsed) {
   const edgeNodes = [];
   const devices = [];
   let birth = false;
+  let usesAliases = false;
 
   for (const message of messages) {
     if (message?.topic) {
@@ -476,6 +477,9 @@ export function captureManifest(parsed) {
       if (parts[4] && !devices.includes(parts[4])) devices.push(parts[4]);
     }
     for (const metric of message?.payload?.metrics || []) {
+      // See capture_worker._manifest(): a metric with an alias and no name is the only kind that
+      // a missing birth certificate actually costs anything.
+      if (!metric?.name && metric?.alias !== undefined && metric?.alias !== null) usesAliases = true;
       if (metric?.name && !seen.has(metric.name)) {
         seen.add(metric.name);
         names.push(metric.name);
@@ -495,7 +499,8 @@ export function captureManifest(parsed) {
     // way would be inventing a fact about a recording this stack did not make.
     rebirth_requested: null,
     edge_node_ids: edgeNodes,
-    device_ids: devices
+    device_ids: devices,
+    uses_aliases: usesAliases
   };
 }
 

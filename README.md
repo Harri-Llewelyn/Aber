@@ -1658,12 +1658,23 @@ paragraphs that state them are corrected in place rather than deleted:
    RLS as the only thing in front — so the `GRANT SELECT` lines that looked like the access control
    were adding a privilege that was already there.
 
-**And one fact about the fixture rather than the code.** The seeded Node-RED fleet publishes `NDATA`
-and `DDATA` only: it emits no `NBIRTH` or `DBIRTH` and does not answer `Node Control/Rebirth`, so
-every capture taken from it honestly reports `birth_captured = false`. The birth path was proved by
-publishing a real `NBIRTH` as the gateway itself — it reaches the file, the manifest and the job
-row, alias intact. Worth knowing before the playback half is built: **captures taken from the
-simulator today carry no alias table**, which is exactly the condition §2 is written about.
+**And one fact about the fixture rather than the code — stated wrongly here first.** This said the
+seeded fleet "emits no `NBIRTH` or `DBIRTH`", which is false and was asserted as measured. It does
+both: each gateway births once when the flow starts, and every device re-births on its own
+`BIRTH_EVERY_SCANS` cycle, about every fifteen minutes. Short captures miss it for the ordinary
+reason that an eight-second window rarely lands on a fifteen-minute cycle — `messages_dbirth` and
+`messages_nbirth` on the daemon's own stats line say so plainly, and I read a quiet window instead.
+
+**What was true is the other half: rebirth requests were discarded.** `simulation/node_red_flow.json`
+subscribed to `spBv1.0/+/NCMD/+` and wired every request into `handle-rebirth`, *a node that did not
+exist* — one dangling wire in fifty-four. So the daemon's requests, at startup and on every sequence
+gap and now on every capture, were received and dropped. That is fixed, and the fix is measured: an
+NCMD to `gwy12…` now returns its `NBIRTH`.
+
+**A listener per gateway, not one for the fleet.** `pattern readwrite spBv1.0/+/+/%u/#` confines each
+broker connection to the edge node it authenticated as, so the single listener could only ever hear
+requests addressed to its own gateway — proved by the same test answering for `gwy12…` and staying
+silent for `gwy14…`. There are four now.
 
 ---
 
@@ -1740,6 +1751,14 @@ only its own `DDATA` omits the `NBIRTH`/`DBIRTH` where the alias table lives, an
 gateway then yields a capture that replays as `unresolved_alias` and drops every metric — from a file
 that looks complete. The daemon documents this failure at `_alias_map`: *"ingests nothing at all from
 an alias-optimised gateway, and reports no error while doing it."*
+
+**"Alias-optimised" is the condition, and the UI was ignoring it.** A capture with no birth was
+labelled as one that "drops every metric", full stop — which is wrong for any recording whose
+metrics carry their full names, and that is most of them, this fleet's included. So the manifest
+records **`uses_aliases`**: true only when some metric arrived with an alias and no name, which is
+the only case a missing birth actually costs anything. A birthless capture of a named-metric fleet
+replays perfectly well; what it does not do is announce the devices, which stay OFFLINE until they
+birth on their own.
 
 But **nothing stores a raw birth payload**. `asset_config` holds birth *parameters* and
 `devices.last_birth_metrics` holds metric *names*; neither can reconstruct a Sparkplug payload. What

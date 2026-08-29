@@ -116,15 +116,26 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
           recorded from.
         </p>
 
-        {capture.manifest?.birth_captured === false && (
+        {/* WARNED ONLY WHEN IT IS TRUE. This used to fire on every birthless capture and say the
+            playback would write nothing, which is wrong for any recording whose metrics carry their
+            full names -- which is most of them. `uses_aliases` is the condition that actually
+            matters, and it is recorded at capture time. */}
+        {capture.manifest?.birth_captured === false && capture.manifest?.uses_aliases && (
           <div className="callout callout-warning" style={{ marginTop: '12px' }}>
             <IconShieldAlert size={14} className="callout-icon" />
             <div style={{ fontSize: '12px' }}>
-              This capture contains no <code>NBIRTH</code> or <code>DBIRTH</code>. If the recorded
-              gateway used metric aliases, every metric will replay as <code>unresolved_alias</code>
-              {' '}and be dropped on ingest — the playback will report success and write nothing.
+              This capture contains no <code>NBIRTH</code> or <code>DBIRTH</code> and its metrics are
+              carried by <strong>alias</strong>. Nothing can resolve them, so every aliased metric is
+              dropped on ingest — the playback will report success and write nothing.
             </div>
           </div>
+        )}
+        {capture.manifest?.birth_captured === false && !capture.manifest?.uses_aliases && (
+          <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '10px 0 0' }}>
+            This capture has no birth certificate. Its metrics carry full names, so they will replay
+            normally — but the target's devices are not announced and stay OFFLINE until they birth
+            on their own.
+          </p>
         )}
 
         {/* ---------------------------------------------------------------------------------- */}

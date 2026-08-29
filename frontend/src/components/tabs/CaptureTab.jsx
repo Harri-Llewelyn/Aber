@@ -717,11 +717,17 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             {
               label: 'Birth certificate',
               // The one field on this panel that changes what an operator does next.
-              value: capture.manifest?.birth_captured === false ? 'Not captured' : 'Captured',
-              danger: capture.manifest?.birth_captured === false,
+              value: capture.manifest?.birth_captured === false
+                ? (capture.manifest?.uses_aliases ? 'Not captured — aliases unresolvable' : 'Not captured')
+                : 'Captured',
+              // Danger only when it actually costs something. A birthless capture of a fleet that
+              // publishes full metric names replays fine, and colouring it red said otherwise.
+              danger: capture.manifest?.birth_captured === false && !!capture.manifest?.uses_aliases,
               title: capture.manifest?.birth_captured === false
-                ? 'No NBIRTH or DBIRTH was recorded, so this capture replays as unresolved_alias against an alias-optimised gateway and drops every metric.'
-                : 'The recording contains a birth certificate, so a playback can resolve metric aliases.',
+                ? (capture.manifest?.uses_aliases
+                  ? 'No birth certificate, and this capture uses metric aliases — a playback cannot resolve them, so every aliased metric is dropped on ingest.'
+                  : 'No birth certificate. Every metric carries its full name, so a playback resolves them; it will not announce the devices, which stay OFFLINE until they birth on their own.')
+                : 'The recording contains a birth certificate, so a playback can resolve metric aliases and announce the devices.',
               full: true
             }
           ] : [])
@@ -1132,11 +1138,19 @@ function SubjectRow({ row, selected, onSelect }) {
               )}
               {/* THE ONE BADGE IN THIS TABLE THAT CHANGES A DECISION. Everything else here is
                   provenance; this says whether the file will actually replay. */}
+              {/* THE OLD TOOLTIP SAID THIS CAPTURE "drops every metric", AND THAT WAS NOT TRUE.
+                  A missing birth certificate costs metrics only when the recording actually depends
+                  on the alias table -- a metric carrying an alias and no name. This fleet publishes
+                  full names, so its birthless captures replay perfectly well, and the warning was
+                  telling operators their good capture was broken. `uses_aliases` is recorded at
+                  capture time so the two cases can be told apart instead of assumed. */}
               {capture.manifest?.birth_captured === false && (
                 <span
-                  className="badge badge-warning"
+                  className={`badge ${capture.manifest?.uses_aliases ? 'badge-warning' : 'badge-neutral'}`}
                   style={{ fontSize: '11px', marginLeft: '6px' }}
-                  title="No NBIRTH or DBIRTH was recorded, so this capture replays as unresolved_alias against an alias-optimised gateway and drops every metric."
+                  title={capture.manifest?.uses_aliases
+                    ? 'No NBIRTH or DBIRTH was recorded and this capture uses metric aliases, so a playback cannot resolve them: every aliased metric is dropped on ingest.'
+                    : 'No NBIRTH or DBIRTH was recorded. Every metric here carries its full name, so a playback still resolves them — but it will not announce the devices, which stay OFFLINE until they birth on their own.'}
                 >
                   NO BIRTH
                 </span>

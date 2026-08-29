@@ -390,10 +390,18 @@ def _manifest(messages, state):
     """
     names, topics = [], set()
     seen = set()
+    # WHETHER THIS CAPTURE ACTUALLY DEPENDS ON THE ALIAS TABLE, which is what decides whether a
+    # missing birth certificate costs anything. A metric carrying an `alias` and NO `name` can only
+    # be resolved through the birth that defined it; one carrying its full name resolves on its own.
+    # Recorded rather than assumed, because "no birth" and "will drop every metric" are not the same
+    # claim -- this fleet publishes full names, so its birthless captures replay perfectly well.
+    uses_aliases = False
     for m in messages:
         topics.add(m["topic"])
         for metric in m["payload"].get("metrics", []):
             name = metric.get("name")
+            if not name and metric.get("alias") is not None:
+                uses_aliases = True
             if name and name not in seen:
                 seen.add(name)
                 names.append(name)
@@ -413,6 +421,7 @@ def _manifest(messages, state):
         "rebirth_requested": state.rebirth_requested,
         "edge_node_ids": edge_nodes,
         "device_ids": devices,
+        "uses_aliases": uses_aliases,
     }
 
 
