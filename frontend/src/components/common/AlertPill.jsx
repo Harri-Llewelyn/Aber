@@ -1,7 +1,8 @@
 import React, { useState } from 'react'
-import { IconAlertTriangle, IconAlertCircle, IconShieldCheck, IconX } from './Icons'
+import { IconAlertTriangle, IconAlertCircle, IconShieldCheck, IconX, IconExternalLink } from './Icons'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
-import { REALTIME_ENABLED } from '../../constants'
+import { useClickOutside } from '../../hooks/useClickOutside'
+import { REALTIME_ENABLED, grafanaAlertUrl } from '../../constants'
 
 /**
  * The Topbar's alert counter, and the list behind it.
@@ -24,18 +25,47 @@ import { REALTIME_ENABLED } from '../../constants'
  * THE COUNT IS THE HEADLINE, THE DETAIL IS ON DEMAND. A toast already fired when each alert arrived;
  * this is the answer to "what is still wrong", which is a different question and wants a list rather
  * than a queue of notifications. Clicking opens it inline instead of navigating, because the operator
- * asking is usually mid-task on another tab -- and each row then navigates to its own device, which
+ * asking is usually mid-task on another tab -- and each row then navigates to its own SUBJECT, which
  * is the one case where leaving the current page is what was wanted.
  *
+ * A ROW GOES WHERE ITS SUBJECT LIVES, WHICH IS NOT ALWAYS A DEVICE. Every row used to call
+ * `onSelectDevice`, from the days when every rule was a machine condition. It has not been true
+ * since the platform rules landed: of the ten rules shipped today FOUR are `entity_type: gateway`
+ * and five are `platform`, and NONE is a device -- so the single destination was wrong for every
+ * alert this stack can currently raise. A stale gateway sent an operator to the Devices page to
+ * search for a `gwy...` id no device row will ever match.
+ *
+ * `entity_type` IS THE ANSWER AND THE PREFIX IS NOT. A `gwy`/`dev` prefix on the wire id would
+ * usually agree, but it is a naming convention being asked to carry an authorisation-shaped
+ * decision: the alert's scope is declared by the Grafana rule's own `entity_type` label, checked by
+ * `platform_alerts_entity_type_valid` (0023) and resolved in the right id space by the webhook. The
+ * column says what the row is about; reading it is not a heuristic.
+ *
+ * A PLATFORM ALERT HAS NO ASSET, AND ITS DESTINATION IS GRAFANA. `platform_alerts_asset_has_wire_id`
+ * makes `sparkplug_id` null for exactly these -- the ingestion pipeline going silent, the quarantine
+ * queue filling -- so there is no page in this application about the subject. Such a row used to be
+ * inert, which read as a broken link rather than as an honest one. It now opens the rule in Grafana
+ * Alerting, which is where its state history and its silence controls actually are, and which the
+ * panel's own footer already tells the operator. Same anchor treatment as ContextPanel's: a real
+ * link, so middle-click and "copy link address" work.
+ *
  * @param {Array}    alerts          Rows from `platform_alerts_active` -- see hooks/usePlatformAlerts.
- * @param {Function} onSelectDevice  Called with a sparkplug_id when a row is clicked. Optional: the
- *                                   panel is still worth opening read-only without it.
+ * @param {Function} onSelectDevice  Called with a sparkplug_id when a `device` row is clicked.
+ *                                   Optional: the panel is still worth opening read-only without it.
+ * @param {Function} onSelectGateway The same for a `gateway` row. Optional for the same reason, and
+ *                                   separately, so a consumer that has one page and not the other
+ *                                   degrades to an inert row rather than to a wrong one.
  * @param {boolean}  realtime        Whether Realtime is carrying updates. Defaults to the deployment
  *                                   flag; a parameter only so tests can pin both branches.
  */
-export function AlertPill({ alerts = [], onSelectDevice, realtime = REALTIME_ENABLED }) {
+export function AlertPill({ alerts = [], onSelectDevice, onSelectGateway, realtime = REALTIME_ENABLED }) {
   const [open, setOpen] = useState(false)
   useEscapeKey(() => setOpen(false), open)
+  // A click anywhere else closes it. The panel is a popover in a header, not a dialog: it takes no
+  // focus trap and no backdrop, so without this it stayed open over whatever the operator went on to
+  // do -- covering the top-right of a page they were now working on, with the only way out being a
+  // control they had to look for. The ref goes on the WRAPPER so the pill's own click still toggles.
+  const wrapRef = useClickOutside(() => setOpen(false), open)
 
   const count = alerts.length
   const healthy = count === 0
@@ -56,7 +86,7 @@ export function AlertPill({ alerts = [], onSelectDevice, realtime = REALTIME_ENA
     : `${count} firing alert${count === 1 ? '' : 's'}`
 
   return (
-    <div className="alert-pill-wrap">
+    <div className="alert-pill-wrap" ref={wrapRef}>
       <button
         className={`alert-pill ${tone}`}
         onClick={() => setOpen((v) => !v)}
@@ -102,10 +132,19 @@ export function AlertPill({ alerts = [], onSelectDevice, realtime = REALTIME_ENA
           ) : (
             <ul className="alert-pill-list">
               {alerts.map((a) => {
+                // `device` IS THE DEFAULT HERE FOR THE SAME REASON IT IS IN THE WEBHOOK: a rule that
+                // declares no scope is a machine rule, and a row written before the column existed
+                // is one of the three original ones. Reading it as unknown instead would make every
+                // historical alert inert.
+                const kind = a.entity_type || 'device'
+                const onSelect = kind === 'gateway' ? onSelectGateway : kind === 'device' ? onSelectDevice : null
+                const page = kind === 'gateway' ? 'Gateways' : 'Devices'
                 // A row is a button only when it can go somewhere. An alert whose sparkplug_id
-                // matched no device row -- which the webhook records rather than drops -- has
-                // nothing to navigate TO, and a dead-looking button is worse than plain text.
-                const navigable = Boolean(onSelectDevice && a.sparkplug_id)
+                // matched no row -- which the webhook records rather than drops -- has nothing to
+                // navigate TO, and a dead-looking button is worse than plain text.
+                const navigable = Boolean(onSelect && a.sparkplug_id)
+                // The fleet-wide rules. No asset, so no page here -- Grafana is the subject's home.
+                const external = !a.sparkplug_id && kind === 'platform'
                 const body = (
                   <>
                     <span className={`alert-pill-dot alert-pill-dot-${a.severity}`} />
@@ -115,7 +154,12 @@ export function AlertPill({ alerts = [], onSelectDevice, realtime = REALTIME_ENA
                           and the values that tripped the rule -- so it is the one string worth
                           showing and does not need re-assembling here. */}
                       {a.summary && <div className="alert-pill-item-summary">{a.summary}</div>}
-                      <div className="alert-pill-item-meta mono">{a.sparkplug_id}</div>
+                      {/* A fleet-wide alert names no asset, and an empty mono line reads as a
+                          failed lookup. It says what the scope IS instead. */}
+                      <div className="alert-pill-item-meta mono">
+                        {a.sparkplug_id || (kind === 'platform' ? 'Platform-wide' : '')}
+                        {external && <> <IconExternalLink size={10} /></>}
+                      </div>
                     </div>
                   </>
                 )
@@ -124,14 +168,25 @@ export function AlertPill({ alerts = [], onSelectDevice, realtime = REALTIME_ENA
                     {navigable ? (
                       <button
                         className="alert-pill-item-link"
-                        onClick={() => { setOpen(false); onSelectDevice(a.sparkplug_id) }}
-                        /* The sparkplug id, not a device name: `platform_alerts` does not carry one.
-                           The webhook resolves the NAME only far enough to template Grafana's
-                           summary, and the id is what the Devices search matches on anyway. */
-                        title={`Show ${a.sparkplug_id} on the Devices page`}
+                        onClick={() => { setOpen(false); onSelect(a.sparkplug_id) }}
+                        /* The sparkplug id, not a name: `platform_alerts` does not carry one. The
+                           webhook resolves the NAME only far enough to template Grafana's summary,
+                           and the id is what each page's search matches on anyway. */
+                        title={`Show ${a.sparkplug_id} on the ${page} page`}
                       >
                         {body}
                       </button>
+                    ) : external ? (
+                      <a
+                        className="alert-pill-item-link"
+                        href={grafanaAlertUrl(a.alert_name)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => setOpen(false)}
+                        title="Open this rule in Grafana Alerting — this alert is about the platform, not about one asset"
+                      >
+                        {body}
+                      </a>
                     ) : body}
                   </li>
                 )
