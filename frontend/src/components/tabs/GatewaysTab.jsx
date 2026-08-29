@@ -15,7 +15,7 @@ import {
 } from '../../utils/gatewayType'
 import { deviceLifecycleStatus, deviceStatusDotColor, deviceStatusTitle, deviceDotColor } from '../../utils/deviceStatus'
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
-import { SCOPE_CELL, SCOPE_SITE_WIDE } from '../../utils/cellResolution'
+import { SCOPE_CELL, SCOPE_SITE_WIDE, gatewayAcceptsCell } from '../../utils/cellResolution'
 import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
 import { StatusBadge } from '../common/StatusBadge'
@@ -81,6 +81,10 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   // that is what the API takes; the select carries one word. Storing both would be two things to
   // keep in step for one decision -- the bug class this whole item is about.
   const formType = gatewayType(form)
+  // Derived the same way and for the same reason, off the flags rather than off `formType`: the
+  // rule belongs to `gateways_synthetic_has_no_cell`, which is written in terms of the two
+  // columns, so reading them keeps this true if a fourth type is ever added.
+  const formAcceptsCell = gatewayAcceptsCell(form)
   const [docsForGw, setDocsForGw] = useState(null)
   // The gateway whose bundle modal is open. Held as the OBJECT rather than an id: the modal needs
   // the name and sparkplug_id, and it stays open across a poll that may reorder the list.
@@ -257,8 +261,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
       if (!haystack.includes(q)) return false
     }
     if (liveStatusFilter && gatewayLiveStatus(g) !== liveStatusFilter) return false
-    if (kindFilter === 'host'   && g.deployment !== 'host') return false
-    if (kindFilter === 'remote' && g.deployment !== 'remote') return false
+    // Compared against the derived type, not against `deployment`: Simulated and Host are the same
+    // deployment and differ only in the flag beside it.
+    if (kindFilter && gatewayType(g) !== kindFilter) return false
     if (quarantineOnly && !gatewaysWithQuarantine.has(g.gateway_id)) return false
     return true
   })
@@ -356,10 +361,16 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           <option value="OFFLINE">Offline</option>
         </select>
 
-        <select className="form-control" style={{ width: '160px' }} value={kindFilter} onChange={e => setKindFilter(e.target.value)} title="Where each gateway's connector runs: on this host, or on an appliance out on the plant network">
-          <option value="">Anywhere</option>
-          <option value="remote">On an appliance</option>
-          <option value="host">On this host</option>
+        {/* FILTERS ON THE SAME VALUE THE Type COLUMN PRINTS, through the same helper. It used to
+            filter on `deployment` alone and offer "On an appliance" / "On this host", which could
+            not express Simulated at all: a simulated gateway is host-run, so "On this host"
+            returned it alongside the real connectors and there was no way to separate them --
+            while the column beside it had been telling them apart since 0064. */}
+        <select className="form-control" style={{ width: '160px' }} value={kindFilter} onChange={e => setKindFilter(e.target.value)} title="Filter by the Type column: Remote (an appliance on the plant network), Host (a connector inside this stack), or Simulated (host-run, readings generated)">
+          <option value="">Any type</option>
+          {SELECTABLE_TYPES.map(t => (
+            <option key={t} value={t}>{gatewayTypeLabel(t)}</option>
+          ))}
         </select>
 
         <button
@@ -445,14 +456,29 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                            </span>
                          </td>
                          <td>
-                           {/* Three states, not two. Site-Wide is an answer -- a host-run
-                               connector serving the facility -- and must not read as the
-                               unanswered case, or nobody ever stops trying to "fix" it. */}
-                           {g.location_scope === SCOPE_SITE_WIDE
-                             ? <span className="badge badge-neutral" style={{ fontSize: '11px' }} title="Serves the whole facility rather than one cell. Its devices need their own cell.">Site-Wide</span>
-                             : g.cell_id
-                               ? (cells.find(c => c.cell_id === g.cell_id)?.cell_name || <span className="mono">{g.cell_id}</span>)
-                               : <span style={{ fontSize: '11px', color: 'var(--warning-text)', fontStyle: 'italic' }} title="Devices on this gateway inherit no cell, so they land in the Unassigned queue">No cell</span>}
+                           {/* FOUR STATES, AND THE FIRST ONE IS "THE QUESTION DOES NOT APPLY".
+                               A synthetic gateway cannot hold a cell -- gateways_synthetic_has_no_cell
+                               (0059) -- so `location_scope` on one is inert: `device_locations`
+                               resolves simulated and shadow AHEAD of it, and the value changes
+                               nothing about where anything lands.
+
+                               It was still being PRINTED, which is how four simulated gateways came
+                               to report three different cell zones between them: the one seeded
+                               `site_wide` read "Site-Wide" and the others read "No cell", a
+                               difference with no behaviour behind it. Worse, "No cell" is rendered
+                               as a warning promising devices in the Unassigned queue, and theirs
+                               are in the Simulated lane. Both were answering a question this row
+                               does not have.
+
+                               Site-Wide is still an answer for every other gateway, and must not
+                               read as the unanswered case, or nobody ever stops trying to fix it. */}
+                           {!gatewayAcceptsCell(g)
+                             ? <span style={{ fontSize: '11px', color: 'var(--text-dim)' }} title={`${gatewayTypeLabel(gatewayType(g))} gateways have no cell: their devices resolve to the ${gatewayTypeLabel(gatewayType(g))} lane, which takes precedence over cell membership.`}>—</span>
+                             : g.location_scope === SCOPE_SITE_WIDE
+                               ? <span className="badge badge-neutral" style={{ fontSize: '11px' }} title="Serves the whole facility rather than one cell. Its devices need their own cell.">Site-Wide</span>
+                               : g.cell_id
+                                 ? (cells.find(c => c.cell_id === g.cell_id)?.cell_name || <span className="mono">{g.cell_id}</span>)
+                                 : <span style={{ fontSize: '11px', color: 'var(--warning-text)', fontStyle: 'italic' }} title="Devices on this gateway inherit no cell, so they land in the Unassigned queue">No cell</span>}
                          </td>
                          <td>
                            {g.is_archived ? (
@@ -548,50 +574,6 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 Optional, and read by nothing — a note for whoever comes to this next.
               </div>
             </div>
-            <div className="form-group">
-              <label className="form-label">Shopfloor Cell Zone</label>
-              <select
-                className="form-control"
-                value={form.location_scope === SCOPE_SITE_WIDE ? '' : (form.cell_id || '')}
-                disabled={form.location_scope === SCOPE_SITE_WIDE}
-                onChange={e => setForm(f => ({ ...f, cell_id: e.target.value }))}
-                title="Cell this gateway serves — its devices inherit this cell unless they carry one of their own"
-              >
-                <option value="">— No cell assigned —</option>
-                {cells.filter(c => !c.is_archived).map(c => (
-                  <option key={c.cell_id} value={c.cell_id}>{c.cell_name}</option>
-                ))}
-              </select>
-
-              {/* Site-Wide is what a host-run or central connector actually is: it serves the
-                  facility, not a bay. Ticking it clears the cell, mirroring
-                  gateways_site_wide_has_no_cell -- "it is in no particular cell" and "it is in
-                  Bay 4" cannot both be true. */}
-              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px', fontSize: '12px', cursor: 'pointer' }}
-                     title="For a host-run or central gateway that serves the whole facility rather than one cell">
-                <input
-                  type="checkbox"
-                  checked={form.location_scope === SCOPE_SITE_WIDE}
-                  onChange={e => setForm(f => ({
-                    ...f,
-                    location_scope: e.target.checked ? SCOPE_SITE_WIDE : SCOPE_CELL,
-                    cell_id: e.target.checked ? '' : f.cell_id
-                  }))}
-                />
-                <span>Site-Wide — this gateway serves no single cell</span>
-              </label>
-
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
-                {form.location_scope === SCOPE_SITE_WIDE
-                  ? 'Its devices inherit nothing from it, so each one needs its own cell — or its own Site-Wide mark. Scope is not inherited: a machine reached through a host-run connector is still in a cell.'
-                  : form.cell_id
-                    ? 'Devices served by this gateway appear under this cell, unless a device carries a cell of its own.'
-                    : 'With no cell here, devices served by this gateway land in the Unassigned queue unless each is given one. If this connector serves the whole facility, mark it Site-Wide instead.'}
-              </div>
-            </div>
-            {/* .form-group-check rather than an inline 12px/12px pair: this was the one field in
-                the app on its own vertical rhythm, which read as a gap where a field had been
-                deleted rather than as a deliberately tighter row. */}
             {/* ONE CONTROL, NOT TWO CHECKBOXES, AND THE SCHEMA STILL HOLDS TWO FACTS.
 
                 It was "Runs on this host" plus "Telemetry is simulated or replayed", which offered
@@ -602,14 +584,29 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
 
                 This is a rendering of the constraint rather than a collapse of the model -- see
                 utils/gatewayType.js. If a remote simulator is ever wanted, the CHECK relaxes in one
-                line and a fourth option appears here with no data migration behind it. */}
+                line and a fourth option appears here with no data migration behind it.
+
+                IT COMES BEFORE THE CELL ZONE BECAUSE IT GOVERNS IT. Choosing Simulated makes the
+                field below unavailable, and a control that disables the one above it makes an
+                operator re-read a decision they had already taken. */}
             <div className="form-group">
               <label className="form-label" htmlFor="gateway-type">Type</label>
               <select
                 id="gateway-type"
                 className="form-control"
                 value={formType}
-                onChange={e => setForm(f => ({ ...f, ...gatewayTypeFields(e.target.value) }))}
+                onChange={e => setForm(f => ({
+                  ...f,
+                  ...gatewayTypeFields(e.target.value),
+                  // CLEARED HERE, NOT LEFT FOR THE SAVE TO DISCOVER.
+                  // `gateways_synthetic_has_no_cell` (0059) refuses a simulated gateway that holds
+                  // a cell, so carrying a stale cell_id through this change turns the Save button
+                  // into a constraint violation -- with the offending field disabled and the
+                  // operator unable to see, let alone clear, the value being rejected.
+                  ...(e.target.value === GATEWAY_TYPES.SIMULATED
+                    ? { cell_id: '', location_scope: SCOPE_CELL }
+                    : {})
+                }))}
                 title="Where this gateway's connector runs, and whether its readings are real"
               >
                 {SELECTABLE_TYPES.map(t => (
@@ -628,6 +625,59 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               {gatewayTypeDescription(formType)}
               {!editing && formType === GATEWAY_TYPES.REMOTE
                 && ' On save you will be given a bundle to copy to that machine; it enrols itself and appears here as online.'}
+            </div>
+            {/* SITE-WIDE IS AN OPTION IN THIS LIST, NOT A CHECKBOX BESIDE IT.
+
+                The two controls answered ONE question -- where does this gateway sit -- and the
+                answers are mutually exclusive by CHECK (`gateways_site_wide_has_no_cell`): "it is
+                in no particular cell" and "it is in Bay 4" cannot both be true. Splitting one
+                question across a select and a tick box made the exclusion something the form had
+                to enforce by clearing the other control, and made Site-Wide look like a modifier
+                on a cell choice rather than an alternative to it.
+
+                Its option value is SCOPE_SITE_WIDE, which cannot collide with a cell id: those are
+                UUIDs. */}
+            <div className="form-group">
+              <label className="form-label" htmlFor="gateway-cell-zone">Shopfloor Cell Zone</label>
+              <select
+                id="gateway-cell-zone"
+                className="form-control"
+                // READS AS "NO CELL" FOR A SYNTHETIC GATEWAY WHATEVER IS STORED, which is the
+                // reported bug in its other half: the seeded BMS simulator carries
+                // `location_scope = 'site_wide'` from before 0059 made the flag win, so a disabled
+                // box would have shown "Site-Wide" directly above a note saying simulated gateways
+                // have no cell. The stored value is inert -- device_locations resolves `simulated`
+                // ahead of it -- and this is a display fallback, not a write: nothing is cleared
+                // here, only on the type change that would make the row unsavable.
+                value={!formAcceptsCell
+                  ? ''
+                  : form.location_scope === SCOPE_SITE_WIDE ? SCOPE_SITE_WIDE : (form.cell_id || '')}
+                disabled={!formAcceptsCell}
+                onChange={e => setForm(f => (e.target.value === SCOPE_SITE_WIDE
+                  ? { ...f, location_scope: SCOPE_SITE_WIDE, cell_id: '' }
+                  : { ...f, location_scope: SCOPE_CELL, cell_id: e.target.value }))}
+                title={formAcceptsCell
+                  ? 'Cell this gateway serves — its devices inherit this cell unless they carry one of their own'
+                  : 'A simulated gateway belongs to the Simulated lane, which resolves ahead of any cell'}
+              >
+                <option value="">— No cell assigned —</option>
+                <option value={SCOPE_SITE_WIDE}>Site-Wide — serves no single cell</option>
+                {cells.filter(c => !c.is_archived).map(c => (
+                  <option key={c.cell_id} value={c.cell_id}>{c.cell_name}</option>
+                ))}
+              </select>
+
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                {!formAcceptsCell
+                  /* Says which lane it lands in instead, so the disabled control reads as an
+                     answer already given rather than as a field that failed to load. */
+                  ? 'Simulated gateways have no cell: their devices resolve to the Simulated lane, which takes precedence over cell membership. gateways_synthetic_has_no_cell (0059) refuses the pairing outright.'
+                  : form.location_scope === SCOPE_SITE_WIDE
+                    ? 'Its devices inherit nothing from it, so each one needs its own cell — or its own Site-Wide mark. Scope is not inherited: a machine reached through a host-run connector is still in a cell.'
+                    : form.cell_id
+                      ? 'Devices served by this gateway appear under this cell, unless a device carries a cell of its own.'
+                      : null}
+              </div>
             </div>
             <div className="form-group">
               <label className="form-label">Gateway Access URL (Optional UI Console)</label>
@@ -698,23 +748,29 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             // A LINK when there is a cell to open. Site-Wide is deliberately left as plain text --
             // it is the assertion that this gateway belongs to no cell, so a chip styled like the
             // others but leading nowhere would promise an affordance that cannot exist.
-            value: selected.location_scope === SCOPE_SITE_WIDE
-              ? 'Site-Wide'
-              : selectedCell
-                ? (
-                    <button
-                      className="chip chip-link"
-                      onClick={() => onSelectCell?.(selectedCell.cell_id)}
-                      title="Open this cell on the Cells page"
-                    >
-                      <IconMap size={11} />
-                      <span className="chip-name">{selectedCell.cell_name}</span>
-                    </button>
-                  )
-                : (selected.cell_id || null),
-            title: selected.location_scope === SCOPE_SITE_WIDE
-              ? 'A host-run or central connector serving the whole facility. Its devices inherit no cell from it.'
-              : 'Devices served by this gateway resolve to this cell unless they carry one of their own.'
+            // Same three-way as the column, for the same reason: on a synthetic gateway the stored
+            // scope is inert, so printing it here would contradict the row it was opened from.
+            value: !gatewayAcceptsCell(selected)
+              ? `${gatewayTypeLabel(gatewayType(selected))} — no cell`
+              : selected.location_scope === SCOPE_SITE_WIDE
+                ? 'Site-Wide'
+                : selectedCell
+                  ? (
+                      <button
+                        className="chip chip-link"
+                        onClick={() => onSelectCell?.(selectedCell.cell_id)}
+                        title="Open this cell on the Cells page"
+                      >
+                        <IconMap size={11} />
+                        <span className="chip-name">{selectedCell.cell_name}</span>
+                      </button>
+                    )
+                  : (selected.cell_id || null),
+            title: !gatewayAcceptsCell(selected)
+              ? `Its devices resolve to the ${gatewayTypeLabel(gatewayType(selected))} lane, which takes precedence over cell membership. gateways_synthetic_has_no_cell (0059) refuses the pairing.`
+              : selected.location_scope === SCOPE_SITE_WIDE
+                ? 'A host-run or central connector serving the whole facility. Its devices inherit no cell from it.'
+                : 'Devices served by this gateway resolve to this cell unless they carry one of their own.'
           },
           { label: 'Last Heartbeat', value: formatHeartbeat(selected.last_heartbeat), title: 'Age of the last NBIRTH/NDATA/NDEATH. STALE after 90 seconds of silence.' },
           /**

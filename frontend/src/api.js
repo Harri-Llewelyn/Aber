@@ -1508,7 +1508,12 @@ const apiMethods = {
       const [{ data, error }, locations] = await Promise.all([
         supabase
           .from('devices')
-          .select('*, gateways(id, name, cell_id, location_scope, status, is_archived)')
+          // `is_simulated` and `is_shadow` are selected for the FALLBACK path, not for the happy
+          // one: device_locations already resolves the lanes server-side, but when that read fails
+          // resolveDeviceLocation() re-derives locally, and without these two every simulated
+          // device would degrade to Unassigned -- the exact misreport this embed exists to avoid
+          // for cell_id.
+          .select('*, gateways(id, name, cell_id, location_scope, is_simulated, is_shadow, status, is_archived)')
           .order('created_at', { ascending: false }),
         loadDeviceLocations()
       ]);
@@ -1641,7 +1646,7 @@ const apiMethods = {
       // is what the approval modal has to show to be worth showing at all.
       const { data, error } = await supabase
         .from('devices')
-        .select('*, gateways(id, name, cell_id, location_scope)')
+        .select('*, gateways(id, name, cell_id, location_scope, is_simulated, is_shadow)')
         .eq('is_quarantined', true);
       if (error) throw error;
 

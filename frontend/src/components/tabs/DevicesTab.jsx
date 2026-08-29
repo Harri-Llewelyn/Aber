@@ -35,8 +35,9 @@ import {
   deviceStatusTitle
 } from '../../utils/deviceStatus'
 import {
-  SCOPE_CELL, SCOPE_SITE_WIDE, SOURCE_EXPLICIT, SOURCE_SITE_WIDE,
-  resolveDeviceLocation, needsCellAssignment, unassignedHint
+  SCOPE_CELL, SCOPE_SITE_WIDE, SOURCE_EXPLICIT, SOURCE_SITE_WIDE, NON_CELL_SOURCES,
+  resolveDeviceLocation, needsCellAssignment, unassignedHint,
+  locationSourceLabel, gatewayAcceptsCell, noCellReason
 } from '../../utils/cellResolution'
 import {
   unmodelledMetrics, schemasForDevice, deviceTagList, deviceHasTag, availableTags, UNMODELLED_TAG
@@ -1019,8 +1020,29 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                             const gw = gatewayById.get(a.active_gateway_id) || null
                             const cellName = cellById.get(a.effective_cell_id)?.cell_name
 
-                            if (a.location_source === SOURCE_SITE_WIDE) {
-                              return <span className="badge badge-neutral" style={{ fontSize: '11px' }} title="Asserted to have no single cell — facility-wide or mobile">Site-Wide</span>
+                            // EVERY LANE THAT RESOLVES TO NO CELL, not just Site-Wide.
+                            //
+                            // This tested one source by hand and let the rest fall through to
+                            // `!cellName`, which is how a fleet of simulated devices came to be
+                            // reported as Unassigned: `device_locations` had answered `simulated`
+                            // for all of them, and simulated resolves to a null cell exactly as
+                            // Site-Wide does. The warning triangle then promised a queue to drain
+                            // that could never drain -- unassignedHint() has no advice for a
+                            // synthetic asset, because there is none to give.
+                            //
+                            // NON_CELL_SOURCES is the set cellResolution.js keeps for precisely
+                            // this: its own comment warns that every consumer counting "devices
+                            // with no cell" had grown a hand-written list, and this was the last
+                            // one still carrying it.
+                            if (NON_CELL_SOURCES.has(a.location_source)) {
+                              return (
+                                <span className="badge badge-neutral" style={{ fontSize: '11px' }}
+                                      title={a.location_source === SOURCE_SITE_WIDE
+                                        ? 'Asserted to have no single cell — facility-wide or mobile'
+                                        : noCellReason(gw) || 'Resolves to a lane rather than to a cell'}>
+                                  {locationSourceLabel(a.location_source)}
+                                </span>
+                              )
                             }
                             if (!cellName) {
                               return (
@@ -1123,22 +1145,38 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
               const nameOf = (id) => cells.find(c => c.cell_id === id)?.cell_name
               const inheritedName = nameOf(location.gateway_cell_id)
               const chosenCell = cells.find(c => c.cell_id === form.cell_id)
+              // Whether a cell means anything for this device at all, decided by its GATEWAY. See
+              // gatewayAcceptsCell(): there is no CHECK on the device side, so a cell stored here
+              // would be accepted and then ignored -- device_locations resolves the synthetic lanes
+              // ahead of every cell arm.
+              const acceptsCell = gatewayAcceptsCell(formGateway)
 
               return (
                 <div className="form-group">
-                  <label className="form-label">Shopfloor Cell Zone</label>
+                  <label className="form-label" htmlFor="device-cell-zone">Shopfloor Cell Zone</label>
+                  {/* SITE-WIDE IS AN OPTION HERE, NOT A CHECKBOX BELOW.
+                      One question, one control -- and `devices_site_wide_has_no_cell` makes the
+                      answers exclusive in the database, so a tick box that had to reach over and
+                      clear the select was modelling that exclusion twice. Its option value is
+                      SCOPE_SITE_WIDE, which cannot collide with a cell id: those are UUIDs. */}
                   <select
+                    id="device-cell-zone"
                     className="form-control"
-                    value={siteWide ? '' : (form.cell_id || '')}
-                    disabled={siteWide}
-                    onChange={e => setForm(f => ({ ...f, cell_id: e.target.value }))}
-                    title="Where this device physically sits. Leave on Inherit to follow its gateway."
+                    value={siteWide ? SCOPE_SITE_WIDE : (form.cell_id || '')}
+                    disabled={!acceptsCell}
+                    onChange={e => setForm(f => (e.target.value === SCOPE_SITE_WIDE
+                      ? { ...f, location_scope: SCOPE_SITE_WIDE, cell_id: '' }
+                      : { ...f, location_scope: SCOPE_CELL, cell_id: e.target.value }))}
+                    title={acceptsCell
+                      ? 'Where this device physically sits. Leave on Inherit to follow its gateway.'
+                      : 'Its gateway generates or replays this telemetry, so the device resolves to a lane rather than to a cell'}
                   >
                     {/* Named after what it resolves to, not "None" -- the empty value is a
                         deliberate "follow the gateway", not an absence. */}
                     <option value="">
                       {inheritedName ? `— Inherit from gateway (${inheritedName}) —` : '— Inherit from gateway (gateway has no cell) —'}
                     </option>
+                    <option value={SCOPE_SITE_WIDE}>Site-Wide — no single cell</option>
                     {cells.filter(c => !c.is_archived).map(c => (
                       <option key={c.cell_id} value={c.cell_id}>{c.cell_name}</option>
                     ))}
@@ -1149,30 +1187,21 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                     )}
                   </select>
 
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '8px', fontSize: '12px', cursor: 'pointer' }}
-                         title="For assets with no single cell — a BMS, an AGV, an ambient sensor. Different from leaving it unassigned.">
-                    <input
-                      type="checkbox"
-                      checked={siteWide}
-                      onChange={e => setForm(f => ({
-                        ...f,
-                        location_scope: e.target.checked ? SCOPE_SITE_WIDE : SCOPE_CELL,
-                        // Cleared together, mirroring devices_site_wide_has_no_cell: "it is in no
-                        // particular cell" and "it is in Bay 4" cannot both be true.
-                        cell_id: e.target.checked ? '' : f.cell_id
-                      }))}
-                    />
-                    <span>Site-Wide — this asset has no single cell</span>
-                  </label>
-
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
-                    {siteWide
-                      ? 'Reported as Site-Wide rather than under any cell. Use this for facility-wide or mobile assets.'
-                      : location.location_source === SOURCE_EXPLICIT
-                        ? `Set on this device — it stays in ${nameOf(location.effective_cell_id) || 'this cell'} even if its gateway moves.`
-                        : inheritedName
-                          ? `Follows the gateway above. Reassigning the gateway moves this device with it.`
-                          : 'Neither this device nor its gateway has a cell, so it will appear in the Unassigned queue. Pick a cell here, set one on the gateway, or mark it Site-Wide.'}
+                    {!acceptsCell
+                      /* DELIBERATELY DOES NOT CLEAR `cell_id`. Unlike the gateway form, nothing
+                         here would be refused on save -- so a stored cell is kept and simply not
+                         in force, and it comes back into force by itself if the gateway stops
+                         being synthetic. Clearing it would destroy an operator's filing to enforce
+                         a rule the database does not have. */
+                      ? `${noCellReason(formGateway)} Any cell already set on it is kept, and applies again if that changes.`
+                      : siteWide
+                        ? 'Reported as Site-Wide rather than under any cell. Use this for facility-wide or mobile assets.'
+                        : location.location_source === SOURCE_EXPLICIT
+                          ? `Set on this device — it stays in ${nameOf(location.effective_cell_id) || 'this cell'} even if its gateway moves.`
+                          : inheritedName
+                            ? `Follows the gateway above. Reassigning the gateway moves this device with it.`
+                            : 'Neither this device nor its gateway has a cell, so it will appear in the Unassigned queue. Pick a cell here, set one on the gateway, or mark it Site-Wide.'}
                   </div>
 
                   {location.cell_mismatch && (

@@ -1880,15 +1880,35 @@ tbody tr:hover { background: var(--bg-glass); }
   align-items: start;
 }
 
-/* THE DERIVED LANES ARE THE FIRST TWO TILES.
-   Site-Wide and Unassigned are not cells -- one is a permanent home for facility-scoped assets,
-   the other a queue that should drain -- and they used to sit in their own full-width stack above
-   the grid so they could not reflow between the bays as cells were added.
+/* The lanes' row. `auto-fit` rather than the cell grid's `auto-fill` so the three always share the
+   full width evenly instead of leaving empty tracks beside them -- the count is fixed at three,
+   which is exactly the case the two functions differ on. */
+.shopfloor-lanes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 12px;
+}
 
-   Inside the grid they are PINNED by `order`, which is what keeps that guarantee: they hold
-   positions 1 and 2 whatever the cell list does, so the queue is always in the same corner. What
-   the separate stack bought beyond that was mostly height, and at this tile size it is cheaper to
-   mark them than to segregate them.
+/* THE DERIVED LANES GET A ROW OF THEIR OWN, ABOVE THE CELLS.
+   Site-Wide, Simulated and Unassigned are not cells -- a permanent home for facility-scoped
+   assets, a lane for telemetry that was generated rather than observed, and a queue that should
+   drain. None has a row in `cells`.
+
+   They were pinned to the front of the single cell grid by `order`, which held their POSITION but
+   not their SEPARATION: at most widths they shared a row with the first bays, so the map read as
+   one run of tiles of which three happened to be coloured differently, and the boundary was
+   visible only to a reader who already knew where it was.
+
+   A grid of their own draws it structurally. `auto-fit` with the same 280px minimum as the cell
+   grid keeps the tiles identical in size and lets the three collapse to two rows on a narrow
+   viewport rather than overflowing -- they are the same kind of object, just not in the plant.
+
+   THIS REVERSES THE MERGE INTO ONE GRID, and what changed is the count: the merge traded a section
+   of its own for height when there were two lanes, and three fill a row on their own, so there is
+   no longer any height to buy. `order` is gone with it -- position in a grid of exactly the lanes
+   is the DOM order of the LANES array, which is where that decision is already written down.
 
    EACH LANE GETS ITS OWN HUE, not one shared "derived" treatment. They are not two of a kind: one
    is a permanent home and the other is a queue that should drain, and colouring them alike made
@@ -1921,7 +1941,6 @@ tbody tr:hover { background: var(--bg-glass); }
    Compounding takes these to 0-2-0, which wins on specificity and therefore no longer depends on
    where in the file anyone happens to move them. Do not "simplify" these back to one class. */
 .shopfloor-zone.shopfloor-lane {
-  order: -1;
   border-style: solid;
   border-width: 1px;
   border-top-width: 4px;
@@ -1932,9 +1951,8 @@ tbody tr:hover { background: var(--bg-glass); }
   background: rgba(0, 212, 255, 0.05);
 }
 
-/* Simulated sits between the two and needs no `order` of its own: it inherits -1 from
-   .shopfloor-lane, ties with Site-Wide, and a tie falls back to DOM order -- which is the LANES
-   array, where it is declared second. Adding an explicit -1 here would say the same thing twice.
+/* Simulated sits between the two, by its position in the LANES array and nothing else now that the
+   lanes have a grid to themselves.
 
    DELIBERATELY GREY RATHER THAN A FIFTH HUE. --accent and --warning are carrying "infrastructure"
    and "act on this"; a third colour beside them would read as a third kind of urgency. Synthetic
@@ -1952,9 +1970,8 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 /* The queue comes last: infrastructure first, then context about what is not real, then the thing
-   to act on, sitting immediately before the cells its contents are waiting to be filed into. */
+   to act on, sitting immediately above the cells its contents are waiting to be filed into. */
 .shopfloor-zone.shopfloor-lane-queue {
-  order: 0;
   border-color: var(--warning);
   background: rgba(255, 179, 0, 0.06);
 }
