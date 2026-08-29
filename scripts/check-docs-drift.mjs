@@ -227,9 +227,17 @@ const MARKDOWN = allFiles.filter((f) => f.endsWith('.md'));
 // exists -- it never runs on a branch, so nothing about ordinary development reveals it, and what
 // it does (publishing images and a chart under a version derived from a tag) is exactly the kind of
 // thing someone needs to know about BEFORE they push a tag.
+//
+// README + docs/testing.md, for the reason check 6 reads two documents: README's Testing section is
+// now four lines and a pointer -- "every suite, what each one needs, the five CI jobs and the
+// release workflow are in docs/testing.md" -- and the jobs are named there, in a table, correctly.
+// Reading only README reported nine jobs as undocumented while their documentation sat one
+// directory down, and the repair for that would have been to copy job names back onto the front
+// page to satisfy a checker. NAMED, never globbed: the point is that a reader following the
+// pointer arrives somewhere that lists them.
 // -------------------------------------------------------------------------------------------------
 {
-  const readme = read('README.md');
+  const readme = ['README.md', 'docs/testing.md'].map(read).join('\n');
   const WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8 };
   let allJobs = 0;
   let anyMissing = false;
@@ -243,7 +251,7 @@ const MARKDOWN = allFiles.filter((f) => f.endsWith('.md'));
     const jobs = [...jobsBlock.matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)].map((m) => m[1]);
     const missing = jobs.filter((j) => !readme.includes(j));
     if (missing.length) {
-      fail(`README.md does not mention ${wf} job(s): ${missing.join(', ')}`);
+      fail(`README.md and docs/testing.md do not mention ${wf} job(s): ${missing.join(', ')}`);
       anyMissing = true;
     }
     allJobs += jobs.length;
@@ -255,23 +263,28 @@ const MARKDOWN = allFiles.filter((f) => f.endsWith('.md'));
   const claimed = readme.match(/runs (\w+) jobs/);
   if (claimed) {
     const n = WORDS[claimed[1].toLowerCase()] ?? Number(claimed[1]);
-    if (n !== ciJobs) fail(`README.md claims "${claimed[1]} jobs"; ci.yml defines ${ciJobs}`);
+    if (n !== ciJobs) fail(`the docs claim "${claimed[1]}" CI jobs; ci.yml defines ${ciJobs}`);
   }
-  if (!anyMissing) pass(`README names all ${allJobs} workflow jobs`);
+  if (!anyMissing) pass(`the docs name all ${allJobs} workflow jobs`);
 }
 
 // -------------------------------------------------------------------------------------------------
-// 4. Every Python test suite is listed in README's Testing section.
+// 4. Every Python test suite is listed where the Testing documentation says it lists them.
 //
 // Found stale: test_health_heartbeat.py and test_nodered_userinfo.py were both absent. A suite nobody
 // knows to run is a suite that stops being run.
+//
+// SAME TWO-DOCUMENT CORPUS AS CHECK 3, and for the same reason. The suite list moved to
+// docs/testing.md and README kept a pointer to it, at which point this check reported 36 suites as
+// undocumented -- every one of them listed, with what it needs, in the document README sends the
+// reader to. A check that fails against correct documentation is a check people learn to skip.
 // -------------------------------------------------------------------------------------------------
 {
   const suites = allFiles.filter((f) => /(^|\/)test_[a-z0-9_]+\.py$/.test(f));
-  const readme = read('README.md');
-  const missing = suites.filter((s) => !readme.includes(s));
-  if (missing.length) fail(`README.md Testing section omits: ${missing.join(', ')}`);
-  else pass(`README lists all ${suites.length} Python test suites`);
+  const corpus = ['README.md', 'docs/testing.md'].map(read).join('\n');
+  const missing = suites.filter((s) => !corpus.includes(s));
+  if (missing.length) fail(`no testing document lists suite(s): ${missing.join(', ')}`);
+  else pass(`all ${suites.length} Python test suites are listed in the testing documentation`);
 }
 
 /**
@@ -922,7 +935,7 @@ function edgeFunctionNames() {
     // 9 is NOT here. The AAS item was retired long before this practice and the list was
     // renumbered around it at the time, so 9 is a live entry today -- it was reused legitimately,
     // under the old convention, and listing it would fail the check against a correct README.
-    const RETIRED = [6, 7, 11, 13, 16, 18];
+    const RETIRED = [6, 7, 11, 13, 16, 17, 18];
     const reused = items.filter((n) => RETIRED.includes(n));
     if (reused.length) {
       fail(

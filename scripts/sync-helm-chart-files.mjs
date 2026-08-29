@@ -56,12 +56,13 @@ const MIRRORS = [
     // service and the Helm Job that run these. A file that mirrored automatically but was never
     // invoked would sit in the ConfigMap looking applied.
     match: (name) =>
+      name === 'extension.sql' ||
       name === 'retention.sql' ||
       name === 'aggregates.sql' ||
       name === 'storage.sql' ||
       name === 'roles.sql',
-    why: 'Telemetry lifecycle: compression/retention policies, the rollup views, the storage '
-       + 'footprint view and the read-only BI roles, reconciled on every boot',
+    why: 'Telemetry lifecycle: the extension update, compression/retention policies, the rollup '
+       + 'views, the storage footprint view and the read-only BI roles, reconciled on every boot',
   },
   // THE MIGRATIONS ARE NOT MIRRORED. They are baked into the db-init image by
   // supabase/db-init/Dockerfile and read from its filesystem, so the chart carries none of them.

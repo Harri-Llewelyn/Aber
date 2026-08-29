@@ -334,17 +334,20 @@ the readings are real. A physical appliance replaying a capture is `is_virtual =
 
 `capture.py` writes a file, and the file is enough — the three things above all work with one on
 disk. To share a capture, or to keep the only copy of a fault off somebody's laptop, there is the
-**`broker-captures`** bucket and a panel on the gateway's detail drawer in **Gateways**.
+**`broker-captures`** bucket and the **Capture** page.
 
-**The prefix is the gateway a capture plays back AS, not the one it was recorded from**, and those
-are different by construction: playback rewrites captured identities onto one gateway's own assets,
-so the target is the only thing about a capture that is a fact rather than a guess. RLS enforces the
-prefix, exactly as it does for `gateway-backups`.
+**Filed by the subject recorded, not by the gateway a capture plays back as.** The path is
+`<sparkplug_id>/capture.json` — one capture per subject, and a new recording replaces it — so a
+`gwy…` prefix and a `dev…` prefix are both legitimate folders and the storage RLS admits each. The
+CLI files by target because that is the only fact available when a person uploads a file by hand; a
+page that records from a subject knows the subject, which is what makes the **Gateways** and
+**Devices** tabs coherent. Playback still names its own target, which is a separate question.
 
-**Uploading is a browser act, not a CLI one, and that is a consequence rather than a preference.**
-Storage authorises through a *user session*; `capture.py` runs on a host with `.env` and no session.
-Giving the CLI upload rights would mean handing it the service-role key, which `0046` exists to stop.
-So the recorder writes a file and a person files it — `record` → drop it on the panel.
+**There is no capture panel on the gateway detail drawer any more**, and its removal was required
+rather than tidier. It listed the bucket directly — objects with a name, a size and a timestamp —
+and against one capture per subject at a deterministic path it could only ever show a single row
+called `capture.json`, with the note, the message count and the manifest all in a table it did not
+read. It also only ever covered gateways, and a device is now a subject in its own right.
 
 | | read | upload / delete |
 | :--- | :--- | :--- |
@@ -358,22 +361,242 @@ accept several JSON-ish MIME types because browsers report a hand-picked `.json`
 the type is close to no check at all, and a wrong file is otherwise discovered when somebody tries to
 *play* it: the worst moment, and the furthest from the mistake.
 
-**25 MiB**, sized from the traffic rather than picked. At the fleet's measured 0.95 msg/s a full
-working day fits; what it refuses is a capture taken at the ingestion ceiling, which is a load-test
-artefact rather than something anybody keeps.
+**100 MiB**, sized from the traffic rather than picked. At the fleet's measured 0.95 msg/s a full
+working day fits, and it sits above the 50 MiB cap `capture_jobs` puts on a recording — which is the
+constraint that matters, because a capture that terminated successfully and then failed to upload
+would be a recording lost at the last step.
 
 **A capture names devices that are not the gateway it is filed under**, because it records whatever
 was on the wire. That is not a leak across the prefix rule — every role that can read the bucket can
 already enumerate the fleet through the directory — but it is why nobody below them can read it.
+
+### Recording from the dashboard
+
+`capture.py record` opens an MQTT subscription; a browser cannot. Mosquitto listens on **1883 TCP**
+with no WebSocket listener, and the recording principal's password is a server-side secret a bundle
+would publish. So the **Capture** page is a page in front of new behaviour in the ingestion daemon,
+and [`capture_worker.py`](capture_worker.py) is that behaviour:
+[`0055`](../supabase/migrations/0055_capture_orchestration.sql) holds the tables and every gate.
+
+**The daemon is the host, and there is no second principal.** It already holds `spBv1.0/#` and the
+credential, so a capture costs no new broker connection — `observe()` appends to a buffer when a job
+is active and the topic matches. A separate capture service would need its own broker account *and*
+would split the `seq` stream, since `_last_seq` is keyed `(group, edge_node)`, making the daemon's
+own gap detection fire permanently. That is roadmap item 1's `$share` finding arriving from the
+other direction.
+
+**Two tables, because a job and an artefact are different things.** `capture_jobs` records an act
+that happened once; `captures` holds the artefact — subject, storage path, size, note and manifest —
+and `playback_jobs.capture_id` references it. A capture uploaded through the browser never had a
+job, so pointing playback at `capture_jobs` would mean two ways to name a capture, handled in four
+places and wrongly in one.
+
+**Three caps, auto-terminating on the first met, and they agree with the bucket.**
+
+| cap | value | why |
+| :--- | :--- | :--- |
+| duration | 2 hours | |
+| messages | 100,000 | ≈29 h at the fleet's 0.95 msg/s; ≈7 min at the measured 240 msg/s ceiling |
+| size | 50 MiB | the smallest cap that lets the message cap bind first, under a 100 MiB bucket |
+
+The buffer is held in the daemon's memory and the chart declares no memory limit for `ingestion`, so
+an oversized cap is not refused — it is bounded by node pressure, and the process is killed taking
+ingestion for the whole fleet with it. That is the argument for the smaller number, ahead of the
+storage one.
+
+**A capture opens by asking its edge node to rebirth**, because birth certificates cannot be
+queried: `asset_config` holds birth *parameters* and `devices.last_birth_metrics` holds metric
+*names*, and neither reconstructs a Sparkplug payload. The birth then arrives on the wire and is
+recorded as ordinary traffic. `request_node_rebirth()` takes a `force` flag for this and capture is
+its only caller — the throttle exists to stop a flood driven by traffic, and a capture is one person
+pressing one button under a single-flight lock. The throttle is still stamped, so a forced request
+does not leave the node open to being asked again by the next message that notices a gap.
+
+**`birth_captured` means the node's birth, not a device's.** An `NBIRTH` carries the alias table,
+which is what makes a capture replayable; announcing a *device* takes a `DBIRTH`, and only
+`process_dbirth()` sets a device `ONLINE`. So a capture holding an NBIRTH alone brings the target
+edge node up and delivers its telemetry to the historian, and leaves the devices `OFFLINE` until
+they birth on their own — all correct, and not what the single flag suggests.
+
+**A missing birth only costs anything on an alias-optimised fleet**, which is why the manifest also
+records `uses_aliases` — true only when some metric arrived with an alias and no name. A birthless
+capture of a named-metric fleet, this one included, replays perfectly well; what it does not do is
+announce the devices.
+
+**The manifest exists so the page can describe a file it has not downloaded**: the metric names seen
+(capped at 50 with the true count beside them, the way `record_ingestion_rejection()` caps
+violations), `birth_captured`, `uses_aliases`, the topic count, the observed rate, and the captured
+`device_ids` and `edge_node_ids` — those last two so the playback dialog can offer one dropdown per
+captured device without pulling up to 100 MiB into a browser to populate a select. A capture
+recorded before them falls back to reading the file, which is slower and correct. The browser fills
+a manifest for uploads on the pass that already validates the file, so an uploaded capture does not
+read as broken beside a recorded one.
+
+**Single-flight, in the database**: a partial unique index on `status = 'RECORDING'` allows one
+capture at a time across the whole stack, where two browser tabs cannot race it. Widening the index
+to the subject would permit one per subject and turn the page's running card into a list; that is a
+deliberate change rather than a default.
+
+**Progress rides Supabase Realtime, and stopping is a column.** The daemon serves exactly one HTTP
+endpoint — Prometheus `/metrics` — and `/api/v1/…` is a client-side convention inside
+`frontend/src/api.js` that maps onto PostgREST, so a `POST …/stop` would need a server invented to
+host it. Instead the daemon `UPDATE`s `capture_jobs` with bytes, messages and elapsed, `capture_jobs`
+is added to the `supabase_realtime` publication explicitly, and the page sets `stop_requested` for
+the daemon to observe on its next message. A flag also survives a page reload, which a fired-off
+POST would not.
+
+**`capture_jobs` deliberately has no digital-thread trigger.** That trigger is opt-in per table, and
+adding it here would look like consistency while writing a row per progress tick into an append-only
+table no application role can prune.
+
+**Anything left `RECORDING` when the daemon boots becomes `FAILED`.** Without that, a restart
+mid-capture leaves a row counting down forever and a card that never clears.
+
+**The daemon's authority over the bucket is a policy arm, scoped rather than narrowed.** A capture's
+bytes travel over the Storage REST API, so no `SECURITY DEFINER` function can carry them into a
+bucket; and write-only is not achievable either, because replacing a capture is an upsert, storage-api
+serves that as `INSERT … ON CONFLICT DO UPDATE`, and Postgres checks the SELECT policy for the row
+being conflicted with. The arm is `is_ingestion_caller() AND is_active_capture_object(name)` — the
+daemon can read, insert and overwrite exactly the one path named by the job it is running, reaches
+nothing at all in the bucket with no capture in flight, and never deletes. Nothing is destroyed until
+its replacement has been written.
+
+**The note is a field because of where it is shown.** An optional label given when a capture starts
+— *"pre-trip bearing vibration baseline"* — appears on the list and, critically, inside the replace
+confirmation, which names what it destroys rather than asking "are you sure". Replace-in-place bounds
+storage and the cost is real: a capture of a rare fault can be destroyed by a routine re-record, and
+that modal is the only thing standing there.
+
+### Playback from the dashboard
+
+[`playback_worker.py`](playback_worker.py) is a **separate process**, with
+[`0056`](../supabase/migrations/0056_playback_orchestration.sql) behind it. It runs from the
+ingestion image under a different command: what playback needs that is new is a separate process
+holding a separate Supabase principal and its own broker credentials, none of which an image
+boundary provides, and it publishes through `capture.py`'s `plan_playback()`, which is already in
+that image.
+
+**Not the ingestion daemon, because that account is the one the ACL is built around.** It holds
+`read spBv1.0/#` and `write spBv1.0/+/NCMD/+` — rebirth requests and nothing else — and teaching it
+to publish asset data would widen it, while `verify_gateway_binding()` cannot tell a forged message
+under a correctly bound device from a real one. The `seq` objection that kept *capture* inside the
+daemon does not apply in reverse: a playback worker only publishes, holds no subscription, and takes
+nothing away from the daemon's view of the stream.
+
+**Two identities, which is the arrangement to understand first.** `Service_Playback` is a Supabase
+principal — it reads the queue, reads the capture, writes status. The MQTT identity is **the target
+gateway's own**, its `sparkplug_id` as username, supplied as a secret the way `MQTT_VALIDATOR_USER`
+is. One says what the worker may do in the database, the other what the broker will carry.
+
+| tier | what it stops |
+| :--- | :--- |
+| the job gate | `playback_jobs` refuses a target that is not `is_simulated`, in the database rather than the UI |
+| credential possession | the worker holds credentials only for gateways issued as playback targets, so it cannot authenticate as a real one |
+| the broker ACL | `pattern readwrite spBv1.0/+/+/%u/#` confines each credential to its own edge node, so even a compromised worker reaches one gateway |
+
+**The ACL cannot say "simulated gateways", and does not need to.** `mosquitto.acl` is a static file
+with `%u` substitution and MQTT wildcards; `is_simulated` is a database predicate, and no ACL rule
+can consult Postgres. Per-gateway confinement delivers the guarantee anyway — a worker connected as
+`gwyAAA…` cannot publish under `gwyBBB…`, and the broker drops the attempt at the network protocol
+layer before any subscriber sees it. A topic-shaped rule such as `spBv1.0/+/+/simulated_#` is not a
+narrower version of that: `#` is a wildcard only as a whole filter or immediately after a `/`, so
+mosquitto 2.0.22 refuses to start on it, and the namespace it names cannot exist — the edge-node
+segment is a gateway's generated `sparkplug_id` and `verify_gateway_binding()` rejects anything else.
+
+**The gate is only a gate because RLS forbids the direct write.** `playback_jobs` takes no direct
+write from any application role; `start_playback_job()` is the only path and the checks live inside
+it, which is what makes "cannot target a production gateway" a property of the schema rather than of
+the client. The worker also needs a read gate for Storage: `broker_captures_read_privileged` admits
+`Administrator`, `Shopfloor_Manager` and `Auditor`, and a worker holding `Operator` would get
+`42501` — a job failing for a reason nothing surfaces.
+
+**The credential predicate is `gateway_has_broker_credential()`, not
+`gateway_holds_a_credential()`.** The latter is `NOT g.is_virtual AND g.enrolled_at IS NOT NULL` —
+"is this a physical appliance that completed enrolment" — which for playback is inverted: it refuses
+every virtual gateway, which is what a playback target normally is, and admits only real hardware,
+which is exactly what a playback must never publish as. `0056`'s predicate asks the question of both
+routes — physical enrolment, and the `CREDENTIAL_ISSUED` audit row that is the only record a virtual
+mint leaves — and subtracts revocation. Liveness is not the predicate either: a playback target is
+legitimately `OFFLINE`, because nothing publishes as it until a playback runs.
+
+**The worker reports what it holds, on a heartbeat**
+([`0057`](../supabase/migrations/0057_playback_worker_reports_its_reach.sql)), because the database
+knows whether the *platform* issued a credential and cannot know whether the *worker* was given the
+password — minting shows it once and an operator pastes it into the worker's environment. The
+timestamp is the part that earns its place: an empty list with a recent report means the worker is
+running and holds nothing, while no recent report means the worker is down. A stale report never
+blocks a playback; the list is then unknown rather than empty, and the gate and the worker still
+refuse whatever they always refused. Nothing secret is stored — a `sparkplug_id` is the MQTT
+username and is on the Gateways page already.
+
+### The Playback gateway, and its shadow devices
+
+[`0060`](../supabase/migrations/0060_playback_gateway_and_shadow_devices.sql) seeds a dedicated
+`Playback` gateway (`gwy160000000000400080000`, `is_shadow`), and a BEFORE INSERT trigger on
+`playback_jobs` refuses any other target.
+
+**Two publishers on one edge node is not a race, it is a corrupted stream.** `seq` is scoped to the
+edge node rather than the connection, so a simulated gateway that Node-RED is publishing as while a
+playback runs increments two private counters into one shared sequence: the daemon sees 41, 12, 42,
+13, concludes a message was dropped and asks for a rebirth. The live node then births mid-playback,
+the alias table is rebuilt from *its* metrics while replayed frames still carry the old aliases, and
+the next frame trips the detector again. Every part of that loop behaves as designed, and staggering
+or throttling one side does not fix it.
+
+**A stand-down NCMD was considered and rejected.** Sparkplug defines four node control metrics —
+Rebirth, Reboot, Next Server, Scan Rate — so it would be a private name conformant nodes ignore
+while the dashboard reports success; and "stop reporting" is not idempotent and on a real plant
+blinds whoever is watching. Quieting a simulator is legitimate and belongs in the simulator, as a
+per-gateway flag in Node-RED's own flow context with no MQTT command involved.
+
+**Shadow devices are lanes, not copies.** `ensure_shadow_devices()` mints one device per captured
+device, bound to the playback gateway, carrying `devices.shadow_of`, and returns the map
+`start_playback_job()` wants. They are reused rather than minted per run, so a chart comparing a
+machine with its replay holds still between runs. What is copied is the **metric contract** —
+`schema_id` and `device_submodels` — because a replay judged against no schema is either unjudged or,
+under `conformance_policy = enforce`, wholly rejected while the job reports success. What is
+deliberately not copied is the **nameplate**, and `0060` carries a self-check that fails if a shadow
+ever gains one: `device_nameplate` is IDTA Nameplate and holds a serial number, which identifies one
+physical object, so a copy would make the AAS Part 5 export emit two Asset Administration Shells
+asserting the same asset identity. A shadow is not a product and has no manufacturer; links are
+resolved through `shadow_of` rather than duplicated, for the ordinary reason that a copy goes stale.
+
+**The Playback gateway needs its own broker credential**, minted on the Access Control page like any
+virtual gateway's and then placed in `MQTT_PLAYBACK_CREDENTIALS`. The migration's `NOTICE` says so
+with the `sparkplug_id` already filled in.
+
+### What the page adds that the CLI cannot, and two things neither does
+
+- **The device map from dropdowns**, built from the devices actually bound to the target gateway,
+  instead of typing 24-character ids.
+- **Refusal rather than warning** when a target is not `is_simulated`. The CLI can only warn, having
+  no view of the directory; the page has one, which turns `0052`'s marking from a label into a
+  precondition.
+- **The credential state shown before the click**, using the gate's own predicate as a computed
+  field, so a job is not accepted and then failed a second later.
+
+**No burst mode, and `--speed 0` stays refused.** Speed divides both the send schedule and the
+timestamp rebasing, so as it rises every message converges on one millisecond — and the historian
+inserts `ON CONFLICT (time, asset_id, metric_name) DO NOTHING`. A burst replay of 100,000 messages
+would write one row per metric and silently discard the rest: a successful-looking run against an
+almost-empty table. Publishing flat out while still advancing timestamps by the recorded intervals
+is a different feature with a different argument, and is not this one.
+
+**No in-browser payload editor.** The capture file is JSON *specifically* so it can be hand-edited,
+and playback re-encodes to whatever encoding each message arrived in. A text editor already does
+everything a hex or protobuf UI would, and `--override-metric` is the same operation with more
+surface.
 
 ### Configuration
 
 | Variable | Used by | Default |
 | :--- | :--- | :--- |
 | `MQTT_CAPTURE_USER` / `MQTT_CAPTURE_PASSWORD` | `record` | falls back to `MQTT_INGESTION_*` |
-| `MQTT_PLAYBACK_USER` / `MQTT_PLAYBACK_PASSWORD` | `play` | none — must be set |
-| `CAPTURE_BUCKET` | `storage-init`, the dashboard | `broker-captures` |
-| `CAPTURE_FILE_SIZE_LIMIT` | `storage-init` | `26214400` (25 MiB) |
+| `MQTT_PLAYBACK_USER` / `MQTT_PLAYBACK_PASSWORD` | `play`, and the worker's single-target fallback | none |
+| `MQTT_PLAYBACK_CREDENTIALS` | `playback_worker.py` | empty — a JSON object keyed by `sparkplug_id` |
+| `SUPABASE_PLAYBACK_KEY` | `playback_worker.py` | none — it authenticates as `Service_Playback` |
+| `CAPTURE_BUCKET` | `storage-init`, the dashboard, both workers | `broker-captures` |
+| `CAPTURE_FILE_SIZE_LIMIT` | `storage-init` | `104857600` (100 MiB) |
 
 Renaming the bucket means changing `supabase/storage-policies.sql` too. A bucket with no policies is
 invisible to every browser-facing role and a policy naming a bucket that does not exist is dead text
@@ -382,6 +605,11 @@ invisible to every browser-facing role and a policy naming a bucket that does no
 `record` defaults to the ingestion principal because recording is a read: `mosquitto.acl` grants it
 `read spBv1.0/#` and no asset write at all, so a mistyped subcommand cannot publish. `play` has no
 default and no fallback, because there is no gateway this tool should pick on an operator's behalf.
+
+**`MQTT_PLAYBACK_CREDENTIALS` is empty by default and the worker starts anyway.** A stack that has
+issued no playback targets is correctly configured for having none; the worker says so once at boot
+and refuses each job with a message naming the gateway it lacks a credential for, rather than
+failing to start and taking the diagnosis with it.
 
 ---
 

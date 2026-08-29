@@ -82,6 +82,12 @@ services:
   #
   # Retention is a HARD DELETE with no undo, so every interval is the operator's to set. `never`
   # disables any individual policy.
+  #
+  # IT ALSO OWNS `ALTER EXTENSION timescaledb UPDATE`, which nothing used to run: a bumped image tag
+  # upgraded the binaries and left the SQL-level extension behind, so the database went on running
+  # the older release's definitions inside the newer image with nothing saying so. extension.sql
+  # goes FIRST and in its OWN psql session -- the statement is refused once a connection has loaded
+  # the old library, and every file after it uses the API surface it updates.
   timescaledb-maintenance:
     container_name: acs-cymru_timescaledb_maintenance
     image: timescale/timescaledb:2.29.2-pg17
@@ -105,6 +111,7 @@ services:
       # than creating one with a blank password. See timescaledb/roles.sql.
       BI_READER_PASSWORD: ${BI_READER_PASSWORD:-}
     volumes:
+      - ./timescaledb/extension.sql:/extension.sql:ro
       - ./timescaledb/retention.sql:/retention.sql:ro
       - ./timescaledb/storage.sql:/storage.sql:ro
       - ./timescaledb/aggregates.sql:/aggregates.sql:ro
@@ -122,6 +129,8 @@ services:
         if [ $$i -ge 60 ]; then echo 'timed out waiting for the telemetry hypertable (created by timescaledb/init/001_schema.sql on an EMPTY data directory)' >&2; exit 1; fi;
         sleep 2;
       done;
+      echo 'Updating the timescaledb extension to the version the image ships...';
+      psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -f /extension.sql;
       echo 'Reconciling compression and retention policies...';
       psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -v compress_after=\"$$TIMESCALE_COMPRESS_AFTER\" -v retain_after=\"$$TIMESCALE_RETAIN_FOR\" -f /retention.sql;
       echo 'Reconciling telemetry rollups...';
