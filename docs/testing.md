@@ -46,7 +46,10 @@ SUPABASE_ANON_KEY=... SUPABASE_SERVICE_ROLE_KEY=... \
 # Broker credential issuance — needs the stack up and the service's own bearer token
 MQTT_CREDENTIAL_SERVICE_TOKEN=... python gateway-credential/test_gateway_credential.py
 
-# The credential merge, in isolation — the one piece of it whose failure is silent
+# Two pieces of the broker-credential machinery whose failure is silent, in isolation and with no
+# stack: the merge that must never lose an account, and the filter deciding which accounts the
+# orphan sweep may rotate — which is what keeps it from revoking `factoryplus_ingestion` and
+# stopping the stack ingesting.
 npm run test:lib
 
 # Configuration drift — no services needed, and the ONE check here that reads your own .env.
@@ -90,6 +93,10 @@ python supabase/migrations/test_gateway_enrollment.py
 # The machine-path credential recorder (0062), and the grant that decides whether it is a fix.
 # Every test rolls back: the rows it writes are audit rows, and that table cannot be pruned.
 python supabase/migrations/test_credential_recorder.py
+# Revocation reaching a virtual gateway (0063), and still passing over one that holds nothing.
+# Rolls back for a second reason: net.http_post queues inside the transaction, so the rotation
+# requests these tests provoke are un-queued rather than sent.
+python supabase/migrations/test_credential_revocation.py
 # Needs the TimescaleDB historian (port 5433), not Supabase — the rollups live there
 python timescaledb/test_bi_reader_grants.py
 # The installed extension against the version the image ships, plus the two deployment paths that
