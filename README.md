@@ -648,7 +648,7 @@ Every suite, what each one needs, the five CI jobs and the release workflow are 
 **[`docs/testing.md`](docs/testing.md)**. The short version:
 
 ```bash
-cd frontend && npm test                 # Frontend — 1417 tests
+cd frontend && npm test                 # Frontend — 1647 tests
 node scripts/check-env-drift.mjs        # Configuration drift — no services needed
 
 # End-to-end — needs the running stack

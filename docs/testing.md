@@ -1,7 +1,7 @@
 # Testing
 
 ```bash
-# Frontend — 1417 tests
+# Frontend — 1647 tests
 cd frontend && npm test
 
 # Python unit suites — no stack required

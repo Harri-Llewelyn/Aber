@@ -22,6 +22,12 @@
  *     otherwise indistinguishable from a dead device.
  *   * `seq` advances by one per published message and wraps 255 → 0, which is the only way
  *     ingestion can detect a dropped message under RBE.
+ *   * ONE COUNTER PER EDGE NODE, not per device. Sparkplug scopes `seq` to the edge node and
+ *     ingestion.py keys `_last_seq` on `(group, edge_node)`, so the three devices and the
+ *     heartbeat publishing under one gateway share a single run of numbers. They each kept their
+ *     own until b40e9d3, and four counters interleaving into one sequence made the daemon conclude
+ *     messages were lost -- 238 gaps on one gateway in thirty minutes, on a fleet that had lost
+ *     nothing.
  *
  * THE CACHE MUST BE PER INSTANCE. `context` here is a fresh store per simulated device, mirroring
  * Node-RED's per-subflow-instance node context. If the body were changed to use `flow` or `global`
@@ -43,6 +49,11 @@ const nodes = Object.fromEntries(
 const SCAN_MS = 5000
 const CNC_BODY = nodes['sf-cnc-fn'].func
 const OEE_BODY = nodes['sf-oee-fn'].func
+// The gateway's own NBIRTH/NDATA node. It is on the tab rather than in a subflow and its ids are
+// literals for that reason -- `env` on a plain function node does not resolve -- so it takes no
+// env here. It shares the edge node's counter with every device subflow beneath it.
+const HB_BODY = nodes['fn-hb-cnc'].func
+const SEQ_KEY = 'seq_gwy120000000000400080000'
 
 /**
  * One simulated device: its own context store, its own env, a shared global.
@@ -215,11 +226,134 @@ describe('the Sparkplug sequence number', () => {
 
   it('wraps 255 to 0 rather than growing without bound', () => {
     dev.scan()
-    dev.context.set('seq', 255)
+    // SEEDED IN `global`, UNDER THE EDGE NODE'S KEY. This drove `context` until b40e9d3 moved the
+    // counter, at which point the seeding reached nothing, the body went on counting from 1, and
+    // the test failed on an assertion about wrapping that the body still implements correctly. A
+    // harness that pokes at the wrong store reports the wrong thing broken.
+    dev.globalStore.set(SEQ_KEY, 255)
     let msg = null
     for (let i = 0; i < 40 && msg === null; i++) msg = dev.scan()
     expect(msg.payload.seq).toBe(255)
-    expect(dev.context.get('seq')).toBe(0)
+    expect(dev.globalStore.get(SEQ_KEY)).toBe(0)
+  })
+})
+
+/**
+ * THE COUNTER BELONGS TO THE EDGE NODE, and this is the regression b40e9d3 fixed.
+ *
+ * `context` in a subflow is scoped to the INSTANCE, so every device had a private counter. Cell 1
+ * runs three devices plus a gateway heartbeat under one edge node, and four private counters
+ * interleaving into one sequence is not a race but a corrupted stream: the daemon sees 41, 12, 42,
+ * 13, concludes a message was dropped, and asks for a rebirth -- correctly, on a fleet that had
+ * lost nothing.
+ *
+ * These tests pin the SHAPE of the fix rather than the storage detail: what matters is that
+ * publishers under one gateway produce one unbroken run, and that publishers under different
+ * gateways do not touch each other's.
+ */
+describe('the sequence belongs to the edge node, not the device', () => {
+  const seqOf = (dev) => {
+    let msg = null
+    for (let i = 0; i < 40 && msg === null; i++) msg = dev.scan()
+    return msg.payload.seq
+  }
+
+  it('two devices under one gateway share a single run of numbers', () => {
+    const shared = new Map()
+    const a = makeDevice(CNC_BODY, cncEnv(), shared)
+    const b = makeDevice(CNC_BODY, cncEnv({
+      DEVICE_ID: 'dev230000000000400080000', DEVICE_NAME: 'Sim_CNC_Mill_02'
+    }), shared)
+
+    // Births first -- both publish unconditionally -- then one further message from each.
+    expect(a.scan().payload.seq).toBe(0)
+    expect(b.scan().payload.seq).toBe(1)
+    expect(seqOf(a)).toBe(2)
+    expect(seqOf(b)).toBe(3)
+
+    // Not four counters at 0,0,1,1 -- which is what a per-instance counter produced, and what the
+    // daemon reported as 238 gaps in half an hour.
+    expect(shared.get(SEQ_KEY)).toBe(4)
+  })
+
+  it('a device under a different gateway keeps its own run', () => {
+    const shared = new Map()
+    const cell1 = makeDevice(CNC_BODY, cncEnv(), shared)
+    const cell2 = makeDevice(CNC_BODY, cncEnv({
+      GATEWAY_ID: 'gwy130000000000400080000',
+      DEVICE_ID: 'dev240000000000400080000',
+      DEVICE_NAME: 'Sim_CNC_Mill_03'
+    }), shared)
+
+    expect(cell1.scan().payload.seq).toBe(0)
+    // Zero, not one: a second edge node is a second sequence. Sharing ONE counter across the fleet
+    // would be the same defect in the opposite direction, and the daemon would report gaps on
+    // every gateway instead of one.
+    expect(cell2.scan().payload.seq).toBe(0)
+    expect(shared.get(SEQ_KEY)).toBe(1)
+    expect(shared.get('seq_gwy130000000000400080000')).toBe(1)
+  })
+
+  it('the gateway heartbeat draws from the same run as its devices', () => {
+    const shared = new Map()
+    const device = makeDevice(CNC_BODY, cncEnv(), shared)
+    const heartbeat = makeDevice(HB_BODY, {}, shared)
+
+    expect(device.scan().payload.seq).toBe(0)
+    // The NBIRTH resets the run -- see the next describe -- so this is 0 rather than 1, and the
+    // reset lands on the counter the DEVICE is also drawing from. That is the whole point: a birth
+    // resynchronises every publisher under the edge node, not just the node itself.
+    const birth = heartbeat.run()
+    expect(birth.topic).toContain('/NBIRTH/')
+    expect(birth.payload.seq).toBe(0)
+
+    // The heartbeat is a publisher under this edge node like any other -- it was one of the four
+    // counters that used to interleave -- and the device picks the run up where the heartbeat left
+    // it rather than keeping a number of its own.
+    expect(heartbeat.run().payload.seq).toBe(1)
+    expect(seqOf(device)).toBe(2)
+  })
+})
+
+/**
+ * AN NBIRTH RESTARTS THE RUN AT ZERO, which is the specification and is why the daemon treats a
+ * birth as a resynchronisation point rather than checking it. A birth carrying whatever the counter
+ * had reached made a rebirth cause the alarm it was sent to clear.
+ */
+describe('a birth resynchronises the sequence', () => {
+  it('the first heartbeat is an NBIRTH at zero, and the next an NDATA at one', () => {
+    const shared = new Map()
+    const heartbeat = makeDevice(HB_BODY, {}, shared)
+
+    const birth = heartbeat.run()
+    expect(birth.topic).toBe('spBv1.0/ACS-Cymru/NBIRTH/gwy120000000000400080000')
+    expect(birth.payload.seq).toBe(0)
+
+    const data = heartbeat.run()
+    expect(data.topic).toContain('/NDATA/')
+    expect(data.payload.seq).toBe(1)
+  })
+
+  it('an NBIRTH resets a run already in progress, rather than continuing it', () => {
+    const shared = new Map()
+    shared.set(SEQ_KEY, 200)
+    const heartbeat = makeDevice(HB_BODY, {}, shared)
+
+    expect(heartbeat.run().payload.seq).toBe(0)
+    expect(shared.get(SEQ_KEY)).toBe(1)
+  })
+
+  it('a DBIRTH consumes a number and does NOT reset, because only the node births', () => {
+    const shared = new Map()
+    shared.set(SEQ_KEY, 42)
+    const device = makeDevice(CNC_BODY, cncEnv(), shared)
+
+    const birth = device.scan()
+    expect(birth.topic).toContain('/DBIRTH/')
+    // 42, not 0. A device announcing itself is not the edge node resynchronising, and treating it
+    // as one would make every BIRTH_EVERY_SCANS cycle look like a fresh run to the daemon.
+    expect(birth.payload.seq).toBe(42)
+    expect(shared.get(SEQ_KEY)).toBe(43)
   })
 })
 
