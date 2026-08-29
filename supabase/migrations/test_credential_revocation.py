@@ -82,13 +82,14 @@ class RevocationBase(unittest.TestCase):
         self.cur.execute("SELECT count(*) FROM net.http_request_queue;")
         return self.cur.fetchone()[0]
 
-    def a_gateway(self, virtual=True, enrolled=False, with_credential=False):
+    def a_gateway(self, host_run=True, enrolled=False, with_credential=False):
         """A gateway of this suite's own, plus optionally the record of a credential."""
         gid = str(uuid.uuid4())
         self.cur.execute(
-            "INSERT INTO public.gateways (id, name, description, is_virtual, enrolled_at) "
+            "INSERT INTO public.gateways (id, name, description, deployment, enrolled_at) "
             "VALUES (%s, %s, 'revocation suite', %s, %s) RETURNING id, sparkplug_id;",
-            (gid, f"Test_Revoke_{gid[:8]}", virtual, "now()" if enrolled else None),
+            (gid, f"Test_Revoke_{gid[:8]}", "host" if host_run else "remote",
+             "now()" if enrolled else None),
         )
         row = self.cur.fetchone()
         if enrolled:
@@ -107,7 +108,7 @@ class TestTheGatewaysItReaches(RevocationBase):
 
     def test_deleting_a_virtual_gateway_asks_for_its_credential_back(self):
         """The exact case that failed: a virtual gateway, deleted, credential left working."""
-        gid, _ = self.a_gateway(virtual=True, with_credential=True)
+        gid, _ = self.a_gateway(host_run=True, with_credential=True)
         before = self.queue_depth()
 
         self.cur.execute("DELETE FROM public.gateways WHERE id = %s;", (gid,))
@@ -115,13 +116,13 @@ class TestTheGatewaysItReaches(RevocationBase):
         self.assertEqual(
             self.queue_depth(),
             before + 1,
-            "deleting a virtual gateway queued no revocation. Before 0063 this was the behaviour "
+            "deleting a host-run gateway queued no revocation. Before 0063 this was the behaviour "
             "for EVERY gateway a provisioned stack has, and the credential went on publishing "
             "after its row was gone.",
         )
 
     def test_archiving_a_virtual_gateway_asks_and_stamps(self):
-        gid, _ = self.a_gateway(virtual=True, with_credential=True)
+        gid, _ = self.a_gateway(host_run=True, with_credential=True)
         before = self.queue_depth()
 
         self.cur.execute(
@@ -138,7 +139,7 @@ class TestTheGatewaysItReaches(RevocationBase):
 
     def test_a_physical_enrolled_gateway_still_works(self):
         """The case that was never broken, asserted so the fix is not a swap of one gap for another."""
-        gid, _ = self.a_gateway(virtual=False, enrolled=True)
+        gid, _ = self.a_gateway(host_run=False, enrolled=True)
         before = self.queue_depth()
 
         self.cur.execute("DELETE FROM public.gateways WHERE id = %s;", (gid,))
@@ -155,7 +156,7 @@ class TestWhatItStillPassesOver(RevocationBase):
     """
 
     def test_a_virtual_gateway_with_no_recorded_credential_is_passed_over(self):
-        gid, _ = self.a_gateway(virtual=True, with_credential=False)
+        gid, _ = self.a_gateway(host_run=True, with_credential=False)
         before = self.queue_depth()
 
         self.cur.execute("DELETE FROM public.gateways WHERE id = %s;", (gid,))
@@ -169,14 +170,14 @@ class TestWhatItStillPassesOver(RevocationBase):
         )
 
     def test_a_physical_gateway_that_never_enrolled_is_passed_over(self):
-        gid, _ = self.a_gateway(virtual=False, enrolled=False)
+        gid, _ = self.a_gateway(host_run=False, enrolled=False)
         before = self.queue_depth()
 
         self.cur.execute("DELETE FROM public.gateways WHERE id = %s;", (gid,))
         self.assertEqual(self.queue_depth(), before)
 
     def test_an_already_archived_gateway_is_not_re_revoked_by_an_ordinary_edit(self):
-        gid, _ = self.a_gateway(virtual=True, with_credential=True)
+        gid, _ = self.a_gateway(host_run=True, with_credential=True)
         self.cur.execute("UPDATE public.gateways SET is_archived = true WHERE id = %s;", (gid,))
         before = self.queue_depth()
 
@@ -193,12 +194,12 @@ class TestTheSweepAgrees(RevocationBase):
     The retry path has to be for the same gateways as the fast path.
 
     The sweep exists for the case where the trigger's asynchronous call did not land. Left asking
-    the old question, it would never retry a virtual gateway -- so the safety net would have had a
+    the old question, it would never retry a host-run gateway -- so the safety net would have had a
     hole in exactly the shape of the bug.
     """
 
     def test_the_sweep_retries_a_virtual_gateway(self):
-        gid, _ = self.a_gateway(virtual=True, with_credential=True)
+        gid, _ = self.a_gateway(host_run=True, with_credential=True)
         self.cur.execute("UPDATE public.gateways SET is_archived = true WHERE id = %s;", (gid,))
         # CLEARED IN A SECOND STATEMENT, and the first attempt at this test got it wrong in a way
         # worth recording: setting `credential_revoked_at = NULL` in the SAME update as

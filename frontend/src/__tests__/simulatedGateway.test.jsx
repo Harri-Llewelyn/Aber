@@ -15,7 +15,7 @@ import { api } from '../api'
  * THE TWO WAYS THE CONTROL CAN MISLEAD, which is what is asserted here rather than that it
  * renders:
  *
- *   1. BEING CONFUSED WITH `is_virtual`. They are different questions -- virtual is about whether
+ *   1. BEING CONFUSED WITH `deployment`. They are different questions -- deployment is about where
  *      an edge appliance exists, simulated is about whether the readings are real -- and a
  *      physical appliance replaying a capture is virtual=false, simulated=true. If one ever
  *      implied the other, that gateway becomes unrepresentable and the marking silently stops
@@ -40,7 +40,7 @@ const gateway = (overrides = {}) => ({
   gateway_name: 'Playback_Lab',
   sparkplug_id: 'gwy110000000000400080000',
   status: 'ONLINE',
-  is_virtual: false,
+  deployment: 'remote',
   is_simulated: false,
   is_archived: false,
   cell_id: 'cell-1',
@@ -70,7 +70,7 @@ const openEdit = () => {
 }
 
 const simulatedCheckbox = () => document.querySelector('#is_simulated')
-const virtualCheckbox = () => document.querySelector('#is_virtual')
+const deploymentCheckbox = () => document.querySelector('#deployment')
 
 beforeEach(() => vi.clearAllMocks())
 
@@ -88,14 +88,14 @@ describe('the SIMULATED badge', () => {
 
   it('appears alongside VIRTUAL rather than instead of it', async () => {
     // THE COMBINATION THAT MUST STAY SAYABLE. A cloud connector generating test data is both.
-    await show([gateway({ is_virtual: true, is_simulated: true })])
+    await show([gateway({ deployment: 'host', is_simulated: true })])
     expect(screen.getAllByText('SIMULATED').length).toBeGreaterThan(0)
     expect(screen.getAllByText('VIRTUAL').length).toBeGreaterThan(0)
   })
 
   it('is shown for a simulated gateway that is not virtual', async () => {
     // The case that makes the two flags irreducible: a real appliance replaying a capture.
-    await show([gateway({ is_virtual: false, is_simulated: true })])
+    await show([gateway({ deployment: 'remote', is_simulated: true })])
     expect(screen.getAllByText('SIMULATED').length).toBeGreaterThan(0)
     expect(screen.queryByText('VIRTUAL')).toBeNull()
   })
@@ -119,14 +119,23 @@ describe('the simulated checkbox', () => {
     expect(simulatedCheckbox().checked).toBe(false)
   })
 
-  it('is independent of the virtual checkbox', async () => {
-    // Ticking one must not move the other. If they were ever wired together the flag would stop
-    // meaning what the column comment says it means.
+  it('is independent of where the connector runs', async () => {
+    // Ticking one must not move the other. They are two columns rather than one enum precisely so
+    // that the combinations stay sayable -- an appliance out on the plant network replaying a
+    // capture is remote AND simulated -- and wiring the checkboxes together would undo in the UI
+    // what 0064 was careful to keep separate in the schema.
+    //
+    // The database refuses only ONE combination, simulated + remote (gateways_simulated_is_host),
+    // and that is a CHECK rather than a disabled input: a rule stated where a reader finds it.
     await show([gateway()])
     openEdit()
+    const before = deploymentCheckbox().checked
     fireEvent.click(simulatedCheckbox())
     expect(simulatedCheckbox().checked).toBe(true)
-    expect(virtualCheckbox().checked).toBe(false)
+    // UNCHANGED, not a particular value: what is being asserted is that one control does not move
+    // the other, and pinning the fixture's own default here would make this test fail the day
+    // somebody changes the fixture rather than the day somebody wires the two together.
+    expect(deploymentCheckbox().checked).toBe(before)
   })
 
   it('says that ingestion is unchanged', async () => {

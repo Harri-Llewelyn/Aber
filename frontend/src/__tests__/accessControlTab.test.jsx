@@ -22,7 +22,7 @@ const provisioned = {
   id: '12000000-0000-4000-8000-000000000001',
   name: 'Sim_Gateway_Cell1_Machining',
   sparkplug_id: 'gwy120000000000400080000',
-  is_virtual: true, is_archived: false, status: 'ONLINE',
+  deployment: 'host', is_archived: false, status: 'ONLINE',
   enrolled_at: null, credential_revoked_at: null, issued_at: null
 }
 
@@ -30,7 +30,7 @@ const enrolled = {
   id: '2a000000-0000-4000-8000-000000000001',
   name: 'Cell 4 Press Line',
   sparkplug_id: 'gwy2a0000000000400080000',
-  is_virtual: false, is_archived: false, status: 'ONLINE',
+  deployment: 'remote', is_archived: false, status: 'ONLINE',
   enrolled_at: '2026-08-01T09:00:00Z', credential_revoked_at: null, issued_at: null
 }
 

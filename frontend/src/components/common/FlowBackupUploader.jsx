@@ -55,7 +55,7 @@ export function FlowBackupUploader({ gateway, canRead, canManage, showToast }) {
     // happens during render; this effect runs regardless, so without it a virtual gateway fires a
     // list request for a prefix that can never hold anything -- once per drawer open, on a page that
     // polls.
-    if (!canRead || !sparkplugId || gateway?.is_virtual) return
+    if (!canRead || !sparkplugId || gateway?.deployment === 'host') return
     setLoading(true)
     setError(null)
     try {
@@ -65,7 +65,7 @@ export function FlowBackupUploader({ gateway, canRead, canManage, showToast }) {
     } finally {
       setLoading(false)
     }
-  }, [canRead, sparkplugId, gateway?.is_virtual])
+  }, [canRead, sparkplugId, gateway?.deployment])
 
   useEffect(() => { refresh() }, [refresh])
 
@@ -121,7 +121,7 @@ export function FlowBackupUploader({ gateway, canRead, canManage, showToast }) {
 
   // A virtual gateway has no appliance and therefore no flow of its own to lose -- the platform's
   // Node-RED flow is version-controlled in the repository and deployed through GitOps.
-  if (gateway?.is_virtual) {
+  if (gateway?.deployment === 'host') {
     return (
       <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
         Virtual gateways have no appliance to back up — the platform's flow is deployed from the

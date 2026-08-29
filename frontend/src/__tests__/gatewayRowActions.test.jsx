@@ -15,7 +15,7 @@ const gateway = (overrides = {}) => ({
   sparkplug_id: 'gwy100000000000400080000',
   cell_id: 'cell-1',
   status: 'ONLINE',
-  is_virtual: true,
+  deployment: 'host',
   is_archived: false,
   access_url: 'http://localhost:1880',
   last_heartbeat: new Date().toISOString(),

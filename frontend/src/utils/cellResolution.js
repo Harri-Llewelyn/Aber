@@ -192,16 +192,17 @@ export const UNASSIGNED_GATEWAY_SITE_WIDE = 'gateway_site_wide'
 /**
  * Why a device is unassigned, or null if it is not.
  *
- * The three cases call for different fixes, which is why they are not collapsed. A physical
- * gateway with no cell is fixed once on the Gateways page and every device behind it follows;
- * a site-wide or virtual gateway can never supply a cell by inheritance, so each of its devices
- * has to be filed individually. Telling an operator to "assign the gateway a cell" when the
- * gateway is a host-run proxy is advice that cannot be taken.
+ * The three cases call for different fixes, which is why they are not collapsed. A REMOTE gateway
+ * with no cell is fixed once on the Gateways page and every device behind it follows; a site-wide
+ * or HOST-RUN gateway can never supply a cell by inheritance, so each of its devices has to be
+ * filed individually. Telling an operator to "assign the gateway a cell" when the gateway is a
+ * host-run proxy is advice that cannot be taken -- which is why this asks where the connector runs
+ * rather than what `is_virtual` used to mean (roadmap 15).
  */
 export function unassignedReason(device, gateway) {
   if (!isUnassigned(device, gateway)) return null
   if (!gateway) return UNASSIGNED_NO_GATEWAY
-  if (gateway.location_scope === SCOPE_SITE_WIDE || gateway.is_virtual) return UNASSIGNED_GATEWAY_SITE_WIDE
+  if (gateway.location_scope === SCOPE_SITE_WIDE || gateway.deployment === 'host') return UNASSIGNED_GATEWAY_SITE_WIDE
   return UNASSIGNED_GATEWAY_HAS_NO_CELL
 }
 

@@ -18,7 +18,7 @@ const GATEWAY = {
   gateway_id: '2a000000-0000-4000-8000-000000000001',
   gateway_name: 'Cell 4 Press Line',
   sparkplug_id: 'gwy2a0000000000400080000',
-  is_virtual: false
+  deployment: 'remote'
 }
 
 const BACKUPS = [
@@ -196,7 +196,7 @@ describe('FlowBackupUploader — upload', () => {
 
 describe('FlowBackupUploader — virtual gateways', () => {
   it('explains that a virtual gateway has nothing to back up', async () => {
-    renderFor('Administrator', { ...GATEWAY, is_virtual: true })
+    renderFor('Administrator', { ...GATEWAY, deployment: 'host' })
     expect(screen.getByText(/no appliance to back up/i)).toBeTruthy()
     expect(dropzone()).toBeNull()
     // No pointless request for a prefix that will never hold anything.

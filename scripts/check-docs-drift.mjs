@@ -999,7 +999,7 @@ function edgeFunctionNames() {
     // 9 is NOT here. The AAS item was retired long before this practice and the list was
     // renumbered around it at the time, so 9 is a live entry today -- it was reused legitimately,
     // under the old convention, and listing it would fail the check against a correct README.
-    const RETIRED = [6, 7, 11, 13, 16, 17, 18];
+    const RETIRED = [6, 7, 11, 13, 15, 16, 17, 18];
     const reused = items.filter((n) => RETIRED.includes(n));
     if (reused.length) {
       fail(

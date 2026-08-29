@@ -693,7 +693,7 @@ Kubernetes — which is what makes it the real drift control between them.
 
 ## Roadmap & Future Extensions
 
-Fifteen extensions, none of them speculative: every one names the code it would build on, because
+Fourteen extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
@@ -710,11 +710,13 @@ orchestration now sits beside the CLI it wraps, under
 [Recording from the dashboard](ingestion/README.md#recording-from-the-dashboard),
 [Playback from the dashboard](ingestion/README.md#playback-from-the-dashboard) and
 [The Playback gateway, and its shadow devices](ingestion/README.md#the-playback-gateway-and-its-shadow-devices);
+item 15 under
+[`deployment`, and the word it is replacing](supabase/README.md#deployment-and-the-word-it-is-replacing-0064);
 item 18 under [Historian roles](#historian-roles); and item 9's subject was retired the same way
 when `aas-api` shipped.
 
 **Retired numbers are not reused, and the list is therefore not contiguous.** The gaps at 6, 7, 11,
-13, 16, 17 and 18 are deliberate. Renumbering on retirement was the earlier practice and it does not survive
+13, 15, 16, 17 and 18 are deliberate. Renumbering on retirement was the earlier practice and it does not survive
 contact with this repository: the remaining entries are named by **dozens of comments** in migrations,
 scripts and components, all explaining why that code is the way it is, and shifting every number
 below a removal would silently redirect all of them without erroring. A number cited from code is an
@@ -724,12 +726,12 @@ documentation rather than a roadmap number.
 **Items 1-5 are this repository's own**, ordered by how much of each already exists, as are 20-22 —
 20 first because both 21 and 22 depend on the role split it makes: 21 has nowhere to put an
 Administrator-only control without it, and 22 would hide a lane from a role that could still grant
-itself the ability to see it. **Items 8-15
+itself the ability to see it. **Items 8-14
 arrive from feature requests** — 8, 9 and 10 from GitHub issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
 [#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66), in that same order of how much already
-exists; 12 and 15 are not yet filed. 19 arrives from
+exists; 12 was not filed. 19 arrives from
 [#39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39).
 [#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) was item 11 and is now built. Where an entry's heading differs from the issue's title, it is
 because the work that remains is narrower than the title claims.
@@ -1311,161 +1313,6 @@ mechanism from seeding one at boot, and needs its own path or a restart.
 
 **With that step built, the tour is the argument for the whole item**: Cells, Gateways, credential
 minting, Devices, Schemas and Access Control, which is most of the product.
-
----
-
-### 15 · Three kinds of gateway, and two lanes for what is not real
-
-**Builds on:** `gateways.is_virtual` (`0001`) · `location_scope` and its two CHECK constraints ·
-`public.device_locations` · [`frontend/src/utils/cellResolution.js`](frontend/src/utils/cellResolution.js) ·
-`gateway_holds_a_credential()` (`0038`) · `verify_gateway_binding()` ·
-`gateway_health_rows()` (`0036`) · **not yet filed as an issue**
-
-**The lanes shipped, then the column did. What is left is the rename.**
-[`0059_simulated_and_shadow_lanes.sql`](supabase/migrations/0059_simulated_and_shadow_lanes.sql)
-adds `gateways.is_shadow`, two same-row CHECKs, and the two new arms of `device_locations`, mirrored
-in [`cellResolution.js`](frontend/src/utils/cellResolution.js) and pinned by
-`check-mirror-drift.mjs`.
-[`0064_gateway_deployment.sql`](supabase/migrations/0064_gateway_deployment.sql) adds `deployment`
-('host' | 'remote'), the cross-column CHECK, and a transitional trigger that keeps it in step with
-`is_virtual` in both directions — so every existing writer keeps working unchanged and gets the new
-column for free.
-
-**What remains is the rename alone**, and it stays separate for the reason this entry has always
-given: a rename smuggled in beside a feature is a rename nobody reviews. `0064` is the column it
-needs to move onto.
-
-**A SECOND LANE, because provenance is not one axis.** A shadow gateway is necessarily simulated —
-`start_playback_job()` (`0056`) refuses a target that is not — so one lane would have covered both,
-and the second had to earn itself. It does: a **simulated** spindle reporting 4000 RPM never turned,
-and a **shadow** spindle reporting 4000 RPM did turn, on a real machine, on the day the capture was
-recorded. Both are "not a machine running right now" and they give opposite answers to *is this
-number true*, which is the question being asked at the moment anyone consults a lane. Precedence is
-`shadow > simulated > site_wide > explicit > inherited > unassigned`, most specific first: both flags
-are true of a shadow device, so without an explicit order it lands in Simulated and the more
-informative lane is silently unreachable. That ordering is itself mirror-checked.
-
-**Shadow does not render on the Overview map, and that is not a rule about derived lanes.** Simulated
-does render — on a stack running the simulator the simulated fleet *is* the plant, and hiding it would
-empty the page. The map answers *what is my plant doing now*, and a replay is not now; a lane of
-stand-ins invites exactly the miscount the lanes exist to prevent. A running playback is visible on
-the Capture page instead.
-
-**`is_virtual` carries three incompatible definitions today, and they are not reconcilable by
-choosing a better word for the same thing.** `0025` and `provision-gateways.mjs` define it as *"no
-physical edge appliance behind this row"* — a claim about whether hardware exists. `GatewaysTab.jsx`
-defines it as *"a deployment fact (this connector runs on the app host)"* — a claim about where it
-runs. The checkbox label says *"(Cloud / Server-Simulated)"* and the badge tooltip says *"ACS-Cymru
-Cloud Virtual Gateway"* — a claim about who hosts it, and one that directly contradicts the second,
-since a cloud connector is the one thing definitively not on the app host.
-
-**Every behaviour that branches on the flag is about remoteness, and none is about virtuality.** The
-bundle is refused because there is no machine to carry it to; there is nothing to revoke because
-enrolment never happened; flow backups are hidden because *"a virtual gateway has no appliance and
-therefore no flow of its own to lose"*; and the bundle modal opens on create because a physical
-gateway *"needs a bundle, on a machine, before it can publish at all"*. So the axis the code actually
-uses is **host vs remote**, and the column is named for a different one.
-
-**Two columns, not a three-way enum — built in `0064`.** `deployment` (`'host'` | `'remote'`) and
-`is_simulated` (boolean) express the three varieties this stack wants — a host connector to real devices, a remote
-appliance, and a host-run simulator — while leaving the fourth combination *sayable* rather than
-unrepresentable. Folding them into one enum welds two independent facts together and makes a
-simulator on a separate load-generation box inexpressible. The idiom is already here: `location_scope`
-is an enum with a CHECK, **plus** a cross-column CHECK, and forbidding remote simulators is exactly
-that second kind of constraint —
-
-```sql
-CHECK (NOT is_simulated OR deployment = 'host')
-```
-
-— which states the rule where a reader will find it, and relaxes in one line if a remote simulator
-ever turns out to be wanted.
-
-**Devices should inherit, not carry their own flag**, and the reason is mechanical rather than
-stylistic. `devices.cell_id` is already an override whose `NULL` means *inherit from the gateway*,
-resolved through a view its own comment says to use *"never by reading this column alone"*. The same
-shape applies here — and it makes two of the four containment rules disappear rather than need
-enforcing. *"No simulated device on a real gateway"* and *"no real device on a simulated gateway"* are
-one rule stated twice, and a derived value cannot disagree with its source. `verify_gateway_binding()`
-already guarantees the physical half: a device's data reaches storage only from the gateway it is
-bound to.
-
-**Stored, that same rule is expensive, and it is worth knowing why before choosing.** A CHECK
-constraint cannot reference another table — `devices_site_wide_has_no_cell` works only because both
-columns sit on one row. A device-level `is_simulated` that must agree with its gateway's needs
-**triggers on both sides**: one on `devices` for insert and re-parenting, and one on `gateways` for
-the update that flips the flag under devices that already exist. Two triggers that must agree, to
-maintain an invariant that inheritance gives for nothing.
-
-**The Simulated lane is a derived lane, not a cell row and not a flag on `cells`.** `device_locations`
-already computes `location_source` as `site_wide` / `explicit` / `inherited` / `unassigned`, and
-**`unassigned` is never stored** — it is the `ELSE` arm, which is precisely the precedent. `simulated`
-joins it as a fifth label taking precedence over the rest. Nothing is inserted into `cells`, so there
-is no "Simulated cell" that could be renamed, archived or filled with real devices by accident, and no
-question about what a real device inside a simulated cell would mean.
-
-**That reduces the two cell rules to one same-row constraint**, mirroring the one beside it:
-
-```sql
-CHECK (NOT is_simulated OR cell_id IS NULL)     -- on gateways, as gateways_site_wide_has_no_cell
-```
-
-**One mirrored obligation, which the tooling will enforce.** `device_locations` mirrors
-`cellResolution.js`, and `check-mirror-drift.mjs` pins the label list literally —
-`location_source labels = "explicit,inherited,site_wide,unassigned"`. Adding a lane is therefore a
-deliberate two-file change with a check that fails until both sides agree, which is the intended
-behaviour rather than an obstacle.
-
-**How strictly to enforce is a real choice, and the repository already has a house style for it.** A
-device explicitly placed in a different cell from its gateway is not refused — `device_locations`
-computes `cell_mismatch` and the UI surfaces it. So *report* is an established answer alongside
-*refuse*. The recommendation here is split: **refuse** the gateway-to-cell rule, because it is a
-same-row CHECK costing nothing, and **derive** the device rule, because a derived value has nothing to
-refuse.
-
-**Simulated telemetry is treated exactly like real telemetry, and that is a decision rather than an
-omission.** [Broker playback](ingestion/README.md#broker-capture-and-playback) now depends on it,
-which moved this from a prediction to a constraint: a capture replays *as a gateway*, and synthetic
-devices must roll up exactly like real ones because that is the behaviour under test. Shorter
-retention for simulated data would break the one feature that needs synthetic data to behave normally
-— and could not be built cheaply anyway, since retention is one policy on one hypertable dropping
-whole chunks rather than rows.
-
-**`gateways.is_simulated` already exists** (`0052`), added with playback and taken deliberately from
-this item's design rather than item 11's: the flag is on the gateway and devices inherit it. With
-`0059`'s lanes and `0064`'s column both built, **what remains here is the `is_virtual` rename and
-nothing else**. **The flag records provenance; each consumer decides.** The Digital
-Thread page hides simulated assets by default, which is one more predicate in `0039`'s RPC and
-answers the demonstration feedback where it was actually aimed — at what a reader sees, not at what
-is stored. `digital_thread` itself keeps receiving the rows, because someone standing up a simulator
-on a production stack is a governance event.
-
-**It was to have sequenced after §14, and the cost it was waiting on has now been paid rather than
-avoided.** The seeded `Sim_` gateways were deliberately assigned to real-looking cells — "Cell 1 —
-Precision Machining" and the rest — so that the shopfloor map looks like a shopfloor, and
-`gateways_synthetic_has_no_cell` forbids exactly that. The two artefacts §14 separates are priced
-differently by it: **an onboarding simulator gains** from being visibly not-real, which is what the
-demonstration feedback asked for, while **a demonstration fixture loses**, because a shopfloor map
-showing an empty plant beside one Simulated bucket demonstrates less than four populated cells did.
-
-**The answer taken is the first, and `0059` clears those cells on the way past** — reported to
-db-init's log, not silently, because it discards an operator's placement. That is normally the thing
-provisioning is careful never to do, and it is justified here only because the placement had already
-stopped being readable: the lane resolves ahead of the cell, so clearing the column makes the row say
-what the UI was already showing. `provision-gateways.mjs` learned the same rule, so a re-run no longer
-puts them back. A map that shows a plant which is not there is the more expensive of the two
-mistakes.
-
-**The rename's blast radius is 126 references across 47 files**, most of them frontend tests — it
-read 68 across 28 when this entry was written, and `0056`, the playback work and `0062` have all
-added more since. A number that only moves upwards is worth re-counting rather than trusting. The
-load-bearing few are worth listing because they are not textual: `gateway_holds_a_credential()`
-(`0038`) is `IMMUTABLE` and called from triggers, `gateway_health_rows()` (`0036`) names the column in
-its `RETURNS TABLE` signature, and `0025_physical_gateway_enrollment.sql` keeps its filename whatever
-the vocabulary becomes — the chain is immutable, so the old word survives there and the header
-explains why. Above all, `check-docs-drift.mjs` enforces that **every migration adding a `gateways`
-column rebuilds `gateway_status`**, because Postgres freezes `SELECT g.*` at creation time; that rule
-exists for precisely this kind of change and this change must satisfy it twice.
 
 ---
 

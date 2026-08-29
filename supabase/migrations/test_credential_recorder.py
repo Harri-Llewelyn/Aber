@@ -107,8 +107,8 @@ class RecorderBase(unittest.TestCase):
         """
         gid = str(uuid.uuid4())
         self.cur.execute(
-            "INSERT INTO public.gateways (id, name, description, is_virtual, is_archived) "
-            "VALUES (%s, %s, %s, true, %s) RETURNING id, sparkplug_id;",
+            "INSERT INTO public.gateways (id, name, description, deployment, is_archived) "
+            "VALUES (%s, %s, %s, 'host', %s) RETURNING id, sparkplug_id;",
             (gid, f"Test_Recorder_{gid[:8]}", "credential recorder suite", archived),
         )
         return self.cur.fetchone()

@@ -245,7 +245,7 @@ export function AccessControlTab({ showToast }) {
                     </td>
                     <td>
                       <span className="badge badge-neutral" style={{ fontSize: '11px' }}>
-                        {g.is_virtual ? '⚡ VIRTUAL' : 'PHYSICAL'}
+                        {g.deployment === 'host' ? '⚡ HOST-RUN' : 'APPLIANCE'}
                       </span>
                     </td>
                     {/* THE USERNAME IS THE WIRE IDENTITY, not a display name -- and it is the one

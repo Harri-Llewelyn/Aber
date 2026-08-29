@@ -25,7 +25,7 @@ const gateway = {
   // site-wide are independent: this fixture is a virtual gateway that has been given a cell.
   location_scope: 'cell',
   status: 'ONLINE',
-  is_virtual: true,
+  deployment: 'host',
   is_archived: false,
   last_heartbeat: new Date(NOW - 20_000).toISOString(),
   device_count: 1,
@@ -232,7 +232,7 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
     expect(api.put.mock.calls[0][1]).toMatchObject({ location_scope: 'site_wide', cell_id: '' })
   })
 
-  it('does not treat the Virtual checkbox as a location assertion', async () => {
+  it('does not treat the host-run checkbox as a location assertion', async () => {
     // Virtual is a deployment fact; site-wide is a claim about location. A virtual gateway is
     // usually site-wide, but tying them together would relocate assets on a checkbox.
     api.get.mockImplementation(routeGet())
@@ -243,7 +243,7 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
 
     fireEvent.click(within(document.querySelector('.page-main')).getByText('Virtual_Gateway_NodeRED'))
     fireEvent.click(within(document.querySelector('.context-panel')).getByText('Edit Details'))
-    fireEvent.click(screen.getByLabelText(/Mark as Virtual Gateway/i))
+    fireEvent.click(screen.getByLabelText(/Runs on this host/i))
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())

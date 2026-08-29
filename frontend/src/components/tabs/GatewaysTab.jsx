@@ -64,10 +64,14 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   // as live as the row it came from, and it closes itself if the entity disappears.
   const [selectedId, setSelectedId] = useState(null)
   // location_scope defaults to 'cell' -- an edge node belongs in some cell until someone says
-  // otherwise. is_virtual is deliberately NOT the same question: virtual is a deployment fact
-  // (this connector runs on the app host), site-wide is a claim about location. A virtual
-  // gateway is usually site-wide, but conflating them would relocate assets on a checkbox.
-  const blank = { gateway_id: '', gateway_name: '', status: 'OFFLINE', is_virtual: false, is_simulated: false, access_url: '', cell_id: '', location_scope: SCOPE_CELL }
+  // otherwise. `deployment` is deliberately NOT the same question: it says where the connector
+  // RUNS, site-wide is a claim about where the assets ARE. A host-run gateway is usually
+  // site-wide, but conflating them would relocate assets on a checkbox.
+  //
+  // 'remote' is the default because it is the case that needs setup: a remote gateway leaves this
+  // form with a bundle to install, and defaulting to the one that finishes on save would let an
+  // operator create a gateway that silently never gets an appliance.
+  const blank = { gateway_id: '', gateway_name: '', status: 'OFFLINE', deployment: 'remote', is_simulated: false, access_url: '', cell_id: '', location_scope: SCOPE_CELL }
   const [form, setForm]         = useState(blank)
   const [docsForGw, setDocsForGw] = useState(null)
   // The gateway whose bundle modal is open. Held as the OBJECT rather than an id: the modal needs
@@ -181,14 +185,14 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
        * The row is seconds old, so there is no earlier bundle for this one to invalidate -- the
        * whole reason that confirmation exists is absent here. See GatewayBundleModal.
        */
-      if (!form.is_virtual) {
+      if (form.deployment === 'remote') {
         setBundleForGw({
           gateway_id: created.id || created.gateway_id,
           gateway_name: created.name || form.gateway_name,
           sparkplug_id: created.sparkplug_id,
           confirmFirst: false
         })
-        showToast('Physical gateway created — download its bundle to finish setup', 'success')
+        showToast('Remote gateway created — download its bundle to finish setup', 'success')
       } else {
         showToast('Gateway created', 'success')
       }
@@ -245,8 +249,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
       if (!haystack.includes(q)) return false
     }
     if (liveStatusFilter && gatewayLiveStatus(g) !== liveStatusFilter) return false
-    if (kindFilter === 'virtual'  && !g.is_virtual) return false
-    if (kindFilter === 'physical' && g.is_virtual) return false
+    if (kindFilter === 'host'   && g.deployment !== 'host') return false
+    if (kindFilter === 'remote' && g.deployment !== 'remote') return false
     if (quarantineOnly && !gatewaysWithQuarantine.has(g.gateway_id)) return false
     return true
   })
@@ -344,10 +348,10 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           <option value="OFFLINE">Offline</option>
         </select>
 
-        <select className="form-control" style={{ width: '160px' }} value={kindFilter} onChange={e => setKindFilter(e.target.value)} title="Separate simulated/virtual edge nodes from physical hardware">
-          <option value="">Any kind</option>
-          <option value="physical">Physical</option>
-          <option value="virtual">Virtual</option>
+        <select className="form-control" style={{ width: '160px' }} value={kindFilter} onChange={e => setKindFilter(e.target.value)} title="Where each gateway's connector runs: on this host, or on an appliance out on the plant network">
+          <option value="">Anywhere</option>
+          <option value="remote">On an appliance</option>
+          <option value="host">On this host</option>
         </select>
 
         <button
@@ -406,7 +410,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                        >
                          <td>
                            <strong>{g.gateway_name}</strong>
-                           {g.is_virtual && (
+                           {g.deployment === 'host' && (
                              <span className="badge badge-warning" style={{ background: 'rgba(0,212,255,0.15)', color: 'var(--accent)', border: '1px solid var(--accent)', marginLeft: '8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="ACS-Cymru Cloud Virtual Gateway">
                                <IconZap size={11} /> VIRTUAL
                              </span>
@@ -577,8 +581,13 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 the app on its own vertical rhythm, which read as a gap where a field had been
                 deleted rather than as a deliberately tighter row. */}
             <div className="form-group form-group-check">
-              <input type="checkbox" id="is_virtual" checked={form.is_virtual || false} onChange={e => setForm(f => ({ ...f, is_virtual: e.target.checked }))} />
-              <label htmlFor="is_virtual" className="form-label">⚡ Mark as Virtual Gateway (Cloud / Server-Simulated)</label>
+              {/* THE LABEL IS THE POINT OF THE RENAME, not just the column. This said "Mark as
+                  Virtual Gateway (Cloud / Server-Simulated)", which asserted three different things
+                  at once -- and "Cloud" directly contradicted the behaviour behind it, since a cloud
+                  connector is the one thing definitively not on this host. What the flag has always
+                  decided is whether there is a machine to carry a bundle to. */}
+              <input type="checkbox" id="deployment" checked={form.deployment === 'host'} onChange={e => setForm(f => ({ ...f, deployment: e.target.checked ? 'host' : 'remote' }))} />
+              <label htmlFor="deployment" className="form-label">⚡ Runs on this host (no appliance to install)</label>
             </div>
             {/* THE CONSEQUENCE OF THE CHECKBOX, SAID BEFORE IT IS TICKED. Leaving it clear means a
                 bundle to download and hardware to run it on; ticking it means the row is finished on
@@ -586,7 +595,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                 when creating: an existing gateway's enrolment is not re-run by editing its row. */}
             {!editing && (
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '-6px', marginBottom: '12px' }}>
-                {form.is_virtual
+                {form.deployment === 'host'
                   ? 'Runs on the application host. Nothing to install — this gateway is ready once saved.'
                   : 'Runs on its own hardware. On save you will be given a bundle to copy to that machine; it enrols itself and appears here as online.'}
               </div>
@@ -646,7 +655,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
         subtitle={selected && (
           <>
             <StatusBadge status={gatewayLiveStatus(selected)} />
-            {selected.is_virtual && <span className="badge badge-neutral" style={{ fontSize: '11px' }}>VIRTUAL</span>}
+            {selected.deployment === 'host' && <span className="badge badge-neutral" style={{ fontSize: '11px' }}>HOST-RUN</span>}
             {selected.is_simulated && <span className="badge badge-neutral" style={{ fontSize: '11px' }} title="Telemetry from this gateway is generated, not observed">SIMULATED</span>}
             {selected.is_archived && <span className="badge badge-warning" style={{ fontSize: '11px' }}>ARCHIVED</span>}
           </>
@@ -825,7 +834,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
            * broker credential an appliance is holding. Issuing destroys whichever it has, so the
            * modal asks for the gateway's name before it mints anything.
            */
-          !selected.is_archived && !selected.is_virtual && isGatewayPending(selected) && canManage && {
+          !selected.is_archived && selected.deployment === 'remote' && isGatewayPending(selected) && canManage && {
             label: selected.status === 'AWAITING_BIRTH' ? 'Re-issue Bundle' : 'Download Setup Bundle',
             icon: <IconDownload size={13} />,
             primary: true,
@@ -841,11 +850,13 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               : 'Generate the bootstrap bundle for this gateway and download it'
           },
           /*
-           * THE VIRTUAL COUNTERPART, AND THE CONDITIONS ARE THE MIRROR OF THE ONE ABOVE.
+           * THE HOST-RUN COUNTERPART, AND THE CONDITIONS ARE THE MIRROR OF THE ONE ABOVE.
            *
-           * `is_virtual` instead of `!is_virtual`, and no `isGatewayPending()`: enrolment is a
-           * lifecycle a physical gateway passes through, and a virtual one has none -- there is no
-           * appliance to wait for, so there is no state in which minting is premature or too late.
+           * `deployment === 'host'` instead of `'remote'`, and no `isGatewayPending()`: enrolment is
+           * a lifecycle a remote appliance passes through, and a host-run gateway has none -- there
+           * is no appliance to wait for, so there is no state in which minting is premature or too
+           * late. The two RPCs behind these buttons are mirror images on the same axis, which is
+           * the argument roadmap 15 makes for the column being named for it.
            *
            * NOT SHOWN ON AN ARCHIVED GATEWAY, matching the bundle action and 0041's own refusal.
            * 0037 found that a bundle downloaded before archiving stayed redeemable afterwards and
@@ -855,7 +866,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
            * out a claim (the bundle) or never reveals a secret at all, which is why the modal
            * confirms unconditionally rather than taking the bundle modal's create-time exemption.
            */
-          !selected.is_archived && selected.is_virtual && canManage && {
+          !selected.is_archived && selected.deployment === 'host' && canManage && {
             label: 'Generate Broker Credential',
             icon: <IconLock size={13} />,
             primary: true,

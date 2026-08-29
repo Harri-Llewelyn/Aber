@@ -475,9 +475,9 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
       <span
         key={g.gateway_id}
         className="chip chip-gw"
-        title={`Gateway ${g.gateway_name} [${g.gateway_id}] ${g.is_virtual ? '(Virtual Gateway)' : ''} ${isGwArch ? '(Archived)' : `(${gwStatus}, heartbeat ${formatHeartbeat(g.last_heartbeat)})`} — ${g.device_count} device(s) — Click to view on Gateways page`}
+        title={`Gateway ${g.gateway_name} [${g.gateway_id}] ${g.deployment === 'host' ? '(Host-run gateway)' : ''} ${isGwArch ? '(Archived)' : `(${gwStatus}, heartbeat ${formatHeartbeat(g.last_heartbeat)})`} — ${g.device_count} device(s) — Click to view on Gateways page`}
         onClick={() => onSelectGateway(g.gateway_id)}
-        style={{ cursor: 'pointer', borderColor: isGwArch ? 'var(--warning)' : g.is_virtual ? 'var(--accent)' : undefined, opacity: isGwArch ? 0.75 : 1 }}
+        style={{ cursor: 'pointer', borderColor: isGwArch ? 'var(--warning)' : g.deployment === 'host' ? 'var(--accent)' : undefined, opacity: isGwArch ? 0.75 : 1 }}
       >
         {/* THREE OUTCOMES, NOT TWO. A red dot on a gateway nobody has installed yet is a fault report
             on an unfinished task -- see the .badge-pending block in App.css. */}
@@ -494,7 +494,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
             single flags for the same reason -- a bordered pill left no room for the name it
             describes. */}
         <span className="chip-name mono">{g.gateway_name}</span>
-        {g.is_virtual && !isGwArch && <span className="chip-flag" style={{ color: 'var(--accent)' }} title="Virtual Gateway"><IconZap size={9} /></span>}
+        {g.deployment === 'host' && !isGwArch && <span className="chip-flag" style={{ color: 'var(--accent)' }} title="Runs on this host"><IconZap size={9} /></span>}
         {isGwArch && <span className="chip-flag" style={{ color: 'var(--warning-text)' }}>ARCH</span>}
       </span>
     )

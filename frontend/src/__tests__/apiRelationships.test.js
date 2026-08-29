@@ -198,10 +198,10 @@ describe('writing an asset location', () => {
     expect(callFor('devices').payload.location_scope).toBe('cell');
   });
 
-  it('does not treat is_virtual as a location assertion', async () => {
+  it('does not treat deployment as a location assertion', async () => {
     // A virtual gateway is a deployment fact; site-wide is an operator's claim about location.
-    await api.put('/api/v1/gateways/gw-1', { gateway_name: 'Virtual', is_virtual: true, cell_id: 'cell-1' });
-    expect(callFor('gateways').payload).toMatchObject({ is_virtual: true, cell_id: 'cell-1' });
+    await api.put('/api/v1/gateways/gw-1', { gateway_name: 'Virtual', deployment: 'host', cell_id: 'cell-1' });
+    expect(callFor('gateways').payload).toMatchObject({ deployment: 'host', cell_id: 'cell-1' });
     expect('location_scope' in callFor('gateways').payload).toBe(false);
   });
 });

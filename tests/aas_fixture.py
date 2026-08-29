@@ -115,7 +115,7 @@ def ensure(base, token, anon):
 
     _upsert(base, token, anon, "gateways", {
         "id": GATEWAY_UUID, "name": GATEWAY_NAME, "cell_id": cell_id,
-        "status": "ONLINE", "is_virtual": True,
+        "status": "ONLINE", "deployment": "host",
     }, on_conflict="id")
 
     devices = _upsert(base, token, anon, "devices", {

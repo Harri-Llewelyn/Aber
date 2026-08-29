@@ -24,7 +24,7 @@ const DAY = 24 * 60 * 60 * 1000
 
 const onlineGateway = {
   gateway_id: 'gw-1', gateway_name: 'Line_A_Gateway', sparkplug_id: 'gwy100000000000400080000',
-  cell_id: 'cell-1', status: 'ONLINE', is_virtual: false, is_archived: false,
+  cell_id: 'cell-1', status: 'ONLINE', deployment: 'remote', is_archived: false,
   last_heartbeat: new Date(NOW - 20_000).toISOString(), device_count: 2, devices: []
 }
 // Heartbeat older than the 90s staleness threshold, so gatewayLiveStatus() reports STALE even
@@ -32,7 +32,7 @@ const onlineGateway = {
 const staleVirtualGateway = {
   ...onlineGateway,
   gateway_id: 'gw-2', gateway_name: 'Sim_Gateway', sparkplug_id: 'gwy200000000000400080000',
-  cell_id: 'cell-2', is_virtual: true,
+  cell_id: 'cell-2', deployment: 'host',
   last_heartbeat: new Date(NOW - 10 * 60_000).toISOString(), device_count: 1
 }
 
@@ -264,12 +264,15 @@ describe('GatewaysTab filters', () => {
     expect(screen.getByText('Sim_Gateway')).toBeTruthy()
   })
 
-  it('separates virtual gateways from physical hardware', async () => {
+  it('separates gateways by where their connector runs', async () => {
+    // The filter asked "physical or virtual" until roadmap 15, and `virtual` meant three things at
+    // once. It asks where the connector RUNS now, which is the axis every behaviour behind it --
+    // bundles, flow backups, enrolment -- was always about.
     api.get.mockImplementation(routeGet())
     renderGateways()
     await waitFor(() => expect(screen.getByText('Line_A_Gateway')).toBeTruthy())
 
-    fireEvent.change(screen.getByTitle(/simulated\/virtual edge nodes/i), { target: { value: 'physical' } })
+    fireEvent.change(screen.getByTitle(/where each gateway's connector runs/i), { target: { value: 'remote' } })
     await waitFor(() => expect(screen.queryByText('Sim_Gateway')).toBeNull())
     expect(screen.getByText('Line_A_Gateway')).toBeTruthy()
   })

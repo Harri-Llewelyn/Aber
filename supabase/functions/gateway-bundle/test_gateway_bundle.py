@@ -131,9 +131,9 @@ class BundleBase(unittest.TestCase):
             "/gateways", method="POST", prefer="return=representation",
             body=[
                 {"id": PHYSICAL_GW, "name": "Test Bundle Gateway", "status": "OFFLINE",
-                 "is_virtual": False},
+                 "deployment": "remote"},
                 {"id": VIRTUAL_GW, "name": "Test Bundle Virtual", "status": "OFFLINE",
-                 "is_virtual": True},
+                 "deployment": "host"},
             ],
         )
         cls.sparkplug_id = next(r["sparkplug_id"] for r in rows if r["id"] == PHYSICAL_GW)

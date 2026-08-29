@@ -371,22 +371,22 @@ async function renameIfNeeded(table, row, desiredName) {
 
 async function ensureGateway(spec) {
   const found = await rest(
-    `/gateways?id=eq.${spec.id}&select=id,name,sparkplug_id,cell_id,location_scope,is_virtual,is_simulated,is_shadow`
+    `/gateways?id=eq.${spec.id}&select=id,name,sparkplug_id,cell_id,location_scope,deployment,is_simulated,is_shadow`
   );
   if (found.length > 0) {
     const row = found[0];
     await renameIfNeeded('gateways', row, spec.name);
 
     // Reconciled on an existing row too, not only set at creation: the first four gateways were
-    // provisioned with is_virtual false, and a flag that is only ever written on INSERT would
-    // leave every stack provisioned before this change permanently mislabelled.
-    if (row.is_virtual !== true && !dryRun) {
-      await rest(`/gateways?id=eq.${row.id}`, {
+    // provisioned as remote, and a flag that is only ever written on INSERT would
+    // leave them that way forever.
+    if (row.deployment !== 'host' && !dryRun) {
+      await rest(`/gateways?id=eq.${spec.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ is_virtual: true }),
+        body: JSON.stringify({ deployment: 'host' }),
+        headers: { Prefer: 'return=minimal' },
       });
-      console.log(`    marked ${row.name} virtual (⚡ badge)`);
-      row.is_virtual = true;
+      row.deployment = 'host';
     }
 
     // The cell is renamed through the gateway's own cell_id, so an existing deployment follows this
@@ -454,14 +454,17 @@ async function ensureGateway(spec) {
   const payload = {
     id: spec.id,
     name: spec.name,
-    // TRUE, AND IT IS A STATEMENT ABOUT THE ASSET RATHER THAN A DISPLAY FLAG. `is_virtual` means
-    // "no physical edge appliance behind this row" -- a host-run connector, or in this case a
-    // simulator. The dashboard renders it as the ⚡ badge, which is the one place an operator can
-    // tell a simulated gateway from a real one at a glance without reading its name.
+    // 'host', AND IT IS A STATEMENT ABOUT THE ASSET RATHER THAN A DISPLAY FLAG. These connectors
+    // run inside this stack -- Node-RED on the app host -- so there is no appliance to enrol, no
+    // bundle to carry anywhere, and no flow of their own to back up. The dashboard renders it as
+    // the ⚡ badge, which is the one place an operator can tell a host-run gateway from a real one
+    // at a glance without reading its name.
     //
-    // It was `false`, which asserted the opposite: four simulated gateways claiming to be physical
-    // hardware, sitting on the same shopfloor map as real plant with nothing distinguishing them.
-    is_virtual: true,
+    // This wrote `is_virtual: false` once, asserting the opposite: four simulated gateways claiming
+    // to be physical hardware, on the same shopfloor map as real plant with nothing distinguishing
+    // them. It became `is_virtual: true`, and became this when roadmap 15 retired that word -- the
+    // claim it was making all along was about where the connector runs.
+    deployment: 'host',
     ...(spec.locationScope === 'site_wide'
       // The CHECK constraint forbids site_wide with a populated cell_id, so this must not send one.
       ? { location_scope: 'site_wide' }
@@ -832,7 +835,7 @@ async function main() {
         `    ${deviceCreated ? 'created' : 'exists'}: ${deviceRow.name} -> ${deviceRow.sparkplug_id}`
       );
       // On an EXISTING device too, not only a newly created one -- the same reasoning as the
-      // is_virtual and cell reconciliation above. A stack provisioned before this function existed
+      // deployment and cell reconciliation above. A stack provisioned before this function existed
       // has its schemas from the migrations; one whose operator detached a schema gets it back,
       // which is the behaviour `--rotate`-free re-running is for.
       await ensureSubmodels(deviceRow, device.schemas);

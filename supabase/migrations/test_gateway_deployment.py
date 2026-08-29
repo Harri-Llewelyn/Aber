@@ -1,22 +1,26 @@
 """
-`gateways.deployment`, and the transitional agreement with `is_virtual` (0064).
+`gateways.deployment`, and the rules that outlived the column it replaced (0064, 0066).
 
     python supabase/migrations/test_gateway_deployment.py
 
-Requires the Supabase database (54322 by default) and migration 0064 applied.
+Requires the Supabase database (54322 by default) and migration 0066 applied.
 
 ---------------------------------------------------------------------------------------------
-WHAT THIS COLUMN IS FOR. `is_virtual` carries three incompatible definitions -- "no appliance
+WHAT THIS COLUMN IS FOR. `is_virtual` carried three incompatible definitions -- "no appliance
 exists", "runs on the app host", "(Cloud / Server-Simulated)" -- while every behaviour branching on
-it is about a fourth thing, remoteness. Roadmap 15 argues that at length; the evidence arrived
+it was about a fourth thing, remoteness. Roadmap 15 argued that at length; the evidence arrived
 anyway, as `gateway_holds_a_credential()` being the wrong predicate three times: 0056 (playback
-targets), 0062 (the credential inventory), 0063 (revocation never firing for a virtual gateway).
+targets), 0062 (the credential inventory), 0063 (revocation never firing for a host-run gateway).
 
-WHAT THIS SUITE PROTECTS, WHICH IS NARROWER. Not the rename -- `is_virtual` is still here and still
-read by every consumer. It protects the property that makes the rename possible later: **the two
-columns cannot disagree**, whichever generation of writer touched the row. Every writer in the
-repository today names `is_virtual` and none names `deployment`, so if the trigger stopped agreeing
-the two columns would describe different fleets and nobody would find out until a consumer moved.
+HALF THIS SUITE WAS DELETED WHEN 0066 LANDED, AND THAT IS THE INTENDED END OF IT. It began by
+pinning the agreement between `deployment` and `is_virtual` -- the property that made the rename
+possible, asserted in both directions for both generations of writer. 0066 dropped the old column
+and the trigger that kept them in step, so those tests now describe machinery that does not exist.
+Keeping them alive against a mock of a removed trigger would be testing the scaffolding after the
+building is up.
+
+What survives is what is still true: the constraints, and the read path through a view that must be
+rebuilt whenever the table's columns change.
 
 EVERY TEST ROLLS BACK. Writes to `gateways` fire the digital-thread trigger, and that table is
 append-only and cannot be pruned.
@@ -54,6 +58,15 @@ class DeploymentBase(unittest.TestCase):
             )
             if not cur.fetchone():
                 raise unittest.SkipTest("0064_gateway_deployment.sql has not been applied")
+            cur.execute(
+                "SELECT 1 FROM information_schema.columns WHERE table_schema='public' "
+                "AND table_name='gateways' AND column_name='is_virtual';"
+            )
+            if cur.fetchone():
+                raise unittest.SkipTest(
+                    "0066_retire_is_virtual.sql has not been applied -- this suite describes the "
+                    "state after the old column is gone"
+                )
         finally:
             conn.rollback()
             conn.close()
@@ -74,89 +87,14 @@ class DeploymentBase(unittest.TestCase):
         placeholders = ", ".join(["%s"] * len(cols))
         self.cur.execute(
             f"INSERT INTO public.gateways ({names}) VALUES ({placeholders}) "
-            "RETURNING id, deployment, is_virtual;",
+            "RETURNING id, deployment;",
             tuple(cols.values()),
         )
         return self.cur.fetchone()
 
     def read(self, gid):
-        self.cur.execute(
-            "SELECT deployment, is_virtual FROM public.gateways WHERE id = %s;", (gid,)
-        )
-        return self.cur.fetchone()
-
-
-class TestTheTwoColumnsAgree(DeploymentBase):
-    """
-    Both writer generations, in both directions. This is the whole safety property of 0064.
-    """
-
-    def test_an_old_writer_naming_is_virtual_gets_a_deployment(self):
-        # Every writer in the repository today: provision-gateways.mjs, the create modal,
-        # enroll-gateway, 0002's seed. None of them knows this column exists.
-        _, deployment, _ = self.insert(is_virtual=True)
-        self.assertEqual(deployment, "host")
-
-        _, deployment, _ = self.insert(is_virtual=False)
-        self.assertEqual(deployment, "remote")
-
-    def test_a_new_writer_naming_deployment_gets_an_is_virtual(self):
-        # What the rename will produce. Consumers still read is_virtual, so a row created this way
-        # has to be indistinguishable to them from one created the old way.
-        _, _, is_virtual = self.insert(deployment="remote")
-        self.assertFalse(is_virtual)
-
-        _, _, is_virtual = self.insert(deployment="host")
-        self.assertTrue(is_virtual)
-
-    def test_deployment_wins_when_a_caller_names_both_on_insert(self):
-        # `is_virtual` defaults to false, so an insert naming only `deployment='host'` arrives with
-        # both columns set and disagreeing. Refusing that would refuse the new writers this column
-        # exists for, so on INSERT the explicit deployment is authoritative.
-        _, deployment, is_virtual = self.insert(deployment="host", is_virtual=False)
-        self.assertEqual(deployment, "host")
-        self.assertTrue(is_virtual)
-
-    def test_updating_one_moves_the_other(self):
-        gid, _, _ = self.insert(is_virtual=True)
-
-        self.cur.execute("UPDATE public.gateways SET deployment='remote' WHERE id=%s;", (gid,))
-        self.assertEqual(self.read(gid), ("remote", False))
-
-        self.cur.execute("UPDATE public.gateways SET is_virtual=true WHERE id=%s;", (gid,))
-        self.assertEqual(self.read(gid), ("host", True))
-
-    def test_restating_the_other_column_does_not_fight_the_change(self):
-        """
-        THE CASE THAT LOOKS LIKE A CONFLICT AND CANNOT BE ONE.
-
-        `SET deployment='remote', is_virtual=true` on a host row reads as a caller asking for two
-        contradictory things. It is not distinguishable from `SET deployment='remote'` alone: NEW
-        carries the whole row, `is_virtual` is unchanged from OLD, and only a column that MOVED can
-        be said to have been chosen.
-
-        A guard against this was written first and could never fire -- both columns are two-valued
-        and the row starts in agreement, so changing both flips both, which agrees. The behaviour
-        pinned here is the arithmetic, not a policy.
-        """
-        gid, _, _ = self.insert(is_virtual=True)
-        self.cur.execute(
-            "UPDATE public.gateways SET deployment='remote', is_virtual=true WHERE id=%s;", (gid,)
-        )
-        self.assertEqual(self.read(gid), ("remote", False))
-
-    def test_an_update_changing_both_to_agree_is_allowed(self):
-        # The form a migration or a careful writer would use mid-transition.
-        gid, _, _ = self.insert(is_virtual=True)
-        self.cur.execute(
-            "UPDATE public.gateways SET deployment='remote', is_virtual=false WHERE id=%s;", (gid,)
-        )
-        self.assertEqual(self.read(gid), ("remote", False))
-
-    def test_an_unrelated_update_leaves_both_alone(self):
-        gid, _, _ = self.insert(is_virtual=False)
-        self.cur.execute("UPDATE public.gateways SET description='edited' WHERE id=%s;", (gid,))
-        self.assertEqual(self.read(gid), ("remote", False))
+        self.cur.execute("SELECT deployment FROM public.gateways WHERE id = %s;", (gid,))
+        return self.cur.fetchone()[0]
 
 
 class TestTheConstraints(DeploymentBase):
@@ -174,13 +112,13 @@ class TestTheConstraints(DeploymentBase):
         self.assertIn("gateways_simulated_is_host", str(caught.exception))
 
     def test_a_simulated_gateway_on_the_host_is_fine(self):
-        _, deployment, _ = self.insert(deployment="host", is_simulated=True)
+        _, deployment = self.insert(deployment="host", is_simulated=True)
         self.assertEqual(deployment, "host")
 
     def test_the_column_cannot_be_null(self):
-        # The trigger fills it, so reaching NULL takes an explicit one -- which must still fail,
-        # because the whole point is that every gateway answers this question.
-        gid, _, _ = self.insert(is_virtual=True)
+        # Nothing fills it in any more -- 0066 removed the trigger with the column it synced -- so
+        # this is now simply NOT NULL doing its job. Every gateway answers this question.
+        gid, _ = self.insert(deployment="host")
         with self.assertRaises(psycopg2.Error):
             self.cur.execute(
                 "UPDATE public.gateways SET deployment=NULL WHERE id=%s;", (gid,)
@@ -202,7 +140,7 @@ class TestTheViewWasRebuilt(DeploymentBase):
         self.assertIsNotNone(self.cur.fetchone())
 
     def test_the_view_agrees_with_the_table(self):
-        gid, _, _ = self.insert(deployment="remote")
+        gid, _ = self.insert(deployment="remote")
         self.cur.execute("SELECT deployment FROM public.gateway_status WHERE id=%s;", (gid,))
         self.assertEqual(self.cur.fetchone()[0], "remote")
 
