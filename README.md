@@ -307,6 +307,12 @@ than for ports to answer, and re-provisions the four cell gateways — printing 
 and writing them to `.env.gateways`, because `mosquitto_passwd` stores only a hash and they cannot
 be read back afterwards.
 
+Node, not a shell script, so it runs the same on Windows, macOS and Linux
+([#106](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/106)). **It checks that Docker answers
+before it tears anything down** — the shell version discovered an unreachable Docker at the moment
+it was already dropping volumes, which left a half-destroyed stack on the one path nobody exercises
+until something has already gone wrong.
+
 **`--yes` is required and there is no interactive prompt.** A prompt is something people learn to
 dismiss without reading, and this is most dangerous once it is familiar. It also refuses outright
 when `NODE_ENV=production`, and when `COMPOSE_PROJECT_NAME` names a stack this repository does not
