@@ -383,6 +383,79 @@ This is the same narrowing `0026` applied to `digital_thread`, on the argument t
 is not what an audit trail rests on"*. The table guarding a destructive replay had been left out of
 it.
 
+### Capture and playback orchestration (`0055`, `0056`, `0057`, `0058`, `0060`)
+
+The schema behind the **Capture** page. What the workers do with it is in
+[`ingestion/README.md`](../ingestion/README.md#recording-from-the-dashboard); what is here is the
+part that has to be true whoever calls it.
+
+**A job and an artefact are separate tables, and that split is load-bearing.** `capture_jobs`
+records an act that happened once; `captures` holds the artefact — subject, storage path, size, note
+and manifest — and `playback_jobs.capture_id` references *that*. A capture uploaded through the
+browser never had a job, so pointing playback at `capture_jobs` would leave two ways to name a
+capture.
+
+**The RPCs are the only write path, which is what makes their checks gates.** `capture_jobs` and
+`playback_jobs` take no direct `INSERT` or `UPDATE` from any application role;
+`start_capture_job()`, `register_uploaded_capture()` and `start_playback_job()` are `SECURITY
+DEFINER` and hold the checks. Same shape as `0047`: a validation that lives in the client, or beside
+a policy that also admits a direct write, is advice rather than a control — and the direct write is
+the door an API caller uses rather than the one the UI happens to.
+
+**Single-flight is an index, not application logic.** A partial unique index on
+`status = 'RECORDING'` permits one capture at a time across the whole stack, where two browser tabs
+cannot race it. Widening it to the subject is how concurrency would arrive, and would turn the
+page's single running card into a list — a deliberate change rather than a default.
+
+**Neither job table gets a digital-thread trigger.** That trigger is opt-in per table, and both
+tables carry a progress column the workers update roughly once a second. Adding it would look like
+consistency while writing a row per tick into an append-only table no application role can prune,
+which is `0005`'s heartbeat problem. Both tables *are* added to the `supabase_realtime` publication
+explicitly, which is how the page follows a running job at all, and `0055` self-checks that the
+publication membership survived.
+
+**`Service_Playback` (`0056`) is a machine principal in `0048`'s sense** — no user row, reached
+through `is_playback_caller()` — and it holds four gates and one storage object, not `service_role`.
+Its MQTT identity is a separate matter entirely: the worker authenticates to the broker **as the
+target gateway**, so the database says what it may do and the broker ACL says what it may publish.
+See [Machine identities](#machine-identities) for why the two never collapse into one credential.
+
+**`gateway_has_broker_credential()` exists because `gateway_holds_a_credential()` (`0038`) answers
+the opposite question.** The older predicate is `NOT g.is_virtual AND g.enrolled_at IS NOT NULL` —
+"a physical appliance that completed enrolment" — which refuses every virtual gateway and admits
+only real hardware. For a playback target that is inverted twice over: the target is normally
+virtual, and real hardware is exactly what a playback must never publish as. `0041` had already
+recorded that a virtual gateway is outside the older predicate's scope by definition. The new one
+asks both routes — physical enrolment, or the `CREDENTIAL_ISSUED` audit row that is the only trace a
+virtual mint leaves — and subtracts revocation.
+
+**`0057` exists because the database cannot know what a process holds.** It records what the
+playback worker reports on a heartbeat: the gateways it has an MQTT password for, and when it last
+said so. The timestamp is the part that earns its place — an empty list with a recent report means
+the worker is up and holds nothing, while no recent report means the worker is down, and an empty
+list alone cannot tell those apart. Nothing secret is stored; a `sparkplug_id` is the MQTT username
+and is on the Gateways page already.
+
+**`0058` is `rebirth_requests`, and it is named for the one thing it carries.** A capture opens by
+asking its subject's edge node to rebirth, because birth certificates cannot be queried, and a
+person can now ask for one too. Sparkplug's NCMD channel could equally write metric *values* — a
+setpoint, a mode, a relay — and that is actuation. A rebirth asks a node to restate what it already
+is: idempotent, carrying no intent about the process, and a node that ignores it is in exactly the
+state it was. So the table is not called `commands`, and `0058` carries a self-check that fails if
+it ever grows a column able to hold a payload.
+
+**`0060` seeds one `Playback` gateway and refuses every other target**, through a BEFORE INSERT
+trigger on `playback_jobs`. Two publishers on one edge node is not a race but a corrupted stream:
+`seq` is scoped to the edge node, so a simulator and a playback under one identity increment private
+counters into one shared sequence and the daemon correctly concludes messages were dropped.
+`ensure_shadow_devices()` mints one device per captured device against that gateway, carrying
+`devices.shadow_of` and reused between runs. It copies the **metric contract** — `schema_id` and
+`device_submodels` — because a replay judged against no schema is either unjudged or, under
+`conformance_policy = enforce`, wholly rejected while the job reports success. It does **not** copy
+the nameplate, and a self-check fails if a shadow ever gains one: `device_nameplate` (`0011`) is
+IDTA Nameplate and holds a serial number, so a copy would make the AAS Part 5 export emit two shells
+asserting the same asset identity.
+
 ### `0001` builds `gateway_status` by calling the function, not inline
 
 `pg_dump` expanded the view into an **explicit column list** when the baseline was squashed, while
@@ -1115,17 +1188,17 @@ not a capability.
 
 ## Storage buckets and why they differ
 
-Two buckets, created by `scripts/storage-init.mjs` and governed by `storage-policies.sql`. They are
-opposites in the one setting that matters, and the reasoning belongs together rather than split
-across two comment blocks in the policy file.
+Three buckets, created by `scripts/storage-init.mjs` and governed by `storage-policies.sql`. The
+first two are opposites in the one setting that matters, and the reasoning belongs together rather
+than split across comment blocks in the policy file.
 
-| | `asset-3d-models` | `gateway-backups` |
-| :--- | :--- | :--- |
-| Public read | **yes** | **no** |
-| Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager |
-| Read | anyone, including `anon` | those two plus **Auditor** |
-| Operator | read | nothing |
-| Reached by | a plain public URL | a signed URL, minted after a role check |
+| | `asset-3d-models` | `gateway-backups` | `broker-captures` |
+| :--- | :--- | :--- | :--- |
+| Public read | **yes** | **no** | **no** |
+| Write | `device:manage` (Administrator, Shopfloor_Manager) | Administrator, Shopfloor_Manager | those two, plus the ingestion daemon for one path |
+| Read | anyone, including `anon` | those two plus **Auditor** | those two plus **Auditor** |
+| Operator | read | nothing | nothing |
+| Reached by | a plain public URL | a signed URL, minted after a role check | a signed URL, minted after a role check |
 
 ### `asset-3d-models` is public-read, and that is not laziness
 
@@ -1174,6 +1247,33 @@ deleted — which is exactly when someone is looking for them.
 The trap in writing that policy, and why its test asserts an *accepted* path as well as rejected
 ones, is recorded inline in `storage-policies.sql`, because it constrains the SQL on the very next
 line.
+
+### `broker-captures` gives one machine principal one object at a time
+
+The ingestion daemon has to put a capture's bytes somewhere, and this is the bucket that had to bend
+for it. **The authority cannot be a `SECURITY DEFINER` function**: the bytes travel over the Storage
+REST API, `storage.objects` is written by storage-api under the caller's own JWT, and no SQL
+function can carry a file into a bucket. So the daemon's access is a policy arm, and
+`is_ingestion_caller()` does resolve inside a storage request.
+
+**It cannot be write-only either**, which was the first design and is impossible rather than merely
+awkward. Each subject holds exactly one capture, so re-recording *overwrites* it; storage-js spells
+overwrite as `upsert: true`; storage-api serves that as `INSERT … ON CONFLICT DO UPDATE`; and
+Postgres evaluates the **SELECT** policy too, because the statement has to see the row it conflicts
+with. Probed directly, the first insert returned 200 and the upsert immediately after returned
+`new row violates row-level security policy`.
+
+**So the arm is scoped rather than narrowed**: `is_ingestion_caller() AND
+is_active_capture_object(name)`. The daemon may read, insert and overwrite exactly the one path
+named by the job it is currently running, can reach nothing at all in the bucket with no capture in
+flight, and never deletes — so nothing is destroyed before its replacement exists, and an orphan is
+impossible. Deleting a stale capture stays with the roles that own the bucket, and the browser's
+replace confirmation names what it is about to destroy.
+
+**The prefix is the subject recorded**, not the gateway a capture plays back as, so
+`is_capture_subject_prefix()` admits a `dev…` folder beside a `gwy…` one — a device is a capture
+subject in its own right. `100 MiB`, above the 50 MiB cap `capture_jobs` puts on a recording, so a
+capture that completed cannot then fail to upload.
 
 ---
 
