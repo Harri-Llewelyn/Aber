@@ -490,7 +490,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
                     : 'badge-offline'}`} />}
         {/* Name only, same as the device chip. The per-gateway "N dev" that used to sit here went
             with the UUIDs: the tile header already totals GW and Dev for the whole zone, and the
-            per-gateway figure is on this chip's title. The VIRTUAL and ARCHIVED badges are down to
+            per-gateway figure is on this chip's title. The HOST and ARCHIVED badges are down to
             single flags for the same reason -- a bordered pill left no room for the name it
             describes. */}
         <span className="chip-name mono">{g.gateway_name}</span>

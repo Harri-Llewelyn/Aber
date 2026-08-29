@@ -1279,7 +1279,7 @@ tbody tr:hover { background: var(--bg-glass); }
 .badge-neutral { background: var(--bg-glass); color: var(--text-muted); border: 1px solid var(--border); }
 
 /* ---------------------------------------------------------------------------------------------
-   The two PHYSICAL GATEWAY ENROLMENT states.
+   The two REMOTE GATEWAY ENROLMENT states.
 
    NEITHER EXISTING VARIANT FITS. `badge-warning` (amber) means "look at this", and a gateway
    waiting for somebody to carry a bundle to a machine is an unfinished task rather than a fault --

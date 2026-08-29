@@ -675,7 +675,7 @@ const apiMethods = {
 
     if (!res.ok) {
       // The function reports failures as JSON even on this path, so the real reason survives -- a
-      // 403 for an Operator, a 400 for a virtual gateway, a 503 for an unconfigured deployment.
+      // 403 for an Operator, a 400 for a host-run gateway, a 503 for an unconfigured deployment.
       let message = `Bundle generation failed (${res.status})`;
       try { message = (await res.json())?.error || message; } catch { /* non-JSON body */ }
       throw new Error(message);
@@ -762,7 +762,7 @@ const apiMethods = {
    * Every gateway with what the platform knows about its broker credential.
    *
    * TWO READS, NOT A JOIN, and the second is the interesting one. `gateway_status` carries
-   * `enrolled_at` and `credential_revoked_at`, which is the whole story for a PHYSICAL gateway. A
+   * `enrolled_at` and `credential_revoked_at`, which is the whole story for a REMOTE gateway. A
    * virtual one has neither by construction -- enrolment refuses it -- so its only record is the
    * CREDENTIAL_ISSUED row 0041 writes, which lives in `digital_thread`.
    *
@@ -795,7 +795,7 @@ const apiMethods = {
     if (gatewaysRes.error) throw new Error(gatewaysRes.error.message || 'Could not read gateways');
 
     // AN AUDIT READ THAT FAILS IS NOT FATAL. `digital_thread:read` is a separate permission, and a
-    // caller without it should still see the gateway inventory -- with every virtual gateway
+    // caller without it should still see the gateway inventory -- with every host-run gateway
     // reading `No platform record`, which is exactly what that state means from where they stand.
     const issuedBy = new Map();
     if (!issuedRes.error) {
@@ -808,7 +808,7 @@ const apiMethods = {
   },
 
   /**
-   * Mint a VIRTUAL gateway's broker credential and get it back once.
+   * Mint a HOST-RUN gateway's broker credential and get it back once.
    *
    * `supabase.functions.invoke()` WOULD work here -- the response is JSON, so the decoding trap
    * above does not apply -- and it is deliberately not used anyway, so both gateway-credential

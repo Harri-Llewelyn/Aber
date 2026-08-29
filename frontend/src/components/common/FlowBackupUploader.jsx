@@ -51,8 +51,8 @@ export function FlowBackupUploader({ gateway, canRead, canManage, showToast }) {
   const sparkplugId = gateway?.sparkplug_id
 
   const refresh = useCallback(async () => {
-    // THE VIRTUAL CHECK BELONGS HERE, not only in the render below. The early return further down
-    // happens during render; this effect runs regardless, so without it a virtual gateway fires a
+    // THE HOST-RUN CHECK BELONGS HERE, not only in the render below. The early return further down
+    // happens during render; this effect runs regardless, so without it a host-run gateway fires a
     // list request for a prefix that can never hold anything -- once per drawer open, on a page that
     // polls.
     if (!canRead || !sparkplugId || gateway?.deployment === 'host') return
@@ -119,7 +119,7 @@ export function FlowBackupUploader({ gateway, canRead, canManage, showToast }) {
   // was never intended. The same reasoning the storage policy applies by granting them nothing.
   if (!canRead) return null
 
-  // A virtual gateway has no appliance and therefore no flow of its own to lose -- the platform's
+  // A host-run gateway has no appliance and therefore no flow of its own to lose -- the platform's
   // Node-RED flow is version-controlled in the repository and deployed through GitOps.
   if (gateway?.deployment === 'host') {
     return (
