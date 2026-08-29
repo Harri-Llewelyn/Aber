@@ -649,9 +649,19 @@ function Dashboard({ session, onSignOut }) {
           is the one thing whose value moves, plus the door to everything else.
         */}
         <div className="topbar-right">
+          {/* THE SAME TWO HELPERS EVERY OTHER SURFACE NAVIGATES WITH, rather than the inline copy
+              of showDevice this used to carry -- one destination per subject, defined once above.
+
+              A gateway alert goes to the Gateways page, and until it did EVERY alert this stack can
+              raise went to Devices: of the ten rules shipped, four are gateway-scoped and five are
+              platform-scoped, and none is a device. A stale gateway sent the operator to a Devices
+              search for a `gwy...` id no device row can ever match. The two handlers stay separate
+              rather than one that switches on the id, because which page a row belongs on is the
+              alert's declared scope and not a guess from its prefix. */}
           <AlertPill
             alerts={firingAlerts}
-            onSelectDevice={id => { setSelectedDeviceFilter(id); setTab('devices', { search: id }) }}
+            onSelectDevice={showDevice}
+            onSelectGateway={showGateway}
           />
 
           <UserMenu

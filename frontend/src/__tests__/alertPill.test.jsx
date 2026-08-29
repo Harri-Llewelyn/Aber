@@ -223,4 +223,175 @@ describe('AlertPill', () => {
       expect(screen.getByText('Thermal Excursion')).toBeInTheDocument()
     })
   })
+
+  /**
+   * WHERE A ROW GOES, which was a single destination and should never have been.
+   *
+   * Of the ten rules shipped in grafana/provisioning/alerting/, four are `entity_type: gateway`,
+   * five are `platform`, and none is a device -- so "every row opens the Devices page" was wrong
+   * for every alert this stack can currently raise. A stale gateway sent an operator to a Devices
+   * search for a `gwy...` id that no device row can match.
+   *
+   * The tests below pin the DECLARED scope as the thing that decides, not the id's prefix. The two
+   * usually agree; only one of them is a statement the rule made about itself.
+   */
+  describe('routing by the subject the alert is about', () => {
+    const gatewayAlert = (over = {}) => alert({
+      fingerprint: 'fp-stale-gwy16',
+      entity_type: 'gateway',
+      sparkplug_id: 'gwy160000000000400080000',
+      alert_name: 'Gateway Stale',
+      severity: 'warning',
+      summary: 'Playback has not sent a heartbeat for 4509s.',
+      ...over
+    })
+
+    const platformAlert = (over = {}) => alert({
+      fingerprint: 'fp-ingestion-silent',
+      entity_type: 'platform',
+      sparkplug_id: null,
+      alert_name: 'Ingestion Pipeline Silent',
+      severity: 'critical',
+      summary: 'No telemetry has been written for 10 minutes',
+      ...over
+    })
+
+    it('sends a gateway alert to the Gateways page, not the Devices page', () => {
+      const onSelectDevice = vi.fn()
+      const onSelectGateway = vi.fn()
+      render(
+        <AlertPill
+          alerts={[gatewayAlert()]}
+          onSelectDevice={onSelectDevice}
+          onSelectGateway={onSelectGateway}
+        />
+      )
+      fireEvent.click(pill())
+
+      const link = screen.getByTitle(/on the Gateways page$/)
+      fireEvent.click(link)
+      expect(onSelectGateway).toHaveBeenCalledWith('gwy160000000000400080000')
+      expect(onSelectDevice).not.toHaveBeenCalled()
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    it('still sends a device alert to the Devices page', () => {
+      const onSelectDevice = vi.fn()
+      const onSelectGateway = vi.fn()
+      render(
+        <AlertPill
+          alerts={[alert({ entity_type: 'device' })]}
+          onSelectDevice={onSelectDevice}
+          onSelectGateway={onSelectGateway}
+        />
+      )
+      fireEvent.click(pill())
+      fireEvent.click(screen.getByTitle(/on the Devices page$/))
+      expect(onSelectDevice).toHaveBeenCalledWith('dev220000000000400080000')
+      expect(onSelectGateway).not.toHaveBeenCalled()
+    })
+
+    it('treats a row with no entity_type as a device, the way the webhook does', () => {
+      // Rows written before the column existed, and any rule that declares no scope. Reading the
+      // absence as "unknown" would make every historical alert inert.
+      const onSelectDevice = vi.fn()
+      render(<AlertPill alerts={[alert()]} onSelectDevice={onSelectDevice} />)
+      fireEvent.click(pill())
+      fireEvent.click(screen.getByTitle(/on the Devices page$/))
+      expect(onSelectDevice).toHaveBeenCalledWith('dev220000000000400080000')
+    })
+
+    it('leaves a gateway row inert rather than wrong when only the device handler exists', () => {
+      // A consumer with one page and not the other degrades to plain text. The alternative -- fall
+      // back to onSelectDevice -- is the bug this whole describe block exists to close.
+      const onSelectDevice = vi.fn()
+      render(<AlertPill alerts={[gatewayAlert()]} onSelectDevice={onSelectDevice} />)
+      fireEvent.click(pill())
+      expect(document.querySelector('.alert-pill-item-link')).toBeNull()
+      expect(screen.getByText('Gateway Stale')).toBeInTheDocument()
+      expect(onSelectDevice).not.toHaveBeenCalled()
+    })
+
+    it('opens a platform alert in Grafana, because no page here is about the platform', () => {
+      const onSelectDevice = vi.fn()
+      const onSelectGateway = vi.fn()
+      render(
+        <AlertPill
+          alerts={[platformAlert()]}
+          onSelectDevice={onSelectDevice}
+          onSelectGateway={onSelectGateway}
+        />
+      )
+      fireEvent.click(pill())
+
+      const link = document.querySelector('a.alert-pill-item-link')
+      // A REAL ANCHOR, target=_blank -- the same treatment ContextPanel gives this link, so
+      // middle-click and "copy link address" work on the thing most likely to be pasted to whoever
+      // owns the rule.
+      expect(link).toBeTruthy()
+      expect(link.getAttribute('href')).toContain('/alerting/list?search=')
+      expect(link.getAttribute('href')).toContain(encodeURIComponent('Ingestion Pipeline Silent'))
+      expect(link).toHaveAttribute('target', '_blank')
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+      expect(onSelectDevice).not.toHaveBeenCalled()
+      expect(onSelectGateway).not.toHaveBeenCalled()
+    })
+
+    it('says what a fleet-wide alert is about instead of showing an empty id line', () => {
+      render(<AlertPill alerts={[platformAlert()]} />)
+      fireEvent.click(pill())
+      // An empty mono line reads as a lookup that failed. This one has no asset BY CONSTRUCTION --
+      // `platform_alerts_asset_has_wire_id` (0023) requires sparkplug_id to be null here.
+      expect(screen.getByText('Platform-wide')).toBeInTheDocument()
+    })
+  })
+
+  /**
+   * DISMISSAL. The panel is a popover in a header, not a dialog: no backdrop, no focus trap. It
+   * stayed open over whatever the operator did next, covering the top-right of the page they had
+   * moved on to, with the only exits being Escape or a close control they had to go and find.
+   */
+  describe('closing', () => {
+    it('closes when a pointer goes down outside it', () => {
+      render(
+        <div>
+          <button>Somewhere else</button>
+          <AlertPill alerts={[alert()]} />
+        </div>
+      )
+      fireEvent.click(pill())
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+      fireEvent.mouseDown(screen.getByRole('button', { name: 'Somewhere else' }))
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    it('stays open when the pointer goes down inside the panel', () => {
+      // Selecting the text of a summary must not dismiss the thing being read -- which is also why
+      // the hook judges the gesture on mousedown, where it STARTED, rather than on click.
+      render(<AlertPill alerts={[alert()]} />)
+      fireEvent.click(pill())
+      fireEvent.mouseDown(screen.getByText('Thermal Excursion'))
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+
+    it('lets the pill itself still toggle, rather than closing and reopening on one click', () => {
+      // The ref is on the WRAPPER, so the button that opens the panel counts as inside it.
+      render(<AlertPill alerts={[alert()]} />)
+      fireEvent.click(pill())
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+      fireEvent.mouseDown(pill())
+      fireEvent.click(pill())
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+
+    it('binds nothing while it is closed', () => {
+      // A listener on every click in the application, for a panel nobody has opened, is the cost
+      // this guards against.
+      const add = vi.spyOn(document, 'addEventListener')
+      render(<AlertPill alerts={[alert()]} />)
+      expect(add.mock.calls.some(([type]) => type === 'mousedown')).toBe(false)
+      add.mockRestore()
+    })
+  })
 })
