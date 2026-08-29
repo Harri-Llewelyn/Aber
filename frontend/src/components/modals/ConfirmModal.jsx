@@ -10,6 +10,14 @@ import { ActionButton } from '../common/ActionButton'
  * @param {string}   [requireTyped]  When set, the operator must type this exact text before the
  *                                 confirming button becomes usable. See below.
  * @param {string}   [requireTypedLabel]  What the typed value IS, for the field's label.
+ * @param {string}   [confirmClassName]  Button class for the confirming action. Defaults to
+ *                                 `btn btn-danger`, which is right for the destructive callers
+ *                                 that make up most of them -- but NOT for all of them: a dialog
+ *                                 guarding a constructive act (restoring an archived entity) that
+ *                                 painted its confirm button red would tell the operator they were
+ *                                 about to destroy something, which is the opposite of true. A
+ *                                 confirmation exists to make somebody read; a mislabelled colour
+ *                                 makes them read the wrong thing.
  */
 export function ConfirmModal({
   message,
@@ -18,7 +26,8 @@ export function ConfirmModal({
   confirmLabel = 'Confirm',
   pendingLabel = 'Working…',
   requireTyped = null,
-  requireTypedLabel = 'name'
+  requireTypedLabel = 'name',
+  confirmClassName = 'btn btn-danger'
 }) {
   const [pending, runConfirm] = usePendingAction()
   const [typed, setTyped] = useState('')
@@ -94,7 +103,7 @@ export function ConfirmModal({
         <div className="modal-actions">
           <button className="btn btn-ghost" onClick={onCancel} disabled={pending}>Cancel</button>
           <ActionButton
-            className="btn btn-danger"
+            className={confirmClassName}
             pending={pending}
             pendingLabel={pendingLabel}
             disabled={!satisfied}
