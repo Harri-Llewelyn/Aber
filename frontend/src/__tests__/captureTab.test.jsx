@@ -765,6 +765,44 @@ describe('publishing a capture back', () => {
     expect(screen.getByRole('button', { name: /Publish capture/ })).toBeDisabled()
   })
 
+  /**
+   * THE ONE THING THAT MAKES A TARGET WRONG RATHER THAN UNREADY. A gateway that is beating already
+   * has a publisher; a playback adds a second on the same edge node, and their sequence numbers
+   * interleave. Warned, not refused — quiescing a machine and replaying onto it is legitimate.
+   */
+  it('warns when something is already publishing as the target', async () => {
+    api.playbackTargets.mockResolvedValue([
+      { ...TARGET, last_heartbeat: new Date().toISOString(), status: 'ONLINE' }
+    ])
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    expect(await screen.findByText(/is publishing right now/)).toBeInTheDocument()
+    // A warning, so the button is still reachable once the mapping is done.
+    fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
+      { target: { value: 'dev310000000000400080000' } })
+    expect(screen.getByRole('button', { name: /Publish capture/ })).not.toBeDisabled()
+  })
+
+  it('says nothing about live traffic for a quiet target', async () => {
+    api.playbackTargets.mockResolvedValue([
+      { ...TARGET, last_heartbeat: new Date(Date.now() - 10 * 60 * 1000).toISOString(), status: 'OFFLINE' }
+    ])
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    expect(screen.queryByText(/is publishing right now/)).toBeNull()
+  })
+
+  /** The message named a variable and not where it lives, and the first reader asked if it went in the capture file. */
+  it('says where MQTT_PLAYBACK_CREDENTIALS actually goes', async () => {
+    api.playbackWorkerStatus.mockResolvedValue({
+      held_edge_nodes: [], reported_at: new Date().toISOString()
+    })
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    expect(await screen.findByText(/server-side setting, not part of the capture file/)).toBeInTheDocument()
+    expect(screen.getByText(/docker compose up -d playback/)).toBeInTheDocument()
+  })
+
   /** "Holds nothing" and "is not running" are different problems, and only the heartbeat tells them apart. */
   it('says the worker is not running when its report is stale', async () => {
     api.playbackWorkerStatus.mockResolvedValue({

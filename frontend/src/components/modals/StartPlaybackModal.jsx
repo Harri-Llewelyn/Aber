@@ -104,6 +104,11 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
    * worker is worse than no list, because it describes what playback COULD do rather than what it
    * can. Two minutes rather than thirty seconds so a slow tick is not read as a death.
    */
+  // 90 seconds is the window `gateway_status` derives staleness from, so a heartbeat inside it is
+  // the same "currently live" this stack means everywhere else.
+  const isLive = (t) => !!t?.last_heartbeat
+    && (Date.now() - new Date(t.last_heartbeat).getTime()) < 90 * 1000
+
   const WORKER_STALE_MS = 2 * 60 * 1000
   const workerLive = !!worker?.reported_at
     && (Date.now() - new Date(worker.reported_at).getTime()) < WORKER_STALE_MS
@@ -229,13 +234,52 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
         {target && target.gateway_has_broker_credential && workerLive && !workerHolds(target) && (
           <div className="callout" style={{ borderColor: 'var(--danger)', marginTop: '10px' }}>
             <IconShieldAlert size={14} className="callout-icon" />
+            {/* THE MESSAGE NAMED A VARIABLE AND NOT WHERE IT LIVES, and the first person to read it
+                asked whether the password went in the capture file. It does not: this is a
+                server-side secret in the stack's `.env`, because the worker is a container and the
+                broker password is not something a browser may hold. */}
             <div style={{ fontSize: '12px' }}>
               <strong>{target.name}</strong> has a credential, but the playback worker was not given
-              its password, so it cannot authenticate as this gateway. Add it to{' '}
-              <code>MQTT_PLAYBACK_CREDENTIALS</code> as{' '}
-              <code>{`{"${target.sparkplug_id}": "…"}`}</code> and restart the worker. The password
-              is shown only when the credential is minted — issue a new one from Access Control if
-              it was not kept.
+              its password, so it cannot authenticate as this gateway.
+              <br />
+              This is a server-side setting, not part of the capture file. In the stack's{' '}
+              <code>.env</code>, add:
+              <br />
+              <code style={{ display: 'inline-block', margin: '4px 0' }}>
+                {`MQTT_PLAYBACK_CREDENTIALS={"${target.sparkplug_id}":"<password>"}`}
+              </code>
+              <br />
+              then <code>docker compose up -d playback</code>. The password is shown only at the
+              moment the credential is minted — issue a new one from Access Control if it was not
+              kept.
+            </div>
+          </div>
+        )}
+
+        {/* SOMETHING IS ALREADY PUBLISHING AS THIS GATEWAY, which is the one thing that makes a
+            target wrong rather than unready — and nothing said so.
+
+            A playback target is legitimately OFFLINE: nothing publishes as it until a playback
+            runs, which is why the gate deliberately does NOT require ONLINE. The inverse is the
+            warning. A gateway that is beating right now has a live publisher, and a playback adds
+            a second one on the same edge node — so their Sparkplug sequence numbers interleave and
+            the daemon reports permanent message loss for both. That is exactly what
+            `playback_jobs_one_per_target` exists to prevent between two playbacks; it cannot see a
+            simulator or a real appliance doing the same thing.
+
+            A WARNING AND NOT A REFUSAL, because the database cannot tell a gateway that is beating
+            from one that will still be beating in a minute, and re-recording a fault onto a
+            deliberately-quiesced machine is a legitimate thing to want. */}
+        {target && isLive(target) && (
+          <div className="callout callout-warning" style={{ marginTop: '10px' }}>
+            <IconShieldAlert size={14} className="callout-icon" />
+            <div style={{ fontSize: '12px' }}>
+              <strong>{target.name}</strong> is publishing right now. A playback would be a second
+              publisher on the same edge node, so the two sets of Sparkplug sequence numbers
+              interleave and the daemon reports both as losing messages.
+              <br />
+              A playback target is best as a gateway <em>nothing else</em> publishes as — a virtual
+              one created for the purpose, rather than one a simulator or an appliance is driving.
             </div>
           </div>
         )}

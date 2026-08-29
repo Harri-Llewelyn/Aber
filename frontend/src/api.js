@@ -1127,7 +1127,10 @@ const apiMethods = {
   playbackTargets: async () => {
     const { data, error } = await supabase
       .from('gateways')
-      .select('id, name, sparkplug_id, sparkplug_group, is_archived, gateway_has_broker_credential, devices(id, name, sparkplug_id, is_archived)')
+      // `status` and `last_heartbeat` are read to warn about a target something ELSE is already
+      // publishing as -- see StartPlaybackModal. Not to refuse one: a playback target is
+      // legitimately OFFLINE, because nothing publishes as it until a playback runs.
+      .select('id, name, sparkplug_id, sparkplug_group, is_archived, status, last_heartbeat, gateway_has_broker_credential, devices(id, name, sparkplug_id, is_archived)')
       .eq('is_simulated', true)
       .eq('is_archived', false)
       .order('name');
