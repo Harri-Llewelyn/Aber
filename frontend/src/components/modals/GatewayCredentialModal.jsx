@@ -8,11 +8,11 @@ import { IconCheck, IconCopy, IconLock, IconShieldAlert, IconX } from '../common
 const COPY_FEEDBACK_MS = 1600
 
 /**
- * Mint a VIRTUAL gateway's broker credential and show it exactly once.
+ * Mint a HOST-RUN gateway's broker credential and show it exactly once.
  *
  * THE COUNTERPART TO GatewayBundleModal, and it deliberately reads like it. That one hands a
  * physical gateway a CLAIM the appliance exchanges for a credential at first boot, so no password
- * ever reaches a browser. A virtual gateway has no appliance -- `issue_gateway_enrollment_token()`
+ * ever reaches a browser. A host-run gateway has no appliance -- `issue_gateway_enrollment_token()`
  * refuses one outright for exactly that reason -- so the password has to be shown to a person, and
  * this is the one place in the product where that happens.
  *

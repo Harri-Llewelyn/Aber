@@ -20,7 +20,13 @@ const COPY_FEEDBACK_MS = 1600
 const normalise = (value) => (value || '').trim().replace(/\s+/g, ' ').toLowerCase()
 
 /**
- * The setup step for a PHYSICAL gateway: one dialog.
+ * The setup step for a REMOTE gateway: one dialog.
+ *
+ * "Remote", not "physical" -- roadmap 15's vocabulary, and the word the Type column, the filter and
+ * the create form all use. It is also the accurate one for what this dialog does: the bundle exists
+ * because the connector runs on hardware this stack cannot reach, which is a fact about DEPLOYMENT.
+ * Whether that hardware is a physical panel PC or a VM in somebody's cloud was never the question,
+ * and `is_virtual` meaning both was how the old word came to mean three things at once.
  *
  * ---------------------------------------------------------------------------------------------
  * WHY ISSUING IS GUARDED AT ALL.
@@ -151,7 +157,7 @@ export function GatewayBundleModal({ gateway, onClose, showToast, confirmFirst =
   useEscapeKey(backOut, true)
 
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Physical gateway setup">
+    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Remote gateway setup">
       <div className="modal modal-lg">
         <div className="modal-header-row">
           <div className="modal-title" style={{ marginBottom: 0 }}>

@@ -16,7 +16,7 @@
  *
  *   * `enrolled_at`            an appliance redeemed a bundle (0025 / enroll-gateway)
  *   * `credential_revoked_at`  archive or delete rotated it to an unrecorded password (0038)
- *   * a CREDENTIAL_ISSUED row  someone minted one for a virtual gateway through the UI (0041)
+ *   * a CREDENTIAL_ISSUED row  someone minted one for a host-run gateway through the UI (0041)
  *
  * AND CREDENTIALS EXIST THAT NONE OF THOSE RECORD. `scripts/provision-gateways.mjs` issues one per
  * demonstration gateway by calling `mosquitto-provision-gateway.mjs` directly, and

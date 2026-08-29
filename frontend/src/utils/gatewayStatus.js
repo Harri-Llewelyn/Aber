@@ -14,7 +14,7 @@
 export const HEARTBEAT_STALE_MS = 90_000;
 
 /**
- * The two states a PHYSICAL gateway passes through before it has ever published.
+ * The two states a REMOTE gateway passes through before it has ever published.
  *
  *   PENDING_ENROLLMENT  a bundle has been issued; the appliance has not redeemed it yet
  *   AWAITING_BIRTH      the appliance enrolled and holds a credential; no NBIRTH yet

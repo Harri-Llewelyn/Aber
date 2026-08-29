@@ -89,7 +89,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   // The gateway whose bundle modal is open. Held as the OBJECT rather than an id: the modal needs
   // the name and sparkplug_id, and it stays open across a poll that may reorder the list.
   const [bundleForGw, setBundleForGw] = useState(null)
-  // The VIRTUAL counterpart to bundleForGw. Separate state rather than a mode flag on one
+  // The HOST-RUN counterpart to bundleForGw. Separate state rather than a mode flag on one
   // modal: the two are authorised differently, destroy different things, and only one of them
   // ever puts a password on screen.
   const [credentialForGw, setCredentialForGw] = useState(null)
@@ -185,8 +185,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
       setShowForm(false); load()
 
       /**
-       * THE PHYSICAL BRANCH. A virtual gateway is finished the moment its row exists -- it is a
-       * connector running on the app host, and nothing has to be carried anywhere. A PHYSICAL one has
+       * THE REMOTE BRANCH. A host-run gateway is finished the moment its row exists -- it is a
+       * connector running on the app host, and nothing has to be carried anywhere. A REMOTE one has
        * only just started: it needs a bundle, on a machine, before it can publish at all.
        *
        * So the bundle modal opens immediately rather than leaving the operator to find a button. The
@@ -952,11 +952,15 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               gateway_name: selected.gateway_name,
               sparkplug_id: selected.sparkplug_id
             }),
-            title: 'Mint this virtual gateway a broker account and show the password once'
+            // NAMED BY THE CONDITION THE ACTION IS GATED ON, which is `deployment === 'host'`. It
+            // said "this virtual gateway", a word roadmap 15 retired precisely because it meant
+            // three things at once -- and the one it meant HERE is the one this tooltip needs: no
+            // appliance, so the credential is minted in the browser instead of on the box.
+            title: 'Mint this host-run gateway a broker account and show the password once. A Remote gateway enrols itself instead, and its credential never reaches a browser.'
           },
           selected.access_url && {
             label: 'Launch UI', icon: <IconExternalLink size={13} />, href: selected.access_url, primary: true,
-            title: 'Open Node-RED / Virtual Gateway Editor'
+            title: 'Open this gateway’s own console — Node-RED for a host-run connector, the appliance’s web UI for a Remote one'
           },
           // Restore REPLACES Edit on an archived gateway: editing one is refused anyway, and
           // Restore is the only action that means anything there.
