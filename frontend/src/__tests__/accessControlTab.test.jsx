@@ -152,6 +152,31 @@ describe('AccessControlTab', () => {
     expect(screen.getByText(/every RLS policy refuses it/i)).toBeTruthy()
   })
 
+  /**
+   * THE FALLBACK ABOVE IS FOR PRINCIPALS NOBODY COULD HAVE WRITTEN DOWN, not for the ones that ship.
+   *
+   * Two of the three principals this stack seeds rendered as "Undocumented principal" — 0046's
+   * Service_Ingestor and 0056's Service_Playback — because each migration added one and neither
+   * updated KNOWN_PRINCIPALS. The page stayed honest and simply said it did not know, which is the
+   * fallback working; what it then asked an operator to do was go and identify a bare uuid in the
+   * migrations, on the one page whose job is to say what can reach the stack.
+   *
+   * `check-docs-drift.mjs` (11d) is what stops it happening again, since the miss was invisible to
+   * every test that existed. This asserts the visible half.
+   */
+  it('names the two principals npm run setup signs keys for', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listServicePrincipals.mockResolvedValue([
+      { principal_id: 'b0000000-0000-4000-8000-000000000002', roles: ['Operator'], created_at: null, can_sign_in: false },
+      { principal_id: 'b0000000-0000-4000-8000-000000000003', roles: ['Operator'], created_at: null, can_sign_in: false }
+    ])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('Service_Ingestor')).toBeTruthy())
+    expect(screen.getByText('Service_Playback')).toBeTruthy()
+    expect(screen.queryByText(/Undocumented principal/i)).toBeNull()
+  })
+
   it('shows the broker principals and marks which one can publish', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
     render(<AccessControlTab showToast={vi.fn()} />)
@@ -239,15 +264,16 @@ describe('AccessControlTab', () => {
    * THE COVERAGE NOTE, and why an empty inventory needed one.
    *
    * Two of the three principals this stack ships with hold keys that are in use right now --
-   * SUPABASE_INGESTION_KEY and SUPABASE_PLAYBACK_KEY -- and NEITHER can ever appear in this list:
-   * `npm run setup` mints them before the database exists, and they are signed for ten years, which
-   * record_service_token_issued() refuses because its ceiling exists precisely for credentials
-   * nobody can take back.
-   *
-   * So the gap cannot be closed by recording harder, and an unlabelled empty list is read as "no
-   * credentials outstanding" -- on a stack where the two most powerful ones are outstanding. This
+   * SUPABASE_INGESTION_KEY and SUPABASE_PLAYBACK_KEY -- and an unlabelled empty list is read as "no
+   * credentials outstanding", on a stack where the two most powerful ones are outstanding. This
    * inventory is the compensating control README.md's Accepted risks section names by name, so its
    * coverage belongs on its face rather than in a migration header nobody reading the page will see.
+   *
+   * THE NOTE CHANGED WITH #101 AND THIS TEST CHANGED WITH IT. It used to say the two could NEVER
+   * appear -- true of a ten-year token, which record_service_token_issued() refuses outright. They
+   * are 90-day keys now, so the permanent exclusion became a temporary one: `npm run setup` still
+   * signs the FIRST pair before the database exists, and rotating records them. A note still
+   * claiming they can never appear would now be teaching an operator not to bother.
    */
   it('states the credentials it cannot see, so an empty list is not read as none', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
@@ -256,9 +282,11 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
     expect(screen.getByText('SUPABASE_INGESTION_KEY')).toBeTruthy()
     expect(screen.getByText('SUPABASE_PLAYBACK_KEY')).toBeTruthy()
-    // The REASON, not just the exclusion. A note saying "some keys are not listed" invites somebody
-    // to close the gap by listing them, which the ceiling exists to prevent.
-    expect(screen.getByText(/past the 90-day ceiling/i)).toBeTruthy()
+    // THE REASON AND THE WAY OUT. A note saying only "some keys are not listed" invites somebody to
+    // close the gap by hand; this one says why the first pair cannot be recorded and which command
+    // brings them in.
+    expect(screen.getByText(/before this database exists/i)).toBeTruthy()
+    expect(screen.getByText(/keys:rotate/i)).toBeTruthy()
   })
 
   /**

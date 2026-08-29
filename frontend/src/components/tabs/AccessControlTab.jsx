@@ -513,28 +513,33 @@ export function AccessControlTab({ showToast }) {
             </div>
           )}
 
-          {/* WHAT THIS INVENTORY DOES NOT SEE, ON ITS FACE.
+          {/* WHAT THIS INVENTORY DOES NOT SEE, ON ITS FACE — AND THE GAP IS NARROWER NOW (#101).
 
-              The list used to render empty on a stack holding live credentials, and an empty list
-              is read as an assertion that none exist. It is not: the two keys the daemon and the
-              playback worker authenticate with are minted by `npm run setup` BEFORE this database
-              exists, and they run for ten years -- which record_service_token_issued() refuses,
-              because that ceiling exists precisely for credentials nobody can take back.
+              This note used to say the two worker keys could NEVER appear here, and that was true
+              of a ten-year token: record_service_token_issued() refuses anything past
+              service_token_max_days(), because that ceiling exists precisely for credentials nobody
+              can take back. Bounding them at 90 days made them recordable, and
+              `scripts/rotate-service-keys.mjs` records each re-signing before it writes it.
 
-              So the gap cannot be closed by recording harder, and stating it is not a consolation
-              prize: this inventory is the compensating control README.md's Accepted risks section
-              names, and a control whose coverage is unstated is one an operator will over-trust.
+              WHAT REMAINS UNCOVERED IS THE FIRST PAIR ONLY, and the reason is unchanged and
+              unfixable by recording harder: `npm run setup` runs BEFORE this database exists, so
+              there is nothing to record into. A stack that has never rotated therefore shows
+              nothing for these two -- which is now a statement about that stack rather than about
+              the platform, and it names the command that closes it.
 
-              Gateway broker credentials are a different story and ARE covered now -- 0062 gave
-              provisioning a recorder it can actually reach. */}
+              Stating the gap is not a consolation prize: this inventory is the compensating control
+              README.md's Accepted risks section names, and a control whose coverage is unstated is
+              one an operator will over-trust. */}
           <div className="card-footer" style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
             <strong>What this list covers.</strong> Tokens minted by{' '}
-            <code>scripts/mint-mcp-token.mjs</code>, which records each issue before it prints one.
-            It does <strong>not</strong> cover <code>SUPABASE_INGESTION_KEY</code> or{' '}
-            <code>SUPABASE_PLAYBACK_KEY</code>: <code>npm run setup</code> mints those before this
-            database exists, and they are signed for ten years — past the 90-day ceiling the
-            recorder enforces, which is there because none of these tokens can be revoked. They are
-            live whether or not they appear here.
+            <code>scripts/mint-mcp-token.mjs</code> and re-signings by{' '}
+            <code>npm run keys:rotate</code>, each of which records the issue before releasing it.
+            The <strong>first</strong> <code>SUPABASE_INGESTION_KEY</code> and{' '}
+            <code>SUPABASE_PLAYBACK_KEY</code> are not here and cannot be:{' '}
+            <code>npm run setup</code> signs them before this database exists, so there is nothing
+            to record into. Rotating once brings both under this list. They are live whether or not
+            they appear here, and <code>npm run keys:check</code> reports what is in{' '}
+            <code>.env</code> either way.
           </div>
         </div>
 
