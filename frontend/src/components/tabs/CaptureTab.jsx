@@ -1066,10 +1066,70 @@ function PlaybackCard({ job, onStop, stopPending, canManage }) {
  */
 const FAILURE_VISIBLE_MS = 15 * 60 * 1000
 
+/**
+ * Which failures this viewer has already read.
+ *
+ * DISMISSAL HAS TO SURVIVE A RELOAD, which is the whole complaint: a banner that comes back when
+ * the page does has not been dismissed, it has been hidden until the next render. `localStorage`
+ * is the right home -- "I have read this" is a fact about one person at one browser, not about the
+ * job, and putting it in the database would mean one operator's acknowledgement silently clearing
+ * the notice for everybody else.
+ *
+ * Every accessor is wrapped: a private window, cleared site data, or a browser set to refuse
+ * storage all throw here rather than returning empty, and a page that fails to render a table
+ * because it could not read a dismissal list would be a far worse bug than the one being fixed.
+ */
+const DISMISSED_KEY = 'acs-cymru.capture.dismissed-failures'
+
+function readDismissed() {
+  try {
+    const raw = window.localStorage.getItem(DISMISSED_KEY)
+    return new Set(raw ? JSON.parse(raw) : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function writeDismissed(ids) {
+  try {
+    // CAPPED, because this list is only ever appended to. A stack that has run for a year would
+    // otherwise carry every failure id it has ever shown, and the 15-minute window means anything
+    // older than the last few is unreachable anyway.
+    window.localStorage.setItem(DISMISSED_KEY, JSON.stringify([...ids].slice(-50)))
+  } catch {
+    // Nothing to do and nothing worth saying: the banner simply reappears on the next load.
+  }
+}
+
+/**
+ * A failure that has just happened, until it is read.
+ *
+ * TWO WAYS OUT, AND BOTH ARE DELIBERATE. The 15-minute window handles the operator who never
+ * returns to this page; the dismiss button handles the one who is looking at it now and wants it
+ * gone. Neither alone is enough -- the window left a notice sitting there for a quarter of an hour
+ * with no way to say "seen it", and dismissal alone would leave a year-old failure waiting for
+ * somebody to click it.
+ *
+ * NOT A MODAL, which is what was asked for, and the reason is when these arrive. A capture fails
+ * asynchronously and the page may not be open; a dialog would then be waiting to block whatever
+ * the operator came to the page to do, for something that happened ten minutes ago. Worse, three
+ * failures would be three dialogs. Dismissal is the acknowledgement a modal was for, without
+ * seizing the page to get it.
+ */
 function RecentFailures({ jobs, kind = 'capture' }) {
+  const [dismissed, setDismissed] = useState(readDismissed)
+
+  const dismiss = (id) => setDismissed(prev => {
+    const next = new Set(prev)
+    next.add(id)
+    writeDismissed(next)
+    return next
+  })
+
   const cutoff = Date.now() - FAILURE_VISIBLE_MS
   const failed = (jobs || []).filter(j => {
     if (j.status !== 'FAILED' && j.status !== 'CANCELLED') return false
+    if (dismissed.has(j.id)) return false
     // No finished_at means it has only just been written; show it rather than hiding a fresh one.
     if (!j.finished_at) return true
     const at = new Date(j.finished_at).getTime()
@@ -1082,7 +1142,7 @@ function RecentFailures({ jobs, kind = 'capture' }) {
       {failed.map(job => (
         <div key={job.id} className="callout" style={{ borderColor: 'var(--danger)', marginTop: '6px' }}>
           <IconShieldAlert size={14} className="callout-icon" />
-          <div style={{ fontSize: '12px' }}>
+          <div style={{ fontSize: '12px', flex: 1 }}>
             <strong>
               {job.devices?.name || job.gateways?.name
                 || job.subject_sparkplug_id || job.target_edge_node_id}
@@ -1091,6 +1151,14 @@ function RecentFailures({ jobs, kind = 'capture' }) {
             {job.status === 'CANCELLED' ? 'cancelled' : 'failed'}
             {job.error ? `: ${job.error}` : '.'}
           </div>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => dismiss(job.id)}
+            title="Dismiss this notice. It will not come back, on this browser."
+            aria-label={`Dismiss the ${kind} failure notice`}
+          >
+            <IconX size={13} />
+          </button>
         </div>
       ))}
     </div>

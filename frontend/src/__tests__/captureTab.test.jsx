@@ -398,6 +398,42 @@ describe('a failed job', () => {
     expect(await screen.findByText(/recorded no messages/)).toBeInTheDocument()
   })
 
+  /**
+   * DISMISSAL HAS TO SURVIVE A RELOAD. A banner that returns when the page does has not been
+   * dismissed — which was the report: "reloading the page does not remove this error message".
+   */
+  it('stays dismissed across a remount', async () => {
+    const job = {
+      id: 'job-dismissible', status: 'FAILED', subject_sparkplug_id: 'gwy150000000000400080000',
+      gateways: { name: 'Sim_Gateway_Site_BMS' },
+      error: 'recorded no messages', finished_at: new Date().toISOString()
+    }
+    api.recentCaptureJobs.mockResolvedValue([job])
+
+    const first = renderTab()
+    expect(await screen.findByText(/recorded no messages/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Dismiss the capture failure notice/ }))
+    expect(screen.queryByText(/recorded no messages/)).toBeNull()
+
+    // A reload is a fresh mount reading the same job back from the same query.
+    first.unmount()
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    expect(screen.queryByText(/recorded no messages/)).toBeNull()
+  })
+
+  /** The other way out, for the operator who never comes back to the page. */
+  it('hides a failure older than the visible window without being dismissed', async () => {
+    api.recentCaptureJobs.mockResolvedValue([{
+      id: 'job-old', status: 'FAILED', subject_sparkplug_id: 'gwy150000000000400080000',
+      gateways: { name: 'Sim_Gateway_Site_BMS' },
+      error: 'an hour ago', finished_at: new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    }])
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    expect(screen.queryByText(/an hour ago/)).toBeNull()
+  })
+
   it('says nothing when the recent jobs all succeeded', async () => {
     api.recentCaptureJobs.mockResolvedValue([{ id: 'job-8', status: 'COMPLETED' }])
     renderTab()
