@@ -529,9 +529,10 @@ oversight: it makes those gates the only route rather than the tidy one.
 
 **Tokens cannot be revoked.** PostgREST checks the signature, not a session table, so revoking means
 rotating `SUPABASE_JWT_SECRET` and invalidating every key in the stack. Expiry is therefore the only
-bound that exists — 90 days maximum for a token a person holds, ten years for an infrastructure key
-a container holds — and the **Access Control** tab exists to say what is outstanding, because with
-no revocation an accurate inventory *is* the safety story.
+bound that exists — 90 days maximum for any token naming a **principal**, whether a person pasted it
+into a laptop config or a container reads it from `.env`, and ten years only for the anon and
+service-role keys, which name nobody and are the stack's API keys. The **Access Control** tab exists
+to say what is outstanding, because with no revocation an accurate inventory *is* the safety story.
 
 The full argument, including the three revocation designs that were checked and rejected, is in
 [`supabase/README.md`](supabase/README.md#machine-identities).
@@ -580,7 +581,9 @@ polling instead, or waiting for upstream to authenticate before delivering the e
 
 Described in full under [Machine identities](#machine-identities) — a token cannot be withdrawn without rotating
 `SUPABASE_JWT_SECRET` and invalidating every key in the stack, so expiry is the only bound that
-exists: 90 days for a token a person holds, ten years for an infrastructure key a container holds.
+exists: 90 days for any token naming a principal — the ingestion and playback keys included, which
+`npm run keys:rotate` re-signs — and ten years only for the anon and service-role keys, which name
+nobody.
 
 **Accepted because** the three revocation designs that would fix it were checked and rejected for
 reasons recorded in [`supabase/README.md`](supabase/README.md#machine-identities), and because an

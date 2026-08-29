@@ -29,6 +29,12 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+// SHARED WITH scripts/rotate-service-keys.mjs, which signs the same two keys again on a live
+// stack (issue #101). Still no new dependencies -- lib/service-jwt.mjs is node:crypto and nothing
+// else, so this remains a zero-install script.
+import {
+  mintJwt, SERVICE_KEY_DEFAULT_DAYS, INFRASTRUCTURE_KEY_DAYS
+} from './lib/service-jwt.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -43,51 +49,29 @@ const demoMode = process.argv.includes('--demo');
  *  URL parser or a shell and the failure is a connection refused three layers away. */
 const hex = (bytes) => crypto.randomBytes(bytes).toString('hex');
 
-const b64url = (input) =>
-  Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-
 /**
- * Mint a Supabase HS256 JWT.
+ * THE CLAIMS LIVE IN scripts/lib/service-jwt.mjs NOW, shared with the rotation script (issue #101).
+ * What is worth keeping here is why the two kinds of key it mints have different lifetimes.
  *
- * The claims match what the demo tokens carry, because that is what the rest of the stack reads:
- * PostgREST switches to the database role named in `role`, GoTrue checks the signature against
- * SUPABASE_JWT_SECRET, and Kong treats the whole string as an opaque API key. `iss: supabase` is
- * what the Supabase tooling expects to see.
+ * THE ANON AND SERVICE-ROLE KEYS STAY AT TEN YEARS. They carry a `role` and no `sub`, because they
+ * are not anybody -- PostgREST switches to the named database role and RLS never asks who is
+ * calling. They are also the stack's API keys: Kong's `key-auth` admits exactly these two literal
+ * strings, so shortening them needs a story for re-issuing them to every client at once. That is a
+ * different change and is deliberately not attempted here.
  *
- * `exp` is ten years out, matching the demo tokens' 2033. These are infrastructure keys held by
- * services, not user sessions: a short expiry here would silently take the stack off the air on a
- * date nobody wrote down, and there is no refresh path for them.
+ * THE TWO PRINCIPAL KEYS ARE NOW BOUNDED AT 90 DAYS, and this is the defect #101 records. They
+ * carry a `sub` naming a principal seeded by a migration, which is what makes them narrow -- and
+ * what makes them the same kind of credential `scripts/mint-mcp-token.mjs` mints, which has always
+ * enforced a 90-day ceiling. The stack held operators to that rule and exempted its own two keys
+ * from it by a factor of forty.
  *
- * `subject` NAMES A PRINCIPAL AND IS WHAT MAKES A NARROW SERVICE KEY POSSIBLE (see Machine Identities in supabase/README.md).
- * The anon and service-role keys carry a `role` and no `sub`, because they are not anybody --
- * PostgREST switches to the database role and RLS never asks who is calling. A key minted with a
- * `sub` is somebody: `role: authenticated` puts it through RLS like any signed-in user, and
- * `auth.uid()` resolves to the principal seeded in a migration.
- *
- * WHY NOT `scripts/mint-mcp-token.mjs`, which already signs tokens for a named principal. That
- * script enforces a 90-day ceiling, and it is right to: it mints tokens that get pasted into a
- * config file on somebody's laptop, cannot be revoked, and walk out of the building with the
- * machine. An infrastructure key held by a container is the other case entirely -- the one this
- * function's own comment above describes -- and giving it a 90-day expiry would take ingestion off
- * the air on a date nobody wrote down, which is exactly what that comment exists to prevent.
+ * THE ARGUMENT THAT USED TO SIT HERE IS HALF ANSWERED AND HALF STILL TRUE. It said a short expiry
+ * "would silently take the stack off the air on a date nobody wrote down, and there is no refresh
+ * path for them". There is a refresh path now -- `npm run keys:rotate`, which re-signs both with
+ * the SAME SUPABASE_JWT_SECRET and therefore needs no re-issuing of anything else. And the "date
+ * nobody wrote down" was never fixed by length: a 2036 expiry is still a date nobody wrote down.
+ * It is fixed by `npm run keys:check`, which is what makes any lifetime safe.
  */
-function mintJwt(role, secret, subject) {
-  const now = Math.floor(Date.now() / 1000);
-  const header = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const payload = b64url(JSON.stringify({
-    iss: 'supabase',
-    role,
-    ...(subject ? { sub: subject } : {}),
-    iat: now,
-    exp: now + 10 * 365 * 24 * 60 * 60,
-  }));
-  const signature = crypto
-    .createHmac('sha256', secret)
-    .update(`${header}.${payload}`)
-    .digest('base64')
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  return `${header}.${payload}.${signature}`;
-}
 
 console.log('🚀 Running ACS-Cymru Asset Tracking Environment Setup...');
 
@@ -128,6 +112,21 @@ const INGESTION_PRINCIPAL = 'b0000000-0000-4000-8000-000000000002';
 const PLAYBACK_PRINCIPAL = 'b0000000-0000-4000-8000-000000000003';
 
 /**
+ * The two bounded keys, minted here rather than inline below so that their `jti` and expiry can be
+ * REPORTED. That reporting is not decoration: these now expire, and the failure mode this change
+ * has to avoid is an operator learning the date from ingestion stopping. `npm run keys:check`
+ * answers it later; this answers it at the moment they are created.
+ */
+const ingestionKey = mintJwt({
+  role: 'authenticated', secret: jwtSecret, subject: INGESTION_PRINCIPAL,
+  days: SERVICE_KEY_DEFAULT_DAYS,
+});
+const playbackKey = mintJwt({
+  role: 'authenticated', secret: jwtSecret, subject: PLAYBACK_PRINCIPAL,
+  days: SERVICE_KEY_DEFAULT_DAYS,
+});
+
+/**
  * Every value replaced, and why each is the length it is.
  *
  * Two carry hard limits enforced by the container rather than by taste — supabase/realtime refuses
@@ -138,8 +137,8 @@ const generated = {
   POSTGRES_PASSWORD: hex(24),
   DB_PASSWORD: hex(24),
   SUPABASE_JWT_SECRET: jwtSecret,
-  SUPABASE_ANON_KEY: mintJwt('anon', jwtSecret),
-  SUPABASE_SERVICE_ROLE_KEY: mintJwt('service_role', jwtSecret),
+  SUPABASE_ANON_KEY: mintJwt({ role: 'anon', secret: jwtSecret, days: INFRASTRUCTURE_KEY_DAYS }).token,
+  SUPABASE_SERVICE_ROLE_KEY: mintJwt({ role: 'service_role', secret: jwtSecret, days: INFRASTRUCTURE_KEY_DAYS }).token,
   // The ingestion daemon's own credential (see Machine Identities in supabase/README.md). `authenticated` with a `sub`, not a
   // role that bypasses RLS: it authenticates as Service_Ingestor (migration 0046), which holds
   // Operator and therefore cannot write a single row directly. Every write it makes goes through
@@ -149,13 +148,13 @@ const generated = {
   // apikey check admits exactly two literal keys, so this token would be refused at the edge if it
   // were sent as the apikey. It travels as the Authorization bearer, the way i3X passes a caller's
   // own token through to PostgREST.
-  SUPABASE_INGESTION_KEY: mintJwt('authenticated', jwtSecret, INGESTION_PRINCIPAL),
+  SUPABASE_INGESTION_KEY: ingestionKey.token,
   // The playback worker's own credential (migration 0056). Same shape and same reasoning as the
   // line above: `authenticated` with a `sub`, because every write it makes goes through a gate
   // that checks the caller IS Service_Playback. Its narrowness is what makes the storage read arm
   // meaningful -- that policy admits this principal for exactly one object, the capture of the
   // job it is currently running.
-  SUPABASE_PLAYBACK_KEY: mintJwt('authenticated', jwtSecret, PLAYBACK_PRINCIPAL),
+  SUPABASE_PLAYBACK_KEY: playbackKey.token,
   PG_META_CRYPTO_KEY: hex(32),
   REALTIME_DB_ENC_KEY: hex(8),          // EXACTLY 16 chars
   REALTIME_SECRET_KEY_BASE: hex(32),    // AT LEAST 64 chars
@@ -286,6 +285,16 @@ console.log(`✅ Created .env with ${Object.keys(generated).length} freshly gene
 console.log('   The anon and service-role JWTs were signed with the new SUPABASE_JWT_SECRET, so the');
 console.log('   three are a matching set. Nothing in .env is shared with any other install.');
 console.log(`   Left empty on purpose: ${deliberatelyEmpty.join(', ')} (break-glass only).`);
+console.log('');
+// SAID AT THE MOMENT THEY ARE CREATED, because these now expire and the failure this change has to
+// avoid is an operator learning the date from ingestion stopping. Issue #101: the ten years these
+// replace were 40x the ceiling the platform enforces on every other principal-bearing token.
+console.log('🔑 The two service keys expire — they are bounded, unlike the anon and service-role keys:');
+console.log(`   SUPABASE_INGESTION_KEY  jti ${ingestionKey.jti}`);
+console.log(`   SUPABASE_PLAYBACK_KEY   jti ${playbackKey.jti}`);
+console.log(`   Both valid ${SERVICE_KEY_DEFAULT_DAYS} days, until ${ingestionKey.expiresAt.toISOString().slice(0, 10)}.`);
+console.log('   `npm run keys:check` reports the remaining days; `npm run keys:rotate` re-signs both');
+console.log('   in place. Rotation reuses SUPABASE_JWT_SECRET, so nothing else has to be re-issued.');
 console.log('');
 console.log('⚠️  Demo LOGINS are separate and unchanged: admin@acs-cymru.local / acscymru123');
 console.log('   and the other three accounts are seeded by supabase/seed.sql, not by .env.');

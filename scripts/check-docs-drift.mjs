@@ -1435,6 +1435,76 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 11d. The Access Control page describes every DATABASE principal a migration seeds.
+//
+// THE BROKER HALF HAD A CHECK AND THIS HALF DID NOT, which is how two of the three shipped
+// principals came to render as "Undocumented principal" on the page whose whole job is to say what
+// can reach the stack. 0046 seeded Service_Ingestor and 0056 seeded Service_Playback; neither
+// updated KNOWN_PRINCIPALS, and nothing anywhere noticed, because the database list is enumerated
+// at RUNTIME by list_service_principals() and no static check compared it to anything.
+//
+// The failure is quiet and it is the wrong kind of quiet. `describePrincipal()` falls back rather
+// than hiding the row -- correctly, since a machine identity the dashboard cannot name is more
+// interesting than one it can -- so the page stays honest and simply says it does not know. What it
+// then asks the reader to do is open the migrations and work out which one seeded a bare uuid,
+// which is a question this repository can answer at check time instead.
+//
+// ONLY LITERAL, PINNED IDS ARE REQUIRED, and that exclusion is deliberate rather than convenient.
+// `create_service_principal()` (0044) mints a principal at runtime with a generated uuid: there is
+// no id to write down ahead of time, and the fallback text is exactly right for one of those. What
+// this asserts is narrower and is the thing that actually drifted -- a principal PINNED in a
+// migration, which is a fact known when the migration was written.
+// -------------------------------------------------------------------------------------------------
+{
+  const ui = read('frontend/src/utils/serviceIdentities.js');
+
+  // The seeding shape 0034, 0046 and 0056 all share: a bare `(id)` insert with a literal uuid.
+  // Requiring the single-column form is what keeps supabase/seed.sql's four HUMAN accounts out --
+  // those are a multi-column insert carrying an email and a password, and they are not service
+  // principals at all.
+  const seeded = new Map();
+  const migrationDir = 'supabase/migrations';
+  const migrations = readdirSync(join(REPO, migrationDir), { withFileTypes: true })
+    .filter((e) => e.isFile() && e.name.endsWith('.sql'))
+    .map((e) => e.name)
+    .sort();
+  for (const file of migrations) {
+    const sql = read(`${migrationDir}/${file}`);
+    for (const [, id] of sql.matchAll(
+      /INSERT\s+INTO\s+auth\.users\s*\(\s*id\s*\)\s*VALUES\s*\(\s*'([0-9a-f-]{36})'\s*\)/gi
+    )) {
+      if (!seeded.has(id)) seeded.set(id, file);
+    }
+  }
+
+  const described = new Set(
+    [...ui.matchAll(/'([0-9a-f-]{36})':\s*\{/g)].map((m) => m[1])
+  );
+
+  if (seeded.size === 0) {
+    fail(
+      'could not find any pinned service principal in supabase/migrations. 0034, 0046 and 0056 each ' +
+        "seed one with `INSERT INTO auth.users (id) VALUES ('<uuid>')` -- if that shape changed, " +
+        'this check needs to change with it rather than silently passing.'
+    );
+  } else {
+    const missing = [...seeded].filter(([id]) => !described.has(id));
+    if (missing.length) {
+      fail(
+        'frontend/src/utils/serviceIdentities.js has no KNOWN_PRINCIPALS entry for: ' +
+          missing.map(([id, file]) => `${id} (seeded by ${file})`).join(', ') +
+          '.\n      The Access Control page renders these as "Undocumented principal", which tells an\n' +
+          '      operator that an identity able to reach the stack is one the dashboard cannot name.'
+      );
+    } else {
+      pass(
+        `the Access Control page names all ${seeded.size} service principals pinned by a migration`
+      );
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 12. `provision-gateways.mjs` owns the demonstration floor, and three files have to agree with it.
 //
 // THE DUPLICATION THIS USED TO POLICE IS GONE, and what replaced it is worth stating because the

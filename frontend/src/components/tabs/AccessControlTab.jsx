@@ -21,6 +21,7 @@ import {
   tokenStatusDetail,
   tokenStatusLabel,
   tokenStatusTone,
+  TOKEN_STATES,
 } from '../../utils/serviceIdentities'
 import { gatewayType, gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone } from '../../utils/gatewayType'
 
@@ -490,27 +491,48 @@ export function AccessControlTab({ showToast }) {
                       <td style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '40ch' }}>
                         {roleReach(p.roles)}
                       </td>
+                      {/* SAID ONCE. The detail was rendered as a tooltip AND as a paragraph below
+                          the badge -- the identical tokenStatusDetail(status) string, twice, in a
+                          34ch column. It reads as two facts and is one.
+
+                          The tooltip is the copy that survives, matching the Identity column beside
+                          it, and it takes that column's dotted underline with it: a title on a
+                          plain element is an affordance nobody can see. */}
                       <td>
                         <span
                           className={`badge badge-${tokenStatusTone(status)}`}
-                          style={{ fontSize: '11px' }}
+                          style={{
+                            fontSize: '11px',
+                            textDecoration: 'underline dotted var(--text-muted)',
+                            textUnderlineOffset: '3px',
+                            cursor: 'help',
+                          }}
                           title={tokenStatusDetail(status)}
                         >
                           {tokenStatusLabel(status)}
                         </span>
-                        <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '4px', maxWidth: '34ch' }}>
-                          {tokenStatusDetail(status)}
-                        </div>
                       </td>
                       {/* THE COMMAND, NOT A BUTTON. Minting stays on the host deliberately (roadmap
                           §13): these tokens cannot be revoked, so issuing one should cost more than
                           a click. What the page can do is remove the part that is error-prone --
-                          transcribing a UUID -- so the whole line is copyable. */}
+                          transcribing a UUID -- so the whole line is copyable.
+
+                          IT IS PER-PRINCIPAL, AND IT USED NOT TO BE. Every row rendered
+                          `mint-mcp-token.mjs --principal <id>`, which is wrong for two of the three
+                          this stack ships with -- and wrong in the direction that does damage. That
+                          script WOULD sign a token for Service_Ingestor: same subject, same secret,
+                          entirely valid. No worker would ever read it, because the daemon takes its
+                          key from the environment. The result is a second unrevocable credential
+                          for a privileged identity, issued by an operator who was following the
+                          page, and nothing fixed. It also contradicted the coverage note directly
+                          below it, which named the right commands all along. */}
                       <td>
                         <CopyableId
-                          value={`node scripts/mint-mcp-token.mjs --principal ${p.principal_id}`}
+                          value={meta.mintCommand.replace('{id}', p.principal_id)}
                           label="mint command"
-                          title="Copy the command. It runs on the host that has .env, records the issue in the Digital Thread, and only then prints the token."
+                          title={meta.mintCommand.startsWith('npm run keys:rotate')
+                            ? 'Copy the command. This identity\'s key lives in .env and is read at boot, so rotating it — not minting a new token — is what changes what the process presents. It records the issue before writing, and names the containers to restart.'
+                            : 'Copy the command. It runs on the host that has .env, records the issue in the Digital Thread, and only then prints the token.'}
                           onNotify={showToast}
                         />
                       </td>
@@ -522,29 +544,34 @@ export function AccessControlTab({ showToast }) {
             </div>
           )}
 
-          {/* WHAT THIS INVENTORY DOES NOT SEE, ON ITS FACE.
+          {/* SHOWN ONLY WHILE IT IS TRUE OF THIS STACK, which is the fix rather than deleting it.
 
-              The list used to render empty on a stack holding live credentials, and an empty list
-              is read as an assertion that none exist. It is not: the two keys the daemon and the
-              playback worker authenticate with are minted by `npm run setup` BEFORE this database
-              exists, and they run for ten years -- which record_service_token_issued() refuses,
-              because that ceiling exists precisely for credentials nobody can take back.
+              As a permanent footer it had become self-contradicting: after a rotation both service
+              principals display "1 active token" and the paragraph beneath them said they "are not
+              here and cannot be". Only careful parsing of "the first" reconciled those, and nobody
+              parses a footer carefully.
 
-              So the gap cannot be closed by recording harder, and stating it is not a consolation
-              prize: this inventory is the compensating control README.md's Accepted risks section
-              names, and a control whose coverage is unstated is one an operator will over-trust.
+              DELETING IT OUTRIGHT WOULD REOPEN THE DEFECT IT WAS WRITTEN FOR (#91). On a stack that
+              has never rotated, this list genuinely IS empty for the two most powerful credentials
+              on the box -- `npm run setup` signs them before the database exists, so there is
+              nothing to record into -- and an unlabelled empty list is read as "nothing
+              outstanding". This inventory is the compensating control README.md's Accepted risks
+              section names, and a control whose coverage is unstated is one an operator over-trusts.
 
-              Gateway broker credentials are a different story and ARE covered now -- 0062 gave
-              provisioning a recorder it can actually reach. */}
-          <div className="card-footer" style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-            <strong>What this list covers.</strong> Tokens minted by{' '}
-            <code>scripts/mint-mcp-token.mjs</code>, which records each issue before it prints one.
-            It does <strong>not</strong> cover <code>SUPABASE_INGESTION_KEY</code> or{' '}
-            <code>SUPABASE_PLAYBACK_KEY</code>: <code>npm run setup</code> mints those before this
-            database exists, and they are signed for ten years — past the 90-day ceiling the
-            recorder enforces, which is there because none of these tokens can be revoked. They are
-            live whether or not they appear here.
-          </div>
+              So it is conditional on the state it describes. It appears when a principal has no
+              token on record, says which command closes that, and disappears once none does --
+              taking the contradiction with it. The "see the coverage note below" text in the
+              TOKENS cell is governed by the same condition, so it can never point at nothing. */}
+          {principals.some(p => tokenStatus(tokens.get(p.principal_id)).state === TOKEN_STATES.NONE) && (
+            <div className="card-footer" style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+              <strong>Why a row can show no token.</strong> This list holds what was{' '}
+              <em>recorded</em> at issue — by <code>scripts/mint-mcp-token.mjs</code>, or by{' '}
+              <code>npm run keys:rotate</code> for the two keys in <code>.env</code>.{' '}
+              <code>npm run setup</code> signs that pair before this database exists, so the first
+              of each is live but unrecorded; rotating once brings them in.{' '}
+              <code>npm run keys:check</code> reports what <code>.env</code> holds either way.
+            </div>
+          )}
         </div>
 
         <div className="card" style={{ marginTop: '12px' }}>

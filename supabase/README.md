@@ -871,17 +871,25 @@ leak for one junk account per gateway ever deleted.
 ### What the inventory still cannot see
 
 `npm run setup` mints `SUPABASE_INGESTION_KEY` and `SUPABASE_PLAYBACK_KEY` — the keys the ingestion
-daemon and the playback worker authenticate with — **before this database exists**, and signs them
-for ten years. Measured: 3650 days and ~2440 days, with no `jti`.
+daemon and the playback worker authenticate with — **before this database exists**. There is
+nothing to record into at that moment, and no arrangement of the code changes that.
 
-`record_service_token_issued()` refuses both, and correctly: `service_token_max_days()` is 90, and
-that ceiling exists *because* these tokens cannot be revoked. So the gap cannot be closed by
-recording harder. Closing it properly means either shortening those two keys' lifetime — for which
-there is no rotation path today — or raising a ceiling that is load-bearing.
+So on a stack that has never rotated, those two principals show *"No token recorded"*. That is a
+statement about **that stack**, not about the platform, and one command closes it:
 
-Until that is decided, the Access Control page **states the gap on its face** rather than rendering
-an empty list that reads as "nothing outstanding". An inventory whose coverage is unstated is one an
-operator will over-trust, and this inventory is the compensating control
+```bash
+npm run keys:rotate          # re-signs both, recording each before it writes
+```
+
+**This gap used to be permanent, for a second reason that is now gone.** Those keys were signed for
+**ten years** — measured at 3650 and ~2440 days, with no `jti` — and `record_service_token_issued()`
+refuses anything past `service_token_max_days()`, so they could never have appeared here however
+hard anything tried. They are bounded at 90 days now; see
+[Rotating the two service keys](#rotating-the-two-service-keys).
+
+The Access Control page **states its coverage on its face** rather than rendering an empty list that
+reads as "nothing outstanding". An inventory whose coverage is unstated is one an operator will
+over-trust, and this inventory is the compensating control
 [Accepted risks](../README.md#accepted-risks) names by name.
 
 ### There is no revocation, so expiry is the whole safety story
@@ -902,18 +910,52 @@ unrevocable credential a button press with a tidy audit trail of a thing nobody 
 the wrong half well is worse than not solving it, because the clean implementation reads as safety.**
 So minting stays on the host.
 
-Two expiry regimes, and the split is deliberate:
+Two expiry regimes, and the split is deliberate — but the line falls between **keys that name a
+principal** and **keys that name nobody**, not between scripts:
 
-| Minted by | Expiry | Why |
+| Key | Expiry | Why |
 | :--- | :--- | :--- |
-| `mint-mcp-token.mjs` | 30 days default, **90 ceiling** | Pasted into a config file on somebody's laptop. It walks out of the building with the machine, and cannot be revoked, so the expiry is the only bound that exists |
-| `setup.mjs` | 10 years | Infrastructure keys held by a container, alongside the anon and service-role keys. A short expiry here takes the stack off the air on a date nobody wrote down, and there is no refresh path |
+| `mint-mcp-token.mjs` tokens | 30 days default, **90 ceiling** | Pasted into a config file on somebody's laptop. It walks out of the building with the machine, and cannot be revoked, so the expiry is the only bound that exists |
+| `SUPABASE_INGESTION_KEY`, `SUPABASE_PLAYBACK_KEY` | **90 days**, rotatable | They carry a `sub`, so they are the same kind of credential as the row above and are bounded by the same ceiling. `npm run keys:rotate` re-signs them |
+| `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | 10 years | Not anybody: `role` and no `sub`, so RLS never asks who is calling. They are also the stack's **API keys** — Kong's `key-auth` admits exactly these two literal strings — so shortening them needs a story for re-issuing them to every client at once |
 
 The ceiling is enforced in both the script and the database, deliberately duplicated: what it bounds
 cannot be revoked, so it should not be removable by editing one file. `mint-mcp-token.mjs` also
 **records before it prints** — the token exists nowhere until stdout, so a failed audit write costs
 a row describing a credential nobody holds, where the other order costs an unrevocable credential in
 the wild with no record of it.
+
+### Rotating the two service keys
+
+The middle row used to read *10 years*, alongside a note that a short expiry would take the stack
+off the air "on a date nobody wrote down, and there is no refresh path". Half of that was right and
+the other half was the defect ([#101](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/101)):
+
+* **There is a refresh path**, and building it was cheap because these keys are signed with
+  `SUPABASE_JWT_SECRET` and **re-signing them does not rotate that secret**. A new token with a
+  later `exp` is valid the instant it is signed, so nothing else is re-issued — not the anon key,
+  not the service-role key, not a gateway credential.
+* **Length never fixed "a date nobody wrote down"**, it deferred it to 2036 and removed every
+  chance to notice on the way. Visibility fixes it, which is what `--check` is for.
+
+```bash
+npm run keys:check    # days remaining per key, exits non-zero within 14 days of expiry
+npm run keys:rotate   # re-sign both, in place in .env, recording each issuance first
+docker compose up -d --force-recreate ingestion playback
+```
+
+The restart is **not optional and not automatic**. Both workers read their key once at import
+(`os.getenv` in `ingestion.py` and `playback_worker.py`), so until they are recreated they are still
+presenting the previous token — which still works, and is exactly what makes it easy to believe a
+rotation is finished when it is not. `keys:rotate` ends by saying so.
+
+On Kubernetes `.env` is not the source of truth, so `--print` emits the two assignments without
+touching it; update the Secret and `kubectl rollout restart deploy/ingestion deploy/playback`.
+
+**Rotation shortens exposure going forward; it cannot withdraw a key already issued.** PostgREST
+validates a signature and consults no table, so the previous key stays valid until its own `exp` —
+which is the entire argument for the ceiling. Rotating a 90-day key leaves at most 90 days of
+overlap. Rotating a ten-year one left ten years.
 
 ### The Access Control page states what is outstanding
 
