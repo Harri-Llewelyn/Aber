@@ -642,6 +642,23 @@ function edgeFunctionNames() {
       vocabulary: they write entity_type = 'service_principals', which is NOT a table, so every one
       of their rows answered "absent from all three" and was hidden as a deleted asset. 0045 scopes
       the question to the three types that can answer it. The anti-join itself is unchanged.`,
+    'public.revoke_credential_on_decommission': `0038 gates both arms on
+      gateway_holds_a_credential(), which is \`NOT is_virtual AND enrolled_at IS NOT NULL\` and is
+      therefore false for every gateway a provisioned stack has; 0063 gates them on
+      gateway_has_broker_credential() (0056) instead. Demonstrated before the fix: a virtual
+      gateway's broker credential kept publishing after its row was DELETED, and nothing was ever
+      queued in net.http_request_queue -- the path was dead code rather than failing. THE BODY IS
+      REPRODUCED IN FULL, so the archive arm, the transition guard and the optimistic stamp stay in
+      the file that defines the live function. The guard 0040 documents is preserved rather than
+      removed: the new predicate still cannot admit a gateway that never held an account, so
+      revocation cannot CREATE one through the add-only credential service.
+      test_credential_revocation.py asserts both directions.`,
+    'public.sweep_gateway_credential_revocations': `Same swap as the trigger above, in the same
+      migration and for the same reason. The sweep is the retry path for a trigger call that did
+      not land, so leaving it on the old predicate would have left the safety net with a hole in
+      exactly the shape of the bug -- a virtual gateway whose revocation failed silently would
+      never have been retried. Everything else, including the clear-the-optimistic-stamp statement
+      and the LIMIT 200, is 0038's text.`,
     'public.platform_health_rows': `0029 excludes archived gateways from the gateway_stale arm and
       nothing else, which was right when it was written; 0061 ALSO excludes shadow gateways. The
       Playback gateway (0060) is never expected to heartbeat -- nothing publishes as it until a

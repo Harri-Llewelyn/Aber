@@ -739,7 +739,7 @@ function provisionCredential(sparkplugId, gatewayIsNew) {
  * The host and OS user are CLAIMED. 0062 stores them under a `claimed` key because the database
  * can verify neither, and this script is not in a position to prove anything about itself either.
  */
-async function recordCredentialIssued(gatewayId, { rotated }) {
+async function recordCredentialIssued(gatewayId, { rotated, script = 'scripts/provision-gateways.mjs' }) {
   await rest('/rpc/record_gateway_credential_issued_by_service', {
     method: 'POST',
     body: JSON.stringify({
@@ -748,10 +748,50 @@ async function recordCredentialIssued(gatewayId, { rotated }) {
         rotated,
         os_user: process.env.USER || process.env.USERNAME || null,
         host: hostname(),
-        script: 'scripts/provision-gateways.mjs',
+        script,
       },
     }),
   });
+}
+
+/**
+ * Record a credential this script did NOT issue, because a previous run did and nothing wrote it
+ * down.
+ *
+ * WHY A RE-RUN IS THE BACKFILL. Before 0062 nothing recorded what provisioning issued, so an
+ * existing install has gateways whose broker accounts work and whose platform record is empty. That
+ * is not only a reporting gap any more: since 0063, revocation is gated on
+ * `gateway_has_broker_credential()`, which for a virtual gateway IS that record. No row means no
+ * revocation on archive or delete -- the credential outlives the gateway, silently, which is the
+ * defect 0063 exists to close.
+ *
+ * ONLY WHEN THE BROKER ACTUALLY HAS THE ACCOUNT. `credentialExists()` returns null when it cannot
+ * tell -- the broker is down, kubectl is unconfigured -- and null is treated as "exists" everywhere
+ * else in this file, deliberately, because guessing wrong there rotates a working credential.
+ * HERE THE SAFE DIRECTION IS THE OPPOSITE ONE: a record written on a guess asserts a credential
+ * exists when it may not, in a table nothing can prune, and it would make revocation ask the broker
+ * to rotate an account that never existed -- which the add-only service answers by CREATING one.
+ * So this acts on `true` and on nothing else.
+ *
+ * IT CLAIMS TO BE A BACKFILL, in the one field a caller may assert. 0062 lifts `script` out of the
+ * context as a claim, and a row that says it was written by a backfill is honest about being a
+ * platform OBSERVATION rather than a witnessed issuance. Nobody watched this password being minted.
+ */
+async function backfillCredentialRecord(row) {
+  if (dryRun) return false;
+  if (credentialExists(row.sparkplug_id) !== true) return false;
+
+  const existing = await rest(
+    `/digital_thread?entity_id=eq.${row.id}&entity_type=eq.gateways` +
+    '&action=eq.CREDENTIAL_ISSUED&select=id&limit=1'
+  );
+  if (existing.length > 0) return false;
+
+  await recordCredentialIssued(row.id, {
+    rotated: false,
+    script: 'scripts/provision-gateways.mjs (backfill)',
+  });
+  return true;
 }
 
 // --- main -------------------------------------------------------------------------------------
@@ -765,6 +805,8 @@ async function main() {
   // Credentials that reached the broker and not the audit trail. Reported at the end rather than
   // thrown at the moment, so one failure does not abandon a run that is issuing several.
   const unrecorded = [];
+  // Credentials a PREVIOUS run issued and nothing recorded, caught up on this one.
+  const backfilled = [];
   for (const spec of GATEWAYS) {
     console.log(`\n${spec.name} -- ${spec.description}`);
     const { row, created } = await ensureGateway(spec);
@@ -817,6 +859,18 @@ async function main() {
       } catch (err) {
         unrecorded.push({ name: spec.name, sparkplugId: row.sparkplug_id, reason: err.message });
       }
+    } else {
+      // NO CREDENTIAL WAS ISSUED, which since 0063 is the case worth acting on rather than the
+      // uninteresting one: the gateway kept an account this run did not touch, and if a run before
+      // 0062 issued it then nothing recorded it -- so revocation cannot see it either.
+      try {
+        if (await backfillCredentialRecord(row)) {
+          backfilled.push(row.sparkplug_id);
+          console.log('  recorded the credential it already holds (nothing had)');
+        }
+      } catch (err) {
+        unrecorded.push({ name: spec.name, sparkplugId: row.sparkplug_id, reason: err.message });
+      }
     }
   }
 
@@ -827,6 +881,18 @@ async function main() {
       '\nNo credentials were issued -- every gateway already existed and kept the password it has.\n' +
       'Pass --rotate to reissue them (and then update .env, or Node-RED keeps using the old one).'
     );
+    if (backfilled.length > 0) {
+      console.log(
+        `\nRecorded ${backfilled.length} credential(s) that were already at the broker with no ` +
+        'platform record:\n' +
+        backfilled.map((id) => `  ${id}`).join('\n') +
+        '\n\nThose gateways can now be revoked. Until this run, archiving or deleting one left its\n' +
+        'broker account working -- revocation is gated on the record (0063), and there was none.'
+      );
+    }
+    // THE SAME REPORT AS THE ISSUING PATH, and it has to be here too: this branch returns early, so
+    // a backfill that failed would otherwise leave the run green with the gap still open.
+    reportUnrecorded(unrecorded);
     return;
   }
 
@@ -872,28 +938,41 @@ async function main() {
     'Re-running this script rotates them; it does not read them back.'
   );
 
-  // ---------------------------------------------------------------------------------------------
-  // A CREDENTIAL THAT REACHED THE BROKER AND NOT THE AUDIT TRAIL FAILS THE RUN, after the passwords
-  // have been printed and written.
-  //
-  // The alternative -- a warning -- restores the defect this whole change closes, quietly: the
-  // account works, the demonstrator comes up, and the only symptom is a page that says `No platform
-  // record` for a gateway that holds one. Nobody reads a warning in a script that ended with a
-  // success message and a block of credentials.
-  // ---------------------------------------------------------------------------------------------
-  if (unrecorded.length > 0) {
-    console.error(
-      `\n${unrecorded.length} credential(s) were issued at the broker and NOT recorded in the ` +
-      'audit trail:\n' +
-      unrecorded.map((u) => `  ${u.name} (${u.sparkplugId}): ${u.reason}`).join('\n') +
-      '\n\nThe passwords above are live and usable. What is missing is the platform\'s record ' +
-      'that they exist,\nwhich is what the Access Control page reports as the credential ' +
-      'inventory -- and, because these\ncredentials cannot be revoked, that inventory is the ' +
-      'compensating control rather than a nicety.\n\n' +
-      'Check that migration 0062 has been applied (db-init replays it on every boot) and re-run.'
+  if (backfilled.length > 0) {
+    console.log(
+      `\nRecorded ${backfilled.length} credential(s) that were already at the broker with no ` +
+      'platform record.\nThose gateways can now be revoked on archive or delete; until this run ' +
+      'they could not be (0063).'
     );
-    process.exitCode = 1;
   }
+
+  reportUnrecorded(unrecorded);
+}
+
+/**
+ * A CREDENTIAL THAT REACHED THE BROKER AND NOT THE AUDIT TRAIL FAILS THE RUN, after the passwords
+ * have been printed and written.
+ *
+ * The alternative -- a warning -- restores the defect this whole change closes, quietly: the
+ * account works, the demonstrator comes up, and the only symptom is a page that says `No platform
+ * record` for a gateway that holds one. Nobody reads a warning in a script that ended with a
+ * success message and a block of credentials.
+ *
+ * SINCE 0063 IT IS NOT ONLY A REPORTING GAP. Revocation is gated on that record for a virtual
+ * gateway, so an unrecorded credential is one the platform cannot withdraw when the gateway is
+ * archived or deleted.
+ */
+function reportUnrecorded(unrecorded) {
+  if (unrecorded.length === 0) return;
+  console.error(
+    `\n${unrecorded.length} credential(s) are at the broker and NOT recorded in the audit trail:\n` +
+    unrecorded.map((u) => `  ${u.name} (${u.sparkplugId}): ${u.reason}`).join('\n') +
+    '\n\nAny passwords above are live and usable. What is missing is the platform\'s record ' +
+    'that they exist,\nwhich is what the Access Control page reports as the credential ' +
+    'inventory -- and what revocation\nreads to decide whether there is anything to withdraw.\n\n' +
+    'Check that migration 0062 has been applied (db-init replays it on every boot) and re-run.'
+  );
+  process.exitCode = 1;
 }
 
 main().catch((err) => {

@@ -719,6 +719,37 @@ an auditor reads to check that did not happen, exactly the thing it was written 
 none: it is bounded by revocation (`0038`), not by a countdown. Inventing an `expires_at` would put a
 reassuring date against a credential that has no such date.
 
+### Revocation reads that record, which is why it never worked (`0063`)
+
+`0038` rotates a decommissioned gateway's broker credential to a password nobody records. **It never
+fired for a virtual gateway, which is every gateway a provisioned stack has**, because it gated on
+`gateway_holds_a_credential()`. Demonstrated end to end: create a virtual gateway, give it a broker
+account, publish, `DELETE` the row, and it went on publishing — with nothing queued in
+`net.http_request_queue`, so the revocation was never attempted rather than failing.
+
+**The exclusion was deliberate and its purpose was right.** `0040`'s header says so: *"The guard is
+there so revocation cannot CREATE an account by rotating one that never existed, and by that
+definition a simulator gateway holds nothing."* Revocation goes through an **add-only** credential
+service, so asking it to rotate an account that does not exist provisions one. What was wrong is the
+second half — a simulator gateway holds exactly what `provision-gateways.mjs` issued it.
+
+So `0063` swaps both the trigger and the pg_cron sweep onto `gateway_has_broker_credential()`, which
+admits a virtual gateway **only when a `CREDENTIAL_ISSUED` row exists**. That closes the leak and
+keeps `0040`'s guarantee: a gateway that never held an account still cannot have one created for it
+by being deleted. Revoking unconditionally was the obvious alternative and would have traded the
+leak for one junk account per gateway ever deleted.
+
+**Two things SQL cannot reach, and both are on the host:**
+
+- **Credentials issued before `0062`** have no record, so the predicate skips them. A re-run of
+  `npm run provision:gateways` backfills one for any gateway whose broker account exists — recorded
+  as a claim by `scripts/provision-gateways.mjs (backfill)`, because nobody witnessed that mint.
+- **Accounts whose gateway row is gone** cannot fire a trigger at all.
+  `scripts/revoke-orphaned-broker-accounts.mjs` reads the password file, subtracts every gateway row
+  (archived included — those belong to the trigger and the sweep), and rotates what is left through
+  `revoke_gateway_credential()`. Dry run by default. It considers only `gwy` + 21 hex characters, so
+  it can never select `factoryplus_ingestion` and stop the stack ingesting.
+
 ### What the inventory still cannot see
 
 `npm run setup` mints `SUPABASE_INGESTION_KEY` and `SUPABASE_PLAYBACK_KEY` — the keys the ingestion
