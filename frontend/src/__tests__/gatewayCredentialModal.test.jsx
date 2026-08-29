@@ -114,6 +114,35 @@ describe('GatewayCredentialModal', () => {
     await waitFor(() => expect(written.length).toBe(1))
     expect(written[0]).toContain(`MQTT_GW_<NAME>_USER=${CREDENTIAL.mqtt_username}`)
     expect(written[0]).toContain(`MQTT_GW_<NAME>_PASSWORD=${CREDENTIAL.password}`)
+    // Twice: the comment inside the block, and the hint under it that says where to find the value.
+    expect(screen.getAllByText(/acsCredentialsEnv/).length).toBeGreaterThan(0)
+  })
+
+  /**
+   * A PLAYBACK GATEWAY'S PASSWORD GOES SOMEWHERE ELSE ENTIRELY (0060). It has no Node-RED broker
+   * node, so the `acsCredentialsEnv` pairing is advice that cannot be followed -- and the operator
+   * only finds that out after the one dialog that will ever show the password has closed.
+   *
+   * The playback worker reads ONE variable keyed by sparkplug_id, and that key IS derivable, so
+   * this block is pasteable whole rather than carrying a placeholder.
+   */
+  it('points a playback gateway at the playback worker, not at Node-RED', async () => {
+    api.mintGatewayCredential.mockResolvedValue(CREDENTIAL)
+    render(<GatewayCredentialModal gateway={{ ...GATEWAY, is_shadow: true }}
+      onClose={vi.fn()} showToast={vi.fn()} />)
+    await confirmAndMint()
+
+    await waitFor(() => expect(screen.getByText(/For \.env/i)).toBeTruthy())
+    fireEvent.click(screen.getByText(/Copy block/i))
+
+    await waitFor(() => expect(written.length).toBe(1))
+    expect(written[0]).toContain(
+      `MQTT_PLAYBACK_CREDENTIALS={"${CREDENTIAL.mqtt_username}":"${CREDENTIAL.password}"}`)
+    // No placeholder to substitute, and no mention of a flow it does not appear in.
+    expect(written[0]).not.toContain('<NAME>')
+    expect(screen.queryAllByText(/acsCredentialsEnv/)).toHaveLength(0)
+    expect(screen.queryAllByText(/Node-RED/)).toHaveLength(0)
+    expect(screen.getByText(/restart the playback worker/i)).toBeInTheDocument()
   })
 
   /**

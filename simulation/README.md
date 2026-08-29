@@ -400,6 +400,18 @@ one per message, wrapping 255 → 0, and is what lets `ingestion.py` detect that
 missing; under RBE that is the only way it can find out, because a metric that stopped arriving
 looks exactly like a metric that stopped changing.
 
+**`seq` belongs to the EDGE NODE, not to the device**, and every publisher under one gateway shares
+it — the three Cell 1 devices, and that gateway's own heartbeat. An `NBIRTH` restarts the run at
+zero; a `DBIRTH` does not, and consumes a number like any other message.
+
+> **This was wrong until it was measured.** Each device subflow kept its own counter in `context`,
+> which Node-RED scopes to the *subflow instance* — so Cell 1 published four independent sequences
+> into one edge node's stream. The daemon did exactly what it should with that: concluded messages
+> were lost and asked for a rebirth, several hundred times an hour on a healthy fleet. The counter
+> now lives in `global` under `seq_<edge node>`, which is the only scope a subflow instance and a
+> node on the tab can both reach — `flow` is no more shared than `context` was, because inside a
+> subflow it is the instance's own scope.
+
 `Asset_ID` and `Asset_Name` are **not** in `DDATA`. They are immutable, declared in `DBIRTH`, and
 discarded by the daemon's identity-metric filter before reaching the historian — the topic is what
 identifies the device. (`DBIRTH` still carries `Asset_ID` as a cross-check: if it disagrees with

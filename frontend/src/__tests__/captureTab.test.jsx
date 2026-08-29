@@ -16,10 +16,11 @@ import { tabIsVisible, navDensity, TABS } from '../App'
  *      routine re-record. The dialog is the only thing standing there, and a dialog that says "are
  *      you sure" does not do the job -- so the tests assert the timestamp AND the note are in it.
  *
- *   2. `birth_captured = false` HAS TO BE VISIBLE ON THE LIST. A capture with no NBIRTH replays as
- *      `unresolved_alias` against an alias-optimised gateway and drops every metric, from a file
- *      whose size and message count look entirely normal. If the badge is missing, nothing else on
- *      the page distinguishes the two.
+ *   2. `birth_captured = false` HAS TO BE VISIBLE ON THE LIST, AND MUST NOT OVERSTATE ITSELF. A
+ *      capture with no NBIRTH drops every metric only when it USES ALIASES; one whose metrics carry
+ *      their full names replays perfectly well and merely leaves the devices unannounced. The badge
+ *      shipped saying the first about both, which told operators a good capture was broken — so
+ *      both branches are pinned below.
  *
  * The rest is the shape the daemon and the schema require: a device capture is a subject in its own
  * right, one capture runs at a time, and the page never records anything itself.
@@ -42,6 +43,8 @@ vi.mock('../api', async () => {
       playbackTargets: vi.fn(),
       activePlaybackJob: vi.fn(),
       recentPlaybackJobs: vi.fn(),
+      playbackWorkerStatus: vi.fn(),
+      ensureShadowLanes: vi.fn(),
       startPlayback: vi.fn(),
       stopPlayback: vi.fn()
     }
@@ -118,6 +121,11 @@ beforeEach(() => {
   api.activePlaybackJob.mockResolvedValue(null)
   api.recentPlaybackJobs.mockResolvedValue([])
   api.playbackTargets.mockResolvedValue([TARGET])
+  // A live worker holding the target's password: the ordinary case, so the existing tests are
+  // about what they were about rather than about a worker that has never reported.
+  api.playbackWorkerStatus.mockResolvedValue({
+    held_edge_nodes: ['gwy130000000000400080000'], reported_at: new Date().toISOString()
+  })
 })
 
 const TARGET = {
@@ -182,17 +190,31 @@ describe('a stored capture', () => {
   })
 
   /**
-   * THE ONE BADGE THAT CHANGES A DECISION. Without it a capture that will drop every metric on
-   * playback is indistinguishable from one that will not.
+   * THE ONE BADGE THAT CHANGES A DECISION — AND IT USED TO OVERSTATE IT.
+   *
+   * The tooltip said a birthless capture "drops every metric", which is only true when the
+   * recording actually depends on the alias table. Every metric in this fleet's captures carries
+   * its full name, so the warning was telling operators a perfectly good capture was broken. Both
+   * branches are pinned here, because the wrong one was shipped once already.
    */
-  it('marks a capture that recorded no birth certificate', async () => {
+  it('marks a birthless capture, and says only that devices go unannounced', async () => {
     api.listCaptures.mockResolvedValue([
-      { ...CAPTURE, manifest: { ...CAPTURE.manifest, birth_captured: false } }
+      { ...CAPTURE, manifest: { ...CAPTURE.manifest, birth_captured: false, uses_aliases: false } }
     ])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     expect(within(row).getByText('NO BIRTH')).toBeInTheDocument()
-    expect(within(row).getByTitle(/unresolved_alias/)).toBeInTheDocument()
+    expect(within(row).getByTitle(/carries its full name/)).toBeInTheDocument()
+    expect(within(row).queryByTitle(/dropped on ingest/)).toBeNull()
+  })
+
+  it('says a birthless capture WILL drop metrics when it uses aliases', async () => {
+    api.listCaptures.mockResolvedValue([
+      { ...CAPTURE, manifest: { ...CAPTURE.manifest, birth_captured: false, uses_aliases: true } }
+    ])
+    renderTab()
+    const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
+    expect(within(row).getByTitle(/dropped on ingest/)).toBeInTheDocument()
   })
 
   it('does not mark one that did', async () => {
@@ -301,7 +323,10 @@ describe('the running card', () => {
   const JOB = {
     id: 'job-1', status: 'RECORDING', subject_sparkplug_id: 'gwy120000000000400080000',
     gateways: { name: 'Line 1 Gateway' }, devices: null, note: 'night shift',
-    messages: 120, bytes: 45000, elapsed_seconds: 3, max_seconds: 600, birth_captured: true
+    messages: 120, bytes: 45000, elapsed_seconds: 3, max_seconds: 600, birth_captured: true,
+    // The three caps a recording stops at. NOT NULL on the row, so a fixture without them was
+    // testing a shape the database cannot produce.
+    max_messages: 100000, max_bytes: 52428800
   }
 
   it('shows progress for the one running capture', async () => {
@@ -372,6 +397,42 @@ describe('a failed job', () => {
     }])
     renderTab()
     expect(await screen.findByText(/recorded no messages/)).toBeInTheDocument()
+  })
+
+  /**
+   * DISMISSAL HAS TO SURVIVE A RELOAD. A banner that returns when the page does has not been
+   * dismissed — which was the report: "reloading the page does not remove this error message".
+   */
+  it('stays dismissed across a remount', async () => {
+    const job = {
+      id: 'job-dismissible', status: 'FAILED', subject_sparkplug_id: 'gwy150000000000400080000',
+      gateways: { name: 'Sim_Gateway_Site_BMS' },
+      error: 'recorded no messages', finished_at: new Date().toISOString()
+    }
+    api.recentCaptureJobs.mockResolvedValue([job])
+
+    const first = renderTab()
+    expect(await screen.findByText(/recorded no messages/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Dismiss the capture failure notice/ }))
+    expect(screen.queryByText(/recorded no messages/)).toBeNull()
+
+    // A reload is a fresh mount reading the same job back from the same query.
+    first.unmount()
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    expect(screen.queryByText(/recorded no messages/)).toBeNull()
+  })
+
+  /** The other way out, for the operator who never comes back to the page. */
+  it('hides a failure older than the visible window without being dismissed', async () => {
+    api.recentCaptureJobs.mockResolvedValue([{
+      id: 'job-old', status: 'FAILED', subject_sparkplug_id: 'gwy150000000000400080000',
+      gateways: { name: 'Sim_Gateway_Site_BMS' },
+      error: 'an hour ago', finished_at: new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    }])
+    renderTab()
+    await screen.findByText('Line 1 Gateway')
+    expect(screen.queryByText(/an hour ago/)).toBeNull()
   })
 
   it('says nothing when the recent jobs all succeeded', async () => {
@@ -593,6 +654,42 @@ describe('publishing a capture back', () => {
     expect(within(mapSelect).getByText(/Sim Spindle/)).toBeInTheDocument()
   })
 
+  /**
+   * THE MAP BUILDS ITSELF (0060). Every captured device needs a lane bound to the target, and
+   * creating each by hand on the Devices page before every playback is a chore that means the
+   * feature does not get used. `ensure_shadow_devices()` mints them and returns the map.
+   */
+  it('fills the map from the replay lanes it prepares', async () => {
+    const LANE = { id: 'lane-1', name: 'Sim Spindle (replay)',
+      sparkplug_id: 'dev990000000000400080000', is_archived: false, shadow_of: 'dev-27' }
+    api.ensureShadowLanes.mockResolvedValue({ dev270000000000400080000: 'dev990000000000400080000' })
+
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    await screen.findByLabelText('Target device for dev270000000000400080000')
+
+    // THE SECOND RESOLVE MATTERS: the dropdown renders `target.devices`, which was read before the
+    // lane existed. Without the reload the map holds an id the select cannot display, and the row
+    // renders blank while claiming to be mapped.
+    api.playbackTargets.mockResolvedValue([{ ...TARGET, devices: [...TARGET.devices, LANE] }])
+    fireEvent.click(screen.getByRole('button', { name: /Prepare replay lanes/ }))
+
+    await waitFor(() => expect(api.ensureShadowLanes).toHaveBeenCalledWith('cap-1'))
+    await waitFor(() => expect(
+      screen.getByLabelText('Target device for dev270000000000400080000')
+    ).toHaveValue('dev990000000000400080000'))
+    expect(screen.getByRole('button', { name: /Publish capture/ })).toBeEnabled()
+  })
+
+  it('does not prepare lanes until asked', async () => {
+    // It WRITES -- a device row appearing in the directory because someone opened a modal is the
+    // kind of surprise that makes people stop trusting the table.
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    await screen.findByLabelText('Target device for dev270000000000400080000')
+    expect(api.ensureShadowLanes).not.toHaveBeenCalled()
+  })
+
   it('will not start while a captured device is unmapped', async () => {
     await open()
     fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
@@ -641,14 +738,27 @@ describe('publishing a capture back', () => {
     expect(after.value).toBe('')
   })
 
-  it('warns that a birthless capture will replay as unresolved aliases', async () => {
+  it('warns hard about a birthless capture that uses aliases', async () => {
     api.listCaptures.mockResolvedValue([
-      { ...PLAYABLE, manifest: { ...PLAYABLE.manifest, birth_captured: false } }
+      { ...PLAYABLE, manifest: { ...PLAYABLE.manifest, birth_captured: false, uses_aliases: true } }
     ])
     renderTab()
     const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
     selectRow(row); fireEvent.click(panelAction(/Play back/))
-    expect(await screen.findByText(/unresolved_alias/)).toBeInTheDocument()
+    expect(await screen.findByText(/dropped on ingest/)).toBeInTheDocument()
+  })
+
+  /** The case that was being warned about wrongly: no birth, but every metric named in full. */
+  it('does not claim a birthless capture writes nothing when its metrics are named', async () => {
+    api.listCaptures.mockResolvedValue([
+      { ...PLAYABLE, manifest: { ...PLAYABLE.manifest, birth_captured: false, uses_aliases: false } }
+    ])
+    renderTab()
+    const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
+    selectRow(row); fireEvent.click(panelAction(/Play back/))
+    await screen.findByLabelText('Publish as')
+    expect(screen.queryByText(/dropped on ingest/)).toBeNull()
+    expect(screen.getByText(/will replay normally/)).toBeInTheDocument()
   })
 
   it('shows the gate refusal in the dialog', async () => {
@@ -671,6 +781,86 @@ describe('publishing a capture back', () => {
     selectRow(row); fireEvent.click(panelAction(/Play back/))
     fireEvent.change(await screen.findByLabelText('Publish as'), { target: { value: 'gw-sim' } })
     expect(await screen.findByText(/publishes no device-level traffic/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Publish capture/ })).not.toBeDisabled()
+  })
+
+  /**
+   * TIER TWO, MADE VISIBLE. `gateway_has_broker_credential` says the PLATFORM issued a credential;
+   * only the worker knows whether it was given the password. Minting it and pasting it into the
+   * worker's environment are two acts, and until this the dialog could not tell they had come
+   * apart — it showed a green target and the job failed a second later.
+   */
+  it('refuses a target whose password the worker was not given', async () => {
+    api.playbackWorkerStatus.mockResolvedValue({
+      held_edge_nodes: [], reported_at: new Date().toISOString()
+    })
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+
+    expect(await screen.findByText(/was not given/)).toBeInTheDocument()
+    expect(screen.getByText(/MQTT_PLAYBACK_CREDENTIALS/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Publish capture/ })).toBeDisabled()
+  })
+
+  /**
+   * THE ONE THING THAT MAKES A TARGET WRONG RATHER THAN UNREADY. A gateway that is beating already
+   * has a publisher; a playback adds a second on the same edge node, and their sequence numbers
+   * interleave. Warned, not refused — quiescing a machine and replaying onto it is legitimate.
+   */
+  it('warns when something is already publishing as the target', async () => {
+    api.playbackTargets.mockResolvedValue([
+      { ...TARGET, last_heartbeat: new Date().toISOString(), status: 'ONLINE' }
+    ])
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    expect(await screen.findByText(/is publishing right now/)).toBeInTheDocument()
+    // A warning, so the button is still reachable once the mapping is done.
+    fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
+      { target: { value: 'dev310000000000400080000' } })
+    expect(screen.getByRole('button', { name: /Publish capture/ })).not.toBeDisabled()
+  })
+
+  it('says nothing about live traffic for a quiet target', async () => {
+    api.playbackTargets.mockResolvedValue([
+      { ...TARGET, last_heartbeat: new Date(Date.now() - 10 * 60 * 1000).toISOString(), status: 'OFFLINE' }
+    ])
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    expect(screen.queryByText(/is publishing right now/)).toBeNull()
+  })
+
+  /** The message named a variable and not where it lives, and the first reader asked if it went in the capture file. */
+  it('says where MQTT_PLAYBACK_CREDENTIALS actually goes', async () => {
+    api.playbackWorkerStatus.mockResolvedValue({
+      held_edge_nodes: [], reported_at: new Date().toISOString()
+    })
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    expect(await screen.findByText(/server-side setting, not part of the capture file/)).toBeInTheDocument()
+    expect(screen.getByText(/docker compose up -d playback/)).toBeInTheDocument()
+  })
+
+  /** "Holds nothing" and "is not running" are different problems, and only the heartbeat tells them apart. */
+  it('says the worker is not running when its report is stale', async () => {
+    api.playbackWorkerStatus.mockResolvedValue({
+      held_edge_nodes: ['gwy130000000000400080000'],
+      reported_at: new Date(Date.now() - 10 * 60 * 1000).toISOString()
+    })
+    await open()
+    expect(await screen.findByText(/has not reported recently/)).toBeInTheDocument()
+  })
+
+  /**
+   * A STALE WORKER MUST NOT BLOCK A PLAYBACK. Its credential list is unknown, not empty — and the
+   * gate and the worker still refuse whatever they always refused. A dialog that stopped a job
+   * because a courtesy row was old would be worse than the failure it prevents.
+   */
+  it('still allows a playback when the worker status is unknown', async () => {
+    api.playbackWorkerStatus.mockResolvedValue(null)
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    fireEvent.change(await screen.findByLabelText('Target device for dev270000000000400080000'),
+      { target: { value: 'dev310000000000400080000' } })
     expect(screen.getByRole('button', { name: /Publish capture/ })).not.toBeDisabled()
   })
 

@@ -67,6 +67,16 @@ BUCKET = os.getenv("CAPTURE_BUCKET", "broker-captures")
 POLL_INTERVAL_SECONDS = float(os.getenv("PLAYBACK_POLL_INTERVAL_SECONDS", "3"))
 PROGRESS_INTERVAL_SECONDS = float(os.getenv("PLAYBACK_PROGRESS_INTERVAL_SECONDS", "1"))
 
+# How often this worker restates which gateways it can publish as.
+#
+# IT IS A HEARTBEAT, NOT A CHANGE FEED, and that is why it repeats rather than reporting once. The
+# page has to tell "the worker holds no credentials" from "the worker is not running", and an empty
+# list reported once at startup looks identical to both. 30s against the page's own staleness
+# window means a worker that dies is visible as down well before anyone finishes reading a dialog.
+CREDENTIAL_REPORT_INTERVAL_SECONDS = float(
+    os.getenv("PLAYBACK_CREDENTIAL_REPORT_INTERVAL_SECONDS", "30")
+)
+
 MQTT_HOST = os.getenv("MQTT_HOST", "mosquitto")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 
@@ -328,7 +338,33 @@ def main():
         POLL_INTERVAL_SECONDS, MQTT_HOST, MQTT_PORT,
     )
 
+    last_report = 0.0
+
     while True:
+        # ------------------------------------------------------------------------------------
+        # Say what this worker can publish as.
+        # ------------------------------------------------------------------------------------
+        # THE ONLY THING THAT KNOWS. `gateway_has_broker_credential()` answers whether the PLATFORM
+        # issued a credential; nothing in the database can answer whether this process was given
+        # the password. Without this the playback dialog showed a target as ready and the job then
+        # failed with "this worker holds no broker credential for …" -- correct, and far too late
+        # to be useful, because minting the credential and pasting it here are two separate acts.
+        #
+        # IN THE LOOP RATHER THAN ONCE AT STARTUP, because the page has to distinguish "holds
+        # nothing" from "is not running", and only a repeating timestamp does that. Failure is
+        # logged and otherwise ignored: a worker that cannot report is still a worker that can
+        # play back, and refusing to work because the status row is unreachable would turn a
+        # cosmetic outage into a real one.
+        now = time.monotonic()
+        if now - last_report >= CREDENTIAL_REPORT_INTERVAL_SECONDS:
+            last_report = now
+            try:
+                supabase.rpc("playback_report_credentials", {
+                    "p_edge_nodes": sorted(credentials.keys()),
+                }).execute()
+            except Exception as err:
+                logger.warning("Could not report held credentials: %s", err)
+
         try:
             job = supabase.rpc("playback_claim_job", {}).execute().data
         except Exception as err:

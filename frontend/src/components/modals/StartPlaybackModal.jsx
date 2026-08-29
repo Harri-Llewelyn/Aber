@@ -45,12 +45,16 @@ const SPEEDS = [
  */
 export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
   const [targets, setTargets] = useState(null)
+  const [worker, setWorker] = useState(undefined)   // undefined = not loaded, null = never reported
   const [targetId, setTargetId] = useState('')
   const [deviceMap, setDeviceMap] = useState({})
   const [speed, setSpeed] = useState(1)
   const [capturedDevices, setCapturedDevices] = useState(null)
   const [error, setError] = useState(null)
   const [pending, run] = usePendingAction()
+  // Its OWN pending flag, not `run`'s. Sharing one would put the Start button into its pending
+  // state while lanes are being prepared, which reads as "the playback has begun".
+  const [preparing, runPrepare] = usePendingAction()
 
   useEscapeKey(pending ? () => {} : onCancel)
 
@@ -59,6 +63,12 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
     api.playbackTargets()
       .then(rows => { if (!cancelled) setTargets(rows) })
       .catch(err => { if (!cancelled) { setTargets([]); setError(err.message) } })
+    // Non-fatal: a status read that fails leaves the dialog exactly as it was before this existed
+    // -- the gate and the worker still refuse what they always refused. It is a courtesy, not a
+    // control, and it must not be able to stop a playback that would have worked.
+    api.playbackWorkerStatus()
+      .then(row => { if (!cancelled) setWorker(row) })
+      .catch(() => { if (!cancelled) setWorker(null) })
     return () => { cancelled = true }
   }, [])
 
@@ -89,8 +99,52 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
   // change into a refusal the operator did not cause.
   useEffect(() => { setDeviceMap({}) }, [targetId])
 
+  /**
+   * Is the worker running, and can it publish as this target?
+   *
+   * STALE IS TREATED AS DOWN. The worker restates its credentials every 30 seconds, so a report
+   * older than a couple of minutes means the process is gone — and a list of gateways from a dead
+   * worker is worse than no list, because it describes what playback COULD do rather than what it
+   * can. Two minutes rather than thirty seconds so a slow tick is not read as a death.
+   */
+  // 90 seconds is the window `gateway_status` derives staleness from, so a heartbeat inside it is
+  // the same "currently live" this stack means everywhere else.
+  const isLive = (t) => !!t?.last_heartbeat
+    && (Date.now() - new Date(t.last_heartbeat).getTime()) < 90 * 1000
+
+  const WORKER_STALE_MS = 2 * 60 * 1000
+  const workerLive = !!worker?.reported_at
+    && (Date.now() - new Date(worker.reported_at).getTime()) < WORKER_STALE_MS
+  const heldByWorker = workerLive ? (worker.held_edge_nodes || []) : []
+  const workerHolds = (t) => !!t && heldByWorker.includes(t.sparkplug_id)
+
   const unmapped = (capturedDevices || []).filter(d => !deviceMap[d])
-  const ready = !!target && target.gateway_has_broker_credential && unmapped.length === 0
+
+  /**
+   * Mint the replay lanes and fill the map from what came back.
+   *
+   * THE TARGET LIST IS REFRESHED AFTERWARDS, and that is not belt-and-braces. `target.devices` is
+   * what the dropdowns render, and it was read before these lanes existed -- so without the reload
+   * the map holds device ids that the select beside it cannot display, and the row renders blank
+   * while claiming to be mapped.
+   */
+  const prepareLanes = () => runPrepare(async () => {
+    setError(null)
+    try {
+      const map = await api.ensureShadowLanes(capture.id)
+      setTargets(await api.playbackTargets())
+      setDeviceMap(m => ({ ...m, ...map }))
+    } catch (err) {
+      setError(err.message)
+    }
+  })
+  // The worker check is NOT part of `ready` when the status is unknown -- see the loader. A dialog
+  // that refuses because it could not read a courtesy row would be worse than the failure it is
+  // trying to prevent.
+  const ready = !!target
+    && target.gateway_has_broker_credential
+    && (worker === undefined || !workerLive || workerHolds(target))
+    && unmapped.length === 0
 
   const submit = () => run(async () => {
     setError(null)
@@ -116,15 +170,26 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
           recorded from.
         </p>
 
-        {capture.manifest?.birth_captured === false && (
+        {/* WARNED ONLY WHEN IT IS TRUE. This used to fire on every birthless capture and say the
+            playback would write nothing, which is wrong for any recording whose metrics carry their
+            full names -- which is most of them. `uses_aliases` is the condition that actually
+            matters, and it is recorded at capture time. */}
+        {capture.manifest?.birth_captured === false && capture.manifest?.uses_aliases && (
           <div className="callout callout-warning" style={{ marginTop: '12px' }}>
             <IconShieldAlert size={14} className="callout-icon" />
             <div style={{ fontSize: '12px' }}>
-              This capture contains no <code>NBIRTH</code> or <code>DBIRTH</code>. If the recorded
-              gateway used metric aliases, every metric will replay as <code>unresolved_alias</code>
-              {' '}and be dropped on ingest — the playback will report success and write nothing.
+              This capture contains no <code>NBIRTH</code> or <code>DBIRTH</code> and its metrics are
+              carried by <strong>alias</strong>. Nothing can resolve them, so every aliased metric is
+              dropped on ingest — the playback will report success and write nothing.
             </div>
           </div>
+        )}
+        {capture.manifest?.birth_captured === false && !capture.manifest?.uses_aliases && (
+          <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '10px 0 0' }}>
+            This capture has no birth certificate. Its metrics carry full names, so they will replay
+            normally — but the target's devices are not announced and stay OFFLINE until they birth
+            on their own.
+          </p>
         )}
 
         {/* ---------------------------------------------------------------------------------- */}
@@ -157,7 +222,9 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
                 {targets.map(t => (
                   <option key={t.id} value={t.id}>
                     {t.name} ({t.sparkplug_id})
-                    {t.gateway_has_broker_credential ? '' : ' — no broker credential'}
+                    {!t.gateway_has_broker_credential
+                      ? ' — no broker credential'
+                      : (workerLive && !workerHolds(t) ? ' — worker has no password' : '')}
                   </option>
                 ))}
               </select>
@@ -182,6 +249,76 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
           </div>
         )}
 
+        {/* TIER TWO, SAID BEFORE THE CLICK. The platform having issued a credential and the WORKER
+            having been given it are two different facts, and only the worker knows the second. It
+            reports what it holds on a heartbeat; this is that report, read back. Without it the
+            dialog showed a green target and the job failed a second later with the same sentence. */}
+        {target && target.gateway_has_broker_credential && workerLive && !workerHolds(target) && (
+          <div className="callout" style={{ borderColor: 'var(--danger)', marginTop: '10px' }}>
+            <IconShieldAlert size={14} className="callout-icon" />
+            {/* THE MESSAGE NAMED A VARIABLE AND NOT WHERE IT LIVES, and the first person to read it
+                asked whether the password went in the capture file. It does not: this is a
+                server-side secret in the stack's `.env`, because the worker is a container and the
+                broker password is not something a browser may hold. */}
+            <div style={{ fontSize: '12px' }}>
+              <strong>{target.name}</strong> has a credential, but the playback worker was not given
+              its password, so it cannot authenticate as this gateway.
+              <br />
+              This is a server-side setting, not part of the capture file. In the stack's{' '}
+              <code>.env</code>, add:
+              <br />
+              <code style={{ display: 'inline-block', margin: '4px 0' }}>
+                {`MQTT_PLAYBACK_CREDENTIALS={"${target.sparkplug_id}":"<password>"}`}
+              </code>
+              <br />
+              then <code>docker compose up -d playback</code>. The password is shown only at the
+              moment the credential is minted — issue a new one from Access Control if it was not
+              kept.
+            </div>
+          </div>
+        )}
+
+        {/* SOMETHING IS ALREADY PUBLISHING AS THIS GATEWAY, which is the one thing that makes a
+            target wrong rather than unready — and nothing said so.
+
+            A playback target is legitimately OFFLINE: nothing publishes as it until a playback
+            runs, which is why the gate deliberately does NOT require ONLINE. The inverse is the
+            warning. A gateway that is beating right now has a live publisher, and a playback adds
+            a second one on the same edge node — so their Sparkplug sequence numbers interleave and
+            the daemon reports permanent message loss for both. That is exactly what
+            `playback_jobs_one_per_target` exists to prevent between two playbacks; it cannot see a
+            simulator or a real appliance doing the same thing.
+
+            A WARNING AND NOT A REFUSAL, because the database cannot tell a gateway that is beating
+            from one that will still be beating in a minute, and re-recording a fault onto a
+            deliberately-quiesced machine is a legitimate thing to want. */}
+        {target && isLive(target) && (
+          <div className="callout callout-warning" style={{ marginTop: '10px' }}>
+            <IconShieldAlert size={14} className="callout-icon" />
+            <div style={{ fontSize: '12px' }}>
+              <strong>{target.name}</strong> is publishing right now. A playback would be a second
+              publisher on the same edge node, so the two sets of Sparkplug sequence numbers
+              interleave and the daemon reports both as losing messages.
+              <br />
+              A playback target is best as a gateway <em>nothing else</em> publishes as — a virtual
+              one created for the purpose, rather than one a simulator or an appliance is driving.
+            </div>
+          </div>
+        )}
+
+        {/* "Holds nothing" and "is not running" are different problems with different fixes, and an
+            empty list cannot tell them apart. The heartbeat is what separates them. */}
+        {worker !== undefined && !workerLive && (
+          <div className="callout callout-warning" style={{ marginTop: '10px' }}>
+            <IconShieldAlert size={14} className="callout-icon" />
+            <div style={{ fontSize: '12px' }}>
+              The playback worker has not reported recently, so which gateways it can publish as is
+              unknown. A job started now will queue and wait. Check that the <code>playback</code>
+              {' '}service is running.
+            </div>
+          </div>
+        )}
+
         {/* ---------------------------------------------------------------------------------- */}
         {target && capturedDevices !== null && capturedDevices.length > 0 && (
           <div className="form-group" style={{ marginTop: '16px' }}>
@@ -191,7 +328,26 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
               would publish under the target's edge node carrying another gateway's device segment,
               which quarantines that device — and reads as a fleet fault rather than a mapping one.
             </p>
-            {target.devices.length === 0 && (
+            {/* THE MAP BUILDS ITSELF, and the button is here rather than on load because it
+                writes. `ensure_shadow_devices()` mints one replay lane per captured device --
+                bound to this gateway, carrying the original's schema and nothing else -- and
+                returns exactly the map `start_playback_job()` wants. Reused on the next run, so
+                this is a no-op after the first capture of a given machine. */}
+            {unmapped.length > 0 && (
+              <div style={{ marginBottom: '10px' }}>
+                <ActionButton
+                  className="btn btn-secondary btn-sm"
+                  pending={preparing}
+                  pendingLabel="Preparing…"
+                  disabled={pending}
+                  onClick={prepareLanes}
+                  title="Create a replay lane for each device in this capture, bound to this gateway"
+                >
+                  Prepare replay lanes ({unmapped.length})
+                </ActionButton>
+              </div>
+            )}
+            {target.devices.length === 0 && unmapped.length === 0 && (
               <div className="callout" style={{ borderColor: 'var(--danger)' }}>
                 <IconShieldAlert size={14} className="callout-icon" />
                 <div style={{ fontSize: '12px' }}>
@@ -283,7 +439,9 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
             title={ready ? undefined : (
               !target ? 'Choose a target gateway'
                 : !target.gateway_has_broker_credential ? 'This gateway holds no broker credential'
-                  : `${unmapped.length} device${unmapped.length === 1 ? '' : 's'} still to map`
+                  : (workerLive && !workerHolds(target))
+                    ? 'The playback worker was not given this gateway’s password'
+                    : `${unmapped.length} device${unmapped.length === 1 ? '' : 's'} still to map`
             )}
             onClick={submit}
           >

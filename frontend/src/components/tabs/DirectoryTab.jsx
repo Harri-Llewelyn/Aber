@@ -105,17 +105,26 @@ function EndpointCell({ url, onNotify }) {
   )
 }
 
+// A DESCRIPTION PER GROUP, not one for the page. Each card here is a different KIND of thing --
+// somewhere to click through to, the path telemetry travels, or the machinery underneath -- and a
+// single sentence at the top of the page would have to be vague about all three.
 const SERVICE_GROUPS = [
   {
     title: 'Applications & User Interfaces',
+    description: 'The things with a front door. These are meant to be opened — a link here is where '
+      + 'you go to do something the dashboard does not do itself.',
     types: ['MONITORING', 'EDGE_NODE', 'GRAPHICAL_UI', 'DOCUMENTATION']
   },
   {
     title: 'Ingestion & Messaging',
+    description: 'The path a reading takes from a machine to the historian. If telemetry has stopped '
+      + 'arriving, the fault is almost always one of these.',
     types: ['MQTT_BROKER', 'INGESTION', 'API_GATEWAY']
   },
   {
     title: 'Data & Backend Infrastructure',
+    description: 'What everything above is built on. Listed because a registry that named only the '
+      + 'parts with a URL would describe the stack as smaller than it is.',
     types: ['REST_API', 'AUTHENTICATION', 'SERVERLESS', 'DATABASE', 'TIME_SERIES_DB', 'METRICS_EXPORTER']
   }
 ]
@@ -139,8 +148,14 @@ export function groupServices(services) {
 
   const byName = (a, b) => String(a.service_name || '').localeCompare(String(b.service_name || ''))
 
-  const sections = SERVICE_GROUPS.map(g => ({ title: g.title, rows: [] }))
-  const ungrouped = { title: UNGROUPED_TITLE, rows: [] }
+  const sections = SERVICE_GROUPS.map(g => ({ title: g.title, description: g.description, rows: [] }))
+  const ungrouped = {
+    title: UNGROUPED_TITLE,
+    description: 'Registered with a type none of the groups above claims. `directory_services` is a '
+      + 'registry anything can write into, so a type nobody anticipated lands here rather than '
+      + 'being dropped.',
+    rows: []
+  }
 
   for (const s of services) {
     const at = rank.get(s.service_type)
@@ -367,6 +382,11 @@ export function DirectoryTab({ showToast, hasPermission }) {
             <div className="card-header">
               <h3 className="section-title">{g.title} <span className="section-count">{g.rows.length}</span></h3>
             </div>
+            {g.description && (
+              <div className="card-body">
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: 0 }}>{g.description}</p>
+              </div>
+            )}
             <ServiceTable rows={g.rows} onNotify={showToast} />
           </div>
         ))

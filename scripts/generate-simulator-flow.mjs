@@ -144,7 +144,27 @@ const MAX_SILENCE_MS    = 5 * 60 * 1000;
 const cache   = context.get('rbe')   || {};
 const lastPub = context.get('lastAt') || {};
 let   scan    = Number(context.get('scan') || 0);
-let   seq     = Number(context.get('seq')  || 0);
+
+// ---------------------------------------------------------------------------------------------
+// SEQ IS PER EDGE NODE, NOT PER DEVICE, AND THAT IS THE SPECIFICATION RATHER THAN A PREFERENCE.
+//
+// Sparkplug scopes \`seq\` to the edge node: every NBIRTH, NDATA, DBIRTH and DDATA leaving one edge
+// node shares one counter, and the daemon checks it that way -- ingestion.py keys \`_last_seq\` on
+// \`(group, edge_node)\`.
+//
+// THIS USED TO BE \`context.get('seq')\`, which is scoped to the SUBFLOW INSTANCE. Cell 1 runs three
+// device instances plus a gateway heartbeat under one edge node, so four independent counters were
+// interleaving into one sequence. The daemon did exactly what it should with that -- concluded
+// messages were lost and asked for a rebirth -- several hundred times an hour, and the alarm that
+// exists to report real loss was firing constantly on a healthy fleet.
+//
+// \`global\`, NOT \`flow\`: inside a subflow, \`flow\` is the SUBFLOW INSTANCE's scope, so it is no more
+// shared than \`context\` was. \`global\` is the only scope a subflow instance and a node on the tab
+// can both reach. The read-modify-write below is safe unlocked because Node-RED runs function
+// nodes to completion on one thread.
+// ---------------------------------------------------------------------------------------------
+const SEQ_KEY = 'seq_' + GATEWAY_ID;
+let   seq     = Number(global.get(SEQ_KEY) || 0);
 
 scan += 1;
 
@@ -283,7 +303,9 @@ if (scan === 1 || scan % BIRTH_EVERY_SCANS === 0) {
   context.set('rbe', cache);
   context.set('lastAt', lastPub);
   context.set('scan', scan);
-  context.set('seq', seq);
+  // A DBIRTH is NOT a sequence reset -- only NBIRTH is. It consumes a number like any other
+  // message, which is why this advances the shared counter rather than clearing it.
+  global.set(SEQ_KEY, seq);
 
   node.status({ fill: 'blue', shape: 'dot', text: 'DBIRTH ' + new Date(t).toLocaleTimeString() });
   return { topic: 'spBv1.0/' + GROUP + '/DBIRTH/' + GATEWAY_ID + '/' + DEVICE_ID, payload: birth };
@@ -331,7 +353,7 @@ if (changed.length === 0) {
 
 const payload = { timestamp: t, seq: seq, metrics: changed };
 seq = (seq + 1) % 256;
-context.set('seq', seq);
+global.set(SEQ_KEY, seq);
 
 node.status({ fill: 'green', shape: 'dot', text: changed.length + ' metric(s) @ ' + new Date(t).toLocaleTimeString() });
 return { topic: 'spBv1.0/' + GROUP + '/DDATA/' + GATEWAY_ID + '/' + DEVICE_ID, payload: payload };
@@ -376,7 +398,10 @@ const GROUP        = env.get('SPARKPLUG_GROUP') || 'ACS-Cymru';
 const BIRTH_EVERY  = Number(env.get('BIRTH_EVERY_SCANS') || 15);
 
 const acc = context.get('acc') || { productive: 0, total: 0, good: 0, made: 0 };
-let seq = Number(context.get('seq') || 0);
+// Shared with every other publisher under this edge node -- see the note in the device subflow.
+// \`global\` rather than \`flow\`, because inside a subflow \`flow\` is the instance's own scope.
+const SEQ_KEY = 'seq_' + GATEWAY_ID;
+let seq = Number(global.get(SEQ_KEY) || 0);
 const scan = Number(context.get('scan') || 0) + 1;
 
 const state = global.get('state_' + SOURCE_ID) || 'READY';
@@ -445,7 +470,7 @@ if (scan === 1 || scan % BIRTH_EVERY === 0) {
     ],
   };
   seq = (seq + 1) % 256;
-  context.set('seq', seq);
+  global.set(SEQ_KEY, seq);
 
   node.status({ fill: 'blue', shape: 'dot', text: 'DBIRTH ' + new Date().toLocaleTimeString() });
   return { topic: 'spBv1.0/' + GROUP + '/DBIRTH/' + GATEWAY_ID + '/' + DEVICE_ID, payload: birth };
@@ -453,7 +478,7 @@ if (scan === 1 || scan % BIRTH_EVERY === 0) {
 
 const payload = { timestamp: Date.now(), seq: seq, metrics: factors };
 seq = (seq + 1) % 256;
-context.set('seq', seq);
+global.set(SEQ_KEY, seq);
 
 node.status({ fill: 'blue', shape: 'dot', text: 'OEE ' + round(oee) + '% (' + state + ')' });
 return { topic: 'spBv1.0/' + GROUP + '/DDATA/' + GATEWAY_ID + '/' + DEVICE_ID, payload: payload };
@@ -473,9 +498,18 @@ const GATEWAY_ID = ${JSON.stringify(gw.sparkplugId)};
 const GATEWAY_NAME = ${JSON.stringify(gw.name)};
 const GROUP = ${JSON.stringify(SPARKPLUG_GROUP)};
 
+// \`born\` is genuinely per-node: there is one heartbeat node per gateway, so nothing else needs to
+// read it. The COUNTER is not -- it belongs to the edge node and is shared with every device
+// subflow publishing under it. See the note in the device subflow for why that is \`global\`.
 let born = context.get('born') || false;
-let seq = Number(context.get('seq') || 0);
+const SEQ_KEY = 'seq_' + GATEWAY_ID;
 const type = born ? 'NDATA' : 'NBIRTH';
+
+// AN NBIRTH RESTARTS THE RUN AT ZERO. That is the specification -- a birth is the
+// resynchronisation point, which is exactly why the daemon treats it as one rather than checking
+// it (see check_message_sequence). Publishing a birth carrying whatever number the counter had
+// reached would leave every consumer that DOES check disagreeing with us from the birth onwards.
+let seq = type === 'NBIRTH' ? 0 : Number(global.get(SEQ_KEY) || 0);
 
 const payload = {
   timestamp: Date.now(),
@@ -484,11 +518,64 @@ const payload = {
 };
 
 seq = (seq + 1) % 256;
-context.set('seq', seq);
+global.set(SEQ_KEY, seq);
 context.set('born', true);
 node.status({ fill: 'green', shape: 'dot', text: type + ' ' + GATEWAY_NAME });
 
 return { topic: 'spBv1.0/' + GROUP + '/' + type + '/' + GATEWAY_ID, payload: payload };
+`.trim();
+
+/**
+ * Answer a Sparkplug B rebirth request by republishing the addressed gateway's NBIRTH.
+ *
+ * WHAT A REBIRTH IS: "say who you are again". It restates the node's birth certificate, which is
+ * where the metric alias table lives. It changes nothing on the plant, and it is the only NCMD this
+ * stack's ACL permits the daemon to publish.
+ *
+ * NBIRTH ONLY, NOT DBIRTH. The node-level birth is what carries the alias table and what
+ * `captures.manifest.birth_captured` keys on. Device births stay on their own BIRTH_EVERY_SCANS
+ * cycle inside the subflows, whose per-instance state this node cannot reach.
+ */
+const rebirthHandlerBody = () => `
+${GATEWAYS.map((gw, i) => `// output ${i + 1}: ${gw.name}`).join('\n')}
+const GATEWAYS = ${JSON.stringify(GATEWAYS.map((g) => ({ id: g.sparkplugId, name: g.name })), null, 2)};
+const GROUP = ${JSON.stringify(SPARKPLUG_GROUP)};
+
+// spBv1.0/<group>/NCMD/<edge_node>. Anything else is not addressed to a node here.
+const parts = String(msg.topic || '').split('/');
+if (parts.length < 4 || parts[2] !== 'NCMD') { return null; }
+const edgeNode = parts[3];
+
+const index = GATEWAYS.findIndex(g => g.id === edgeNode);
+if (index === -1) {
+  node.status({ fill: 'grey', shape: 'ring', text: 'NCMD for ' + edgeNode + ' (not ours)' });
+  return null;
+}
+
+// NOT INSPECTED FOR THE Node Control/Rebirth METRIC. The daemon publishes exactly one kind of NCMD
+// -- its ACL permits nothing else -- and decoding protobuf here to confirm what we already know
+// would add a failure mode (an undecodable payload) to a handler whose whole job is to be
+// reliable. If this simulator ever receives a different NCMD, restating who it is remains a safe
+// and correct answer.
+const gw = GATEWAYS[index];
+
+// A BIRTH RESTARTS THE RUN AT ZERO, and the counter it restarts is the EDGE NODE's -- shared with
+// every device subflow publishing under this gateway. \`global\`, not \`flow\`: a subflow instance
+// cannot see the tab's flow context, so a value set there would be invisible to the very nodes
+// that have to agree with it.
+global.set('seq_' + gw.id, 1);
+
+const payload = {
+  timestamp: Date.now(),
+  seq: 0,
+  metrics: [{ name: 'Gateway_Status', datatype: 12, string_value: 'ONLINE' }],
+};
+
+node.status({ fill: 'green', shape: 'dot', text: 'NBIRTH ' + gw.name + ' ' + new Date().toLocaleTimeString() });
+
+const out = new Array(GATEWAYS.length).fill(null);
+out[index] = { topic: 'spBv1.0/' + GROUP + '/NBIRTH/' + gw.id, payload: payload };
+return out;
 `.trim();
 
 // =================================================================================================
@@ -837,6 +924,65 @@ for (const f of faults) {
   faultY += 50;
 }
 
+// =================================================================================================
+// Rebirth: answering the one NCMD this stack sends
+// =================================================================================================
+// GENERATED RATHER THAN HAND-PLACED, and that is the whole reason this section exists here. These
+// nodes were authored directly in node_red_flow.json, on the tab this script REBUILDS from scratch
+// every run -- so the next regeneration would have deleted them silently, restoring the dangling
+// wire that made every rebirth request vanish. Anything that has to live on this tab has to be
+// emitted by this file.
+//
+// ONE LISTENER PER GATEWAY, WHICH IS NOT REDUNDANCY. `mosquitto.acl` grants an account read on its
+// OWN edge-node subtree only, so a subscription made through Cell 1's connection receives Cell 1's
+// NCMDs and nothing else. A single listener looks like it covers the fleet and silently answers
+// for one gateway -- measured, not assumed: with only Cell 1 subscribed, a rebirth addressed to
+// the BMS was never seen while the same request to Cell 1 was answered.
+const rebirthFn = 'handle-rebirth';
+let ncmdY = faultY + 60;
+
+for (const gw of GATEWAYS) {
+  push({
+    id: `ncmd-listener-${gw.key}`,
+    type: 'mqtt in',
+    z: TAB_ID,
+    name: `Listen for NCMD rebirth requests — ${gw.name}`,
+    topic: 'spBv1.0/+/NCMD/+',
+    qos: '0',
+    // BUFFER, not json or utf8: the payload is protobuf, and letting Node-RED attempt a parse
+    // would drop the message on a decode error in a handler whose job is to be reliable.
+    datatype: 'buffer',
+    broker: `mqtt-broker-${gw.key}`,
+    nl: false,
+    rap: true,
+    rh: 0,
+    inputs: 0,
+    x: 260,
+    y: ncmdY,
+    wires: [[rebirthFn]],
+  });
+  ncmdY += 50;
+}
+
+push({
+  id: rebirthFn,
+  type: 'function',
+  z: TAB_ID,
+  name: 'Answer rebirth — republish NBIRTH',
+  func: rebirthHandlerBody(),
+  // ONE OUTPUT PER GATEWAY, because each mqtt-out node holds a different broker connection and the
+  // ACL pins the topic's edge-node segment to the account publishing it. A gateway's NBIRTH can
+  // only leave through that gateway's own connection.
+  outputs: GATEWAYS.length,
+  noerr: 0,
+  initialize: '',
+  finalize: '',
+  libs: [],
+  x: 620,
+  y: faultY + 60,
+  wires: GATEWAYS.map((gw) => [`mqtt-out-${gw.key}`]),
+});
+
 push({
   id: 'comment-faults',
   type: 'comment',
@@ -882,13 +1028,14 @@ const ownedSubflows = new Set(DEVICE_SUBFLOWS.map((s) => s.id));
  * reset, but their bodies and their comments come across untouched. Rewriting them here would fork
  * logic that already works and is already covered.
  */
-const RELOCATE = ['quarantine-hook-in', 'quarantine-hook-log', 'quarantine-hook-response',
-                  'ncmd-listener'];
+// `ncmd-listener` USED TO BE RELOCATED HERE AND IS NOW GENERATED, one per gateway, in the rebirth
+// section above -- so it is deliberately absent from this list. Relocating it kept a single
+// listener bound to Cell 1's connection, which the ACL confines to Cell 1's own NCMDs.
+const RELOCATE = ['quarantine-hook-in', 'quarantine-hook-log', 'quarantine-hook-response'];
 const RELOCATE_POSITIONS = {
   'quarantine-hook-in': { x: 220, y: faultY + 40 },
   'quarantine-hook-log': { x: 560, y: faultY + 40 },
   'quarantine-hook-response': { x: 860, y: faultY + 40 },
-  'ncmd-listener': { x: 220, y: faultY + 100 },
 };
 
 const relocated = [];

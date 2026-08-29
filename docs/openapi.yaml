@@ -1186,6 +1186,78 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/PlaybackJob' } }
         '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
 
+  /rest/v1/rebirth_requests:
+    get:
+      tags: [Assets]
+      summary: Read requests for an edge node to republish its birth certificate
+      description: |
+        One row per `Node Control/Rebirth` an operator has asked for. The ingestion daemon claims
+        `PENDING` rows and publishes the NCMD; the answer arrives as an `NBIRTH` on the wire, not as
+        a response here.
+
+        **A birth certificate is where the metric alias table lives**, and that table is in-memory
+        in the daemon — so a restart loses it and a stable device may not birth again for weeks.
+        The daemon already asks on its own at startup, on every sequence gap, and at the start of
+        every broker capture. This is the same publish with a person as the reason.
+
+        **This is the only command this stack sends.** Sparkplug's NCMD channel can also write
+        metric *values*, which is actuation; that is not reachable from the dashboard, `mosquitto.acl`
+        grants the daemon this one topic pattern, and `0058` carries a self-check that fails if this
+        table ever gains a column able to carry a payload. A rebirth asks a node to restate what it
+        already is — it changes nothing on the plant, and a node that ignores it is unaffected.
+
+        At most one row is `PENDING` per gateway: a second would only be refused by the daemon's own
+        per-node throttle, producing a row whose outcome is "throttled" and a button that appeared
+        to do something.
+
+        Created only by `request_gateway_rebirth()`; the table takes no direct write.
+      parameters:
+        - { name: gateway_id, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [PENDING, SENT, FAILED] } }
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+      responses:
+        '200':
+          description: Rebirth requests visible to the caller.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/RebirthRequest' } }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
+
+  /rest/v1/playback_worker_status:
+    get:
+      tags: [Storage]
+      summary: Read what the playback worker can publish as
+      description: |
+        One row, holding the gateway `sparkplug_id`s the playback worker has broker passwords for
+        and when it last said so.
+
+        **It exists because the database cannot know this.** `gateway_has_broker_credential()`
+        answers whether the *platform* issued a gateway a credential — an audit row, or an enrolment
+        stamp. Whether the *worker* was given that password is a fact about a process's environment,
+        and minting a credential and pasting it into the worker are two separate acts. Before this,
+        the playback dialog showed a target as ready and the job failed a second later with
+        `this worker holds no broker credential for …`.
+
+        **`reported_at` is a heartbeat, and the distinction it draws matters.** An empty
+        `held_edge_nodes` with a recent timestamp means the worker is running and holds nothing; a
+        stale timestamp means the worker is not running. Those are different problems with different
+        fixes, and an empty list alone cannot tell them apart.
+
+        **No secret is here.** A `sparkplug_id` is a public identifier — it is on the Gateways page,
+        in every topic, and is the MQTT username. The passwords are deliberately absent, for the
+        reason `0041` gives about credentials in readable tables.
+
+        Written only by `playback_report_credentials()`, which the worker's principal alone may
+        call. The table takes no direct write from any application role.
+      responses:
+        '200':
+          description: The worker's most recent report.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlaybackWorkerStatus' }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
+
   /rest/v1/system_settings:
     get:
       tags: [Registry]
@@ -2813,6 +2885,20 @@ components:
             Legacy free-text classification, no longer written. A device's type is derived from the
             metric groups its attached schemas model. Existing values still display, marked legacy.
         connection_method: { type: string, nullable: true, example: Sparkplug B }
+        shadow_of:
+          type: string
+          format: uuid
+          nullable: true
+          readOnly: true
+          description: >-
+            For a playback lane: the real machine whose recordings this device replays. NULL for
+            every ordinary device. Set only by `ensure_shadow_devices()` (0060) — a lane is created
+            as a side effect of preparing a playback and reused thereafter, one per (playback
+            gateway, original device). This is PROVENANCE and not a copy of a gateway flag: whether
+            a device is synthetic still derives from `gateways.is_shadow` / `is_simulated`.
+            A lane carries its original's schemas and deliberately NOT its nameplate — a serial
+            number identifies one physical object, and a copy would make the AAS export emit two
+            shells asserting the same asset identity.
         first_dbirth_at: { type: string, format: date-time, nullable: true, readOnly: true, description: 'Write-once — a later rebirth never overwrites it.' }
         last_birth_metrics:
           type: array
@@ -2857,8 +2943,20 @@ components:
         explicit_cell_id: { type: string, format: uuid, nullable: true, description: 'The raw `devices.cell_id`. This is what an edit form must round-trip.' }
         gateway_cell_id: { type: string, format: uuid, nullable: true }
         location_scope: { $ref: '#/components/schemas/LocationScope' }
-        effective_cell_id: { type: string, format: uuid, nullable: true, description: 'What to display. NULL is the Unassigned lane.' }
-        location_source: { type: string, enum: [device, gateway, none], description: Which arm supplied the effective cell. }
+        effective_cell_id: { type: string, format: uuid, nullable: true, description: 'What to display. NULL for every lane — read `location_source` to tell which.' }
+        location_source:
+          type: string
+          enum: [shadow, simulated, site_wide, explicit, inherited, unassigned]
+          description: >-
+            Which arm answered, most specific first. `shadow` and `simulated` are read off the
+            GATEWAY (0059) and resolve to no cell: they are lanes rather than places, and an asset
+            behind one is not unfiled but unfileable — `gateways_synthetic_has_no_cell` refuses the
+            write. `site_wide` is an operator's assertion that an asset has no single cell.
+            `explicit` and `inherited` look identical once resolved, but only the second moves when
+            the gateway is reassigned. `unassigned` is the fall-through and the only one that means
+            "nobody has decided": it is a queue that should drain, which is why the four above it
+            are kept out of it.
+          example: inherited
         cell_mismatch: { type: boolean, description: True when an explicit cell disagrees with the gateway's. }
 
     DeviceSubmodel:
@@ -3234,6 +3332,50 @@ components:
         created_at: { type: string, format: date-time }
         started_at: { type: string, format: date-time, nullable: true }
         finished_at: { type: string, format: date-time, nullable: true }
+
+    RebirthRequest:
+      type: object
+      description: |
+        One request for an edge node to republish its birth certificate.
+      properties:
+        id: { type: string, format: uuid }
+        gateway_id: { type: string, format: uuid }
+        edge_node_id:
+          type: string
+          description: 'The gateway`s sparkplug_id — the NCMD is addressed to it.'
+          example: gwy120000000000400080000
+        sparkplug_group: { type: string, example: ACS-Cymru }
+        status: { type: string, enum: [PENDING, SENT, FAILED] }
+        throttled:
+          type: boolean
+          description: |
+            The daemon rate-limits rebirths per edge node, because a node that reboots on one would
+            otherwise be held in a loop by the mechanism meant to recover it. A request from a
+            person bypasses that limit, so this is false in practice and is kept because "asked and
+            declined" is a different outcome from "asked and failed".
+        error: { type: string, nullable: true }
+        requested_by: { type: string, format: uuid, nullable: true }
+        requested_at: { type: string, format: date-time }
+        sent_at: { type: string, format: date-time, nullable: true }
+
+    PlaybackWorkerStatus:
+      type: object
+      description: |
+        What the playback worker can authenticate as, and when it last said so. One row.
+      properties:
+        held_edge_nodes:
+          type: array
+          items: { type: string }
+          description: |
+            Gateway `sparkplug_id`s this worker holds a broker password for. Public identifiers; the
+            passwords are not stored anywhere readable.
+          example: ['gwy130000000000400080000']
+        reported_at:
+          type: string
+          format: date-time
+          description: |
+            Heartbeat, restated every 30 seconds. Stale means the worker is not running — which is a
+            different problem from an empty list, and is why the timestamp is here.
 
     PlaybackJob:
       type: object

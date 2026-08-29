@@ -674,8 +674,38 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     <div className="page-layout">
       <div className="page-main">
 
-      {/* Filters live on their own row: the header outgrew a single line once schema, status and
-          relationship filters arrived, and the primary actions were being pushed off screen. */}
+      {/* One card: title, description, primary action, filters, table. See CellsTab's note on why
+          the filter bar came inside rather than floating above.
+
+          The onboarding queue below stays INSIDE the body rather than above the card, and the
+          reading order is the argument: what this page is, how to narrow it, the devices waiting to
+          be let in, then the ones that are in. */}
+      <div className="card">
+        <div className="card-header">
+          <h3 className="section-title">
+            Devices <span className="section-count">{assets.length}</span>
+          </h3>
+          <button
+            className={`btn btn-primary btn-sm ${!canManage ? 'btn-disabled' : ''}`}
+            style={{ marginLeft: 'auto' }}
+            disabled={!canManage}
+            onClick={() => canManage && (setEditing(null), setForm(blank), setShowForm(true))}
+            title={!canManage ? 'Requires Admin permissions' : 'Register new shopfloor device'}
+          >
+            <IconPlus size={14} /> New Device
+          </button>
+        </div>
+
+        <div className="card-body">
+          <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 12px' }}>
+            A device is an asset that publishes telemetry through a gateway. What it is MODELLED to
+            publish comes from its schema; what it actually publishes is what the historian records,
+            and the two disagreeing is the thing this page exists to surface — as a quarantine, an
+            unmodelled metric, or a device that has never birthed at all.
+          </p>
+
+      {/* Filters live on their own row within the card: the header outgrew a single line once
+          schema, status and relationship filters arrived. */}
       <div className="filter-bar">
         {/* Lifecycle lives here rather than as a separate segmented control in the header: it is
             a filter like the rest, and having two filter surfaces on one page meant the header
@@ -756,17 +786,6 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           </button>
         )}
 
-        {/* The page's one primary action, at the far end of the row it shares with the filters.
-            It had a row of its own -- a 34px band holding a single button, above a filter bar that
-            was already the page's control surface. `.filter-bar-spacer` pushes it right. */}
-        <button
-          className={`btn btn-primary btn-sm ${activeFilterCount > 0 ? '' : 'filter-bar-spacer'} ${!canManage ? 'btn-disabled' : ''}`}
-          disabled={!canManage}
-          onClick={() => canManage && (setEditing(null), setForm(blank), setShowForm(true))}
-          title={!canManage ? 'Requires Admin permissions' : 'Register new shopfloor device'}
-        >
-          <IconPlus size={14} /> New Device
-        </button>
       </div>
 
       {schemaName && (
@@ -854,7 +873,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
         </div>
       )}
 
-      <div className="card">
+        </div>{/* .card-body */}
+
         {loading ? <div className="loading-wrap"><div className="spinner" /> Loading devices…</div> :
          filteredAssets.length === 0 ? (
            <div className="empty-state">

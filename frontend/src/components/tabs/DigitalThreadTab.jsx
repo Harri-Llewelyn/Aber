@@ -1224,14 +1224,43 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
   return (
     <div className="page-layout">
       <div className="page-main">
-        {/* Heading and description removed: the top bar names the page. The event count moved onto
-            the export button, which is the one control whose behaviour depends on it -- it writes
-            exactly these rows.
+        {/* THE HEADING IS BACK, AND THE REASON IS NOT THE ONE THAT REMOVED IT. It went on the
+            grounds that "the top bar names the page", which is true and is still true. What it did
+            not account for is that a card is a COMPOSITION -- title, description, actions, filters
+            -- and a page whose card has none of the first three is a different shape from every
+            page whose card does. The title is the redundant part and it is cheap; the DESCRIPTION
+            is the part the top bar cannot carry, and this page needs one more than most, because
+            what the digital thread does and does not record is not guessable from a list of rows.
 
-            Export and auto-refresh used to sit in a `.page-actions` row of their own ABOVE the
-            filters, which is backwards: what the export writes is decided by the filters, so the
-            button belongs at the end of the row that decides it, not on a separate row before it.
-            Folding them in also removes a whole 34px band from the top of the page. */}
+            EXPORT IS AN ACTION, SO IT SITS WITH THE ACTIONS. It was kept in the filter bar on the
+            grounds that what it writes is decided by the filters, so it belonged at the end of the
+            row that decides it. That is an argument about proximity; the stronger one is about what
+            the control IS -- it does not filter anything, and every other card keeps its actions in
+            the header at title height. The COUNT stays the filtered count, which is the half of the
+            proximity argument worth keeping: the button still says how many rows it will write. */}
+        <div className="card">
+          <div className="card-header">
+            <h3 className="section-title">
+              Digital Thread <span className="section-count">{events.length}</span>
+            </h3>
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ marginLeft: 'auto' }}
+              onClick={() => downloadCSV(exportRows(), 'digital-thread-export.csv')}
+              title="Download the events matching the current filters as CSV"
+            >
+              <IconDownload size={13} /> Export CSV ({events.length})
+            </button>
+          </div>
+
+          <div className="card-body">
+            <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 12px' }}>
+              Every attributed change to a cell, gateway or device, in the order it happened and
+              with what caused it. Append-only and unprunable by any application role — which is
+              what makes it evidence rather than a log. It records asset lifecycle, not privileged
+              acts: a role grant leaves no row here (roadmap item 22).
+            </p>
+
         <div className="filter-bar">
           <select
             className="form-control"
@@ -1354,11 +1383,14 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
                 and chose a value -- and the same widget then offered 1s and 5s against an audit
                 log that changes when an operator does something. A fixed 60s poll below does what
                 the control was there to arrange, without asking. */}
-            <button className="btn btn-ghost btn-sm" onClick={() => downloadCSV(exportRows(), 'digital-thread-export.csv')} title="Download audit events as CSV"><IconDownload size={13} /> Export CSV ({events.length})</button>
           </div>
         </div>
+          </div>{/* .card-body */}
 
-        <div className="card" style={{ padding: '16px' }}>
+        {/* The timeline is a second `.card-body` rather than the card's own inline padding, which
+            is what it used to carry. Two bodies get a divider between them from one rule, so the
+            controls and the trace read as separate registers of the same card. */}
+        <div className="card-body">
           {loading ? (
             <div className="loading-wrap"><div className="spinner" /> Loading digital thread trace sequence…</div>
           ) : events.length === 0 ? (
@@ -1563,7 +1595,8 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
               )}
             </>
           )}
-        </div>
+        </div>{/* .card-body — the timeline */}
+      </div>{/* .card */}
       </div>
 
       <ContextPanel

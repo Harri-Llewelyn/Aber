@@ -153,6 +153,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   // In-flight state for the form's Save and for whichever gateway is restoring.
   const [saving, runSave] = usePendingAction()
   const [restoringId, runRestore] = usePendingKey()
+  // Keyed rather than a single flag: the panel resolves its gateway every render, so a bare boolean
+  // would spin the button for whichever gateway happened to be selected when the request settled.
+  const [rebirthingId, runRebirth] = usePendingKey()
 
   const save = async () => {
     try {
@@ -271,6 +274,42 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
     <div className="page-layout">
       <div className="page-main">
 
+      {/* Above the card: a page-level finding, and the first thing worth knowing on arrival. See
+          CellsTab's note on why it is not in the card body. */}
+      {unassignedDevices.length > 0 && (
+        <div style={{ marginBottom: '20px', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px 16px', fontSize: '13px', color: 'var(--warning-text)' }}>
+          <strong>{unassignedDevices.length} device{unassignedDevices.length === 1 ? '' : 's'} not assigned to any gateway:</strong>{' '}
+          {unassignedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unassignedDevices.length > 5 ? ', …' : ''}.
+          Assign them from the Devices page.
+        </div>
+      )}
+
+      {/* One card: title, description, primary action, filters, table. See CellsTab's note on why
+          the filter bar came inside rather than floating above. */}
+      <div className="card">
+        <div className="card-header">
+          <h3 className="section-title">
+            Edge Gateways <span className="section-count">{gateways.length}</span>
+          </h3>
+          <button
+            className={`btn btn-primary btn-sm ${!canManage ? 'btn-disabled' : ''}`}
+            style={{ marginLeft: 'auto' }}
+            disabled={!canManage}
+            onClick={() => canManage && (setEditing(null), setForm(blank), setShowForm(true))}
+            title={!canManage ? 'Requires Admin permissions' : 'Register new edge gateway'}
+          >
+            <IconPlus size={14} /> New Gateway
+          </button>
+        </div>
+
+        <div className="card-body">
+          <p style={{ color: 'var(--text-muted)', fontSize: '13px', margin: '0 0 12px' }}>
+            A gateway is an edge node: the thing that publishes to the broker, and the identity every
+            topic beneath it is pinned to. Its devices reach the platform through it, so a gateway
+            that goes quiet takes their telemetry with it — which is why status here is derived from
+            the last heartbeat rather than from anything the gateway asserts about itself.
+          </p>
+
       <div className="filter-bar">
         {/* Lifecycle lives here rather than as a separate segmented control in the header: it is
             a filter like the rest, and having two filter surfaces on one page meant the header
@@ -325,28 +364,10 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           </button>
         )}
 
-        {/* The page's one primary action, at the far end of the row it shares with the filters.
-            It had a row of its own -- a 34px band holding a single button, above a filter bar that
-            was already the page's control surface. `.filter-bar-spacer` pushes it right. */}
-        <button
-          className={`btn btn-primary btn-sm filter-bar-spacer ${!canManage ? 'btn-disabled' : ''}`}
-          disabled={!canManage}
-          onClick={() => canManage && (setEditing(null), setForm(blank), setShowForm(true))}
-          title={!canManage ? 'Requires Admin permissions' : 'Register new edge gateway'}
-        >
-          <IconPlus size={14} /> New Gateway
-        </button>
       </div>
 
-      {unassignedDevices.length > 0 && (
-        <div style={{ marginBottom: '20px', background: 'rgba(255,179,0,0.08)', border: '1px solid var(--warning)', borderRadius: 'var(--radius)', padding: '12px 16px', fontSize: '13px', color: 'var(--warning-text)' }}>
-          <strong>{unassignedDevices.length} device{unassignedDevices.length === 1 ? '' : 's'} not assigned to any gateway:</strong>{' '}
-          {unassignedDevices.slice(0, 5).map(a => a.asset_name).join(', ')}{unassignedDevices.length > 5 ? ', …' : ''}.
-          Assign them from the Devices page.
-        </div>
-      )}
+        </div>{/* .card-body */}
 
-      <div className="card">
         {loading ? <div className="loading-wrap"><div className="spinner" /> Loading gateways…</div> :
          filteredGateways.length === 0 ? (
            <div className="empty-state">
@@ -754,6 +775,40 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           },
         ] : []}
         actions={selected ? [
+          /**
+           * ASK THE NODE TO SAY WHO IT IS AGAIN.
+           *
+           * `Node Control/Rebirth` republishes the birth certificate: the metric list, the datatypes
+           * and the ALIAS TABLE every subsequent DDATA is resolved against. The daemon already sends
+           * this on its own -- at startup, on every sequence gap, at the start of every capture --
+           * because that table is in-memory and a stable device may not birth again for weeks. This
+           * is the same publish with a person as the reason, and until now the only way to get one
+           * was to nudge a node in the Node-RED editor and redeploy.
+           *
+           * IT IS THE ONLY COMMAND THIS DASHBOARD SENDS, and the distinction is worth keeping in
+           * view: a rebirth asks a node to RESTATE WHAT IT ALREADY IS. Sparkplug's same NCMD channel
+           * can write metric values, which is actuation, and that is deliberately not reachable from
+           * here -- see 0058.
+           *
+           * NOT ON AN ARCHIVED GATEWAY, where nothing is listening.
+           */
+          !selected.is_archived && canManage && {
+            label: 'Request Rebirth',
+            icon: <IconRefreshCw size={13} />,
+            title: 'Ask this edge node to republish its birth certificate. Harmless — it restates '
+              + 'the metric names and aliases it already publishes, and briefly appears in the live '
+              + 'stream for every subscriber. The daemon sends it within a few seconds.',
+            onClick: () => runRebirth(selected.gateway_id, async () => {
+              try {
+                await api.requestRebirth(selected.gateway_id)
+                showToast(`Rebirth requested for '${selected.gateway_name}'. The daemon sends it within a few seconds.`, 'success')
+              } catch (err) {
+                showToast(err.message, 'error')
+              }
+            }),
+            pending: rebirthingId === selected.gateway_id,
+            pendingLabel: 'Requesting…'
+          },
           /**
            * SETUP COMES FIRST WHILE IT IS UNFINISHED, above Launch UI and Edit.
            *

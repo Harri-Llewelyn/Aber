@@ -717,11 +717,17 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             {
               label: 'Birth certificate',
               // The one field on this panel that changes what an operator does next.
-              value: capture.manifest?.birth_captured === false ? 'Not captured' : 'Captured',
-              danger: capture.manifest?.birth_captured === false,
+              value: capture.manifest?.birth_captured === false
+                ? (capture.manifest?.uses_aliases ? 'Not captured — aliases unresolvable' : 'Not captured')
+                : 'Captured',
+              // Danger only when it actually costs something. A birthless capture of a fleet that
+              // publishes full metric names replays fine, and colouring it red said otherwise.
+              danger: capture.manifest?.birth_captured === false && !!capture.manifest?.uses_aliases,
               title: capture.manifest?.birth_captured === false
-                ? 'No NBIRTH or DBIRTH was recorded, so this capture replays as unresolved_alias against an alias-optimised gateway and drops every metric.'
-                : 'The recording contains a birth certificate, so a playback can resolve metric aliases.',
+                ? (capture.manifest?.uses_aliases
+                  ? 'No birth certificate, and this capture uses metric aliases — a playback cannot resolve them, so every aliased metric is dropped on ingest.'
+                  : 'No birth certificate. Every metric carries its full name, so a playback resolves them; it will not announce the devices, which stay OFFLINE until they birth on their own.')
+                : 'The recording contains a birth certificate, so a playback can resolve metric aliases and announce the devices.',
               full: true
             }
           ] : [])
@@ -929,12 +935,44 @@ function RunningCard({ job, onStop, stopPending, canManage }) {
             seconds, the daemon is not running.
           </div>
         ) : (
-          <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>
-            {job.messages} message{job.messages === 1 ? '' : 's'} · {formatSize(job.bytes)} ·{' '}
-            {job.elapsed_seconds}s of {job.max_seconds}s
-            {' · '}
-            {job.birth_captured ? 'birth certificate captured' : 'no birth certificate yet'}
-          </div>
+          <>
+            {/* A BAR FOR THE CLOCK, NUMBERS FOR THE OTHER TWO CAPS, and the split is the point.
+                A recording stops at whichever of THREE limits binds first -- duration, 100,000
+                messages, 50 MiB -- so a single bar at 10% would promise 90% remaining when the
+                message cap might fire in two seconds. The bar is labelled as the DURATION only and
+                the other two stay as figures beside it, which is the same reason this card counts
+                up rather than down. */}
+            <div
+              style={{
+                height: '4px', borderRadius: '2px', background: 'var(--bg-glass)',
+                overflow: 'hidden', margin: '8px 0 6px'
+              }}
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={job.max_seconds}
+              aria-valuenow={Math.min(job.elapsed_seconds, job.max_seconds)}
+              aria-label="Elapsed against the duration cap"
+              // The caps are NOT NULL columns, so they are always present on a real row -- but the
+              // title is cosmetic and must not be the thing that throws if one is ever absent.
+              title={`${job.elapsed_seconds}s of the ${job.max_seconds}s duration cap.`
+                + (job.max_messages && job.max_bytes
+                  ? ` The recording also stops at ${job.max_messages.toLocaleString()} messages or ${formatSize(job.max_bytes)}, whichever comes first.`
+                  : '')}
+            >
+              <div
+                style={{
+                  width: `${Math.min(100, (job.elapsed_seconds / Math.max(job.max_seconds, 1)) * 100)}%`,
+                  height: '100%', background: 'var(--accent)', transition: 'width 1s linear'
+                }}
+              />
+            </div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+              {job.elapsed_seconds}s of {job.max_seconds}s ·{' '}
+              {job.messages} message{job.messages === 1 ? '' : 's'} · {formatSize(job.bytes)}
+              {' · '}
+              {job.birth_captured ? 'birth certificate captured' : 'no birth certificate yet'}
+            </div>
+          </>
         )}
         {/* THE BANNER SETTLES RATHER THAN VANISHING. This warning is only on screen while the card
             is, which is exactly the window nobody is watching — so it also resolves into
@@ -1028,10 +1066,70 @@ function PlaybackCard({ job, onStop, stopPending, canManage }) {
  */
 const FAILURE_VISIBLE_MS = 15 * 60 * 1000
 
+/**
+ * Which failures this viewer has already read.
+ *
+ * DISMISSAL HAS TO SURVIVE A RELOAD, which is the whole complaint: a banner that comes back when
+ * the page does has not been dismissed, it has been hidden until the next render. `localStorage`
+ * is the right home -- "I have read this" is a fact about one person at one browser, not about the
+ * job, and putting it in the database would mean one operator's acknowledgement silently clearing
+ * the notice for everybody else.
+ *
+ * Every accessor is wrapped: a private window, cleared site data, or a browser set to refuse
+ * storage all throw here rather than returning empty, and a page that fails to render a table
+ * because it could not read a dismissal list would be a far worse bug than the one being fixed.
+ */
+const DISMISSED_KEY = 'acs-cymru.capture.dismissed-failures'
+
+function readDismissed() {
+  try {
+    const raw = window.localStorage.getItem(DISMISSED_KEY)
+    return new Set(raw ? JSON.parse(raw) : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function writeDismissed(ids) {
+  try {
+    // CAPPED, because this list is only ever appended to. A stack that has run for a year would
+    // otherwise carry every failure id it has ever shown, and the 15-minute window means anything
+    // older than the last few is unreachable anyway.
+    window.localStorage.setItem(DISMISSED_KEY, JSON.stringify([...ids].slice(-50)))
+  } catch {
+    // Nothing to do and nothing worth saying: the banner simply reappears on the next load.
+  }
+}
+
+/**
+ * A failure that has just happened, until it is read.
+ *
+ * TWO WAYS OUT, AND BOTH ARE DELIBERATE. The 15-minute window handles the operator who never
+ * returns to this page; the dismiss button handles the one who is looking at it now and wants it
+ * gone. Neither alone is enough -- the window left a notice sitting there for a quarter of an hour
+ * with no way to say "seen it", and dismissal alone would leave a year-old failure waiting for
+ * somebody to click it.
+ *
+ * NOT A MODAL, which is what was asked for, and the reason is when these arrive. A capture fails
+ * asynchronously and the page may not be open; a dialog would then be waiting to block whatever
+ * the operator came to the page to do, for something that happened ten minutes ago. Worse, three
+ * failures would be three dialogs. Dismissal is the acknowledgement a modal was for, without
+ * seizing the page to get it.
+ */
 function RecentFailures({ jobs, kind = 'capture' }) {
+  const [dismissed, setDismissed] = useState(readDismissed)
+
+  const dismiss = (id) => setDismissed(prev => {
+    const next = new Set(prev)
+    next.add(id)
+    writeDismissed(next)
+    return next
+  })
+
   const cutoff = Date.now() - FAILURE_VISIBLE_MS
   const failed = (jobs || []).filter(j => {
     if (j.status !== 'FAILED' && j.status !== 'CANCELLED') return false
+    if (dismissed.has(j.id)) return false
     // No finished_at means it has only just been written; show it rather than hiding a fresh one.
     if (!j.finished_at) return true
     const at = new Date(j.finished_at).getTime()
@@ -1044,7 +1142,7 @@ function RecentFailures({ jobs, kind = 'capture' }) {
       {failed.map(job => (
         <div key={job.id} className="callout" style={{ borderColor: 'var(--danger)', marginTop: '6px' }}>
           <IconShieldAlert size={14} className="callout-icon" />
-          <div style={{ fontSize: '12px' }}>
+          <div style={{ fontSize: '12px', flex: 1 }}>
             <strong>
               {job.devices?.name || job.gateways?.name
                 || job.subject_sparkplug_id || job.target_edge_node_id}
@@ -1053,6 +1151,14 @@ function RecentFailures({ jobs, kind = 'capture' }) {
             {job.status === 'CANCELLED' ? 'cancelled' : 'failed'}
             {job.error ? `: ${job.error}` : '.'}
           </div>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => dismiss(job.id)}
+            title="Dismiss this notice. It will not come back, on this browser."
+            aria-label={`Dismiss the ${kind} failure notice`}
+          >
+            <IconX size={13} />
+          </button>
         </div>
       ))}
     </div>
@@ -1100,11 +1206,19 @@ function SubjectRow({ row, selected, onSelect }) {
               )}
               {/* THE ONE BADGE IN THIS TABLE THAT CHANGES A DECISION. Everything else here is
                   provenance; this says whether the file will actually replay. */}
+              {/* THE OLD TOOLTIP SAID THIS CAPTURE "drops every metric", AND THAT WAS NOT TRUE.
+                  A missing birth certificate costs metrics only when the recording actually depends
+                  on the alias table -- a metric carrying an alias and no name. This fleet publishes
+                  full names, so its birthless captures replay perfectly well, and the warning was
+                  telling operators their good capture was broken. `uses_aliases` is recorded at
+                  capture time so the two cases can be told apart instead of assumed. */}
               {capture.manifest?.birth_captured === false && (
                 <span
-                  className="badge badge-warning"
+                  className={`badge ${capture.manifest?.uses_aliases ? 'badge-warning' : 'badge-neutral'}`}
                   style={{ fontSize: '11px', marginLeft: '6px' }}
-                  title="No NBIRTH or DBIRTH was recorded, so this capture replays as unresolved_alias against an alias-optimised gateway and drops every metric."
+                  title={capture.manifest?.uses_aliases
+                    ? 'No NBIRTH or DBIRTH was recorded and this capture uses metric aliases, so a playback cannot resolve them: every aliased metric is dropped on ingest.'
+                    : 'No NBIRTH or DBIRTH was recorded. Every metric here carries its full name, so a playback still resolves them — but it will not announce the devices, which stay OFFLINE until they birth on their own.'}
                 >
                   NO BIRTH
                 </span>

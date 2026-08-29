@@ -95,7 +95,7 @@ const DEVICE_EMBED =
   'is_archived, gateway_id, cell_id, location_scope, created_at, model_3d_path';
 const GATEWAY_EMBED =
   `id, name, description, sparkplug_id, cell_id, location_scope, access_url, status, last_heartbeat, ` +
-  `is_virtual, is_simulated, is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
+  `is_virtual, is_simulated, is_shadow, is_archived, archived_at, created_at, devices(${DEVICE_EMBED})`;
 
 /**
  * Effective cell per device, keyed by device id, read from public.device_locations.
@@ -464,6 +464,7 @@ export function captureManifest(parsed) {
   const edgeNodes = [];
   const devices = [];
   let birth = false;
+  let usesAliases = false;
 
   for (const message of messages) {
     if (message?.topic) {
@@ -476,6 +477,9 @@ export function captureManifest(parsed) {
       if (parts[4] && !devices.includes(parts[4])) devices.push(parts[4]);
     }
     for (const metric of message?.payload?.metrics || []) {
+      // See capture_worker._manifest(): a metric with an alias and no name is the only kind that
+      // a missing birth certificate actually costs anything.
+      if (!metric?.name && metric?.alias !== undefined && metric?.alias !== null) usesAliases = true;
       if (metric?.name && !seen.has(metric.name)) {
         seen.add(metric.name);
         names.push(metric.name);
@@ -495,7 +499,8 @@ export function captureManifest(parsed) {
     // way would be inventing a fact about a recording this stack did not make.
     rebirth_requested: null,
     edge_node_ids: edgeNodes,
-    device_ids: devices
+    device_ids: devices,
+    uses_aliases: usesAliases
   };
 }
 
@@ -505,6 +510,30 @@ export function gatewayBackupPath(sparkplugId, when = new Date()) {
   // well download one. `-` keeps the timestamp sortable and the filename portable.
   const stamp = when.toISOString().replace(/[:.]/g, '-');
   return `${sparkplugId}/${stamp}-flows.json`;
+}
+
+/**
+ * A signed storage URL that a NEW TAB can actually open.
+ *
+ * THE SIGNED URL ALONE IS NOT ENOUGH BEHIND THIS GATEWAY, and the failure names the wrong thing.
+ * storage-js returns `/storage/v1/object/sign/<bucket>/<path>?token=…`, which is correct and which
+ * the browser then requests with NO HEADERS -- and the API gateway in front of Supabase rejects any
+ * request carrying no `apikey` before storage-api ever sees the token:
+ *
+ *     GET …/object/sign/broker-captures/gwy…/capture.json?token=…
+ *     -> 401 {"message":"No API key found in request"}
+ *
+ * So every "Download" on this stack that opened a signed URL in a tab was broken -- captures and
+ * gateway flow backups both -- and the message points at an API key when what is missing is a query
+ * parameter. Measured, not inferred; appending the key returns 200 with the file.
+ *
+ * PUTTING THE ANON KEY IN A URL IS NOT A LEAK. It is in the bundle every visitor already downloads;
+ * the gateway's filter is a ROUTING check rather than an authorisation one. What authorises this
+ * request is the signed token, which is scoped to one object and expires in sixty seconds.
+ */
+function withApiKey(signedUrl) {
+  if (!signedUrl) return signedUrl;
+  return signedUrl + (signedUrl.includes('?') ? '&' : '?') + `apikey=${SUPABASE_ANON_KEY}`;
 }
 
 /** The public URL for a stored model path. Composed, never stored -- see archived migration 0035. */
@@ -747,7 +776,10 @@ const apiMethods = {
     const [gatewaysRes, issuedRes] = await Promise.all([
       supabase
         .from('gateway_status')
-        .select('id,name,sparkplug_id,is_virtual,is_archived,status,enrolled_at,credential_revoked_at,live_status')
+        // `is_shadow` so the credential dialog can tell an operator where the password actually
+        // goes: a playback gateway has no Node-RED broker node, so the .env pairing it would
+        // otherwise print is advice that cannot be followed.
+        .select('id,name,sparkplug_id,is_virtual,is_shadow,is_archived,status,enrolled_at,credential_revoked_at,live_status')
         .order('name'),
       supabase
         .from('digital_thread')
@@ -889,9 +921,11 @@ const apiMethods = {
   gatewayBackupUrl: async (path) => {
     const { data, error } = await supabase.storage
       .from(GATEWAY_BACKUP_BUCKET)
-      .createSignedUrl(path, 60);
+      // Same two fixes as captureUrl: the gateway refuses a headerless request without an apikey,
+      // and a flows.json renders in the tab rather than saving without `download`.
+      .createSignedUrl(path, 60, { download: path.split('/').pop() || 'flows.json' });
     if (error) throw new Error(error.message || 'Could not create a download link');
-    return data.signedUrl;
+    return withApiKey(data.signedUrl);
   },
 
   deleteGatewayBackup: async (path) => {
@@ -1082,6 +1116,30 @@ const apiMethods = {
   },
 
   /**
+   * Ask an edge node to republish its birth certificate.
+   *
+   * THE PAGE DOES NOT SEND IT. A browser cannot publish MQTT, so this writes a row and the
+   * ingestion daemon -- which holds the only broker account permitted to write an NCMD -- picks it
+   * up within a few seconds. The answer arrives as an `NBIRTH` on the wire, not as a response here.
+   *
+   * THIS IS THE ONLY COMMAND THIS STACK SENDS. Sparkplug's NCMD channel can also write metric
+   * VALUES, which is actuation; that is not reachable from the dashboard and 0058 has a self-check
+   * asserting the table it writes has not grown a way to carry one.
+   */
+  requestRebirth: async (gatewayId) => {
+    const { data, error } = await supabase.rpc('request_gateway_rebirth', {
+      p_gateway_id: gatewayId
+    });
+    if (error) {
+      if (/insufficient_privilege|requires Administrator/i.test(error.message || '')) {
+        throw new Error('Requesting a rebirth requires Administrator or Shopfloor Manager.');
+      }
+      throw new Error(error.message || 'Could not request a rebirth');
+    }
+    return data;
+  },
+
+  /**
    * Gateways a capture may be published onto, with their devices and their credential state.
    *
    * SIMULATED ONLY, because `start_playback_job()` refuses anything else -- offering a real gateway
@@ -1096,8 +1154,16 @@ const apiMethods = {
   playbackTargets: async () => {
     const { data, error } = await supabase
       .from('gateways')
-      .select('id, name, sparkplug_id, sparkplug_group, is_archived, gateway_has_broker_credential, devices(id, name, sparkplug_id, is_archived)')
-      .eq('is_simulated', true)
+      // `status` and `last_heartbeat` are read to warn about a target something ELSE is already
+      // publishing as -- see StartPlaybackModal. Not to refuse one: a playback target is
+      // legitimately OFFLINE, because nothing publishes as it until a playback runs.
+      .select('id, name, sparkplug_id, sparkplug_group, is_archived, status, last_heartbeat, gateway_has_broker_credential, devices(id, name, sparkplug_id, is_archived, shadow_of)')
+      // `is_shadow`, NOT `is_simulated` (migration 0060). A simulator is marked simulated and holds
+      // a credential and would pass every tier -- and Node-RED is publishing as it at the same
+      // time. Two publishers share one Sparkplug `seq` counter, the daemon reads the interleaving
+      // as message loss, and it asks the live node for a rebirth in the middle of the playback.
+      // The database refuses that now; offering it here would only make the refusal a surprise.
+      .eq('is_shadow', true)
       .eq('is_archived', false)
       .order('name');
     if (error) throw new Error(error.message || 'Could not list playback targets');
@@ -1105,6 +1171,44 @@ const apiMethods = {
       ...g,
       devices: (g.devices || []).filter(d => !d.is_archived)
     }));
+  },
+
+  /**
+   * Find or create one replay lane per device in a capture, and return the map to publish under.
+   *
+   * A WRITE, AND DELIBERATELY NOT AUTOMATIC. It creates directory rows, so it hangs off an explicit
+   * click rather than off opening a dialog or changing a dropdown — a device appearing in the
+   * Devices table because someone browsed a modal is the kind of surprise that makes people stop
+   * trusting the table.
+   *
+   * Idempotent: a lane is keyed on (playback gateway, original device) and reused, so replaying the
+   * same capture three times puts three replays on one lane rather than creating three. That is
+   * what lets a chart comparing a machine with its replay hold still between runs.
+   */
+  ensureShadowLanes: async (captureId) => {
+    const { data, error } = await supabase.rpc('ensure_shadow_devices', { p_capture_id: captureId });
+    if (error) throw new Error(error.message || 'Could not prepare replay lanes');
+    return data || {};
+  },
+
+  /**
+   * What the playback worker can actually publish as, and when it last said so.
+   *
+   * THE THIRD FACT THE DIALOG NEEDS, and the only one the database cannot derive. A target can be
+   * `is_simulated` and hold a platform-issued credential and still be unreachable, because the
+   * password is minted in a browser and pasted into the worker's environment by hand — two acts,
+   * and nothing until now noticed when only the first had happened.
+   *
+   * Returns null when nothing has ever reported, which the caller treats the same as stale: in
+   * both cases the honest thing to say is that the worker is not running.
+   */
+  playbackWorkerStatus: async () => {
+    const { data, error } = await supabase
+      .from('playback_worker_status')
+      .select('held_edge_nodes, reported_at')
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'Could not read the playback worker status');
+    return data || null;
   },
 
   activePlaybackJob: async () => {
@@ -1160,11 +1264,20 @@ const apiMethods = {
     return data === true;
   },
 
-  /** A short-lived signed URL. Signed because the bucket is private -- there is no public URL. */
+  /**
+   * A short-lived signed URL. Signed because the bucket is private -- there is no public URL.
+   *
+   * `download` NAMES THE SAVED FILE AND FORCES AN ATTACHMENT. A capture is JSON, so without it the
+   * browser renders the file in the tab instead of saving it -- which for a 50 MiB recording is a
+   * tab that hangs rather than a download. The name is the subject's own, so a folder of captures
+   * from four gateways is not four files called `capture.json`.
+   */
   captureUrl: async (path) => {
-    const { data, error } = await supabase.storage.from(CAPTURE_BUCKET).createSignedUrl(path, 60);
+    const filename = `${(path.split('/')[0] || 'capture')}.capture.json`;
+    const { data, error } = await supabase.storage
+      .from(CAPTURE_BUCKET).createSignedUrl(path, 60, { download: filename });
     if (error) throw new Error(error.message || 'Could not create a download link');
-    return data.signedUrl;
+    return withApiKey(data.signedUrl);
   },
 
   /**

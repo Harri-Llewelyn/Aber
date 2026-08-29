@@ -30,23 +30,45 @@ export const LOCATION_SCOPES = [SCOPE_CELL, SCOPE_SITE_WIDE]
  * Which arm of the resolution answered. `explicit` and `inherited` look identical once resolved,
  * but only one of them moves when the gateway is reassigned -- which is the whole reason the view
  * reports the source rather than just the cell.
+ *
+ * `shadow` and `simulated` are read off the GATEWAY rather than the device (migration 0059). They
+ * are not places, and that is the point: an asset whose telemetry is generated or replayed is not
+ * unfiled, it is unfileable, and every hint unassignedHint() can offer is advice that cannot be
+ * taken for one. Keeping them out of Unassigned is what keeps Unassigned a queue that drains.
  */
 export const SOURCE_EXPLICIT = 'explicit'
 export const SOURCE_INHERITED = 'inherited'
 export const SOURCE_SITE_WIDE = 'site_wide'
 export const SOURCE_UNASSIGNED = 'unassigned'
+export const SOURCE_SIMULATED = 'simulated'
+export const SOURCE_SHADOW = 'shadow'
 
 const SOURCE_LABELS = {
   [SOURCE_EXPLICIT]: 'Set on device',
   [SOURCE_INHERITED]: 'From gateway',
   [SOURCE_SITE_WIDE]: 'Site-Wide',
-  [SOURCE_UNASSIGNED]: 'Unassigned'
+  [SOURCE_UNASSIGNED]: 'Unassigned',
+  [SOURCE_SIMULATED]: 'Simulated',
+  [SOURCE_SHADOW]: 'Shadow'
 }
 
 /** Short badge text for a location source. */
 export function locationSourceLabel(source) {
   return SOURCE_LABELS[source] || SOURCE_LABELS[SOURCE_UNASSIGNED]
 }
+
+/**
+ * The sources that resolve to NO cell, as one set rather than four inequalities.
+ *
+ * Every consumer that reports "devices with no cell" has to exclude these, and every one of them
+ * had its own hand-written list -- which is how Site-Wide ended up correctly excluded from the
+ * Cells banner and the Devices filter while a third caller quietly counted it. Adding a lane
+ * should not require finding those call sites again.
+ *
+ * `unassigned` is NOT in here: it also resolves to no cell, but it is the one that MEANS "nobody
+ * has decided", which is exactly what such a consumer is trying to count.
+ */
+export const NON_CELL_SOURCES = new Set([SOURCE_SITE_WIDE, SOURCE_SIMULATED, SOURCE_SHADOW])
 
 /**
  * Resolve one device against its serving gateway.
@@ -61,13 +83,26 @@ export function resolveDeviceLocation(device, gateway) {
   const explicit = device?.cell_id || null
   const inherited = gateway?.cell_id || null
 
+  // Read off the gateway, and inherited rather than stored -- devices carry no copy, which is what
+  // makes "no simulated device on a real gateway" true by construction instead of by trigger.
+  // A device with no gateway yields false for both and falls through to the arms below.
+  const shadow = !!gateway?.is_shadow
+  const simulated = !!gateway?.is_simulated
+
   // A site-wide asset resolves to no cell at all. Its own cell_id is already NULL -- the
   // devices_site_wide_has_no_cell CHECK guarantees it -- so this is about not inheriting the
-  // gateway's either.
-  const effective = scope === SCOPE_SITE_WIDE ? null : (explicit || inherited)
+  // gateway's either. Synthetic and replayed assets resolve to no cell for a different reason:
+  // they belong to a lane rather than to the plant, and gateways_synthetic_has_no_cell (0059)
+  // guarantees there is no gateway cell for them to inherit in the first place.
+  const effective = (shadow || simulated || scope === SCOPE_SITE_WIDE) ? null : (explicit || inherited)
 
+  // SHADOW BEFORE SIMULATED, mirroring the view. A shadow gateway is necessarily simulated -- 0056
+  // refuses a playback target that is not, and a CHECK states it -- so testing simulated first
+  // would make the shadow lane unreachable without any arm being individually wrong.
   let source
-  if (scope === SCOPE_SITE_WIDE) source = SOURCE_SITE_WIDE
+  if (shadow) source = SOURCE_SHADOW
+  else if (simulated) source = SOURCE_SIMULATED
+  else if (scope === SCOPE_SITE_WIDE) source = SOURCE_SITE_WIDE
   else if (explicit) source = SOURCE_EXPLICIT
   else if (inherited) source = SOURCE_INHERITED
   else source = SOURCE_UNASSIGNED
@@ -120,12 +155,31 @@ export function isUnassigned(device, gateway) {
   return deviceLocationOf(device, gateway).location_source === SOURCE_UNASSIGNED
 }
 
+/** Telemetry generated rather than observed -- a simulator, or a playback target. */
+export function isSimulatedAsset(device, gateway) {
+  const source = deviceLocationOf(device, gateway).location_source
+  return source === SOURCE_SIMULATED || source === SOURCE_SHADOW
+}
+
+/**
+ * A replay lane: real readings, recorded from a real machine, republished under a stand-in.
+ *
+ * Narrower than isSimulatedAsset() on purpose. "Invented" and "recorded from your own plant" are
+ * both synthetic in provenance and opposite in truth, and a caller asking whether a number ever
+ * happened wants this one.
+ */
+export function isShadowAsset(device, gateway) {
+  return deviceLocationOf(device, gateway).location_source === SOURCE_SHADOW
+}
+
 /**
  * Whether an operator still has to say where this device is.
  *
  * True exactly when the resolution ran out of arms. Site-Wide is NOT included: it is the
  * deliberate answer to this question, not an unanswered one -- which is the distinction that
- * keeps the Unassigned lane a queue that can actually drain.
+ * keeps the Unassigned lane a queue that can actually drain. Simulated and Shadow are excluded
+ * for a stronger reason (0059): they are not unfiled but unfileable, and every hint
+ * unassignedHint() can offer is advice that cannot be taken for one.
  */
 export function needsCellAssignment(device, gateway) {
   return isUnassigned(device, gateway)
@@ -173,9 +227,9 @@ export function unassignedHint(device, gateway) {
  * bucket them server-side made every consumer read the device list twice, since all of them
  * already load it for their own purposes. Overview polls at 3s, so that was the expensive one.
  *
- * Devices resolving to no cell -- site-wide and unassigned -- are omitted rather than collected
- * under a null key. They belong to no card, and the two are different states that must not be
- * merged into one "everything else" bucket.
+ * Devices resolving to no cell -- shadow, simulated, site-wide and unassigned -- are omitted rather
+ * than collected under a null key. They belong to no card, and the four are different states that
+ * must not be merged into one "everything else" bucket.
  *
  * Rows are expected to carry `location_source` from `device_locations` (api.js merges it), in
  * which case deviceLocationOf() takes the server's answer verbatim.

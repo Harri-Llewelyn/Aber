@@ -58,11 +58,42 @@ export function VocabularyPanel({ title = 'Standard Vocabulary Reference', subti
 
   return (
     <>
+    <div className="card" style={{ marginBottom: '24px' }}>
+      {/* The header is the title and its explanation, full width, with nothing floating in it. */}
+      <div className="card-header vocab-header">
+        <div>
+          <h3 className="section-title">
+            {title} <span className="section-count">{query ? `${matches} / ${total}` : total}</span>
+          </h3>
+          {subtitle && <div className="vocab-subtitle">{subtitle}</div>}
+        </div>
+      </div>
+
+      {/* Lead sentence, then the caveats as separate labelled lines.
+          This was one paragraph of six sentences that ran the width of the card, and the two facts
+          in it that stop someone making a mistake -- "reference only, not what your devices
+          publish", and how a name is actually composed -- were buried mid-run. */}
+      <div className="vocab-description">
+        <p>{active.description}</p>
+        {(active.notes || []).map((note, i) => (
+          <p key={i} className="vocab-note">
+            {note.label && <strong className="vocab-note-label">{note.label}</strong>}
+            {note.body}
+          </p>
+        ))}
+      </div>
+
       {/* ONE CONTROL ROW, the shape every other page uses: what you are looking at on the left,
           what you are looking for on the right. The standard pills used to sit inside the card
           under its header and the search box floated in that header beside the title, so the two
           halves of one decision were separated by a heading -- and the title and its explanation
-          had to wrap around a 220px input that had nothing to do with them. */}
+          had to wrap around a 220px input that had nothing to do with them.
+
+          IT IS NOW INSIDE THE CARD, BELOW THE DESCRIPTION, like every other list page: a card is a
+          title, a description, its actions and then the filters that narrow what is below. It
+          floated above the card, which made it read as a page-level control when the only thing it
+          affects is this card. */}
+      <div className="card-body">
       <div className="filter-bar">
         {/* A segmented control rather than a dropdown because the whole point is that all four
             counts are visible at once -- that is what tells you the vocabularies are different
@@ -103,31 +134,7 @@ export function VocabularyPanel({ title = 'Standard Vocabulary Reference', subti
           </button>
         )}
       </div>
-
-    <div className="card" style={{ marginBottom: '24px' }}>
-      {/* The header is the title and its explanation, full width, with nothing floating in it. */}
-      <div className="card-header vocab-header">
-        <div>
-          <h3 className="section-title">
-            {title} <span className="section-count">{query ? `${matches} / ${total}` : total}</span>
-          </h3>
-          {subtitle && <div className="vocab-subtitle">{subtitle}</div>}
-        </div>
-      </div>
-
-      {/* Lead sentence, then the caveats as separate labelled lines.
-          This was one paragraph of six sentences that ran the width of the card, and the two facts
-          in it that stop someone making a mistake -- "reference only, not what your devices
-          publish", and how a name is actually composed -- were buried mid-run. */}
-      <div className="vocab-description">
-        <p>{active.description}</p>
-        {(active.notes || []).map((note, i) => (
-          <p key={i} className="vocab-note">
-            {note.label && <strong className="vocab-note-label">{note.label}</strong>}
-            {note.body}
-          </p>
-        ))}
-      </div>
+      </div>{/* .card-body */}
 
       {query && filtered.length === 0 && (
         <div className="empty-state">

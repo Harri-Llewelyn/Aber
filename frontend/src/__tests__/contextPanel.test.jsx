@@ -629,36 +629,63 @@ describe('Links accordion no longer duplicates the panel action', () => {
   })
 })
 
-describe('Filter bars carry the page\'s primary action', () => {
-  // Each page had a `.page-actions` row of its own: a 34px band holding one button, directly above
-  // a filter bar that was already the page's control surface.
-  const primaryInFilterBar = (label) => {
-    const bar = document.querySelector('.filter-bar')
-    const btn = within(bar).getByRole('button', { name: label })
+describe('A card is a composition: header, description, filters, table', () => {
+  /**
+   * THIS USED TO ASSERT THE OPPOSITE, and the history is the point.
+   *
+   * Each page began with a `.page-actions` row of its own -- a 34px band holding one button above a
+   * filter bar that was already the page's control surface -- so the button was folded INTO the
+   * filter bar and this suite pinned it there. That fixed the wasted band and left a subtler
+   * problem: "create a thing" was sitting in the row for "narrow the things", and the filter bar
+   * floated above the card it filtered as a panel in its own right.
+   *
+   * The rule now is compositional rather than corrective: a card is a title, a description, its
+   * actions, and the filters that narrow what is below it. So the bar moved inside the card and the
+   * primary action moved into the header -- and what is asserted is that arrangement, on every page
+   * that has one, because a rule applied to three pages and forgotten on the fourth is not a rule.
+   *
+   * `.page-actions` must still not come back: that part of the original finding stands.
+   */
+  const composedCard = (label) => {
+    const card = document.querySelector('.page-main .card')
+    expect(card).toBeTruthy()
+
+    // The primary action is in the header, not in the filter bar.
+    const header = card.querySelector('.card-header')
+    const btn = within(header).getByRole('button', { name: label })
     expect(btn.className).toMatch(/btn-primary/)
+
+    // The description and the filters are in the body, and the body is inside the card.
+    const body = card.querySelector('.card-body')
+    expect(body).toBeTruthy()
+    expect(body.querySelector('p')).toBeTruthy()
+    expect(body.querySelector('.filter-bar')).toBeTruthy()
+
+    // Nothing floats outside the card any more.
+    expect(document.querySelector('.page-main > .filter-bar')).toBeNull()
     expect(document.querySelector('.page-actions')).toBeNull()
   }
 
-  it('puts New Gateway in the gateways filter bar', async () => {
+  it('composes the gateways card', async () => {
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} onViewThread={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
-    primaryInFilterBar(/New Gateway/i)
+    composedCard(/New Gateway/i)
   })
 
-  it('puts New Device in the devices filter bar, and drops Export CSV', async () => {
+  it('composes the devices card, and still drops Export CSV', async () => {
     render(
       <DevicesTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()}
         initialSchemaFilter="" onClearSchemaFilter={vi.fn()} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />
     )
     await waitFor(() => expect(screen.getByText('Simulated_CNC_01')).toBeInTheDocument())
-    primaryInFilterBar(/New Device/i)
+    composedCard(/New Device/i)
     expect(screen.queryByRole('button', { name: /Export CSV/i })).toBeNull()
   })
 
-  it('puts New Cell in the cells filter bar', async () => {
+  it('composes the cells card', async () => {
     render(<CellsTab showToast={vi.fn()} hasPermission={() => true} onSelectDevice={vi.fn()} onViewThread={vi.fn()} />)
     await waitFor(() => expect(screen.getByText('Assembly Line 1')).toBeInTheDocument())
-    primaryInFilterBar(/New Cell/i)
+    composedCard(/New Cell/i)
   })
 })
 

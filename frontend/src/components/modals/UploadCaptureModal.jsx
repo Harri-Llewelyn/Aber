@@ -108,12 +108,14 @@ export function UploadCaptureModal({ file, subjects, presetSubject, onConfirm, o
           </p>
         )}
 
-        {parsed && manifest && !manifest.birth_captured && (
+        {/* Only when the capture actually depends on the alias table -- see StartPlaybackModal. */}
+        {parsed && manifest && !manifest.birth_captured && manifest.uses_aliases && (
           <div className="callout callout-warning" style={{ marginTop: '10px' }}>
             <IconShieldAlert size={14} className="callout-icon" />
             <div style={{ fontSize: '12px' }}>
-              This capture contains no <code>NBIRTH</code> or <code>DBIRTH</code>. If the recorded
-              gateway used metric aliases, a playback will drop every metric and still report success.
+              This capture contains no <code>NBIRTH</code> or <code>DBIRTH</code> and its metrics are
+              carried by <strong>alias</strong>. A playback will drop every one of them and still
+              report success.
             </div>
           </div>
         )}

@@ -950,16 +950,30 @@ describe('Digital Thread — removed tag filter', () => {
     await waitFor(() => expect(controls().length).toBe(6))
   })
 
-  it('folds export into the filter bar rather than a row of its own', async () => {
-    // What the export writes is decided by the filters, so the button belongs at the end of the
-    // row that decides it. Removing the separate `.page-actions` row is also a whole band of
-    // vertical space off the top of the page.
+  it('puts export in the card header, where a card keeps its actions', async () => {
+    /*
+     * THIS ASSERTED THE FILTER BAR, AND THE REASONING HAS MOVED ON TWICE.
+     *
+     * Export began in a `.page-actions` row of its own -- a band holding one button -- and was
+     * folded into the filter bar on the grounds that what it writes is decided by the filters, so
+     * it belonged at the end of the row that decides it.
+     *
+     * That is an argument about PROXIMITY. The stronger one is about what the control IS: it does
+     * not filter anything, and a card keeps its actions in the header at title height. So it sits
+     * there now, and the count stays the FILTERED count -- which is the half of the proximity
+     * argument worth keeping, because the button still says how many rows it will write.
+     *
+     * `.page-actions` must still not come back. That part of the original finding stands.
+     */
     await show()
 
     expect(document.querySelector('.page-actions')).toBeNull()
-    const actions = document.querySelector('.filter-bar .filter-bar-actions')
-    expect(actions).toBeTruthy()
-    expect(within(actions).getByTitle('Download audit events as CSV')).toBeInTheDocument()
+    const header = document.querySelector('.page-main .card > .card-header')
+    expect(header).toBeTruthy()
+    expect(within(header).getByRole('button', { name: /Export CSV/ })).toBeInTheDocument()
+    // And not in the filter bar it used to live in.
+    const bar = document.querySelector('.filter-bar')
+    expect(within(bar).queryByRole('button', { name: /Export CSV/ })).toBeNull()
   })
 
   it('no longer offers the auto-refresh control, having replaced it with a poll (issue #42)', async () => {
@@ -1039,7 +1053,7 @@ describe('Digital Thread — removed tag filter', () => {
        */
       await show()
 
-      expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (4)')
+      expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (4)')
       expect(screen.queryByTitle('Clear every filter')).not.toBeInTheDocument()
     })
 
@@ -1048,7 +1062,7 @@ describe('Digital Thread — removed tag filter', () => {
       fireEvent.click(toggle())
 
       await waitFor(() =>
-        expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (6)'))
+        expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (6)'))
       expect(screen.getByTitle('Clear every filter')).toHaveTextContent('Clear filters (1)')
     })
 
@@ -1058,7 +1072,7 @@ describe('Digital Thread — removed tag filter', () => {
       fireEvent.click(await screen.findByTitle('Clear every filter'))
 
       await waitFor(() =>
-        expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (4)'))
+        expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (4)'))
     })
 
     it('is styled as the toggle Gateways and Cells already use', async () => {
@@ -1081,11 +1095,11 @@ describe('Digital Thread — removed tag filter', () => {
       // The count on the button is the count the CSV writes -- both read the same derived list,
       // which is why `events` is derived once rather than filtered at each call site.
       await show()
-      expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (4)')
+      expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (4)')
 
       fireEvent.click(toggle())
       await waitFor(() =>
-        expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (6)'))
+        expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (6)'))
     })
 
     it('hides the control when nothing would be hidden', async () => {
@@ -1125,7 +1139,7 @@ describe('Digital Thread — removed tag filter', () => {
       render(<DigitalThreadTab />)
 
       await waitFor(() =>
-        expect(screen.getByTitle('Download audit events as CSV')).toHaveTextContent('Export CSV (6)'))
+        expect(screen.getByRole('button', { name: /Export CSV/ })).toHaveTextContent('Export CSV (6)'))
       expect(screen.queryByRole('button', { name: /Show deleted assets/i })).not.toBeInTheDocument()
     })
 

@@ -96,17 +96,31 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
   // bundle modal gives about its command block: two literals drift, and the failure is an operator
   // pasting lines that disagree with what is on screen.
   //
-  // The variable NAME is left as a placeholder on purpose. `acsCredentialsEnv` is declared per
+  // TWO DESTINATIONS, BECAUSE THERE ARE TWO KINDS OF HOLDER, and printing the wrong one is worse
+  // than printing nothing: an operator follows it, nothing works, and the password is already gone.
+  //
+  // A SIMULATED gateway's password is held by a Node-RED broker node, which reads a `.env` PAIR.
+  // The variable NAME is left as a placeholder on purpose: `acsCredentialsEnv` is declared per
   // broker node in the flow and is deliberately NOT derived from the gateway's name --
   // provision-gateways.mjs documents the debugging session that cost -- so this component cannot
   // know it, and guessing would produce a block that looks authoritative and does not work.
-  const envBlock = credential
-    ? [
-      '# in .env, matching the broker node\'s acsCredentialsEnv',
-      `MQTT_GW_<NAME>_USER=${credential.mqtt_username}`,
-      `MQTT_GW_<NAME>_PASSWORD=${credential.password}`,
-    ].join('\n')
-    : ''
+  //
+  // A PLAYBACK gateway (0060) has no Node-RED node at all. Nothing publishes as it except the
+  // playback worker, which reads ONE json object keyed by sparkplug_id -- and that key IS
+  // derivable, so this half prints a line that can be pasted whole.
+  const isPlayback = !!gateway.is_shadow
+  const envBlock = !credential
+    ? ''
+    : isPlayback
+      ? [
+        '# in .env -- the playback worker reads this one variable',
+        `MQTT_PLAYBACK_CREDENTIALS={"${credential.mqtt_username}":"${credential.password}"}`,
+      ].join('\n')
+      : [
+        '# in .env, matching the broker node\'s acsCredentialsEnv',
+        `MQTT_GW_<NAME>_USER=${credential.mqtt_username}`,
+        `MQTT_GW_<NAME>_PASSWORD=${credential.password}`,
+      ].join('\n')
 
   const close = useCallback(() => onClose(), [onClose])
   useEscapeKey(close, true)
@@ -238,8 +252,21 @@ export function GatewayCredentialModal({ gateway, onClose, showToast }) {
               }}>{envBlock}</pre>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
                 <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
-                  Replace <span className="mono">&lt;NAME&gt;</span> with the broker node’s{' '}
-                  <span className="mono">acsCredentialsEnv</span> value, then restart Node-RED.
+                  {isPlayback ? (
+                    <>
+                      Paste it as it is, then restart the playback worker
+                      (<span className="mono">docker compose up -d playback</span>). Already have
+                      other targets in there? Add this key to the existing object rather than
+                      replacing it.
+                    </>
+                  ) : (
+                    <>
+                      Replace <span className="mono">&lt;NAME&gt;</span> with the broker node’s{' '}
+                      <span className="mono">acsCredentialsEnv</span> value — it is declared on the
+                      broker node in the Node-RED flow, and is not the gateway’s name — then restart
+                      Node-RED.
+                    </>
+                  )}
                 </span>
                 <button className="btn btn-ghost" onClick={() => copy('env', envBlock)}>
                   {copied === 'env' ? <IconCheck size={13} /> : <IconCopy size={13} />} Copy block
