@@ -735,9 +735,27 @@ three-way enum, so the fourth combination stays *sayable*: folding them together
 simulator on a separate load-generation box inexpressible.
 
 **The rename is not in that migration**, deliberately — 126 references across 47 files, and §15's
-own rule is that a rename beside a feature is a rename nobody reviews. Until it happens
+own rule is that a rename beside a feature is a rename nobody reviews. Until it completes,
 `sync_gateway_deployment()` keeps the two columns in agreement in both directions, so every writer
-in the repository — none of which knows the new column — keeps working and gets it filled correctly.
+that still names `is_virtual` keeps working and gets the new column filled correctly.
+
+**`0065` moves the SQL half**, and it went first because that is where the ambiguity has actually
+cost something: `gateway_holds_a_credential()`, `gateway_has_broker_credential()`,
+`authorize_virtual_gateway_credential()`, `issue_gateway_enrollment_token()` and both credential
+recorders. Three defects — `0056`, `0062`, `0063` — were the same predicate misread three ways, and
+all three lived in a `WHERE` clause. The translation is mechanical (`NOT is_virtual` →
+`deployment = 'remote'`) and `0064`'s trigger means every one of them answers exactly as it did.
+
+Two things `0065` records that are easy to miss:
+
+- **The audit rows now carry `deployment`**, and rows already written keep `is_virtual`. That is
+  correct rather than untidy: an audit row records what was true in the vocabulary of its time, and
+  rewriting history to use a word coined later would be a lie about a table whose whole value is
+  that it cannot be edited.
+- **Its self-check strips comments before looking for stragglers.** `prosrc` is the whole body,
+  prose included, and the first version failed on a function whose new comment *explains* that it
+  used to read `is_virtual`. A check that cannot tell a mention from a use forces documentation to
+  be thinned to keep it quiet.
 
 **On UPDATE there is no conflict to resolve, and that is arithmetic rather than policy.** Both
 columns are two-valued and every row starts in agreement, so an update changing both necessarily
