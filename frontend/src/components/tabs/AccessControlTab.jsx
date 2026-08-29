@@ -512,6 +512,30 @@ export function AccessControlTab({ showToast }) {
             </table>
             </div>
           )}
+
+          {/* WHAT THIS INVENTORY DOES NOT SEE, ON ITS FACE.
+
+              The list used to render empty on a stack holding live credentials, and an empty list
+              is read as an assertion that none exist. It is not: the two keys the daemon and the
+              playback worker authenticate with are minted by `npm run setup` BEFORE this database
+              exists, and they run for ten years -- which record_service_token_issued() refuses,
+              because that ceiling exists precisely for credentials nobody can take back.
+
+              So the gap cannot be closed by recording harder, and stating it is not a consolation
+              prize: this inventory is the compensating control README.md's Accepted risks section
+              names, and a control whose coverage is unstated is one an operator will over-trust.
+
+              Gateway broker credentials are a different story and ARE covered now -- 0062 gave
+              provisioning a recorder it can actually reach. */}
+          <div className="card-footer" style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+            <strong>What this list covers.</strong> Tokens minted by{' '}
+            <code>scripts/mint-mcp-token.mjs</code>, which records each issue before it prints one.
+            It does <strong>not</strong> cover <code>SUPABASE_INGESTION_KEY</code> or{' '}
+            <code>SUPABASE_PLAYBACK_KEY</code>: <code>npm run setup</code> mints those before this
+            database exists, and they are signed for ten years — past the 90-day ceiling the
+            recorder enforces, which is there because none of these tokens can be revoked. They are
+            live whether or not they appear here.
+          </div>
         </div>
 
         <div className="card" style={{ marginTop: '12px' }}>

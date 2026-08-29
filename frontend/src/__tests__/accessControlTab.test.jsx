@@ -230,9 +230,35 @@ describe('AccessControlTab', () => {
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText('No token on record')).toBeTruthy())
-    // The same distinction the credential column makes: the page reports what it recorded, and a
-    // token minted before the script recorded its issues would not appear here.
-    expect(screen.getByText(/would not appear here/i)).toBeTruthy()
+    // The same distinction the credential column makes, and now stated rather than left to be
+    // inferred: the page reports what it RECORDED, and an empty cell is a fact about the record.
+    expect(screen.getByText(/not the same as none existing/i)).toBeTruthy()
+  })
+
+  /**
+   * THE COVERAGE NOTE, and why an empty inventory needed one.
+   *
+   * Two of the three principals this stack ships with hold keys that are in use right now --
+   * SUPABASE_INGESTION_KEY and SUPABASE_PLAYBACK_KEY -- and NEITHER can ever appear in this list:
+   * `npm run setup` mints them before the database exists, and they are signed for ten years, which
+   * record_service_token_issued() refuses because its ceiling exists precisely for credentials
+   * nobody can take back.
+   *
+   * So the gap cannot be closed by recording harder, and an unlabelled empty list is read as "no
+   * credentials outstanding" -- on a stack where the two most powerful ones are outstanding. This
+   * inventory is the compensating control README.md's Accepted risks section names by name, so its
+   * coverage belongs on its face rather than in a migration header nobody reading the page will see.
+   */
+  it('states the credentials it cannot see, so an empty list is not read as none', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
+    expect(screen.getByText('SUPABASE_INGESTION_KEY')).toBeTruthy()
+    expect(screen.getByText('SUPABASE_PLAYBACK_KEY')).toBeTruthy()
+    // The REASON, not just the exclusion. A note saying "some keys are not listed" invites somebody
+    // to close the gap by listing them, which the ceiling exists to prevent.
+    expect(screen.getByText(/past the 90-day ceiling/i)).toBeTruthy()
   })
 
   /**
