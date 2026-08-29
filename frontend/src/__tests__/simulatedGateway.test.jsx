@@ -5,25 +5,27 @@ import { GatewaysTab } from '../components/tabs/GatewaysTab'
 import { api } from '../api'
 
 /**
- * `gateways.is_simulated` (migration 0052) in the Gateways tab.
+ * The Type column and the control behind it, in the Gateways tab.
  *
- * WHAT THIS FLAG IS FOR. Broker playback (`ingestion/capture.py`) publishes a recorded capture
- * back through the real broker down the real ingestion path -- deliberately, because a spoofed
- * fault is only useful if it is indistinguishable from a real one downstream. Once it lands,
- * this flag is the only thing that says the reading was replayed.
+ * WHAT THIS REPLACED. Two badges beside the gateway name (VIRTUAL, SIMULATED) and two checkboxes in
+ * the form. Between them they said three things -- where it runs, whether the numbers are real, and
+ * in a tooltip "Cloud", which contradicted the first -- and the two checkboxes offered FOUR
+ * combinations where the database permits three: `gateways_simulated_is_host` (0064) forbids a
+ * remote simulator, so one of the four was a write that would be refused after it was ticked.
  *
- * THE TWO WAYS THE CONTROL CAN MISLEAD, which is what is asserted here rather than that it
- * renders:
+ * WHAT IS ASSERTED HERE is the part that can mislead rather than the markup:
  *
- *   1. BEING CONFUSED WITH `deployment`. They are different questions -- deployment is about where
- *      an edge appliance exists, simulated is about whether the readings are real -- and a
- *      physical appliance replaying a capture is virtual=false, simulated=true. If one ever
- *      implied the other, that gateway becomes unrepresentable and the marking silently stops
- *      meaning what it says.
- *
- *   2. READING AS A DATA-PATH SWITCH. Ticking it changes nothing about ingestion. An operator who
- *      believed it quarantined or diverted the replayed data would be wrong in the direction that
- *      matters, so the form says so where it is ticked.
+ *   1. THE FOUR VALUES ARE NOT INTERCHANGEABLE, and Shadow is the one that earns the column its
+ *      fourth. A SIMULATED spindle reporting 4000 RPM never turned; a SHADOW spindle reporting
+ *      4000 RPM did turn, on a real machine, on the day the capture was recorded. Both are "not a
+ *      machine running now" and they give opposite answers to *is this number true*.
+ *   2. SHADOW CANNOT BE CHOSEN. 0060 seeds the single Playback gateway and a trigger refuses any
+ *      other; offering it would be offering to fabricate one.
+ *   3. ONE CONTROL STILL WRITES TWO COLUMNS. The schema keeps them separate on purpose, so the
+ *      translation happens in one place and the form does not quietly become the model.
+ *   4. IT IS NOT A DATA-PATH SWITCH. Choosing Simulated changes nothing about ingestion, and an
+ *      operator who believed it quarantined or diverted the replayed data would be wrong in the
+ *      direction that matters.
  */
 
 vi.mock('../api', async () => {
@@ -42,6 +44,7 @@ const gateway = (overrides = {}) => ({
   status: 'ONLINE',
   deployment: 'remote',
   is_simulated: false,
+  is_shadow: false,
   is_archived: false,
   cell_id: 'cell-1',
   location_scope: 'cell',
@@ -69,100 +72,124 @@ const openEdit = () => {
   fireEvent.click(within(document.querySelector('.context-panel')).getByText('Edit Details'))
 }
 
-const simulatedCheckbox = () => document.querySelector('#is_simulated')
-const deploymentCheckbox = () => document.querySelector('#deployment')
+const typeSelect = () => document.querySelector('#gateway-type')
+/** The row's Type cell, which is the one in the table rather than any badge in the drawer. */
+const typeCell = () => within(document.querySelector('.page-main')).getAllByText(
+  /^(Host|Remote|Simulated|Shadow)$/
+)[0]
 
 beforeEach(() => vi.clearAllMocks())
 
-describe('the SIMULATED badge', () => {
+describe('the Type column', () => {
 
-  it('is shown for a simulated gateway', async () => {
-    await show([gateway({ is_simulated: true })])
-    expect(screen.getAllByText('SIMULATED').length).toBeGreaterThan(0)
-  })
-
-  it('is absent for an ordinary one', async () => {
-    await show([gateway()])
-    expect(screen.queryByText('SIMULATED')).toBeNull()
-  })
-
-  it('appears alongside VIRTUAL rather than instead of it', async () => {
-    // THE COMBINATION THAT MUST STAY SAYABLE. A cloud connector generating test data is both.
+  it('reports a simulated gateway as Simulated', async () => {
     await show([gateway({ deployment: 'host', is_simulated: true })])
-    expect(screen.getAllByText('SIMULATED').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('VIRTUAL').length).toBeGreaterThan(0)
+    expect(typeCell().textContent).toBe('Simulated')
   })
 
-  it('is shown for a simulated gateway that is not virtual', async () => {
-    // The case that makes the two flags irreducible: a real appliance replaying a capture.
-    await show([gateway({ deployment: 'remote', is_simulated: true })])
-    expect(screen.getAllByText('SIMULATED').length).toBeGreaterThan(0)
+  it('reports a host-run gateway as Host', async () => {
+    await show([gateway({ deployment: 'host' })])
+    expect(typeCell().textContent).toBe('Host')
+  })
+
+  it('reports an appliance as Remote', async () => {
+    await show([gateway({ deployment: 'remote' })])
+    expect(typeCell().textContent).toBe('Remote')
+  })
+
+  it('reports a shadow gateway as Shadow, not Simulated', async () => {
+    // THE PRECEDENCE THAT EARNS THE FOURTH VALUE. A shadow gateway is necessarily simulated too, so
+    // without an explicit order it lands in Simulated and the more informative answer -- these
+    // readings actually happened -- becomes unreachable.
+    await show([gateway({ deployment: 'host', is_simulated: true, is_shadow: true })])
+    expect(typeCell().textContent).toBe('Shadow')
+  })
+
+  it('reports a row with no deployment as Remote rather than Host', async () => {
+    // A row read through an older select list, or a fixture written before 0064. Host is the type
+    // with no appliance and no enrolment, so claiming it wrongly hides the kind that needs setting
+    // up -- the safe direction is the one that says "there may be hardware to install".
+    const g = gateway()
+    delete g.deployment
+    await show([g])
+    expect(typeCell().textContent).toBe('Remote')
+  })
+
+  it('no longer shows the badges it replaced', async () => {
+    await show([gateway({ deployment: 'host', is_simulated: true })])
     expect(screen.queryByText('VIRTUAL')).toBeNull()
+    expect(screen.queryByText('SIMULATED')).toBeNull()
   })
 })
 
-describe('the simulated checkbox', () => {
+describe('the Type control', () => {
+
+  it('offers exactly the three types a person may set', async () => {
+    await show([gateway()])
+    openEdit()
+    const values = [...typeSelect().options].map(o => o.value)
+    expect(values).toEqual(['remote', 'host', 'simulated'])
+  })
+
+  it('does not offer Shadow', async () => {
+    // 0060 seeds the one shadow gateway and a BEFORE INSERT trigger on playback_jobs refuses any
+    // other target. Offering it here would be offering to fabricate the row that exists to be
+    // unique.
+    await show([gateway()])
+    openEdit()
+    expect([...typeSelect().options].map(o => o.value)).not.toContain('shadow')
+  })
 
   it('reflects the gateway it is editing', async () => {
-    await show([gateway({ is_simulated: true })])
+    await show([gateway({ deployment: 'host', is_simulated: true })])
     openEdit()
-    expect(simulatedCheckbox().checked).toBe(true)
+    expect(typeSelect().value).toBe('simulated')
   })
 
-  it('defaults to false for a gateway saved before 0052', async () => {
-    // A row cached or created before the column existed has no such key. Absent must read as
-    // false, which is what the column defaults to, rather than rendering indeterminate.
-    const g = gateway()
-    delete g.is_simulated
-    await show([g])
-    openEdit()
-    expect(simulatedCheckbox().checked).toBe(false)
-  })
-
-  it('is independent of where the connector runs', async () => {
-    // Ticking one must not move the other. They are two columns rather than one enum precisely so
-    // that the combinations stay sayable -- an appliance out on the plant network replaying a
-    // capture is remote AND simulated -- and wiring the checkboxes together would undo in the UI
-    // what 0064 was careful to keep separate in the schema.
-    //
-    // The database refuses only ONE combination, simulated + remote (gateways_simulated_is_host),
-    // and that is a CHECK rather than a disabled input: a rule stated where a reader finds it.
-    await show([gateway()])
-    openEdit()
-    const before = deploymentCheckbox().checked
-    fireEvent.click(simulatedCheckbox())
-    expect(simulatedCheckbox().checked).toBe(true)
-    // UNCHANGED, not a particular value: what is being asserted is that one control does not move
-    // the other, and pinning the fixture's own default here would make this test fail the day
-    // somebody changes the fixture rather than the day somebody wires the two together.
-    expect(deploymentCheckbox().checked).toBe(before)
-  })
-
-  it('says that ingestion is unchanged', async () => {
-    // THE MISREADING THIS PREVENTS: that ticking it diverts or quarantines the data. It does not,
-    // and an operator who believed otherwise would be wrong in the direction that matters.
-    await show([gateway()])
-    openEdit()
-    expect(screen.getByText(/Ingestion is unchanged/i)).toBeInTheDocument()
-  })
-
-  it('says that devices inherit it', async () => {
-    // The design decision from 0052, surfaced where somebody would otherwise go looking for a
-    // per-device setting that deliberately does not exist.
-    await show([gateway()])
-    openEdit()
-    expect(screen.getByText(/devices inherit the mark/i)).toBeInTheDocument()
-  })
-
-  it('sends the flag on save', async () => {
+  it('writes both columns when Simulated is chosen', async () => {
+    // ONE CONTROL, TWO COLUMNS. The schema keeps them separate deliberately; this is the single
+    // place the translation happens, and the assertion is that it happens completely.
     api.put.mockResolvedValue({})
     await show([gateway()])
     openEdit()
-    fireEvent.click(simulatedCheckbox())
+    fireEvent.change(typeSelect(), { target: { value: 'simulated' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     const [, body] = api.put.mock.calls[0]
     expect(body.is_simulated).toBe(true)
+    expect(body.deployment).toBe('host')
+  })
+
+  it('clears the simulated flag when the type moves back to Remote', async () => {
+    // The combination the database refuses. Leaving is_simulated set while deployment became
+    // 'remote' would send a write that gateways_simulated_is_host rejects -- an error an operator
+    // caused by choosing something the form offered.
+    api.put.mockResolvedValue({})
+    await show([gateway({ deployment: 'host', is_simulated: true })])
+    openEdit()
+    fireEvent.change(typeSelect(), { target: { value: 'remote' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(api.put).toHaveBeenCalled())
+    const [, body] = api.put.mock.calls[0]
+    expect(body.deployment).toBe('remote')
+    expect(body.is_simulated).toBe(false)
+  })
+
+  it('says that ingestion is unchanged', async () => {
+    // THE MISREADING THIS PREVENTS: that choosing Simulated diverts or quarantines the data. It
+    // does not, and the sentence lives beside the control rather than in a migration header.
+    await show([gateway({ deployment: 'host', is_simulated: true })])
+    openEdit()
+    expect(screen.getByText(/Ingestion is unchanged/i)).toBeInTheDocument()
+  })
+
+  it('says that devices inherit the mark', async () => {
+    // 0052's design decision, surfaced where somebody would otherwise go looking for a per-device
+    // setting that deliberately does not exist.
+    await show([gateway({ deployment: 'host', is_simulated: true })])
+    openEdit()
+    expect(screen.getByText(/devices inherit the mark/i)).toBeInTheDocument()
   })
 })

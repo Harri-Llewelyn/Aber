@@ -5,6 +5,7 @@ import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { usePendingAction } from '../../hooks/usePendingAction'
 import { ActionButton } from '../common/ActionButton'
 import CopyableId from '../common/CopyableId'
+import { gatewayType, gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone } from '../../utils/gatewayType'
 import { ContextPanel, rowSelectHandler } from '../common/ContextPanel'
 import { schemasForDevice } from '../../utils/deviceTags'
 import { ConfirmModal } from '../modals/ConfirmModal'
@@ -182,6 +183,14 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
     return map
   }, [gateways])
 
+  // THE ROW, not just the name: a device's Type is its gateway's, and deciding it needs all three
+  // of `is_shadow`, `is_simulated` and `deployment` rather than a label.
+  const gatewayById = useMemo(() => {
+    const map = new Map()
+    for (const g of gateways) map.set(g.id, g)
+    return map
+  }, [gateways])
+
   const allRows = useMemo(() => {
     const source = subjectKind === 'gateway' ? gateways : devices
     return source.map(subject => ({
@@ -194,7 +203,13 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         ? (gatewayName.get(subject.gateway_id) || 'Unbound')
         : null,
       gatewayId: subjectKind === 'device' ? subject.gateway_id : subject.id,
-      isSimulated: subjectKind === 'gateway' && !!subject.is_simulated,
+      // THE TYPE OF THE GATEWAY, for a device row as much as a gateway one: a device's readings are
+      // as synthetic as the edge node publishing them, and the device rows are where an operator is
+      // most likely to forget that. `gatewayType()` reads three fields and applies the lane
+      // precedence, so Shadow does not present as Simulated.
+      type: gatewayType(
+        subjectKind === 'gateway' ? subject : gatewayById.get(subject.gateway_id)
+      ),
       // Carried so the panel can name the device's schema without a second lookup per selection.
       device: subjectKind === 'device' ? subject : null,
       capture: captureBySubject.get(`${subjectKind}:${subject.id}`) || null
@@ -615,6 +630,9 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                   <th title="The wire identity. A capture is filed under this, and playback rewrites it onto the target's own assets">
                     Sparkplug ID
                   </th>
+                  <th title="The kind of gateway this subject publishes through: Remote (an appliance on the plant network), Host (inside this stack), Simulated (readings generated), Shadow (republishes recorded captures)">
+                    Type
+                  </th>
                   <th title="The one capture stored for this subject. Recording again replaces it">
                     Stored capture
                   </th>
@@ -658,11 +676,13 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
         title={selected?.name || ''}
         subtitle={selected && (
           <>
-            {selected.isSimulated && (
-              <span className="badge badge-neutral" style={{ fontSize: '11px', marginRight: '6px' }}>
-                SIMULATED
-              </span>
-            )}
+            <span
+              className={`badge badge-${gatewayTypeTone(selected.type)}`}
+              style={{ fontSize: '11px', marginRight: '6px' }}
+              title={gatewayTypeDescription(selected.type)}
+            >
+              {gatewayTypeLabel(selected.type)}
+            </span>
             {capture
               ? `${capture.message_count} message${capture.message_count === 1 ? '' : 's'} stored`
               : 'No capture stored'}
@@ -1173,25 +1193,24 @@ function SubjectRow({ row, selected, onSelect }) {
       onClick={rowSelectHandler(onSelect)}
       title="Click to inspect this subject in the details panel"
     >
-      <td>
-        {row.name}
-        {/* ONLY WHEN TRUE, which is the whole point of it being a badge rather than a column. A
-            gateway whose telemetry is observed is the ordinary case and needs no label; one whose
-            telemetry is synthetic is the exception, and the only kind a playback may target. */}
-        {row.isSimulated && (
-          <span
-            className="badge badge-neutral"
-            style={{ fontSize: '11px', marginLeft: '8px' }}
-            title="This gateway's telemetry is generated rather than observed (0052). Only a simulated gateway may be a playback target."
-          >
-            SIMULATED
-          </span>
-        )}
-      </td>
+      <td>{row.name}</td>
       {row.kind === 'device' && (
         <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{row.context}</td>
       )}
       <td><CopyableId value={row.sparkplugId} label="Sparkplug ID" /></td>
+      {/* A COLUMN RATHER THAN A BADGE ON THE NAME, matching the Gateways page. The badge said
+          SIMULATED or nothing, which left three of the four kinds looking identical -- and on this
+          page the kind decides something: only a simulated gateway may be a playback target, and a
+          shadow one is where a playback lands. */}
+      <td>
+        <span
+          className={`badge badge-${gatewayTypeTone(row.type)}`}
+          style={{ fontSize: '11px' }}
+          title={gatewayTypeDescription(row.type)}
+        >
+          {gatewayTypeLabel(row.type)}
+        </span>
+      </td>
       <td>
         {!capture && <span style={{ color: 'var(--text-dim)' }}>—</span>}
         {capture && (

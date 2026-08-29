@@ -22,6 +22,7 @@ import {
   tokenStatusLabel,
   tokenStatusTone,
 } from '../../utils/serviceIdentities'
+import { gatewayType, gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone } from '../../utils/gatewayType'
 
 /**
  * Access Control — broker credentials, and where they came from.
@@ -219,7 +220,7 @@ export function AccessControlTab({ showToast }) {
             <thead>
               <tr>
                 <th>Gateway</th>
-                <th>Kind</th>
+                <th title="The kind of gateway: Remote (an appliance on the plant network), Host (inside this stack), Simulated (readings generated), Shadow (republishes recorded captures)">Type</th>
                 <th>MQTT username</th>
                 <th>Credential</th>
                 <th style={{ textAlign: 'right' }}>Issue</th>
@@ -244,8 +245,16 @@ export function AccessControlTab({ showToast }) {
                       )}
                     </td>
                     <td>
-                      <span className="badge badge-neutral" style={{ fontSize: '11px' }}>
-                        {g.deployment === 'host' ? '⚡ HOST-RUN' : 'APPLIANCE'}
+                      {/* THE SAME FOUR WORDS AS THE GATEWAYS AND CAPTURE PAGES, from the same
+                          helper. This column said HOST-RUN or APPLIANCE, which is only the
+                          deployment half -- and on the page whose subject is credentials, a
+                          simulator and a shadow gateway hold one for different reasons. */}
+                      <span
+                        className={`badge badge-${gatewayTypeTone(gatewayType(g))}`}
+                        style={{ fontSize: '11px' }}
+                        title={gatewayTypeDescription(gatewayType(g))}
+                      >
+                        {gatewayTypeLabel(gatewayType(g))}
                       </span>
                     </td>
                     {/* THE USERNAME IS THE WIRE IDENTITY, not a display name -- and it is the one

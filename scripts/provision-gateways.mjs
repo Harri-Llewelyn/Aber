@@ -58,10 +58,20 @@ const rootDir = path.resolve(__dirname, '..');
 /**
  * The demonstrator's cells and their gateways.
  *
- * `cellName` is created if absent, because a gateway with no cell resolves to Unassigned and the
- * shopfloor map is the first thing anyone looks at. `locationScope: 'site_wide'` is for the BMS,
- * which genuinely has no single cell -- writing it into a cell would be a lie the Overview map
- * then renders as fact. See docs: location_scope does not inherit.
+ * NO CELLS, AND THAT IS THE POINT RATHER THAN AN OMISSION. These gateways are marked
+ * `is_simulated`, and `gateways_synthetic_has_no_cell` (0059) forbids pairing that with a cell --
+ * so the four cells this script used to create were containers nothing could be put in. They are
+ * gone with the assignment.
+ *
+ * The devices follow their gateway into the Simulated lane, which resolves AHEAD of cell membership
+ * (`shadow > simulated > site_wide > explicit > inherited > unassigned`), so nothing lands in the
+ * Unassigned queue and no cell is missing from anywhere.
+ *
+ * WHAT THIS COSTS IS THE DEMONSTRATION, and roadmap 15 priced it before taking the decision: a
+ * shopfloor map showing one Simulated bucket demonstrates less than four populated cells did. What
+ * it buys is a map that does not show a plant which is not there, which is the more expensive of
+ * the two mistakes. `locationScope: 'site_wide'` survives for the BMS because it is an assertion
+ * about an asset rather than a container.
  */
 /**
  * DEVICES ARE PRE-REGISTERED, AND THAT IS A CHOICE WITH A COST.
@@ -108,7 +118,6 @@ const GATEWAYS = [
     id: '12000000-0000-4000-8000-000000000001',
     envKey: 'MQTT_GW_CNC_MACHINING',
     name: 'Sim_Gateway_Cell1_Machining',
-    cellName: 'Cell 1 — Precision Machining',
     description: 'Machine tools publishing MTConnect 2.x semantics',
     devices: [
       // TWO SCHEMAS, and 0022's header explains why this one device carries them: the class
@@ -135,7 +144,6 @@ const GATEWAYS = [
     id: '13000000-0000-4000-8000-000000000001',
     envKey: 'MQTT_GW_ROBOTIC_ASSEMBLY',
     name: 'Sim_Gateway_Cell2_Robotics',
-    cellName: 'Cell 2 — Robotic Assembly',
     description: 'Articulated robots publishing OPC 40010 Robotics and 40001-4 Energy semantics',
     devices: [
       {
@@ -151,7 +159,6 @@ const GATEWAYS = [
     // keyed on that id all remain valid. Creating a new gateway would have orphaned all three.
     envKey: 'MQTT_GW_AGV_FLEET',
     name: 'Sim_Gateway_Cell3_OEE',
-    cellName: 'Cell 3 — Production KPIs',
     description: 'ISO 22400 KPI aggregation for the machining cell',
     devices: [
       {
@@ -166,7 +173,6 @@ const GATEWAYS = [
     name: 'Sim_Gateway_Site_BMS',
     // No cell: a building management system spans the site. `location_scope = 'site_wide'` is an
     // assertion an operator makes, and the CHECK constraint forbids pairing it with a cell_id.
-    cellName: null,
     locationScope: 'site_wide',
     description: 'Facility BMS publishing ASHRAE 223P semantics',
     devices: [
@@ -313,25 +319,6 @@ async function rest(pathname, init = {}) {
   return body ? JSON.parse(body) : null;
 }
 
-// --- cells ------------------------------------------------------------------------------------
-async function ensureCell(name) {
-  if (!name) return null;
-  const existing = await rest(`/cells?name=eq.${encodeURIComponent(name)}&select=id,name`);
-  if (existing.length > 0) return existing[0].id;
-
-  if (dryRun) {
-    console.log(`  [dry-run] would create cell '${name}'`);
-    return null;
-  }
-  const created = await rest('/cells', {
-    method: 'POST',
-    headers: { Prefer: 'return=representation' },
-    body: JSON.stringify({ name }),
-  });
-  console.log(`  created cell '${name}'`);
-  return created[0].id;
-}
-
 // --- gateways ---------------------------------------------------------------------------------
 /**
  * Create the gateway if absent, and return the row INCLUDING its generated sparkplug_id.
@@ -389,45 +376,25 @@ async function ensureGateway(spec) {
       row.deployment = 'host';
     }
 
-    // The cell is renamed through the gateway's own cell_id, so an existing deployment follows this
-    // file without a second lookup by the OLD cell name -- which would fail once it had changed.
-    if (spec.cellName && row.cell_id) {
-      const cells = await rest(`/cells?id=eq.${row.cell_id}&select=id,name`);
-      if (cells.length > 0) await renameIfNeeded('cells', cells[0], spec.cellName);
-    }
-
-    // ---------------------------------------------------------------------------------------
-    // AN EXISTING GATEWAY WITH NO CELL STILL GETS ONE, and that arm is not hypothetical: it is
-    // now the ORDINARY case for the first gateway. `0002_seed_data.sql` seeds
-    // Sim_Gateway_Cell1_Machining so the machining CNC exists wherever the migrations run, and it
-    // seeds no cells at all (Unassigned and Site-Wide are derived lanes, not rows). So this
-    // function finds the gateway already present, took the early return above, and never called
-    // ensureCell -- leaving Cell 1 uncreated, the gateway Unassigned, and, because the caller
-    // reads `cellId` off THIS row, all three of its devices Unassigned too.
+    // AND THE SAME FOR `is_simulated`, which nothing set until now.
     //
-    // It failed exactly that way once. The whole machining lane was missing from the shopfloor
-    // map while every row was otherwise correct, which is the kind of failure that looks like a
-    // rendering bug.
+    // 0052 added the column and could not seed it: on a fresh install these rows do not exist when
+    // that migration runs. So a wiped stack came back with four simulator gateways claiming, by
+    // omission, that their readings were observed -- on the same shopfloor map as real plant, with
+    // nothing distinguishing them. That is exactly what the flag exists to prevent, and it was
+    // invisible because nobody had started from an empty database in a long time.
     //
-    // Only when the row has NO cell. An operator who has deliberately moved a gateway to another
-    // cell owns that decision; re-running provisioning must not drag it back.
-    //
-    // AND NOT WHEN THE ROW IS SYNTHETIC. `gateways_synthetic_has_no_cell` (0059) forbids pairing a
-    // cell with is_simulated or is_shadow, so this arm would fail the PATCH rather than misplace
-    // the row -- but it would fail on every provisioning run of a stack whose simulator has been
-    // flagged, which is the ordinary state once §14 lands. A synthetic gateway resolves to the
-    // Simulated or Shadow lane and has no cell to be missing.
-    const synthetic = row.is_simulated || row.is_shadow;
-    if (spec.cellName && !row.cell_id && !synthetic && row.location_scope !== 'site_wide' && !dryRun) {
-      const cellId = await ensureCell(spec.cellName);
-      if (cellId) {
-        await rest(`/gateways?id=eq.${row.id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ cell_id: cellId }),
-        });
-        console.log(`    placed ${row.name} in '${spec.cellName}'`);
-        row.cell_id = cellId;
-      }
+    // The cell has to go with it: `gateways_synthetic_has_no_cell` (0059) refuses the pairing, so
+    // the PATCH clears it in the same statement rather than leaving a row the CHECK would reject.
+    if ((row.is_simulated !== true || row.cell_id) && !dryRun) {
+      await rest(`/gateways?id=eq.${spec.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_simulated: true, cell_id: null }),
+        headers: { Prefer: 'return=minimal' },
+      });
+      if (row.cell_id) console.log(`    cleared its cell (a simulated gateway holds none)`);
+      row.is_simulated = true;
+      row.cell_id = null;
     }
 
     // Likewise for a site-wide gateway that was seeded without the assertion. The CHECK constraint
@@ -450,7 +417,6 @@ async function ensureGateway(spec) {
     return { row: null, created: false };
   }
 
-  const cellId = await ensureCell(spec.cellName);
   const payload = {
     id: spec.id,
     name: spec.name,
@@ -465,10 +431,13 @@ async function ensureGateway(spec) {
     // them. It became `is_virtual: true`, and became this when roadmap 15 retired that word -- the
     // claim it was making all along was about where the connector runs.
     deployment: 'host',
-    ...(spec.locationScope === 'site_wide'
-      // The CHECK constraint forbids site_wide with a populated cell_id, so this must not send one.
-      ? { location_scope: 'site_wide' }
-      : { cell_id: cellId }),
+    // AND SIMULATED, which is the whole claim this fixture makes about itself: these readings are
+    // generated. Set at creation as well as reconciled above, so a fresh install is honest from the
+    // first row rather than from the second provisioning run.
+    is_simulated: true,
+    // No cell_id in either arm: gateways_synthetic_has_no_cell forbids it beside is_simulated, and
+    // the Simulated lane is where these resolve anyway.
+    ...(spec.locationScope === 'site_wide' ? { location_scope: 'site_wide' } : {}),
   };
 
   const created = await rest('/gateways', {
@@ -488,7 +457,7 @@ async function ensureGateway(spec) {
  * null `gateway_id` publishing through a real gateway is refused -- correctly, and confusingly, at
  * the point where telemetry silently stops rather than where the row was created.
  */
-async function ensureDevice(spec, gatewayId, cellId) {
+async function ensureDevice(spec, gatewayId, cellId, simulatedGateway = false) {
   const found = await rest(
     `/devices?id=eq.${spec.id}&select=id,name,sparkplug_id,gateway_id,cell_id,location_scope`
   );
@@ -504,7 +473,26 @@ async function ensureDevice(spec, gatewayId, cellId) {
     // Guarded on the row having no location of its own, so an operator's deliberate placement
     // survives -- location is a fact about where the machine IS, and this script does not know
     // better than the person who moved it.
-    if (!dryRun && !row.cell_id && row.location_scope !== 'site_wide') {
+    // A DEVICE BEHIND A SIMULATED GATEWAY HAS NO REACHABLE CELL, so a stored one is clutter that
+    // says something the UI cannot show. The lane precedence is
+    // `shadow > simulated > site_wide > explicit > inherited > unassigned`, and a device inherits
+    // `is_simulated` from its gateway -- so it renders in the Simulated lane whatever its cell_id
+    // holds. 0059 cleared exactly this on the gateway side and said why: clearing the column makes
+    // the row say what the UI was already showing.
+    //
+    // REPORTED RATHER THAN SILENT, for the same reason 0059 gives -- it discards a placement
+    // somebody may have made.
+    if (!dryRun && row.cell_id && simulatedGateway) {
+      await rest(`/devices?id=eq.${row.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ cell_id: null }),
+        headers: { Prefer: 'return=minimal' },
+      });
+      console.log(`    cleared ${row.name}'s cell (its gateway is simulated; the lane resolves first)`);
+      row.cell_id = null;
+    }
+
+    if (!dryRun && !row.cell_id && !simulatedGateway && row.location_scope !== 'site_wide') {
       const patch = spec.locationScope === 'site_wide'
         // The CHECK constraint forbids site_wide with a cell_id, so these two are exclusive.
         ? { location_scope: 'site_wide' }
@@ -829,7 +817,7 @@ async function main() {
 
     for (const device of spec.devices || []) {
       const { row: deviceRow, created: deviceCreated } =
-        await ensureDevice(device, row.id, cellId);
+        await ensureDevice(device, row.id, cellId, !!row.is_simulated);
       if (!deviceRow) continue;
       console.log(
         `    ${deviceCreated ? 'created' : 'exists'}: ${deviceRow.name} -> ${deviceRow.sparkplug_id}`

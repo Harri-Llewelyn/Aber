@@ -232,7 +232,7 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
     expect(api.put.mock.calls[0][1]).toMatchObject({ location_scope: 'site_wide', cell_id: '' })
   })
 
-  it('does not treat the host-run checkbox as a location assertion', async () => {
+  it('does not treat the Type control as a location assertion', async () => {
     // Virtual is a deployment fact; site-wide is a claim about location. A virtual gateway is
     // usually site-wide, but tying them together would relocate assets on a checkbox.
     api.get.mockImplementation(routeGet())
@@ -243,7 +243,10 @@ describe('GatewaysTab reflects heartbeats and device assignment', () => {
 
     fireEvent.click(within(document.querySelector('.page-main')).getByText('Virtual_Gateway_NodeRED'))
     fireEvent.click(within(document.querySelector('.context-panel')).getByText('Edit Details'))
-    fireEvent.click(screen.getByLabelText(/Runs on this host/i))
+    // Changing the TYPE must not move the cell. They are different questions -- where the connector
+    // runs versus where its assets are -- and conflating them would relocate a plant's devices on a
+    // dropdown.
+    fireEvent.change(document.querySelector('#gateway-type'), { target: { value: 'host' } })
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }))
 
     await waitFor(() => expect(api.put).toHaveBeenCalled())

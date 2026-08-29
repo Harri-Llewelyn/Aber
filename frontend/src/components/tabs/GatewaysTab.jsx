@@ -9,6 +9,10 @@ import {
   formatCertExpiry, isCertExpiring, formatBytes, CERT_EXPIRY_WARN_DAYS
 } from '../../utils/gatewayStatus'
 import { gatewaySparkplugId } from '../../utils/sparkplugId'
+import {
+  GATEWAY_TYPES, SELECTABLE_TYPES, gatewayType, gatewayTypeFields,
+  gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone,
+} from '../../utils/gatewayType'
 import { deviceLifecycleStatus, deviceStatusDotColor, deviceStatusTitle, deviceDotColor } from '../../utils/deviceStatus'
 import { alertIndex, alertForDevice } from '../../utils/deviceAlerts'
 import { SCOPE_CELL, SCOPE_SITE_WIDE } from '../../utils/cellResolution'
@@ -73,6 +77,10 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   // operator create a gateway that silently never gets an appliance.
   const blank = { gateway_id: '', gateway_name: '', status: 'OFFLINE', deployment: 'remote', is_simulated: false, access_url: '', cell_id: '', location_scope: SCOPE_CELL }
   const [form, setForm]         = useState(blank)
+  // DERIVED, NOT A SECOND PIECE OF STATE. The form carries `deployment` and `is_simulated` because
+  // that is what the API takes; the select carries one word. Storing both would be two things to
+  // keep in step for one decision -- the bug class this whole item is about.
+  const formType = gatewayType(form)
   const [docsForGw, setDocsForGw] = useState(null)
   // The gateway whose bundle modal is open. Held as the OBJECT rather than an id: the modal needs
   // the name and sparkplug_id, and it stays open across a poll that may reorder the list.
@@ -385,6 +393,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                  <tr>
                    <th title="Human-readable gateway name">Gateway Name</th>
                    <th title="Sparkplug B edge node id this gateway publishes under">Sparkplug ID</th>
+                   <th title="Where this gateway's connector runs, and whether its readings are real: Remote (an appliance on the plant network), Host (inside this stack), Simulated (host-run, readings generated), Shadow (republishes recorded captures)">Type</th>
                    <th title="Shopfloor cell zone this gateway serves">Cell Zone</th>
                    <th title="Network connectivity status">Gateway Status</th>
                    <th title="Age of the last Sparkplug B node heartbeat (NBIRTH/NDATA/NDEATH)">Last Heartbeat</th>
@@ -410,21 +419,15 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                        >
                          <td>
                            <strong>{g.gateway_name}</strong>
-                           {g.deployment === 'host' && (
-                             <span className="badge badge-warning" style={{ background: 'rgba(0,212,255,0.15)', color: 'var(--accent)', border: '1px solid var(--accent)', marginLeft: '8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }} title="ACS-Cymru Cloud Virtual Gateway">
-                               <IconZap size={11} /> VIRTUAL
-                             </span>
-                           )}
-                           {/* SEPARATE FROM VIRTUAL, AND BOTH CAN BE SHOWN AT ONCE. Virtual is
-                               about whether an edge appliance exists; this is about whether the
-                               readings are real. A physical appliance replaying a capture is
-                               virtual=false, simulated=true, which is why neither implies the
-                               other and the badges do not merge. */}
-                           {g.is_simulated && (
-                             <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Telemetry from this gateway is generated, not observed -- a simulator or a broker playback target">
-                               SIMULATED
-                             </span>
-                           )}
+                           {/* THE KIND OF GATEWAY IS A COLUMN NOW, not two badges beside the name.
+                               They were VIRTUAL and SIMULATED, could both appear at once, and
+                               between them said three things -- where it runs, whether the numbers
+                               are real, and (in the tooltip) "Cloud", which contradicted the first.
+                               One Type column answers the question once, and sorts.
+
+                               ARCHIVED STAYS HERE, because it is not a kind: a gateway of any type
+                               can be decommissioned, and it is the state that changes what the row
+                               MEANS rather than what the gateway IS. */}
                            {g.is_archived && (
                              <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Decommissioned gateway">
                                <IconArchive size={11} /> ARCHIVED
@@ -432,6 +435,15 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
                            )}
                          </td>
                          <td><CopyableId value={g.sparkplug_id || gatewaySparkplugId(g.gateway_id)} label="Sparkplug edge node id" onNotify={showToast} /></td>
+                         <td>
+                           <span
+                             className={`badge badge-${gatewayTypeTone(gatewayType(g))}`}
+                             style={{ fontSize: '11px' }}
+                             title={gatewayTypeDescription(gatewayType(g))}
+                           >
+                             {gatewayTypeLabel(gatewayType(g))}
+                           </span>
+                         </td>
                          <td>
                            {/* Three states, not two. Site-Wide is an answer -- a host-run
                                connector serving the facility -- and must not read as the
@@ -580,40 +592,42 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             {/* .form-group-check rather than an inline 12px/12px pair: this was the one field in
                 the app on its own vertical rhythm, which read as a gap where a field had been
                 deleted rather than as a deliberately tighter row. */}
-            <div className="form-group form-group-check">
-              {/* THE LABEL IS THE POINT OF THE RENAME, not just the column. This said "Mark as
-                  Virtual Gateway (Cloud / Server-Simulated)", which asserted three different things
-                  at once -- and "Cloud" directly contradicted the behaviour behind it, since a cloud
-                  connector is the one thing definitively not on this host. What the flag has always
-                  decided is whether there is a machine to carry a bundle to. */}
-              <input type="checkbox" id="deployment" checked={form.deployment === 'host'} onChange={e => setForm(f => ({ ...f, deployment: e.target.checked ? 'host' : 'remote' }))} />
-              <label htmlFor="deployment" className="form-label">⚡ Runs on this host (no appliance to install)</label>
+            {/* ONE CONTROL, NOT TWO CHECKBOXES, AND THE SCHEMA STILL HOLDS TWO FACTS.
+
+                It was "Runs on this host" plus "Telemetry is simulated or replayed", which offered
+                four combinations where the database permits three: `gateways_simulated_is_host`
+                (0064) forbids a remote simulator, so one of the four was a write that would be
+                refused after the operator had ticked it. A select over the legal states cannot
+                express the refused one.
+
+                This is a rendering of the constraint rather than a collapse of the model -- see
+                utils/gatewayType.js. If a remote simulator is ever wanted, the CHECK relaxes in one
+                line and a fourth option appears here with no data migration behind it. */}
+            <div className="form-group">
+              <label className="form-label" htmlFor="gateway-type">Type</label>
+              <select
+                id="gateway-type"
+                className="form-control"
+                value={formType}
+                onChange={e => setForm(f => ({ ...f, ...gatewayTypeFields(e.target.value) }))}
+                title="Where this gateway's connector runs, and whether its readings are real"
+              >
+                {SELECTABLE_TYPES.map(t => (
+                  <option key={t} value={t}>{gatewayTypeLabel(t)}</option>
+                ))}
+              </select>
             </div>
-            {/* THE CONSEQUENCE OF THE CHECKBOX, SAID BEFORE IT IS TICKED. Leaving it clear means a
-                bundle to download and hardware to run it on; ticking it means the row is finished on
-                save. That difference used to be invisible until after the gateway existed. Shown only
-                when creating: an existing gateway's enrolment is not re-run by editing its row. */}
-            {!editing && (
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '-6px', marginBottom: '12px' }}>
-                {form.deployment === 'host'
-                  ? 'Runs on the application host. Nothing to install — this gateway is ready once saved.'
-                  : 'Runs on its own hardware. On save you will be given a bundle to copy to that machine; it enrols itself and appears here as online.'}
-              </div>
-            )}
-            <div className="form-group form-group-check">
-              <input type="checkbox" id="is_simulated" checked={form.is_simulated || false} onChange={e => setForm(f => ({ ...f, is_simulated: e.target.checked }))} />
-              <label htmlFor="is_simulated" className="form-label">Telemetry is simulated or replayed</label>
-            </div>
-            {/* WHAT TICKING IT MEANS, SAID WHERE IT IS TICKED. It changes no behaviour on the
-                ingestion path -- a simulated gateway is ingested exactly like a real one, which is
-                the point of broker playback -- so the only thing it does is let everything
-                downstream tell the difference. Saying so stops it reading as a switch that
-                quarantines or diverts the data. */}
+            {/* THE CONSEQUENCE, SAID BEFORE IT IS CHOSEN. Remote means a bundle to download and
+                hardware to run it on; the other two mean the row is finished on save. That
+                difference used to be invisible until after the gateway existed.
+
+                Shown for every type rather than only on create, unlike the note it replaces: the
+                Simulated description is about what the READINGS are, which an operator editing an
+                existing row has as much reason to read as one creating it. */}
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '-6px', marginBottom: '12px' }}>
-              Marks this gateway's readings as generated rather than observed — a simulator, or a
-              target for <code>capture.py play</code>. Its devices inherit the mark; they have no
-              setting of their own. Ingestion is unchanged: this is a label for dashboards,
-              retention and reports, not a filter on the data path.
+              {gatewayTypeDescription(formType)}
+              {!editing && formType === GATEWAY_TYPES.REMOTE
+                && ' On save you will be given a bundle to copy to that machine; it enrols itself and appears here as online.'}
             </div>
             <div className="form-group">
               <label className="form-label">Gateway Access URL (Optional UI Console)</label>
