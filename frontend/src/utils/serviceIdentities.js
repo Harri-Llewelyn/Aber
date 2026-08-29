@@ -97,6 +97,9 @@ export const KNOWN_PRINCIPALS = {
       + '`scripts/mint-mcp-token.mjs`, because GOTRUE_JWT_EXP is one hour and this one is pasted '
       + 'into a desktop config file.',
     mintedBy: 'scripts/mint-mcp-token.mjs',
+    // `{id}` is substituted with the principal's own uuid -- the part an operator would otherwise
+    // transcribe by hand, which is the error this column exists to remove.
+    mintCommand: 'node scripts/mint-mcp-token.mjs --principal {id}',
   },
   /*
    * THESE TWO WERE MISSING AND RENDERED AS "Undocumented principal", which is the fallback working
@@ -115,6 +118,12 @@ export const KNOWN_PRINCIPALS = {
       + 'checks the caller IS this principal. Its key travels as the Authorization bearer, not as '
       + 'the apikey — the daemon still sends the anon key for the gateway\'s own check.',
     mintedBy: 'scripts/setup.mjs, re-signed by scripts/rotate-service-keys.mjs',
+    // NOT mint-mcp-token.mjs, AND THAT DISTINCTION IS THE POINT OF THIS FIELD. That script would
+    // happily sign a token for this principal -- same subject, same secret, perfectly valid -- and
+    // no worker would ever read it. The daemon takes its key from the environment, so the result is
+    // a second unrevocable credential for a privileged identity that fixes nothing. Rotation is the
+    // only operation that changes what these processes actually present.
+    mintCommand: 'npm run keys:rotate',
   },
   'b0000000-0000-4000-8000-000000000003': {
     name: 'Service_Playback',
@@ -124,6 +133,12 @@ export const KNOWN_PRINCIPALS = {
       + 'storage policy meaningful — it admits this principal for exactly one object, the capture '
       + 'of the job it is currently running.',
     mintedBy: 'scripts/setup.mjs, re-signed by scripts/rotate-service-keys.mjs',
+    // NOT mint-mcp-token.mjs, AND THAT DISTINCTION IS THE POINT OF THIS FIELD. That script would
+    // happily sign a token for this principal -- same subject, same secret, perfectly valid -- and
+    // no worker would ever read it. The daemon takes its key from the environment, so the result is
+    // a second unrevocable credential for a privileged identity that fixes nothing. Rotation is the
+    // only operation that changes what these processes actually present.
+    mintCommand: 'npm run keys:rotate',
   },
 }
 
@@ -149,6 +164,11 @@ export function describePrincipal(principalId) {
     purpose: 'No description is recorded in the dashboard for this identity. It was created by a '
       + 'migration; check which one seeded this id before assuming it is safe.',
     mintedBy: null,
+    // THE GENERIC MINT COMMAND IS RIGHT FOR AN UNKNOWN PRINCIPAL and wrong for the two service
+    // keys, which is the whole reason this moved out of the component. A principal nobody has
+    // documented is most likely one `create_service_principal()` made at runtime, and
+    // mint-mcp-token.mjs is exactly how a token for one of those is issued.
+    mintCommand: 'node scripts/mint-mcp-token.mjs --principal {id}',
   }
 }
 
