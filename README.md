@@ -1321,13 +1321,19 @@ minting, Devices, Schemas and Access Control, which is most of the product.
 `gateway_holds_a_credential()` (`0038`) · `verify_gateway_binding()` ·
 `gateway_health_rows()` (`0036`) · **not yet filed as an issue**
 
-**The lanes shipped; the vocabulary has not.**
+**The lanes shipped, then the column did. What is left is the rename.**
 [`0059_simulated_and_shadow_lanes.sql`](supabase/migrations/0059_simulated_and_shadow_lanes.sql)
 adds `gateways.is_shadow`, two same-row CHECKs, and the two new arms of `device_locations`, mirrored
 in [`cellResolution.js`](frontend/src/utils/cellResolution.js) and pinned by
-`check-mirror-drift.mjs`. What remains is `deployment` ('host' | 'remote'), the cross-column CHECK
-that needs both columns, and the `is_virtual` rename — none of which a lane needed, and a rename
-smuggled in beside a feature is a rename nobody reviews.
+`check-mirror-drift.mjs`.
+[`0064_gateway_deployment.sql`](supabase/migrations/0064_gateway_deployment.sql) adds `deployment`
+('host' | 'remote'), the cross-column CHECK, and a transitional trigger that keeps it in step with
+`is_virtual` in both directions — so every existing writer keeps working unchanged and gets the new
+column for free.
+
+**What remains is the rename alone**, and it stays separate for the reason this entry has always
+given: a rename smuggled in beside a feature is a rename nobody reviews. `0064` is the column it
+needs to move onto.
 
 **A SECOND LANE, because provenance is not one axis.** A shadow gateway is necessarily simulated —
 `start_playback_job()` (`0056`) refuses a target that is not — so one lane would have covered both,
@@ -1360,8 +1366,8 @@ therefore no flow of its own to lose"*; and the bundle modal opens on create bec
 gateway *"needs a bundle, on a machine, before it can publish at all"*. So the axis the code actually
 uses is **host vs remote**, and the column is named for a different one.
 
-**Two columns, not a three-way enum.** `deployment` (`'host'` | `'remote'`) and `is_simulated`
-(boolean) express the three varieties this stack wants — a host connector to real devices, a remote
+**Two columns, not a three-way enum — built in `0064`.** `deployment` (`'host'` | `'remote'`) and
+`is_simulated` (boolean) express the three varieties this stack wants — a host connector to real devices, a remote
 appliance, and a host-run simulator — while leaving the fourth combination *sayable* rather than
 unrepresentable. Folding them into one enum welds two independent facts together and makes a
 simulator on a separate load-generation box inexpressible. The idiom is already here: `location_scope`
@@ -1426,9 +1432,9 @@ retention for simulated data would break the one feature that needs synthetic da
 whole chunks rather than rows.
 
 **`gateways.is_simulated` already exists** (`0052`), added with playback and taken deliberately from
-this item's design rather than item 11's: the flag is on the gateway and devices inherit it. What
-remains here is `deployment`, the cross-column CHECK that needs both, the `is_virtual` rename, and
-the Simulated lane in `device_locations`. **The flag records provenance; each consumer decides.** The Digital
+this item's design rather than item 11's: the flag is on the gateway and devices inherit it. With
+`0059`'s lanes and `0064`'s column both built, **what remains here is the `is_virtual` rename and
+nothing else**. **The flag records provenance; each consumer decides.** The Digital
 Thread page hides simulated assets by default, which is one more predicate in `0039`'s RPC and
 answers the demonstration feedback where it was actually aimed — at what a reader sees, not at what
 is stored. `digital_thread` itself keeps receiving the rows, because someone standing up a simulator
@@ -1450,7 +1456,9 @@ what the UI was already showing. `provision-gateways.mjs` learned the same rule,
 puts them back. A map that shows a plant which is not there is the more expensive of the two
 mistakes.
 
-**The rename's blast radius is 68 references across 28 files**, most of them frontend tests. The
+**The rename's blast radius is 126 references across 47 files**, most of them frontend tests — it
+read 68 across 28 when this entry was written, and `0056`, the playback work and `0062` have all
+added more since. A number that only moves upwards is worth re-counting rather than trusting. The
 load-bearing few are worth listing because they are not textual: `gateway_holds_a_credential()`
 (`0038`) is `IMMUTABLE` and called from triggers, `gateway_health_rows()` (`0036`) names the column in
 its `RETURNS TABLE` signature, and `0025_physical_gateway_enrollment.sql` keeps its filename whatever

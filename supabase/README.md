@@ -719,6 +719,33 @@ an auditor reads to check that did not happen, exactly the thing it was written 
 none: it is bounded by revocation (`0038`), not by a countdown. Inventing an `expires_at` would put a
 reassuring date against a credential that has no such date.
 
+### `deployment`, and the word it is replacing (`0064`)
+
+`is_virtual` carries three incompatible definitions — *"no physical edge appliance behind this
+row"* (`0025`, provisioning), *"this connector runs on the app host"* (`GatewaysTab.jsx`), and
+*"(Cloud / Server-Simulated)"* (the checkbox, which contradicts the second) — while **every**
+behaviour branching on it is about a fourth thing: whether there is a machine out on the plant
+network. Roadmap §15 makes that argument; the bill arrived separately, as
+`gateway_holds_a_credential()` being the wrong predicate three times in `0056`, `0062` and `0063`.
+
+`0064` adds **`deployment`** (`'host'` | `'remote'`), the axis the code actually uses, plus the
+cross-column `CHECK (NOT is_simulated OR deployment = 'host')` — a simulator is a process this stack
+runs, and a remote one is not something it can provision or reason about. Two columns rather than a
+three-way enum, so the fourth combination stays *sayable*: folding them together would make a
+simulator on a separate load-generation box inexpressible.
+
+**The rename is not in that migration**, deliberately — 126 references across 47 files, and §15's
+own rule is that a rename beside a feature is a rename nobody reviews. Until it happens
+`sync_gateway_deployment()` keeps the two columns in agreement in both directions, so every writer
+in the repository — none of which knows the new column — keeps working and gets it filled correctly.
+
+**On UPDATE there is no conflict to resolve, and that is arithmetic rather than policy.** Both
+columns are two-valued and every row starts in agreement, so an update changing both necessarily
+flips both, which agrees again; a caller restating one column at its current value is
+indistinguishable from one that never mentioned it. The first version of the trigger guarded
+against a disagreement that cannot occur. On INSERT the rule is real, because `is_virtual` has a
+default: a row naming only `deployment` arrives with both set, and the one the caller chose wins.
+
 ### Revocation reads that record, which is why it never worked (`0063`)
 
 `0038` rotates a decommissioned gateway's broker credential to a password nobody records. **It never
