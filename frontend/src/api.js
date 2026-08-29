@@ -1154,8 +1154,13 @@ const apiMethods = {
       // `status` and `last_heartbeat` are read to warn about a target something ELSE is already
       // publishing as -- see StartPlaybackModal. Not to refuse one: a playback target is
       // legitimately OFFLINE, because nothing publishes as it until a playback runs.
-      .select('id, name, sparkplug_id, sparkplug_group, is_archived, status, last_heartbeat, gateway_has_broker_credential, devices(id, name, sparkplug_id, is_archived)')
-      .eq('is_simulated', true)
+      .select('id, name, sparkplug_id, sparkplug_group, is_archived, status, last_heartbeat, gateway_has_broker_credential, devices(id, name, sparkplug_id, is_archived, shadow_of)')
+      // `is_shadow`, NOT `is_simulated` (migration 0060). A simulator is marked simulated and holds
+      // a credential and would pass every tier -- and Node-RED is publishing as it at the same
+      // time. Two publishers share one Sparkplug `seq` counter, the daemon reads the interleaving
+      // as message loss, and it asks the live node for a rebirth in the middle of the playback.
+      // The database refuses that now; offering it here would only make the refusal a surprise.
+      .eq('is_shadow', true)
       .eq('is_archived', false)
       .order('name');
     if (error) throw new Error(error.message || 'Could not list playback targets');
@@ -1163,6 +1168,24 @@ const apiMethods = {
       ...g,
       devices: (g.devices || []).filter(d => !d.is_archived)
     }));
+  },
+
+  /**
+   * Find or create one replay lane per device in a capture, and return the map to publish under.
+   *
+   * A WRITE, AND DELIBERATELY NOT AUTOMATIC. It creates directory rows, so it hangs off an explicit
+   * click rather than off opening a dialog or changing a dropdown — a device appearing in the
+   * Devices table because someone browsed a modal is the kind of surprise that makes people stop
+   * trusting the table.
+   *
+   * Idempotent: a lane is keyed on (playback gateway, original device) and reused, so replaying the
+   * same capture three times puts three replays on one lane rather than creating three. That is
+   * what lets a chart comparing a machine with its replay hold still between runs.
+   */
+  ensureShadowLanes: async (captureId) => {
+    const { data, error } = await supabase.rpc('ensure_shadow_devices', { p_capture_id: captureId });
+    if (error) throw new Error(error.message || 'Could not prepare replay lanes');
+    return data || {};
   },
 
   /**

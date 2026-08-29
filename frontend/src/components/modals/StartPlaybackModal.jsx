@@ -52,6 +52,9 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
   const [capturedDevices, setCapturedDevices] = useState(null)
   const [error, setError] = useState(null)
   const [pending, run] = usePendingAction()
+  // Its OWN pending flag, not `run`'s. Sharing one would put the Start button into its pending
+  // state while lanes are being prepared, which reads as "the playback has begun".
+  const [preparing, runPrepare] = usePendingAction()
 
   useEscapeKey(pending ? () => {} : onCancel)
 
@@ -116,6 +119,25 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
   const workerHolds = (t) => !!t && heldByWorker.includes(t.sparkplug_id)
 
   const unmapped = (capturedDevices || []).filter(d => !deviceMap[d])
+
+  /**
+   * Mint the replay lanes and fill the map from what came back.
+   *
+   * THE TARGET LIST IS REFRESHED AFTERWARDS, and that is not belt-and-braces. `target.devices` is
+   * what the dropdowns render, and it was read before these lanes existed -- so without the reload
+   * the map holds device ids that the select beside it cannot display, and the row renders blank
+   * while claiming to be mapped.
+   */
+  const prepareLanes = () => runPrepare(async () => {
+    setError(null)
+    try {
+      const map = await api.ensureShadowLanes(capture.id)
+      setTargets(await api.playbackTargets())
+      setDeviceMap(m => ({ ...m, ...map }))
+    } catch (err) {
+      setError(err.message)
+    }
+  })
   // The worker check is NOT part of `ready` when the status is unknown -- see the loader. A dialog
   // that refuses because it could not read a courtesy row would be worse than the failure it is
   // trying to prevent.
@@ -306,7 +328,26 @@ export function StartPlaybackModal({ capture, onConfirm, onCancel }) {
               would publish under the target's edge node carrying another gateway's device segment,
               which quarantines that device — and reads as a fleet fault rather than a mapping one.
             </p>
-            {target.devices.length === 0 && (
+            {/* THE MAP BUILDS ITSELF, and the button is here rather than on load because it
+                writes. `ensure_shadow_devices()` mints one replay lane per captured device --
+                bound to this gateway, carrying the original's schema and nothing else -- and
+                returns exactly the map `start_playback_job()` wants. Reused on the next run, so
+                this is a no-op after the first capture of a given machine. */}
+            {unmapped.length > 0 && (
+              <div style={{ marginBottom: '10px' }}>
+                <ActionButton
+                  className="btn btn-secondary btn-sm"
+                  pending={preparing}
+                  pendingLabel="Preparing…"
+                  disabled={pending}
+                  onClick={prepareLanes}
+                  title="Create a replay lane for each device in this capture, bound to this gateway"
+                >
+                  Prepare replay lanes ({unmapped.length})
+                </ActionButton>
+              </div>
+            )}
+            {target.devices.length === 0 && unmapped.length === 0 && (
               <div className="callout" style={{ borderColor: 'var(--danger)' }}>
                 <IconShieldAlert size={14} className="callout-icon" />
                 <div style={{ fontSize: '12px' }}>

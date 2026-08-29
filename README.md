@@ -2070,6 +2070,52 @@ surfaces. **A read gate is a prerequisite, exactly as the write gate is for capt
   > `gateway_has_broker_credential()` instead, which asks the same question of both routes. See the
   > correction at the head of this item.
 
+#### 5b · An edge node nothing else publishes as
+
+**A playback target used to be any simulated gateway, which in practice meant a simulator — a node
+Node-RED is publishing as at the same time.**
+[`0060`](supabase/migrations/0060_playback_gateway_and_shadow_devices.sql) seeds a dedicated
+`Playback` gateway (`gwy160000000000400080000`, `is_shadow`) and a BEFORE INSERT trigger on
+`playback_jobs` refuses anything else.
+
+**Two publishers on one edge node is not a race, it is a corrupted stream**, and Sparkplug makes it
+structural. `seq` is scoped to the **edge node**, not the connection — [`ingestion.py`](ingestion/ingestion.py#L678)
+keys `_last_seq` on `(group, edge_node)` exactly as the specification requires. Two publishers under
+one identity increment separate private counters into one shared sequence, so the daemon sees
+41, 12, 42, 13 and [`check_message_sequence()`](ingestion/ingestion.py#L1019) does the correct thing
+with that: it concludes a message was dropped and asks for a rebirth. The live node then births
+mid-playback, the alias table is rebuilt from *its* metrics while replayed frames are still arriving
+against the old aliases, and the next frame trips the detector again. Every part of that loop is
+behaving as designed, and nothing fixes it by staggering or throttling one side.
+
+**A stand-down NCMD was considered and rejected.** Sparkplug defines four node control metrics —
+Rebirth, Reboot, Next Server, Scan Rate — so it would be a private name that conformant nodes ignore
+while the dashboard reports success; and it is a different *kind* of command from the one thing this
+stack sends. `0058` draws that line: a rebirth asks a node to restate what it already is, and a node
+that ignores it is in exactly the state it was. "Stop reporting" is not idempotent and on a real
+plant blinds whoever is watching. Quieting the simulator is legitimate and belongs **in** the
+simulator — a per-gateway flag in Node-RED's own flow context, with no MQTT command involved.
+
+**Shadow devices are lanes, not copies.** `ensure_shadow_devices()` mints one device per captured
+device, bound to the playback gateway, carrying `devices.shadow_of` and returning the map
+`start_playback_job()` wants. Reused rather than minted per run, so a chart comparing a machine with
+its replay holds still between runs. What is copied is the **metric contract** — `schema_id` and
+`device_submodels` — because a replay judged against no schema is either unjudged or, under
+`conformance_policy = enforce`, wholly rejected while the job reports success.
+
+**What is deliberately not copied is the nameplate**, and `0060` carries a self-check that fails if a
+shadow ever gains one. [`device_nameplate`](supabase/migrations/0011_device_nameplate.sql) is IDTA
+Nameplate and holds a **serial number**, which identifies one physical object; a copy would make the
+AAS Part 5 export emit two Asset Administration Shells asserting the same asset identity. Nothing had
+to be written to prevent it: `0011`'s rule is that a device with no nameplate data has *no row*, and
+the exporter omits an empty submodel — so a shadow exports without one, which is honest. It is not a
+product and has no manufacturer. Links are resolved through `shadow_of` rather than duplicated, for
+the ordinary reason that a copy goes stale.
+
+**The one operational cost**: the Playback gateway needs its own broker credential, minted on the
+Access Control page like any virtual gateway's, then placed in `MQTT_PLAYBACK_CREDENTIALS`. The
+migration's `NOTICE` says so with the `sparkplug_id` already filled in.
+
 #### 6 · Non-goals, recorded so they are not proposed again
 
 **No burst mode, and `--speed 0` stays refused.** Speed divides both the send schedule and the

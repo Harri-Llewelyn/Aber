@@ -2885,6 +2885,20 @@ components:
             Legacy free-text classification, no longer written. A device's type is derived from the
             metric groups its attached schemas model. Existing values still display, marked legacy.
         connection_method: { type: string, nullable: true, example: Sparkplug B }
+        shadow_of:
+          type: string
+          format: uuid
+          nullable: true
+          readOnly: true
+          description: >-
+            For a playback lane: the real machine whose recordings this device replays. NULL for
+            every ordinary device. Set only by `ensure_shadow_devices()` (0060) — a lane is created
+            as a side effect of preparing a playback and reused thereafter, one per (playback
+            gateway, original device). This is PROVENANCE and not a copy of a gateway flag: whether
+            a device is synthetic still derives from `gateways.is_shadow` / `is_simulated`.
+            A lane carries its original's schemas and deliberately NOT its nameplate — a serial
+            number identifies one physical object, and a copy would make the AAS export emit two
+            shells asserting the same asset identity.
         first_dbirth_at: { type: string, format: date-time, nullable: true, readOnly: true, description: 'Write-once — a later rebirth never overwrites it.' }
         last_birth_metrics:
           type: array
@@ -2929,8 +2943,20 @@ components:
         explicit_cell_id: { type: string, format: uuid, nullable: true, description: 'The raw `devices.cell_id`. This is what an edit form must round-trip.' }
         gateway_cell_id: { type: string, format: uuid, nullable: true }
         location_scope: { $ref: '#/components/schemas/LocationScope' }
-        effective_cell_id: { type: string, format: uuid, nullable: true, description: 'What to display. NULL is the Unassigned lane.' }
-        location_source: { type: string, enum: [device, gateway, none], description: Which arm supplied the effective cell. }
+        effective_cell_id: { type: string, format: uuid, nullable: true, description: 'What to display. NULL for every lane — read `location_source` to tell which.' }
+        location_source:
+          type: string
+          enum: [shadow, simulated, site_wide, explicit, inherited, unassigned]
+          description: >-
+            Which arm answered, most specific first. `shadow` and `simulated` are read off the
+            GATEWAY (0059) and resolve to no cell: they are lanes rather than places, and an asset
+            behind one is not unfiled but unfileable — `gateways_synthetic_has_no_cell` refuses the
+            write. `site_wide` is an operator's assertion that an asset has no single cell.
+            `explicit` and `inherited` look identical once resolved, but only the second moves when
+            the gateway is reassigned. `unassigned` is the fall-through and the only one that means
+            "nobody has decided": it is a queue that should drain, which is why the four above it
+            are kept out of it.
+          example: inherited
         cell_mismatch: { type: boolean, description: True when an explicit cell disagrees with the gateway's. }
 
     DeviceSubmodel:

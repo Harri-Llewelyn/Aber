@@ -44,6 +44,7 @@ vi.mock('../api', async () => {
       activePlaybackJob: vi.fn(),
       recentPlaybackJobs: vi.fn(),
       playbackWorkerStatus: vi.fn(),
+      ensureShadowLanes: vi.fn(),
       startPlayback: vi.fn(),
       stopPlayback: vi.fn()
     }
@@ -651,6 +652,42 @@ describe('publishing a capture back', () => {
     fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
     const mapSelect = await screen.findByLabelText('Target device for dev270000000000400080000')
     expect(within(mapSelect).getByText(/Sim Spindle/)).toBeInTheDocument()
+  })
+
+  /**
+   * THE MAP BUILDS ITSELF (0060). Every captured device needs a lane bound to the target, and
+   * creating each by hand on the Devices page before every playback is a chore that means the
+   * feature does not get used. `ensure_shadow_devices()` mints them and returns the map.
+   */
+  it('fills the map from the replay lanes it prepares', async () => {
+    const LANE = { id: 'lane-1', name: 'Sim Spindle (replay)',
+      sparkplug_id: 'dev990000000000400080000', is_archived: false, shadow_of: 'dev-27' }
+    api.ensureShadowLanes.mockResolvedValue({ dev270000000000400080000: 'dev990000000000400080000' })
+
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    await screen.findByLabelText('Target device for dev270000000000400080000')
+
+    // THE SECOND RESOLVE MATTERS: the dropdown renders `target.devices`, which was read before the
+    // lane existed. Without the reload the map holds an id the select cannot display, and the row
+    // renders blank while claiming to be mapped.
+    api.playbackTargets.mockResolvedValue([{ ...TARGET, devices: [...TARGET.devices, LANE] }])
+    fireEvent.click(screen.getByRole('button', { name: /Prepare replay lanes/ }))
+
+    await waitFor(() => expect(api.ensureShadowLanes).toHaveBeenCalledWith('cap-1'))
+    await waitFor(() => expect(
+      screen.getByLabelText('Target device for dev270000000000400080000')
+    ).toHaveValue('dev990000000000400080000'))
+    expect(screen.getByRole('button', { name: /Publish capture/ })).toBeEnabled()
+  })
+
+  it('does not prepare lanes until asked', async () => {
+    // It WRITES -- a device row appearing in the directory because someone opened a modal is the
+    // kind of surprise that makes people stop trusting the table.
+    await open()
+    fireEvent.change(screen.getByLabelText('Publish as'), { target: { value: 'gw-sim' } })
+    await screen.findByLabelText('Target device for dev270000000000400080000')
+    expect(api.ensureShadowLanes).not.toHaveBeenCalled()
   })
 
   it('will not start while a captured device is unmapped', async () => {
