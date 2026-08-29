@@ -125,6 +125,17 @@ spec:
             - |
               PSQL="psql -v ON_ERROR_STOP=1 -h {{ include "acs-cymru.timescale.host" . }} -p {{ include "acs-cymru.timescale.port" . }} -U {{ .Values.timescaledb.username }} -d {{ .Values.timescaledb.database }}"
 
+              {{/*
+                FIRST, AND IN ITS OWN psql SESSION. `ALTER EXTENSION timescaledb UPDATE` is refused
+                once a connection has loaded the old version's library, and every file below uses
+                the API surface it updates -- see extension.sql, which also asserts the update took
+                rather than leaving the image and the database to disagree in silence.
+
+                Outside the rollups `if`, because the extension version is not a rollup setting.
+              */}}
+              echo 'Updating the timescaledb extension to the version the image ships...'
+              $PSQL -f /sql/extension.sql
+
               echo 'Reconciling compression and retention policies...'
               $PSQL -v compress_after={{ .Values.timescaledb.retention.compressAfter | quote }} -v retain_after={{ .Values.timescaledb.retention.retainFor | quote }} -f /sql/retention.sql
               {{- if .Values.timescaledb.rollups.enabled }}

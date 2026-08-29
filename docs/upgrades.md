@@ -59,6 +59,21 @@ Three consequences that matter:
 `supabase/migrations/archive/` is **not** replayed: the loop reads `/migrations/*.sql`, which does
 not recurse. Superseded migrations are kept there for provenance, not for execution.
 
+### The historian upgrades itself too, and used not to
+
+`supabase-db-init` covers the Supabase database. The historian is a separate instance with no
+migration chain, and its own upgrade is one statement that nothing used to run: bumping the
+TimescaleDB image tag upgrades the **binaries** and leaves the **SQL-level extension** where it was.
+Postgres then loads the library matching the *installed* version, so a `2.29.2` image ran `2.29.1`'s
+definitions — indefinitely, silently, and widening on every bump.
+
+`timescaledb-maintenance` now applies [`timescaledb/extension.sql`](../timescaledb/extension.sql)
+first, in its own psql session, on Compose and on Kubernetes alike. It is a no-op when there is
+nothing to update, and it **fails the step** if the two versions still disagree afterwards rather
+than letting the stack carry on — which is the whole difference between this and what it replaced.
+
+An operator does nothing: as above, upgrading is still `docker compose up -d` / `helm upgrade`.
+
 ### Migrations are forward-only
 
 There are no down-migrations, and this is the honest limit of §2. **The images can be rolled back;
@@ -168,6 +183,7 @@ to look at if you want positive confirmation rather than absence of complaints:
 | Check | Where |
 | :--- | :--- |
 | Every migration applied cleanly | `docker compose logs supabase-db-init` — it exits non-zero on any failure |
+| The historian's extension matches its image | `docker compose logs timescaledb-maintenance` — the first step names the version, and fails the step if it drifted |
 | Gateways still reporting | Dashboard → Gateways: `Last Heartbeat` under 90s |
 | Telemetry still landing | Grafana → *Stack & Ingestion Health* → rows ingested per second |
 | The daemon is not dropping anything new | `curl localhost:9108/metrics \| grep dropped` — every reason is a separate series |

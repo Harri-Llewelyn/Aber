@@ -89,6 +89,9 @@ python supabase/migrations/test_metric_catalog_seed.py
 python supabase/migrations/test_gateway_enrollment.py
 # Needs the TimescaleDB historian (port 5433), not Supabase — the rollups live there
 python timescaledb/test_bi_reader_grants.py
+# The installed extension against the version the image ships, plus the two deployment paths that
+# are supposed to close that gap. The second half needs no stack.
+python timescaledb/test_extension_version.py
 # The daemon's and the FDW's own roles (item 18). Each skips itself when its password is unset,
 # because roles.sql skips creating the role on the same condition.
 python timescaledb/test_historian_role_grants.py

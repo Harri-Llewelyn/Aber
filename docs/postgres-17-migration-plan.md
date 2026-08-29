@@ -1,7 +1,10 @@
 # PostgreSQL 17 and TimescaleDB 2.29 — Implementation Plan
 
 **Status (2026-08-10):** Phases **0, 2, 3 and 4 are COMPLETE** and verified on the Compose target.
-Both databases run PostgreSQL 17; the historian runs TimescaleDB 2.29.1 on the columnstore API.
+Both databases run PostgreSQL 17; the historian runs TimescaleDB on the columnstore API — extension
+2.29.2 as of 2026-08-29, when `ALTER EXTENSION timescaledb UPDATE` started running on every boot and
+closed the gap between the pinned image and the installed extension. See §4 and
+[`../docs/upgrades.md`](upgrades.md#the-historian-upgrades-itself-too-and-used-not-to).
 
 **Phase 1 (removing `pgjwt`) is DEFERRED — accepted technical debt, not unfinished work.** Phase 0
 demoted it from blocker to hardening when the extension turned out to still ship in
@@ -405,6 +408,13 @@ Verified three ways: clean install on a fresh hypertable, a second run for idemp
 one that matters — **applied over a database already carrying the legacy `timescaledb.compress`
 settings and an `add_compression_policy` job**, with a changed interval, which took effect. That is
 the upgrade path every existing deployment takes on its next boot.
+
+> **That verification assumed the extension actually updates, and for a long time it did not.**
+> Nothing in the repository ran `ALTER EXTENSION timescaledb UPDATE`, so a stack pinned to
+> `2.29.2-pg17` was measured running extension `2.29.1` — the binaries upgraded, the definitions
+> not. Closed by [`timescaledb/extension.sql`](../timescaledb/extension.sql), which the maintenance
+> path applies before anything that touches this API surface, and which fails rather than proceeding
+> when the image and the database still disagree.
 
 ### The read-only claim was FALSE, and was already false before this upgrade
 
