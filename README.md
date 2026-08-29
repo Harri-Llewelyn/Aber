@@ -1448,12 +1448,36 @@ minting, Devices, Schemas and Access Control, which is most of the product.
 
 ---
 
-### 15 · Three kinds of gateway, and a Simulated lane
+### 15 · Three kinds of gateway, and two lanes for what is not real
 
 **Builds on:** `gateways.is_virtual` (`0001`) · `location_scope` and its two CHECK constraints ·
 `public.device_locations` · [`frontend/src/utils/cellResolution.js`](frontend/src/utils/cellResolution.js) ·
 `gateway_holds_a_credential()` (`0038`) · `verify_gateway_binding()` ·
 `gateway_health_rows()` (`0036`) · **not yet filed as an issue**
+
+**The lanes shipped; the vocabulary has not.**
+[`0059_simulated_and_shadow_lanes.sql`](supabase/migrations/0059_simulated_and_shadow_lanes.sql)
+adds `gateways.is_shadow`, two same-row CHECKs, and the two new arms of `device_locations`, mirrored
+in [`cellResolution.js`](frontend/src/utils/cellResolution.js) and pinned by
+`check-mirror-drift.mjs`. What remains is `deployment` ('host' | 'remote'), the cross-column CHECK
+that needs both columns, and the `is_virtual` rename — none of which a lane needed, and a rename
+smuggled in beside a feature is a rename nobody reviews.
+
+**A SECOND LANE, because provenance is not one axis.** A shadow gateway is necessarily simulated —
+`start_playback_job()` (`0056`) refuses a target that is not — so one lane would have covered both,
+and the second had to earn itself. It does: a **simulated** spindle reporting 4000 RPM never turned,
+and a **shadow** spindle reporting 4000 RPM did turn, on a real machine, on the day the capture was
+recorded. Both are "not a machine running right now" and they give opposite answers to *is this
+number true*, which is the question being asked at the moment anyone consults a lane. Precedence is
+`shadow > simulated > site_wide > explicit > inherited > unassigned`, most specific first: both flags
+are true of a shadow device, so without an explicit order it lands in Simulated and the more
+informative lane is silently unreachable. That ordering is itself mirror-checked.
+
+**Shadow does not render on the Overview map, and that is not a rule about derived lanes.** Simulated
+does render — on a stack running the simulator the simulated fleet *is* the plant, and hiding it would
+empty the page. The map answers *what is my plant doing now*, and a replay is not now; a lane of
+stand-ins invites exactly the miscount the lanes exist to prevent. A running playback is visible on
+the Capture page instead.
 
 **`is_virtual` carries three incompatible definitions today, and they are not reconcilable by
 choosing a better word for the same thing.** `0025` and `provision-gateways.mjs` define it as *"no
@@ -1544,15 +1568,21 @@ answers the demonstration feedback where it was actually aimed — at what a rea
 is stored. `digital_thread` itself keeps receiving the rows, because someone standing up a simulator
 on a production stack is a governance event.
 
-**It sequences after §14, and the reason is a genuine cost rather than a technicality.** The seeded
-`Sim_` gateways are deliberately assigned to real-looking cells — "Cell 1 — Precision Machining" and
-the rest — so that the shopfloor map looks like a shopfloor. `CHECK (NOT is_simulated OR cell_id IS
-NULL)` forbids exactly that, so it cannot land while the seed exists. And it prices the two artefacts
-§14 separates differently: **an onboarding simulator gains** from being visibly not-real, which is
-what the demonstration feedback asked for, while **a demonstration fixture loses**, because a
-shopfloor map showing an empty plant beside one Simulated bucket demonstrates less than four
-populated cells did. Whichever way that resolves, it should be decided per artefact rather than
-inherited from a constraint written for the other one.
+**It was to have sequenced after §14, and the cost it was waiting on has now been paid rather than
+avoided.** The seeded `Sim_` gateways were deliberately assigned to real-looking cells — "Cell 1 —
+Precision Machining" and the rest — so that the shopfloor map looks like a shopfloor, and
+`gateways_synthetic_has_no_cell` forbids exactly that. The two artefacts §14 separates are priced
+differently by it: **an onboarding simulator gains** from being visibly not-real, which is what the
+demonstration feedback asked for, while **a demonstration fixture loses**, because a shopfloor map
+showing an empty plant beside one Simulated bucket demonstrates less than four populated cells did.
+
+**The answer taken is the first, and `0059` clears those cells on the way past** — reported to
+db-init's log, not silently, because it discards an operator's placement. That is normally the thing
+provisioning is careful never to do, and it is justified here only because the placement had already
+stopped being readable: the lane resolves ahead of the cell, so clearing the column makes the row say
+what the UI was already showing. `provision-gateways.mjs` learned the same rule, so a re-run no longer
+puts them back. A map that shows a plant which is not there is the more expensive of the two
+mistakes.
 
 **The rename's blast radius is 68 references across 28 files**, most of them frontend tests. The
 load-bearing few are worth listing because they are not textual: `gateway_holds_a_credential()`

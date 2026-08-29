@@ -249,20 +249,51 @@ const compare = (mirror, label, jsValue, sqlValue) => {
         `${sqlCoalesce[1] === 'd' ? 'device' : 'gateway'},${sqlCoalesce[2] === 'g' ? 'gateway' : 'device'}`);
     }
 
-    // The site_wide branch must resolve to NO cell on both sides, not to an inherited one.
-    const sqlSiteWideNulls = /WHEN \(d\.location_scope = 'site_wide'::text\) THEN NULL::uuid/.test(body.replace(/\s+/g, ' '));
-    const jsSiteWideNulls = /scope === SCOPE_SITE_WIDE \? null :/.test(js);
-    if (!sqlSiteWideNulls || !jsSiteWideNulls) {
-      problems.push(`cellResolution: the site_wide branch must resolve to no cell on both sides (SQL ${sqlSiteWideNulls ? 'ok' : 'MISSING'}, JS ${jsSiteWideNulls ? 'ok' : 'MISSING'})`);
-    } else {
-      ok.push('cellResolution: site_wide resolves to no cell on both sides');
+    // THE THREE ARMS THAT RESOLVE TO NO CELL must do so on both sides, rather than falling through
+    // to an inherited one. Site-wide has none by assertion; shadow and simulated (0059) have none
+    // because they are lanes rather than places, and gateways_synthetic_has_no_cell guarantees
+    // there is nothing to inherit anyway.
+    //
+    // The JS pattern tolerates the arms being written as one disjunction -- they short-circuit to
+    // the same `null` -- but still requires each term to be present, so dropping one is caught.
+    const flat = body.replace(/\s+/g, ' ');
+    const nullArms = [
+      ['site_wide', /WHEN \(d\.location_scope = 'site_wide'::text\) THEN NULL::uuid/.test(flat),
+        /scope === SCOPE_SITE_WIDE[^?]*\? null :/.test(js)],
+      ['shadow', /WHEN COALESCE\(g\.is_shadow, false\) THEN NULL::uuid/.test(flat),
+        /\(\s*shadow \|\|/.test(js)],
+      ['simulated', /WHEN COALESCE\(g\.is_simulated, false\) THEN NULL::uuid/.test(flat),
+        /\|\| simulated \|\|/.test(js)]
+    ];
+    for (const [arm, sqlOk, jsOk] of nullArms) {
+      if (!sqlOk || !jsOk) {
+        problems.push(`cellResolution: the ${arm} branch must resolve to no cell on both sides (SQL ${sqlOk ? 'ok' : 'MISSING'}, JS ${jsOk ? 'ok' : 'MISSING'})`);
+      } else {
+        ok.push(`cellResolution: ${arm} resolves to no cell on both sides`);
+      }
     }
 
-    // The four location_source labels are a closed set the UI switches on.
+    // PRECEDENCE, which is the one thing about these lanes that can break while every arm stays
+    // individually correct. A shadow gateway is necessarily simulated (0056 refuses a target that
+    // is not, and gateways_shadow_is_simulated states it), so testing simulated first makes the
+    // shadow lane unreachable and nothing else changes. Both sides must ask about shadow first.
+    const sqlShadowFirst = flat.indexOf("THEN 'shadow'::text") < flat.indexOf("THEN 'simulated'::text");
+    const jsShadowFirst = js.indexOf('if (shadow) source = SOURCE_SHADOW') < js.indexOf('source = SOURCE_SIMULATED');
+    if (!sqlShadowFirst || !jsShadowFirst) {
+      problems.push(`cellResolution: shadow must be tested before simulated on both sides (SQL ${sqlShadowFirst ? 'ok' : 'WRONG ORDER'}, JS ${jsShadowFirst ? 'ok' : 'WRONG ORDER'})`);
+    } else {
+      ok.push('cellResolution: shadow resolves ahead of simulated on both sides');
+    }
+
+    // The six location_source labels are a closed set the UI switches on.
     // `THEN` and `ELSE`: 'unassigned' is the CASE's fall-through, so a THEN-only pattern silently
-    // reports three labels where there are four -- the check would then pass whenever the JS
+    // reports five labels where there are six -- the check would then pass whenever the JS
     // dropped that constant too.
-    const sqlSources = [...new Set([...body.matchAll(/(?:THEN|ELSE) '(site_wide|explicit|inherited|unassigned)'::text/g)].map((m) => m[1]))].sort();
+    //
+    // The alternation is spelled out rather than left as `\w+` so that adding a lane is a
+    // deliberate edit here as well. `\w+` would also match the NULL-arm labels of any other CASE
+    // that later joins this view, and would quietly start comparing a wider set than the UI knows.
+    const sqlSources = [...new Set([...body.matchAll(/(?:THEN|ELSE) '(site_wide|explicit|inherited|unassigned|simulated|shadow)'::text/g)].map((m) => m[1]))].sort();
     const jsSources = [...new Set([...js.matchAll(/export const SOURCE_[A-Z_]+ = '([a-z_]+)'/g)].map((m) => m[1]))].sort();
     compare('cellResolution', 'location_source labels', jsSources.join(','), sqlSources.join(','));
   }

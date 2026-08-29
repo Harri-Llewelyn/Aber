@@ -370,7 +370,7 @@ async function renameIfNeeded(table, row, desiredName) {
 
 async function ensureGateway(spec) {
   const found = await rest(
-    `/gateways?id=eq.${spec.id}&select=id,name,sparkplug_id,cell_id,location_scope,is_virtual`
+    `/gateways?id=eq.${spec.id}&select=id,name,sparkplug_id,cell_id,location_scope,is_virtual,is_simulated,is_shadow`
   );
   if (found.length > 0) {
     const row = found[0];
@@ -410,7 +410,14 @@ async function ensureGateway(spec) {
     //
     // Only when the row has NO cell. An operator who has deliberately moved a gateway to another
     // cell owns that decision; re-running provisioning must not drag it back.
-    if (spec.cellName && !row.cell_id && row.location_scope !== 'site_wide' && !dryRun) {
+    //
+    // AND NOT WHEN THE ROW IS SYNTHETIC. `gateways_synthetic_has_no_cell` (0059) forbids pairing a
+    // cell with is_simulated or is_shadow, so this arm would fail the PATCH rather than misplace
+    // the row -- but it would fail on every provisioning run of a stack whose simulator has been
+    // flagged, which is the ordinary state once §14 lands. A synthetic gateway resolves to the
+    // Simulated or Shadow lane and has no cell to be missing.
+    const synthetic = row.is_simulated || row.is_shadow;
+    if (spec.cellName && !row.cell_id && !synthetic && row.location_scope !== 'site_wide' && !dryRun) {
       const cellId = await ensureCell(spec.cellName);
       if (cellId) {
         await rest(`/gateways?id=eq.${row.id}`, {

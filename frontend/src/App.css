@@ -1932,8 +1932,27 @@ tbody tr:hover { background: var(--bg-glass); }
   background: rgba(0, 212, 255, 0.05);
 }
 
-/* The queue comes second: infrastructure first, then the thing to act on, sitting immediately
-   before the cells its contents are waiting to be filed into. */
+/* Simulated sits between the two and needs no `order` of its own: it inherits -1 from
+   .shopfloor-lane, ties with Site-Wide, and a tie falls back to DOM order -- which is the LANES
+   array, where it is declared second. Adding an explicit -1 here would say the same thing twice.
+
+   DELIBERATELY GREY RATHER THAN A FIFTH HUE. --accent and --warning are carrying "infrastructure"
+   and "act on this"; a third colour beside them would read as a third kind of urgency. Synthetic
+   assets are the one thing on this map that wants LESS attention than a real cell, and neutral is
+   how a map says that. It is also the only choice that needs no new token, so it stays correct in
+   both themes for free. */
+.shopfloor-zone.shopfloor-lane-simulated {
+  border-color: var(--text-dim);
+  background: rgba(133, 142, 163, 0.07);
+}
+
+.shopfloor-zone.shopfloor-lane-simulated:hover {
+  border-color: var(--text-dim);
+  box-shadow: 0 0 14px rgba(133, 142, 163, 0.18);
+}
+
+/* The queue comes last: infrastructure first, then context about what is not real, then the thing
+   to act on, sitting immediately before the cells its contents are waiting to be filed into. */
 .shopfloor-zone.shopfloor-lane-queue {
   order: 0;
   border-color: var(--warning);

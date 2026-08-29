@@ -7,7 +7,7 @@ import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
 import { gatewayLiveStatus, isGatewayOnline, isGatewayPending, formatHeartbeat } from '../../utils/gatewayStatus'
 import {
-  SCOPE_CELL, SCOPE_SITE_WIDE, SOURCE_UNASSIGNED, SOURCE_SITE_WIDE, groupDevicesByCell,
+  SCOPE_CELL, SCOPE_SITE_WIDE, SOURCE_UNASSIGNED, SOURCE_SITE_WIDE, SOURCE_SIMULATED, groupDevicesByCell,
   applyStagedMoves
 } from '../../utils/cellResolution'
 import { cellIconComponent } from '../../utils/cellIcon'
@@ -27,6 +27,7 @@ import {
   IconLock,
   IconPencil,
   IconShieldAlert,
+  IconBot,
   IconAlertTriangle,
   IconAlertCircle,
   IconZap,
@@ -212,13 +213,22 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   // groupDevicesByCell() for why the cells endpoint does not supply this.
   const devicesByCell = useMemo(() => groupDevicesByCell(stagedAssets), [stagedAssets])
 
-  // The two derived lanes. Neither is a row in `cells` -- Unassigned is the absence of a decision
-  // and Site-Wide is an operator's assertion that an asset has no single cell, and a magic cell
-  // row would put both meanings in a free-text name. They are rendered beside the cells because
-  // that is where an operator looks for an asset, and because a queue nobody can see never drains.
+  // The derived lanes. None is a row in `cells` -- Unassigned is the absence of a decision,
+  // Site-Wide is an operator's assertion that an asset has no single cell, and Simulated is a fact
+  // about the gateway; a magic cell row would put all three meanings in a free-text name. They are
+  // rendered beside the cells because that is where an operator looks for an asset, and because a
+  // queue nobody can see never drains.
+  //
+  // SHADOW IS NOT HERE, and its absence is deliberate rather than an oversight. This map answers
+  // "what is my plant doing now", and a replay is not now -- a lane of stand-ins for machines
+  // invites exactly the miscount the lanes exist to prevent. A running playback is visible on the
+  // Capture page, which is where a job belongs. Note this is NOT a rule that derived lanes are
+  // hidden here: Simulated shows, because on a stack running the simulator the simulated fleet is
+  // the plant, and hiding it would empty the page.
   const laneDevices = useMemo(() => ({
     [SOURCE_UNASSIGNED]: stagedAssets.filter(a => a.location_source === SOURCE_UNASSIGNED),
-    [SOURCE_SITE_WIDE]: stagedAssets.filter(a => a.location_source === SOURCE_SITE_WIDE)
+    [SOURCE_SITE_WIDE]: stagedAssets.filter(a => a.location_source === SOURCE_SITE_WIDE),
+    [SOURCE_SIMULATED]: stagedAssets.filter(a => a.location_source === SOURCE_SIMULATED)
   }), [stagedAssets])
 
   /**
@@ -505,11 +515,18 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
     // there is instead is a tile holding devices that only look like they are there, and that is
     // the thing an operator must be able to see at a glance before applying the batch.
     const pending = devices.some(d => d.staged)
+    // A TILE WITH NO onDrop MUST NOT ACCEPT DRAGOVER EITHER. handleDragOver calls
+    // preventDefault(), which is precisely what tells the browser "this is a valid drop target" --
+    // so wiring it unconditionally gave the Simulated lane a drop cursor over a tile that then
+    // silently swallowed the drop. Refusing at dragover shows a no-entry cursor instead, which
+    // says the same thing before the operator commits to the gesture.
+    const droppable = !!onDrop
     return (
     <div
       key={key}
       className={`shopfloor-zone${className ? ' ' + className : ''}${pending ? ' shopfloor-zone-pending' : ''}`}
-      onDragOver={handleDragOver}
+      data-droppable={droppable ? 'true' : undefined}
+      onDragOver={droppable ? handleDragOver : undefined}
       onDrop={onDrop}
       title={pending ? `${hint} — contains staged moves that have not been applied yet` : hint}
     >
@@ -559,16 +576,38 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
       title: 'Site-Wide',
       icon: IconMap,
       className: 'shopfloor-lane shopfloor-lane-site',
-      matchGateway: (g) => g.location_scope === SCOPE_SITE_WIDE,
+      matchGateway: (g) => !g.is_simulated && !g.is_shadow && g.location_scope === SCOPE_SITE_WIDE,
       empty: 'No site-wide assets. Drop a BMS, AGV or ambient sensor here.',
       hint: 'A permanent home, not a queue. Facility-wide and mobile assets live here rather than being filed in an arbitrary bay.'
+    },
+    {
+      // Context like Site-Wide rather than a queue, so it sits between the two: stable contents an
+      // operator reads to know what NOT to trust, ahead of the queue they are meant to act on.
+      key: SOURCE_SIMULATED,
+      title: 'Simulated',
+      icon: IconBot,
+      className: 'shopfloor-lane shopfloor-lane-simulated',
+      matchGateway: (g) => !g.is_shadow && g.is_simulated,
+      // NOT DROPPABLE. Every other lane is reachable by a drop because it is a statement about
+      // location, and location is the operator's to assert. This one is a statement about the
+      // gateway's provenance -- dragging a real machine into it would be claiming its readings are
+      // invented, which is not a placement and is not settable from a map.
+      droppable: false,
+      empty: 'Nothing synthetic. Every asset here reports from real hardware.',
+      hint: 'Telemetry generated rather than observed — a simulator, or a broker playback target. Set on the gateway; its devices inherit it and cannot be filed into a cell.'
     },
     {
       key: SOURCE_UNASSIGNED,
       title: 'Unassigned',
       icon: IconShieldAlert,
       className: 'shopfloor-lane shopfloor-lane-queue',
-      matchGateway: (g) => g.location_scope !== SCOPE_SITE_WIDE && !g.cell_id,
+      // SYNTHETIC GATEWAYS ARE EXCLUDED, which is the whole point of the lane beside it. They have
+      // no cell and are cell-scoped, so they matched here until 0059 -- sitting in a queue whose
+      // every suggested fix ("set a cell on the Gateways page") is refused by
+      // gateways_synthetic_has_no_cell. A queue that cannot drain is one an operator learns to
+      // ignore, which costs the real entries their only signal.
+      matchGateway: (g) => !g.is_simulated && !g.is_shadow
+        && g.location_scope !== SCOPE_SITE_WIDE && !g.cell_id,
       // Empty here is a RESULT, not a state -- the queue has drained -- so it says so rather than
       // describing what could go in it. The tile no longer collapses to a single line to make the
       // point: in a grid of uniform tiles a half-height one leaves a hole in the row, and at
@@ -807,7 +846,7 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
               devices: laneAssets,
               counts: `GW: ${laneGateways.length} | Dev: ${laneAssets.length}`,
               hint: lane.hint,
-              onDrop: (e) => handleLaneDrop(e, lane.key),
+              onDrop: lane.droppable === false ? undefined : (e) => handleLaneDrop(e, lane.key),
               empty: lane.empty,
               // THE "DERIVED" BADGE IS GONE FROM THE TILE, and the word moved onto the name's
               // title instead. It was a `flex-shrink: 0` element sharing a narrow header with the

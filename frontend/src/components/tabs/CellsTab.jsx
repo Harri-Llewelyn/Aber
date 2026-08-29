@@ -4,7 +4,7 @@ import { PERMISSION_UUIDS, REALTIME_ENABLED, refreshInterval } from '../../const
 import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { gatewayLiveStatus, gatewayNeedsAttention } from '../../utils/gatewayStatus'
-import { groupDevicesByCell, SOURCE_SITE_WIDE } from '../../utils/cellResolution'
+import { groupDevicesByCell, NON_CELL_SOURCES } from '../../utils/cellResolution'
 import CopyableId from '../common/CopyableId'
 import { TagList } from '../common/TagList'
 import { ActionButton } from '../common/ActionButton'
@@ -165,8 +165,14 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
   //
   // `effective_cell_id`, not `cell_id`: the latter is the explicit override and is NULL for every
   // device that merely inherits its cell.
+  //
+  // Simulated and Shadow are excluded for a stronger version of the Site-Wide reason (0059). A
+  // site-wide device COULD be filed and an operator chose not to; a synthetic one cannot be --
+  // gateways_synthetic_has_no_cell refuses the write. Warning about them would be a banner whose
+  // only remedy is refused by a CHECK constraint, which is the purest form of the "trains people
+  // to ignore the banner" failure this exclusion list exists to prevent.
   const unlinkedDevices = assets.filter(a =>
-    !a.is_archived && !a.effective_cell_id && a.location_source !== SOURCE_SITE_WIDE
+    !a.is_archived && !a.effective_cell_id && !NON_CELL_SOURCES.has(a.location_source)
   )
 
   // Cell membership, grouped from the device list this page already holds.

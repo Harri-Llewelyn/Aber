@@ -494,7 +494,61 @@ describe('OverviewTab shopfloor map', () => {
     // Still marked as derived so they do not read as cells someone could rename or archive --
     // but by their tint, border and name title rather than by a pill that was eating the name.
     // See 'shows the lane names in full' below.
-    expect(laneTiles().map(t => t.className.includes('shopfloor-lane'))).toEqual([true, true])
+    expect(laneTiles().map(t => t.className.includes('shopfloor-lane'))).toEqual([true, true, true])
+  })
+
+  it('gives synthetic assets the Simulated lane rather than the Unassigned queue', async () => {
+    // 0059. Before it, a device behind a simulated gateway had no cell and was cell-scoped, so it
+    // matched Unassigned exactly -- landing in a work queue whose every suggested remedy ("set a
+    // cell on the Gateways page") is refused by gateways_synthetic_has_no_cell. A queue that
+    // cannot drain is one an operator stops reading.
+    api.get.mockImplementation(routeGet({
+      gateways: [
+        { ...gateway, gateway_id: 'gw-sim', gateway_name: 'Sim_Connector',
+          cell_id: null, location_scope: 'cell', is_simulated: true },
+        { ...gateway, gateway_id: 'gw-un', gateway_name: 'Homeless_Gateway',
+          cell_id: null, location_scope: 'cell' }
+      ],
+      devices: [
+        { ...gateway.devices[0], asset_id: 'dev-sim', asset_name: 'Sim_Spindle',
+          active_gateway_id: 'gw-sim', effective_cell_id: null, location_source: 'simulated' },
+        { ...gateway.devices[0], asset_id: 'dev-u', asset_name: 'Orphan_CNC',
+          active_gateway_id: 'gw-un', effective_cell_id: null, location_source: 'unassigned' }
+      ]
+    }))
+
+    render(
+      <OverviewTab onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} showToast={vi.fn()}
+        hasPermission={() => true} onNavigateTab={vi.fn()} />
+    )
+    await waitFor(() => expect(screen.getByText('Simulated')).toBeInTheDocument())
+
+    const simulatedLane = screen.getByTitle(/generated rather than observed/i)
+    const unassignedLane = screen.getByTitle(/work queue, not a location/i)
+
+    expect(within(simulatedLane).getByText('Sim_Spindle')).toBeInTheDocument()
+    expect(within(simulatedLane).getByText('Sim_Connector')).toBeInTheDocument()
+    // And the queue keeps only what an operator can actually act on.
+    expect(within(unassignedLane).getByText('Orphan_CNC')).toBeInTheDocument()
+    expect(within(unassignedLane).queryByText('Sim_Spindle')).not.toBeInTheDocument()
+    expect(within(unassignedLane).queryByText('Sim_Connector')).not.toBeInTheDocument()
+  })
+
+  it('does not accept a drop onto the Simulated lane', async () => {
+    // The other lanes take drops because they are statements about LOCATION, which is the
+    // operator's to assert. This one is a statement about the gateway's provenance: dragging a
+    // real machine into it would be claiming its readings are invented.
+    api.get.mockImplementation(routeGet())
+
+    render(
+      <OverviewTab onSelectDevice={vi.fn()} onSelectGateway={vi.fn()} showToast={vi.fn()}
+        hasPermission={() => true} onNavigateTab={vi.fn()} />
+    )
+    await waitFor(() => expect(screen.getByText('Simulated')).toBeInTheDocument())
+
+    // The two settable lanes wire a drop handler; this one deliberately does not.
+    expect(screen.getByTitle(/permanent home, not a queue/i)).toHaveAttribute('data-droppable', 'true')
+    expect(screen.getByTitle(/generated rather than observed/i)).not.toHaveAttribute('data-droppable', 'true')
   })
 
   it('lists gateways in the lanes, not just devices', async () => {
@@ -586,7 +640,7 @@ describe('OverviewTab shopfloor map', () => {
 
       // The separate full-width lane stack above the grid is gone.
       expect(container.querySelector('.shopfloor-lanes')).toBeNull()
-      expect(laneTiles()).toHaveLength(2)
+      expect(laneTiles()).toHaveLength(3)
       // No tile opts out of the shared shape.
       expect(container.querySelectorAll('.shopfloor-zone-mini')).toHaveLength(0)
     })
@@ -752,12 +806,12 @@ describe('OverviewTab shopfloor map', () => {
     const grid = container.querySelector('.shopfloor-grid')
     const tiles = [...grid.querySelectorAll(':scope > .shopfloor-zone')]
 
-    // Both lanes are in the grid, and they are its first two tiles.
-    expect(tiles.slice(0, 2)).toEqual(laneTiles())
-    expect(tiles.slice(2).every(t => t.className.includes('shopfloor-cell'))).toBe(true)
+    // Every lane is in the grid, and they are its first tiles.
+    expect(tiles.slice(0, 3)).toEqual(laneTiles())
+    expect(tiles.slice(3).every(t => t.className.includes('shopfloor-cell'))).toBe(true)
   })
 
-  it('orders the lanes infrastructure-first, queue-second', async () => {
+  it('orders the lanes infrastructure-first, context-second, queue-last', async () => {
     api.get.mockImplementation(routeGet())
 
     render(
@@ -766,14 +820,18 @@ describe('OverviewTab shopfloor map', () => {
     )
     await waitFor(() => expect(screen.getByText('Site-Wide')).toBeInTheDocument())
 
-    const [first, second] = laneTiles()
+    const [first, second, third] = laneTiles()
     expect(within(first).getByText('Site-Wide')).toBeInTheDocument()
-    expect(within(second).getByText('Unassigned')).toBeInTheDocument()
-    // Each lane carries its OWN hue, not one shared "derived" treatment. They are not two of a
-    // kind -- one is a permanent home, the other a queue that should drain -- and colouring them
-    // alike made the pair read as a single category that the cells were simply not in.
+    expect(within(second).getByText('Simulated')).toBeInTheDocument()
+    expect(within(third).getByText('Unassigned')).toBeInTheDocument()
+    // Each lane carries its OWN hue, not one shared "derived" treatment. They are not three of a
+    // kind -- a permanent home, a statement about provenance, and a queue that should drain -- and
+    // colouring them alike made the set read as a single category that the cells were simply not
+    // in. Simulated is deliberately the neutral one: it is the only lane here that wants LESS
+    // attention than a real cell.
     expect(first.className).toMatch(/shopfloor-lane-site/)
-    expect(second.className).toMatch(/shopfloor-lane-queue/)
+    expect(second.className).toMatch(/shopfloor-lane-simulated/)
+    expect(third.className).toMatch(/shopfloor-lane-queue/)
   })
 
   it('gives the whole chip to the asset name, and keeps the id on its title', async () => {
@@ -817,7 +875,8 @@ describe('OverviewTab shopfloor map', () => {
     )
     await waitFor(() => expect(screen.getByText('Site-Wide')).toBeInTheDocument())
 
-    for (const [tile, name] of [[laneTiles()[0], 'Site-Wide'], [laneTiles()[1], 'Unassigned']]) {
+    for (const [tile, name] of [[laneTiles()[0], 'Site-Wide'], [laneTiles()[1], 'Simulated'],
+                                [laneTiles()[2], 'Unassigned']]) {
       const label = within(tile).getByText(name)
       expect(label).toHaveClass('zone-name')
       expect(label).toHaveAttribute('title', expect.stringContaining('derived lane, not a cell'))
