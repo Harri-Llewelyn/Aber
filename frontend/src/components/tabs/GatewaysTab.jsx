@@ -153,6 +153,9 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   // In-flight state for the form's Save and for whichever gateway is restoring.
   const [saving, runSave] = usePendingAction()
   const [restoringId, runRestore] = usePendingKey()
+  // Keyed rather than a single flag: the panel resolves its gateway every render, so a bare boolean
+  // would spin the button for whichever gateway happened to be selected when the request settled.
+  const [rebirthingId, runRebirth] = usePendingKey()
 
   const save = async () => {
     try {
@@ -772,6 +775,40 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
           },
         ] : []}
         actions={selected ? [
+          /**
+           * ASK THE NODE TO SAY WHO IT IS AGAIN.
+           *
+           * `Node Control/Rebirth` republishes the birth certificate: the metric list, the datatypes
+           * and the ALIAS TABLE every subsequent DDATA is resolved against. The daemon already sends
+           * this on its own -- at startup, on every sequence gap, at the start of every capture --
+           * because that table is in-memory and a stable device may not birth again for weeks. This
+           * is the same publish with a person as the reason, and until now the only way to get one
+           * was to nudge a node in the Node-RED editor and redeploy.
+           *
+           * IT IS THE ONLY COMMAND THIS DASHBOARD SENDS, and the distinction is worth keeping in
+           * view: a rebirth asks a node to RESTATE WHAT IT ALREADY IS. Sparkplug's same NCMD channel
+           * can write metric values, which is actuation, and that is deliberately not reachable from
+           * here -- see 0058.
+           *
+           * NOT ON AN ARCHIVED GATEWAY, where nothing is listening.
+           */
+          !selected.is_archived && canManage && {
+            label: 'Request Rebirth',
+            icon: <IconRefreshCw size={13} />,
+            title: 'Ask this edge node to republish its birth certificate. Harmless — it restates '
+              + 'the metric names and aliases it already publishes, and briefly appears in the live '
+              + 'stream for every subscriber. The daemon sends it within a few seconds.',
+            onClick: () => runRebirth(selected.gateway_id, async () => {
+              try {
+                await api.requestRebirth(selected.gateway_id)
+                showToast(`Rebirth requested for '${selected.gateway_name}'. The daemon sends it within a few seconds.`, 'success')
+              } catch (err) {
+                showToast(err.message, 'error')
+              }
+            }),
+            pending: rebirthingId === selected.gateway_id,
+            pendingLabel: 'Requesting…'
+          },
           /**
            * SETUP COMES FIRST WHILE IT IS UNFINISHED, above Launch UI and Edit.
            *

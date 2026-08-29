@@ -1113,6 +1113,30 @@ const apiMethods = {
   },
 
   /**
+   * Ask an edge node to republish its birth certificate.
+   *
+   * THE PAGE DOES NOT SEND IT. A browser cannot publish MQTT, so this writes a row and the
+   * ingestion daemon -- which holds the only broker account permitted to write an NCMD -- picks it
+   * up within a few seconds. The answer arrives as an `NBIRTH` on the wire, not as a response here.
+   *
+   * THIS IS THE ONLY COMMAND THIS STACK SENDS. Sparkplug's NCMD channel can also write metric
+   * VALUES, which is actuation; that is not reachable from the dashboard and 0058 has a self-check
+   * asserting the table it writes has not grown a way to carry one.
+   */
+  requestRebirth: async (gatewayId) => {
+    const { data, error } = await supabase.rpc('request_gateway_rebirth', {
+      p_gateway_id: gatewayId
+    });
+    if (error) {
+      if (/insufficient_privilege|requires Administrator/i.test(error.message || '')) {
+        throw new Error('Requesting a rebirth requires Administrator or Shopfloor Manager.');
+      }
+      throw new Error(error.message || 'Could not request a rebirth');
+    }
+    return data;
+  },
+
+  /**
    * Gateways a capture may be published onto, with their devices and their credential state.
    *
    * SIMULATED ONLY, because `start_playback_job()` refuses anything else -- offering a real gateway

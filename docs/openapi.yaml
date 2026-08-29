@@ -1186,6 +1186,44 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/PlaybackJob' } }
         '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
 
+  /rest/v1/rebirth_requests:
+    get:
+      tags: [Assets]
+      summary: Read requests for an edge node to republish its birth certificate
+      description: |
+        One row per `Node Control/Rebirth` an operator has asked for. The ingestion daemon claims
+        `PENDING` rows and publishes the NCMD; the answer arrives as an `NBIRTH` on the wire, not as
+        a response here.
+
+        **A birth certificate is where the metric alias table lives**, and that table is in-memory
+        in the daemon — so a restart loses it and a stable device may not birth again for weeks.
+        The daemon already asks on its own at startup, on every sequence gap, and at the start of
+        every broker capture. This is the same publish with a person as the reason.
+
+        **This is the only command this stack sends.** Sparkplug's NCMD channel can also write
+        metric *values*, which is actuation; that is not reachable from the dashboard, `mosquitto.acl`
+        grants the daemon this one topic pattern, and `0058` carries a self-check that fails if this
+        table ever gains a column able to carry a payload. A rebirth asks a node to restate what it
+        already is — it changes nothing on the plant, and a node that ignores it is unaffected.
+
+        At most one row is `PENDING` per gateway: a second would only be refused by the daemon's own
+        per-node throttle, producing a row whose outcome is "throttled" and a button that appeared
+        to do something.
+
+        Created only by `request_gateway_rebirth()`; the table takes no direct write.
+      parameters:
+        - { name: gateway_id, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [PENDING, SENT, FAILED] } }
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+      responses:
+        '200':
+          description: Rebirth requests visible to the caller.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/RebirthRequest' } }
+        '401': { description: 'Not authenticated; `anon` holds nothing on this table.' }
+
   /rest/v1/playback_worker_status:
     get:
       tags: [Storage]
@@ -3268,6 +3306,31 @@ components:
         created_at: { type: string, format: date-time }
         started_at: { type: string, format: date-time, nullable: true }
         finished_at: { type: string, format: date-time, nullable: true }
+
+    RebirthRequest:
+      type: object
+      description: |
+        One request for an edge node to republish its birth certificate.
+      properties:
+        id: { type: string, format: uuid }
+        gateway_id: { type: string, format: uuid }
+        edge_node_id:
+          type: string
+          description: 'The gateway`s sparkplug_id — the NCMD is addressed to it.'
+          example: gwy120000000000400080000
+        sparkplug_group: { type: string, example: ACS-Cymru }
+        status: { type: string, enum: [PENDING, SENT, FAILED] }
+        throttled:
+          type: boolean
+          description: |
+            The daemon rate-limits rebirths per edge node, because a node that reboots on one would
+            otherwise be held in a loop by the mechanism meant to recover it. A request from a
+            person bypasses that limit, so this is false in practice and is kept because "asked and
+            declined" is a different outcome from "asked and failed".
+        error: { type: string, nullable: true }
+        requested_by: { type: string, format: uuid, nullable: true }
+        requested_at: { type: string, format: date-time }
+        sent_at: { type: string, format: date-time, nullable: true }
 
     PlaybackWorkerStatus:
       type: object

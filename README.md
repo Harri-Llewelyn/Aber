@@ -1766,6 +1766,20 @@ the daemon does have is `request_node_rebirth()` — its one permitted publish. 
 requesting a rebirth from the subject's edge node and recording the answer**, so the birth arrives on
 the wire and is captured as ordinary traffic.
 
+**A person can now ask for one too**, which is
+[`0058`](supabase/migrations/0058_rebirth_requests.sql) and a button on the Gateways panel. The
+daemon has always sent these on its own; there was no way for an operator to, and the workaround
+was to nudge a node in the Node-RED editor and redeploy.
+
+**It is the only command this stack sends, and that is a line rather than a starting point.**
+Sparkplug's NCMD channel can also write metric *values* — a setpoint, a mode, a relay — and that is
+actuation. `mosquitto.acl` grants the ingestion principal `write spBv1.0/+/NCMD/+` and the daemon
+publishes exactly one payload through it. A rebirth asks a node to **restate what it already is**:
+idempotent, carrying no intent about the process, and a node that ignores it is in exactly the state
+it was. Writing a value is the opposite of all three — so the table is named `rebirth_requests` for
+the one thing it carries rather than `commands`, and `0058` has a self-check that fails if it ever
+grows a column able to hold a payload.
+
 Two consequences to design around rather than discover: a rebirth is a broadcast to that node, so it
 briefly affects the live stream for every subscriber; and `REBIRTH_REQUEST_INTERVAL_SECONDS`
 rate-limits it, so a capture started twice inside that window gets no second birth and must either

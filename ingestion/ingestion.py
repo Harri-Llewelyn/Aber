@@ -3417,6 +3417,78 @@ def on_message(client, userdata, msg):
         logger.info("Received %s message for device '%s' via edge node '%s'", msg_type, wire_id, edge_node_id)
 
 
+REBIRTH_POLL_INTERVAL_SECONDS = int(os.getenv("REBIRTH_POLL_INTERVAL_SECONDS", "5"))
+
+
+def start_rebirth_poller(client):
+    """
+    Send the rebirth requests a person asked for from the dashboard.
+
+    THE DAEMON IS THE ONLY THING THAT CAN. A browser cannot publish MQTT -- the broker has no
+    WebSocket listener and the credential is a server-side secret -- and `write spBv1.0/+/NCMD/+`
+    is granted to this principal alone. So a request is a row (0058) and this is what notices it.
+
+    IT SENDS EXACTLY WHAT THE DAEMON ALREADY SENDS ITSELF. `request_node_rebirth()` fires at
+    startup, on every sequence gap and at the start of every capture; this adds no new payload and
+    no new topic, only a second reason for the same publish.
+
+    `force=True`, LIKE CAPTURE, and for the same argument: the throttle exists to stop a flood
+    driven by TRAFFIC -- one request per message from a node with a broken alias table -- and a
+    person pressing a button is not that. The database permits one pending request per gateway, so
+    the ceiling is a click.
+
+    A DAEMON THREAD, and forgiving of its own errors: a poll that cannot reach Supabase must not
+    take down a process whose actual job is ingesting telemetry.
+    """
+    def poll():
+        while True:
+            time.sleep(REBIRTH_POLL_INTERVAL_SECONDS)
+            if supabase_client is None:
+                continue
+            try:
+                claimed = supabase_client.rpc("ingest_claim_rebirth_requests", {}).execute().data
+            except Exception as e:
+                logger.warning("Could not ask for rebirth requests: %s", e)
+                continue
+
+            for row in claimed or []:
+                edge_node = row.get("edge_node_id")
+                group = row.get("sparkplug_group")
+                error = None
+                sent = False
+                try:
+                    sent = request_node_rebirth(client, group, edge_node, force=True)
+                    if not sent:
+                        # `force=True` only returns False when the publish itself failed -- the
+                        # throttle is bypassed -- so this is a broker problem, not a rate limit.
+                        error = ("the rebirth request could not be published; the broker refused it "
+                                 "or the connection was down")
+                except Exception as e:
+                    error = str(e)
+
+                if error:
+                    logger.warning("Rebirth request for '%s' failed: %s", edge_node, error)
+                else:
+                    logger.info("Rebirth requested for '%s' by an operator.", edge_node)
+
+                try:
+                    supabase_client.rpc("ingest_record_rebirth_outcome", {
+                        "p_id": row.get("id"),
+                        "p_throttled": False,
+                        "p_error": error,
+                    }).execute()
+                except Exception as e:
+                    # The row is already SENT from the claim, so nothing repeats. What is lost is
+                    # the error text, which is worth one line rather than a retry loop.
+                    logger.warning("Could not record the rebirth outcome for '%s': %s", edge_node, e)
+
+    threading.Thread(target=poll, name="rebirth-poller", daemon=True).start()
+    logger.info(
+        "Rebirth request poller running: checking every %ds for requests from the dashboard.",
+        REBIRTH_POLL_INTERVAL_SECONDS,
+    )
+
+
 def _require_credentials():
     """
     Refuse to start without the broker and database credentials.
@@ -3711,6 +3783,8 @@ def main():
     #
     # The rebirth function is passed in rather than imported: capture_worker is imported HERE, so
     # reaching back for this would be a cycle.
+    # Also after the client exists, for the same reason: it publishes.
+    start_rebirth_poller(client)
     capture_worker.start(
         supabase_client,
         # force=True: see request_node_rebirth(). A capture is one button press, single-flight
