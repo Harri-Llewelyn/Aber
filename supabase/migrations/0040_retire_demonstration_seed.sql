@@ -116,7 +116,7 @@
 -- replacing the account. Node-RED is then holding four passwords the broker no longer accepts, and
 -- nothing fails at that moment -- the rows are all correct and provisioning reports success. The
 -- symptom arrives later as four `Connection failed to broker` lines with no CONNACK code. Fold
--- `.env.gateways` into `.env` and restart Node-RED, which is what `scripts/stack-reset.sh` does.
+-- `.env.gateways` into `.env` and restart Node-RED, which is what `scripts/stack-reset.mjs` does.
 --
 -- ---------------------------------------------------------------------------------------------
 -- WHAT THIS DOES NOT PROMISE, stated because it would otherwise be assumed

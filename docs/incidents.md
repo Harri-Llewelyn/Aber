@@ -27,7 +27,7 @@ fresh volume and must never use it otherwise. The entrypoint applied `-c` to the
 accounts and plain `-b` to the rest — which is correct exactly once.
 
 **A one-shot is not run once.** Compose re-runs a completed one-shot whenever something that
-depends on it is brought up: `docker compose up -d node-red`, or `scripts/stack-reset.sh`
+depends on it is brought up: `docker compose up -d node-red`, or `scripts/stack-reset.mjs`
 recreating Node-RED after provisioning. Each of those re-entered the entrypoint, and the `-c`
 truncated the password file — deleting every gateway credential issued since boot.
 
@@ -35,7 +35,7 @@ truncated the password file — deleting every gateway credential issued since b
 running stack carries on working perfectly. The loss only appears at the broker's next reload or
 restart, by which point nothing connects the two events.
 
-`scripts/stack-reset.sh` hit exactly this: it provisioned four gateway credentials and then deleted
+`scripts/stack-reset.mjs` hit exactly this: it provisioned four gateway credentials and then deleted
 three of them one step later, in a script whose entire purpose is to leave a working stack behind.
 
 **The fix:** `-c` is conditional on the file not existing. The five platform principals are still
