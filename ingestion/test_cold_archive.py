@@ -109,3 +109,45 @@ def test_parquet_round_trips_the_telemetry_columns():
     # The footer count is what verify_object() checks a download against, so it has to be readable
     # from the bytes alone rather than from anything the writer remembered.
     assert pq.ParquetFile(io.BytesIO(payload)).metadata.num_rows == 1
+
+
+@pytest.fixture(scope="module")
+def parse_instant():
+    try:
+        from cold_archive import parse_instant as fn
+    except Exception as err:  # noqa: BLE001
+        pytest.skip(f"cold_archive is not importable here: {err}")
+    return fn
+
+
+def test_a_bare_date_means_midnight_utc(parse_instant):
+    """
+    `--from 2026-04-01` obviously means the start of that day, and guessing the HOST's timezone
+    would silently shift a query by hours depending on where it was run. Telemetry is stored in UTC.
+    """
+    parsed = parse_instant("2026-04-01", "--from")
+    assert parsed == datetime(2026, 4, 1, tzinfo=timezone.utc)
+
+
+def test_an_explicit_offset_is_kept(parse_instant):
+    """Somebody who says +02:00 means +02:00; re-interpreting it as UTC would move the window."""
+    parsed = parse_instant("2026-04-01T09:30:00+02:00", "--from")
+    assert parsed.utcoffset().total_seconds() == 7200
+
+
+def test_a_naive_timestamp_is_read_as_utc(parse_instant):
+    # The same reasoning as the bare date: consistent, and consistent with where the data came from.
+    assert parse_instant("2026-04-01T09:30:00", "--to").tzinfo is not None
+    assert parse_instant("2026-04-01T09:30:00", "--to") == datetime(2026, 4, 1, 9, 30, tzinfo=timezone.utc)
+
+
+def test_a_mistyped_date_is_refused_before_anything_is_fetched(parse_instant):
+    """
+    THE FAILURE THIS REPLACES. Binding the raw text straight into DuckDB produced
+    `Binder Error ... an explicit cast is required` -- AFTER the objects had been downloaded. A
+    parse error has to arrive before the fetch, and name what was expected.
+    """
+    with pytest.raises(SystemExit) as raised:
+        parse_instant("last-april", "--from")
+    assert "--from" in str(raised.value)
+    assert "ISO date" in str(raised.value)

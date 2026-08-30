@@ -838,6 +838,33 @@ python -m cold_archive             # export, upload, verify; drop nothing
 python -m cold_archive --drop      # ... and drop what verification cleared
 ```
 
+**Reading it back** does not rehydrate anything:
+
+```bash
+python -m cold_archive query --from 2026-04-01 --to 2026-05-01 \
+    --asset dev220000000000400080000 --metric SpindleSpeed --limit 50
+python -m cold_archive query --from 2026-04-01 --to 2026-05-01 --csv april.csv
+```
+
+The manifest's `range_start` / `range_end` are what make this cheap: they say which objects **overlap**
+the window, so a question about one March fetches one object rather than the archive. Overlap and
+not containment, deliberately — a chunk spanning a month boundary is relevant to a question about
+either side of it.
+
+**Only verified objects are read**, and anything skipped is named. An `exported` row has an object
+nothing has read back and a `failed` one may be truncated; this answers questions about history,
+where a partial result that looks complete is worse than a refusal. The command also prints the span
+it actually covered, because a range straddling cold and hot storage gets only the cold half from
+here.
+
+**It is not gated on `archive.enabled`.** That setting governs whether telemetry is *exported*, and
+has nothing to say about reading what already was — refusing a traceability question because
+somebody turned future archiving off would be the setting reaching past what it means.
+
+On Compose the objects sit behind storage-api with `STORAGE_BACKEND=file`, so each relevant object
+is fetched whole rather than range-scanned. Pointing storage at real S3 makes DuckDB read only the
+row groups a query touches, with no change to the SQL.
+
 ### `deployment`, and the word it is replacing (`0064`)
 
 `is_virtual` carries three incompatible definitions — *"no physical edge appliance behind this

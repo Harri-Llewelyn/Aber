@@ -865,18 +865,28 @@ Parquet, verified and only then dropped; the manifest, the settings and the cata
 The substance is documented under
 [Cold telemetry archival](supabase/README.md#cold-telemetry-archival-0068).
 
-**What is left is the READ side, which is the half the title's second clause names.** Historical
-months are on object storage in a Hive-partitioned layout (`year=YYYY/month=MM/`) chosen precisely
-so this is possible — DuckDB, Spark and Arrow all read those directory names as columns — but
-nothing yet issues the short-lived presigned URL or runs the query. Until it does, reading an
-archived month means fetching the object by hand. Rendering historical charts on demand, without
-rehydrating gigabytes back into TimescaleDB, is the outstanding work.
+**Reading it back shipped too, as a CLI.** `python -m cold_archive query --from … --to …` reads the
+manifest to find which objects overlap the range, fetches only those, and answers with DuckDB over
+the Parquet — no rehydration into TimescaleDB. The Hive layout (`year=YYYY/month=MM/`) exists for
+it. That is the same shape broker capture shipped in: a CLI first, because the archetypal
+cold-storage question is a traceability query asked once, months later, by a person at a terminal.
 
-**And the page, whose name is now settled: Cold Storage.** Not "Archives" — `ArchivesTab.jsx` means
-*entity* archives, archived cells, gateways and devices, and has nothing to do with cold telemetry.
-That page's "archive" carries a **Restore** button and an auto-purge timer; putting chunk tiering
-beside it would put a Restore control next to rows it cannot restore. `cold_storage_rows()` is the
-read the page needs and already exists.
+**What remains is the LIVE half: historical ranges rendered in the dashboard.** That needs somewhere
+for DuckDB to run that a browser can reach, and the gateway routes to five clusters — auth, storage,
+rest, realtime, functions — none of which is a Python service. So it is a new container, an Envoy
+cluster and route, JWT verification so the existing role gates still apply, and the Helm equivalent.
+The auth surface is the part that must not be got wrong: it would expose raw plant history.
+
+**Server-side was chosen over DuckDB-Wasm in the browser**, and that decision removed a component
+rather than adding one — presigned URLs exist to let a credential-less client fetch an object, and a
+process that already holds the ingestion identity needs none. It also keeps the trust boundary where
+the rest of the platform puts it.
+
+**The page shipped and is called Cold Storage.** Not "Archives" — `ArchivesTab.jsx` means *entity*
+archives, and its "archive" carries a **Restore** button and an auto-purge timer, so putting chunk
+tiering beside it would put a Restore control next to rows it cannot restore. It reads
+`cold_storage_rows()` and is read-only: export and drop stay on the CLI, for the reason §13 keeps
+minting off the Access Control page.
 
 **An external S3 endpoint is the other open option.** The exporter writes to the platform's own
 object storage through the client `capture_worker.py` uses, which is why `0068` declares three

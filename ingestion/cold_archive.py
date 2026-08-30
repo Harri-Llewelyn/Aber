@@ -51,6 +51,7 @@ The one state that must never exist is `dropped` without a readable object, and 
 CHECK constraint and `cold_tier_droppable()` exist to prevent.
 """
 import argparse
+import csv
 import io
 import os
 import sys
@@ -351,27 +352,225 @@ def drop_verified(conn):
     return len(dropped)
 
 
+# -------------------------------------------------------------------------------------------------
+# Query in place
+# -------------------------------------------------------------------------------------------------
+def parse_instant(text, what):
+    """
+    An ISO date or timestamp from the command line, as an aware datetime.
+
+    PARSED HERE RATHER THAN BOUND AS A STRING, and the reason is a real failure: DuckDB refuses to
+    compare TIMESTAMP WITH TIME ZONE against VARCHAR, so passing the text straight through produced
+    a `Binder Error ... an explicit cast is required` AFTER the objects had already been downloaded.
+    Parsing first turns a mistyped date into an immediate, readable refusal instead of a database
+    error at the end of a fetch.
+
+    A BARE DATE MEANS MIDNIGHT UTC. Telemetry is stored in UTC and `--from 2026-04-01` obviously
+    means the start of that day; guessing the host's local zone would silently shift a query by
+    hours depending on where it was run.
+    """
+    value = (text or "").strip()
+    try:
+        # `date` alone has no time part; fromisoformat handles both once the shorthand is expanded.
+        parsed = datetime.fromisoformat(value if "T" in value or " " in value else value + "T00:00:00")
+    except ValueError:
+        raise SystemExit(
+            f"[cold-archive] {what} is not an ISO date or timestamp: {text!r}\n"
+            f"[cold-archive] expected e.g. 2026-04-01 or 2026-04-01T09:30:00+00:00"
+        )
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def objects_covering(conn, start, end):
+    """
+    The archived objects whose span overlaps [start, end), from the manifest.
+
+    THIS IS WHY `range_start` AND `range_end` ARE STORED, and it is where "query in place" gets its
+    economy. A year of archive is a year of objects; a question about one March should read one of
+    them. The manifest answers which without opening any, so the pruning happens before a single
+    byte is fetched.
+
+    OVERLAP, NOT CONTAINMENT: `range_start < end AND range_end > start`. A chunk covering the last
+    week of March and the first of April is relevant to a question about either, and testing
+    containment would silently drop exactly the boundary data somebody asking about a month change
+    is usually looking for.
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """SELECT chunk_name, object_key, range_start, range_end, row_count,
+                      verified_at IS NOT NULL AS verified
+                 FROM public.telemetry_archive_manifest
+                WHERE object_key IS NOT NULL
+                  AND range_start < %s
+                  AND range_end   > %s
+                ORDER BY range_start""",
+            (end, start),
+        )
+        return cur.fetchall()
+
+
+def query_archive(conn, storage, bucket, start, end, asset=None, metric=None, limit=50, out_csv=None):
+    """
+    Answer one question from cold storage.
+
+    DOWNLOADED, THEN QUERIED, AND THAT IS A LIMITATION WORTH NAMING rather than hiding. DuckDB can
+    range-read Parquet over HTTP and fetch only the row groups a query touches -- but on Compose the
+    objects sit behind storage-api with STORAGE_BACKEND=file, not an S3 endpoint DuckDB can address,
+    so this pulls each relevant object whole. The manifest pruning above is what keeps that
+    reasonable: it is whole OBJECTS, not the whole archive. Pointing storage at real S3 makes this a
+    range scan with no change to the SQL below.
+
+    ONLY VERIFIED OBJECTS ARE READ. An `exported` row has an object nothing has read back, and a
+    `failed` one may hold a truncated upload. This answers questions about history, where a partial
+    result that looks complete is worse than a refusal -- so anything skipped is named.
+    """
+    import tempfile
+
+    import duckdb
+
+    covering = objects_covering(conn, start, end)
+    if not covering:
+        log(f"no archived objects cover {start} .. {end}")
+        log("Either that span was never archived, or it is still in the hypertable. This command")
+        log("reads COLD storage only, and says so rather than returning an empty result set.")
+        return 0
+
+    usable = [o for o in covering if o["verified"]]
+    for o in (o for o in covering if not o["verified"]):
+        log(f"  SKIPPED {o['chunk_name']}: exported but not verified, so it may be incomplete")
+    if not usable:
+        log("every object covering that span is unverified; refusing to answer from them.")
+        return 1
+
+    # WHAT THE ANSWER ACTUALLY COVERS, SAID BEFORE THE ANSWER. A question spanning cold and hot
+    # storage gets only the cold half from here, and a result set that looked complete would be the
+    # most misleading thing this command could produce.
+    covered_from = min(o["range_start"] for o in usable)
+    covered_to = max(o["range_end"] for o in usable)
+    log(f"{len(usable)} object(s) cover {covered_from} .. {covered_to}")
+
+    with tempfile.TemporaryDirectory(prefix="cold-archive-") as tmp:
+        paths = []
+        for o in usable:
+            payload = storage.from_(bucket).download(o["object_key"])
+            path = os.path.join(tmp, o["chunk_name"] + ".parquet")
+            with open(path, "wb") as fh:
+                fh.write(payload)
+            paths.append(path)
+            log(f"  fetched {o['object_key']} ({len(payload)} bytes)")
+
+        # PARAMETERISED, INCLUDING THE FILE LIST. `read_parquet` takes a list, and the filters are
+        # bound rather than interpolated -- an asset id or metric name arriving from a shell is
+        # untrusted text, and this is the only place in the file that builds SQL from an argument.
+        clauses = ["time >= ?", "time < ?"]
+        params = [paths, start, end]
+        if asset:
+            clauses.append("asset_id = ?")
+            params.append(asset)
+        if metric:
+            clauses.append("metric_name = ?")
+            params.append(metric)
+        where = " AND ".join(clauses)
+
+        sql = (
+            "SELECT time, asset_id, metric_name, val_double, val_string, val_bool "
+            "FROM read_parquet(?) "
+            "WHERE " + where + " ORDER BY time"
+        )
+
+        db = duckdb.connect()
+        try:
+            total = db.execute("SELECT count(*) FROM (" + sql + ")", params).fetchone()[0]
+            log(f"{total} row(s) match")
+
+            if out_csv:
+                # WRITTEN FROM PYTHON RATHER THAN WITH `COPY ... TO`, and not by preference.
+                # DuckDB's COPY takes a literal destination and refuses a bound parameter -- so the
+                # only way to use it is to interpolate the path into SQL, which is the one thing
+                # this function claims not to do with an argument. Streaming it out here keeps that
+                # true and costs nothing.
+                #
+                # FETCHED IN BATCHES, because the whole point of the archive is that a chunk can be
+                # large. `fetchall()` on a month of a busy plant would hold it all in memory to
+                # write it out a row at a time anyway.
+                db.execute(sql, params)
+                written = 0
+                with open(out_csv, "w", newline="", encoding="utf-8") as fh:
+                    writer = csv.writer(fh)
+                    writer.writerow(
+                        ["time", "asset_id", "metric_name", "val_double", "val_string", "val_bool"]
+                    )
+                    while True:
+                        batch = db.fetchmany(10_000)
+                        if not batch:
+                            break
+                        writer.writerows(batch)
+                        written += len(batch)
+                log(f"{written} row(s) written to {out_csv}")
+                return 0
+
+            rows = db.execute(sql + " LIMIT " + str(int(limit)), params).fetchall()
+            if not rows:
+                return 0
+            print()
+            print(f"{'time':<28} {'asset_id':<26} {'metric':<24} value")
+            for r in rows:
+                value = r[3] if r[3] is not None else (r[4] if r[4] is not None else r[5])
+                print(f"{str(r[0]):<28} {str(r[1]):<26} {str(r[2]):<24} {value}")
+            if total > len(rows):
+                print()
+                log(f"showing {len(rows)} of {total}; raise --limit or use --csv for all of them")
+        finally:
+            db.close()
+
+    return 0
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Export cold telemetry chunks to Parquet.")
+    parser = argparse.ArgumentParser(description="Export and query cold telemetry.")
+    # A POSITIONAL WITH A DEFAULT, so every existing invocation keeps working: `cold_archive`,
+    # `cold_archive --drop` and `cold_archive --dry-run` all still mean the export path.
+    parser.add_argument("command", nargs="?", default="archive", choices=["archive", "query"],
+                        help="archive (default) exports chunks; query reads them back")
     parser.add_argument("--dry-run", action="store_true",
                         help="report what would be exported and change nothing")
     parser.add_argument("--drop", action="store_true",
                         help="also drop chunks whose export has been verified")
     parser.add_argument("--force", action="store_true",
                         help="run even when archive.enabled is off")
+    parser.add_argument("--from", dest="start", help="query: ISO start of the range, inclusive")
+    parser.add_argument("--to", dest="end", help="query: ISO end of the range, exclusive")
+    parser.add_argument("--asset", help="query: restrict to one asset_id")
+    parser.add_argument("--metric", help="query: restrict to one metric_name")
+    parser.add_argument("--limit", type=int, default=50, help="query: rows to print (default 50)")
+    parser.add_argument("--csv", dest="out_csv", help="query: write all matching rows to this file")
     args = parser.parse_args()
 
     settings = read_settings()
-    if not settings["enabled"] and not args.force:
-        log("archive.enabled is off; nothing to do.")
-        log("Turn it on under Settings > Cold Storage, or pass --force for a one-off run.")
-        return 0
-
-    log(f"bucket={settings['bucket']} tier_after_days={settings['tier_after_days']}")
-
     conn = _connect_timescaledb()
     try:
         storage = _storage_client()
+
+        if args.command == "query":
+            # NO `archive.enabled` CHECK. That setting governs whether telemetry is EXPORTED and has
+            # nothing to say about reading what was already archived. Refusing a traceability
+            # question because somebody turned future archiving off would be the setting reaching
+            # well past what it means.
+            if not args.start or not args.end:
+                log("query needs --from and --to, e.g. --from 2026-04-01 --to 2026-05-01")
+                return 2
+            return query_archive(
+                conn, storage, settings["bucket"],
+                parse_instant(args.start, "--from"), parse_instant(args.end, "--to"),
+                asset=args.asset, metric=args.metric, limit=args.limit, out_csv=args.out_csv,
+            )
+
+        if not settings["enabled"] and not args.force:
+            log("archive.enabled is off; nothing to do.")
+            log("Turn it on under Settings > Cold Storage, or pass --force for a one-off run.")
+            return 0
+
+        log(f"bucket={settings['bucket']} tier_after_days={settings['tier_after_days']}")
         archive(conn, storage, settings["bucket"], settings["tier_after_days"], args.dry_run)
         if args.drop and not args.dry_run:
             drop_verified(conn)
