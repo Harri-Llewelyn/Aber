@@ -172,6 +172,22 @@ export const IconArchive = ({ size = 14, className = "" }) => (
   </svg>
 )
 
+/**
+ * Lucide `database` — the Cold Storage tab (roadmap item 3).
+ *
+ * DELIBERATELY NOT IconArchive, which the Archives tab directly above it already uses. Those two
+ * pages mean different things by "archive" -- entity lifecycle against telemetry tiering -- and
+ * sharing a glyph would undo, in the one place a reader looks first, the naming separation the
+ * roadmap asked for.
+ */
+export const IconDatabase = ({ size = 14, className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <ellipse cx="12" cy="5" rx="9" ry="3" />
+    <path d="M3 5v14a9 3 0 0 0 18 0V5" />
+    <path d="M3 12a9 3 0 0 0 18 0" />
+  </svg>
+)
+
 export const IconSettings = ({ size = 14, className = "" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <circle cx="12" cy="12" r="3" />

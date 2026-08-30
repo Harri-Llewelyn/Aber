@@ -563,6 +563,15 @@ html, body, #root {
 
      11 tabs  nav ~1250px  brand gets ~298px at 1920  -> fits, and does today
      12 tabs  nav ~1360px  brand gets ~244px at 1920  -> clipped by ~45px
+     13 tabs  nav ~1470px  brand gets ~134px at 1920  -> still clears the short wordmark
+
+   THE THIRTEENTH TAB IS Cold Storage, and it needs no band of its own. A tab costs ~110px at this
+   size (1250 -> 1360 across the eleven/twelve step), so thirteen leaves the brand ~134px while
+   `tight` already shortens the wordmark to ~75px and hides the strapline. The existing threshold
+   is "12 or more", and the arithmetic it was measured against still holds one tab further on.
+
+   A FOURTEENTH IS WHERE THIS STOPS WORKING: ~24px of brand is less than the short wordmark, so the
+   next page added needs a real re-measure and probably a third band, not another line here.
 
    THE STRAPLINE IS NOT THE LEVER, which is the counter-intuitive part and the reason this block
    exists at all rather than just moving the 1599px rule up. `.brand-text` is a stacked block, so

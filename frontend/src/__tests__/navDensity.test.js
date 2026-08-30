@@ -54,18 +54,27 @@ describe('navDensity', () => {
 
 describe('the tab list this band is measured against', () => {
 
-  it('is twelve tabs, which is the band this was built for', () => {
+  it('is thirteen tabs, still inside the band this was built for', () => {
     // If this fails, a page was added or removed and the bands are due a RE-MEASURE rather than a
-    // re-count: the arithmetic in App.css is written against these widths, and a thirteenth tab
-    // does not have a band of its own.
+    // re-count: the arithmetic in App.css is written against measured widths.
     //
-    // THE TWELFTH PAGE ARRIVED, AND IT IS THE ONE THIS BAND EXPECTED. `tight` was built for a page
-    // from the roadmap item that became broker capture and playback -- which shipped as a CLI
-    // first and added no page at all, so the band sat unreachable and unrenderable. The Capture
-    // page is that page. The band is now live for an Administrator, and its threshold was
-    // measurable for the whole time it was not.
-    expect(TABS).toHaveLength(12)
+    // THE THIRTEENTH PAGE IS Cold Storage, AND IT WAS RE-MEASURED RATHER THAN RE-COUNTED. App.css
+    // records the two data points this band was set from -- 11 tabs at ~1250px of nav, 12 at
+    // ~1360px -- so a tab costs ~110px and thirteen comes to ~1470px, leaving the brand ~134px at
+    // 1920. `tight` already shortens the wordmark to ~75px and hides the strapline, so it clears.
+    // The threshold is "12 or more" and did not have to move.
+    //
+    // FOURTEEN IS WHERE IT BREAKS: ~24px of brand is narrower than the short wordmark. The next
+    // page needs a genuine measurement and probably a third band.
+    expect(TABS).toHaveLength(13)
     expect(navDensity(TABS.length)).toBe('tight')
+  })
+
+  it('has no band for a fourteenth tab, which is the point of the note above', () => {
+    // Asserted so the claim is not just prose: `tight` is the last band, so a fourteenth tab would
+    // silently reuse a treatment measured for twelve. That is fine to DECIDE and not fine to
+    // inherit by accident, which is what this pins.
+    expect(navDensity(14)).toBe('tight')
   })
 
   it('has a rule in App.css for every band navDensity can return', () => {

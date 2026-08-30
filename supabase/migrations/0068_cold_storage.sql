@@ -104,6 +104,18 @@ RETURNS TABLE (
 LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path TO 'public', 'pg_catalog'
 AS $fn$
+    -- GATED ON THE SAME THREE ROLES THE BUCKET ADMITS, checked HERE rather than by hiding a tab.
+    --
+    -- `telemetry_archive_read_privileged` (supabase/storage-policies.sql) lets Administrator,
+    -- Shopfloor_Manager and Auditor read the objects. This catalogue names the object keys and the
+    -- shape of the plant's operating history, so it must not be readable by someone who cannot read
+    -- what it points at -- an Operator would otherwise get a full index of an archive every request
+    -- for it is refused.
+    --
+    -- IN THE FUNCTION BECAUSE A HIDDEN TAB IS NOT A GATE. App.jsx says it plainly: "Hiding a tab
+    -- removes a signpost, not an ability ... treating it as one is how a UI gate ends up being the
+    -- ONLY gate." SECURITY DEFINER makes that especially true here -- the definer's rights are
+    -- exactly what would let an ungated function answer anyone.
     SELECT m.chunk_name,
            m.range_start,
            m.range_end,
@@ -122,6 +134,7 @@ AS $fn$
            m.dropped_at,
            m.last_error
       FROM timescale.telemetry_archive_manifest m
+     WHERE public.has_role(ARRAY['Administrator', 'Shopfloor_Manager', 'Auditor'])
      ORDER BY m.range_start DESC;
 $fn$;
 
@@ -131,9 +144,13 @@ COMMENT ON FUNCTION public.cold_storage_rows() IS
   'that timescaledb/cold_archive.sql enforces with CHECK constraints.';
 
 -- SECURITY DEFINER, so the caller does not need SELECT on `timescale.*` -- which `authenticated`
--- deliberately does not hold for tables 0001 did not grant. Gated to the roles that can already
--- see storage and retention, and NOT to anon: this names object keys, and an unauthenticated
--- reader has no business enumerating what is on the platform's object storage.
+-- deliberately does not hold for tables 0001 did not grant. EXECUTE is granted to `authenticated`
+-- as a whole and the ROLE CHECK IS IN THE BODY: an Operator may call this and gets no rows, which
+-- is how every other read on this schema behaves under RLS. Granting EXECUTE per-role instead would
+-- put the same decision in two places -- the grant and the policy -- and they would diverge.
+--
+-- anon is revoked outright: it holds no role, so the body would return nothing anyway, and saying
+-- so at the grant costs nothing and removes the question.
 REVOKE ALL ON FUNCTION public.cold_storage_rows() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.cold_storage_rows() TO authenticated, service_role;
 
