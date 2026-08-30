@@ -743,6 +743,21 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             { label: 'Recorded', value: formatWhen(capture.recorded_at) },
             { label: 'Size', value: formatSize(capture.size_bytes) },
             { label: 'Messages', value: String(capture.message_count) },
+            /* THE RATE IS HERE TO ANSWER "HOW LONG WILL THIS TAKE", which is the question between
+               choosing a capture and starting a job. Message count alone does not: 40,000 messages
+               is four minutes at 160/s and eleven hours at 1/s, and a playback runs at the recorded
+               pace unless the speed multiplier is changed.
+
+               Recorded rather than derived, because the two disagree: this is the rate the plant
+               actually published at, while message_count over the window would flatten a burst
+               followed by silence into an average that describes neither. */
+            ...(typeof capture.manifest?.observed_rate_hz === 'number' ? [{
+              label: 'Recorded rate',
+              value: `${capture.manifest.observed_rate_hz} msg/s`,
+              title: capture.message_count && capture.manifest.observed_rate_hz > 0
+                ? `About ${Math.round(capture.message_count / capture.manifest.observed_rate_hz)}s of wall clock to replay at speed 1.`
+                : 'The rate the recording was published at. A playback follows it unless the speed is changed.',
+            }] : []),
             { label: 'Source', value: capture.source === 'uploaded' ? 'Uploaded' : 'Recorded here' },
             { label: 'Note', value: capture.note, full: true },
             {
@@ -758,12 +773,61 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
                 ? (capture.manifest?.uses_aliases
                   ? 'No birth certificate, and this capture uses metric aliases — a playback cannot resolve them, so every aliased metric is dropped on ingest.'
                   : 'No birth certificate. Every metric carries its full name, so a playback resolves them; it will not announce the devices, which stay OFFLINE until they birth on their own.')
-                : 'The recording contains a birth certificate, so a playback can resolve metric aliases and announce the devices.',
+                /* WHERE THE BIRTH CAME FROM, when the recorder had to ask for it. A capture that
+                   waited for a natural NBIRTH and one that requested a rebirth are both complete,
+                   but only the second interrupted the plant to get there -- which is worth knowing
+                   when the same subject is recorded repeatedly. */
+                : capture.manifest?.rebirth_requested
+                  ? 'The recording contains a birth certificate, obtained by requesting a rebirth from the edge node. A playback can resolve metric aliases and announce the devices.'
+                  : 'The recording contains a birth certificate, so a playback can resolve metric aliases and announce the devices.',
               full: true
             }
           ] : [])
         ] : []}
-        beforeActions={capture?.manifest?.metric_names?.length > 0 && (
+        beforeActions={(capture?.manifest?.metric_names?.length > 0
+          || capture?.manifest?.device_ids?.length > 0) && (
+          <>
+          {/* WHAT A REPLAY WILL CREATE, ANSWERED BEFORE ONE IS STARTED.
+              `ensure_shadow_devices()` mints one lane per device THIS CAPTURE recorded, so this
+              list is exactly the set of shadow devices a playback will bring into being -- and the
+              only place to see it without starting a job and counting what appears.
+
+              IT IS ALSO HOW YOU TELL TWO CAPTURES APART. A gateway's recording and one of its
+              devices' recordings have the same subject name, the same schema and similar sizes;
+              the device list is what distinguishes "the whole cell" from "one machine".
+
+              Edge nodes are shown beside them because an UPLOADED capture can carry a node this
+              stack has never seen. `start_playback_job()` will still replay it under the target
+              gateway, so the recorded ids are the only evidence of where the file came from. */}
+          {capture?.manifest?.device_ids?.length > 0 && (
+            <div style={{ marginBottom: '12px' }}>
+              <div className="context-panel-section-label">
+                Devices In This Capture
+                <span className="section-count" style={{ marginLeft: '6px' }}>
+                  {capture.manifest.device_ids.length}
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                {capture.manifest.device_ids.map(id => (
+                  <span key={id} className="badge badge-neutral mono" style={{ fontSize: '11px' }}
+                        title={`A playback of this capture creates one replay lane for ${id}`}>
+                    {id}
+                  </span>
+                ))}
+              </div>
+              {capture.manifest.edge_node_ids?.length > 0 && (
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                  Recorded under{' '}
+                  <span className="mono">{capture.manifest.edge_node_ids.join(', ')}</span>
+                  {/* Named rather than implied: a replay publishes as the PLAYBACK gateway, not as
+                      whatever recorded it, which is the whole reason a recording cannot be mistaken
+                      for live plant data. */}
+                  {' '}— a replay republishes under the Playback gateway, not under this.
+                </div>
+              )}
+            </div>
+          )}
+          {capture?.manifest?.metric_names?.length > 0 && (
           <div>
             <div className="context-panel-section-label">
               Captured Metrics
@@ -799,6 +863,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
               )}
             </div>
           </div>
+          )}
+          </>
         )}
         actions={selected ? [
           canManage && {

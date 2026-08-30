@@ -1235,3 +1235,75 @@ describe('the storage path', () => {
     expect(capturePath('dev270000000000400080000')).toBe('dev270000000000400080000/capture.json')
   })
 })
+
+
+// =============================================================================================
+/**
+ * The capture preview in the context panel.
+ *
+ * WHAT THIS IS FOR: deciding whether a capture is the one you want, and what it will do, BEFORE
+ * starting a job. Every field here comes from the manifest `capture_worker.py` records at the end
+ * of a recording, so nothing is derived or guessed -- and several of those fields were being stored
+ * and never shown.
+ */
+describe('the capture preview', () => {
+  const withManifest = (manifest) => ({ ...CAPTURE, manifest: { ...CAPTURE.manifest, ...manifest } })
+
+  const openCapture = async (capture) => {
+    api.listCaptures.mockResolvedValue([capture])
+    renderTab()
+    const row = (await screen.findByText('Line 1 Gateway')).closest('tr')
+    return selectRow(row)
+  }
+
+  it('lists the devices a playback will create lanes for', async () => {
+    // ensure_shadow_devices() mints one lane per device THIS CAPTURE recorded, so this list is
+    // exactly what a playback brings into being -- and the only way to see it without starting a
+    // job and counting what appears.
+    await openCapture(withManifest({ device_ids: ['dev220000000000400080000', 'dev230000000000400080000'] }))
+    expect(await screen.findByText('Devices In This Capture')).toBeInTheDocument()
+    expect(screen.getByText('dev220000000000400080000')).toBeInTheDocument()
+    expect(screen.getByText('dev230000000000400080000')).toBeInTheDocument()
+  })
+
+  it('says a replay republishes under the Playback gateway, not the recorded edge node', async () => {
+    // The property that stops a recording being mistaken for live plant data. An operator reading
+    // the recorded edge node could otherwise reasonably expect the replay to appear under it.
+    await openCapture(withManifest({
+      device_ids: ['dev220000000000400080000'], edge_node_ids: ['gwy120000000000400080000'],
+    }))
+    expect(await screen.findByText(/republishes under the Playback gateway/i)).toBeInTheDocument()
+  })
+
+  it('reports the recorded rate, which is what says how long a replay takes', async () => {
+    // Message count alone does not: 6 messages is seconds at 2/s and minutes at 0.01/s, and a
+    // playback follows the recorded pace unless the speed is changed.
+    await openCapture(withManifest({ observed_rate_hz: 2.5 }))
+    expect(await screen.findByText('2.5 msg/s')).toBeInTheDocument()
+  })
+
+  it('omits the rate rather than showing a blank row when it was not recorded', async () => {
+    // An uploaded capture may carry no manifest rate at all. A "Recorded rate: —" row would read
+    // as a measurement of zero rather than an absent field.
+    await openCapture(withManifest({ observed_rate_hz: undefined }))
+    await screen.findByText('Birth certificate')
+    expect(screen.queryByText(/msg\/s/)).toBeNull()
+  })
+
+  it('says when a birth was obtained by interrupting the plant for a rebirth', async () => {
+    // Both states are complete captures; only one asked the edge node for something. Worth knowing
+    // when the same subject is recorded repeatedly.
+    await openCapture(withManifest({ birth_captured: true, rebirth_requested: true }))
+    const birth = await screen.findByText('Birth certificate')
+    expect(birth.closest('div').textContent).toMatch(/Captured/)
+    expect(screen.getByTitle(/requesting a rebirth/i)).toBeInTheDocument()
+  })
+
+  it('still renders the panel for a capture whose manifest holds no devices', async () => {
+    // Uploaded captures and older recordings predate some of these keys. The panel must degrade to
+    // what it has rather than failing, which is the ordinary case for a manifest field.
+    await openCapture(withManifest({ device_ids: undefined }))
+    expect(await screen.findByText('Captured Metrics')).toBeInTheDocument()
+    expect(screen.queryByText('Devices In This Capture')).toBeNull()
+  })
+})
