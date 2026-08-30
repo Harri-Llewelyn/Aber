@@ -157,6 +157,7 @@ services:
       - ./timescaledb/retention.sql:/retention.sql:ro
       - ./timescaledb/storage.sql:/storage.sql:ro
       - ./timescaledb/aggregates.sql:/aggregates.sql:ro
+      - ./timescaledb/cold_archive.sql:/cold_archive.sql:ro
       - ./timescaledb/roles.sql:/roles.sql:ro
     # The healthcheck cannot be trusted to mean "init has finished": the postgres entrypoint runs
     # initdb scripts against a temporary server that already answers on the unix socket, which is
@@ -179,6 +180,8 @@ services:
       psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -v rollup_1m_retain=\"$$TIMESCALE_ROLLUP_1M_RETAIN_FOR\" -v rollup_5m_retain=\"$$TIMESCALE_ROLLUP_5M_RETAIN_FOR\" -v rollup_1h_retain=\"$$TIMESCALE_ROLLUP_1H_RETAIN_FOR\" -f /aggregates.sql;
       echo 'Reconciling the storage footprint view...';
       psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -f /storage.sql;
+      echo 'Reconciling the cold archive manifest...';
+      psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -f /cold_archive.sql;
       echo 'Reconciling read-only BI role...';
       psql -v ON_ERROR_STOP=1 -h timescaledb -U \"$$TS_USER\" -d \"$$TS_DBNAME\" -v bi_reader_password=\"$$BI_READER_PASSWORD\" -v ingest_writer_password=\"$$INGEST_WRITER_PASSWORD\" -v fdw_reader_password=\"$$FDW_READER_PASSWORD\" -f /roles.sql;
       "
@@ -595,7 +598,19 @@ services:
       # Storage evaluates RLS on storage.objects by impersonating the caller's role, so it needs
       # the same PostgREST URL the rest of the stack uses to resolve the JWT's claims.
       POSTGREST_URL: http://supabase-rest:3000
-      FILE_SIZE_LIMIT: ${STORAGE_FILE_SIZE_LIMIT:-52428800}
+      # THE GLOBAL CEILING, AND IT HAS TO CLEAR THE LARGEST BUCKET OR THAT BUCKET CANNOT BE CREATED.
+      #
+      # storage-api refuses `POST /bucket` with 400 "The object exceeded the maximum allowed size"
+      # when a bucket's own `file_size_limit` exceeds this. It was 50 MiB while `broker-captures`
+      # asks for 100 MiB, so THAT BUCKET HAS NEVER BEEN CREATABLE on a default stack -- storage-init
+      # exits non-zero, the bucket is absent, and capture and playback both fail later at an upload
+      # against a bucket that does not exist. Found while adding `telemetry-archive`, which asks for
+      # more again.
+      #
+      # RAISING IT LOOSENS NOTHING. Per-bucket limits still bind and are unchanged: 3D models stay
+      # at 50 MiB, flow backups at 5 MiB, captures at 100 MiB. This is the ceiling those sit under,
+      # so it has to be the largest of them rather than the smallest.
+      FILE_SIZE_LIMIT: ${STORAGE_FILE_SIZE_LIMIT:-1073741824}
       STORAGE_BACKEND: file
       FILE_STORAGE_BACKEND_PATH: /var/lib/storage
       TENANT_ID: stub
@@ -628,7 +643,10 @@ services:
       STORAGE_URL: http://supabase-storage:5000
       SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
       STORAGE_BUCKET: ${STORAGE_MODEL_BUCKET:-asset-3d-models}
-      STORAGE_FILE_SIZE_LIMIT: ${STORAGE_FILE_SIZE_LIMIT:-52428800}
+      # The 3D-model bucket's OWN limit. Deliberately no longer STORAGE_FILE_SIZE_LIMIT: that is
+      # storage-api's global ceiling, and one variable meaning both made raising the ceiling
+      # silently raise this bucket with it. See scripts/storage-init.mjs.
+      STORAGE_MODEL_FILE_SIZE_LIMIT: ${STORAGE_MODEL_FILE_SIZE_LIMIT:-52428800}
       # The PRIVATE bucket holding Node-RED flow backups from gateway appliances, under
       # <sparkplug_id>/. Its own size limit, deliberately not STORAGE_FILE_SIZE_LIMIT: that one is
       # sized for 3D geometry, and a flows.json anywhere near 50 MiB is not a flow.

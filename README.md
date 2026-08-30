@@ -855,39 +855,38 @@ parts in the layer that has no fallback.
 
 ---
 
-### 3 · Cold Telemetry Archival & Query-in-Place
+### 3 · Cold Telemetry: query-in-place, and the page
 
-**Builds on:** TimescaleDB retention policies · `telemetry` hypertable · Edge Functions · Apache
-Parquet · `public.system_settings` (`0031`, `0032`)
+**Builds on:** `timescaledb/cold_archive.sql` · `0068` · [`ingestion/cold_archive.py`](ingestion/cold_archive.py) ·
+Apache Parquet · `public.system_settings` (`0031`, `0032`)
 
-**Written in the conditional throughout, deliberately.** None of the machinery below exists, and
-this entry previously described it in the present tense — which reads, in a section whose whole
-premise is that it lists only what is NOT built, as though the feature had shipped.
+**The archival half shipped and this entry is what remains of it.** Telemetry is exported to
+Parquet, verified and only then dropped; the manifest, the settings and the catalogue all exist.
+The substance is documented under
+[Cold telemetry archival](supabase/README.md#cold-telemetry-archival-0068).
 
-**The name is already taken.** `ArchivesTab.jsx` ships today and means *entity* archives — archived
-cells, gateways and devices — which has nothing to do with cold telemetry. Whatever this item's page
-is called, it is not "Archives", and the collision should be settled before the page is built rather
-than by whoever gets there second.
+**What is left is the READ side, which is the half the title's second clause names.** Historical
+months are on object storage in a Hive-partitioned layout (`year=YYYY/month=MM/`) chosen precisely
+so this is possible — DuckDB, Spark and Arrow all read those directory names as columns — but
+nothing yet issues the short-lived presigned URL or runs the query. Until it does, reading an
+archived month means fetching the object by hand. Rendering historical charts on demand, without
+rehydrating gigabytes back into TimescaleDB, is the outstanding work.
 
-**Its configuration has somewhere to live, and the split is already decided.** The settings plane
-shipped, so the S3 **endpoint**, bucket and tiering threshold are declared here by this item's own
-migration, beside the code that reads them — that is what the closed key set means. The S3
-**credential** is not: every authenticated user can read `system_settings`, so it goes in Supabase
-Vault and is managed through **Supabase Studio**, which already ships that UI on both deployment
-targets. No secrets interface is to be built for it. See
+**And the page, whose name is now settled: Cold Storage.** Not "Archives" — `ArchivesTab.jsx` means
+*entity* archives, archived cells, gateways and devices, and has nothing to do with cold telemetry.
+That page's "archive" carries a **Restore** button and an auto-purge timer; putting chunk tiering
+beside it would put a Restore control next to rows it cannot restore. `cold_storage_rows()` is the
+read the page needs and already exists.
+
+**An external S3 endpoint is the other open option.** The exporter writes to the platform's own
+object storage through the client `capture_worker.py` uses, which is why `0068` declares three
+settings and not six: `archive.s3_endpoint` and its region belong to the migration that teaches the
+exporter to use one, beside the code that reads them, rather than sitting on the Settings page
+changing nothing. The **credential** never joins them — every authenticated user can read
+`system_settings`, so it goes in Supabase Vault through **Supabase Studio**, which ships that UI on
+both targets. No secrets interface is to be built for it. See
 [`supabase/README.md`](supabase/README.md#runtime-configuration-system_settings), including the note
 that Studio sits on a different trust boundary from an `Administrator` in the dashboard.
-
-Tiering high-volume time-series telemetry out of the operational database into vendor-neutral
-Apache Parquet files on S3-compatible or Azure Blob storage once the hot hypertable retention
-window expires (e.g., >90 days).
-
-**Preserves long-horizon traceability without re-bloating the operational database.** A scheduled
-maintenance task **would** export date-partitioned chunks to compressed `.parquet` files, verify
-storage, record a manifest row in `telemetry_archive_manifest`, and only then drop the raw chunk. A
-catalog view **would** render it and let operators query historical months in place via short-lived
-presigned URLs and DuckDB — rendering historical charts on demand without rehydrating
-gigabytes of raw points back into TimescaleDB.
 
 ---
 

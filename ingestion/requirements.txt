@@ -17,3 +17,13 @@ psycopg2-binary==2.9.10
 # that, on every pull request.
 protobuf==5.29.6
 supabase
+# Parquet, for cold telemetry archival (roadmap item 3, ingestion/cold_archive.py).
+#
+# THE FORMAT IS THE POINT, not the library. Item 3 asks for "vendor-neutral Apache Parquet"
+# precisely so a decade of plant history is not readable only by the stack that wrote it -- DuckDB,
+# Spark, pandas and Power BI all open these files with no ACS-Cymru component involved. pyarrow is
+# the reference implementation and the one DuckDB interoperates with most predictably.
+#
+# It is a large wheel (~40 MB) and it is imported LAZILY, inside the two functions that write and
+# read Parquet, so the ingestion daemon's own start-up path never pays for it.
+pyarrow==18.1.0

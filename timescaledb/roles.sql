@@ -161,6 +161,14 @@ BEGIN
   EXECUTE format('GRANT SELECT ON public.telemetry_latest TO %I', v_role);
   EXECUTE format('GRANT SELECT ON public.assets TO %I', v_role);
 
+  -- The cold archive catalogue, READ ONLY. This is the role every FDW session from the platform
+  -- database opens as, so without it `cold_storage_rows()` (0068) fails inside a dashboard panel
+  -- rather than at deploy -- the same failure 0027's foreign table documents. Guarded on the
+  -- table existing because a first boot applies cold_archive.sql after this file.
+  IF to_regclass('public.telemetry_archive_manifest') IS NOT NULL THEN
+    EXECUTE format('GRANT SELECT ON public.telemetry_archive_manifest TO %I', v_role);
+  END IF;
+
   -- telemetry_gapfill() is how a report-by-exception series MUST be read -- a missing bucket means
   -- unchanged, not unknown, so charting a rollup directly renders steady operation as a hole.
   EXECUTE format(
@@ -327,6 +335,23 @@ BEGIN
 
   EXECUTE format('GRANT INSERT, UPDATE, SELECT ON public.assets TO %I', v_role);
   EXECUTE format('GRANT INSERT, SELECT ON public.telemetry TO %I', v_role);
+
+  -- COLD ARCHIVAL (roadmap item 3). The exporter runs as this role and writes the manifest, so it
+  -- needs INSERT and UPDATE there -- but note what it still does NOT get: DELETE on the manifest,
+  -- and nothing at all on telemetry beyond the INSERT above. The revokes below still stand.
+  --
+  -- Dropping an archived chunk is reached through cold_tier_drop_verified(), which is SECURITY
+  -- DEFINER for exactly this reason: it lets the daemon ASK for a drop the manifest has already
+  -- verified, without holding the DELETE that would let it remove anything else. Guarded on the
+  -- table existing because roles.sql also runs on stacks that have not applied cold_archive.sql
+  -- yet -- a first boot orders the two the other way round.
+  IF to_regclass('public.telemetry_archive_manifest') IS NOT NULL THEN
+    EXECUTE format('GRANT SELECT, INSERT, UPDATE ON public.telemetry_archive_manifest TO %I', v_role);
+    EXECUTE format('REVOKE DELETE, TRUNCATE ON public.telemetry_archive_manifest FROM %I', v_role);
+    EXECUTE format('GRANT EXECUTE ON FUNCTION public.cold_tier_candidates(interval) TO %I', v_role);
+    EXECUTE format('GRANT EXECUTE ON FUNCTION public.cold_tier_droppable() TO %I', v_role);
+    EXECUTE format('GRANT EXECUTE ON FUNCTION public.cold_tier_drop_verified() TO %I', v_role);
+  END IF;
 
   -- REVOKED EXPLICITLY rather than left ungranted, for the same reason the readers above do it:
   -- this file is the authority on the role's reach, not a description of how it was first set up.

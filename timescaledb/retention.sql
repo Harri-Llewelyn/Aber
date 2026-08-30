@@ -159,6 +159,37 @@ BEGIN
         'before it is dropped.', v_retain, v_compress;
     END IF;
 
+    -- COLD ARCHIVAL AND A DROP POLICY ARE A DATA-LOSS COMBINATION (roadmap item 3).
+    --
+    -- This policy deletes chunks on a timer and records nothing. The archiver exports a chunk,
+    -- verifies the object and only then drops it. Run both and the timer wins the race for
+    -- anything the archiver has not reached yet: the rows are gone, no manifest row exists, and
+    -- nothing anywhere says they were ever there.
+    --
+    -- Observed while building the archiver, which is why the wording is this specific: a 150-day
+    -- test chunk was exported, and the next reconciliation of this file deleted it before the
+    -- export could be verified.
+    --
+    -- A WARNING RATHER THAN A REFUSAL. Refusing to add the policy would leave chunks accumulating
+    -- on a stack whose archiver is misconfigured -- trading a loud data-loss risk for a quiet
+    -- disk-exhaustion one. And the manifest holding rows is EVIDENCE of archival, not proof it is
+    -- switched on; `archive.enabled` lives in the platform database, which this file cannot read.
+    -- So it reports the conflict and lets the operator settle it.
+    IF to_regclass('public.telemetry_archive_manifest') IS NOT NULL THEN
+      DECLARE v_archived bigint;
+      BEGIN
+        SELECT count(*) INTO v_archived FROM public.telemetry_archive_manifest;
+        IF v_archived > 0 THEN
+          RAISE WARNING
+            'cold archival is in use (% manifest row(s)) AND a retention policy of % is being '
+            'added. This policy drops chunks on a timer with no export and no record, so it will '
+            'delete whatever the archiver has not reached yet. Set TIMESCALE_RETAIN_FOR=never and '
+            'let `python -m cold_archive --drop` remove chunks once their export is verified.',
+            v_archived, v_retain;
+        END IF;
+      END;
+    END IF;
+
     PERFORM add_retention_policy('public.telemetry', v_retain);
     RAISE NOTICE 'retention policy: chunks older than % are DROPPED', v_retain;
   ELSE

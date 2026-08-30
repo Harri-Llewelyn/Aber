@@ -40,6 +40,13 @@ COPY ingestion/capture.py .
 # a second tag to keep in step, and a second entry in check-image-tag-parity.mjs.
 COPY ingestion/playback_worker.py .
 
+# Cold telemetry archival (roadmap item 3). IN THIS IMAGE RATHER THAN ITS OWN, for the reason the
+# playback worker is: it needs the historian connection, the daemon's storage identity and the
+# settings reader that already live here, and a second image would be this one minus two files plus
+# a tag to keep in step. It is a CLI, not a service -- nothing starts it; `python -m cold_archive`
+# does, on demand or from a scheduler.
+COPY ingestion/cold_archive.py .
+
 # Compile the Sparkplug B protobuf definition
 RUN protoc --python_out=. sparkplug_b.proto
 

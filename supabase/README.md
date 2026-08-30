@@ -780,6 +780,64 @@ its shadow devices exist to receive a replay rather than to report a machine, so
 out of the Capture page's subject tables. Starting a playback is unaffected — that query selects on
 `is_shadow` because that is exactly the lane a playback publishes into.
 
+### Cold telemetry archival (`0068`)
+
+Raw telemetry used to leave one way: `timescaledb/retention.sql` adds a TimescaleDB retention
+policy that **drops** chunks past `TIMESCALE_RETAIN_FOR`, on a timer, recording nothing. Cold
+archival turns that delete into a move.
+
+**The ordering is the whole feature**, and it is enforced in three independent places rather than
+by a careful sequence in one file:
+
+```
+claim → export → upload → VERIFY → record → drop
+```
+
+| Enforced by | What it refuses |
+| :--- | :--- |
+| `telemetry_archive_manifest` CHECK constraints | *recording* a drop that was never verified, or a verification that was never exported |
+| `cold_tier_drop_verified()` | dropping anything the manifest has not cleared — it computes the boundary itself |
+| `--drop` being opt-in | the destructive half happening as a side effect of an export |
+
+**The manifest lives on the historian, not here.** It describes chunks, and the chunks are there; a
+copy in this database could drift from the hypertable it claims to describe with nothing able to
+notice. `0068` maps it over the same `postgres_fdw` bridge that already carries `telemetry` and
+`storage_footprint` — the arrangement `0027` established. One writer there, one reader here,
+through `cold_storage_rows()`.
+
+**`drop_chunks()` is a boundary, not a selection**, and that is the subtlety worth knowing. It
+drops *every* chunk older than the timestamp given, so dropping the verified chunks one at a time
+would delete everything older than each — including chunks never exported.
+`cold_tier_drop_verified()` therefore computes the longest **oldest-first run** of verified chunks
+and drops once, at its end. In practice archival runs oldest-first and the verified set is already
+a prefix; the guard matters on the run where it is not.
+
+**The exporter cannot delete telemetry**, which is not a detail. `roles.sql` revokes `DELETE` and
+`TRUNCATE` on `telemetry` from `ingest_writer` deliberately — *"the two that make append-only
+true"* — and the exporter runs as that role. `cold_tier_drop_verified()` is `SECURITY DEFINER`, so
+the daemon may *ask* for a drop the manifest has already cleared while holding no privilege to
+remove a row of its own choosing.
+
+**Its settings arrive with their reader**, which is `0031`'s rule and the reason there are three
+keys rather than six: `archive.enabled` (off by default), `archive.tier_after_days` and
+`archive.bucket`, all read by `ingestion/cold_archive.py`. There is no S3 endpoint key because this
+implementation writes to the platform's own object storage through the client
+`capture_worker.py` already uses; those keys belong to the migration that teaches it to use an
+external endpoint. **No credential key will ever be added** — every authenticated user can read
+`system_settings`, so secrets go to Vault through Studio.
+
+**Enabling it means standing retention down.** Both mechanisms drop chunks, and the timer wins the
+race for anything the archiver has not reached: set `TIMESCALE_RETAIN_FOR=never` and let
+`python -m cold_archive --drop` remove chunks once their export is verified. `retention.sql` warns
+when it sees a manifest with rows and a drop policy being added, because that combination silently
+deletes what the archiver has not got to yet.
+
+```bash
+python -m cold_archive --dry-run   # what would be exported
+python -m cold_archive             # export, upload, verify; drop nothing
+python -m cold_archive --drop      # ... and drop what verification cleared
+```
+
 ### `deployment`, and the word it is replacing (`0064`)
 
 `is_virtual` carries three incompatible definitions — *"no physical edge appliance behind this

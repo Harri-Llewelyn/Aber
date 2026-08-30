@@ -34,7 +34,22 @@
 
 const STORAGE_URL = process.env.STORAGE_URL || 'http://supabase-storage:5000';
 const SERVICE_ROLE_KEY = process.env.SERVICE_ROLE_KEY || '';
-const FILE_SIZE_LIMIT = Number.parseInt(process.env.STORAGE_FILE_SIZE_LIMIT || '52428800', 10);
+/**
+ * The 3D-model bucket's OWN limit, and no longer the global one.
+ *
+ * It used to read `STORAGE_FILE_SIZE_LIMIT`, which is storage-api's GLOBAL CEILING for every
+ * bucket -- so one variable meant two different things and raising the ceiling silently raised
+ * this bucket with it. That surfaced the moment the ceiling had to move: `broker-captures` asks
+ * for 100 MiB and `telemetry-archive` for 1 GiB, and storage-api refuses to create a bucket whose
+ * limit exceeds the ceiling, so the ceiling had to rise -- which would have taken 3D models from
+ * 50 MiB to 1 GiB as a side effect nobody asked for.
+ *
+ * Two jobs, two variables. The ceiling is the largest bucket; this is what a model may be.
+ */
+const FILE_SIZE_LIMIT = Number.parseInt(
+  process.env.STORAGE_MODEL_FILE_SIZE_LIMIT || '52428800',
+  10,
+);
 
 /**
  * The formats the 3D uploader accepts, declared on the bucket as well as in the browser.
@@ -132,6 +147,35 @@ const CAPTURE_FILE_SIZE_LIMIT = Number.parseInt(
   10,
 );
 
+/**
+ * Cold telemetry objects (roadmap item 3).
+ *
+ * 1 GiB, an order of magnitude above a capture, because the unit is a whole TimescaleDB chunk
+ * rather than a window somebody chose -- by default a week of every metric from every device on
+ * the plant. Parquet's columnar compression does most of the work here, but the ceiling has to
+ * admit a busy facility's week and not a demonstrator's.
+ *
+ * IT BINDS BEFORE ANYTHING IS DROPPED, which is what makes it safe to set at all: the exporter
+ * uploads and VERIFIES before the raw chunk is removed, so a chunk too large for this bucket fails
+ * the upload and simply stays in the hypertable. A cap that was too low would stall archival, not
+ * lose data.
+ */
+const TELEMETRY_ARCHIVE_SIZE_LIMIT = Number.parseInt(
+  process.env.TELEMETRY_ARCHIVE_SIZE_LIMIT || '1073741824',
+  10,
+);
+
+/**
+ * Parquet has no registered IANA type. `application/vnd.apache.parquet` is what Arrow and DuckDB
+ * emit and is the closest thing to a convention; the octet-stream fallback is what an HTTP client
+ * that declines to guess will send, and refusing that would fail an upload over a header rather
+ * than over its contents.
+ */
+const TELEMETRY_ARCHIVE_MIME_TYPES = [
+  'application/vnd.apache.parquet',
+  'application/octet-stream',
+];
+
 const BUCKETS = [
   {
     id: process.env.STORAGE_BUCKET || 'asset-3d-models',
@@ -172,6 +216,23 @@ const BUCKETS = [
     file_size_limit: CAPTURE_FILE_SIZE_LIMIT,
     allowed_mime_types: CAPTURE_MIME_TYPES,
     why: 'broker captures for playback, under <sparkplug_id>/ of the gateway they play back as',
+  },
+  {
+    id: process.env.TELEMETRY_ARCHIVE_BUCKET || 'telemetry-archive',
+    // PRIVATE, AND THE ONE BUCKET WHERE PUBLIC WOULD BE UNRECOVERABLE RATHER THAN MERELY WRONG.
+    // The others hold copies: a flow backup and a capture both describe something that still
+    // exists. An object here is the ONLY remaining copy of a month of plant telemetry -- the raw
+    // chunk was dropped precisely because this was verified (timescaledb/cold_archive.sql). So a
+    // guessable unauthenticated URL would expose the plant's entire operating history, and a
+    // deletion here is not a lost backup, it is lost history.
+    public: false,
+    // FAR LARGER THAN A CAPTURE, because the unit is different in kind. A capture is a window
+    // somebody chose; this is a whole TimescaleDB chunk -- a week of every metric from every
+    // device by default. Parquet's columnar compression does most of the work, but the cap has to
+    // admit a busy plant's week rather than a demonstrator's.
+    file_size_limit: TELEMETRY_ARCHIVE_SIZE_LIMIT,
+    allowed_mime_types: TELEMETRY_ARCHIVE_MIME_TYPES,
+    why: 'cold telemetry chunks as Parquet, under year=YYYY/month=MM/, referenced by telemetry_archive_manifest',
   },
 ];
 
