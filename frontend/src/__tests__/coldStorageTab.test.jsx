@@ -183,8 +183,29 @@ describe('the empty state distinguishes off from on-and-idle', () => {
     api.get.mockResolvedValue([{ key: 'archive.enabled', value: true }])
     await show([])
     await waitFor(() => expect(screen.getByText(/Archiving is/)).toBeInTheDocument())
-    expect(screen.getByText(/nothing schedules it/i)).toBeInTheDocument()
     expect(screen.queryByText(/Cold storage is off/i)).toBeNull()
+  })
+
+  it('says it runs by itself, because it does', async () => {
+    /*
+     * THE COPY THIS REPLACES WAS STALE AND MISLED A READER INTO ASKING FOR A CRON JOB.
+     *
+     * It said "nothing schedules it, so on this stack it is a command somebody runs", which was
+     * true when written and stopped being true one commit later when the `cold-archiver` service
+     * landed. Nobody reading it could tell -- which is the failure this repository calls out by
+     * name: a stale claim is worse than none, because it will be acted on.
+     *
+     * The empty state now attributes the emptiness to the right cause: not a missing scheduler, but
+     * nothing being ELIGIBLE yet.
+     */
+    api.get.mockResolvedValue([{ key: 'archive.enabled', value: true }])
+    await show([])
+    await waitFor(() => expect(screen.getByText(/runs by itself/i)).toBeInTheDocument())
+    expect(screen.getByText(/cold-archiver/)).toBeInTheDocument()
+    // "eligible" appears twice by design -- as the cause, and again in the command that lists it --
+    // so this asserts the cause rather than either occurrence.
+    expect(screen.getByText(/nothing is/i).textContent).toMatch(/eligible/i)
+    expect(screen.queryByText(/nothing schedules it/i)).toBeNull()
   })
 
   it('says where the switch is when it really is off', async () => {

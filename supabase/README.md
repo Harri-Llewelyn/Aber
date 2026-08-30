@@ -915,6 +915,12 @@ Walks the manifest and checks every object is still fetchable, exiting non-zero 
 distinguishes an object that is merely gone from one that was **the only copy**, and reports how
 many rows that is.
 
+**It checks the other direction too** — objects on storage that no manifest row references. Those are
+bytes nothing can reach through the catalogue and nothing can account for, left by a failed drop, an
+interrupted export, or a manifest restored from a backup older than the storage beside it. They are
+**reported and never deleted**: removing an object is the one irreversible act here, the process runs
+as Operator, and the bucket admits only an Administrator to `DELETE`.
+
 **The failure it exists for is a reconfiguration, not a bug.** `STORAGE_BACKEND` can be pointed from
 `file` at S3 — but switching it **migrates nothing**. The same keys are looked for in the new backend
 and 404 while the manifest still reads `archived` and the raw rows are already gone. Moving to cloud

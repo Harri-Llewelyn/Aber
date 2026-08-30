@@ -252,10 +252,15 @@ export function tokenStatusDetail(status, now = Date.now()) {
     // nothing to record into. (They used to be unrecordable for a second reason, a ten-year expiry
     // past the ceiling; #101 removed that one, and `npm run keys:rotate` records each re-signing.)
     // So an empty inventory is a statement about the RECORD, and saying otherwise is the defect
-    // this wording was rewritten to close. The coverage note under the table carries the detail;
-    // this is the cell, and it has 34ch.
-    return 'No token recorded for this identity. That is not the same as none existing — see the '
-      + 'coverage note below.'
+    // this wording was rewritten to close.
+    //
+    // SELF-CONTAINED NOW, because the coverage note under the table is gone. It used to end "see
+    // the coverage note below", which was correct while that note existed and would have become a
+    // pointer to nothing -- the kind of stale cross-reference a reader cannot tell is stale. The
+    // caveat is short enough to carry here, which is what made removing the note reasonable.
+    return 'No token recorded for this identity. That is not the same as none existing: '
+      + '`npm run setup` signs the ingestion and playback keys before this database exists, so the '
+      + 'first of each is live but unrecorded until `npm run keys:rotate` re-signs it.'
   }
   if (status.state === TOKEN_STATES.EXPIRED) {
     return `The last token expired on ${new Date(status.lastExpiry).toLocaleDateString()}.`

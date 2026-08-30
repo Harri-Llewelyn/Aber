@@ -570,9 +570,14 @@ def audit(conn, storage, bucket):
         )
         rows = cur.fetchall()
 
+    manifest_keys = {r["object_key"] for r in rows}
+
     if not rows:
-        log("the manifest is empty; nothing to audit.")
-        return 0
+        # STILL CHECKS FOR ORPHANS. An empty manifest and a bucket full of objects is not "nothing
+        # to audit" -- it is the most interesting state the bucket can be in, and returning early
+        # here is what let four of them sit unnoticed.
+        log("the manifest is empty.")
+        return 1 if audit_orphans(storage, bucket, manifest_keys) else 0
 
     missing, checked = [], 0
     for r in rows:
@@ -588,9 +593,11 @@ def audit(conn, storage, bucket):
         marker = "DATA LOST" if r["is_only_copy"] else "object gone"
         log(f"  {marker}: {r['chunk_name']} -> {r['object_key']} ({err})")
 
+    orphans = audit_orphans(storage, bucket, manifest_keys)
+
     if not missing:
         log(f"{checked} object(s) present and readable.")
-        return 0
+        return 1 if orphans else 0
 
     lost = [r for r, _ in missing if r["is_only_copy"]]
     log(f"{len(missing)} of {len(rows)} object(s) are unreachable.")
@@ -600,6 +607,53 @@ def audit(conn, storage, bucket):
         log("If storage was recently repointed at another backend, the objects were not migrated:")
         log("copy them across preserving their keys exactly, then re-run this.")
     return 1
+
+
+def audit_orphans(storage, bucket, manifest_keys):
+    """
+    Objects on storage that no manifest row references.
+
+    THE DIRECTION `audit()` DOES NOT LOOK, and the gap was found by an operator opening the bucket
+    rather than by any tooling here. audit() walks the manifest and asks storage about each row; an
+    object with no row is invisible to it, because there is no row to start from.
+
+    They are not harmless. An orphan is bytes nobody can reach through the catalogue and nobody can
+    account for -- and the ones that prompted this were left by a test run whose manifest rows were
+    cleaned up while the objects were not, which is exactly how a real one appears: a failed drop, an
+    interrupted export, or a manifest restored from a backup older than the storage beside it.
+
+    REPORTED, NEVER DELETED. Removing an object is the one irreversible act in this file, this
+    process holds Operator and the bucket admits only an Administrator to DELETE, and an orphan is
+    precisely the case where the tool is least sure what it is looking at. Naming them is the whole
+    job; deciding is a person's.
+    """
+    try:
+        found = storage.from_(bucket).list("", {"limit": 1000})
+    except Exception as err:  # noqa: BLE001
+        log(f"could not list the bucket to check for orphans ({err}); skipping that half.")
+        return 0
+
+    # storage3's list() is one level at a time, and the layout is year=/month=/file. Walking it is
+    # three calls rather than a recursive helper, which is worth keeping literal.
+    keys = []
+    for year in found:
+        if not year.get("name", "").startswith("year="):
+            continue
+        for month in storage.from_(bucket).list(year["name"], {"limit": 1000}):
+            prefix = f"{year['name']}/{month['name']}"
+            for obj in storage.from_(bucket).list(prefix, {"limit": 1000}):
+                keys.append(f"{prefix}/{obj['name']}")
+
+    orphans = [k for k in keys if k not in manifest_keys]
+    if not orphans:
+        return 0
+
+    log(f"{len(orphans)} object(s) on storage that no manifest row references:")
+    for k in orphans:
+        log(f"  orphan: {k}")
+    log("Nothing points at these, so nothing will ever read them. They are NOT deleted here --")
+    log("an Administrator can remove them once satisfied they hold nothing wanted.")
+    return len(orphans)
 
 
 # -------------------------------------------------------------------------------------------------

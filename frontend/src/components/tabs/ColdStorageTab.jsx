@@ -141,12 +141,17 @@ export function ColdStorageTab({ showToast, userRole }) {
                    Compose stack does. Telling somebody who has just switched it on that "cold
                    storage is off" is the one thing this cell must not say. */
                 <div className="empty-text">
-                  Archiving is <strong>on</strong>, and nothing has been archived yet. Two things
-                  have to be true before anything appears here: a telemetry chunk has to be older
-                  than the threshold in <strong>Settings → Cold Storage</strong>, and{' '}
-                  <code>python -m cold_archive</code> has to run — <strong>nothing schedules it</strong>,
-                  so on this stack it is a command somebody runs. Check what is eligible with{' '}
-                  <code>docker exec acs-cymru_ingestion python -m cold_archive --dry-run</code>.
+                  Archiving is <strong>on</strong> and runs by itself — the{' '}
+                  <code>cold-archiver</code> service exports, verifies and drops on a timer
+                  (<code>COLD_ARCHIVE_INTERVAL_SECONDS</code>, daily by default). Nothing has been
+                  archived yet because nothing is <strong>eligible</strong>: a chunk only qualifies
+                  once its whole time range is older than the threshold in{' '}
+                  <strong>Settings → Cold Storage</strong>, so on a stack whose telemetry is newer
+                  than that, there is correctly nothing to move.
+                  <div style={{ marginTop: '8px' }}>
+                    See what is eligible, or run a pass now, with{' '}
+                    <code>docker exec acs-cymru_ingestion python -m cold_archive --dry-run</code>.
+                  </div>
                 </div>
               ) : (
                 <div className="empty-text">
