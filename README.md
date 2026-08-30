@@ -416,6 +416,7 @@ live services went unlisted: the tag it named (`alpine:3.24`) still existed, so 
 | `frontend` | `acs-cymru_frontend` | `./frontend/Dockerfile` | `3000:3000` |
 | `ingestion` | `acs-cymru_ingestion` | `./Dockerfile` | `9108:9108` |
 | `playback` | `acs-cymru_playback` | `./Dockerfile` (same image as `ingestion`, different command) | — |
+| `cold-archiver` | `acs-cymru_cold_archiver` | `./Dockerfile` (same image as `ingestion`, different command) | — |
 | `i3x-service` | `acs-cymru_i3x` | `./i3x/Dockerfile` | `8090:8090` |
 | `gateway-credential` | `acs-cymru_gateway_credential` | `./gateway-credential/Dockerfile` | — |
 | `node-red-init` | `acs-cymru_node_red_init` | `./node-red/Dockerfile` | — |
@@ -702,7 +703,7 @@ Kubernetes — which is what makes it the real drift control between them.
 
 ## Roadmap & Future Extensions
 
-Fourteen extensions, none of them speculative: every one names the code it would build on, because
+Thirteen extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
@@ -721,10 +722,14 @@ orchestration now sits beside the CLI it wraps, under
 [The Playback gateway, and its shadow devices](ingestion/README.md#the-playback-gateway-and-its-shadow-devices);
 item 15 under
 [`deployment`, and the word it is replacing](supabase/README.md#deployment-and-the-word-it-is-replacing-0064);
-item 18 under [Historian roles](#historian-roles); and item 9's subject was retired the same way
-when `aas-api` shipped.
+item 18 under [Historian roles](#historian-roles); item 3 under
+[Cold telemetry archival](supabase/README.md#cold-telemetry-archival-0068), including
+[what Grafana can and cannot see](supabase/README.md#what-grafana-can-and-cannot-see) — the one part
+of that item deliberately **not** built, because rendering archived ranges in a dashboard would
+recover a resolution nothing charts while adding a container, a gateway route and an auth surface
+over raw plant history; and item 9's subject was retired the same way when `aas-api` shipped.
 
-**Retired numbers are not reused, and the list is therefore not contiguous.** The gaps at 6, 7, 11,
+**Retired numbers are not reused, and the list is therefore not contiguous.** The gaps at 3, 6, 7, 11,
 13, 15, 16, 17 and 18 are deliberate. Renumbering on retirement was the earlier practice and it does not survive
 contact with this repository: the remaining entries are named by **dozens of comments** in migrations,
 scripts and components, all explaining why that code is the way it is, and shifting every number
@@ -852,42 +857,6 @@ a substituted JSON array.
 **Do not start this before §4's Kubernetes half.** The chart still deploys Kong; changing how
 Kubernetes expresses CORS while the gateway underneath it is still being replaced means two moving
 parts in the layer that has no fallback.
-
----
-
-### 3 · Cold Telemetry Archival & Query-in-Place
-
-**Builds on:** TimescaleDB retention policies · `telemetry` hypertable · Edge Functions · Apache
-Parquet · `public.system_settings` (`0031`, `0032`)
-
-**Written in the conditional throughout, deliberately.** None of the machinery below exists, and
-this entry previously described it in the present tense — which reads, in a section whose whole
-premise is that it lists only what is NOT built, as though the feature had shipped.
-
-**The name is already taken.** `ArchivesTab.jsx` ships today and means *entity* archives — archived
-cells, gateways and devices — which has nothing to do with cold telemetry. Whatever this item's page
-is called, it is not "Archives", and the collision should be settled before the page is built rather
-than by whoever gets there second.
-
-**Its configuration has somewhere to live, and the split is already decided.** The settings plane
-shipped, so the S3 **endpoint**, bucket and tiering threshold are declared here by this item's own
-migration, beside the code that reads them — that is what the closed key set means. The S3
-**credential** is not: every authenticated user can read `system_settings`, so it goes in Supabase
-Vault and is managed through **Supabase Studio**, which already ships that UI on both deployment
-targets. No secrets interface is to be built for it. See
-[`supabase/README.md`](supabase/README.md#runtime-configuration-system_settings), including the note
-that Studio sits on a different trust boundary from an `Administrator` in the dashboard.
-
-Tiering high-volume time-series telemetry out of the operational database into vendor-neutral
-Apache Parquet files on S3-compatible or Azure Blob storage once the hot hypertable retention
-window expires (e.g., >90 days).
-
-**Preserves long-horizon traceability without re-bloating the operational database.** A scheduled
-maintenance task **would** export date-partitioned chunks to compressed `.parquet` files, verify
-storage, record a manifest row in `telemetry_archive_manifest`, and only then drop the raw chunk. A
-catalog view **would** render it and let operators query historical months in place via short-lived
-presigned URLs and DuckDB — rendering historical charts on demand without rehydrating
-gigabytes of raw points back into TimescaleDB.
 
 ---
 

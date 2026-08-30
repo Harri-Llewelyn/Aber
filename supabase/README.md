@@ -780,6 +780,166 @@ its shadow devices exist to receive a replay rather than to report a machine, so
 out of the Capture page's subject tables. Starting a playback is unaffected — that query selects on
 `is_shadow` because that is exactly the lane a playback publishes into.
 
+### Cold telemetry archival (`0068`)
+
+Raw telemetry used to leave one way: `timescaledb/retention.sql` adds a TimescaleDB retention
+policy that **drops** chunks past `TIMESCALE_RETAIN_FOR`, on a timer, recording nothing. Cold
+archival turns that delete into a move.
+
+**The ordering is the whole feature**, and it is enforced in three independent places rather than
+by a careful sequence in one file:
+
+```
+claim → export → upload → VERIFY → record → drop
+```
+
+| Enforced by | What it refuses |
+| :--- | :--- |
+| `telemetry_archive_manifest` CHECK constraints | *recording* a drop that was never verified, or a verification that was never exported |
+| `cold_tier_drop_verified()` | dropping anything the manifest has not cleared — it computes the boundary itself |
+| `--drop` being opt-in | the destructive half happening as a side effect of an export |
+
+**The manifest lives on the historian, not here.** It describes chunks, and the chunks are there; a
+copy in this database could drift from the hypertable it claims to describe with nothing able to
+notice. `0068` maps it over the same `postgres_fdw` bridge that already carries `telemetry` and
+`storage_footprint` — the arrangement `0027` established. One writer there, one reader here,
+through `cold_storage_rows()`.
+
+**`drop_chunks()` is a boundary, not a selection**, and that is the subtlety worth knowing. It
+drops *every* chunk older than the timestamp given, so dropping the verified chunks one at a time
+would delete everything older than each — including chunks never exported.
+`cold_tier_drop_verified()` therefore computes the longest **oldest-first run** of verified chunks
+and drops once, at its end. In practice archival runs oldest-first and the verified set is already
+a prefix; the guard matters on the run where it is not.
+
+**The exporter cannot delete telemetry**, which is not a detail. `roles.sql` revokes `DELETE` and
+`TRUNCATE` on `telemetry` from `ingest_writer` deliberately — *"the two that make append-only
+true"* — and the exporter runs as that role. `cold_tier_drop_verified()` is `SECURITY DEFINER`, so
+the daemon may *ask* for a drop the manifest has already cleared while holding no privilege to
+remove a row of its own choosing.
+
+**Its settings arrive with their reader**, which is `0031`'s rule and the reason there are three
+keys rather than six: `archive.enabled` (off by default), `archive.tier_after_days` and
+`archive.bucket`, all read by `ingestion/cold_archive.py`. There is no S3 endpoint key because this
+implementation writes to the platform's own object storage through the client
+`capture_worker.py` already uses; those keys belong to the migration that teaches it to use an
+external endpoint. **No credential key will ever be added** — every authenticated user can read
+`system_settings`, so secrets go to Vault through Studio.
+
+**Enabling it means standing retention down.** Both mechanisms drop chunks, and the timer wins the
+race for anything the archiver has not reached: set `TIMESCALE_RETAIN_FOR=never` and let
+`python -m cold_archive --drop` remove chunks once their export is verified. `retention.sql` warns
+when it sees a manifest with rows and a drop policy being added, because that combination silently
+deletes what the archiver has not got to yet.
+
+```bash
+python -m cold_archive --dry-run   # what would be exported
+python -m cold_archive             # export, upload, verify; drop nothing
+python -m cold_archive --drop      # ... and drop what verification cleared
+```
+
+**Reading it back** does not rehydrate anything:
+
+```bash
+python -m cold_archive query --from 2026-04-01 --to 2026-05-01 \
+    --asset dev220000000000400080000 --metric SpindleSpeed --limit 50
+python -m cold_archive query --from 2026-04-01 --to 2026-05-01 --csv april.csv
+```
+
+The manifest's `range_start` / `range_end` are what make this cheap: they say which objects **overlap**
+the window, so a question about one March fetches one object rather than the archive. Overlap and
+not containment, deliberately — a chunk spanning a month boundary is relevant to a question about
+either side of it.
+
+**Only verified objects are read**, and anything skipped is named. An `exported` row has an object
+nothing has read back and a `failed` one may be truncated; this answers questions about history,
+where a partial result that looks complete is worse than a refusal. The command also prints the span
+it actually covered, because a range straddling cold and hot storage gets only the cold half from
+here.
+
+**It is not gated on `archive.enabled`.** That setting governs whether telemetry is *exported*, and
+has nothing to say about reading what already was — refusing a traceability question because
+somebody turned future archiving off would be the setting reaching past what it means.
+
+On Compose the objects sit behind storage-api with `STORAGE_BACKEND=file`, so each relevant object
+is fetched whole rather than range-scanned. Pointing storage at real S3 makes DuckDB read only the
+row groups a query touches, with no change to the SQL.
+
+### What Grafana can and cannot see
+
+**Grafana cannot read the Parquet, and is not meant to.** It connects as `grafana_reader` over
+Postgres to `timescaledb:5432` and `supabase-db:5432`. The objects live behind storage-api's HTTP
+API in a bucket whose RLS admits three roles, none of which is a Postgres datasource. There is no
+path between them.
+
+**Archiving therefore removes raw rows from Grafana's reach — and that matters far less than it
+sounds, because the rollups were designed for it:**
+
+| relation | retained | Grafana |
+| :--- | :--- | :--- |
+| `telemetry` (raw) | 90 days, then archived | loses the archived span |
+| `telemetry_1m` | 180 days | unaffected |
+| `telemetry_5m` | 1 year | unaffected |
+| `telemetry_1h` | **5 years** | unaffected |
+
+`aggregates.sql` states the intent: *"THE ROLLUPS OUTLIVE THE RAW DATA, and that is the point of
+setting their retention separately … these keep shape, excursions and state."* An hourly chart of
+last March still works, and still will in 2031. What is lost to Grafana is **per-sample resolution**
+older than the threshold — not the history.
+
+**Bridging Grafana to Parquet was researched and rejected.** The historian image offers only
+`file_fdw` and `postgres_fdw`; there is no `parquet_fdw` or `duckdb_fdw`, and the image is Alpine,
+so adding one means compiling DuckDB's C++ library and the FDW against musl into a custom
+TimescaleDB image, re-done on every version bump. Grafana's Infinity plugin reads CSV and JSON over
+HTTP, not Parquet. That is a large permanent custom artefact to recover a resolution Grafana charts
+do not render — so the boundary is documented instead. For raw archived rows, `cold_archive query`
+has `--csv`.
+
+### Running it, and the switch that used to mean nothing
+
+The `cold-archiver` service runs `cold_archive --drop --loop` on `COLD_ARCHIVE_INTERVAL_SECONDS`
+(default daily), re-reading `archive.enabled` every pass and doing nothing while it is off. It runs
+on every stack and stays inert until the switch is turned on — which is what makes the switch a
+control rather than a note about a command somebody has to remember.
+
+It includes `--drop`, and that is the safer option rather than the bolder one: the baseline it
+replaces is `retention.sql` dropping chunks on a timer with **no export and no record at all**.
+
+### Auditing, and the reconfiguration that breaks an archive
+
+```bash
+python -m cold_archive audit
+```
+
+Walks the manifest and checks every object is still fetchable, exiting non-zero if any is not. It
+distinguishes an object that is merely gone from one that was **the only copy**, and reports how
+many rows that is.
+
+**It checks the other direction too** — objects on storage that no manifest row references. Those are
+bytes nothing can reach through the catalogue and nothing can account for, left by a failed drop, an
+interrupted export, or a manifest restored from a backup older than the storage beside it. They are
+**reported and never deleted**: removing an object is the one irreversible act here, the process runs
+as Operator, and the bucket admits only an Administrator to `DELETE`.
+
+**The failure it exists for is a reconfiguration, not a bug.** `STORAGE_BACKEND` can be pointed from
+`file` at S3 — but switching it **migrates nothing**. The same keys are looked for in the new backend
+and 404 while the manifest still reads `archived` and the raw rows are already gone. Moving to cloud
+storage therefore means copying the objects across **preserving their keys exactly**, because
+`object_key` is what points at them. Note also that the backend is storage-api-wide: 3D models, flow
+backups and captures move with it.
+
+### Restoring
+
+```bash
+python -m cold_archive restore --chunk _hyper_1_40_chunk
+```
+
+Reads the object and inserts the rows back (`ON CONFLICT DO NOTHING`, so an interrupted restore is
+safe to repeat), then clears `dropped_at` — putting the row back in exactly the state it held
+between verification and the drop: data in **both** places, `verified_at` still set. That is not a
+special case, it is the safest state in the flow, so `--drop` will remove the chunk again with no
+further work. The round trip closes rather than being one-way.
+
 ### `deployment`, and the word it is replacing (`0064`)
 
 `is_virtual` carries three incompatible definitions — *"no physical edge appliance behind this

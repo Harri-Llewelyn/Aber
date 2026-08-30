@@ -72,7 +72,7 @@ export const DIGITAL_THREAD_ACTIONS = {
  */
 export const VALID_TABS = [
   'overview', 'cells', 'gateways', 'devices', 'digital-thread', 'schemas', 'vocabulary', 'directory',
-  'capture', 'archives', 'access-control', 'settings'
+  'capture', 'archives', 'cold-storage', 'access-control', 'settings'
 ];
 
 // Realtime rollout flag and the polling intervals paired with it.

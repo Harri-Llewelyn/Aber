@@ -710,6 +710,24 @@ const apiMethods = {
   },
 
   /**
+   * The cold telemetry catalogue — every chunk that has been claimed for archival (`0068`).
+   *
+   * READ FROM THE HISTORIAN, over the FDW, through a SECURITY DEFINER function. The manifest lives
+   * beside the chunks it describes, so this is the only path a browser has to it.
+   *
+   * AN EMPTY LIST IS AMBIGUOUS HERE AND THE PAGE MUST NOT RESOLVE IT SILENTLY. `cold_storage_rows()`
+   * gates on Administrator / Shopfloor_Manager / Auditor in its body rather than at the grant, so an
+   * Operator gets zero rows rather than an error — exactly as every RLS-protected read on this
+   * schema behaves. "Nothing archived" and "not yours to see" therefore look identical from here,
+   * which is why the page says which it is from the session's role rather than guessing.
+   */
+  listColdStorage: async () => {
+    const { data, error } = await supabase.rpc('cold_storage_rows');
+    if (error) throw new Error(error.message || 'Could not read the cold storage catalogue');
+    return data || [];
+  },
+
+  /**
    * Every TOKEN_MINTED row, grouped by the principal it was signed for.
    *
    * NOT "THE LATEST PER PRINCIPAL", which is what a naive inventory would fetch. A re-mint does not

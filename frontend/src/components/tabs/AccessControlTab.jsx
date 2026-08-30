@@ -551,27 +551,19 @@ export function AccessControlTab({ showToast }) {
               here and cannot be". Only careful parsing of "the first" reconciled those, and nobody
               parses a footer carefully.
 
-              DELETING IT OUTRIGHT WOULD REOPEN THE DEFECT IT WAS WRITTEN FOR (#91). On a stack that
-              has never rotated, this list genuinely IS empty for the two most powerful credentials
-              on the box -- `npm run setup` signs them before the database exists, so there is
-              nothing to record into -- and an unlabelled empty list is read as "nothing
-              outstanding". This inventory is the compensating control README.md's Accepted risks
-              section names, and a control whose coverage is unstated is one an operator over-trusts.
+              THE CAVEAT MOVED INTO THE ROW RATHER THAN BEING LOST (#91). What it protected against
+              is real: on a stack that has never rotated, this list is genuinely empty for the two
+              most powerful credentials on the box -- `npm run setup` signs them before the database
+              exists, so there is nothing to record into -- and an unlabelled empty list reads as
+              "nothing outstanding". This inventory is the compensating control README.md's Accepted
+              risks section names, and a control whose coverage is unstated is one an operator
+              over-trusts.
 
-              So it is conditional on the state it describes. It appears when a principal has no
-              token on record, says which command closes that, and disappears once none does --
-              taking the contradiction with it. The "see the coverage note below" text in the
-              TOKENS cell is governed by the same condition, so it can never point at nothing. */}
-          {principals.some(p => tokenStatus(tokens.get(p.principal_id)).state === TOKEN_STATES.NONE) && (
-            <div className="card-footer" style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-              <strong>Why a row can show no token.</strong> This list holds what was{' '}
-              <em>recorded</em> at issue — by <code>scripts/mint-mcp-token.mjs</code>, or by{' '}
-              <code>npm run keys:rotate</code> for the two keys in <code>.env</code>.{' '}
-              <code>npm run setup</code> signs that pair before this database exists, so the first
-              of each is live but unrecorded; rotating once brings them in.{' '}
-              <code>npm run keys:check</code> reports what <code>.env</code> holds either way.
-            </div>
-          )}
+              But the TOKENS cell already says it, per row and per principal, on the badge that
+              shows the state: "No token recorded ... That is not the same as none existing". That
+              is where somebody reading a specific row looks, and it is now self-contained rather
+              than pointing at a paragraph below. A footer restating it was a second copy of a
+              caveat the row carries, on a page this dense. */}
         </div>
 
         <div className="card" style={{ marginTop: '12px' }}>

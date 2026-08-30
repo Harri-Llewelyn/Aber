@@ -287,11 +287,24 @@ describe('AccessControlTab', () => {
     render(<AccessControlTab showToast={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
-    // THE REASON AND THE WAY OUT. A note saying only "some keys are not listed" invites somebody to
-    // close the gap by hand; this one says why the first pair cannot be recorded and which command
-    // brings them in.
-    expect(screen.getByText(/Why a row can show no token/i)).toBeTruthy()
-    expect(screen.getByText(/before this database exists/i)).toBeTruthy()
+    // ON THE ROW, NOT IN A FOOTER. The caveat used to be a paragraph under the table and the cell
+    // pointed at it; it is now carried by the badge itself, per principal, where somebody reading a
+    // specific row actually looks. What matters is that the page still says an empty cell is a
+    // statement about the RECORD rather than about the credential -- #91's whole point.
+    expect(screen.getByText('No token on record').getAttribute('title'))
+      .toMatch(/not the same as none existing/i)
+    expect(screen.getByText('No token on record').getAttribute('title'))
+      .toMatch(/before this database exists/i)
+  })
+
+  it('carries no second copy of that caveat under the table', async () => {
+    // The footer was removed deliberately: a page this dense should not state the same thing twice,
+    // and the row is where it belongs. Pinned so it does not creep back alongside the tooltip.
+    api.listGatewayCredentials.mockResolvedValue([])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText(/MCP read-only client/i)).toBeTruthy())
+    expect(screen.queryByText(/Why a row can show no token/i)).toBeNull()
   })
 
   /**

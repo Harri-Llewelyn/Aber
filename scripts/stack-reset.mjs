@@ -68,6 +68,13 @@ Destroys and rebuilds the local Docker Compose stack:
   --yes             required; there is no interactive prompt
   --skip-gateways   stop after the stack is healthy
   --timeout=N       seconds to wait for readiness (default 600)
+
+  --discard-cold-archive
+                    proceed even though telemetry exists ONLY on cold storage.
+                    Those chunks were dropped from the hypertable because their
+                    Parquet objects were verified; this destroys the objects and
+                    the manifest together. Separate from --yes on purpose: it is
+                    the one loss here that nothing can re-derive.
 `;
 
 // --- arguments ------------------------------------------------------------------------------
@@ -78,6 +85,9 @@ let timeoutSeconds = Number(process.env.STACK_RESET_TIMEOUT || 600);
 for (const arg of process.argv.slice(2)) {
   if (arg === '--yes') confirmed = true;
   else if (arg === '--skip-gateways') skipGateways = true;
+  // Read directly where it is used rather than into a variable here: it is a confirmation for one
+  // guard, not a mode the rest of the script branches on.
+  else if (arg === '--discard-cold-archive') { /* see the cold archive guard below */ }
   else if (arg.startsWith('--timeout=')) timeoutSeconds = Number(arg.slice('--timeout='.length));
   else if (arg === '-h' || arg === '--help') { process.stdout.write(USAGE); process.exit(0); }
   else { console.error(`Unknown argument '${arg}'. See --help.`); process.exit(2); }
@@ -169,6 +179,9 @@ const psql = (container, sql) =>
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+const TIMESCALE = 'acs-cymru_timescaledb';
+const SUPABASE = 'acs-cymru_supabase_db';
+
 // --- 0. docker answers ------------------------------------------------------------------------
 // BEFORE THE TEARDOWN, WHICH IS THE WHOLE POINT OF #106. The shell version discovered that docker
 // was unreachable at the moment it was already destroying volumes. Checking first costs one command
@@ -182,6 +195,56 @@ if (capture('docker', ['version', '--format', '{{.Server.Version}}']) === null) 
   console.error('  * Is Docker Desktop running?');
   console.error('  * On Windows, is `docker` on PATH for this shell? (`docker version`)');
   process.exit(1);
+}
+
+// --- 0b. cold-archived telemetry is the one thing a reset cannot re-derive -------------------
+//
+// EVERY OTHER VOLUME THIS DESTROYS HOLDS SOMETHING THAT CAN COME BACK. Telemetry is re-published by
+// the simulator, the audit trail is re-seeded, gateway credentials are re-provisioned, 3D models
+// can be re-uploaded and captures re-recorded. That is what makes `down -v` a reasonable thing to
+// offer at all.
+//
+// Cold-archived telemetry is different in kind, and it is the difference `storage-init.mjs` already
+// writes on the bucket: "an object here is the ONLY remaining copy". Those chunks were dropped from
+// the hypertable BECAUSE the object was verified. `down -v` takes `storage_data` (the objects) and
+// the historian volume (the manifest that says where they went), so a reset destroys the data and
+// the record of it in one step, leaving nothing to notice afterwards.
+//
+// ON COMPOSE THE OBJECTS ARE ON THIS HOST, which is what makes this reachable at all: STORAGE_BACKEND
+// is `file` over a Docker volume, not a remote bucket. A stack pointed at real S3 would keep its
+// archive through a reset -- the manifest would still go, which is its own problem, and one this
+// warning names rather than hides.
+if (!process.argv.includes('--discard-cold-archive')) {
+  const archived = psql(
+    TIMESCALE,
+    "SELECT count(*) FROM public.telemetry_archive_manifest WHERE dropped_at IS NOT NULL"
+  );
+
+  if (archived === null) {
+    // NOT SILENT. The check needs the historian running, and a stopped stack still has the volumes
+    // -- so "could not ask" is a different answer from "nothing archived" and must not read like it.
+    console.log('');
+    console.log('NOTE: could not read the cold archive manifest (is the historian running?).');
+    console.log('      If this stack has archived telemetry to cold storage, `down -v` will destroy');
+    console.log('      both the objects and the manifest. Start the stack and re-run to be told.');
+  } else if (Number(archived) > 0) {
+    console.error('');
+    console.error(`REFUSING: ${archived} telemetry chunk(s) exist ONLY on cold storage.`);
+    console.error('');
+    console.error('Those chunks were dropped from the hypertable because their Parquet objects were');
+    console.error('verified. `docker compose down -v` destroys the storage volume holding those');
+    console.error('objects AND the historian volume holding the manifest that says where they went,');
+    console.error('so this would delete the data and the record of it together.');
+    console.error('');
+    console.error('Nothing has been changed. To see what would go:');
+    console.error('  docker exec acs-cymru_supabase_db psql -U postgres -d postgres \\');
+    console.error('    -c "SELECT chunk_name, range_start, range_end, row_count, object_key');
+    console.error('        FROM cold_storage_rows() WHERE on_cold_storage"');
+    console.error('');
+    console.error('Copy the objects out first (scripts/backup-databases.sh takes STORAGE_HOST_PATH),');
+    console.error('or re-run with --discard-cold-archive if that history is genuinely not wanted.');
+    process.exit(1);
+  }
 }
 
 // --- 1. down ------------------------------------------------------------------------------------
@@ -236,9 +299,6 @@ async function waitFor(description, predicate) {
     await sleep(3000);
   }
 }
-
-const TIMESCALE = 'acs-cymru_timescaledb';
-const SUPABASE = 'acs-cymru_supabase_db';
 
 step('Waiting for the databases');
 

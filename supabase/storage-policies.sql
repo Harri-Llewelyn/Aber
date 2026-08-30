@@ -569,3 +569,121 @@ BEGIN
     'confined to the object of its running job, and never deleting).';
 END $$;
 
+
+
+-- ---------------------------------------------------------------------------------------------
+-- telemetry-archive -- cold telemetry chunks as Parquet (roadmap item 3)
+-- ---------------------------------------------------------------------------------------------
+-- THE ONE BUCKET WHOSE OBJECTS ARE NOT COPIES OF ANYTHING. A flow backup describes an appliance
+-- that still exists; a capture records traffic the plant produced and still holds. An object here
+-- is the ONLY remaining copy of a span of telemetry -- the raw chunk was dropped precisely because
+-- this object was verified (timescaledb/cold_archive.sql).
+--
+-- That asymmetry decides every policy below:
+--
+--   * NO BROWSER ROLE WRITES HERE AT ALL, which is narrower than the capture bucket beside it.
+--     There is no operator action that should produce one of these: objects are written by the
+--     exporter and by nothing else, so admitting Administrator to INSERT would be admitting a
+--     path that exists only to be misused.
+--   * READ is the same privileged set as captures. This is plant operating history; the roles that
+--     can already see the whole fleet can read what it did.
+--   * DELETE is Administrator-only and is genuinely destructive -- it is the one operation in this
+--     file that loses data nothing else holds. It exists because cold storage needs a way to end
+--     eventually; it is not offered to anyone else for exactly that reason.
+DROP POLICY IF EXISTS "telemetry_archive_read_privileged" ON storage.objects;
+CREATE POLICY "telemetry_archive_read_privileged" ON storage.objects
+  FOR SELECT TO authenticated
+  USING (
+    bucket_id = 'telemetry-archive'
+    AND (
+      public.has_role(ARRAY['Administrator', 'Shopfloor_Manager', 'Auditor'])
+      -- THE DAEMON READS ITS OWN WRITES, and that is not a convenience: verification is a read-back
+      -- of the object it just uploaded, and `verified_at` is what the historian's CHECK constraint
+      -- requires before a chunk may be recorded as dropped. Without this arm the export completes,
+      -- verification fails with 42501, and nothing is ever archived -- which fails safe, but
+      -- silently, which is 0051's defect again.
+      OR public.is_ingestion_caller()
+    )
+  );
+
+DROP POLICY IF EXISTS "telemetry_archive_insert_daemon" ON storage.objects;
+CREATE POLICY "telemetry_archive_insert_daemon" ON storage.objects
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    bucket_id = 'telemetry-archive'
+    AND public.is_ingestion_caller()
+  );
+
+-- UPDATE covers `upsert: true` on a retry. A previous attempt that uploaded and then failed
+-- verification leaves an object that must be replaceable -- refusing that would strand the chunk
+-- forever, since the manifest row already exists and the candidate list excludes it.
+DROP POLICY IF EXISTS "telemetry_archive_update_daemon" ON storage.objects;
+CREATE POLICY "telemetry_archive_update_daemon" ON storage.objects
+  FOR UPDATE TO authenticated
+  USING (
+    bucket_id = 'telemetry-archive'
+    AND public.is_ingestion_caller()
+  )
+  WITH CHECK (
+    bucket_id = 'telemetry-archive'
+    AND public.is_ingestion_caller()
+  );
+
+DROP POLICY IF EXISTS "telemetry_archive_delete_admin" ON storage.objects;
+CREATE POLICY "telemetry_archive_delete_admin" ON storage.objects
+  FOR DELETE TO authenticated
+  USING (
+    bucket_id = 'telemetry-archive'
+    AND public.has_role(ARRAY['Administrator'])
+  );
+
+
+-- ---------------------------------------------------------------------------------------------
+-- Reconcile: telemetry-archive
+-- ---------------------------------------------------------------------------------------------
+DO $$
+DECLARE
+  v_policies      integer;
+  v_daemon_delete integer;
+  v_human_writes  integer;
+BEGIN
+  SELECT count(*) INTO v_policies FROM pg_policies
+   WHERE schemaname = 'storage' AND tablename = 'objects'
+     AND policyname LIKE 'telemetry_archive_%';
+  IF v_policies <> 4 THEN
+    RAISE EXCEPTION
+      'telemetry-archive has % policy/policies, expected 4 (select, insert, update, delete). A '
+      'missing one does not error -- storage.objects is RLS-enabled, so the operation simply stops '
+      'working, and here that means archival stalls with chunks left in the hypertable.', v_policies;
+  END IF;
+
+  -- THE DAEMON MUST NOT BE ABLE TO DELETE. It is the process that decides a chunk is safe to drop;
+  -- letting it also destroy the object that made it safe would put both halves of an irreversible
+  -- act behind one credential.
+  SELECT count(*) INTO v_daemon_delete FROM pg_policies
+   WHERE schemaname = 'storage' AND tablename = 'objects'
+     AND policyname LIKE 'telemetry_archive_%' AND cmd = 'DELETE'
+     AND coalesce(qual, '') LIKE '%is_ingestion_caller%';
+  IF v_daemon_delete > 0 THEN
+    RAISE EXCEPTION
+      'telemetry-archive: the ingestion daemon can DELETE. It is the process that drops the raw '
+      'chunk once this object is verified -- it must not also be able to remove the only copy.';
+  END IF;
+
+  -- AND NO HUMAN ROLE MAY WRITE ONE. An object here is only ever produced by an export whose row
+  -- count the manifest records; one uploaded by hand would be a file the catalogue describes and
+  -- nothing verified.
+  SELECT count(*) INTO v_human_writes FROM pg_policies
+   WHERE schemaname = 'storage' AND tablename = 'objects'
+     AND policyname LIKE 'telemetry_archive_%' AND cmd IN ('INSERT', 'UPDATE')
+     AND coalesce(with_check, '') LIKE '%has_role%';
+  IF v_human_writes > 0 THEN
+    RAISE EXCEPTION
+      'telemetry-archive: a write policy admits a browser role. Objects here are written by the '
+      'exporter alone; a hand-uploaded file would be catalogued as verified history it is not.';
+  END IF;
+
+  RAISE NOTICE
+    'telemetry-archive policies reconciled (4 policies; the exporter writes and never deletes, no '
+    'browser role writes, Administrator alone may delete the only copy).';
+END $$;

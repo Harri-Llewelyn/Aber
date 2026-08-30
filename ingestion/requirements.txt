@@ -17,3 +17,35 @@ psycopg2-binary==2.9.10
 # that, on every pull request.
 protobuf==5.29.6
 supabase
+# Parquet, for cold telemetry archival (roadmap item 3, ingestion/cold_archive.py).
+#
+# THE FORMAT IS THE POINT, not the library. Item 3 asks for "vendor-neutral Apache Parquet"
+# precisely so a decade of plant history is not readable only by the stack that wrote it -- DuckDB,
+# Spark, pandas and Power BI all open these files with no ACS-Cymru component involved. pyarrow is
+# the reference implementation and the one DuckDB interoperates with most predictably.
+#
+# It is a large wheel (~40 MB) and it is imported LAZILY, inside the two functions that write and
+# read Parquet, so the ingestion daemon's own start-up path never pays for it.
+pyarrow==18.1.0
+
+# Reading the cold archive back (roadmap item 3, `cold_archive query`).
+#
+# WHY NOT JUST pyarrow, WHICH IS ALREADY HERE. pyarrow reads a Parquet file; DuckDB queries a SET of
+# them with SQL -- joins, aggregates, predicate pushdown and Hive partition awareness -- which is
+# what "query in place" means as opposed to "load and filter in Python". The archive's layout was
+# chosen for it: `year=YYYY/month=MM/` are columns to DuckDB, not directory names.
+#
+# It also keeps the archive honest about being VENDOR-NEUTRAL. The same query an operator runs here
+# runs unchanged in the DuckDB CLI, in pandas, or in Power BI, against the same objects, with no
+# ACS-Cymru component involved. That is the property Parquet was chosen for and this is what
+# exercises it.
+duckdb==1.1.3
+# DuckDB needs this to hand TIMESTAMP WITH TIME ZONE values back to Python, and fails at fetch time
+# without it -- "Required module 'pytz' failed to import" -- AFTER the query has already run. It is
+# not listed as a hard dependency of duckdb because only the timezone-aware paths need it, and every
+# row of `telemetry.time` is one.
+#
+# The alternative was casting `time` to text in the query, which would have removed a dependency by
+# making the CSV output stringly-typed for every future consumer. Two hundred kilobytes is the
+# cheaper side of that trade.
+pytz==2024.2

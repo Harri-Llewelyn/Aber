@@ -24,6 +24,17 @@ python ingestion/test_telemetry_batching.py
 python ingestion/test_capture_playback.py
 # The daemon-side recording engine -- subject matching, the caps, and the manifest
 python ingestion/test_capture_worker.py
+# Cold telemetry archival -- the object LAYOUT and the Parquet round trip. Needs pytest and pyarrow.
+#
+# Deliberately narrow: the export path needs a historian, object storage and a chunk to mean
+# anything, and the safety properties are asserted in SQL where they live -- cold_archive.sql's own
+# self-check runs on every boot and proves that dropped requires verified, verified requires
+# exported, and that a correctly ordered row is still accepted.
+#
+# What is left for a unit test is the part that is a DECISION rather than a mechanism: the
+# `year=YYYY/month=MM/` key is baked into every object the moment one is written, and changing it
+# later means rewriting the archive or teaching every reader two schemes.
+python -m pytest ingestion/test_cold_archive.py
 python i3x/test_i3x_service.py
 python supabase/functions/approve-quarantine/test_approve_quarantine.py
 python supabase/functions/deploy-nodered/test_deploy_nodered.py

@@ -41,6 +41,7 @@ import {
   IconClipboardList,
   IconFileCode,
   IconArchive,
+  IconDatabase,
   IconRecord,
   IconSettings,
   IconLock,
@@ -74,6 +75,7 @@ const VocabularyTab    = lazy(() => import('./components/tabs/VocabularyTab').th
 const DirectoryTab     = lazy(() => import('./components/tabs/DirectoryTab').then(m => ({ default: m.DirectoryTab })))
 const ArchivesTab      = lazy(() => import('./components/tabs/ArchivesTab').then(m => ({ default: m.ArchivesTab })))
 const CaptureTab       = lazy(() => import('./components/tabs/CaptureTab').then(m => ({ default: m.CaptureTab })))
+const ColdStorageTab   = lazy(() => import('./components/tabs/ColdStorageTab').then(m => ({ default: m.ColdStorageTab })))
 const SettingsTab      = lazy(() => import('./components/tabs/SettingsTab').then(m => ({ default: m.SettingsTab })))
 const AccessControlTab = lazy(() => import('./components/tabs/AccessControlTab').then(m => ({ default: m.AccessControlTab })))
 
@@ -95,6 +97,15 @@ export const TABS = [
   // returns no rows rather than an error.
   { id: 'capture',        label: 'Capture',           icon: <IconRecord size={15} />, role: ['Administrator', 'Shopfloor_Manager', 'Auditor'] },
   { id: 'archives',       label: 'Archives',          icon: <IconArchive size={15} />, permission: PERMISSION_UUIDS.ARCHIVE_MANAGE },
+  // NOT "Archives", WHICH IS THE TAB DIRECTLY ABOVE. That one means ENTITY archives -- archived
+  // cells, gateways and devices, with a Restore button and an auto-purge timer. This is telemetry
+  // tiered to Parquet on object storage, with no restore and no timer. Roadmap item 3 asked for the
+  // collision to be settled before the page was built rather than by whoever got there second.
+  //
+  // THE SAME THREE ROLES `cold_storage_rows()` RETURNS ROWS TO, and the function checks them in its
+  // own body rather than relying on this: the catalogue names object keys, and the bucket policy
+  // admits exactly these three to read what those keys point at.
+  { id: 'cold-storage',   label: 'Cold Storage',      icon: <IconDatabase size={15} />, role: ['Administrator', 'Shopfloor_Manager', 'Auditor'] },
   // GATED ON THE ROLE, NOT ON A PERMISSION, because the DATABASE gates on the role: 0031's UPDATE
   // policy is `has_role(ARRAY['Administrator'])`. Inventing a SETTINGS_MANAGE permission for the
   // UI would mean two different predicates deciding the same question, and the day they disagree
@@ -712,6 +723,12 @@ function Dashboard({ session, onSignOut }) {
           {tab === 'capture' && ['Administrator', 'Shopfloor_Manager', 'Auditor'].includes(userRole) &&
             <CaptureTab showToast={showToast} userRole={userRole} onSelectSchema={showSchema} />}
           {tab === 'archives'       && <ArchivesTab showToast={showToast} hasPermission={hasPermission} />}
+          {/* Re-checked here as the others are: routing can put `tab` on a value the nav never
+              offered. `userRole` is passed on rather than a boolean because the page uses it to
+              tell "nothing archived" apart from "not yours to see" -- cold_storage_rows() gates in
+              its body, so both look like an empty list from the browser. */}
+          {tab === 'cold-storage' && ['Administrator', 'Shopfloor_Manager', 'Auditor'].includes(userRole) &&
+            <ColdStorageTab showToast={showToast} userRole={userRole} />}
           {/* The role is re-checked here, not only in the nav: routing can put `tab` on a value
               the nav never offered. Still a courtesy -- RLS is what refuses the write. */}
           {tab === 'access-control' && userRole === 'Administrator' && <AccessControlTab showToast={showToast} />}
