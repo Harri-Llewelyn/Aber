@@ -999,7 +999,11 @@ function edgeFunctionNames() {
     // 9 is NOT here. The AAS item was retired long before this practice and the list was
     // renumbered around it at the time, so 9 is a live entry today -- it was reused legitimately,
     // under the old convention, and listing it would fail the check against a correct README.
-    const RETIRED = [6, 7, 11, 13, 15, 16, 17, 18];
+    // 3 joined them when cold telemetry archival shipped. Its remaining clause -- rendering
+    // archived ranges in a dashboard -- was declined rather than deferred, and the reasoning is in
+    // supabase/README.md; an item with nothing outstanding does not belong in a list of what is not
+    // built, however much of it was reasoned about.
+    const RETIRED = [3, 6, 7, 11, 13, 15, 16, 17, 18];
     const reused = items.filter((n) => RETIRED.includes(n));
     if (reused.length) {
       fail(

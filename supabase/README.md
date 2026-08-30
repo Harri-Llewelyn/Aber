@@ -865,6 +865,75 @@ On Compose the objects sit behind storage-api with `STORAGE_BACKEND=file`, so ea
 is fetched whole rather than range-scanned. Pointing storage at real S3 makes DuckDB read only the
 row groups a query touches, with no change to the SQL.
 
+### What Grafana can and cannot see
+
+**Grafana cannot read the Parquet, and is not meant to.** It connects as `grafana_reader` over
+Postgres to `timescaledb:5432` and `supabase-db:5432`. The objects live behind storage-api's HTTP
+API in a bucket whose RLS admits three roles, none of which is a Postgres datasource. There is no
+path between them.
+
+**Archiving therefore removes raw rows from Grafana's reach — and that matters far less than it
+sounds, because the rollups were designed for it:**
+
+| relation | retained | Grafana |
+| :--- | :--- | :--- |
+| `telemetry` (raw) | 90 days, then archived | loses the archived span |
+| `telemetry_1m` | 180 days | unaffected |
+| `telemetry_5m` | 1 year | unaffected |
+| `telemetry_1h` | **5 years** | unaffected |
+
+`aggregates.sql` states the intent: *"THE ROLLUPS OUTLIVE THE RAW DATA, and that is the point of
+setting their retention separately … these keep shape, excursions and state."* An hourly chart of
+last March still works, and still will in 2031. What is lost to Grafana is **per-sample resolution**
+older than the threshold — not the history.
+
+**Bridging Grafana to Parquet was researched and rejected.** The historian image offers only
+`file_fdw` and `postgres_fdw`; there is no `parquet_fdw` or `duckdb_fdw`, and the image is Alpine,
+so adding one means compiling DuckDB's C++ library and the FDW against musl into a custom
+TimescaleDB image, re-done on every version bump. Grafana's Infinity plugin reads CSV and JSON over
+HTTP, not Parquet. That is a large permanent custom artefact to recover a resolution Grafana charts
+do not render — so the boundary is documented instead. For raw archived rows, `cold_archive query`
+has `--csv`.
+
+### Running it, and the switch that used to mean nothing
+
+The `cold-archiver` service runs `cold_archive --drop --loop` on `COLD_ARCHIVE_INTERVAL_SECONDS`
+(default daily), re-reading `archive.enabled` every pass and doing nothing while it is off. It runs
+on every stack and stays inert until the switch is turned on — which is what makes the switch a
+control rather than a note about a command somebody has to remember.
+
+It includes `--drop`, and that is the safer option rather than the bolder one: the baseline it
+replaces is `retention.sql` dropping chunks on a timer with **no export and no record at all**.
+
+### Auditing, and the reconfiguration that breaks an archive
+
+```bash
+python -m cold_archive audit
+```
+
+Walks the manifest and checks every object is still fetchable, exiting non-zero if any is not. It
+distinguishes an object that is merely gone from one that was **the only copy**, and reports how
+many rows that is.
+
+**The failure it exists for is a reconfiguration, not a bug.** `STORAGE_BACKEND` can be pointed from
+`file` at S3 — but switching it **migrates nothing**. The same keys are looked for in the new backend
+and 404 while the manifest still reads `archived` and the raw rows are already gone. Moving to cloud
+storage therefore means copying the objects across **preserving their keys exactly**, because
+`object_key` is what points at them. Note also that the backend is storage-api-wide: 3D models, flow
+backups and captures move with it.
+
+### Restoring
+
+```bash
+python -m cold_archive restore --chunk _hyper_1_40_chunk
+```
+
+Reads the object and inserts the rows back (`ON CONFLICT DO NOTHING`, so an interrupted restore is
+safe to repeat), then clears `dropped_at` — putting the row back in exactly the state it held
+between verification and the drop: data in **both** places, `verified_at` still set. That is not a
+special case, it is the safest state in the flow, so `--drop` will remove the chunk again with no
+further work. The round trip closes rather than being one-way.
+
 ### `deployment`, and the word it is replacing (`0064`)
 
 `is_virtual` carries three incompatible definitions — *"no physical edge appliance behind this

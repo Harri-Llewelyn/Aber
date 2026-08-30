@@ -1513,6 +1513,67 @@ services:
       supabase-envoy:
         condition: service_healthy
 
+  # Cold telemetry archival (roadmap item 3): exports chunks past the retention threshold to
+  # Parquet on object storage, verifies each one, and only then drops the raw rows.
+  #
+  # THE SAME IMAGE AS `ingestion`, UNDER A DIFFERENT COMMAND, for the reason `playback` below
+  # records at length: what this needs that is new is a separate PROCESS, not a separate image. It
+  # uses the historian connection, the storage identity and the settings reader already in there.
+  #
+  # WHY A SERVICE AT ALL, WHEN THE EXPORTER IS A CLI. `archive.enabled` is a switch on the Settings
+  # page, and until this existed it armed a mechanism nothing ran: an operator turned it on, opened
+  # the Cold Storage page, and saw nothing -- because the only way to export was to remember a
+  # command. A switch that does nothing is worse than no switch, and the roadmap asked for "a
+  # scheduled maintenance task" from the start.
+  #
+  # IT RE-READS THE SETTING EVERY PASS AND IS INERT WHILE IT IS OFF, so this runs on every stack and
+  # does nothing until somebody asks for it. No compose profile and no second file: the database
+  # decides, which is how every other setting here works.
+  #
+  # `--drop` IS INCLUDED, AND THAT IS THE SAFER OPTION RATHER THAN THE BOLDER ONE. The baseline it
+  # replaces is `retention.sql`, which drops chunks on a timer with no export and no record at all.
+  # Exporting, reading the object back, checking its row count and only then dropping is strictly
+  # safer than what happens on a stack without this -- and the CHECK constraints in
+  # cold_archive.sql make the ordering unskippable. Leaving it out would keep every archived chunk
+  # in the hypertable forever, which is the one outcome that helps nobody: the operational database
+  # never shrinks and the objects pile up beside it.
+  #
+  # SET TIMESCALE_RETAIN_FOR=never WHEN YOU ENABLE THIS. Both mechanisms drop chunks and the timer
+  # wins the race for anything the archiver has not reached; retention.sql warns when it sees a
+  # manifest with rows.
+  cold-archiver:
+    container_name: acs-cymru_cold_archiver
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    command: ["python", "-m", "cold_archive", "--drop", "--loop", "${COLD_ARCHIVE_INTERVAL_SECONDS:-86400}"]
+    environment:
+      DB_HOST: ${DB_HOST:-timescaledb}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-postgres}
+      # The same narrow historian role the daemon uses. It may INSERT telemetry and write the
+      # manifest, and it holds neither DELETE nor TRUNCATE -- dropping an archived chunk is reached
+      # only through cold_tier_drop_verified(), which is SECURITY DEFINER for exactly that reason.
+      DB_USER: ${INGEST_DB_USER:-ingest_writer}
+      DB_PASSWORD: ${INGEST_DB_PASSWORD:-${INGEST_WRITER_PASSWORD:?INGEST_WRITER_PASSWORD is required -- the cold archiver connects to the historian as ingest_writer. Run `npm run setup`, or set it in .env.}}
+      SUPABASE_URL: http://supabase-kong:8000
+      # Both, for the reason the ingestion service gives: the anon key is the apikey the gateway
+      # checks, and the ingestion key is the Authorization bearer the storage bucket admits.
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_INGESTION_KEY: ${SUPABASE_INGESTION_KEY}
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      supabase-db-init:
+        condition: service_completed_successfully
+      # It reads settings and writes objects through the gateway, so both have to be up. Ordering
+      # only: a pass that cannot reach either logs the reason and tries again next interval, which
+      # is the right behaviour long after boot when no depends_on helps.
+      supabase-envoy:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+
   # Broker playback (roadmap item 17 §5): publishes a stored capture back into the stack.
   #
   # THE SAME IMAGE AS `ingestion`, UNDER A DIFFERENT COMMAND, AND THAT IS NOT A SHORTCUT. What

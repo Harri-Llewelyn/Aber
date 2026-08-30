@@ -416,6 +416,7 @@ live services went unlisted: the tag it named (`alpine:3.24`) still existed, so 
 | `frontend` | `acs-cymru_frontend` | `./frontend/Dockerfile` | `3000:3000` |
 | `ingestion` | `acs-cymru_ingestion` | `./Dockerfile` | `9108:9108` |
 | `playback` | `acs-cymru_playback` | `./Dockerfile` (same image as `ingestion`, different command) | — |
+| `cold-archiver` | `acs-cymru_cold_archiver` | `./Dockerfile` (same image as `ingestion`, different command) | — |
 | `i3x-service` | `acs-cymru_i3x` | `./i3x/Dockerfile` | `8090:8090` |
 | `gateway-credential` | `acs-cymru_gateway_credential` | `./gateway-credential/Dockerfile` | — |
 | `node-red-init` | `acs-cymru_node_red_init` | `./node-red/Dockerfile` | — |
@@ -702,7 +703,7 @@ Kubernetes — which is what makes it the real drift control between them.
 
 ## Roadmap & Future Extensions
 
-Fourteen extensions, none of them speculative: every one names the code it would build on, because
+Thirteen extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
@@ -721,10 +722,14 @@ orchestration now sits beside the CLI it wraps, under
 [The Playback gateway, and its shadow devices](ingestion/README.md#the-playback-gateway-and-its-shadow-devices);
 item 15 under
 [`deployment`, and the word it is replacing](supabase/README.md#deployment-and-the-word-it-is-replacing-0064);
-item 18 under [Historian roles](#historian-roles); and item 9's subject was retired the same way
-when `aas-api` shipped.
+item 18 under [Historian roles](#historian-roles); item 3 under
+[Cold telemetry archival](supabase/README.md#cold-telemetry-archival-0068), including
+[what Grafana can and cannot see](supabase/README.md#what-grafana-can-and-cannot-see) — the one part
+of that item deliberately **not** built, because rendering archived ranges in a dashboard would
+recover a resolution nothing charts while adding a container, a gateway route and an auth surface
+over raw plant history; and item 9's subject was retired the same way when `aas-api` shipped.
 
-**Retired numbers are not reused, and the list is therefore not contiguous.** The gaps at 6, 7, 11,
+**Retired numbers are not reused, and the list is therefore not contiguous.** The gaps at 3, 6, 7, 11,
 13, 15, 16, 17 and 18 are deliberate. Renumbering on retirement was the earlier practice and it does not survive
 contact with this repository: the remaining entries are named by **dozens of comments** in migrations,
 scripts and components, all explaining why that code is the way it is, and shifting every number
@@ -852,51 +857,6 @@ a substituted JSON array.
 **Do not start this before §4's Kubernetes half.** The chart still deploys Kong; changing how
 Kubernetes expresses CORS while the gateway underneath it is still being replaced means two moving
 parts in the layer that has no fallback.
-
----
-
-### 3 · Cold Telemetry: query-in-place, and the page
-
-**Builds on:** `timescaledb/cold_archive.sql` · `0068` · [`ingestion/cold_archive.py`](ingestion/cold_archive.py) ·
-Apache Parquet · `public.system_settings` (`0031`, `0032`)
-
-**The archival half shipped and this entry is what remains of it.** Telemetry is exported to
-Parquet, verified and only then dropped; the manifest, the settings and the catalogue all exist.
-The substance is documented under
-[Cold telemetry archival](supabase/README.md#cold-telemetry-archival-0068).
-
-**Reading it back shipped too, as a CLI.** `python -m cold_archive query --from … --to …` reads the
-manifest to find which objects overlap the range, fetches only those, and answers with DuckDB over
-the Parquet — no rehydration into TimescaleDB. The Hive layout (`year=YYYY/month=MM/`) exists for
-it. That is the same shape broker capture shipped in: a CLI first, because the archetypal
-cold-storage question is a traceability query asked once, months later, by a person at a terminal.
-
-**What remains is the LIVE half: historical ranges rendered in the dashboard.** That needs somewhere
-for DuckDB to run that a browser can reach, and the gateway routes to five clusters — auth, storage,
-rest, realtime, functions — none of which is a Python service. So it is a new container, an Envoy
-cluster and route, JWT verification so the existing role gates still apply, and the Helm equivalent.
-The auth surface is the part that must not be got wrong: it would expose raw plant history.
-
-**Server-side was chosen over DuckDB-Wasm in the browser**, and that decision removed a component
-rather than adding one — presigned URLs exist to let a credential-less client fetch an object, and a
-process that already holds the ingestion identity needs none. It also keeps the trust boundary where
-the rest of the platform puts it.
-
-**The page shipped and is called Cold Storage.** Not "Archives" — `ArchivesTab.jsx` means *entity*
-archives, and its "archive" carries a **Restore** button and an auto-purge timer, so putting chunk
-tiering beside it would put a Restore control next to rows it cannot restore. It reads
-`cold_storage_rows()` and is read-only: export and drop stay on the CLI, for the reason §13 keeps
-minting off the Access Control page.
-
-**An external S3 endpoint is the other open option.** The exporter writes to the platform's own
-object storage through the client `capture_worker.py` uses, which is why `0068` declares three
-settings and not six: `archive.s3_endpoint` and its region belong to the migration that teaches the
-exporter to use one, beside the code that reads them, rather than sitting on the Settings page
-changing nothing. The **credential** never joins them — every authenticated user can read
-`system_settings`, so it goes in Supabase Vault through **Supabase Studio**, which ships that UI on
-both targets. No secrets interface is to be built for it. See
-[`supabase/README.md`](supabase/README.md#runtime-configuration-system_settings), including the note
-that Studio sits on a different trust boundary from an `Administrator` in the dashboard.
 
 ---
 

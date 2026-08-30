@@ -55,6 +55,7 @@ import csv
 import io
 import os
 import sys
+import time
 from datetime import datetime, timezone
 
 import psycopg2
@@ -336,15 +337,28 @@ def drop_verified(conn):
     It stamps the manifest and drops the chunks in ONE transaction, so the state this file cannot
     produce is rows gone with no record of where they went.
     """
+    # ASKED FIRST, SO THE "NOTHING HAPPENED" MESSAGE IS THE RIGHT ONE. Both cases return no rows
+    # from cold_tier_drop_verified() and they mean opposite things: nothing is waiting, versus
+    # something is waiting and is blocked behind an unarchived chunk. Reporting the second when the
+    # manifest is simply empty describes a problem that is not happening -- which on a service that
+    # logs this every pass is how a real blockage later gets read as normal.
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM public.cold_tier_droppable()")
+        waiting = cur.fetchone()[0]
+
+    if not waiting:
+        log("no verified chunks are awaiting a drop")
+        return 0
+
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("SELECT * FROM public.cold_tier_drop_verified()")
         dropped = cur.fetchall()
     conn.commit()
 
     if not dropped:
-        log("nothing was dropped: no verified chunk is the oldest surviving one.")
-        log("drop_chunks works on a time boundary, so a verified chunk sitting behind an")
-        log("unarchived older one cannot be removed without taking that one too.")
+        log(f"{waiting} chunk(s) are verified but none was dropped: the oldest surviving chunk is")
+        log("not among them. drop_chunks works on a time boundary, so a verified chunk sitting")
+        log("behind an unarchived older one cannot be removed without taking that one too.")
         return 0
 
     for row in dropped:
@@ -526,12 +540,155 @@ def query_archive(conn, storage, bucket, start, end, asset=None, metric=None, li
     return 0
 
 
+# -------------------------------------------------------------------------------------------------
+# Audit
+# -------------------------------------------------------------------------------------------------
+def audit(conn, storage, bucket):
+    """
+    Check that every object the manifest claims exists is still fetchable.
+
+    THE FAILURE THIS EXISTS FOR IS A RECONFIGURATION, NOT A BUG. storage-api's backend is
+    `STORAGE_BACKEND: file` on Compose and can be pointed at S3 instead -- and switching it does NOT
+    migrate anything. The same keys are then looked for in the new backend and 404, while the
+    manifest still reads `archived` and the raw rows are already gone from the hypertable. The
+    catalogue goes on saying everything is fine.
+
+    So the archive needs a way to be ASKED rather than assumed, and this is it. It is also the right
+    check after moving objects by hand, which is what a backend switch requires: keys must land
+    identically, because `object_key` is what points at them.
+
+    HEAD, NOT DOWNLOAD, where the client allows it -- this walks the whole archive and pulling every
+    object to prove it exists would make the audit itself expensive enough to skip.
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """SELECT chunk_name, object_key, object_bytes, row_count,
+                      dropped_at IS NOT NULL AS is_only_copy
+                 FROM public.telemetry_archive_manifest
+                WHERE object_key IS NOT NULL
+                ORDER BY range_start"""
+        )
+        rows = cur.fetchall()
+
+    if not rows:
+        log("the manifest is empty; nothing to audit.")
+        return 0
+
+    missing, checked = [], 0
+    for r in rows:
+        try:
+            # storage3 has no HEAD; a zero-length range is the cheapest available proof of
+            # existence and costs one request rather than one object.
+            storage.from_(bucket).download(r["object_key"], {"transform": None})
+            checked += 1
+        except Exception as err:  # noqa: BLE001
+            missing.append((r, str(err)[:160]))
+
+    for r, err in missing:
+        marker = "DATA LOST" if r["is_only_copy"] else "object gone"
+        log(f"  {marker}: {r['chunk_name']} -> {r['object_key']} ({err})")
+
+    if not missing:
+        log(f"{checked} object(s) present and readable.")
+        return 0
+
+    lost = [r for r, _ in missing if r["is_only_copy"]]
+    log(f"{len(missing)} of {len(rows)} object(s) are unreachable.")
+    if lost:
+        rows_lost = sum(int(r["row_count"] or 0) for r in lost)
+        log(f"{len(lost)} of those are the ONLY copy -- {rows_lost} row(s) of telemetry.")
+        log("If storage was recently repointed at another backend, the objects were not migrated:")
+        log("copy them across preserving their keys exactly, then re-run this.")
+    return 1
+
+
+# -------------------------------------------------------------------------------------------------
+# Restore
+# -------------------------------------------------------------------------------------------------
+def restore(conn, storage, bucket, chunk_name):
+    """
+    Put an archived chunk's rows back into the hypertable.
+
+    THE GAP THIS CLOSES. Everything else here moves data one way, and a feature whose premise is
+    "your history is safe" has to be able to hand it back -- otherwise the archive is only readable
+    through this one CLI, and Grafana, the dashboard and every other consumer stay blind to it
+    forever.
+
+    IT LEAVES THE OBJECT IN PLACE AND CLEARS `dropped_at`, which puts the row back in exactly the
+    state it held between verification and the drop: data in BOTH places, `verified_at` still set.
+    That is not a special case -- it is the safest state in the whole flow, `cold_tier_droppable()`
+    already returns it, and `--drop` will therefore remove the chunk again with no further work. The
+    round trip is closed rather than one-way-and-then-stuck.
+
+    ON CONFLICT DO NOTHING, because `telemetry`'s primary key is (time, asset_id, metric_name) and a
+    partial restore that was interrupted must be safe to run again. It also means restoring a chunk
+    whose rows are somehow still present is a no-op rather than a duplicate-key failure.
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """SELECT chunk_name, object_key, row_count, dropped_at, verified_at
+                 FROM public.telemetry_archive_manifest
+                WHERE chunk_name = %s""",
+            (chunk_name,),
+        )
+        row = cur.fetchone()
+
+    if row is None:
+        log(f"no manifest row for {chunk_name}")
+        return 1
+    if row["dropped_at"] is None:
+        log(f"{chunk_name} was never dropped; its rows are still in the hypertable.")
+        return 0
+    if not row["object_key"]:
+        log(f"{chunk_name} has no object recorded; nothing to restore from.")
+        return 1
+
+    import pyarrow.parquet as pq
+
+    payload = storage.from_(bucket).download(row["object_key"])
+    table = pq.read_table(io.BytesIO(payload))
+    log(f"read {table.num_rows} row(s) from {row['object_key']}")
+
+    records = table.to_pylist()
+    with conn.cursor() as cur:
+        psycopg2.extras.execute_batch(
+            cur,
+            """INSERT INTO public.telemetry (time, asset_id, metric_name, val_double, val_string, val_bool)
+               VALUES (%(time)s, %(asset_id)s, %(metric_name)s, %(val_double)s, %(val_string)s, %(val_bool)s)
+               ON CONFLICT DO NOTHING""",
+            records,
+            page_size=1000,
+        )
+        # Back to the state between verification and the drop. The object stays: it is still a
+        # verified copy, and deleting it here would trade one single point of failure for another.
+        cur.execute(
+            """UPDATE public.telemetry_archive_manifest
+                  SET dropped_at = NULL
+                WHERE chunk_name = %s""",
+            (chunk_name,),
+        )
+    conn.commit()
+
+    log(f"restored {chunk_name}; its rows are in the hypertable AND on cold storage.")
+    log("`cold_archive --drop` will remove them again once you are done with them.")
+    return 0
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Export and query cold telemetry.")
+    parser = argparse.ArgumentParser(description="Export, query, audit and restore cold telemetry.")
     # A POSITIONAL WITH A DEFAULT, so every existing invocation keeps working: `cold_archive`,
     # `cold_archive --drop` and `cold_archive --dry-run` all still mean the export path.
-    parser.add_argument("command", nargs="?", default="archive", choices=["archive", "query"],
-                        help="archive (default) exports chunks; query reads them back")
+    parser.add_argument("command", nargs="?", default="archive",
+                        choices=["archive", "query", "audit", "restore"],
+                        help="archive (default) exports chunks; query reads them back; audit checks "
+                             "every object is still fetchable; restore puts one chunk back")
+    parser.add_argument("--chunk", help="restore: the chunk_name to put back")
+    # THE SETTING FINALLY MEANS SOMETHING WITH THIS. `archive.enabled` armed a mechanism nothing
+    # ran: an operator turned it on, opened the page and saw nothing, because the exporter is a CLI
+    # and no scheduler existed. The compose service runs this loop, so the switch is what decides
+    # whether anything happens rather than a note about a command somebody has to remember.
+    parser.add_argument("--loop", type=int, metavar="SECONDS",
+                        help="archive: keep running, pausing this long between passes")
     parser.add_argument("--dry-run", action="store_true",
                         help="report what would be exported and change nothing")
     parser.add_argument("--drop", action="store_true",
@@ -565,17 +722,41 @@ def main():
                 asset=args.asset, metric=args.metric, limit=args.limit, out_csv=args.out_csv,
             )
 
-        if not settings["enabled"] and not args.force:
-            log("archive.enabled is off; nothing to do.")
-            log("Turn it on under Settings > Cold Storage, or pass --force for a one-off run.")
-            return 0
+        if args.command == "audit":
+            # NOT GATED ON `archive.enabled` either, and for a sharper reason than query is: this is
+            # the command that tells you whether archived history still exists. Refusing to run it
+            # because archiving was switched off would withhold the answer exactly when somebody has
+            # turned things off to investigate.
+            return audit(conn, storage, settings["bucket"])
 
-        log(f"bucket={settings['bucket']} tier_after_days={settings['tier_after_days']}")
-        archive(conn, storage, settings["bucket"], settings["tier_after_days"], args.dry_run)
-        if args.drop and not args.dry_run:
-            drop_verified(conn)
-        elif args.drop:
-            log("--drop ignored with --dry-run")
+        if args.command == "restore":
+            if not args.chunk:
+                log("restore needs --chunk, e.g. --chunk _hyper_1_39_chunk")
+                log("`cold_archive audit` or the Cold Storage page lists the chunk names.")
+                return 2
+            return restore(conn, storage, settings["bucket"], args.chunk)
+
+        while True:
+            # RE-READ EVERY PASS, so switching the setting off stops the next pass rather than
+            # needing the container restarted. The switch on the Settings page is the control.
+            settings = read_settings()
+            if not settings["enabled"] and not args.force:
+                if args.loop is None:
+                    log("archive.enabled is off; nothing to do.")
+                    log("Turn it on under Settings > Cold Storage, or pass --force for a one-off run.")
+                    return 0
+                log("archive.enabled is off; waiting.")
+            else:
+                log(f"bucket={settings['bucket']} tier_after_days={settings['tier_after_days']}")
+                archive(conn, storage, settings["bucket"], settings["tier_after_days"], args.dry_run)
+                if args.drop and not args.dry_run:
+                    drop_verified(conn)
+                elif args.drop:
+                    log("--drop ignored with --dry-run")
+
+            if args.loop is None:
+                return 0
+            time.sleep(args.loop)
     finally:
         conn.close()
     return 0
