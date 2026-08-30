@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
+import { useSetting } from '../../hooks/useSettings'
 import CopyableId from '../common/CopyableId'
 import { IconArchive, IconAlertTriangle } from '../common/Icons'
 import {
@@ -42,6 +43,11 @@ export function ColdStorageTab({ showToast, userRole }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  // READ SO THE EMPTY STATE CAN TELL TWO SITUATIONS APART. "Nothing archived because the feature is
+  // off" and "nothing archived although it is on" call for opposite next steps, and the page cannot
+  // work out which from an empty list. Defaults to false, matching 0068's own default, so a failed
+  // settings read shows the more cautious of the two rather than claiming archiving is running.
+  const archiveEnabled = useSetting('archive.enabled', false)
 
   const load = useCallback((initial = false) => {
     if (initial) setLoading(true)
@@ -128,6 +134,19 @@ export function ColdStorageTab({ showToast, userRole }) {
                 <div className="empty-text">
                   Cold telemetry is readable by Administrator, Shopfloor_Manager and Auditor. This
                   list is empty because of your role, not because nothing is archived.
+                </div>
+              ) : archiveEnabled ? (
+                /* ON, AND STILL EMPTY -- which is the state that had no wording and needed one.
+                   Turning the setting on arms the exporter; it does not run it, and nothing on a
+                   Compose stack does. Telling somebody who has just switched it on that "cold
+                   storage is off" is the one thing this cell must not say. */
+                <div className="empty-text">
+                  Archiving is <strong>on</strong>, and nothing has been archived yet. Two things
+                  have to be true before anything appears here: a telemetry chunk has to be older
+                  than the threshold in <strong>Settings → Cold Storage</strong>, and{' '}
+                  <code>python -m cold_archive</code> has to run — <strong>nothing schedules it</strong>,
+                  so on this stack it is a command somebody runs. Check what is eligible with{' '}
+                  <code>docker exec acs-cymru_ingestion python -m cold_archive --dry-run</code>.
                 </div>
               ) : (
                 <div className="empty-text">

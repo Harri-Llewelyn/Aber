@@ -6,7 +6,7 @@ import { ColdStorageTab } from '../components/tabs/ColdStorageTab'
 import { coldStorageSummary, formatBytes, coldStateLabel } from '../utils/coldStorage'
 import { api } from '../api'
 
-vi.mock('../api', () => ({ api: { listColdStorage: vi.fn() } }))
+vi.mock('../api', () => ({ api: { listColdStorage: vi.fn(), get: vi.fn() } }))
 
 const row = (overrides = {}) => ({
   chunk_name: '_hyper_1_38_chunk',
@@ -29,7 +29,13 @@ const show = async (rows, userRole = 'Administrator') => {
   await waitFor(() => expect(api.listColdStorage).toHaveBeenCalled())
 }
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  // The page reads `archive.enabled` through useSetting, which calls api.get. Defaulted to an empty
+  // list -- no row means the fallback, which is `false`, so every test that is not ABOUT the switch
+  // gets the same state it had before the switch was read.
+  api.get.mockResolvedValue([])
+})
 
 describe('the cold storage catalogue', () => {
 
@@ -160,5 +166,39 @@ describe('state vocabulary', () => {
     // "Archived" is the Archives page's word for an entity lifecycle state. Reusing it here is the
     // collision roadmap item 3 asked to be settled before this page was built.
     expect(coldStateLabel('archived')).toBe('On cold storage')
+  })
+})
+
+
+/**
+ * THE STATE AN OPERATOR ACTUALLY HITS FIRST, and the one the page originally had no wording for.
+ *
+ * Turning `archive.enabled` on ARMS the exporter; it does not run it, and nothing on a Compose
+ * stack schedules it. So the ordinary first experience is: switch it on, open this page, see
+ * nothing -- and be told "cold storage is off", which is both wrong and the opposite of actionable.
+ */
+describe('the empty state distinguishes off from on-and-idle', () => {
+
+  it('does not claim archiving is off when it is on', async () => {
+    api.get.mockResolvedValue([{ key: 'archive.enabled', value: true }])
+    await show([])
+    await waitFor(() => expect(screen.getByText(/Archiving is/)).toBeInTheDocument())
+    expect(screen.getByText(/nothing schedules it/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Cold storage is off/i)).toBeNull()
+  })
+
+  it('says where the switch is when it really is off', async () => {
+    api.get.mockResolvedValue([{ key: 'archive.enabled', value: false }])
+    await show([])
+    await waitFor(() => expect(screen.getByText(/Cold storage is off/i)).toBeInTheDocument())
+  })
+
+  it('assumes off when the settings read fails, rather than claiming archiving is running', async () => {
+    // useSetting swallows read errors by design. The cautious default matters here: telling
+    // somebody archiving is on when the page could not find out would send them looking for a
+    // command to run instead of a switch to flip.
+    api.get.mockRejectedValue(new Error('offline'))
+    await show([])
+    await waitFor(() => expect(screen.getByText(/Cold storage is off/i)).toBeInTheDocument())
   })
 })
