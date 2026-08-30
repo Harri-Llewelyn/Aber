@@ -104,6 +104,8 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   const [liveStatusFilter, setLiveStatusFilter] = useState('')
   const [kindFilter, setKindFilter] = useState('')
   const [quarantineOnly, setQuarantineOnly] = useState(false)
+  // The Playback gateway (0060). Off by default -- see the filter for why it is not a Type option.
+  const [showShadowGateways, setShowShadowGateways] = useState(false)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -251,6 +253,19 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
   )
 
   const filteredGateways = gateways.filter(g => {
+    // HIDDEN BY DEFAULT, matching the Devices page's treatment of the shadow devices this gateway
+    // publishes as. It is one row on every stack, it is seeded rather than created, and almost
+    // every action on it has been withdrawn -- so it sits in the fleet list offering nothing while
+    // reading, to anyone scanning for a real connector, as a gateway that is permanently offline.
+    //
+    // NOT REMOVED FROM THE PAGE. It has to stay reachable: minting its broker credential is the one
+    // act an operator must perform on it, and 0060's NOTICE names this page as where. The toggle
+    // is what keeps it findable while keeping it out of the way.
+    //
+    // TYPE-FILTERED SEPARATELY. Choosing Simulated in the Type control should not surface it either
+    // -- Shadow is its own type, and a filter that quietly widened to include the playback gateway
+    // would be the "Simulated means three things" problem returning by the back door.
+    if (!showShadowGateways && g.is_shadow) return false
     if (filterMode === 'active'   && g.is_archived) return false
     if (filterMode === 'archived' && !g.is_archived) return false
     if (searchQuery) {
@@ -268,9 +283,13 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
     return true
   })
 
+  // Counted across the whole fleet, not the filtered list: it is what the toggle reveals, so
+  // counting what is already shown would read zero exactly when the button matters.
+  const shadowGatewayCount = gateways.filter(g => g.is_shadow).length
+
   const activeFilterCount =
     [searchQuery, liveStatusFilter, kindFilter].filter(Boolean).length +
-    (quarantineOnly ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
+    (quarantineOnly ? 1 : 0) + (showShadowGateways ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
 
   // Arriving from a cell's gateway chip, a device's Serving Gateway chip or the shopfloor map: the
   // caller named ONE gateway, so open it. Identifier equality only -- see the hook.
@@ -380,6 +399,19 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
         >
           <IconShieldAlert size={13} /> Has quarantined devices ({gatewaysWithQuarantine.size})
         </button>
+
+        {/* SHOWN ONLY WHEN ONE EXISTS, like the Devices page's shadow toggle. 0060 seeds exactly
+            one, so on a stack that has it this is a single button; on one that somehow does not,
+            a control for an absent row would be a puzzle rather than a filter. */}
+        {shadowGatewayCount > 0 && (
+          <button
+            className={`btn btn-sm ${showShadowGateways ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setShowShadowGateways(v => !v)}
+            title="The Playback gateway (migration 0060). It publishes recorded captures as shadow devices and is not a connector to any machine, so it is hidden by default — but it stays reachable, because minting its broker credential is the one act an operator must perform on it."
+          >
+            <IconRadio size={13} /> Show playback gateway ({shadowGatewayCount})
+          </button>
+        )}
 
         {activeFilterCount > 0 && (
           <button className="btn btn-ghost btn-sm filter-bar-spacer" onClick={resetFilters} title="Clear every filter">

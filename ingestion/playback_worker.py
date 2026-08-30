@@ -67,6 +67,14 @@ BUCKET = os.getenv("CAPTURE_BUCKET", "broker-captures")
 POLL_INTERVAL_SECONDS = float(os.getenv("PLAYBACK_POLL_INTERVAL_SECONDS", "3"))
 PROGRESS_INTERVAL_SECONDS = float(os.getenv("PLAYBACK_PROGRESS_INTERVAL_SECONDS", "1"))
 
+# How long to wait for the broker's CONNACK before failing the job.
+#
+# GENEROUS ON PURPOSE. This is a local broker on the same compose network, where the answer arrives
+# in milliseconds, and the cost of waiting is paid once per job rather than per message. Five
+# seconds is long enough that a loaded host does not produce a spurious failure, and short enough
+# that an operator watching a job does not read the pause as the playback having started.
+CONNACK_TIMEOUT_SECONDS = float(os.getenv("PLAYBACK_CONNACK_TIMEOUT_SECONDS", "5"))
+
 # How often this worker restates which gateways it can publish as.
 #
 # IT IS A HEARTBEAT, NOT A CHANGE FEED, and that is why it repeats rather than reporting once. The
@@ -155,9 +163,30 @@ def _storage():
 
 
 def _connect(edge_node_id, password):
-    """Connect AS the target gateway. Its `sparkplug_id` is the username, and that is the point."""
+    """
+    Connect AS the target gateway. Its `sparkplug_id` is the username, and that is the point.
+
+    THE CONNACK IS CAPTURED, WHICH IT WAS NOT, AND THE GAP WAS A SILENT SUCCESS.
+    `client.connect()` completes the TCP handshake and returns; the CONNACK arrives later on the
+    network loop. So a WRONG password -- as opposed to a missing one -- got past the credential
+    check above, connected at the socket level, was refused with rc=5, and every QoS 0 publish
+    after that was dropped locally with no error anywhere. The job ran to completion, reported the
+    full message count, and moved nothing.
+
+    That is precisely the outcome the credential check's own comment predicts and calls the reason
+    it exists -- it just cannot see this case, because a stale password is not a missing one. It
+    happens whenever a credential is re-minted and the worker is not restarted, which is the
+    ordinary way of rotating one.
+
+    `rc` is recorded rather than raised from the callback: it arrives on paho's thread, where an
+    exception would be swallowed and logged by the library rather than reaching the caller.
+    """
     client = mqtt.Client(client_id="acs-playback-%s" % edge_node_id)
     client.username_pw_set(edge_node_id, password)
+    # A list because the callback closes over it; `rc` stays None until the broker answers, which
+    # is itself the third outcome -- no answer at all.
+    client.acs_connack = []
+    client.on_connect = lambda _c, _u, _f, rc, *args: client.acs_connack.append(rc)
     if os.getenv("MQTT_TLS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on"):
         import ssl
         ca = os.getenv("MQTT_TLS_CA_FILE", "").strip()
@@ -238,6 +267,47 @@ def _run_job(supabase, storage, credentials, job):
         return 0, "could not connect to the broker as %s: %s" % (edge_node, err)
 
     client.loop_start()
+
+    # ------------------------------------------------------------------------------------------
+    # THE BROKER HAS TO ACCEPT US BEFORE A SINGLE MESSAGE IS COUNTED AS SENT.
+    #
+    # Without this the worker published an entire capture into a closed socket and reported
+    # success: `connect()` returns after the TCP handshake, the CONNACK arrives later on this loop,
+    # and a QoS 0 publish to a refused connection is dropped locally with no error to catch. The
+    # job finished, `messages_sent` matched the plan, and no telemetry existed.
+    #
+    # THE CREDENTIAL CHECK ABOVE CANNOT SEE THIS. It refuses a MISSING password; this is a WRONG
+    # one, which is what a re-minted credential leaves behind until the worker is restarted -- the
+    # ordinary way of rotating one, and how this was found.
+    #
+    # rc 4 and 5 are the two that mean the password: 4 is bad username/password, 5 is not
+    # authorised. They are named rather than lumped in, because they are the ones an operator fixes
+    # by rotating MQTT_PLAYBACK_CREDENTIALS and restarting rather than by looking at the broker.
+    deadline = time.monotonic() + CONNACK_TIMEOUT_SECONDS
+    while not client.acs_connack and time.monotonic() < deadline:
+        time.sleep(0.05)
+
+    if not client.acs_connack:
+        client.loop_stop()
+        return 0, (
+            "the broker never answered the connection as %s within %ss. It is reachable at %s:%s "
+            "or this would have failed above, so it accepted the socket and said nothing."
+            % (edge_node, CONNACK_TIMEOUT_SECONDS, MQTT_HOST, MQTT_PORT)
+        )
+
+    rc = client.acs_connack[0]
+    if rc != 0:
+        client.loop_stop()
+        detail = {
+            4: "the broker rejected the username or password",
+            5: "the broker refused this connection as not authorised",
+        }.get(rc, "the broker refused the connection")
+        return 0, (
+            "%s for %s (CONNACK rc=%s). If this gateway's credential was re-minted, the worker is "
+            "still holding the previous one: update MQTT_PLAYBACK_CREDENTIALS and recreate the "
+            "playback container." % (detail, edge_node, rc)
+        )
+
     sent = 0
     started = time.monotonic()
     last_report = 0.0

@@ -231,7 +231,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   const [gatewayFilter, setGatewayFilter] = useState('')
   const [cellFilter, setCellFilter] = useState('')
   const [attentionOnly, setAttentionOnly] = useState(false)
-  // Replay lanes (0060). Off by default -- see the filter below for why they are not a `filterMode`.
+  // Shadow devices (0060). Off by default -- see the filter below for why they are not a `filterMode`.
   const [showShadows, setShowShadows] = useState(false)
 
   useEffect(() => {
@@ -807,7 +807,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
         </button>
 
         {/* SHOWN ONLY WHEN THERE ARE ANY, like the Archived toggle on the Access Control page. A
-            permanent "Replay lanes (0)" on every stack that has never played anything back would be
+            permanent "Show shadow devices (0)" on every stack that has never played anything back would be
             a control for a feature most operators will not use, taking width from the filters they
             do. It appears the moment a playback mints the first lane, which is also the moment
             somebody wonders where the extra devices came from. */}
@@ -815,9 +815,9 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           <button
             className={`btn btn-sm ${showShadows ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => setShowShadows(v => !v)}
-            title="Replay lanes created by broker playback (migration 0060). One per device a capture recorded, they receive replayed readings so a recording is never mistaken for live plant data. Hidden by default because they are not machines."
+            title="Shadow devices created by broker playback (migration 0060). One per device a capture recorded, they receive replayed readings so a recording is never mistaken for live plant data. Hidden by default because they are not machines."
           >
-            <IconPlay size={13} /> Replay lanes ({shadowCount})
+            <IconPlay size={13} /> Show shadow devices ({shadowCount})
           </button>
         )}
 
@@ -947,8 +947,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                               A badge on the row answers that wherever the row is later seen. */}
                           {a.shadow_of && (
                             <span className="badge badge-neutral" style={{ fontSize: '11px', marginLeft: '8px' }}
-                                  title="A replay lane, not a machine. It receives recorded readings republished by broker playback, so its values did happen — on the real device, on the day the capture was taken.">
-                              <IconPlay size={11} /> REPLAY LANE
+                                  title="A shadow device, not a machine. It receives recorded readings republished by broker playback, so its values did happen — on the real device, on the day the capture was taken.">
+                              <IconPlay size={11} /> SHADOW
                             </span>
                           )}
                           {a.is_archived && (
@@ -1649,7 +1649,17 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             onClick: () => setConfigAsset(selectedDevice),
             title: 'Inspect the DBIRTH metric parameters this device reported'
           },
-          {
+          /* WITHDRAWN FROM A REPLAY LANE, and 0060 makes the argument rather than taste:
+             "NO NAMEPLATE. device_nameplate (0011) is IDTA Nameplate -- manufacturer, SERIAL
+             NUMBER, year of construction. A serial number identifies one physical object. Copying
+             it would leave the platform holding two rows claiming to be serial XYZ-4471, and the
+             AAS Part 5 export would emit two Asset Administration Shells asserting the same asset
+             identity, which is the exact thing AAS identity exists to prevent."
+
+             So offering the editor here offers to create precisely the row the migration exists to
+             prevent -- and it would be created by hand, one field at a time, with nothing to stop
+             it. A shadow is a recording of an asset, not a second asset. */
+          !selectedDevice.shadow_of && {
             // Directly above the two exports on purpose: it is the only thing here that changes
             // what they contain.
             label: 'Digital Nameplate…', icon: <IconClipboardList size={13} />,
@@ -1672,7 +1682,15 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             disabled: exportingAas === selectedDevice.asset_id,
             title: 'Download an AASX (OPC) package, with any attached 3D model bundled in'
           },
-          {
+          /* ALSO WITHDRAWN FROM A REPLAY LANE, for 0060's second rule: "NO LINKS. `links` are
+             documents ABOUT the machine, and a copy goes stale the moment someone edits the
+             original. `shadow_of` resolves them at read time instead."
+
+             A lane's documents ARE the machine's documents, reached through shadow_of. Attaching
+             one here would create the second copy that rule exists to prevent -- and it would go
+             stale silently, which is the failure mode that makes a duplicated document worse than
+             no document. */
+          !selectedDevice.shadow_of && {
             // The accordion below lists the links; this is how a new one gets attached. Both are
             // needed now that the accordion no longer carries its own Manage button.
             label: 'Manage Links', icon: <IconBookOpen size={13} />,

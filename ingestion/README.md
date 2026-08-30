@@ -565,6 +565,15 @@ resolved through `shadow_of` rather than duplicated, for the ordinary reason tha
 virtual gateway's and then placed in `MQTT_PLAYBACK_CREDENTIALS`. The migration's `NOTICE` says so
 with the `sparkplug_id` already filled in.
 
+**Re-minting it means recreating the playback container**, and until it does the worker is holding
+the previous password. That used to fail silently and is now caught: `connect()` returns after the
+TCP handshake and the CONNACK arrives later on the network loop, so a *wrong* password connected at
+the socket level, was refused with `rc=5`, and every QoS 0 publish after it was dropped locally with
+no error anywhere — the job ran to completion, reported the full message count, and moved nothing.
+The worker now waits for the CONNACK and fails the job naming the stale credential. The credential
+check beside it cannot see this case: it refuses a *missing* password, and a stale one is not
+missing.
+
 **They are minted on demand, not up front**, which is worth stating because the opposite is the
 natural assumption. `ensure_shadow_devices()` takes a **capture id**, so a stack that has never
 replayed anything has none at all, and the ones it does have are exactly the devices some capture
