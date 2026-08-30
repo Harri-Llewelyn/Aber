@@ -565,6 +565,29 @@ resolved through `shadow_of` rather than duplicated, for the ordinary reason tha
 virtual gateway's and then placed in `MQTT_PLAYBACK_CREDENTIALS`. The migration's `NOTICE` says so
 with the `sparkplug_id` already filled in.
 
+**They are minted on demand, not up front**, which is worth stating because the opposite is the
+natural assumption. `ensure_shadow_devices()` takes a **capture id**, so a stack that has never
+replayed anything has none at all, and the ones it does have are exactly the devices some capture
+recorded — never the whole fleet.
+
+**On the Devices page they are hidden by default and carry a `REPLAY LANE` badge when shown.** The
+first playback would otherwise double the list: six machines becoming twelve rows, the new ones
+holding the same schema and similar readings as the machines they sit beside. The toggle appears
+only once a lane exists, and the badge is on the row rather than implied by the filter, because the
+question a reader has about a number here is whether it **happened** — and for a replay lane the
+answer is yes, on the real device, on the day the capture was taken.
+
+**The gateway offers no Archive, no Rebirth and no Edit.** Archiving the last one is refused by
+[`0067`](../supabase/migrations/0067_the_playback_gateway_cannot_be_archived_away.sql) in the
+database, because `ensure_shadow_devices()` finds the gateway *by flag* and the failure would
+otherwise surface weeks later at job time. A rebirth is addressed to a node nobody is listening as —
+the playback worker only publishes and holds no subscription. And **editing is withdrawn because the
+form offers writes the database refuses**: `gateways_shadow_is_simulated` is `NOT is_shadow OR
+is_simulated`, so choosing Remote or Host in the Type control sets `is_simulated = false` and the
+save comes back a CHECK violation. Two of that control's three options are dead ends on this one
+row. Deletion is deliberately *not* guarded — `0060` re-seeds the row on the next boot, so a delete
+repairs itself where an archive survives one.
+
 ### What the page adds that the CLI cannot, and two things neither does
 
 - **The device map from dropdowns**, built from the devices actually bound to the target gateway,

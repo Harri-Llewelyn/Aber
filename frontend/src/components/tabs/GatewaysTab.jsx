@@ -972,7 +972,26 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
             disabled: !canArchive,
             primary: !selected.access_url,
             title: !canArchive ? 'Requires Admin permissions' : 'Restore gateway back to active service'
-          } : {
+          } : !selected.is_shadow && {
+            /* WITHDRAWN FROM THE PLAYBACK GATEWAY, and not merely because there is no reason to
+               edit it -- the form OFFERS WRITES THE DATABASE REFUSES on this row.
+
+               `gateways_shadow_is_simulated` (0059) is `NOT is_shadow OR is_simulated`, and this
+               gateway is the one row where is_shadow is true. So choosing Remote or Host in the
+               Type control sets is_simulated = false and the save comes back a CHECK violation:
+               two of the three options are dead ends. That is precisely the failure the two
+               checkboxes had before 0064 -- a combination an operator can pick and then have
+               rejected -- reappearing on one row because the form cannot express "this one is
+               already a fourth type".
+
+               Nothing here needs changing anyway. 0060 seeds the row, its name and description are
+               its own, it has no appliance to give an access URL, and gateways_synthetic_has_no_cell
+               forbids the cell. The remaining editable field is a label on a gateway nobody browses
+               to. Withdrawing the whole action is smaller and clearer than a form that disables
+               four of its five fields.
+
+               Renaming is still possible from the database for anyone who genuinely needs it, which
+               is the right amount of friction for a row the platform depends on by flag. */
             label: 'Edit Details', icon: <IconPencil size={13} />,
             onClick: () => { setEditing(selected); setForm(selected); setShowForm(true) },
             disabled: !canManage,

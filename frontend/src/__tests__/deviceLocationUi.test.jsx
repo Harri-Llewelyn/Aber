@@ -472,3 +472,66 @@ describe('approving a quarantined device', () => {
     expect(body.location_scope).toBe('cell')
   })
 })
+
+
+/**
+ * Replay lanes on the Devices page (roadmap item 17, migration 0060).
+ *
+ * `ensure_shadow_devices()` mints one per device a capture recorded, at the moment a playback
+ * starts -- so a stack that has never replayed has none, and the first playback would otherwise
+ * double the device list. Six machines become twelve rows, the new ones carrying the same schema
+ * and similar readings as the machines they sit beside, with nothing saying which is which.
+ *
+ * The question a reader has about a number on this page is whether it HAPPENED, and a replay lane
+ * answers that differently from a machine: its values did happen, on the real device, on the day
+ * the capture was taken. That is worth a badge rather than a filter alone.
+ */
+describe('replay lanes', () => {
+  const shadow = (overrides = {}) => device({
+    asset_id: 'ssssssss-0000-4000-8000-000000000001',
+    asset_name: 'CNC_01 (replay)',
+    shadow_of: 'aaaaaaaa-0000-4000-8000-000000000001',
+    active_gateway_id: 'gw-sim',
+    effective_cell_id: null,
+    location_source: 'shadow',
+    ...overrides,
+  })
+
+  it('hides them by default, so a playback does not double the device list', async () => {
+    await show([device(), shadow()])
+    await waitFor(() => expect(screen.getByText('CNC_01')).toBeInTheDocument())
+    expect(screen.queryByText('CNC_01 (replay)')).toBeNull()
+  })
+
+  it('offers a toggle counting what is hidden', async () => {
+    // COUNTED ACROSS EVERY DEVICE, not the filtered list -- counting the rows on screen would
+    // report zero exactly when the button is worth pressing.
+    await show([device(), shadow()])
+    await waitFor(() => expect(screen.getByText(/Replay lanes \(1\)/)).toBeInTheDocument())
+  })
+
+  it('shows them when asked, marked as what they are', async () => {
+    await show([device(), shadow()])
+    fireEvent.click(await screen.findByText(/Replay lanes \(1\)/))
+    await waitFor(() => expect(screen.getByText('CNC_01 (replay)')).toBeInTheDocument())
+    // The badge is on the ROW, not only implied by the filter: filters are forgotten, and the row
+    // may be read later from a link or a screenshot.
+    expect(screen.getByText('REPLAY LANE')).toBeInTheDocument()
+  })
+
+  it('does not offer the toggle on a stack that has never replayed', async () => {
+    // Most stacks. A permanent "Replay lanes (0)" would take width from filters that do something.
+    await show([device()])
+    await waitFor(() => expect(screen.getByText('CNC_01')).toBeInTheDocument())
+    expect(screen.queryByText(/Replay lanes/)).toBeNull()
+  })
+
+  it('is orthogonal to the archived filter, which is why it is not a filterMode', async () => {
+    // A replay lane can be archived or not. Folding it into active/archived/all would make one of
+    // those combinations unreachable.
+    await show([device(), shadow({ is_archived: true })])
+    fireEvent.click(await screen.findByText(/Replay lanes \(1\)/))
+    await waitFor(() => expect(screen.getByText('CNC_01 (replay)')).toBeInTheDocument())
+    expect(screen.getByText('ARCHIVED')).toBeInTheDocument()
+  })
+})

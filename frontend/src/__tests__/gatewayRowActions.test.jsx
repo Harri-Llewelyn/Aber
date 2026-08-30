@@ -193,6 +193,22 @@ describe('the playback gateway', () => {
     expect(openPanel('Playback').queryByText('Request Rebirth')).toBeNull()
   })
 
+  /**
+   * EDIT IS WITHDRAWN BECAUSE THE FORM OFFERS WRITES THE DATABASE REFUSES, which is a stronger
+   * reason than "there is nothing worth editing".
+   *
+   * `gateways_shadow_is_simulated` (0059) is `NOT is_shadow OR is_simulated`, and this is the one
+   * row where is_shadow is true. The Type control offers Remote, Host and Simulated; the first two
+   * set is_simulated = false, so two of its three options come back a CHECK violation on this
+   * gateway. That is the failure the two checkboxes had before 0064 -- a combination an operator
+   * can pick and then have rejected -- reappearing on one row because the form cannot express
+   * "this one is already a fourth type".
+   */
+  it('cannot have its details edited', async () => {
+    await show([playback()])
+    expect(openPanel('Playback').queryByText('Edit Details')).toBeNull()
+  })
+
   it('still offers its broker credential, which playback cannot run without', async () => {
     await show([playback()])
     // The action exists for every host-run gateway and this one is no exception: 0060's NOTICE
@@ -207,6 +223,7 @@ describe('the playback gateway', () => {
     const panel = openPanel()
     expect(panel.queryByText('Archive Gateway')).not.toBeNull()
     expect(panel.queryByText('Request Rebirth')).not.toBeNull()
+    expect(panel.queryByText('Edit Details')).not.toBeNull()
   })
 })
 

@@ -59,6 +59,7 @@ import {
   IconCube,
   IconShieldAlert,
   IconAlertTriangle,
+  IconPlay,
   IconAlertCircle,
   IconLock,
   IconDownload,
@@ -230,6 +231,8 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   const [gatewayFilter, setGatewayFilter] = useState('')
   const [cellFilter, setCellFilter] = useState('')
   const [attentionOnly, setAttentionOnly] = useState(false)
+  // Replay lanes (0060). Off by default -- see the filter below for why they are not a `filterMode`.
+  const [showShadows, setShowShadows] = useState(false)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -585,6 +588,20 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     // separation can be enforced.
     if (a.is_quarantined) return false
 
+    // REPLAY LANES ARE OUT BY DEFAULT, for the reason quarantined devices are: they are a different
+    // KIND of row rendered by the same table, and mixing them silently is worse than either showing
+    // or hiding them deliberately.
+    //
+    // `ensure_shadow_devices()` (0060) mints one per device a capture recorded, at the moment a
+    // playback starts. So a stack that has never replayed has none, and the first playback would
+    // otherwise double the device list -- six machines becoming twelve rows, the new ones
+    // indistinguishable from the real ones and sitting next to the machines they replay.
+    //
+    // NOT FOLDED INTO `filterMode`, which is about the ARCHIVED lifecycle. A shadow device can be
+    // archived or not, so it is an orthogonal axis and a four-way active/archived/shadow/all would
+    // make one of those combinations unreachable.
+    if (!showShadows && a.shadow_of) return false
+
     if (filterMode === 'active'   && a.is_archived) return false
     if (filterMode === 'archived' && !a.is_archived) return false
     // Matches either the legacy 1:1 column or any attached submodel, so a device filtered by
@@ -621,7 +638,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     return true
   }), [
     assets, filterMode, schemaFilter, schemas, tagFilter, latestBySparkplugId, catalog,
-    gatewayFilter, cellFilter, gatewayById, attentionOnly, statusFilter, searchQuery,
+    gatewayFilter, cellFilter, gatewayById, attentionOnly, showShadows, statusFilter, searchQuery,
     unmodelledFor, cellById,
   ])
 
@@ -638,6 +655,14 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
     () => assets.filter(a => !a.is_quarantined && needsAttention(a)).length,
     [assets, gatewayById, cellById, unmodelledFor]
   )
+  // COUNTED ACROSS EVERY DEVICE, not across the filtered list: it is the number the toggle reveals,
+  // so counting the rows already on screen would report zero exactly when the button is most worth
+  // pressing. Quarantined lanes are excluded for the same reason attentionCount excludes them --
+  // they are rendered by the onboarding banner and not by this table.
+  const shadowCount = useMemo(
+    () => assets.filter(a => !a.is_quarantined && a.shadow_of).length,
+    [assets]
+  )
   // Walks every device's schemas and last-birth metrics to build the tag dropdown. Memoised for
   // the same reason as the filter: nothing about it changes when a modal opens.
   // Same reasoning: `latestFor` is rebuilt every render and closes over `latestBySparkplugId`,
@@ -648,7 +673,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
   )
   const activeFilterCount =
     [schemaFilter, statusFilter, tagFilter, gatewayFilter, cellFilter, searchQuery].filter(Boolean).length +
-    (attentionOnly ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
+    (attentionOnly ? 1 : 0) + (showShadows ? 1 : 0) + (filterMode !== 'all' ? 1 : 0)
   const schemaName = schemas.find(s => s.schema_uuid === schemaFilter)?.schema_name
 
   // Arriving from a gateway's device chip, a schema's device chip, an alert row or the shopfloor
@@ -781,6 +806,21 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
           <IconAlertTriangle size={13} /> Needs attention ({attentionCount})
         </button>
 
+        {/* SHOWN ONLY WHEN THERE ARE ANY, like the Archived toggle on the Access Control page. A
+            permanent "Replay lanes (0)" on every stack that has never played anything back would be
+            a control for a feature most operators will not use, taking width from the filters they
+            do. It appears the moment a playback mints the first lane, which is also the moment
+            somebody wonders where the extra devices came from. */}
+        {shadowCount > 0 && (
+          <button
+            className={`btn btn-sm ${showShadows ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setShowShadows(v => !v)}
+            title="Replay lanes created by broker playback (migration 0060). One per device a capture recorded, they receive replayed readings so a recording is never mistaken for live plant data. Hidden by default because they are not machines."
+          >
+            <IconPlay size={13} /> Replay lanes ({shadowCount})
+          </button>
+        )}
+
         {activeFilterCount > 0 && (
           <button className="btn btn-ghost btn-sm filter-bar-spacer" onClick={resetFilters} title="Clear every filter">
             <IconX size={13} /> Clear filters ({activeFilterCount})
@@ -900,6 +940,17 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
                       >
                         <td>
                           <strong>{a.asset_name}</strong>
+                          {/* MARKED WHENEVER IT IS SHOWN, because the toggle that revealed it is a
+                              filter and filters are forgotten. A replay lane sits beside the machine
+                              it replays, with the same schema and similar readings, and the one
+                              question a reader has about a number here is whether it happened.
+                              A badge on the row answers that wherever the row is later seen. */}
+                          {a.shadow_of && (
+                            <span className="badge badge-neutral" style={{ fontSize: '11px', marginLeft: '8px' }}
+                                  title="A replay lane, not a machine. It receives recorded readings republished by broker playback, so its values did happen — on the real device, on the day the capture was taken.">
+                              <IconPlay size={11} /> REPLAY LANE
+                            </span>
+                          )}
                           {a.is_archived && (
                             <span className="badge badge-warning" style={{ background: 'rgba(255,179,0,0.15)', color: 'var(--warning-text)', border: '1px solid var(--warning)', marginLeft: '8px' }} title="Decommissioned device">
                               <IconArchive size={11} /> ARCHIVED
