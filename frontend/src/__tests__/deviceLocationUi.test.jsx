@@ -475,7 +475,7 @@ describe('approving a quarantined device', () => {
 
 
 /**
- * Replay lanes on the Devices page (roadmap item 17, migration 0060).
+ * Shadow devices on the Devices page (roadmap item 17, migration 0060).
  *
  * `ensure_shadow_devices()` mints one per device a capture recorded, at the moment a playback
  * starts -- so a stack that has never replayed has none, and the first playback would otherwise
@@ -507,31 +507,101 @@ describe('replay lanes', () => {
     // COUNTED ACROSS EVERY DEVICE, not the filtered list -- counting the rows on screen would
     // report zero exactly when the button is worth pressing.
     await show([device(), shadow()])
-    await waitFor(() => expect(screen.getByText(/Replay lanes \(1\)/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/Show shadow devices \(1\)/)).toBeInTheDocument())
   })
 
   it('shows them when asked, marked as what they are', async () => {
     await show([device(), shadow()])
-    fireEvent.click(await screen.findByText(/Replay lanes \(1\)/))
+    fireEvent.click(await screen.findByText(/Show shadow devices \(1\)/))
     await waitFor(() => expect(screen.getByText('CNC_01 (replay)')).toBeInTheDocument())
     // The badge is on the ROW, not only implied by the filter: filters are forgotten, and the row
     // may be read later from a link or a screenshot.
-    expect(screen.getByText('REPLAY LANE')).toBeInTheDocument()
+    expect(screen.getByText('SHADOW')).toBeInTheDocument()
   })
 
   it('does not offer the toggle on a stack that has never replayed', async () => {
-    // Most stacks. A permanent "Replay lanes (0)" would take width from filters that do something.
+    // Most stacks. A permanent "Show shadow devices (0)" would take width from filters that do something.
     await show([device()])
     await waitFor(() => expect(screen.getByText('CNC_01')).toBeInTheDocument())
-    expect(screen.queryByText(/Replay lanes/)).toBeNull()
+    expect(screen.queryByText(/Show shadow devices/)).toBeNull()
   })
 
   it('is orthogonal to the archived filter, which is why it is not a filterMode', async () => {
     // A replay lane can be archived or not. Folding it into active/archived/all would make one of
     // those combinations unreachable.
     await show([device(), shadow({ is_archived: true })])
-    fireEvent.click(await screen.findByText(/Replay lanes \(1\)/))
+    fireEvent.click(await screen.findByText(/Show shadow devices \(1\)/))
     await waitFor(() => expect(screen.getByText('CNC_01 (replay)')).toBeInTheDocument())
     expect(screen.getByText('ARCHIVED')).toBeInTheDocument()
+  })
+})
+
+
+/**
+ * Actions withdrawn from a shadow device (migration 0060).
+ *
+ * 0060 states both rules and gives the reason for each, so these are not taste:
+ *
+ *   "NO NAMEPLATE. device_nameplate (0011) is IDTA Nameplate -- manufacturer, SERIAL NUMBER, year
+ *    of construction. A serial number identifies one physical object. Copying it would leave the
+ *    platform holding two rows claiming to be serial XYZ-4471, and the AAS Part 5 export would emit
+ *    two Asset Administration Shells asserting the same asset identity."
+ *
+ *   "NO LINKS. `links` are documents ABOUT the machine, and a copy goes stale the moment someone
+ *    edits the original. `shadow_of` resolves them at read time instead."
+ *
+ * Offering either control would let an operator create by hand exactly what the migration exists to
+ * prevent -- one field at a time, with nothing to stop them.
+ */
+describe('the actions a shadow device does not offer', () => {
+  const shadowDevice = () => device({
+    asset_id: 'ssssssss-0000-4000-8000-000000000001',
+    asset_name: 'CNC_01 (replay)',
+    shadow_of: 'aaaaaaaa-0000-4000-8000-000000000001',
+    active_gateway_id: 'gw-sim',
+    effective_cell_id: null,
+    location_source: 'shadow',
+  })
+
+  const openShadowPanel = async () => {
+    await show([device(), shadowDevice()])
+    fireEvent.click(await screen.findByText(/Show shadow devices \(1\)/))
+    fireEvent.click(await screen.findByText('CNC_01 (replay)'))
+    return within(document.querySelector('.context-panel'))
+  }
+
+  it('offers no Digital Nameplate', async () => {
+    const panel = await openShadowPanel()
+    expect(panel.queryByText(/Digital Nameplate/)).toBeNull()
+  })
+
+  it('offers no Manage Links', async () => {
+    const panel = await openShadowPanel()
+    expect(panel.queryByText('Manage Links')).toBeNull()
+  })
+
+  it('still offers the AAS exports, which 0060 designed for', async () => {
+    /*
+     * DELIBERATELY KEPT, and this is the one of the three that the migration argues FOR rather than
+     * against: "A shadow exports without a Nameplate submodel, which is honest -- it is not a
+     * product and has no manufacturer." 0011's rule is that a device with no nameplate data has no
+     * row rather than a row of nulls, and the exporter omits an empty submodel entirely.
+     *
+     * So the export is defined, produces a shell with no asset identity to collide with, and is
+     * the thing the nameplate withdrawal above makes safe. Removing it would remove a capability
+     * the migration explicitly reasoned about.
+     */
+    const panel = await openShadowPanel()
+    expect(panel.queryByText(/Export AAS JSON/)).not.toBeNull()
+  })
+
+  it('leaves all three on an ordinary device', async () => {
+    // The guard is about `shadow_of`, not about devices in general.
+    await show([device()])
+    fireEvent.click(within(document.querySelector('.page-main')).getByText('CNC_01'))
+    const panel = within(document.querySelector('.context-panel'))
+    expect(panel.queryByText(/Digital Nameplate/)).not.toBeNull()
+    expect(panel.queryByText('Manage Links')).not.toBeNull()
+    expect(panel.queryByText(/Export AAS JSON/)).not.toBeNull()
   })
 })

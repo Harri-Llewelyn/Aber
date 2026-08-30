@@ -1307,3 +1307,42 @@ describe('the capture preview', () => {
     expect(screen.queryByText('Devices In This Capture')).toBeNull()
   })
 })
+
+
+// =============================================================================================
+describe('the playback progress bar', () => {
+  const running = (overrides = {}) => ({
+    id: 'pb-1', status: 'RUNNING', target_edge_node_id: 'gwy130000000000400080000',
+    gateways: { name: 'Playback Target' }, speed: 1,
+    messages_sent: 25, messages_total: 100, elapsed_seconds: 12, ...overrides,
+  })
+
+  it('draws a bar against the capture total, which a capture card cannot', async () => {
+    // A recording stops at whichever of three caps binds first, so the capture card deliberately
+    // bars only the clock. A playback has one total, so the fraction means what it looks like.
+    api.activePlaybackJob.mockResolvedValue(running())
+    renderTab()
+    const bar = await screen.findByRole('progressbar', { name: /Messages published/i })
+    expect(bar.getAttribute('aria-valuenow')).toBe('25')
+    expect(bar.getAttribute('aria-valuemax')).toBe('100')
+  })
+
+  it('draws no bar for a queued job, which has no total yet', async () => {
+    // `messages_total` is written by the worker's first progress call. A bar at 0% with no
+    // denominator would say "nothing has happened" where the truth is "nothing measured yet".
+    api.activePlaybackJob.mockResolvedValue(running({ status: 'PENDING', messages_total: 0, messages_sent: 0 }))
+    renderTab()
+    await screen.findByText(/Waiting for the playback worker/i)
+    expect(screen.queryByRole('progressbar', { name: /Messages published/i })).toBeNull()
+  })
+
+  it('does not overflow when the worker reports more than the plan held', async () => {
+    // messages_sent is the worker's count and messages_total the plan's; a late progress call can
+    // arrive after the last publish. The bar must clamp rather than render past its track.
+    api.activePlaybackJob.mockResolvedValue(running({ messages_sent: 140, messages_total: 100 }))
+    renderTab()
+    const bar = await screen.findByRole('progressbar', { name: /Messages published/i })
+    expect(bar.getAttribute('aria-valuenow')).toBe('100')
+    expect(bar.firstChild.style.width).toBe('100%')
+  })
+})

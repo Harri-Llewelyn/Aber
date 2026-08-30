@@ -1129,6 +1129,36 @@ function PlaybackCard({ job, onStop, stopPending, canManage }) {
           <strong>{pending ? 'Queued' : 'Publishing'} as {target}</strong>
           <span style={{ color: 'var(--text-muted)' }}> · {job.speed}× speed</span>
         </div>
+        {/* A BAR IS UNAMBIGUOUS HERE, WHICH IT IS NOT ON THE CAPTURE CARD ABOVE.
+            A recording stops at whichever of three caps binds first, so a single bar there would
+            promise remaining time the message cap might take away. A playback has exactly one
+            total -- the messages in the plan -- so the fraction means what it looks like.
+
+            RENDERED ONLY WHEN THE TOTAL IS KNOWN AND THE JOB HAS STARTED. `messages_total` is
+            written by the worker's first progress call, so a queued job has none; a bar at 0% with
+            no denominator would say "nothing has happened" when the truth is "nothing has been
+            measured yet", and the line below already says which. */}
+        {!pending && total > 0 && (
+          <div
+            style={{
+              height: '4px', borderRadius: '2px', background: 'var(--bg-glass)',
+              overflow: 'hidden', margin: '8px 0 6px'
+            }}
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={total}
+            aria-valuenow={Math.min(job.messages_sent, total)}
+            aria-label="Messages published against the capture's total"
+            title={`${job.messages_sent} of ${total} messages published at ${job.speed}× speed.`}
+          >
+            <div
+              style={{
+                width: `${Math.min(100, (job.messages_sent / Math.max(total, 1)) * 100)}%`,
+                height: '100%', background: 'var(--accent)', transition: 'width 1s linear'
+              }}
+            />
+          </div>
+        )}
         <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '4px' }}>
           {pending
             ? 'Waiting for the playback worker to pick it up. If this does not start within a few seconds, the worker is not running.'

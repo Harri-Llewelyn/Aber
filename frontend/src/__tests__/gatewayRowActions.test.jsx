@@ -34,6 +34,16 @@ const routeGet = (rows) => (path) => {
 const show = async (rows, hasPermission = () => true) => {
   api.get.mockImplementation(routeGet(rows))
   render(<GatewaysTab showToast={vi.fn()} hasPermission={hasPermission} initialSearchFilter="" onClearFilter={vi.fn()} />)
+
+  /*
+   * THE PLAYBACK GATEWAY IS HIDDEN BY DEFAULT, so a fixture containing one has to reveal it before
+   * anything can be asserted about its row. That is the behaviour rather than an inconvenience:
+   * these tests are about which ACTIONS it offers, and the filter is a separate question with its
+   * own test. Revealing it here keeps each test about the thing it names.
+   */
+  if (rows.some(r => r.is_shadow)) {
+    fireEvent.click(await screen.findByText(/Show playback gateway/))
+  }
   await waitFor(() => expect(screen.getByText(rows[0].gateway_name)).toBeInTheDocument())
 }
 
@@ -252,5 +262,66 @@ describe('gateway document links', () => {
 
     await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
     expect(openPanel().getByText('Manage Links')).toBeInTheDocument()
+  })
+})
+
+
+/**
+ * The Playback gateway is hidden from the fleet list by default (roadmap item 17).
+ *
+ * It is one seeded row that connects to no machine, and almost every action on it has been
+ * withdrawn -- so in a list of real connectors it reads as a gateway that is permanently offline,
+ * which is the one thing an operator scanning that page is looking for.
+ *
+ * IT IS HIDDEN, NOT REMOVED. Minting its broker credential is the single act an operator must
+ * perform on it, and 0060's NOTICE names this page as where.
+ */
+describe('the playback gateway is filtered out by default', () => {
+  const playbackRow = () => ({
+    ...gateway(),
+    gateway_id: 'gw-playback', gateway_name: 'Playback',
+    sparkplug_id: 'gwy160000000000400080000',
+    cell_id: null, is_simulated: true, is_shadow: true,
+  })
+
+  it('does not list it until asked', async () => {
+    api.get.mockImplementation(routeGet([gateway(), playbackRow()]))
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    expect(screen.queryByText('Playback')).toBeNull()
+  })
+
+  it('offers a toggle that counts what it is hiding', async () => {
+    api.get.mockImplementation(routeGet([gateway(), playbackRow()]))
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
+
+    fireEvent.click(await screen.findByText(/Show playback gateway \(1\)/))
+    await waitFor(() => expect(screen.getByText('Playback')).toBeInTheDocument())
+  })
+
+  it('offers no toggle on a stack that has none', async () => {
+    // A control for an absent row is a puzzle rather than a filter.
+    api.get.mockImplementation(routeGet([gateway()]))
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    expect(screen.queryByText(/Show playback gateway/)).toBeNull()
+  })
+
+  it('is not surfaced by choosing Simulated in the Type filter', async () => {
+    /*
+     * THE REGRESSION THIS GUARDS. A shadow gateway IS simulated -- gateways_shadow_is_simulated
+     * requires it -- so a Type filter that matched on the flag rather than on the derived type
+     * would quietly bring the Playback gateway back under "Simulated". That is the "one word
+     * meaning three things" problem returning by the back door, which roadmap 15 spent a migration
+     * removing.
+     */
+    api.get.mockImplementation(routeGet([gateway(), playbackRow()]))
+    render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('Virtual_Gateway_NodeRED')).toBeInTheDocument())
+    fireEvent.change(screen.getByTitle(/filter by the type column/i), { target: { value: 'simulated' } })
+    expect(screen.queryByText('Playback')).toBeNull()
   })
 })

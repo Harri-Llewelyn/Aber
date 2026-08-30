@@ -703,7 +703,7 @@ Kubernetes — which is what makes it the real drift control between them.
 
 ## Roadmap & Future Extensions
 
-Thirteen extensions, none of them speculative: every one names the code it would build on, because
+Fourteen extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
@@ -737,10 +737,12 @@ below a removal would silently redirect all of them without erroring. A number c
 identifier, not a position. Where code refers to work that has since shipped, the citation names the
 documentation rather than a roadmap number.
 
-**Items 1-5 are this repository's own**, ordered by how much of each already exists, as are 20-22 —
+**Items 1-5 are this repository's own**, ordered by how much of each already exists, as are 20-23 —
 20 first because both 21 and 22 depend on the role split it makes: 21 has nowhere to put an
 Administrator-only control without it, and 22 would hide a lane from a role that could still grant
-itself the ability to see it. **Items 8-14
+itself the ability to see it. **23 is deliberately not in that chain**: it is Administrator-only
+from the start, which adds a sixth policy to the five that already separate the two roles by hand
+rather than waiting for 20 to make the distinction mean something. **Items 8-14
 arrive from feature requests** — 8, 9 and 10 from GitHub issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
@@ -1658,6 +1660,133 @@ panel actively misinforming would be a strange document.
 - **Whether an export is part of it.** A security lane nobody can ship to a SIEM is a lane that gets
   read once a quarter. That is a larger question than this item, and worth knowing the answer before
   the schema is fixed.
+
+### 23 · Revocable service tokens, and the mint that becomes safe once they exist
+
+**Builds on:** `create_service_principal()`
+([0044](supabase/migrations/0044_create_service_principal.sql)) ·
+`record_service_token_issued()` and `service_token_max_days()`
+([0043](supabase/migrations/0043_record_service_token_issued.sql)) ·
+[`scripts/mint-mcp-token.mjs`](scripts/mint-mcp-token.mjs) ·
+[`scripts/rotate-service-keys.mjs`](scripts/rotate-service-keys.mjs) ·
+[`AccessControlTab.jsx`](frontend/src/components/tabs/AccessControlTab.jsx) ·
+`PGRST_DB_PRE_REQUEST`, which is unset
+
+Mint and revoke a service principal's tokens from the Access Control page, Administrator-only, so
+the last credential workflow that requires a shell on the host stops requiring one. **Revocation is
+the item and the buttons are its consequence**, in that order, for a reason that is already written
+down.
+
+#### The CLI step is standing in for a control, not for a missing screen
+
+Half of this is built. [`0044`](supabase/migrations/0044_create_service_principal.sql) already lets
+an Administrator create a machine identity from the page, and
+[`supabase/README.md`](supabase/README.md#the-access-control-page-states-what-is-outstanding)
+describes it doing so. What is left on the host is minting a **token** for one.
+
+That button was designed and refused, and the refusal is the whole design constraint here. `pgjwt`
+is installed and `extensions.sign()` exists, so a `SECURITY DEFINER` RPC could mint one today with
+no new dependency and no secret leaving the database — and the argument against it was not effort:
+
+> *"technically neat, and it would have made an unrevocable credential a button press with a tidy
+> audit trail of a thing nobody can undo. **Solving the wrong half well is worse than not solving
+> it, because the clean implementation reads as safety.** So minting stays on the host."*
+
+So building the mint first removes the friction and keeps the missing control, and the page then
+hands out unrevocable credentials pleasantly. Build revocation first and the same RPC stops being a
+hazard: it is then the ordinary shape this stack already uses for `gateway-credential` — the
+database decides, the row is written before the secret is returned, and the secret is revealed once.
+
+#### A fourth revocation design, and the key it needs has been recorded all along
+
+[`0043`](supabase/migrations/0043_record_service_token_issued.sql) surveys three ways of adding
+revocation and none works: deleting the `auth.users` row does nothing because the signature is
+validated and the subject never looked up; removing the role does nothing because the relations the
+i3X address space is assembled from are `FOR SELECT TO authenticated USING (true)`; and a
+`revoked_at` predicate would have to be added to **every RLS policy in the schema**.
+
+The fourth is not considered there. **PostgREST's `db-pre-request` names a function run before every
+request, in the caller's role, which can `RAISE` and abort it** — the single choke point the third
+design lacked, and it touches no policy at all. `postgrest/postgrest:v14.12` supports it and
+`PGRST_DB_PRE_REQUEST` is unset on both targets, so nothing is being displaced.
+
+**And the identifier is already in the inventory.** `mint-mcp-token.mjs` stamps a `jti` from
+`randomUUID()` and hands it to `record_service_token_issued(p_jti)`; `rotate-service-keys.mjs` does
+the same for the ingestion and playback keys. Every token this item would revoke has been recording
+the exact key a denylist needs, for an inventory that could not act on it.
+
+#### What it does not reach belongs on the page, not in a comment
+
+A revocation covering most of the stack is the same failure as the tidy mint: it reads as safety.
+The four services holding `SUPABASE_JWT_SECRET` alongside PostgREST each verify independently, and
+a pre-request function is invisible to all of them.
+
+| Reached | Not reached |
+| :--- | :--- |
+| PostgREST — every table RLS guards, which is the whole `public` schema | `supabase-storage` · `supabase-realtime` · the edge runtime, which boots `VERIFY_JWT="false"` so each function authorises itself · Studio |
+
+**That is complete coverage for what this item is actually about, and the entry should say why
+rather than leave the gap looking accidental.** The MCP reader and `Service_Ingestor` reach
+PostgREST and nothing else, so for a machine principal the choke point is the only door. For a
+person's session it is not — and a person's session is already revocable through GoTrue's refresh
+tokens, which is a different mechanism for a different problem. The edge functions are reachable
+later if wanted: several already call the database, so it is one added check rather than a redesign.
+
+#### Fail-closed is the risk, and the negative tests come before the feature
+
+A function that runs before every PostgREST request is a single point of failure by construction. If
+it raises when it should not, the entire API is down — which is the correct direction for a security
+control and an outage all the same. Three cases have to be tested before anything depends on it: an
+empty denylist, a token carrying no `jti` at all, and the function missing entirely.
+
+The cost is one indexed lookup per request. Keeping only **unexpired** revoked jtis bounds the table
+and makes it self-pruning: a revoked token past its own `exp` is already refused by the signature
+check.
+
+#### Two credential planes, and only one of them is in scope
+
+The broker plane is not this item, and the reason is specific rather than a boundary drawn for
+tidiness. Gateway accounts are already mintable from the dashboard
+([0041](supabase/migrations/0041_virtual_gateway_credential.sql)) and already revoked on archive or
+delete ([0038](supabase/migrations/0038_revoke_gateway_credentials.sql),
+[0063](supabase/migrations/0063_virtual_gateways_get_revoked.sql)).
+
+**The five platform principals cannot be given the same controls, and a first attempt would look
+like it worked.** `factoryplus_ingestion`, `factoryplus_i3x`, `factoryplus_monitor`, the validator
+and the legacy simulator account come from `.env`, and `mosquitto-init` says what it does with them:
+*"THE PLATFORM PRINCIPALS ARE REWRITTEN ON EVERY RUN — they come from .env and must follow it."* A
+revocation performed in the UI would be undone by the next `docker compose up`, silently, on a page
+whose entire job is to state what is outstanding.
+
+Worth recording while the subject is open: **a broker password has no expiry at all.** `0062` says
+so deliberately — *"it is bounded by revocation (`0038`), not by a countdown"* — which is the right
+answer for an account confined by `mosquitto.acl` and the wrong one to discover by assuming the
+90-day ceiling covers everything.
+
+#### Administrator-only, which anticipates item 20 rather than waiting for it
+
+`system_settings` for read and for write, `list_service_principals()` and
+`create_service_principal()` are the **five policies** §20 cites as the database already separating
+`Administrator` from `Shopfloor_Manager` by hand, against 58 sites that check the pair. Gating this
+on `Administrator` alone adds a sixth in the same direction, so it does not need §20 to land first
+and does not contradict it when it does.
+
+It does touch §22, in one line: a revocation writes `TOKEN_REVOKED` beside `TOKEN_MINTED`, which is
+`classifyEvent()`'s `governance` lane today and §22's `security` domain afterwards. One more action
+to classify, not a second design.
+
+#### Worth deciding early
+
+- **Whether revoking a principal deletes its `auth.users` row or flags it.** Flagging it and
+  revoking its outstanding tokens is the recommendation: deleting orphans the `digital_thread`
+  attribution, and the history of a revoked principal is the part most worth keeping.
+- **Whether the ingestion and playback keys are revocable from the page.** They carry jtis, so
+  mechanically they are — and revoking one stops ingestion until somebody rotates the key and
+  recreates the container. Surfacing them read-only and leaving rotation to `npm run keys:rotate`
+  keeps the one control that has a recovery path attached to it.
+- **Whether `mint-mcp-token.mjs` survives.** It should, as break-glass, for the same reason §21
+  documents the service-role factor delete: a stack whose only Administrator cannot sign in still
+  needs a way to mint. What changes is that it stops being the only way.
 
 ---
 

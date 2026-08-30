@@ -64,6 +64,11 @@ const routeGet = (rows) => (path) => {
 const show = async (rows) => {
   api.get.mockImplementation(routeGet(rows))
   render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} />)
+  // A shadow gateway is filtered out of the fleet list by default, so a fixture that is one has to
+  // be revealed before the Type column can be read. The filter has its own test elsewhere.
+  if (rows.some(r => r.is_shadow)) {
+    fireEvent.click(await screen.findByText(/Show playback gateway/))
+  }
   await waitFor(() => expect(screen.getByText('Playback_Lab')).toBeTruthy())
 }
 
