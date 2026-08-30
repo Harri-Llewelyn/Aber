@@ -174,7 +174,26 @@ describe('the page', () => {
     expect(screen.queryByRole('button', { name: /^Save$/ })).toBeNull()
 
     fireEvent.change(screen.getByLabelText('Lanes drawn before folding'), { target: { value: '45' } })
-    expect(screen.getByRole('button', { name: /^Save$/ })).toBeInTheDocument()
+
+    /*
+     * AWAITED, AND THIS WAS THE ONLY SYNCHRONOUS POST-fireEvent ASSERTION IN THE FILE.
+     *
+     * It flaked three times across a long session -- always in a full run, never alone, and always
+     * while Docker builds were competing for the CPU. It was NOT reproducible: 17 consecutive clean
+     * runs, six of them with two suites deliberately racing each other.
+     *
+     * So this is not a diagnosis, and the comment should not pretend otherwise. What it is: the one
+     * structural difference between this test and its twenty-one passing siblings, every one of
+     * which awaits a re-render rather than asserting on it synchronously. `fireEvent` is wrapped in
+     * act() and normally flushes before returning, which is why this reads as safe -- but nothing
+     * in the page's contract promises the button appears in the same tick, and a test should not
+     * assert a timing property it does not mean to require.
+     *
+     * THE GUARANTEE IS UNCHANGED. findBy* still fails if Save never appears, so a real regression --
+     * a Save rendered unconditionally, or one that never renders -- fails here exactly as before.
+     * The only thing given up is an incidental claim about WHEN, which no requirement makes.
+     */
+    expect(await screen.findByRole('button', { name: /^Save$/ })).toBeInTheDocument()
   })
 
   it('sends the coerced value, not the string from the input', async () => {
