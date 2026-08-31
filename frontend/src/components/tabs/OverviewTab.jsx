@@ -6,6 +6,7 @@ import { usePolling } from '../../hooks/usePolling'
 import { useRealtimeTable } from '../../hooks/useRealtimeTable'
 import { useClockTick } from '../../hooks/useClockTick'
 import { gatewayLiveStatus, isGatewayOnline, isGatewayPending, formatHeartbeat } from '../../utils/gatewayStatus'
+import { gatewayFleetCounts, deviceFleetCounts } from '../../utils/fleetCounts'
 import {
   SCOPE_CELL, SCOPE_SITE_WIDE, SOURCE_UNASSIGNED, SOURCE_SITE_WIDE, SOURCE_SIMULATED, groupDevicesByCell,
   applyStagedMoves
@@ -628,32 +629,20 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
   const activeCellsCount = cells.filter(c => !c.is_archived).length
   const archivedCellsCount = cells.filter(c => c.is_archived).length
 
-  // A gateway is only "online" while its heartbeat is fresh -- an edge node that stops
-  // publishing never writes an OFFLINE status, it just goes quiet.
-  const onlineGwCount = gwList.filter(g => !g.is_archived && isGatewayOnline(g)).length
-  // AWAITING SETUP IS ITS OWN BUCKET, AND OFFLINE EXCLUDES IT -- for exactly the reason the
-  // quarantine note below gives. A physical gateway sits in PENDING_ENROLLMENT from the moment it is
-  // created until somebody carries its bundle to a machine, and in AWAITING_BIRTH until that machine
-  // publishes. Counted as "offline" it reports a fault on every appliance still in its box, so
-  // ordering four gateways on a Monday shows four faults on the overview.
-  const pendingGwCount = gwList.filter(g => !g.is_archived && isGatewayPending(g)).length
-  const offlineGwCount = gwList.filter(
-    g => !g.is_archived && !isGatewayPending(g) && !isGatewayOnline(g)
-  ).length
-  const archivedGwCount = gwList.filter(g => g.is_archived).length
+  // THE SHADOW LANE IS NOT PART OF THE FLEET, and this ribbon was the last surface that disagreed.
+  // The rule, why it is one rule rather than three, and what the returned `shadow` figure is for
+  // are all in fleetCounts.js -- it is the only place that sentence is written now.
+  const gw = gatewayFleetCounts(gwList)
+  const dev = deviceFleetCounts(assets)
 
-  // Quarantined is its OWN bucket, and Online/Offline exclude it.
-  //
-  // These used to overlap: a quarantined device is stored with status OFFLINE, so a single
-  // pending device was counted as "1 Offline" here AND as "1" on a separate Pending
-  // Quarantine card -- the same device reported twice on one screen, and the Offline figure
-  // implied a fault where the real state was "waiting to be admitted".
-  //
-  // The four buckets are now mutually exclusive and sum to the card's total.
-  const quarantinedAssetsCount = assets.filter(a => a.is_quarantined && !a.is_archived).length
-  const onlineAssetsCount = assets.filter(a => (a.status === 'ONLINE' || !a.status) && !a.is_archived && !a.is_quarantined).length
-  const offlineAssetsCount = assets.filter(a => a.status === 'OFFLINE' && !a.is_archived && !a.is_quarantined).length
-  const archivedAssetsCount = assets.filter(a => a.is_archived).length
+  // Appended to the tooltips rather than folded into the buckets, which go on summing to the
+  // headline total -- the property the quarantine note protects.
+  const shadowGwNote = gw.shadow > 0
+    ? ` Plus ${gw.shadow} playback gateway, which publishes recorded captures and is not a connector to any machine.`
+    : ''
+  const shadowAssetNote = dev.shadow > 0
+    ? ` Plus ${dev.shadow} shadow device${dev.shadow === 1 ? '' : 's'} — stand-ins that receive replayed readings, not machines.`
+    : ''
 
   return (
     <>
@@ -678,10 +667,10 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
         <button
           className="kpi-item"
           onClick={() => onNavigateTab && onNavigateTab('gateways')}
-          title={`${onlineGwCount} online / ${pendingGwCount} awaiting setup / ${offlineGwCount} offline / ${archivedGwCount} archived, of ${stats.gateways} registered edge gateways. Click to view Gateways.`}
+          title={`${gw.online} online / ${gw.pending} awaiting setup / ${gw.offline} offline / ${gw.archived} archived, of ${gw.total} registered edge gateways.${shadowGwNote} Click to view Gateways.`}
         >
           <span className="kpi-label">Gateways</span>
-          <span className="kpi-value">{onlineGwCount}<span className="kpi-total">/{stats.gateways}</span></span>
+          <span className="kpi-value">{gw.online}<span className="kpi-total">/{gw.total}</span></span>
           <span className="kpi-unit">Online</span>
         </button>
 
@@ -697,19 +686,19 @@ export function OverviewTab({ onSelectDevice, onSelectGateway, onSelectCell, sho
           the meaning on their own, so the signal does not depend on colour alone.
         */}
         <button
-          className={`kpi-item${quarantinedAssetsCount > 0 ? ' kpi-item-alert' : ''}`}
+          className={`kpi-item${dev.quarantined > 0 ? ' kpi-item-alert' : ''}`}
           onClick={() => onNavigateTab && onNavigateTab('devices')}
-          title={quarantinedAssetsCount > 0
-            ? `${quarantinedAssetsCount} device${quarantinedAssetsCount === 1 ? '' : 's'} awaiting zero-touch onboarding approval. ${onlineAssetsCount} online / ${offlineAssetsCount} offline / ${archivedAssetsCount} archived, of ${stats.assets}. Click to review the quarantine queue.`
-            : `${onlineAssetsCount} online / ${offlineAssetsCount} offline / ${archivedAssetsCount} archived, of ${stats.assets} registered shopfloor devices. Click to view Devices.`}
+          title={dev.quarantined > 0
+            ? `${dev.quarantined} device${dev.quarantined === 1 ? '' : 's'} awaiting zero-touch onboarding approval. ${dev.online} online / ${dev.offline} offline / ${dev.archived} archived, of ${dev.total}.${shadowAssetNote} Click to review the quarantine queue.`
+            : `${dev.online} online / ${dev.offline} offline / ${dev.archived} archived, of ${dev.total} registered shopfloor devices.${shadowAssetNote} Click to view Devices.`}
         >
           <span className="kpi-label">Devices</span>
-          <span className="kpi-value">{onlineAssetsCount}<span className="kpi-total">/{stats.assets}</span></span>
+          <span className="kpi-value">{dev.online}<span className="kpi-total">/{dev.total}</span></span>
           <span className="kpi-unit">Online</span>
-          {quarantinedAssetsCount > 0 && (
+          {dev.quarantined > 0 && (
             <span className="kpi-alert-flag">
               <IconShieldAlert size={12} aria-hidden="true" />
-              {quarantinedAssetsCount} Quarantined
+              {dev.quarantined} Quarantined
             </span>
           )}
         </button>
