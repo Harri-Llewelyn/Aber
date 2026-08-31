@@ -539,12 +539,63 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 
 | Table group | SELECT | INSERT / UPDATE / DELETE |
 | :--- | :--- | :--- |
-| `cells`, `gateways`, `devices`, `documents`, `asset_config`, `schemas`, `device_submodels`, `directory_services`, `metric_catalog`, `metric_groups` | `authenticated` | `Administrator`, `Shopfloor_Manager` |
+| `cells`, `gateways`, `devices`, `links`, `asset_config`, `device_submodels`, `directory_services` | `authenticated` | `Administrator`, `Shopfloor_Manager` |
+| `schemas`, `metric_catalog`, `metric_groups` | `authenticated` | `Administrator` — see below (`0069`) |
 | `digital_thread` | `Administrator`, `Shopfloor_Manager`, `Auditor` | **nobody** — see below |
 | `*_vocabulary` | `authenticated` | **no write policy at all** |
 | `roles`, `permissions`, `role_permissions` | `authenticated` | none |
 | `user_roles` | own row, or `Administrator` / `Shopfloor_Manager` | none |
 | `webhook_endpoints` | `Administrator` | **no write policy** |
+
+### The two privileged roles, and what separates them (`0069`)
+
+**`Administrator` operates the platform; `Shopfloor_Manager` operates the shopfloor.** Until `0069`
+that sentence was not true of anything: `0002` granted both roles **the same thirteen permissions**,
+so the distinction between them was the description text on the `roles` row.
+
+The database had already started separating them by hand — `system_settings` for read and for
+write, `list_service_principals()` and `create_service_principal()` check `Administrator` alone,
+against dozens of sites that check the pair. `0069` makes the permission table agree with that
+direction. Three permissions moved:
+
+| Withdrawn from `Shopfloor_Manager` | What it decides | Where it is enforced |
+| :--- | :--- | :--- |
+| `authz:manage` | who has access | **nowhere yet** — see below |
+| `schema:manage` | what contract ingestion validates against | the write policies on `schemas`, `metric_catalog` and `metric_groups` |
+| `gitops:manage` | what gets deployed to the edge | `ALLOWED_ROLES` in [`deploy-nodered`](functions/deploy-nodered/index.ts) **and** `PERMISSION_MAP` in [`nodered-userinfo`](functions/nodered-userinfo/index.ts) |
+
+A manager keeps devices, cells, gateways, links, quarantine approval, telemetry, archives and the
+digital thread, and goes on **reading** every table above: publishing a schema is a platform act,
+resolving what a device conforms to is not.
+
+**The withdrawal had to reach PostgreSQL, and the reason is worth stating.** *No RLS policy in this
+schema reads `role_permissions`* — every database control resolves through `has_role()`, and the
+permission table is consumed by `usePermissions.js` alone. So revoking a grant, on its own, hides a
+button and changes nothing a caller reaches PostgREST with. That is the object this repository
+retired `VITE_ALLOW_SIGNUP` for: *"a frontend flag and therefore never an access control."* The
+policies moved in the same migration as the grant, and
+[`test_role_permission_split.py`](migrations/test_role_permission_split.py) presents a real manager
+session to each of the three tables rather than asserting the grant table twice.
+
+**`gitops:manage` needed two doors closed, not one.** The Directory page's Sync button goes through
+`deploy-nodered`; the Node-RED editor deploys directly, and `nodered-userinfo` is what tells
+Node-RED which permission tier a session gets. Narrowing only the first would have produced a
+manager who cannot press the button and can still deploy — worse than leaving both open, because it
+reads as a control. A manager keeps `read` there: the editor still opens and the running flow is
+still inspectable, which is most of what that page is for when the shopfloor is misbehaving.
+
+**`authz:manage` gates nothing today, and that is the point of doing this first.** `user_roles` and
+`role_permissions` carry a SELECT policy each and no other, so **no authenticated caller —
+`Administrator` included — can write either through PostgREST**; role assignment is a migration,
+the seed, or `handle_new_user()`. Anything said about a manager promoting themselves describes a
+control that does not exist yet. The split is therefore a **prerequisite** for building it: the
+first role-assignment surface is where `authz:manage` starts meaning something, and it should arrive
+into a schema where the two roles already differ rather than one where they do not.
+
+**It is a breaking change** for a deployment where a `Shopfloor_Manager` publishes schemas or
+deploys flows. The repair is to make that person an `Administrator`. Roadmap §21 and §22 both
+depend on this split — §21's MFA reset is gated on `authz:manage`, and §22's security lane would
+otherwise be hidden from a role that could grant itself the ability to see it.
 
 ### `has_role()`
 
@@ -1161,10 +1212,10 @@ All fail closed: missing or unrecognised role ⇒ `403`.
 | Function | Roles | Notes |
 | :--- | :--- | :--- |
 | [`approve-quarantine`](functions/approve-quarantine) | `Administrator`, `Shopfloor_Manager` | Calls the atomic approval RPC |
-| [`deploy-nodered`](functions/deploy-nodered) | `Administrator`, `Shopfloor_Manager` | Deploys **only** the committed flow |
+| [`deploy-nodered`](functions/deploy-nodered) | `Administrator` | Deploys **only** the committed flow. `gitops:manage` is Administrator-only (`0069`), and this is the only place it is enforced |
 | [`aas-export`](functions/aas-export) | + `Operator`, `Auditor` | Export is a read |
 | [`grafana-userinfo`](functions/grafana-userinfo) | any mapped role | OIDC userinfo for Grafana SSO |
-| [`nodered-userinfo`](functions/nodered-userinfo) | any mapped role | The same lookup in Node-RED's permission vocabulary |
+| [`nodered-userinfo`](functions/nodered-userinfo) | any mapped role | The same lookup in Node-RED's permission vocabulary. Only `Administrator` maps to `*`; the editor is the second door onto `gitops:manage` and narrowed with `deploy-nodered` |
 | [`fplus-directory`](functions/fplus-directory) | any authenticated user | Factory+ Directory adapter — see below |
 | [`grafana-alert-webhook`](functions/grafana-alert-webhook) | **no Supabase role at all** | Records a Grafana alert in `platform_alerts` — see below |
 

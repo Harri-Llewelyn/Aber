@@ -219,8 +219,10 @@ for — plus demo accounts (`supabase/seed.sql`).
 
 **Sign in to the React dashboard first.** Node-RED and Grafana both federate to Supabase Auth, and
 the consent step needs your dashboard session — going straight to either shows a "sign in required"
-prompt rather than a login form. In Node-RED, click **Sign in with ACS-Cymru**; Administrator and
-Shopfloor_Manager can deploy, Operator and Auditor get a read-only editor.
+prompt rather than a login form. In Node-RED, click **Sign in with ACS-Cymru**; Administrator can
+deploy, every other role gets a read-only editor. Deploying a flow is `gitops:manage`, which
+`0069` made Administrator-only — and the editor is the second door onto it, so it narrowed with
+the Directory page's Sync button rather than after it.
 
 **Demo accounts** — seeded by [`supabase/seed.sql`](supabase/seed.sql), password `acscymru123`:
 
@@ -738,9 +740,10 @@ identifier, not a position. Where code refers to work that has since shipped, th
 documentation rather than a roadmap number.
 
 **Items 1-5 are this repository's own**, ordered by how much of each already exists, as are 20-23 —
-20 first because both 21 and 22 depend on the role split it makes: 21 has nowhere to put an
-Administrator-only control without it, and 22 would hide a lane from a role that could still grant
-itself the ability to see it. **23 is deliberately not in that chain**: it is Administrator-only
+20 was first because both 21 and 22 depend on the role split it makes: 21 had nowhere to put an
+Administrator-only control without it, and 22 would have hidden a lane from a role that could still
+grant itself the ability to see it. **That split shipped as `0069`**, so 21 and 22 are unblocked and
+what remains of 20 is Entra sign-in, which neither of them needs. **23 is deliberately not in that chain**: it is Administrator-only
 from the start, which adds a sixth policy to the five that already separate the two roles by hand
 rather than waiting for 20 to make the distinction mean something. **Items 8-14
 arrive from feature requests** — 8, 9 and 10 from GitHub issues
@@ -1366,32 +1369,59 @@ account lands in, and documentation an IT administrator can follow without readi
 **Entra only.** Google and GitHub are deliberately out of scope, for a reason given below that is
 not "we ran out of time".
 
-#### Two roles hold identical grants, and five policies already disagree
+#### The role split has landed, and it was the prerequisite rather than a footnote
 
-`Administrator` and `Shopfloor_Manager` are seeded in
-[`0002_seed_data.sql`](supabase/migrations/0002_seed_data.sql) with **the same thirteen
-permissions**. The distinction between them is presentational, and it is worse than cosmetic: a
-Shopfloor_Manager holds `authz:manage`, so a Shopfloor_Manager can promote themselves to
-Administrator through the Access Control tab.
+**This half is built.** `0069` withdrew `authz:manage`, `schema:manage` and `gitops:manage` from
+`Shopfloor_Manager` — who has access, what contract ingestion validates against, and what gets
+deployed to the edge — and it is documented under
+[The two privileged roles, and what separates them](supabase/README.md#the-two-privileged-roles-and-what-separates-them-0069).
+Mapping an Entra group onto `Shopfloor_Manager` was not worth doing until that name meant
+something, and it now does: **Manager operates the shopfloor, Administrator operates the
+platform.**
 
-Meanwhile the database has already started separating the two by hand. **Five** policies check
-`has_role(ARRAY['Administrator'])` alone — `system_settings` for read and for write,
-`list_service_principals()`, `create_service_principal()` — against **58** sites that check the
-pair. The divergence exists in the policies; the permission table does not know about it.
+**One thing this entry used to claim was not true, and the correction is the more useful fact.** It
+said a Shopfloor_Manager *"can promote themselves to Administrator through the Access Control
+tab"*. There is no such control and no write path for one to use: `user_roles` and
+`role_permissions` carry a SELECT policy each and nothing else, so no authenticated caller —
+Administrator included — can write either through PostgREST. Role assignment is a migration, the
+seed, or `handle_new_user()`. **The escalation was latent, not live.** That makes the split a
+prerequisite for building the role-assignment control rather than a patch on an open hole, which is
+a better argument for doing it first, not a worse one — `authz:manage` starts meaning something at
+the moment that surface exists, and it should arrive into a schema where the two roles already
+differ.
 
-Mapping an Entra group onto `Shopfloor_Manager` is not worth doing until that name means something,
-which is why this is the first half of the item rather than a footnote to it. The split that matches
-the five policies already written: **Manager operates the shopfloor, Administrator operates the
-platform.** Manager keeps devices, cells, gateways, links, quarantine approval, telemetry and
-archive. Manager loses `authz:manage`, `schema:manage` and `gitops:manage` — who has access, what
-contract ingestion validates against, and what gets deployed to the edge.
+**The withdrawal had to reach PostgreSQL, and finding out why is the part worth recording.** *No
+RLS policy in this schema reads `role_permissions`.* Every database control resolves through
+`has_role()`; the permission table is read by `usePermissions.js` and by nothing else. So the
+obvious version of this change — delete three rows from the seed — would have hidden three buttons
+and left every endpoint behind them exactly as open as before. This repository has already written
+down what that costs, retiring `VITE_ALLOW_SIGNUP`: *"a frontend flag and therefore never an access
+control."* The write policies on `schemas`, `metric_catalog` and `metric_groups` narrowed in the
+same migration, and `deploy-nodered`'s `ALLOWED_ROLES` narrowed with them, because an edge function
+is where `gitops:manage` is enforced — there is no deployments table to put a policy on.
 
-Two costs, both real. It is a **breaking change** for any deployment that has a Shopfloor_Manager
-doing schema or GitOps work. And `DEFAULT_ROLE_PERMISSIONS_MAP` in
-[`frontend/src/hooks/usePermissions.js`](frontend/src/hooks/usePermissions.js) hard-codes both roles
-as `Object.values(PERMISSION_UUIDS)` — a static fallback that would go on rendering controls the
-database then refuses. The seed and the map move together, and no mirror-drift check covers that
-pair today.
+**And that permission had two doors, which is the trap worth naming.** The Directory page's Sync
+button goes through `deploy-nodered`; the Node-RED editor deploys directly, on a permission tier
+`nodered-userinfo` hands out. Closing the first alone would have produced a manager who cannot
+press the button and can still deploy — worse than leaving both open, because it reads as a
+control. A manager keeps `read` in the editor: inspecting a running flow is not deploying one.
+
+**The mirror this entry said nothing covered is now covered.** `DEFAULT_ROLE_PERMISSIONS_MAP` in
+[`frontend/src/hooks/usePermissions.js`](frontend/src/hooks/usePermissions.js) is the static
+fallback the dashboard renders from when no `role_permissions` rows resolve — a real path, not a
+theoretical one — and it hard-coded both roles as `Object.values(PERMISSION_UUIDS)`.
+[`check-mirror-drift.mjs`](scripts/check-mirror-drift.mjs) now replays the grants across the whole
+migration chain and compares them to that map per role. It refuses to guess: a withdrawal written
+in a shape its parser does not understand fails the check rather than being silently skipped, since
+an unparsed DELETE would make the SQL side look more generous than the database is.
+
+It is a **breaking change** for any deployment that has a Shopfloor_Manager doing schema or GitOps
+work. The repair is to make that person an Administrator.
+
+#### What is left of this item is Entra itself
+
+Everything below is unbuilt. The role split was sequenced first because §21 and §22 both depend on
+it and neither depends on Entra.
 
 #### The tenant URL is the boundary, and it fails open
 
@@ -1487,9 +1517,10 @@ TOTP second factors, required of the roles that can change the platform and opti
 else. Any authenticator that implements TOTP works — Microsoft Authenticator, Google Authenticator,
 Bitwarden, 1Password — which is a documentation fact, not an integration.
 
-**This item depends on item 20's role divergence**, and not incidentally. The reset control below is
-gated on `authz:manage`, which is Administrator-only *only once Manager has given it up*. Shipping
-this first would build an MFA boundary that a Shopfloor_Manager could dissolve.
+**This item depended on item 20's role divergence, and that dependency is now satisfied.** The
+reset control below is gated on `authz:manage`, which is Administrator-only *only once Manager has
+given it up* — `0069` did that, so this no longer builds an MFA boundary that a Shopfloor_Manager
+could dissolve. Nothing else here waits on Entra.
 
 #### `aal2` is not a switch, and the enforcement belongs in the policies
 
@@ -1626,10 +1657,11 @@ able to perform them is separation of duties, which is the thing the role was na
 then reflect what RLS enforces rather than standing in for it, and a Manager's empty Security lane is
 honest, because the rows are genuinely not in their result set.
 
-**Sequenced after item 20.** Once Shopfloor_Manager gives up `authz:manage`, "who may perform a
-privileged act" and "who may read that it happened" become the same set, with Auditor as the
-deliberate read-only exception. Done in the other order, the security lane would be hidden from a
-role that could still grant itself the ability to see it.
+**Sequenced after item 20's role split, which has landed (`0069`).** Now that Shopfloor_Manager has
+given up `authz:manage`, "who may perform a privileged act" and "who may read that it happened" are
+the same set, with Auditor as the deliberate read-only exception. Done in the other order, the
+security lane would have been hidden from a role that could still grant itself the ability to see
+it. This item is unblocked and does not wait on Entra.
 
 #### The credential inventory is empty, and that is the worst state it could be in
 

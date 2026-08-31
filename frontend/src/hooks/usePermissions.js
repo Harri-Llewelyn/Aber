@@ -2,9 +2,43 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { PERMISSION_UUIDS } from '../constants';
 
+/**
+ * The static fallback, used when a session carries a role claim but no `role_permissions` rows
+ * resolve. It MIRRORS the grants seeded in `0002_seed_data.sql`, and
+ * `scripts/check-mirror-drift.mjs` compares the two -- a divergence here renders controls the
+ * database then refuses, which reads as a bug in the control rather than in this map.
+ *
+ * SHOPFLOOR_MANAGER IS ENUMERATED RATHER THAN `Object.values(...)`, and that is the whole of the
+ * change 0069 made on this side. Both privileged roles used to be spelled as every permission
+ * there is, so the two names were decoration: a Manager could publish schemas, deploy to the edge
+ * and manage access. The three it no longer holds are the platform half --
+ *
+ *     AUTHZ_MANAGE     who has access
+ *     SCHEMA_MANAGE    what contract ingestion validates against
+ *     GITOPS_MANAGE    what gets deployed to the edge
+ *
+ * -- and each is enforced somewhere real rather than here: SCHEMA_MANAGE by the write policies on
+ * `schemas`, `metric_catalog` and `metric_groups` (0069), GITOPS_MANAGE by `ALLOWED_ROLES` in
+ * `supabase/functions/deploy-nodered/index.ts`. This map decides what is OFFERED. Hiding a control
+ * has never been an access control in this repository and is not one now.
+ *
+ * Administrator stays `Object.values(...)` deliberately: it holds every permission by definition,
+ * so spelling it out would create a second list to forget when a permission is added.
+ */
 const DEFAULT_ROLE_PERMISSIONS_MAP = {
   Administrator: Object.values(PERMISSION_UUIDS),
-  Shopfloor_Manager: Object.values(PERMISSION_UUIDS),
+  Shopfloor_Manager: [
+    PERMISSION_UUIDS.QUARANTINE_VIEW,
+    PERMISSION_UUIDS.QUARANTINE_APPROVE,
+    PERMISSION_UUIDS.QUARANTINE_REJECT,
+    PERMISSION_UUIDS.DEVICE_MANAGE,
+    PERMISSION_UUIDS.CELL_MANAGE,
+    PERMISSION_UUIDS.GATEWAY_MANAGE,
+    PERMISSION_UUIDS.TELEMETRY_READ,
+    PERMISSION_UUIDS.ARCHIVE_MANAGE,
+    PERMISSION_UUIDS.LINK_MANAGE,
+    PERMISSION_UUIDS.DIGITAL_THREAD_READ
+  ],
   Operator: [
     PERMISSION_UUIDS.TELEMETRY_READ,
     PERMISSION_UUIDS.QUARANTINE_VIEW

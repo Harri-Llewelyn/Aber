@@ -93,6 +93,12 @@ node scripts/check-migration-idempotency.mjs
 
 # Database suites — need Postgres
 python supabase/migrations/test_user_roles_rls.py
+# The Administrator / Shopfloor_Manager split (0069), in both halves: the grants diverged, AND the
+# withdrawal reaches Postgres. The second half is the one worth having -- no RLS policy reads
+# `role_permissions`, so a revoked grant on its own only hides a button. Note the asymmetry it
+# documents: a blocked INSERT raises 42501, a blocked UPDATE or DELETE reports success over zero
+# rows, so those pair the refusal with an Administrator reaching the same row.
+python supabase/migrations/test_role_permission_split.py
 python supabase/migrations/test_schema_versioning.py
 python supabase/migrations/test_digital_thread_guard.py
 python supabase/migrations/test_ingestion_rejection_rpc.py

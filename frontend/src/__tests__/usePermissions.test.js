@@ -77,7 +77,7 @@ describe('usePermissions hook', () => {
     expect(result.current.hasPermission(PERMISSION_UUIDS.TELEMETRY_READ)).toBe(true)
   })
 
-  it('resolves Shopfloor_Manager role and grants management permissions', async () => {
+  it('resolves Shopfloor_Manager role and grants shopfloor permissions while denying the platform ones', async () => {
     const session = {
       user: {
         id: 'user-mgr-2',
@@ -92,9 +92,50 @@ describe('usePermissions hook', () => {
       expect(result.current.userRole).toBe('Shopfloor_Manager')
     })
 
+    // The shopfloor, which is what the role is named for and what it keeps.
     expect(result.current.hasPermission(PERMISSION_UUIDS.GATEWAY_MANAGE)).toBe(true)
     expect(result.current.hasPermission(PERMISSION_UUIDS.CELL_MANAGE)).toBe(true)
     expect(result.current.hasPermission(PERMISSION_UUIDS.DEVICE_MANAGE)).toBe(true)
+    expect(result.current.hasPermission(PERMISSION_UUIDS.QUARANTINE_APPROVE)).toBe(true)
+    expect(result.current.hasPermission(PERMISSION_UUIDS.ARCHIVE_MANAGE)).toBe(true)
+    expect(result.current.hasPermission(PERMISSION_UUIDS.LINK_MANAGE)).toBe(true)
+    expect(result.current.hasPermission(PERMISSION_UUIDS.TELEMETRY_READ)).toBe(true)
+    expect(result.current.hasPermission(PERMISSION_UUIDS.DIGITAL_THREAD_READ)).toBe(true)
+
+    // The platform, which migration 0069 moved to Administrator. THIS HALF USED TO BE TRUE OF
+    // BOTH ROLES: the fallback map spelled Shopfloor_Manager `Object.values(PERMISSION_UUIDS)`,
+    // so the two names offered identical dashboards and the distinction was decoration.
+    //
+    // These are assertions about what is OFFERED. Each is enforced somewhere real: SCHEMA_MANAGE
+    // by the write policies on schemas, metric_catalog and metric_groups (0069), GITOPS_MANAGE by
+    // ALLOWED_ROLES in deploy-nodered. AUTHZ_MANAGE has no control to gate yet, which is the
+    // reason the split lands before the role-assignment UI rather than after it.
+    expect(result.current.hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)).toBe(false)
+    expect(result.current.hasPermission(PERMISSION_UUIDS.GITOPS_MANAGE)).toBe(false)
+    expect(result.current.hasPermission(PERMISSION_UUIDS.AUTHZ_MANAGE)).toBe(false)
+  })
+
+  it('grants an Administrator the three permissions a Shopfloor_Manager no longer holds', async () => {
+    // The other side of the pair above, and the one that would catch a fallback map narrowed too
+    // far. A split that took a capability from BOTH roles would leave nobody able to publish a
+    // schema, and every assertion in the manager test would still pass.
+    const session = {
+      user: {
+        id: 'user-admin-split',
+        app_metadata: { role: 'Administrator' }
+      }
+    }
+
+    const { result } = renderHook(() => usePermissions(session, vi.fn()))
+
+    await waitFor(() => {
+      expect(result.current.loadingPerms).toBe(false)
+      expect(result.current.userRole).toBe('Administrator')
+    })
+
+    expect(result.current.hasPermission(PERMISSION_UUIDS.SCHEMA_MANAGE)).toBe(true)
+    expect(result.current.hasPermission(PERMISSION_UUIDS.GITOPS_MANAGE)).toBe(true)
+    expect(result.current.hasPermission(PERMISSION_UUIDS.AUTHZ_MANAGE)).toBe(true)
   })
 
   it('resolves Operator role and denies all management permissions while allowing read permissions', async () => {
