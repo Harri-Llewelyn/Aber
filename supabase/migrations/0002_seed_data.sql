@@ -91,8 +91,20 @@ ON CONFLICT (id) DO NOTHING;
 
 
 -- -------------------------------------------------------------------------------------------
--- RBAC role/permission grants  (29 rows)
+-- RBAC role/permission grants  (26 rows)
 -- -------------------------------------------------------------------------------------------
+-- 13 Administrator, 10 Shopfloor_Manager, 2 Operator, 1 Auditor.
+--
+-- THE TWO PRIVILEGED ROLES USED TO HOLD THE SAME THIRTEEN, which made the distinction between
+-- them presentational. 0069 withdrew `authz:manage`, `schema:manage` and `gitops:manage` from
+-- Shopfloor_Manager -- who has access, what contract ingestion validates against, and what gets
+-- deployed to the edge -- and narrowed the write policies those gate. This file stops granting
+-- them so a FRESH install never has to be corrected by a later migration; 0069 stays for the
+-- databases that already ran this one, and its DELETE matches no rows on a new stack.
+--
+-- Mirrored by DEFAULT_ROLE_PERMISSIONS_MAP in frontend/src/hooks/usePermissions.js, which is the
+-- static fallback rendered when no role_permissions rows resolve. The two are compared by
+-- scripts/check-mirror-drift.mjs: a divergence would render controls the database then refuses.
 
 INSERT INTO public.role_permissions VALUES (1, 'cb46a943-42e1-4c1d-8706-933e08544e30')
 ON CONFLICT DO NOTHING;
@@ -138,12 +150,14 @@ INSERT INTO public.role_permissions VALUES (2, 'b345c678-9012-4c1d-8706-933e0854
 ON CONFLICT DO NOTHING;
 INSERT INTO public.role_permissions VALUES (2, 'a012b345-6789-4c1d-8706-933e08544e38')
 ON CONFLICT DO NOTHING;
-INSERT INTO public.role_permissions VALUES (2, 'e012c345-6789-4c1d-8706-933e08544e39')
-ON CONFLICT DO NOTHING;
-INSERT INTO public.role_permissions VALUES (2, 'f123d456-7890-4c1d-8706-933e08544e40')
-ON CONFLICT DO NOTHING;
-INSERT INTO public.role_permissions VALUES (2, 'c234e567-8901-4c1d-8706-933e08544e41')
-ON CONFLICT DO NOTHING;
+-- NOT GRANTED TO ROLE 2, and the gap is deliberate rather than an omission: `authz:manage`
+-- (...e39), `schema:manage` (...e40) and `gitops:manage` (...e41) are the platform half of the
+-- split 0069 made, and they belong to Administrator alone.
+--
+-- Adding one back here does not restore it. 0069 replays after this file on every boot and
+-- deletes exactly these three from role 2, so the grant would exist for the length of one
+-- db-init and the change would present as having no effect at all. Withdraw the split in 0069,
+-- or not anywhere.
 INSERT INTO public.role_permissions VALUES (2, 'd345e678-9012-4c1d-8706-933e08544e42')
 ON CONFLICT DO NOTHING;
 INSERT INTO public.role_permissions VALUES (3, 'f012a345-6789-4c1d-8706-933e08544e36')

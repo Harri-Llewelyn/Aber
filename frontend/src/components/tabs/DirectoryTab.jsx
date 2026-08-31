@@ -346,11 +346,14 @@ export function DirectoryTab({ showToast, hasPermission }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px', fontWeight: 600 }}>
             <IconGitBranch size={18} /> Edge GitOps Deployment Manager
           </div>
+          {/* Administrator alone since 0069, and the tooltip has to say so: deploy-nodered's own
+              ALLOWED_ROLES was narrowed with the permission, so a Shopfloor_Manager told to expect
+              access here would meet a 403 rather than a disabled button. */}
           <button
             className={`btn btn-primary ${!canManageGitops ? 'btn-disabled' : ''}`}
             disabled={!canManageGitops}
             onClick={() => canManageGitops && setConfirmSync(true)}
-            title={!canManageGitops ? 'Requires Administrator or Shopfloor Manager' : 'Overwrite the running Node-RED flows with the repository flow'}
+            title={!canManageGitops ? 'Requires Administrator' : 'Overwrite the running Node-RED flows with the repository flow'}
             style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
           >
             <IconRefreshCw size={14} /> Sync Edge Flows via GitOps

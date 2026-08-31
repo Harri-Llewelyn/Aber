@@ -4,7 +4,17 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { resolveUserRole } from "../_shared/roles.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
-const ALLOWED_ROLES = ["Administrator", "Shopfloor_Manager"];
+// ADMINISTRATOR ALONE, since 0069. This is the enforcement point for `gitops:manage`, and it is
+// the only one: there is no `deployments` table and therefore no RLS policy to narrow, so the
+// permission the Directory page's Sync button is gated on means exactly what this constant says
+// and nothing else. Withdrawing the permission without narrowing this list would have hidden the
+// button from a role that could still POST to the endpoint.
+//
+// Shopfloor_Manager came off the list because deploying is a platform act rather than a shopfloor
+// one -- a flow reaches the Node-RED container, which holds the MQTT credential and can address
+// Mosquitto, Supabase and TimescaleDB. The inline-flow refusal below already narrowed what this
+// endpoint can deploy; this narrows who can ask it to.
+const ALLOWED_ROLES = ["Administrator"];
 
 // The name of the committed flow, used only in messages -- the content arrives via the
 // environment (see loadCanonicalFlow below), never off disk.

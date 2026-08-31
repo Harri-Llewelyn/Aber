@@ -21,9 +21,12 @@ from pathlib import Path
 
 INDEX_TS = Path(__file__).resolve().parent / "index.ts"
 
+# A COPY of the map in index.ts. TestSourceInvariants.test_permission_map_matches_this_suite parses
+# the real one and compares -- without it, narrowing the endpoint and forgetting this dict leaves
+# a suite that passes while asserting the deploy authority the endpoint used to hand out.
 PERMISSION_MAP = {
     "Administrator": "*",
-    "Shopfloor_Manager": "*",
+    "Shopfloor_Manager": "read",
     "Operator": "read",
     "Auditor": "read",
 }
@@ -95,10 +98,19 @@ class TestPermissionMapping(unittest.TestCase):
     def test_administrator_gets_full_permissions(self):
         self.assertEqual(self._permissions_for("Administrator")["permissions"], "*")
 
-    def test_shopfloor_manager_gets_full_permissions(self):
-        """The same pair deploy-nodered allows, and for the same reason: a `function` node runs
-        arbitrary JavaScript inside the Node-RED container."""
-        self.assertEqual(self._permissions_for("Shopfloor_Manager")["permissions"], "*")
+    def test_shopfloor_manager_is_read_only(self):
+        """
+        THIS TEST USED TO ASSERT '*', and the inversion is 0069 rather than a tightened default.
+
+        `gitops:manage` is Administrator-only now, and the Node-RED editor is the SECOND door onto
+        it: the Directory page's Sync button goes through deploy-nodered, the editor deploys
+        directly. Narrowing one and not the other produces a manager who cannot press the button
+        and can still deploy -- worse than before, because it reads as a control.
+
+        'read' rather than absent: the editor still opens and the running flow is still
+        inspectable, which is most of what the page is for when the shopfloor is misbehaving.
+        """
+        self.assertEqual(self._permissions_for("Shopfloor_Manager")["permissions"], "read")
 
     def test_operator_is_read_only(self):
         self.assertEqual(self._permissions_for("Operator")["permissions"], "read")

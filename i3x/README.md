@@ -310,8 +310,8 @@ it exactly as it validates a GoTrue token and there is no second trust path. `GO
 governs what GoTrue *issues* and does not apply.
 
 **The principal holds `Operator`, and the choice of role is deliberate.** Every write policy in this
-schema names `Administrator` or `Shopfloor_Manager`, so `Operator` writes nothing — but so does
-`Auditor`. The difference is `digital_thread_select_privileged_or_auditor`: an Auditor can read the
+schema names `Administrator`, alone or with `Shopfloor_Manager` — `0069` narrowed the schema and
+metric-catalog policies to the former — so `Operator` writes nothing. But neither does `Auditor`. The difference is `digital_thread_select_privileged_or_auditor`: an Auditor can read the
 audit trail. This client has no surface for the Digital Thread and deliberately never will, so
 granting Auditor would leave a capability sitting on a long-lived credential that nothing can use
 and someone might later find. `0034`'s self-check asserts all three properties on every boot.

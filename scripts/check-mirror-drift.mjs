@@ -299,6 +299,123 @@ const compare = (mirror, label, jsValue, sqlValue) => {
   }
 }
 
+// -------------------------------------------------------------------------------------------------
+// 4. RBAC grants. `DEFAULT_ROLE_PERMISSIONS_MAP` in usePermissions.js is the STATIC FALLBACK the
+// dashboard renders from when a session carries a role claim and no `role_permissions` rows
+// resolve -- a real path, not a theoretical one: the hook logs a warning and uses it whenever the
+// PostgREST embed comes back empty, which it did for the whole time the embed was written against
+// the wrong FK and returned PGRST200.
+//
+// SO A DIVERGENCE HERE IS NOT COSMETIC. Too generous and the dashboard offers controls the
+// database then refuses -- which reads as a broken button rather than as a permission the user
+// does not have. Too mean and a capability disappears for the one class of user least able to
+// diagnose why.
+//
+// README §20 named this pair as the one nothing checked, at the point where both privileged roles
+// were spelled `Object.values(PERMISSION_UUIDS)` and the seed granted both the same thirteen.
+// 0069 made them differ, so the mirror now has something to be wrong about.
+//
+// THE SQL SIDE IS REPLAYED, NOT READ FROM ONE FILE, for the same reason `lastDefinition` exists:
+// 0002 seeds the grants and 0069 withdraws three of them, so a check reading either alone models a
+// database nobody runs.
+// -------------------------------------------------------------------------------------------------
+{
+  const constants = read('frontend/src/constants.js');
+  const hook = read('frontend/src/hooks/usePermissions.js');
+
+  /** A named block's body, bounded by the first `};` after its declaration. */
+  const block = (source, declaration, what) => {
+    const at = source.indexOf(declaration);
+    if (at < 0) {
+      problems.push(`rbacGrants: could not find ${what} -- the file's shape changed, so this check is no longer checking anything`);
+      return null;
+    }
+    const stop = source.indexOf('};', at);
+    return source.slice(at, stop < 0 ? undefined : stop);
+  };
+
+  const permBlock = block(constants, 'export const PERMISSION_UUIDS = {', 'PERMISSION_UUIDS in constants.js');
+  const mapBlock = block(hook, 'const DEFAULT_ROLE_PERMISSIONS_MAP = {', 'DEFAULT_ROLE_PERMISSIONS_MAP in usePermissions.js');
+
+  if (permBlock && mapBlock) {
+    // KEY -> uuid, so a disagreement can be reported by the name a reader recognises. Bounded to
+    // the PERMISSION_UUIDS block: constants.js carries other uuid-shaped literals.
+    const uuidByKey = new Map([...permBlock.matchAll(/(\w+):\s*'([0-9a-f-]{36})'/g)].map((m) => [m[1], m[2]]));
+    const keyByUuid = new Map([...uuidByKey].map(([k, v]) => [v, k]));
+    const everyPermission = [...uuidByKey.values()];
+
+    // Each role's entry is either the whole set or an explicit list. `Object.values(...)` is
+    // Administrator's deliberate spelling -- it holds every permission by definition, and writing
+    // it out would create a second list to forget when a permission is added.
+    const jsGrants = new Map();
+    for (const m of mapBlock.matchAll(/(\w+):\s*(Object\.values\(PERMISSION_UUIDS\)|\[[^\]]*\])/g)) {
+      const [, role, value] = m;
+      const uuids = value.startsWith('Object.values')
+        ? everyPermission
+        : [...value.matchAll(/PERMISSION_UUIDS\.(\w+)/g)].map((p) => uuidByKey.get(p[1]));
+      if (uuids.some((u) => u === undefined)) {
+        problems.push(`rbacGrants: ${role} names a PERMISSION_UUIDS key that constants.js does not declare`);
+        continue;
+      }
+      jsGrants.set(role, new Set(uuids));
+    }
+
+    const roleNameById = new Map(
+      [...SCHEMA.matchAll(/INSERT INTO public\.roles VALUES \((\d+), '(\w+)'/g)].map((m) => [m[1], m[2]])
+    );
+
+    const sqlGrants = new Map([...roleNameById.values()].map((name) => [name, new Set()]));
+    for (const m of SCHEMA.matchAll(/INSERT INTO public\.role_permissions VALUES \((\d+), '([0-9a-f-]{36})'\)/g)) {
+      const role = roleNameById.get(m[1]);
+      if (role) sqlGrants.get(role).add(m[2]);
+    }
+
+    // THE WITHDRAWALS, and the parser refuses to guess. Only the `role_id = N AND permission_id IN
+    // (...)` shape is understood; a DELETE written any other way would be counted and not applied,
+    // and the check would then compare the browser against a database that grants more than it
+    // does. Better to fail and be rewritten than to model the wrong schema convincingly.
+    const deleteStatements = [...SCHEMA.matchAll(/DELETE FROM public\.role_permissions/g)].length;
+    const parsedDeletes = [...SCHEMA.matchAll(
+      /DELETE FROM public\.role_permissions\s+WHERE role_id = (\d+)\s+AND permission_id IN \(([^;]*?)\);/g
+    )];
+    if (parsedDeletes.length !== deleteStatements) {
+      problems.push(
+        `rbacGrants: the chain has ${deleteStatements} DELETE(s) from role_permissions and this check ` +
+          `understands ${parsedDeletes.length} of them. Teach it the new shape -- an unparsed withdrawal ` +
+          `makes the SQL side look more generous than the database is.`
+      );
+    }
+    for (const m of parsedDeletes) {
+      const role = roleNameById.get(m[1]);
+      if (!role) continue;
+      for (const u of m[2].matchAll(/'([0-9a-f-]{36})'/g)) sqlGrants.get(role).delete(u[1]);
+    }
+
+    const named = (set) => [...set].map((u) => keyByUuid.get(u) || u).sort().join(',');
+    for (const [role, jsSet] of jsGrants) {
+      const sqlSet = sqlGrants.get(role);
+      if (!sqlSet) {
+        problems.push(`rbacGrants: usePermissions.js has a fallback for '${role}', which public.roles does not seed`);
+        continue;
+      }
+      compare('rbacGrants', `${role}'s permissions`, named(jsSet), named(sqlSet));
+    }
+
+    // THE OTHER DIRECTION, which the loop above cannot see. A role seeded with grants and missing
+    // from the map falls through to no permissions at all when the embed comes back empty -- a
+    // fail-closed blank dashboard, which is the safe failure and still a wrong one.
+    const unmapped = [...sqlGrants].filter(([role, set]) => set.size > 0 && !jsGrants.has(role)).map(([role]) => role);
+    if (unmapped.length) {
+      problems.push(
+        `rbacGrants: ${unmapped.join(', ')} hold(s) seeded permissions with no entry in ` +
+          `DEFAULT_ROLE_PERMISSIONS_MAP, so the fallback renders an empty dashboard for that role`
+      );
+    } else {
+      ok.push(`rbacGrants: every seeded role has a fallback entry (${jsGrants.size} roles)`);
+    }
+  }
+}
+
 for (const line of ok) console.log(`  ok   ${line}`);
 if (problems.length) {
   console.error('\nSQL-to-JavaScript mirror drift:');
@@ -308,6 +425,6 @@ if (problems.length) {
   process.exit(1);
 }
 console.log(
-  `\nAll ${ok.length} mirrored values agree between frontend/src/utils/ and the applied migration ` +
+  `\nAll ${ok.length} mirrored values agree between the frontend and the applied migration ` +
     `chain (${MIGRATION_FILES.length} files, last definition wins).`
 );

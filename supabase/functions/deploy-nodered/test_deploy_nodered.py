@@ -21,7 +21,11 @@ def evaluate_deploy_nodered_authorization(user: dict, auth_header: str = None) -
 
     app_metadata = user.get("app_metadata", {})
     user_role = app_metadata.get("role") or None
-    allowed_roles = ["Administrator", "Shopfloor_Manager"]
+    # ADMINISTRATOR ALONE, since 0069 withdrew `gitops:manage` from Shopfloor_Manager. This list is
+    # a COPY of index.ts's, so TestAllowedRolesMirrorTheSource below parses the real one and
+    # compares -- without it, narrowing the endpoint and forgetting this line leaves a suite that
+    # passes while asserting the authorization the endpoint used to have.
+    allowed_roles = ["Administrator"]
 
     if not user_role or user_role not in allowed_roles:
         return 403, "Forbidden: Insufficient privileges"
@@ -75,15 +79,25 @@ class TestDeployNoderedAuth(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertIn("Forbidden", message)
 
-    def test_shopfloor_manager_role_returns_200(self):
-        """User token with role 'Shopfloor_Manager' must succeed authorization."""
+    def test_shopfloor_manager_role_returns_403(self):
+        """
+        User token with role 'Shopfloor_Manager' must now fail closed with 403.
+
+        THIS TEST USED TO ASSERT 200, and the inversion is the point of 0069 rather than a
+        tightened default. Deploying a flow reaches the Node-RED container, which holds the MQTT
+        credential and can address Mosquitto, Supabase and TimescaleDB -- a platform act, not a
+        shopfloor one. `gitops:manage` moved to Administrator with it, and this endpoint is the
+        only place that permission is enforced: there is no deployments table and so no RLS policy
+        behind it.
+        """
         user = {
             "id": "usr-mgr-789",
             "app_metadata": {"role": "Shopfloor_Manager"},
             "user_metadata": {}
         }
         status, message = evaluate_deploy_nodered_authorization(user, auth_header="Bearer valid_token")
-        self.assertEqual(status, 200)
+        self.assertEqual(status, 403)
+        self.assertIn("Forbidden", message)
 
     def test_administrator_role_returns_200(self):
         """User token with role 'Administrator' must succeed authorization."""
@@ -94,6 +108,47 @@ class TestDeployNoderedAuth(unittest.TestCase):
         }
         status, message = evaluate_deploy_nodered_authorization(user, auth_header="Bearer valid_token")
         self.assertEqual(status, 200)
+
+class TestAllowedRolesMirrorTheSource(unittest.TestCase):
+    """
+    The mirror above is a hand-written copy of a list that lives in TypeScript, and a copy of an
+    authorization decision is the kind that fails silently: widen `ALLOWED_ROLES` in index.ts and
+    every test here goes on passing, because they exercise the copy.
+
+    So the real list is parsed and compared. Source-level, for the same reason the class below is:
+    there is no Deno runtime in this suite.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.source = INDEX_TS.read_text(encoding="utf-8")
+
+    def test_the_endpoint_and_the_mirror_allow_the_same_roles(self):
+        match = re.search(r"const ALLOWED_ROLES\s*=\s*\[([^\]]*)\]", self.source)
+        self.assertIsNotNone(
+            match,
+            "ALLOWED_ROLES is no longer declared as an array literal in index.ts. The mirror in "
+            "this file can no longer be checked against it, which is worse than either shape."
+        )
+        source_roles = re.findall(r'"([^"]+)"', match.group(1))
+        self.assertEqual(
+            source_roles,
+            ["Administrator"],
+            "deploy-nodered admits %s. `gitops:manage` is Administrator-only since 0069 and this "
+            "endpoint is the only place it is enforced -- there is no policy behind it."
+            % source_roles
+        )
+        # And the mirror agrees, asked the only way it can be: by running it. A list comparison
+        # would compare two literals; this compares the decision each one produces.
+        for role in ("Shopfloor_Manager", "Operator", "Auditor"):
+            status, _ = evaluate_deploy_nodered_authorization(
+                {"id": "usr-%s" % role, "app_metadata": {"role": role}},
+                auth_header="Bearer valid_token"
+            )
+            self.assertEqual(
+                status, 403,
+                "the mirror admits %s where index.ts does not" % role
+            )
 
 class TestOnlyTheCanonicalFlowIsDeployable(unittest.TestCase):
     """
