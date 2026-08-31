@@ -705,7 +705,7 @@ Kubernetes — which is what makes it the real drift control between them.
 
 ## Roadmap & Future Extensions
 
-Fourteen extensions, none of them speculative: every one names the code it would build on, because
+Fifteen extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
@@ -739,7 +739,7 @@ below a removal would silently redirect all of them without erroring. A number c
 identifier, not a position. Where code refers to work that has since shipped, the citation names the
 documentation rather than a roadmap number.
 
-**Items 1-5 are this repository's own**, ordered by how much of each already exists, as are 20-23 —
+**Items 1-5 are this repository's own**, ordered by how much of each already exists, as are 20-24 —
 20 was first because both 21 and 22 depend on the role split it makes: 21 had nowhere to put an
 Administrator-only control without it, and 22 would have hidden a lane from a role that could still
 grant itself the ability to see it. **That split shipped as `0069`**, so 21 and 22 are unblocked and
@@ -750,7 +750,7 @@ arrive from feature requests** — 8, 9 and 10 from GitHub issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
 [#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66), in that same order of how much already
-exists; 12 was not filed. 19 arrives from
+exists; 12 and 24 were not filed. 19 arrives from
 [#39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39).
 [#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) was item 11 and is now built. Where an entry's heading differs from the issue's title, it is
 because the work that remains is narrower than the title claims.
@@ -1819,6 +1819,111 @@ to classify, not a second design.
 - **Whether `mint-mcp-token.mjs` survives.** It should, as break-glass, for the same reason §21
   documents the service-role factor delete: a stack whose only Administrator cannot sign in still
   needs a way to mint. What changes is that it stops being the only way.
+
+### 24 · A backup an operator can take without a shell
+
+**Builds on:** [`scripts/backup-databases.sh`](scripts/backup-databases.sh) ·
+[`scripts/restore-databases.sh`](scripts/restore-databases.sh) ·
+[Backup and Recovery](supabase/README.md#backup-and-recovery) · the chart's backup CronJob ·
+`0055` and [Recording from the dashboard](ingestion/README.md#recording-from-the-dashboard) ·
+[`gateway-credential-service.mjs`](scripts/gateway-credential-service.mjs) ·
+[`ColdStorageTab.jsx`](frontend/src/components/tabs/ColdStorageTab.jsx) ·
+**not yet filed as an issue**
+
+Take a backup from the dashboard. Today tier 1 is `scripts/backup-databases.sh` on the host, or the
+chart's CronJob on Kubernetes; there is no way to ask for one from the product, and an operator
+without shell access on the appliance cannot take a copy of the plant's data at all.
+
+**The backup itself is not the missing piece.** The script writes both databases plus the storage
+objects and a manifest, it is idempotent, it prunes on a retention window, and it works against
+Compose and any reachable PostgreSQL. What is missing is a caller. Everything below is about who
+runs it and what the artefact is allowed to do next.
+
+#### The Cold Storage page is the wrong home, and renaming it is the wrong fix
+
+`ColdStorageTab.jsx` opens by settling a name collision that has already cost this repository an
+argument: **Archives** means archived cells, gateways and devices, with a Restore button and a purge
+timer; **Cold Storage** means Parquet chunk tiering, with neither. Calling this page Backups makes
+that a three-way collision and puts two unrelated subjects on one screen — *where is my history* and
+*give me a copy of everything*.
+
+**Its read-only rule does not apply here, and it is worth saying why rather than citing it wrongly.**
+That rule is about *irreversible* acts: *"a button here would put an irreversible act one click from
+a table"*, about dropping a chunk. Taking a backup is not one. The argument against this page is the
+name and the single question it answers, not the absence of buttons. **A separate Backups page.**
+
+#### Nothing in this stack can currently take that backup, and that is the whole item
+
+The script does three things a browser and an edge function cannot:
+
+- `docker compose exec` into two containers — the edge runtime has no Docker socket and no `pg_dump`
+  binary;
+- connects as **`supabase_admin`**, because `postgres` is not a superuser in the `supabase/postgres`
+  image and a restore as it dies on the first event trigger;
+- reaches **the historian**, a second database the Supabase stack never connects to.
+
+`cold-archiver` is the closest existing thing and is not close: it reaches TimescaleDB as
+`ingest_writer` — deliberately holding neither DELETE nor TRUNCATE — and has no access to the
+Supabase database at all.
+
+So this needs a **new privileged service**, on the `gateway-credential-service.mjs` model: one verb,
+no read-back, not published outside the container network, authorised by an RPC that checks
+`has_role()`. That service would hold the largest single privilege in the stack — a full dump of
+both databases — and that is the cost to weigh, not the button.
+
+#### The shape already exists, and it is the Capture page
+
+`capture.py record` opens an MQTT subscription and a browser cannot, so the Capture page is *"a page
+in front of new behaviour in the ingestion daemon"* with the tables and every gate in
+[`0055`](supabase/migrations/0055_capture_orchestration.sql). This is the same problem with a
+different capability, and it should be the same answer: `backup_jobs` for the act and `backups` for
+the artefact — 0055's own split, because *"a job and an artefact are different things"* — an
+Administrator-only RPC, a worker in a service that can do the work, and a page that states what
+exists.
+
+#### What leaves the building is the decision to make first
+
+A ZIP handed to a browser is the natural request and it is the part to decide deliberately. The
+runbook already records what these dumps contain, which is why `./backups/` is **gitignored**:
+`auth.users`, hashed OAuth client secrets and the whole `digital_thread`. Add to that the storage
+tar, which carries the `flows.json` backups the stack keeps in a private bucket because a flow
+describes the plant's edge topology, broker addresses and device ids — and **the historian's
+password, which travels inside the Supabase dump** in `public.telemetry`'s user mapping.
+
+Obtaining that today requires shell access on the host. That is a real control rather than an
+accident of packaging, and a download button lowers it to any Administrator session on any
+workstation. Not a reason to refuse — a reason to choose. **The narrower first version is a button
+that produces a backup server-side and a page that lists what exists**, which is the whole request
+minus the one part that changes who can walk out with the database.
+
+**Size points the same way.** Measured on the demonstration stack: 19 MB Supabase and 24 MB
+historian at 37,007 telemetry rows, compressing to roughly 120 KB and 65 KB. That scales with
+history, and a plant retaining a year of it produces a dump in gigabytes — which a browser download
+synthesised on demand is the wrong mechanism for, whatever the access decision.
+
+#### Restore is deliberately not in scope
+
+The same runbook is the argument. A restore needs **nine roles that a dump contains no `CREATE ROLE`
+for**, two of which are traps — `supabase_realtime_admin` is created by the realtime container on
+first start and by nothing in this repository, and `supabase_functions_admin` only *appears* to be
+created, inside an event-trigger function body a restore defines and never runs. A restore cannot be
+replayed over a previous one, because the inherited constraint on Realtime's daily partitions cannot
+be dropped. And a restore is exactly the irreversible act the Cold Storage page refuses to put one
+click from a table. **`restore-databases.sh` stays a runbook**, and the page should link to it rather
+than offer it.
+
+#### Worth deciding early
+
+- **Where the artefact lives.** `./backups/` is a host path the CronJob does not share; a storage
+  bucket is reachable from both targets and puts the dump under `storage-policies.sql`, which is
+  the only thing that would make a later download gateable at all.
+- **Whether a scheduled backup and a requested one are the same row.** The chart's CronJob already
+  produces artefacts nothing records. If the page is going to state what exists, it should state
+  those too — which is the same argument §22 makes about `provision-gateways.mjs` and the empty
+  credential inventory.
+- **What the retention window means once a human can ask.** `BACKUP_RETENTION_DAYS=14` prunes on the
+  next run. A backup somebody took deliberately before a risky migration is the one most worth
+  keeping and the one a timer is most likely to delete.
 
 ---
 
