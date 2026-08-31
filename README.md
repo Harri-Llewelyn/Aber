@@ -705,7 +705,7 @@ Kubernetes — which is what makes it the real drift control between them.
 
 ## Roadmap & Future Extensions
 
-Fifteen extensions, none of them speculative: every one names the code it would build on, because
+Fourteen extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
@@ -724,7 +724,9 @@ orchestration now sits beside the CLI it wraps, under
 [The Playback gateway, and its shadow devices](ingestion/README.md#the-playback-gateway-and-its-shadow-devices);
 item 15 under
 [`deployment`, and the word it is replacing](supabase/README.md#deployment-and-the-word-it-is-replacing-0064);
-item 18 under [Historian roles](#historian-roles); item 3 under
+item 18 under [Historian roles](#historian-roles); item 22 under
+[Two lanes, and one of them an engineer cannot read](supabase/README.md#two-lanes-and-one-of-them-an-engineer-cannot-read-0070);
+item 3 under
 [Cold telemetry archival](supabase/README.md#cold-telemetry-archival-0068), including
 [what Grafana can and cannot see](supabase/README.md#what-grafana-can-and-cannot-see) — the one part
 of that item deliberately **not** built, because rendering archived ranges in a dashboard would
@@ -732,7 +734,7 @@ recover a resolution nothing charts while adding a container, a gateway route an
 over raw plant history; and item 9's subject was retired the same way when `aas-api` shipped.
 
 **Retired numbers are not reused, and the list is therefore not contiguous.** The gaps at 3, 6, 7, 11,
-13, 15, 16, 17 and 18 are deliberate. Renumbering on retirement was the earlier practice and it does not survive
+13, 15, 16, 17, 18 and 22 are deliberate. Renumbering on retirement was the earlier practice and it does not survive
 contact with this repository: the remaining entries are named by **dozens of comments** in migrations,
 scripts and components, all explaining why that code is the way it is, and shifting every number
 below a removal would silently redirect all of them without erroring. A number cited from code is an
@@ -740,10 +742,11 @@ identifier, not a position. Where code refers to work that has since shipped, th
 documentation rather than a roadmap number.
 
 **Items 1-5 are this repository's own**, ordered by how much of each already exists, as are 20-24 —
-20 was first because both 21 and 22 depend on the role split it makes: 21 had nowhere to put an
+20 was first because both 21 and 22 depended on the role split it makes: 21 had nowhere to put an
 Administrator-only control without it, and 22 would have hidden a lane from a role that could still
-grant itself the ability to see it. **That split shipped as `0069`**, so 21 and 22 are unblocked and
-what remains of 20 is Entra sign-in, which neither of them needs. **23 is deliberately not in that chain**: it is Administrator-only
+grant itself the ability to see it. **That split shipped as `0069` and 22 shipped behind it as
+`0070`**, so what remains of 20 is Entra sign-in, which 21 does not need.
+**23 is deliberately not in that chain**: it is Administrator-only
 from the start, which adds a sixth policy to the five that already separate the two roles by hand
 rather than waiting for 20 to make the distinction mean something. **Items 8-14
 arrive from feature requests** — 8, 9 and 10 from GitHub issues
@@ -1420,8 +1423,9 @@ work. The repair is to make that person an Administrator.
 
 #### What is left of this item is Entra itself
 
-Everything below is unbuilt. The role split was sequenced first because §21 and §22 both depend on
-it and neither depends on Entra.
+Everything below is unbuilt. The role split was sequenced first because §21 and the audit-domain
+work both depended on it and neither depended on Entra. The second of those has since shipped as
+`0070`.
 
 #### The tenant URL is the boundary, and it fails open
 
@@ -1592,107 +1596,6 @@ principal writes is an outage, not a hardening.
   delete — but a code can only ever *drop* MFA and force re-enrolment, because nothing but GoTrue
   can mint an `aal2` session. That is a smaller prize than it first looks.
 
-### 22 · An audit trail that covers privileged acts, and one lane an engineer cannot read
-
-**Builds on:** `log_digital_thread_event()` and its three triggers ·
-`digital_thread_select_privileged_or_auditor` · `classifyEvent()` in
-[`DigitalThreadTab.jsx`](frontend/src/components/tabs/DigitalThreadTab.jsx) ·
-`record_gateway_credential_issued()` ([0041](supabase/migrations/0041_virtual_gateway_credential.sql))
-and `record_service_token_issued()` ([0043](supabase/migrations/0043_record_service_token_issued.sql))
-
-The digital thread is asset provenance and it is good at that. This item asks it to also answer
-*who was granted what, by whom, and when* — which it currently cannot — without letting the answer
-be read by everyone who can read the asset history.
-
-#### Three tables are audited, and `user_roles` is not one of them
-
-`log_digital_thread_event()` is attached to `cells`, `devices` and `gateways`. That is the entire
-trigger coverage. **Nothing records a role grant.** An account becoming an Administrator leaves no
-row anywhere, and neither does a change to `system_settings`, a service principal being created, or
-a schema being published.
-
-This is the first question any external assessment asks, and it is the gap where the expensive half
-is already built: an append-only table whose immutability is enforced in
-[`0003`](supabase/migrations/0003_audit_immutability_and_quarantine_rpc.sql), a causation model, a
-page that renders it, and an export. What is missing is the triggers and the RPC-side writes, not
-the machinery.
-
-#### One table, because `causation_id` cannot cross two
-
-The tempting shape is a second table — a security log beside the asset log, with its own policies.
-Rejected, for a reason that is specific rather than aesthetic: **`causation_id` links the rows
-written by a single act, and it can only do that within one table.** A privileged act and its asset
-consequences are routinely the same act — a schema rebound, a quarantined device approved, a gateway
-archived. Splitting the store breaks every chain that crosses the boundary, and buys a second copy
-of 0003's immutability triggers, the retention policy and the purge tests to keep in step.
-
-#### And it cannot be done by hiding a section
-
-The other tempting shape is to leave the rows where they are and not render them for an engineer.
-This repository has already made that mistake once and written down what it cost: *"THIS REPLACES
-`VITE_ALLOW_SIGNUP`, which was a frontend flag and therefore never an access control."* A hidden
-lane is the same object. The rows stay readable through PostgREST with the same token, and
-`listServiceTokens()` in [`api.js`](frontend/src/api.js) is a three-line query anyone can reproduce
-against the endpoint directly.
-
-#### The classification already exists, in the one place it cannot enforce anything
-
-`classifyEvent()` sorts events into `governance`, `critical`, `creation` and `operational`, and it
-sorts them well — `TOKEN_MINTED` is already governance, with a comment explaining that *"who may do
-what is precisely what governance means."* It runs in the browser, so it can colour a row and
-nothing more.
-
-The work is to promote that judgement into the row: an `audit_domain` written at insert time,
-`asset` or `security`, and then a policy per domain rather than one policy over the table. Today
-`digital_thread_select_privileged_or_auditor` grants Administrator, Shopfloor_Manager **and** Auditor
-read over every row, so a Shopfloor_Manager can already read every `CREDENTIAL_ISSUED` and
-`TOKEN_MINTED` row. The concern this item exists to answer is present-tense, not anticipated.
-
-- `asset` → Administrator, Shopfloor_Manager, Auditor, unchanged
-- `security` → Administrator and Auditor
-
-**Auditor stops being a synonym at this point.** The role holds one permission, `digital_thread:read`,
-and today does nothing a read-only Administrator could not. Reviewing privileged acts without being
-able to perform them is separation of duties, which is the thing the role was named for. The UI lanes
-then reflect what RLS enforces rather than standing in for it, and a Manager's empty Security lane is
-honest, because the rows are genuinely not in their result set.
-
-**Sequenced after item 20's role split, which has landed (`0069`).** Now that Shopfloor_Manager has
-given up `authz:manage`, "who may perform a privileged act" and "who may read that it happened" are
-the same set, with Auditor as the deliberate read-only exception. Done in the other order, the
-security lane would have been hidden from a role that could still grant itself the ability to see
-it. This item is unblocked and does not wait on Entra.
-
-#### The credential inventory is empty, and that is the worst state it could be in
-
-Both writers require a human session. `record_gateway_credential_issued()` checks `has_role()`, and
-`record_service_token_issued()` is reachable by `service_role` alone and called only by
-`mint-mcp-token.mjs`, which somebody runs by hand. So every credential minted by
-`provision-gateways.mjs` is recorded nowhere — 0043's own header says so: *"the same wall
-`provision-gateways.mjs` hits, and the same one that makes a demonstration floor's credentials
-unrecorded."*
-
-0031 sets the bar at *"a half-legible audit entry is worse than an absent one, because it looks like
-the feature works."* An empty inventory is worse than either, because it does not look like a
-missing feature — **it reads as an assertion that no credentials are outstanding**, which on a
-provisioned stack is false. That half is a defect rather than an extension and is filed as
-[#91](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/91); it is named here because this item is
-where the general fix lands, and because an item about audit coverage that did not mention the one
-panel actively misinforming would be a strange document.
-
-#### Worth deciding early
-
-- **Whether retention diverges.** `digital_thread` is append-only and nothing prunes it. Security
-  events are normally kept longer than operational ones, and a domain column is what would
-  eventually let the two differ — but a retention policy over an immutable table is its own design.
-- **What a service-role write may claim.** 0043 settled this once, storing the host and OS user
-  under a `claimed` key precisely because the database can verify neither. Every new write path
-  reached without `auth.uid()` inherits that question, and the answer should be the same one rather
-  than a fresh invention per call site.
-- **Whether an export is part of it.** A security lane nobody can ship to a SIEM is a lane that gets
-  read once a quarter. That is a larger question than this item, and worth knowing the answer before
-  the schema is fixed.
-
 ### 23 · Revocable service tokens, and the mint that becomes safe once they exist
 
 **Builds on:** `create_service_principal()`
@@ -1803,9 +1706,11 @@ answer for an account confined by `mosquitto.acl` and the wrong one to discover 
 on `Administrator` alone adds a sixth in the same direction, so it does not need §20 to land first
 and does not contradict it when it does.
 
-It does touch §22, in one line: a revocation writes `TOKEN_REVOKED` beside `TOKEN_MINTED`, which is
-`classifyEvent()`'s `governance` lane today and §22's `security` domain afterwards. One more action
-to classify, not a second design.
+It touches the audit domains in one line: a revocation writes `TOKEN_REVOKED` beside
+`TOKEN_MINTED`, and `audit_domain_for()` already files everything on `service_principals` under
+`security` — so the row lands in the right lane with no change at all, and what is left is one more
+entry in `DIGITAL_THREAD_ACTIONS`. See
+[Two lanes, and one of them an engineer cannot read](supabase/README.md#two-lanes-and-one-of-them-an-engineer-cannot-read-0070).
 
 #### Worth deciding early
 
@@ -1919,8 +1824,8 @@ than offer it.
   the only thing that would make a later download gateable at all.
 - **Whether a scheduled backup and a requested one are the same row.** The chart's CronJob already
   produces artefacts nothing records. If the page is going to state what exists, it should state
-  those too — which is the same argument §22 makes about `provision-gateways.mjs` and the empty
-  credential inventory.
+  those too — which is the same argument `0070` makes about recording an act rather than only its
+  consequences.
 - **What the retention window means once a human can ask.** `BACKUP_RETENTION_DAYS=14` prunes on the
   next run. A backup somebody took deliberately before a risky migration is the one most worth
   keeping and the one a timer is most likely to delete.

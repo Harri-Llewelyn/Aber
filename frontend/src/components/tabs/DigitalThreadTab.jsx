@@ -43,11 +43,22 @@ function actorTitle(event) {
  * bar these rows have to clear: "a half-legible audit entry is worse than an absent one, because it
  * looks like the feature works."
  */
+/*
+ * `user_roles`, `system_settings` and `schemas` join it in 0070, which is when the audit trigger
+ * first reached them. They are listed for the same reason: the fallback would render ROLE
+ * ASSIGNMENT as USER_ROLES and a settings change as SYSTEM_SETTINGS, which clears no bar.
+ *
+ * `user_roles` reads as ACCESS rather than as the table's name. What the row records is that an
+ * account gained or lost a role, and the join table it happens to live in is not the subject.
+ */
 const ENTITY_KIND = {
   cells: 'CELL',
   gateways: 'GATEWAY',
   devices: 'DEVICE',
   service_principals: 'SERVICE IDENTITY',
+  user_roles: 'ACCESS',
+  system_settings: 'SETTING',
+  schemas: 'SCHEMA',
 }
 /**
  * The kinds the purge test can answer for -- the three that name a real table.
@@ -166,12 +177,26 @@ export function diffFields(oldData, newData) {
  */
 export function classifyEvent(event, diff) {
   const action = String(event.event_type || event.action || '').toUpperCase()
+
+  // THE DATABASE'S JUDGEMENT FIRST, WHERE THERE IS ONE. `audit_domain` is stamped at insert time
+  // by 0070 from one closed classifier, and it is the same question this function was answering
+  // by hand -- "is this about who may do what". A security row is governance whatever its verb,
+  // which is what stops a service principal's INSERT rendering green as a creation event.
+  //
+  // OPTIONAL, NOT REQUIRED. This function is also called on rows a test or an older page state
+  // supplied without the column, and on the SCHEMA_REJECTION path below whose fixtures predate it.
+  // An absent domain falls through to the derivation, which is what it always did.
+  if (event.audit_domain === 'security') return 'governance'
+
   if (action === 'SCHEMA_REJECTION') return 'governance'
   // TOKEN_MINTED is governance for the same reason and a sharper one: it records that somebody was
   // granted a way to reach this stack. It is not `creation` -- no row was created, and the thing
   // that WAS created lives outside the database entirely -- and not `critical`, which is reserved
   // for lifecycle events. Who may do what is precisely what governance means.
   if (action === 'TOKEN_MINTED') return 'governance'
+  // The same argument, arriving from `user_roles` (0070). A revocation is not `critical`: that
+  // marker is for an asset's lifecycle, and nothing on the shopfloor ended here.
+  if (action === 'ROLE_GRANTED' || action === 'ROLE_REVOKED') return 'governance'
   if (action === 'DELETE') return 'critical'
   if (action === 'INSERT') return 'creation'
 

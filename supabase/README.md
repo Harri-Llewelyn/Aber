@@ -541,7 +541,8 @@ Every table has `ENABLE ROW LEVEL SECURITY`. The pattern is uniform and fail-clo
 | :--- | :--- | :--- |
 | `cells`, `gateways`, `devices`, `links`, `asset_config`, `device_submodels`, `directory_services` | `authenticated` | `Administrator`, `Shopfloor_Manager` |
 | `schemas`, `metric_catalog`, `metric_groups` | `authenticated` | `Administrator` — see below (`0069`) |
-| `digital_thread` | `Administrator`, `Shopfloor_Manager`, `Auditor` | **nobody** — see below |
+| `digital_thread` (`asset` lane) | `Administrator`, `Shopfloor_Manager`, `Auditor` | **nobody** — see below |
+| `digital_thread` (`security` lane) | `Administrator`, `Auditor` | **nobody** — see below (`0070`) |
 | `*_vocabulary` | `authenticated` | **no write policy at all** |
 | `roles`, `permissions`, `role_permissions` | `authenticated` | none |
 | `user_roles` | own row, or `Administrator` / `Shopfloor_Manager` | none |
@@ -616,8 +617,66 @@ the meaning of a revocation.
 
 ## Audit Trail (`digital_thread`)
 
-Written exclusively by `log_digital_thread_event()`, an `AFTER INSERT OR UPDATE OR DELETE` trigger
-on `cells`, `gateways` and `devices`.
+Written by `log_digital_thread_event()`, an `AFTER INSERT OR UPDATE OR DELETE` trigger on `cells`,
+`gateways`, `devices`, `system_settings` and `schemas`; by `log_role_assignment()` on `user_roles`;
+and by eight RPCs that record acts which are not row mutations at all.
+
+### Two lanes, and one of them an engineer cannot read (`0070`)
+
+Every row carries an **`audit_domain`** — `asset` or `security` — and a policy per domain replaces
+the single policy that used to cover the table.
+
+| Lane | Who reads it | What is in it |
+| :--- | :--- | :--- |
+| `asset` | `Administrator`, `Shopfloor_Manager`, `Auditor` | `cells`, `devices`, `gateways`, `links` — the shopfloor's own history, **`CREDENTIAL_ISSUED` included** |
+| `security` | `Administrator`, `Auditor` | `service_principals`, `user_roles`, `system_settings`, `schemas` |
+
+**`Auditor` stops being a synonym here.** The role holds one permission, `digital_thread:read`, and
+until `0070` did nothing a read-only Administrator could not. Reviewing privileged acts without
+being able to perform them is separation of duties, which is what the role was named for.
+
+**Two gaps closed together, because closing one alone made it worse.** Nothing recorded a role
+grant — an account becoming an Administrator left no row anywhere — and everything the table *did*
+record was readable by everyone privileged. Adding role grants to a table a Shopfloor_Manager can
+read in full is not an improvement.
+
+**The rule is who may PERFORM the act, not what the act is about.** `CREDENTIAL_ISSUED` stays in
+the asset lane because [`0041`](migrations/0041_virtual_gateway_credential.sql) admits a
+Shopfloor_Manager to `issue_virtual_gateway_credential()`. Filing it as security would mean a
+Manager mints a broker credential and the record of their own act disappears — an empty lane is
+only honest when the rows in it belong to somebody else.
+
+**The domain is stamped by trigger, never supplied by a caller.** Nine writers insert into this
+table. Asking each to pass a domain is asking nine call sites to agree forever, with the failure
+being a security row filed as an asset row. `trg_digital_thread_stamp_domain` overwrites whatever
+arrives, from `audit_domain_for()` — the same assertion `actor_source` refuses to accept off a
+request header.
+
+**It fails closed.** An `entity_type` nobody classified is `security`. The two failures are not
+symmetrical: an unclassified asset row is one a Manager cannot see, which is visible and gets
+reported; an unclassified security row is a privileged act sitting in a lane a Manager reads,
+silently.
+
+**What is not backfilled, and why.** Existing *rows* are classified — they carry an `entity_type`
+and an `action`, which is all the classifier reads. Existing *grants* are not: `user_roles` holds
+who currently holds what and says nothing about when it was granted or by whom, so a backfill would
+have to invent a timestamp and an actor. `0031` sets the bar at *"a half-legible audit entry is
+worse than an absent one"*, and a fabricated one is worse than half-legible. **The trail starts
+when the trigger does.**
+
+**Two triggers on `system_settings`, and the split is load bearing.** `seed_setting()` rewrites
+every seeded row on every boot with the values it already holds and bumps `updated_at` doing it, so
+the generic function's own suppression — which compares the rows minus `last_heartbeat` — saw two
+rows that differed and logged. `check-migration-idempotency.mjs` caught it: six rows appended as
+`migration` on a replay of a table that cannot be pruned. The UPDATE trigger carries a `WHEN` clause
+excluding `updated_at` and `updated_by` rather than teaching the shared function about one table's
+churn columns.
+
+**`seed.sql` had the same problem from the other direction.** It cleared all four demo personas'
+role mappings and re-inserted them on every boot, which became eight audit rows per boot the moment
+`user_roles` was audited — a trail reading as though somebody re-granted every persona's role
+nightly. It now deletes only the mappings that are *wrong*, which keeps the one-role-per-persona
+guarantee and matches no rows on a settled database.
 
 ### Append-only, enforced three ways
 

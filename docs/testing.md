@@ -99,6 +99,10 @@ python supabase/migrations/test_user_roles_rls.py
 # documents: a blocked INSERT raises 42501, a blocked UPDATE or DELETE reports success over zero
 # rows, so those pair the refusal with an Administrator reaching the same row.
 python supabase/migrations/test_role_permission_split.py
+# The digital thread's two lanes (0070): the classifier, the stamp a caller cannot override, and
+# the reads. Every test rolls back -- the rows they provoke are audit rows and 0003 makes the table
+# append-only, so a committed fixture is permanent.
+python supabase/migrations/test_audit_domain.py
 python supabase/migrations/test_schema_versioning.py
 python supabase/migrations/test_digital_thread_guard.py
 python supabase/migrations/test_ingestion_rejection_rpc.py
