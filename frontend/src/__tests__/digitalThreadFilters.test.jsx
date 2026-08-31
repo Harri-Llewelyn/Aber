@@ -634,6 +634,39 @@ describe('Digital Thread event classification', () => {
     expect(classifyEvent(event, diffFields(event.old_data, event.new_data))).toBe('operational')
   })
 
+  /*
+   * THE DATABASE'S JUDGEMENT, PROMOTED INTO THE ROW (0070). `classifyEvent()` used to derive
+   * "is this about who may do what" by hand, in the one place it could not enforce anything.
+   * `audit_domain` is now stamped at insert time by one closed classifier, so the browser reads
+   * the decision rather than re-making it -- and the two cannot disagree.
+   */
+  it('calls any security-domain row governance, whatever its verb', () => {
+    // A service principal's INSERT is the case that used to come out green. Nothing was created
+    // on the shopfloor; somebody was given a way to reach the stack.
+    const event = {
+      event_type: 'INSERT',
+      audit_domain: 'security',
+      new_data: { roles: ['Administrator'], can_sign_in: false }
+    }
+    expect(classifyEvent(event, diffFields(null, event.new_data))).toBe('governance')
+  })
+
+  it('still derives a marker for a row that carries no domain', () => {
+    // Rows reach this function from fixtures and from older page state without the column. An
+    // absent domain must fall through to the derivation rather than default to anything.
+    const event = { event_type: 'INSERT', new_data: { asset_name: 'CNC-01' } }
+    expect(classifyEvent(event, diffFields(null, event.new_data))).toBe('creation')
+  })
+
+  it('calls a role grant and a role revocation governance, not creation or lifecycle', () => {
+    // Asserted on the ACTION alone, without a domain, because the two arms are independent: the
+    // action arm is what a row reaching the page from an older cache would be classified by.
+    for (const action of ['ROLE_GRANTED', 'ROLE_REVOKED']) {
+      const event = { event_type: action, new_data: { role: 'Administrator' } }
+      expect(classifyEvent(event, diffFields(null, event.new_data))).toBe('governance')
+    }
+  })
+
   it('carries a legend, because nothing else in the UI says what amber means', async () => {
     await show()
     const legend = document.querySelector('.dt-legend')

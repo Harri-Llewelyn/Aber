@@ -227,15 +227,31 @@ ON CONFLICT (id) DO UPDATE SET
   updated_at    = NOW();
 
 -- Seed public.user_roles mapping auth user_id to public.roles(id).
--- Clear any pre-existing mappings for the demo personas first so each one ends up with
--- exactly one role. usePermissions.js reads data[0] and custom_access_token_hook() uses
--- LIMIT 1, so a persona holding two roles would resolve non-deterministically.
+-- Clear any pre-existing mappings for the demo personas so each one ends up with exactly one
+-- role. usePermissions.js reads data[0] and custom_access_token_hook() uses LIMIT 1, so a persona
+-- holding two roles would resolve non-deterministically.
+--
+-- ONLY THE MAPPINGS THAT ARE WRONG, and the `NOT IN` is what makes this file replayable now that
+-- `user_roles` is audited (0070). The unconditional DELETE this replaces removed all four rows and
+-- the INSERT below put them straight back, so every boot appended four ROLE_REVOKED rows and four
+-- ROLE_GRANTED rows to a table that is append-only and cannot be pruned --
+-- `check-migration-idempotency.mjs` reports it, and the audit trail would have read as though
+-- somebody re-granted every persona's role nightly.
+--
+-- The guarantee is unchanged: any mapping for these four that is not the intended pair is removed.
+-- What changes is that a settled database matches no rows.
 DELETE FROM public.user_roles
 WHERE user_id IN (
   'a0000000-0000-0000-0000-000000000001',
   'a0000000-0000-0000-0000-000000000002',
   'a0000000-0000-0000-0000-000000000003',
   'a0000000-0000-0000-0000-000000000004'
+)
+AND (user_id, role_id) NOT IN (
+  ('a0000000-0000-0000-0000-000000000001', 1),
+  ('a0000000-0000-0000-0000-000000000002', 2),
+  ('a0000000-0000-0000-0000-000000000003', 3),
+  ('a0000000-0000-0000-0000-000000000004', 4)
 );
 
 INSERT INTO public.user_roles (user_id, role_id) VALUES

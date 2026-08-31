@@ -56,6 +56,12 @@ export const DIGITAL_THREAD_ACTIONS = {
   // filterable because both are the reason somebody opens this page -- "who was given what, when".
   CREDENTIAL_ISSUED: 'Credential issued',
   TOKEN_MINTED:      'Token minted',
+  // WRITTEN BY `log_role_assignment()` (0070), not by the generic audit trigger -- `user_roles`
+  // has no `id` column for it to read. Named rather than INSERT/DELETE because the raw verb would
+  // say a row appeared in a join table, where what happened is that somebody became an
+  // Administrator. Both columns are the primary key, so there is no UPDATE to name.
+  ROLE_GRANTED:      'Role granted',
+  ROLE_REVOKED:      'Role revoked',
 };
 
 /**

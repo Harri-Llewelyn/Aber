@@ -65,18 +65,23 @@ const threadUrls = () => api.get.mock.calls.map(c => c[0]).filter(u => u.include
 
 describe('the action filter offers every action the database can record', () => {
   /*
-   * THREE OF THESE ARE NOT WRITTEN BY THE AUDIT TRIGGER, and each arrived with a feature that would
-   * have been unfilterable without an entry here: SCHEMA_REJECTION with 0026, CREDENTIAL_ISSUED with
-   * 0041, TOKEN_MINTED with 0043. This assertion is spelled out rather than derived so that adding
-   * a fourth is a deliberate edit -- the test below already proves the list cannot drift from the
-   * enum, and a check that only compared them to each other would pass while both were wrong.
+   * FIVE OF THESE ARE NOT WRITTEN BY THE GENERIC AUDIT TRIGGER, and each arrived with a feature
+   * that would have been unfilterable without an entry here: SCHEMA_REJECTION with 0026,
+   * CREDENTIAL_ISSUED with 0041, TOKEN_MINTED with 0043, and ROLE_GRANTED / ROLE_REVOKED with
+   * 0070 -- written by `log_role_assignment()`, which `user_roles` needs because it has no `id`
+   * column for the generic function to read.
+   *
+   * This assertion is spelled out rather than derived so that adding a sixth is a deliberate edit.
+   * The test below already proves the list cannot drift from the enum, and a check that only
+   * compared them to each other would pass while both were wrong.
    */
-  it('lists every action, including the three the trigger does not write', async () => {
+  it('lists every action, including the five the generic trigger does not write', async () => {
     await show()
     const values = [...filter().querySelectorAll('option')].map(o => o.value)
 
     expect(values).toEqual([
-      '', 'INSERT', 'UPDATE', 'DELETE', 'SCHEMA_REJECTION', 'CREDENTIAL_ISSUED', 'TOKEN_MINTED'
+      '', 'INSERT', 'UPDATE', 'DELETE', 'SCHEMA_REJECTION', 'CREDENTIAL_ISSUED', 'TOKEN_MINTED',
+      'ROLE_GRANTED', 'ROLE_REVOKED'
     ])
   })
 

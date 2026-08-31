@@ -59,6 +59,46 @@ def get_connection():
     return conn
 
 
+def ensure_auth_user(cur, user_id, label):
+    """
+    Make `user_id` exist in `auth.users`.
+
+    NOT BOILERPLATE, AND EASY TO MISTAKE FOR IT. `log_digital_thread_event()` writes
+    `changed_by = auth.uid()` under a foreign key to `auth.users`, so a fixture that fakes a
+    session without an account fails on the AUDIT insert -- with an FK error naming
+    `digital_thread`, which reads like a fault in the audit trail rather than a missing fixture.
+
+    IT ONLY STARTED MATTERING WHEN THE TABLE UNDER TEST BECAME AUDITED. `0070` attached the
+    trigger to `system_settings`, `schemas` and `user_roles`, so suites that had been writing to
+    them with a synthetic subject were relying on those tables not being watched.
+
+    auth.users differs between GoTrue's real schema and the base image's legacy one, so the
+    intersection (the primary key alone) is tried first and the fuller shape second. Each attempt
+    is savepointed: a failure here must not abort the caller's transaction.
+    """
+    for columns, values in (
+        ("(id)", (user_id,)),
+        ("(instance_id, id, aud, role, email)",
+         ("00000000-0000-0000-0000-000000000000", user_id, "authenticated",
+          "authenticated", f"{user_id}@{label}.test")),
+    ):
+        cur.execute("SAVEPOINT ensure_user;")
+        try:
+            cur.execute(
+                f"INSERT INTO auth.users {columns} VALUES "
+                f"({', '.join(['%s'] * len(values))}) ON CONFLICT (id) DO NOTHING;",
+                values,
+            )
+            cur.execute("RELEASE SAVEPOINT ensure_user;")
+            return
+        except psycopg2.Error:
+            cur.execute("ROLLBACK TO SAVEPOINT ensure_user;")
+    raise RuntimeError(
+        f"could not create auth.users row {user_id}; digital_thread.changed_by is an FK to it, "
+        "so the tests that act as this user cannot run"
+    )
+
+
 def as_user(cur, user_id):
     """Become `authenticated` with a JWT subject, the way PostgREST 12.2 does it: claims only."""
     cur.execute("SET LOCAL ROLE authenticated;")
@@ -82,6 +122,11 @@ class RoleSplitFixture(unittest.TestCase):
                 for needed in ("Administrator", "Shopfloor_Manager"):
                     if needed not in cls.role_id:
                         raise RuntimeError(f"role {needed!r} is missing; 0001 did not run cleanly.")
+
+                # 0070 audits `schemas`, so the Administrator arm of every write test below now
+                # writes an audit row naming this fixture as its actor.
+                for user_id in (ADMIN_ID, MANAGER_ID):
+                    ensure_auth_user(cur, user_id, "rolesplit")
 
                 cur.execute(
                     "INSERT INTO public.user_roles (user_id, role_id) VALUES (%s, %s), (%s, %s)"
