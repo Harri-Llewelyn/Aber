@@ -161,6 +161,22 @@ in CrashLoopBackOff reporting a database it cannot authenticate against.
 {{- if and (eq (.Values.ingestion.dbUser | default "") "ingest_writer") (not .Values.secrets.ingestWriterPassword) -}}
 {{- $missing = append $missing "secrets.ingestWriterPassword (INGEST_WRITER_PASSWORD, required while ingestion.dbUser is ingest_writer -- the role does not exist without it, and the only other historian credential is the superuser)" -}}
 {{- end -}}
+{{/*
+  THE TWO MACHINE-PRINCIPAL KEYS, and they are here because their absence is the WORST failure
+  shape this helper exists to prevent: not a template error, and not a stack that rejects requests,
+  but a `helm install` that reports success while a pod halts itself and reports `0 of 1 updated
+  replicas are available` for ten minutes. The ingestion daemon refuses to start its MQTT loop
+  without SUPABASE_INGESTION_KEY -- correctly, since running fail-open would let unquarantined
+  devices through -- and the message names neither the chart nor the values file.
+
+  Unconditional, because neither workload has an `enabled` flag: the chart always deploys both.
+*/}}
+{{- if not .Values.secrets.ingestionKey -}}
+{{- $missing = append $missing "secrets.ingestionKey (SUPABASE_INGESTION_KEY, required -- the ingestion daemon halts rather than start its MQTT loop without it, so the stack installs and then never becomes ready)" -}}
+{{- end -}}
+{{- if not .Values.secrets.playbackKey -}}
+{{- $missing = append $missing "secrets.playbackKey (SUPABASE_PLAYBACK_KEY, required -- Service_Playback is the identity broker playback publishes under, and it is deliberately not service_role)" -}}
+{{- end -}}
 {{- if not .Values.secrets.fdwReaderPassword -}}
 {{- $missing = append $missing "secrets.fdwReaderPassword (FDW_READER_PASSWORD, required -- Supabase's postgres_fdw mapping authenticates as fdw_reader, and the only alternative is the historian superuser)" -}}
 {{- end -}}
