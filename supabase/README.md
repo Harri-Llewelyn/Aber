@@ -669,6 +669,65 @@ end-to-end run whose message is about `anon`.
 The durable answer is an event trigger on `CREATE FUNCTION`, which would need no call site at all.
 It is deliberately not taken yet; `0071`'s header records why.
 
+### A fresh install was less locked down than a restarted one (`0001`, issue #117)
+
+The same shape as the anon sweep above, one file earlier and for tables as well as functions.
+
+`0001` ends with a reset:
+
+```sql
+REVOKE ALL ON ALL TABLES    IN SCHEMA public FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, anon, authenticated;
+```
+
+**`ON ALL TABLES IN SCHEMA public` means everything that exists *right now*.** This is position one.
+Every object `0011`, `0013`, `0018` and their successors create is born afterwards, holding the
+Supabase image's default-ACL grants in full — `arwdDxtm` for `anon` and `authenticated` on tables,
+`EXECUTE` on functions — and nothing takes them away until the chain replays on the next boot, when
+the sweep finally sees them.
+
+Measured on a first boot: `authenticated` held every privilege on `ashrae223_vocabulary`,
+`device_nameplate`, `idta_submodel_templates`, `platform_alerts` and `platform_alerts_active`, plus
+`EXECUTE` on twelve functions, most of them trigger bodies. **One restart narrowed all seventeen.**
+Only CI ever builds a database from nothing, so only
+[`check-migration-idempotency.mjs`](../scripts/check-migration-idempotency.mjs) ever saw it — as a
+schema that changed across a replay of the same files.
+
+**The fix stops objects being born wide** rather than sweeping harder afterwards:
+
+```sql
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON TABLES    FROM anon, authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon, authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM anon, authenticated;
+```
+
+Four things about this are worth knowing.
+
+**The settled state does not move.** The sweep already strips `anon` and `authenticated` from every
+existing object on every boot, so a running database has no default-ACL grants left to lose. The
+change makes boot one match the boot two every deployment is already on — it cannot take away a
+privilege anything currently relies on.
+
+**It could not be a new numbered migration.** `ALTER DEFAULT PRIVILEGES` affects only objects created
+*after* it runs, so the house rule of adding a new file would have taken effect exactly one boot too
+late and fixed nothing on the install that needs it. It lives in `0001` beside the sweep it repairs.
+
+**The sweep could not simply move to the end of the chain**, the way `0071` moved the anon function
+sweep. The intended state for `anon` is *nothing*, so a blanket revoke **is** the goal there. The
+intended state for `authenticated` is whatever each migration explicitly granted — and a blanket
+revoke last would destroy precisely those grants with nothing left to re-apply them.
+
+**`PUBLIC` is deliberately absent from that list.** The image's recorded default for functions is
+`{postgres=X,anon=X,authenticated=X,service_role=X}` — `PUBLIC` is not in it — so revoking `PUBLIC`
+removes something never recorded and changes nothing, while PostgreSQL still applies its hardwired
+`EXECUTE`-to-`PUBLIC` to every new function. Verified against `supabase/postgres:17.6.1.160`: a
+function created *after* such a revoke still comes out holding `=X/postgres`. What removes it is
+`0071`'s end-of-chain sweep, on the first boot as much as any later one — the two fixes are
+complementary, not alternatives.
+
+A self-check in `0001` fails the boot if a future image reinstates the grants.
+
 ### `has_role()`
 
 ```sql

@@ -2179,6 +2179,83 @@ REVOKE ALL ON ALL TABLES    IN SCHEMA public FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, anon, authenticated;
 
+-- ---------------------------------------------------------------------------------------------
+-- AND THE SAME FOR OBJECTS THAT DO NOT EXIST YET (issue #117)
+--
+-- The three statements above say ON ALL TABLES IN SCHEMA public, which reads as "everything" and
+-- means "everything that exists RIGHT NOW". This file is position one. Every table and function
+-- 0011, 0013, 0018 and their successors create is born AFTER it has run, holding the default-ACL
+-- grants in full -- and nothing takes them away until the chain replays on the next boot, when the
+-- sweep finally sees them and the schema narrows.
+--
+-- SO A FRESH INSTALL WAS LESS LOCKED DOWN THAN A RESTARTED ONE. Measured on a first boot:
+-- `authenticated` held arwdDxtm on ashrae223_vocabulary, device_nameplate, idta_submodel_templates,
+-- platform_alerts and platform_alerts_active -- tables this chain intends it only to SELECT -- plus
+-- EXECUTE on twelve functions, most of them trigger bodies nothing should call directly. One
+-- restart narrowed all seventeen. Only CI ever observes a first boot, which is why
+-- check-migration-idempotency.mjs found it and no developer machine ever did.
+--
+-- THE FIX IS TO STOP OBJECTS BEING BORN WIDE, not to sweep harder afterwards. The sweep cannot
+-- simply move to the end of the chain the way 0071 moved the anon function sweep: the intended
+-- state for `anon` is "nothing", so a blanket revoke IS the goal there. The intended state for
+-- `authenticated` is whatever each migration explicitly granted, and a blanket revoke last would
+-- destroy precisely those grants with nothing left to re-apply them.
+--
+-- ONLY THE `postgres` ENTRY MATTERS. supabase_admin owns a second set of default ACLs on this
+-- schema, but they apply to objects supabase_admin creates; db-init connects as `postgres`, so
+-- everything this chain builds is owned by `postgres` and takes that role's defaults.
+--
+-- `postgres`, `service_role` and the supabase_* roles keep theirs, for the same reason the sweep
+-- above leaves them alone: the migrations never managed those, and revoking them would change
+-- behaviour rather than preserve it.
+--
+-- IT HAS TO LIVE IN THIS FILE. ALTER DEFAULT PRIVILEGES affects only objects created after it runs,
+-- so a new numbered migration -- the house rule everywhere else -- would take effect exactly one
+-- boot too late and fix nothing on the install that needs it.
+--
+-- PUBLIC IS ABSENT FROM THE LIST DELIBERATELY. The image's recorded default for functions is
+-- {postgres=X,anon=X,authenticated=X,service_role=X}; PUBLIC is not in it, so revoking PUBLIC here
+-- removes something never recorded and changes nothing, while PostgreSQL still applies its
+-- hardwired EXECUTE-to-PUBLIC to every new function. Verified against supabase/postgres:17.6.1.160
+-- -- a function created after such a revoke still comes out holding `=X/postgres`. What removes it
+-- is 0071's end-of-chain sweep, which revokes PUBLIC and anon from every function that exists by
+-- then, on the first boot as well as every later one.
+-- ---------------------------------------------------------------------------------------------
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON TABLES    FROM anon, authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon, authenticated;
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM anon, authenticated;
+
+-- Fails loudly if a future supabase/postgres image reinstates the grants, which would silently
+-- restore the divergence this closes. Absence of the row counts as narrowed: PostgreSQL deletes a
+-- pg_default_acl entry once it matches the built-in default.
+DO $default_acl_check$
+DECLARE
+  v_wide text;
+BEGIN
+  SELECT string_agg(label, ', ' ORDER BY label) INTO v_wide
+    FROM (
+      SELECT DISTINCT format('%s on %s', pg_get_userbyid(e.grantee),
+                      CASE d.defaclobjtype WHEN 'r' THEN 'tables'
+                                           WHEN 'f' THEN 'functions'
+                                           WHEN 'S' THEN 'sequences'
+                                           ELSE d.defaclobjtype::text END) AS label
+        FROM pg_default_acl d
+        JOIN pg_namespace n ON n.oid = d.defaclnamespace
+       CROSS JOIN LATERAL aclexplode(d.defaclacl) e
+       WHERE n.nspname = 'public'
+         AND pg_get_userbyid(d.defaclrole) = 'postgres'
+         AND pg_get_userbyid(e.grantee) IN ('anon', 'authenticated')
+    ) s;
+
+  IF v_wide IS NOT NULL THEN
+    RAISE EXCEPTION
+      '0001: the default privileges on schema public still grant to %. Every object a later '
+      'migration creates would be born with them, and a fresh install would again be less locked '
+      'down than a restarted one (issue #117).', v_wide;
+  END IF;
+END;
+$default_acl_check$;
+
 -- Name: FUNCTION active_schema_version(schema_id uuid); Type: ACL; Schema: public; Owner: -
 GRANT ALL ON FUNCTION public.active_schema_version(schema_id uuid) TO anon;
 
