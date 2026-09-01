@@ -1041,6 +1041,13 @@ The `cold-archiver` service runs `cold_archive --drop --loop` on `COLD_ARCHIVE_I
 stays inert until the switch is turned on — which is what makes the switch a control rather than a
 note about a command somebody has to remember.
 
+> **The manifest reaches Kubernetes; the archiver does not.** `cold_archive.sql` is mirrored into
+> the chart and applied by the `timescaledb-maintenance` Job, between `storage.sql` and `roles.sql`
+> exactly as Compose runs it — so `telemetry_archive_manifest` exists, `roles.sql`'s guarded grant
+> lands on the first boot rather than the second, and `0068`'s self-check passes for the right
+> reason. What Kubernetes still has no **`cold-archiver` workload**, so nothing exports or drops:
+> the catalogue is there and permanently empty.
+>
 > **Compose only, for now.** This sentence used to read *"it runs on every stack"* and that was
 > never true of Kubernetes: the chart declares no `cold-archiver` workload, and `cold_archive.sql`
 > is not in `sync-helm-chart-files.mjs`'s allow-list, so the manifest table the archiver writes does
@@ -1051,6 +1058,11 @@ note about a command somebody has to remember.
 > outright with `BackoffLimitExceeded` and the whole deployment target could not install. The check
 > now distinguishes an *unreachable historian* (skip: it is not part of this deployment) from a
 > *reachable but mismatched* one (fail: that is the column-list coupling it exists to protect).
+>
+> That distinction alone did **not** fix Kubernetes, and the reason is worth keeping: there the
+> historian *is* deployed and reachable, so it is the mismatched case, not the absent one. It is the
+> mirrored `cold_archive.sql` above that makes it pass — the skip branch is for the CI job that runs
+> one Postgres and no historian at all.
 >
 > With that fixed the gap is what it always claimed to be: `retention.sql`'s conflict warning is
 > gated on the same table existing, so a Kubernetes stack drops chunks on the ordinary timer exactly

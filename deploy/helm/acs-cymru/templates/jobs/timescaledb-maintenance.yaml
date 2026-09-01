@@ -162,6 +162,25 @@ spec:
               echo 'Reconciling the storage footprint view...'
               $PSQL -f /sql/storage.sql
 
+              {{/*
+                BETWEEN storage.sql AND roles.sql, which is exactly where docker-compose.yml runs
+                it -- and the parity is the point rather than a coincidence. roles.sql grants
+                SELECT on `telemetry_archive_manifest` guarded on the table existing, so running
+                cold_archive.sql after it would push that grant to the SECOND boot and make a
+                fresh Kubernetes install differ from a fresh Compose one.
+
+                IT TAKES NO PSQL VARIABLES. Every threshold cold archival reads lives in
+                `system_settings` in the PLATFORM database and is re-read on each pass, which is
+                what makes `archive.enabled` a control rather than a deploy-time decision.
+
+                NOT INSIDE THE ROLLUPS CONDITIONAL, unlike the two lines around it. Cold archival
+                is about raw chunks and does not touch a rollup view; tying it to
+                `rollups.enabled=false` would leave 0068's self-check facing a reachable historian
+                with no manifest, which it correctly treats as a mismatch and fails db-init on.
+              */}}
+              echo 'Reconciling the cold archive manifest...'
+              $PSQL -f /sql/cold_archive.sql
+
               echo 'Reconciling read-only BI role...'
               $PSQL -v bi_reader_password="$BI_READER_PASSWORD" \
                     -v ingest_writer_password="$INGEST_WRITER_PASSWORD" \
@@ -175,6 +194,15 @@ spec:
                 fail on the first GRANT rather than no-op.
               */}}
               echo 'Rollups disabled; skipping roles.sql (it grants only on the rollup views).'
+
+              {{/*
+                cold_archive.sql is NOT skipped with them. It creates the manifest table 0068's
+                self-check reads over the FDW, and that check runs in the platform database
+                regardless of whether this stack keeps rollups -- so skipping it here would fail
+                db-init on any deployment that turned rollups off.
+              */}}
+              echo 'Reconciling the cold archive manifest...'
+              $PSQL -f /sql/cold_archive.sql
               {{- end }}
           volumeMounts:
             - name: sql
