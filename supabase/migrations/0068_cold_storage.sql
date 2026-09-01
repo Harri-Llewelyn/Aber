@@ -224,13 +224,45 @@ BEGIN
     -- validates nothing at creation time, so a column list that disagrees with the historian
     -- compiles perfectly here and fails inside a dashboard panel later. 0027 makes the same probe
     -- for the same reason.
+    --
+    -- TWO FAILURES THAT LOOK IDENTICAL FROM HERE, AND ONLY ONE IS A BUG. This probe used to raise
+    -- on any error at all, which conflated:
+    --
+    --   * NO HISTORIAN IN THIS DEPLOYMENT -- the FDW server is unreachable. True of the RLS CI job,
+    --     which runs one Postgres and no TimescaleDB, and true of Kubernetes, where the chart
+    --     carries no cold-archiver and `cold_archive.sql` is not in its mirror allow-list. Raising
+    --     here failed db-init outright, so a whole deployment target could not install because an
+    --     optional subsystem was absent.
+    --
+    --   * A HISTORIAN THAT IS PRESENT AND WRONG -- reachable, but the manifest is missing or its
+    --     columns have drifted from the foreign table declared above. That is the coupling this
+    --     check was written for, and it stays fatal.
+    --
+    -- The same distinction `seed.sql` draws for an empty shopfloor: *"it distinguishes the two
+    -- cases rather than relaxing the assertion, because both look like an empty drawer from
+    -- outside and only one is a bug."*
+    --
+    -- SQLSTATE, NOT THE MESSAGE TEXT. postgres_fdw reports an unreachable server as class 08
+    -- (connection exception); a missing or mismatched relation arrives as 42P01 / 42703. Matching
+    -- on the message would break the moment libpq's wording changes, and would not survive a
+    -- localised server.
     BEGIN
         PERFORM 1 FROM timescale.telemetry_archive_manifest LIMIT 1;
-    EXCEPTION WHEN OTHERS THEN
-        RAISE EXCEPTION
-          '0068 self-check: timescale.telemetry_archive_manifest is not readable (%). The column '
-          'list here must match public.telemetry_archive_manifest in timescaledb/cold_archive.sql '
-          'exactly, and that file must have been applied by timescaledb-maintenance first.', SQLERRM;
+    EXCEPTION
+        WHEN sqlstate '08000' OR sqlstate '08001' OR sqlstate '08003' OR sqlstate '08004'
+          OR sqlstate '08006' OR sqlstate '08007' OR sqlstate '08P01' THEN
+            RAISE NOTICE
+              '0068: the historian is not reachable from here (%), so cold archival is not part of '
+              'this deployment and the manifest check is skipped. The archiver runs on Compose; '
+              'the chart carries no cold-archiver workload -- see supabase/README.md. Everything '
+              'below still applies.', SQLERRM;
+        WHEN OTHERS THEN
+            RAISE EXCEPTION
+              '0068 self-check: timescale.telemetry_archive_manifest is not readable (%). The '
+              'column list here must match public.telemetry_archive_manifest in '
+              'timescaledb/cold_archive.sql exactly, and that file must have been applied by '
+              'timescaledb-maintenance first. The historian IS reachable, so this is a real '
+              'mismatch rather than an absent subsystem.', SQLERRM;
     END;
 
     -- Every declared key exists and is readable through the same path the Settings page uses.

@@ -1044,12 +1044,20 @@ note about a command somebody has to remember.
 > **Compose only, for now.** This sentence used to read *"it runs on every stack"* and that was
 > never true of Kubernetes: the chart declares no `cold-archiver` workload, and `cold_archive.sql`
 > is not in `sync-helm-chart-files.mjs`'s allow-list, so the manifest table the archiver writes does
-> not exist there either. Nothing is lost by the gap — `retention.sql`'s conflict warning is gated
-> on that table existing, so a Kubernetes stack drops chunks on the ordinary timer exactly as it did
-> before archival shipped. What is wrong is only the claim. **The archive is a Compose feature until
-> the chart carries the workload**, and the reason it took a fortnight to notice is that CI could not
-> run: the file-sync guard that watches these copies had been failing at the billing gate since
-> before archival merged, so four stale chart files sat on `main` unreported.
+> not exist there either.
+>
+> **And the absence was not graceful.** `0068`'s self-check probed the manifest over the FDW and
+> raised on any failure, so a Kubernetes install did not merely lack archival — `db-init` failed
+> outright with `BackoffLimitExceeded` and the whole deployment target could not install. The check
+> now distinguishes an *unreachable historian* (skip: it is not part of this deployment) from a
+> *reachable but mismatched* one (fail: that is the column-list coupling it exists to protect).
+>
+> With that fixed the gap is what it always claimed to be: `retention.sql`'s conflict warning is
+> gated on the same table existing, so a Kubernetes stack drops chunks on the ordinary timer exactly
+> as it did before archival shipped. **The archive is a Compose feature until the chart carries the
+> workload.** The reason it took a fortnight to notice is that CI could not run: the file-sync guard
+> that watches these copies had been failing at the billing gate since before archival merged, so
+> four stale chart files sat on `main` unreported.
 
 It includes `--drop`, and that is the safer option rather than the bolder one: the baseline it
 replaces is `retention.sql` dropping chunks on a timer with **no export and no record at all**.
