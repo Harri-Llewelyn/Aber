@@ -20,6 +20,40 @@ import { vi } from 'vitest'
 vi.mock('@google/model-viewer', () => ({}))
 
 /**
+ * A FIXED LOCALE FOR EVERY SUITE, because the runner's is not the same as anybody's laptop.
+ *
+ * The components format dates with `toLocaleString(undefined, ...)` -- deliberately the VIEWER's
+ * locale, which is the right behaviour for a dashboard read on a shopfloor in one country and a
+ * head office in another. The consequence is that any test asserting on rendered date text is
+ * asserting on the machine that ran it.
+ *
+ * That is not hypothetical: `captureTab.test.jsx` expected `27 Aug 2026` and passed on every
+ * development machine here, while the GitHub runner rendered `Aug 27, 2026` and failed. It went
+ * unnoticed for a fortnight because CI could not run at all -- see the PR that added this.
+ *
+ * PINNED HERE RATHER THAN FIXED IN THE ONE TEST, for the reason the model-viewer stub above gives:
+ * the trap is silent in the other direction. The next date assertion somebody writes would pass
+ * locally and fail in CI, and the failure names a component rather than a locale.
+ *
+ * `en-GB` because it is the deployment's own locale -- this is a Welsh manufacturing stack -- so
+ * the strings in the tests read the way the people maintaining them expect. THE COMPONENTS ARE
+ * NOT CHANGED: `undefined` still reaches Intl in the browser, and a viewer in another locale still
+ * gets their own format. Only the test runtime's default is decided.
+ *
+ * Patching the three `toLocale*` methods rather than `Intl.DateTimeFormat`: `Date.prototype`
+ * methods do not route through the global constructor in V8, so replacing `Intl.DateTimeFormat`
+ * looks like it works and changes nothing here. An explicit locale passed by a caller still wins,
+ * because only an absent one is defaulted.
+ */
+const TEST_LOCALE = 'en-GB'
+for (const method of ['toLocaleString', 'toLocaleDateString', 'toLocaleTimeString']) {
+  const original = Date.prototype[method]
+  Date.prototype[method] = function (locales, options) {
+    return original.call(this, locales ?? TEST_LOCALE, options)
+  }
+}
+
+/**
  * jsdom gaps that the download paths depend on.
  *
  * Polyfilled HERE rather than in the test files that need them, because the failure modes are

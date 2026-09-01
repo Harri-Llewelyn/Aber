@@ -598,6 +598,35 @@ deploys flows. The repair is to make that person an `Administrator`. Roadmap §2
 depend on this split — §21's MFA reset is gated on `authz:manage`, and §22's security lane would
 otherwise be hidden from a role that could grant itself the ability to see it.
 
+### The anon sweep runs after the functions exist (`0009`, `0071`)
+
+`0009` revokes EXECUTE from `PUBLIC` and `anon` on every function in `public`, restoring only what
+`authenticated` and `service_role` already held. **It runs at position nine.**
+
+PostgreSQL grants EXECUTE on a new function to `PUBLIC` by default and `anon` inherits it, so every
+function created by a migration numbered above 0009 was anon-executable from the moment it was
+created — the enrolment withdrawal (`0037`), the playback guards (`0056`), the revocation trigger
+(`0063`), the audit-domain stamp (`0070`) and a dozen more.
+
+**A restarted stack self-corrects, which is why this survived sixty migrations.** `CREATE OR REPLACE
+FUNCTION` preserves the existing ACL, so the second boot's pass of `0009` revokes what the first
+boot's pass of a later migration created. The baseline is met from boot two onward, and every
+development machine has restarted often enough to look clean.
+
+**A fresh install is boot one.** `validate.py`'s check 13a requires an anon privilege review to
+return an *empty* set — *"that is what makes a real finding visible instead of hiding it among
+harmless trigger functions"* — and on a first boot it returned twelve. CI builds a database from
+nothing on every run and is the only place that state is ever observed; it had been unable to report
+since before half of those functions existed.
+
+`0071` extracts the sweep as `revoke_anon_function_privileges()` and calls it. **A later migration
+that creates a function must end with the same one-line call**, and `0071`'s self-check fails the
+following boot if it does not — naming the omission at db-init rather than an hour later in an
+end-to-end run whose message is about `anon`.
+
+The durable answer is an event trigger on `CREATE FUNCTION`, which would need no call site at all.
+It is deliberately not taken yet; `0071`'s header records why.
+
 ### `has_role()`
 
 ```sql
@@ -1008,9 +1037,39 @@ has `--csv`.
 ### Running it, and the switch that used to mean nothing
 
 The `cold-archiver` service runs `cold_archive --drop --loop` on `COLD_ARCHIVE_INTERVAL_SECONDS`
-(default daily), re-reading `archive.enabled` every pass and doing nothing while it is off. It runs
-on every stack and stays inert until the switch is turned on — which is what makes the switch a
-control rather than a note about a command somebody has to remember.
+(default daily), re-reading `archive.enabled` every pass and doing nothing while it is off. It
+stays inert until the switch is turned on — which is what makes the switch a control rather than a
+note about a command somebody has to remember.
+
+> **The manifest reaches Kubernetes; the archiver does not.** `cold_archive.sql` is mirrored into
+> the chart and applied by the `timescaledb-maintenance` Job, between `storage.sql` and `roles.sql`
+> exactly as Compose runs it — so `telemetry_archive_manifest` exists, `roles.sql`'s guarded grant
+> lands on the first boot rather than the second, and `0068`'s self-check passes for the right
+> reason. What Kubernetes still has no **`cold-archiver` workload**, so nothing exports or drops:
+> the catalogue is there and permanently empty.
+>
+> **Compose only, for now.** This sentence used to read *"it runs on every stack"* and that was
+> never true of Kubernetes: the chart declares no `cold-archiver` workload, and `cold_archive.sql`
+> is not in `sync-helm-chart-files.mjs`'s allow-list, so the manifest table the archiver writes does
+> not exist there either.
+>
+> **And the absence was not graceful.** `0068`'s self-check probed the manifest over the FDW and
+> raised on any failure, so a Kubernetes install did not merely lack archival — `db-init` failed
+> outright with `BackoffLimitExceeded` and the whole deployment target could not install. The check
+> now distinguishes an *unreachable historian* (skip: it is not part of this deployment) from a
+> *reachable but mismatched* one (fail: that is the column-list coupling it exists to protect).
+>
+> That distinction alone did **not** fix Kubernetes, and the reason is worth keeping: there the
+> historian *is* deployed and reachable, so it is the mismatched case, not the absent one. It is the
+> mirrored `cold_archive.sql` above that makes it pass — the skip branch is for the CI job that runs
+> one Postgres and no historian at all.
+>
+> With that fixed the gap is what it always claimed to be: `retention.sql`'s conflict warning is
+> gated on the same table existing, so a Kubernetes stack drops chunks on the ordinary timer exactly
+> as it did before archival shipped. **The archive is a Compose feature until the chart carries the
+> workload.** The reason it took a fortnight to notice is that CI could not run: the file-sync guard
+> that watches these copies had been failing at the billing gate since before archival merged, so
+> four stale chart files sat on `main` unreported.
 
 It includes `--drop`, and that is the safer option rather than the bolder one: the baseline it
 replaces is `retention.sql` dropping chunks on a timer with **no export and no record at all**.

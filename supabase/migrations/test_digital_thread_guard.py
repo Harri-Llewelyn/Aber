@@ -349,15 +349,51 @@ class TestAttribution(AuditGuardTestCase):
         The approve_quarantined_device() path: a SECURITY DEFINER RPC sets the GUC so the audit
         row names the operator who authorised it rather than the service credential it rode in on.
 
-        Uses a REAL seeded account, because `digital_thread.changed_by` is a foreign key into
-        auth.users -- which is itself the reason 0005 needed a separate `actor_source` column
-        rather than writing 'ingestion' into changed_by.
+        Uses a REAL account, because `digital_thread.changed_by` is a foreign key into auth.users
+        -- which is itself the reason 0005 needed a separate `actor_source` column rather than
+        writing 'ingestion' into changed_by.
+
+        AND IT SEEDS ITS OWN, RATHER THAN TAKING THE FIRST ROW IT FINDS. This used to be
+        `SELECT id FROM auth.users ORDER BY created_at LIMIT 1`, which is a person on a seeded
+        stack and something else entirely in CI's RLS job, where seed.sql is deliberately not
+        applied and the only rows are other suites' fixtures. Those are shaped like MACHINES --
+        no email, no password -- so `is_machine_principal()` (0048) answered true, the attribution
+        ladder skipped the `user` arm, and the assertion failed with 'migration' != 'user' against
+        a function behaving exactly as designed.
+
+        The three columns are the definition, not decoration: 0048 calls an account a machine when
+        it has no email, no password AND no `auth.identities` row. A fixture meant to stand for a
+        person has to fail all three, and an identity row is what GoTrue would create for one.
+        This is the same trap the suites that seed their own personas already document -- a test
+        depending on the seed passes locally and fails in CI, which is the worst direction.
         """
-        self.cur.execute("SELECT id FROM auth.users ORDER BY created_at LIMIT 1")
-        row = self.cur.fetchone()
-        if not row:
-            self.skipTest("no seeded auth.users row to attribute against")
-        actor = str(row[0])
+        actor = "5e770005-0000-4000-8000-0000000000a1"
+        self.cur.execute("SAVEPOINT person;")
+        try:
+            self.cur.execute(
+                "INSERT INTO auth.users (id, email, encrypted_password)"
+                " VALUES (%s, %s, %s) ON CONFLICT (id) DO NOTHING;",
+                (actor, "attribution@guard.test", "not-a-real-hash"),
+            )
+            self.cur.execute("RELEASE SAVEPOINT person;")
+        except psycopg2.Error:
+            # The base image's legacy auth.users differs from GoTrue's; fall back to the
+            # intersection and let the identity row below carry the personhood on its own.
+            self.cur.execute("ROLLBACK TO SAVEPOINT person;")
+            self.cur.execute(
+                "INSERT INTO auth.users (id) VALUES (%s) ON CONFLICT (id) DO NOTHING;", (actor,)
+            )
+        self.cur.execute(
+            "INSERT INTO auth.identities (user_id, provider, provider_id, identity_data)"
+            " VALUES (%s, 'email', %s, %s::jsonb) ON CONFLICT DO NOTHING;",
+            (actor, actor, '{"sub": "%s"}' % actor),
+        )
+        self.cur.execute("SELECT public.is_machine_principal(%s);", (actor,))
+        self.assertFalse(
+            self.cur.fetchone()[0],
+            "the fixture account reads as a machine principal, so this test would assert the "
+            "wrong arm of the attribution ladder rather than the one it is about."
+        )
 
         self.cur.execute("SET LOCAL \"acs_cymru.actor_id\" = %s", (actor,))
         self.cur.execute(

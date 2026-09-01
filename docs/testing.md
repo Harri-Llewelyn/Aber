@@ -87,6 +87,13 @@ node scripts/check-env-drift.mjs
 # pin before it counts as newer, because sorting a registry by recency returns `nightly-slim`.
 node scripts/check-image-currency.mjs
 
+# Do both deployment targets deploy the same thing? Needs neither a stack nor helm -- it reads
+# docker-compose.yml and the chart templates as text. The file-sync guard above asserts the copies
+# the chart CARRIES are current; this one asserts the chart carries them at all. Six defects in one
+# branch had that shape, three of them found only by installing the chart and watching a pod crash.
+# Known gaps are printed on every run rather than exempted silently.
+node scripts/check-compose-chart-parity.mjs
+
 node scripts/check-schema-surface.mjs
 
 node scripts/check-migration-idempotency.mjs

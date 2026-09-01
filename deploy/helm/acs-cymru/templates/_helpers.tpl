@@ -161,6 +161,22 @@ in CrashLoopBackOff reporting a database it cannot authenticate against.
 {{- if and (eq (.Values.ingestion.dbUser | default "") "ingest_writer") (not .Values.secrets.ingestWriterPassword) -}}
 {{- $missing = append $missing "secrets.ingestWriterPassword (INGEST_WRITER_PASSWORD, required while ingestion.dbUser is ingest_writer -- the role does not exist without it, and the only other historian credential is the superuser)" -}}
 {{- end -}}
+{{/*
+  THE TWO MACHINE-PRINCIPAL KEYS, and they are here because their absence is the WORST failure
+  shape this helper exists to prevent: not a template error, and not a stack that rejects requests,
+  but a `helm install` that reports success while a pod halts itself and reports `0 of 1 updated
+  replicas are available` for ten minutes. The ingestion daemon refuses to start its MQTT loop
+  without SUPABASE_INGESTION_KEY -- correctly, since running fail-open would let unquarantined
+  devices through -- and the message names neither the chart nor the values file.
+
+  Unconditional, because neither workload has an `enabled` flag: the chart always deploys both.
+*/}}
+{{- if not .Values.secrets.ingestionKey -}}
+{{- $missing = append $missing "secrets.ingestionKey (SUPABASE_INGESTION_KEY, required -- the ingestion daemon halts rather than start its MQTT loop without it, so the stack installs and then never becomes ready)" -}}
+{{- end -}}
+{{- if not .Values.secrets.playbackKey -}}
+{{- $missing = append $missing "secrets.playbackKey (SUPABASE_PLAYBACK_KEY, required -- Service_Playback is the identity broker playback publishes under, and it is deliberately not service_role)" -}}
+{{- end -}}
 {{- if not .Values.secrets.fdwReaderPassword -}}
 {{- $missing = append $missing "secrets.fdwReaderPassword (FDW_READER_PASSWORD, required -- Supabase's postgres_fdw mapping authenticates as fdw_reader, and the only alternative is the historian superuser)" -}}
 {{- end -}}
@@ -243,6 +259,21 @@ Only checked when realtime is enabled AND the chart owns the secret.
 {{- end -}}
 {{- if lt (len $base) 64 -}}
 {{- fail (printf "\n\nacs-cymru: secrets.realtimeSecretKeyBase must be AT LEAST 64 characters (got %d).\nsupabase/realtime refuses to boot otherwise. Generate one with:  openssl rand -hex 32\n" (len $base)) -}}
+{{- end -}}
+{{/*
+  THE THIRD SECRET THAT MAKES REALTIME REFUSE TO BOOT, beside the other two by this block's own
+  logic rather than as a new idea. `METRICS_JWT_SECRET` became mandatory in v2.102.3 --
+  `System.fetch_env!`, so the container aborts during boot rather than defaulting. Unset, the pod
+  CrashLoopBackOffs and the only clue is an Elixir stack trace ten frames deep.
+
+  docker-compose.yml gained it when the version was pinned, and secret.yaml gained the value at
+  the same time -- but NOTHING CONSUMED IT. The chart carried the secret and never passed it to
+  the pod. This is what stops that being possible again.
+
+  No length rule: unlike the two above, it only has to exist and be secret.
+*/}}
+{{- if not .Values.secrets.realtimeMetricsJwtSecret -}}
+{{- fail "\n\nacs-cymru: secrets.realtimeMetricsJwtSecret is required (METRICS_JWT_SECRET).\nsupabase/realtime v2.102.3 refuses to boot otherwise. Generate one with:  openssl rand -hex 32\n\nDeliberately NOT secrets.jwtSecret: it signs the bearer token realtime's /metrics endpoint\nrequires, and sharing the API signing key would let anyone holding it mint metrics tokens.\n" -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

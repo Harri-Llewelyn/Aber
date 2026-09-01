@@ -60,19 +60,37 @@ jobs:
             echo "::error::the frontend suite has failing tests; the documented count is not the problem"
             exit 1
           fi
+          # A BOUND, NOT A COUNT, and the documentation says so deliberately: "it moved four times
+          # in one afternoon and each move made both documents wrong until somebody noticed. A
+          # bound only ever becomes conservative, which is the failure worth having."
+          #
+          # THIS CHECK USED TO DEMAND EQUALITY against `Frontend — [0-9]+ tests`, which stopped
+          # matching the moment the README became `1,600+`. CLAIMED came back empty, and the
+          # inequality below compared a real number against nothing and failed every green build.
+          # Two guards disagreeing about policy, with the older one winning silently.
+          #
+          # So the assertion is the bound: the suite must run AT LEAST what is claimed. That still
+          # catches the failure worth catching -- a documented figure drifting above reality, which
+          # is what makes a reader think tests were deleted -- and stops a passing build being red
+          # for adding one.
           ACTUAL=$(printf '%s' "$STRIPPED" | grep -oE 'Tests +[0-9]+ passed' | grep -oE '[0-9]+' | tail -1)
-          CLAIMED=$(grep -oE 'Frontend — [0-9]+ tests' README.md | grep -oE '[0-9]+')
-          echo "vitest reports ${ACTUAL:-<unparsed>}; README claims ${CLAIMED:-<absent>}"
+          CLAIMED=$(grep -oE 'Frontend — [0-9,]+\+? tests' README.md | grep -oE '[0-9,]+' | tr -d ',')
+          echo "vitest reports ${ACTUAL:-<unparsed>}; README claims at least ${CLAIMED:-<absent>}"
           # An empty ACTUAL is a broken check, not a documentation problem -- say which.
           if [ -z "$ACTUAL" ]; then
             echo "::error::could not read the test count out of vitest's output; this check needs fixing, not the README"
             exit 1
           fi
-          if [ "$ACTUAL" != "$CLAIMED" ]; then
-            echo "::error::README.md says '$CLAIMED tests', vitest ran $ACTUAL. Update README.md."
+          if [ -z "$CLAIMED" ]; then
+            echo "::error::could not read the documented lower bound out of README.md; this check needs fixing"
             exit 1
           fi
-          echo "Documented frontend test count matches."
+          if [ "$ACTUAL" -lt "$CLAIMED" ]; then
+            echo "::error::README.md claims at least $CLAIMED frontend tests, vitest ran $ACTUAL."
+            echo "::error::A lower bound that has risen above reality reads as tests having been deleted."
+            exit 1
+          fi
+          echo "Documented frontend lower bound holds: $ACTUAL >= $CLAIMED."
 
       - name: Verify isUuid Regex Implementation Sync
         run: |
@@ -294,6 +312,17 @@ jobs:
       - name: Verify Chart Files Are In Sync With Their Sources
         run: node scripts/sync-helm-chart-files.mjs --check
 
+      # THE SET COMPARISON THE FILE-SYNC CHECK ABOVE CANNOT MAKE. That one asserts the copies the
+      # chart already carries are current; it says nothing about a service the chart never gained.
+      # Six defects in one branch had that second shape, three of them found only by installing the
+      # chart and watching a pod crash ten minutes at a time.
+      #
+      # It runs HERE rather than in k8s-validation because it needs neither a cluster nor helm --
+      # it reads docker-compose.yml and the templates as text, so it costs seconds and fails on a
+      # pull request rather than after a 20-minute install.
+      - name: Verify Compose And The Chart Deploy The Same Services
+        run: node scripts/check-compose-chart-parity.mjs
+
       # THESE THREE RUN BEFORE THE SATELLITE CHECKS BELOW, and the ordering is deliberate
       # rather than tidy. A GitHub Actions job stops at its FIRST failing step, so whichever
       # check runs first is the only one that reports -- and this job is named for the chart.
@@ -376,15 +405,24 @@ jobs:
       - name: Verify Image Tag Parity Across Both Targets
         run: node scripts/check-image-tag-parity.mjs --verbose
 
-      # kong.yml is SHARED BY BOTH TARGETS and declares its plugins globally. Naming any plugin in
-      # KONG_PLUGINS *replaces* Kong's bundled set rather than adding to it, so a plugin referenced
-      # in kong.yml but missing from that variable does not merely go unused -- Kong refuses to boot
-      # with "plugin '<name>' not enabled; add it to the 'plugins' configuration property".
+      # Naming any plugin in Kong's `plugins` property *replaces* its bundled set rather than adding
+      # to it, so a plugin referenced in kong.yml but missing from that list does not merely go
+      # unused -- Kong refuses to boot with "plugin '<name>' not enabled; add it to the 'plugins'
+      # configuration property". Two files that must agree in two syntaxes, and the error when they
+      # do not names the config file rather than the list.
       #
-      # That makes three files that must agree, in two different syntaxes, across two targets. This
-      # asserts they do. Without it, adding a plugin to the shared file takes down whichever target
-      # someone forgot, and the error names the config file rather than the env var.
-      - name: Verify Kong Plugin Lists Cover Everything kong.yml References
+      # KUBERNETES ONLY, SINCE THE ENVOY MIGRATION. This step used to read `KONG_PLUGINS` out of
+      # docker-compose.yml as well, and that variable is correctly gone: roadmap §4 removed Kong,
+      # `supabase-kong-init` and the `kong_config` volume from Compose, which now runs Envoy. The
+      # check went on demanding it and failed with "could not find KONG_PLUGINS (compose)" -- a
+      # guard reporting the absence of the thing whose absence was the deliverable.
+      #
+      # SO WHY IS THE STEP STILL HERE AT ALL. Because the chart still deploys Kong by default, and
+      # §4 says why `supabase/kong.yml` stays in the repository: "It is read by nothing on Compose
+      # and by the chart on Kubernetes, and the template-hygiene check asserts exactly that pair
+      # rather than the tempting one-liner 'kong.yml is gone'." The same reasoning applies to the
+      # plugin list. This step retires with the chart's Kong, not before it.
+      - name: Verify The Chart's Kong Plugin List Covers Everything kong.yml References
         run: |
           python3 - <<'PY'
           import re, sys, yaml
@@ -396,28 +434,28 @@ jobs:
               for rt in (svc.get('routes') or []):
                   for p in (rt.get('plugins') or []):
                       referenced.add(p['name'])
-          compose = re.search(r'KONG_PLUGINS:\s*([^\s#]+)', open('docker-compose.yml', encoding='utf-8').read())
-          values  = re.search(r'^\s*plugins:\s*([a-z0-9,\-]+)\s*$',
-                              open('deploy/helm/acs-cymru/values.yaml', encoding='utf-8').read(), re.M)
-          if not compose or not values:
-              print('::error::could not find KONG_PLUGINS (compose) or supabaseKong.plugins (values)')
+
+          compose = open('docker-compose.yml', encoding='utf-8').read()
+          if 'KONG_PLUGINS' in compose:
+              print('::error::docker-compose.yml declares KONG_PLUGINS again. Compose runs Envoy '
+                    'since roadmap §4; if Kong is genuinely back, restore the two-target comparison '
+                    'this step used to make rather than leaving one target unchecked.')
               sys.exit(1)
-          lists = {'docker-compose.yml': set(compose.group(1).split(',')),
-                   'values.yaml':        set(values.group(1).split(','))}
+
+          values = re.search(r'^\s*plugins:\s*([a-z0-9,\-]+)\s*$',
+                             open('deploy/helm/acs-cymru/values.yaml', encoding='utf-8').read(), re.M)
+          if not values:
+              print('::error::could not find supabaseKong.plugins in values.yaml')
+              sys.exit(1)
+
+          declared = set(values.group(1).split(','))
           print(f"  kong.yml references: {sorted(referenced)}")
-          bad = False
-          for where, declared in lists.items():
-              missing = referenced - declared
-              if missing:
-                  print(f"::error::{where} KONG_PLUGINS is missing {sorted(missing)} — Kong will refuse to boot")
-                  bad = True
-              else:
-                  print(f"  ok  {where}: {sorted(declared)}")
-          if lists['docker-compose.yml'] != lists['values.yaml']:
-              d = lists['docker-compose.yml'] ^ lists['values.yaml']
-              print(f"::error::the two targets' plugin lists differ: {sorted(d)}")
-              bad = True
-          sys.exit(1 if bad else 0)
+          missing = referenced - declared
+          if missing:
+              print(f"::error::values.yaml supabaseKong.plugins is missing {sorted(missing)} — Kong will refuse to boot")
+              sys.exit(1)
+          print(f"  ok  values.yaml: {sorted(declared)}")
+          sys.exit(0)
           PY
 
       # A ServiceMonitor whose `port` names nothing on the Service it selects does not fail: the
@@ -1251,7 +1289,47 @@ jobs:
                 nullif(current_setting('request.jwt.claim', true), ''),
                 nullif(current_setting('request.jwt.claims', true), '')
               )::jsonb
-            \$\$;"
+            \$\$;
+
+            -- `auth.identities` is GoTrue's, and this job has no GoTrue. The base image ships
+            -- auth.users and not this table, so the chain aborted at 0042 with `relation
+            -- \"auth.identities\" does not exist` -- taking every migration after it, and every
+            -- suite in the next step, with it.
+            --
+            -- NOT AN OPTIONAL DETAIL OF THE FIXTURE. An identity row is GoTrue's record of a
+            -- SIGN-IN METHOD, and this schema uses \"has no identity row\" as its definition of a
+            -- machine principal: 0042 refuses to list a would-be service principal holding one,
+            -- and 0048 builds is_machine_principal() on the same test. A stand-in omitting it
+            -- makes both assertions vacuous rather than absent, which is worse -- they would go
+            -- on reporting success.
+            --
+            -- IT LIVES IN THIS STEP AND NOT ITS OWN, because it needs the same elevated role for
+            -- the same reason: the auth schema is owned by supabase_admin. Added as a separate
+            -- step running as postgres, it failed with the very error the comment above predicts.
+            --
+            -- Empty is the correct state: the suites seed their own auth.users rows and none of
+            -- them is meant to be a person. Columns are the subset the chain reads, plus a primary
+            -- key, because a table without one invites a fixture that inserts the same identity
+            -- twice and still passes.
+            CREATE TABLE IF NOT EXISTS auth.identities (
+              id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+              user_id       uuid NOT NULL,
+              provider      text NOT NULL DEFAULT 'email',
+              provider_id   text NOT NULL DEFAULT '',
+              identity_data jsonb NOT NULL DEFAULT '{}'::jsonb,
+              created_at    timestamptz DEFAULT now(),
+              updated_at    timestamptz DEFAULT now()
+            );
+            -- The migrations apply as postgres, which is an ordinary role in this image and holds
+            -- nothing on a table supabase_admin has just created. 0042's and 0048's self-checks
+            -- read it, so without SELECT the chain fails one error later than it used to.
+            --
+            -- INSERT AS WELL, because this table stands in for GoTrue and the suites have to be
+            -- able to do GoTrue's job. `test_digital_thread_guard.py` seeds a person -- email,
+            -- password AND an identity row, which is 0048's three-part definition of not-a-machine
+            -- -- so a read-only grant fails it with `permission denied for table identities`, one
+            -- step past where the missing table used to stop it.
+            GRANT SELECT, INSERT ON auth.identities TO postgres;"
 
       # NOTE: single-dollar "$f", not the doubled form. Doubling is docker-compose
       # escaping; in a shell "$$" is the PID, so every migration was previously fed a

@@ -60,6 +60,12 @@ const MIRRORS = [
       name === 'retention.sql' ||
       name === 'aggregates.sql' ||
       name === 'storage.sql' ||
+      // ADDED LATE, AND THE DELAY IS THE ARGUMENT FOR THIS LIST BEING EXPLICIT. `cold_archive.sql`
+      // shipped with roadmap item 3 and was never added here, so the chart carried no manifest
+      // table -- and `0068`'s self-check probes it over the FDW, which meant db-init FAILED on
+      // Kubernetes and the whole target could not install. Not a missing feature: a broken
+      // deployment path, unreported for a fortnight because CI was down.
+      name === 'cold_archive.sql' ||
       name === 'roles.sql',
     why: 'Telemetry lifecycle: the extension update, compression/retention policies, the rollup '
        + 'views, the storage footprint view and the read-only BI roles, reconciled on every boot',

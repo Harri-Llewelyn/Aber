@@ -28,6 +28,32 @@ secrets:
   postgresPassword: postgres
   timescalePassword: postgres
 
+  # THE TWO HISTORIAN ROLES (roadmap item 18), required by `acs-cymru.validateSecrets` since
+  # 898bfb3. This fixture did not carry them, so `helm template -f values-dev.yaml` failed at
+  # NOTES.txt for four days and nothing said so -- every CI run was failing at the billing gate
+  # before it reached the step. Distinct values rather than one shared password: the whole point of
+  # the pair is that the FDW mapping and the ingestion daemon authenticate as different roles, and
+  # a fixture that gives them the same secret cannot catch a mix-up between them.
+  ingestWriterPassword: acscymru-ingest-writer
+  fdwReaderPassword: acscymru-fdw-reader
+
+  # THE TWO MACHINE-PRINCIPAL KEYS, and their absence is a CRASH LOOP rather than a render error.
+  # The chart has always carried the plumbing -- secret.yaml maps both, and the two Deployments
+  # read them -- but this fixture left them empty, so `helm install` succeeded and the ingestion
+  # pod halted itself: "CRITICAL SECURITY ERROR: Supabase client is uninitialized ... refusing to
+  # start MQTT loop in fail-open state." Correct behaviour, ten minutes of `0 of 1 updated
+  # replicas are available`, and a failure that names neither the chart nor this file.
+  #
+  # These are the same demonstration JWTs .env.example carries, signed by the jwtSecret above:
+  # Service_Ingestor is sub b0000000-...-0002 (0046) and Service_Playback is ...-0003 (0056).
+  # Neither is `service_role` -- that is the whole point of Machine Identities, and copying the
+  # service key here instead would produce a working stack that proves nothing.
+  ingestionKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoiYjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAyIiwiZXhwIjoyMDAwMDAwMDAwfQ.j-rSyTImEPP3Etuq304tYycMSKrk0mxcI_9Pmew3seI
+  playbackKey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJvbGUiOiJhdXRoZW50aWNhdGVkIiwic3ViIjoiYjAwMDAwMDAtMDAwMC00MDAwLTgwMDAtMDAwMDAwMDAwMDAzIiwiZXhwIjoyMDAwMDAwMDAwfQ.40LLl4zKVmdJOBBkG-sKUZjXkhESdgzEg8c0aK-DVr4
+
+  # Matching .env.example. Realtime's own metrics endpoint, separate from the session JWT secret.
+  realtimeMetricsJwtSecret: acscymru_realtime_metrics_jwt_secret_development_only
+
   # EXACTLY 16 characters, and AT LEAST 64 characters. The chart asserts both.
   realtimeDbEncKey: supabaserealtime
   realtimeSecretKeyBase: 8f2c1d4b7a9e0356c8b1f4d72e5a90c3b6d8f1a4e7c025d9a3e6b8c1f4d7a0e39

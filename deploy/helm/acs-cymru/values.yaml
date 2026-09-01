@@ -664,7 +664,19 @@ supabaseStorage:
   # PVC. Switch backend to s3 (below) to lift that.
   replicas: 1
   bucket: asset-3d-models
-  fileSizeLimit: 52428800
+  # TWO JOBS, TWO VALUES, and they were one until the capture and archive buckets arrived.
+  #
+  # `fileSizeLimit` is storage-api's GLOBAL CEILING for every bucket, passed to the Deployment as
+  # FILE_SIZE_LIMIT. storage-api REFUSES to create a bucket whose own limit exceeds it, so with the
+  # ceiling at 50 MiB the storage-init Job died creating `broker-captures` (100 MiB) with
+  # `EntityTooLarge` -- and the whole chart install failed on `BackoffLimitExceeded`. Compose split
+  # these two apart when the capture bucket landed and raised its ceiling to 1 GiB; the chart kept
+  # one variable meaning both things.
+  #
+  # `modelFileSizeLimit` is what a 3D MODEL may be, which is the question the old single value was
+  # actually answering. Raising the ceiling must not raise this as a side effect nobody asked for.
+  fileSizeLimit: 1073741824
+  modelFileSizeLimit: 52428800
   # The PRIVATE bucket holding Node-RED flow backups from physical gateway appliances, stored under
   # <sparkplug_id>/. Created by the storage-init Job alongside the one above.
   #

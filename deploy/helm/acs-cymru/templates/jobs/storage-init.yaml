@@ -72,17 +72,23 @@ spec:
             {{- include "acs-cymru.secretEnv" (dict "name" "SERVICE_ROLE_KEY" "secretName" (include "acs-cymru.secretName" .) "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
             - name: STORAGE_BUCKET
               value: {{ .Values.supabaseStorage.bucket | quote }}
-            - name: STORAGE_FILE_SIZE_LIMIT
+            - name: STORAGE_MODEL_FILE_SIZE_LIMIT
               {{- /* int64 first: `quote` alone renders this float as "5.24288e+07", which
                      storage-init's parseInt reads as 5 -- creating the bucket with a five-byte
                      limit. See the note in supabase/storage.yaml. */}}
-              value: {{ .Values.supabaseStorage.fileSizeLimit | int64 | quote }}
+              value: {{ .Values.supabaseStorage.modelFileSizeLimit | int64 | quote }}
             - name: GATEWAY_BACKUP_BUCKET
               value: {{ .Values.supabaseStorage.gatewayBackupBucket | quote }}
             - name: CAPTURE_BUCKET
               value: {{ .Values.supabaseStorage.captureBucket | quote }}
             - name: CAPTURE_FILE_SIZE_LIMIT
-              value: {{ .Values.supabaseStorage.captureFileSizeLimit | quote }}
+              {{- /* int64 first, like both of its neighbours and for the same reason: `quote`
+                     alone renders 104857600 as "1.048576e+08", which parseInt reads as 1. The
+                     capture bucket arrived after the other two and did not get the treatment, so
+                     a 100 MiB bucket would have been created with a one-byte limit and every
+                     upload refused. Caught by "Verify No Rendered Value Uses Scientific
+                     Notation", which is the guard the other two comments were written for. */}}
+              value: {{ .Values.supabaseStorage.captureFileSizeLimit | int64 | quote }}
             - name: GATEWAY_BACKUP_FILE_SIZE_LIMIT
               {{- /* int64 first, for the same reason as the limit above -- `quote` alone renders
                      5242880 as "5.24288e+06", which parseInt reads as 5. */}}

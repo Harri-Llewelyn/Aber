@@ -190,8 +190,30 @@ console.log('');
 if (before.schema.digest !== after.schema.digest) {
   fail('the public schema changed across a replay of the same migration chain.');
   note('Only DDL moves this, and DDL between two runs of the same files is drift by definition.');
-  note('Compare with:  docker compose exec -T supabase-db pg_dump -U postgres --schema-only ' +
-       '--schema=public');
+
+  // THE DIFF, NOT JUST THE VERDICT. This check used to say the schema had changed and then hand
+  // the reader a pg_dump command -- which reproduces the AFTER state and not the BEFORE one, so
+  // there was nothing to compare it against. The two dumps exist right here; printing what moved
+  // is the difference between a guard somebody can act on and one they have to re-derive.
+  //
+  // Bounded, because a genuinely divergent chain can move hundreds of lines and the useful signal
+  // is in the first few. GRANT and REVOKE lines are the ones this has actually caught, and they
+  // are also the ones a reader is least likely to guess at.
+  const beforeLines = before.schema.body.split('\n');
+  const afterLines = after.schema.body.split('\n');
+  const beforeSet = new Set(beforeLines);
+  const afterSet = new Set(afterLines);
+  const gone = beforeLines.filter((l) => l.trim() && !afterSet.has(l));
+  const added = afterLines.filter((l) => l.trim() && !beforeSet.has(l));
+
+  const show = (label, lines) => {
+    if (!lines.length) return;
+    note(`${label} (${lines.length}):`);
+    for (const line of lines.slice(0, 15)) note(`    ${line.slice(0, 160)}`);
+    if (lines.length > 15) note(`    ... and ${lines.length - 15} more`);
+  };
+  show('only in the FIRST dump', gone);
+  show('only in the SECOND dump', added);
 } else {
   pass(`the public schema is unchanged (${before.schema.digest.slice(0, 12)})`);
 }
