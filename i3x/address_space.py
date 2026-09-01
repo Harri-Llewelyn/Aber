@@ -145,7 +145,11 @@ RELATIONSHIP_TYPES = [
         "the two answer different questions: HasChildren is the browse hierarchy, HasComponent is "
         "what `maxDepth > 1` on a value query descends. Only objects with `isComposition: true` "
         "publish it -- Unassigned is a queue, not a composition, so it has children and no "
-        "components.",
+        "components. IT IS NOT A TARGET OF ONE EITHER: the site names its cells and its site-wide "
+        "gateways as components and leaves Unassigned out, because `ComponentOf` is this edge's "
+        "inverse and a back edge from Unassigned would assert a membership its own description "
+        "denies. Every other HasComponent edge DOES carry its ComponentOf -- EXP-20 requires it, "
+        "and for a long time nothing emitted one at all.",
     ),
     ("ComponentOf", "HasComponent", "The composition this object is a member of."),
     (
@@ -235,6 +239,11 @@ def device_object(device: dict, effective_cell_id: Optional[str], schema_id: Opt
     relationships = {}
     parent = effective_cell_id or UNASSIGNED_ELEMENT_ID
     relationships["HasParent"] = [parent]
+    # THE INVERSE OF THE CELL'S `HasComponent`, and it has to be emitted or EXP-20 fails: every
+    # forward edge MUST be traversable backwards. Not emitted under Unassigned, which publishes no
+    # `HasComponent` to be the inverse of -- see RELATIONSHIP_TYPES.
+    if parent != UNASSIGNED_ELEMENT_ID:
+        relationships["ComponentOf"] = [parent]
     if gateway_sid:
         relationships["ConnectsVia"] = [gateway_sid]
     return {
@@ -264,6 +273,10 @@ def gateway_object(gateway: dict, device_sids: List[str]) -> dict:
         SITE_ELEMENT_ID if gateway.get("location_scope") == "site_wide" else UNASSIGNED_ELEMENT_ID
     )
     relationships = {"HasParent": [parent]}
+    # As for a device: the inverse of whatever publishes `HasComponent` toward this gateway -- its
+    # cell, or the site itself when `location_scope` is site_wide. Unassigned publishes none.
+    if parent != UNASSIGNED_ELEMENT_ID:
+        relationships["ComponentOf"] = [parent]
     if device_sids:
         relationships["ProvidesConnectivityFor"] = sorted(device_sids)
     return {
@@ -283,7 +296,7 @@ def gateway_object(gateway: dict, device_sids: List[str]) -> dict:
 
 
 def cell_object(cell: dict, child_ids: List[str]) -> dict:
-    relationships = {"HasParent": [SITE_ELEMENT_ID]}
+    relationships = {"HasParent": [SITE_ELEMENT_ID], "ComponentOf": [SITE_ELEMENT_ID]}
     if child_ids:
         relationships["HasChildren"] = sorted(child_ids)
         # A cell IS a composition of the assets in it, so the same edge is also a component edge.
@@ -305,6 +318,28 @@ def cell_object(cell: dict, child_ids: List[str]) -> dict:
     }
 
 
+def _site_relationships(child_ids: List[str]) -> dict:
+    """
+    The site's edges, and the one asymmetry in them.
+
+    EVERY CHILD IS A CHILD; NOT EVERY CHILD IS A COMPONENT. `HasChildren` is the browse hierarchy
+    and takes all of them. `HasComponent` is what `maxDepth > 1` on a value query descends, and
+    Unassigned is left out of it: it is the ABSENCE of a location decision rather than a place, it
+    holds no value of its own, and it publishes no `HasComponent` of its own -- so a descent that
+    reaches it stops there, having added an empty node and nothing else. Cells and site-wide
+    gateways are real and stay.
+
+    This is also what makes the graph symmetric. `ComponentOf` is the declared inverse of
+    `HasComponent`, so naming Unassigned here would oblige it to carry a `ComponentOf` back --
+    asserting a membership the object's own description denies.
+    """
+    rels = {"HasChildren": sorted(child_ids)}
+    components = sorted(c for c in child_ids if c != UNASSIGNED_ELEMENT_ID)
+    if components:
+        rels["HasComponent"] = components
+    return rels
+
+
 def site_object(child_ids: List[str]) -> dict:
     return {
         "elementId": SITE_ELEMENT_ID,
@@ -318,10 +353,7 @@ def site_object(child_ids: List[str]) -> dict:
             "description": "Synthetic root of this deployment's address space.",
             "typeNamespaceUri": NS_LOCAL,
             "sourceTypeId": "Site",
-            "relationships": {
-                "HasChildren": sorted(child_ids),
-                "HasComponent": sorted(child_ids),
-            },
+            "relationships": _site_relationships(child_ids),
         },
     }
 
@@ -342,7 +374,14 @@ def unassigned_object(child_ids: List[str]) -> dict:
             ),
             "typeNamespaceUri": NS_LOCAL,
             "sourceTypeId": "Cell",
-            "relationships": {"HasChildren": sorted(child_ids)},
+            # `HasParent` MUST be here: `parentId` above says the site is the parent, and a
+            # relationship graph that disagrees with `parentId` fails EXP-21 as well as EXP-20.
+            # Its absence is what the conformance suite reported. No `ComponentOf`, because the
+            # site deliberately does not name this queue among its components.
+            "relationships": {
+                "HasParent": [SITE_ELEMENT_ID],
+                "HasChildren": sorted(child_ids),
+            },
         },
     }
 

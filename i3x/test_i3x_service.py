@@ -350,11 +350,74 @@ class TestRfc3339(unittest.TestCase):
         self.assertTrue(env["timestamp"].endswith("Z"), env["timestamp"])
 
 
+def _representative_space() -> dict:
+    """One object of every shape the address space builds, wired as i3x_service.py wires them."""
+    objects = [
+        A.device_object({"sparkplug_id": "dev-placed", "_gateway_sparkplug_id": "gwy-cell"}, "cell-1", None),
+        A.device_object({"sparkplug_id": "dev-unplaced", "_gateway_sparkplug_id": None}, None, None),
+        A.gateway_object({"sparkplug_id": "gwy-cell", "cell_id": "cell-1"}, ["dev-placed"]),
+        A.gateway_object({"sparkplug_id": "gwy-site", "location_scope": "site_wide"}, []),
+        A.cell_object({"id": "cell-1", "name": "Cell 1"}, ["dev-placed", "gwy-cell"]),
+        A.unassigned_object(["dev-unplaced"]),
+        A.site_object(["cell-1", A.UNASSIGNED_ELEMENT_ID, "gwy-site"]),
+    ]
+    return {o["elementId"]: o for o in objects}
+
+
 class TestAddressSpace(unittest.TestCase):
     def test_exactly_one_root(self):
         site = A.site_object(["cell-1"])
         self.assertIsNone(site["parentId"], "the site is the only object with a null parentId")
         self.assertEqual(A.unassigned_object([])["parentId"], A.SITE_ELEMENT_ID)
+
+    def test_every_edge_has_its_inverse(self):
+        """
+        EXP-20 IS A SAMPLE, NOT A SWEEP. The conformance suite slices the first five edges it
+        discovers, so it reported the site/Unassigned pair and stopped -- while `ComponentOf` was
+        emitted by nothing at all and every `HasComponent` edge in the space was one-way. Fixing
+        only what it named would have moved the failure to whichever five edges it drew next.
+
+        This walks the whole graph instead, on a space carrying one of each shape: a placed device,
+        an unplaced one, a gateway in a cell, a site-wide gateway, a cell, Unassigned and the site.
+        """
+        objects = _representative_space()
+        inverse = {name: reverse for name, reverse, _ in A.RELATIONSHIP_TYPES}
+        missing = []
+        for element_id, obj in objects.items():
+            for rel, targets in (obj["metadata"]["relationships"] or {}).items():
+                self.assertIn(rel, inverse, f"{rel} is emitted but not registered in RELATIONSHIP_TYPES")
+                for target in targets:
+                    self.assertIn(target, objects, f"{element_id} points at unknown object {target}")
+                    back = (objects[target]["metadata"]["relationships"] or {}).get(inverse[rel], [])
+                    if element_id not in back:
+                        missing.append(
+                            f"{element_id} -{rel}-> {target}, but {target} carries no "
+                            f"{inverse[rel]} back to it"
+                        )
+        self.assertEqual(missing, [], chr(10).join(missing))
+
+    def test_the_site_does_not_claim_unassigned_as_a_component(self):
+        """
+        The one deliberate asymmetry, and the reason it is safe: `HasComponent` is what a maxDepth
+        value query descends, Unassigned holds no value and publishes no components, so an edge to
+        it adds an empty node and no data. Naming it would also oblige a `ComponentOf` back, which
+        would assert a membership its own description denies.
+        """
+        site = A.site_object(["cell-1", A.UNASSIGNED_ELEMENT_ID, "gwy-site"])
+        rels = site["metadata"]["relationships"]
+        self.assertIn(A.UNASSIGNED_ELEMENT_ID, rels["HasChildren"], "still a child")
+        self.assertNotIn(A.UNASSIGNED_ELEMENT_ID, rels["HasComponent"], "but not a component")
+        self.assertEqual(rels["HasComponent"], ["cell-1", "gwy-site"])
+
+        unassigned = A.unassigned_object([])
+        self.assertEqual(unassigned["metadata"]["relationships"]["HasParent"], [A.SITE_ELEMENT_ID])
+        self.assertNotIn("ComponentOf", unassigned["metadata"]["relationships"])
+
+    def test_an_unplaced_device_is_a_component_of_nothing(self):
+        placed = A.device_object({"sparkplug_id": "dev1", "_gateway_sparkplug_id": None}, "cell-7", None)
+        self.assertEqual(placed["metadata"]["relationships"]["ComponentOf"], ["cell-7"])
+        unplaced = A.device_object({"sparkplug_id": "dev2", "_gateway_sparkplug_id": None}, None, None)
+        self.assertNotIn("ComponentOf", unplaced["metadata"]["relationships"])
 
     def test_device_parent_is_the_cell_not_the_gateway(self):
         device = {"sparkplug_id": "dev1", "name": "Pump", "_gateway_sparkplug_id": "gwy1"}

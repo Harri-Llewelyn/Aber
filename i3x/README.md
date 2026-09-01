@@ -83,6 +83,15 @@ Four mappings that are decisions rather than mechanics:
   table behind it, so it cannot be edited, deleted, or swept by the pg_cron purge that runs past RLS.
 - **`HasComponent` is carried alongside `HasChildren`**, not instead of it. They answer different
   questions — `HasChildren` is the browse hierarchy, `HasComponent` is what `maxDepth > 1` descends.
+  **Unassigned is a child of the site but not a component of it.** It holds no value and publishes
+  no components, so a depth query that descended into it would add an empty node and stop; and
+  since `ComponentOf` is this edge's inverse, naming it would oblige a back edge asserting a
+  membership the object's own description denies. Cells and site-wide gateways are components.
+- **Every edge is stored in both directions**, which i3X requires as a MUST (EXP-20) so a client can
+  discover the graph from any node. `ComponentOf` was declared as `HasComponent`'s inverse and
+  emitted by nothing for as long as the service existed — the conformance suite samples only the
+  first five edges, and it took fixing the three checks queued ahead of it in CI for those five to
+  include one that exposed this. `test_every_edge_has_its_inverse` walks the whole graph instead.
 - **`quality` is derived at read time.** Quarantined or stale → `Uncertain`; never published →
   `GoodNoData` with no value. A `quality` column on the hypertable would be a stored verdict that
   goes stale the moment the gateway does.
