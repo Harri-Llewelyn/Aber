@@ -776,6 +776,11 @@ function edgeFunctionNames() {
       'one row holding the in-flight pg_net request id for the Prometheus liveness probe (0054). ' +
       'RLS on with no policy and the anon/authenticated grants revoked -- infrastructure, and a ' +
       'writable request-id table would let a caller redirect where the probe reads liveness from',
+    schema_bootstrap:
+      'one row recording whether db-init reached the end of the migration chain on this boot ' +
+      '(0072). RLS on with no policy and the anon/authenticated grants revoked -- it is bootstrap ' +
+      'state read by psql, and the only readers are db-init and the e2e-validate Job init ' +
+      'container, both of which connect as postgres rather than over PostgREST',
     roles: 'RBAC internals — managed by migrations and Studio, not an app-facing endpoint',
     permissions: 'RBAC internals',
     role_permissions: 'RBAC internals',

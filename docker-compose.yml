@@ -355,6 +355,13 @@ services:
       /bin/sh -e -c "
       echo 'Configuring PostgreSQL search_path...';
       psql -v ON_ERROR_STOP=1 -h supabase-db -U postgres -d postgres -c 'ALTER ROLE postgres SET search_path TO auth, public, extensions;';
+        # THE CHAIN IS NOW IN PROGRESS. 0072 records that: cleared here, stamped after seed.sql
+        # below. COMPOSE HAS NO RACE TO CLOSE -- every dependent waits on this service with
+        # service_completed_successfully -- but the sentinel must exist identically on both targets
+        # or it becomes exactly the drift scripts/check-compose-chart-parity.mjs was written to
+        # catch. On Kubernetes the e2e-validate Job's init container blocks on the stamp.
+        # `|| true` is for boot one alone: 0072 is the migration that creates the table.
+        psql -v ON_ERROR_STOP=1 -h supabase-db -U postgres -d postgres -c 'UPDATE public.schema_bootstrap SET started_at = now(), completed_at = NULL' >/dev/null 2>&1 || true;
       echo 'Applying Supabase database migrations and seeds...';
       for f in /migrations/*.sql; do
         if [ -f \"$$f\" ]; then
@@ -395,6 +402,9 @@ services:
         echo 'Executing seed.sql...';
         psql -v ON_ERROR_STOP=1 -h supabase-db -U postgres -d postgres -f /seed.sql;
       fi;
+        # THE END OF THE CHAIN, RECORDED: a non-null completed_at means every migration and
+        # seed.sql succeeded on this boot. Not tolerant of an error -- 0072 has run by now.
+        psql -v ON_ERROR_STOP=1 -h supabase-db -U postgres -d postgres -c 'INSERT INTO public.schema_bootstrap (id, completed_at) VALUES (true, now()) ON CONFLICT (id) DO UPDATE SET completed_at = excluded.completed_at';
       echo 'Supabase database initialized successfully.';
       "
     depends_on:

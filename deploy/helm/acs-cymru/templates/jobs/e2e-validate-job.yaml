@@ -87,10 +87,25 @@ spec:
           inside the PostgREST client. The pod ages are what gave it away: `e2e-validate` was
           3m27s old while `db-init` was 43s old. Nothing in the failure named ordering.
 
-          Waiting on a QUERY against `public.devices` covers both halves at once -- `psql` exits
-          non-zero whether the server is down or the table does not exist yet -- and the answer to
-          both is the same: keep waiting. It is the same discipline `ingestion` uses against the
-          telemetry hypertable: probe the OBJECT the workload needs, not the process that serves it.
+          Waiting on a QUERY covers both halves at once -- `psql` exits non-zero whether the server
+          is down or the object does not exist yet -- and the answer to both is the same: keep
+          waiting. It is the same discipline `ingestion` uses against the telemetry hypertable:
+          probe the OBJECT the workload needs, not the process that serves it.
+
+          THAT OBJECT WAS `public.devices`, AND IT WAS THE WRONG ONE. 0001 creates it, so the probe
+          started passing once ONE migration of seventy had run and then stayed passing for the
+          other sixty-nine. It proved the chain had STARTED. On CI run 33503395769 validate.py began
+          publishing while the chain was in its fifties, and checks 1/1d/1e/1f failed against a
+          `devices` table that did not have `conformance_policy` yet -- a column 0050 adds. The
+          suite was green whenever db-init happened to win the race, so it read as four flaky
+          quarantine bugs rather than as one ordering fault. 0072 has the full account.
+
+          `1/count(*)` IS DELIBERATE, AND IT IS THE WHOLE POINT OF THE FIX. This helper reads the
+          EXIT CODE, and a query that matches no rows still exits 0 -- which is why the old probe
+          could not have expressed "and the chain has finished" no matter which table it named. The
+          division makes an empty result an ERROR: no sentinel row yet, or `completed_at` still NULL
+          because db-init is mid-chain, and psql exits non-zero and the loop waits. Complete, and it
+          evaluates to 1.
         */}}
         {{- include "acs-cymru.waitForPostgres" (dict
              "ctx" .
@@ -100,8 +115,8 @@ spec:
              "user" "postgres"
              "db" "postgres"
              "passwordKey" "POSTGRES_PASSWORD"
-             "query" "SELECT 1 FROM public.devices LIMIT 1;"
-             "describe" "the Supabase migrations (public.devices) — db-init is a post-install hook and runs AFTER this Job is created")
+             "query" "SELECT 1/count(*) FROM public.schema_bootstrap WHERE completed_at IS NOT NULL;"
+             "describe" "db-init to finish the whole migration chain (public.schema_bootstrap.completed_at) — it is a post-install hook and runs AFTER this Job is created")
            | nindent 8 }}
         {{/*
           Kong second, and with `-f` this time. validate.py reaches Supabase THROUGH the gateway, so
