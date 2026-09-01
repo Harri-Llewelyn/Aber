@@ -1311,8 +1311,14 @@ jobs:
             );
             -- The migrations apply as postgres, which is an ordinary role in this image and holds
             -- nothing on a table supabase_admin has just created. 0042's and 0048's self-checks
-            -- read it, so without this the chain fails one error later than it used to.
-            GRANT SELECT ON auth.identities TO postgres;"
+            -- read it, so without SELECT the chain fails one error later than it used to.
+            --
+            -- INSERT AS WELL, because this table stands in for GoTrue and the suites have to be
+            -- able to do GoTrue's job. `test_digital_thread_guard.py` seeds a person -- email,
+            -- password AND an identity row, which is 0048's three-part definition of not-a-machine
+            -- -- so a read-only grant fails it with `permission denied for table identities`, one
+            -- step past where the missing table used to stop it.
+            GRANT SELECT, INSERT ON auth.identities TO postgres;"
 
       # NOTE: single-dollar "$f", not the doubled form. Doubling is docker-compose
       # escaping; in a shell "$$" is the PID, so every migration was previously fed a

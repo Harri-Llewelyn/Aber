@@ -72,11 +72,11 @@ spec:
             {{- include "acs-cymru.secretEnv" (dict "name" "SERVICE_ROLE_KEY" "secretName" (include "acs-cymru.secretName" .) "key" "SUPABASE_SERVICE_ROLE_KEY") | nindent 12 }}
             - name: STORAGE_BUCKET
               value: {{ .Values.supabaseStorage.bucket | quote }}
-            - name: STORAGE_FILE_SIZE_LIMIT
+            - name: STORAGE_MODEL_FILE_SIZE_LIMIT
               {{- /* int64 first: `quote` alone renders this float as "5.24288e+07", which
                      storage-init's parseInt reads as 5 -- creating the bucket with a five-byte
                      limit. See the note in supabase/storage.yaml. */}}
-              value: {{ .Values.supabaseStorage.fileSizeLimit | int64 | quote }}
+              value: {{ .Values.supabaseStorage.modelFileSizeLimit | int64 | quote }}
             - name: GATEWAY_BACKUP_BUCKET
               value: {{ .Values.supabaseStorage.gatewayBackupBucket | quote }}
             - name: CAPTURE_BUCKET
