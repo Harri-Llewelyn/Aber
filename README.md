@@ -705,7 +705,7 @@ Kubernetes — which is what makes it the real drift control between them.
 
 ## Roadmap & Future Extensions
 
-Fourteen extensions, none of them speculative: every one names the code it would build on, because
+Fifteen extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
@@ -741,7 +741,7 @@ below a removal would silently redirect all of them without erroring. A number c
 identifier, not a position. Where code refers to work that has since shipped, the citation names the
 documentation rather than a roadmap number.
 
-**Items 1-5 are this repository's own**, ordered by how much of each already exists, as are 20-24 —
+**Items 1-5 are this repository's own**, ordered by how much of each already exists, as are 20-25 —
 20 was first because both 21 and 22 depended on the role split it makes: 21 had nowhere to put an
 Administrator-only control without it, and 22 would have hidden a lane from a role that could still
 grant itself the ability to see it. **That split shipped as `0069` and 22 shipped behind it as
@@ -753,7 +753,7 @@ arrive from feature requests** — 8, 9 and 10 from GitHub issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
 [#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66), in that same order of how much already
-exists; 12 and 24 were not filed. 19 arrives from
+exists; 12, 24 and 25 were not filed. 19 arrives from
 [#39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39).
 [#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) was item 11 and is now built. Where an entry's heading differs from the issue's title, it is
 because the work that remains is narrower than the title claims.
@@ -1829,6 +1829,140 @@ than offer it.
 - **What the retention window means once a human can ask.** `BACKUP_RETENTION_DAYS=14` prunes on the
   next run. A backup somebody took deliberately before a risky migration is the one most worth
   keeping and the one a timer is most likely to delete.
+
+### 25 · Studio behind the login everything else already uses
+
+**Builds on:** the `supabase-studio` block in [`docker-compose.yml`](docker-compose.yml) ·
+`routes.studio` in [`values.yaml`](deploy/helm/acs-cymru/values.yaml) ·
+`GOTRUE_OAUTH_SERVER_ENABLED` · [`0002`](supabase/migrations/0002_seed_data.sql)'s Grafana client and
+[`0006`](supabase/migrations/0006_nodered_oidc_auth.sql)'s Node-RED client ·
+[`grafana-userinfo`](supabase/functions/grafana-userinfo/index.ts) ·
+[`nodered-userinfo`](supabase/functions/nodered-userinfo/index.ts) ·
+[`OAuthConsent.jsx`](frontend/src/pages/OAuthConsent.jsx) ·
+[`supabase/envoy.yaml`](supabase/envoy.yaml) · **not filed as an issue, and arriving from user
+feedback rather than from an audit**
+
+Put an authenticating proxy in front of Supabase Studio, so reaching it costs a Supabase login as an
+`Administrator` rather than a position on the host. **`values.yaml` already asks for this by name** —
+turning the ingress on "belongs with an authenticating proxy in front" — and until one exists, the
+chart's answer and Compose's answer are the same answer: do not let anyone reach it.
+
+#### The binding is a real control, and it is the only one
+
+Studio has no authentication of its own: no login, no roles, no session. The official stack puts it
+behind a basic-auth pair and this one does not run that, so whoever reaches the port gets the SQL
+editor, the table editor and the Vault UI **as the database owner, for whom RLS is not enforced**.
+Compose binds it to `127.0.0.1` and the chart leaves `routes.studio` off; both comments say why at
+length and both are right as far as they go.
+
+What they buy is that reaching Studio needs shell access or a tunnel. What they do not buy is a
+second credential once somebody has one — and the same port also serves `/api/mcp`, a Supabase MCP
+server (`supabase` v0.7.0, protocol `2025-06-18`) that completes `initialize` with no credential at
+all and exposes `execute_sql` and `apply_migration` among its eleven tools. That is not a new
+privilege. It is the SQL editor's privilege in a shape a process can drive rather than one a human
+has to sit in front of, which is a different risk with the same blast radius.
+
+#### The cheapest fix is refused by the people who asked for the feature
+
+Not starting Studio at all — `profiles: [debug]` in Compose, matching what the chart already does —
+removes the surface completely and costs one edit. It is the right answer to the security question
+and the wrong answer to the request that prompted this entry: **users have asked to be able to reach
+Studio**, and an item that answers "you cannot" is not an item. It remains the correct default for
+any deployment nobody has asked that of, and nothing here argues for turning it on by default.
+
+#### The integration exists twice already, and a third is the same shape
+
+This stack is an OAuth 2.1 authorization server. `GOTRUE_OAUTH_SERVER_ENABLED` is on, GoTrue ships
+no consent UI so the React dashboard serves one at `/oauth/consent`, and two clients already
+authenticate humans through it: Grafana, seeded by `0002`, and Node-RED, seeded by `0006`. Both
+migrations hash a secret out of `.env` into `auth.oauth_clients` and `DO UPDATE` on replay, so a
+rotated secret takes effect on the next boot. A third client is that migration again with a
+different redirect URI.
+
+What is new is the proxy, because **Studio cannot be an OAuth client — it has no login to extend**.
+`oauth2-proxy` is the standard answer: it runs the browser flow, holds the session cookie and
+forwards authenticated requests upstream. Studio stops publishing a port and the proxy takes it.
+
+#### GoTrue's userinfo does not carry the role, and that is the decision to make first
+
+`grafana-userinfo` exists because of this and says so: GoTrue's OIDC server advertises the standard
+claims only, `app_metadata` is not among them, and a client reading a role attribute out of it finds
+nothing — with strict mapping every user is denied, without it every user silently becomes a Viewer.
+`nodered-userinfo` is the same function for the same reason. Both read `public.user_roles` through
+`resolveUserRole()`, which is also why a role change takes effect on the user's next login instead
+of whenever their token happens to be reissued.
+
+`oauth2-proxy` needs the same thing and can take it from one of two places, which are not equally
+good:
+
+| Where the role comes from | What it costs | What is unresolved |
+| :--- | :--- | :--- |
+| A claim in the ID token, read with `--oidc-groups-claim` | Nothing, if the claim is there | `custom_access_token_hook` mirrors the role into the **access** token; whether it reaches the ID token GoTrue issues at `/oauth/token` is **unverified**, and settles the design |
+| A third `studio-userinfo` function on `--profile-url` | One edge function, on an established pattern | Nothing — it is what the other two clients do, and it reads the live role |
+
+**Check the ID token first and take the free answer if it is there.** If it is not, write the third
+userinfo function rather than falling back to an email allowlist: a static list of addresses is the
+htpasswd problem with extra steps — no revocation, no role, no audit row, and a further credential
+plane in `.env` for a console that can drop a table.
+
+#### It closes the MCP endpoint, which should be a decision rather than a discovery
+
+A session cookie in front of Studio covers `/api/mcp` along with everything else, and an MCP client
+cannot complete an interactive browser flow to obtain one. So this item **removes** the
+unauthenticated MCP server as a working endpoint, not merely as an open one.
+
+That is the right outcome, and the reason is worth recording because the endpoint is tempting. It
+runs as the owner, so it reads `digital_thread`, `auth.users` and the Vault, and it sits outside
+every control this repository built for that exact question: `0034`'s read-only principal holds
+`Operator` and nothing else *precisely* so a model cannot see the audit trail, and §23's revocation
+acts at PostgREST, which Studio does not go through. The model-facing surface this stack intends is
+the i3X one, where RLS is in the path. A developer-facing MCP is recoverable later by exempting the
+route and giving it a credential of its own — on its own argument, not as a side effect of how
+Studio happens to be published.
+
+#### The door and the privilege are separate decisions, and only one of them is this item
+
+Worth doing whether or not the proxy is built, and it does not block on it. The pinned image builds
+its connection string as `readOnly ? POSTGRES_USER_READ_ONLY : POSTGRES_USER_READ_WRITE`, and **this
+stack sets only the read-write half** — `POSTGRES_USER_READ_WRITE: postgres`, with no read-only
+counterpart — so every path that asks for the restricted user is handed the owner instead. Creating
+that role and setting the variable narrows what Studio can *do*, where the proxy narrows who can
+open it.
+
+Two caveats before it is treated as free. Both branches take the same `POSTGRES_PASSWORD`, so the
+read-only role has to be created holding the owner's password, which is not obviously acceptable and
+should be decided rather than absorbed. And which of Studio's own paths request the read-only branch
+was not measured — the table editor plainly cannot use it. Measure before promising anything about
+what it covers.
+
+#### What this must not touch
+
+The proxy fronts **Studio only**. Envoy already fronts Auth, PostgREST, Realtime, Storage and the
+edge runtime on `:54321` with API-key auth and four deliberate exemptions, and every machine
+principal in the stack authenticates there without a browser. A browser-session proxy anywhere on
+that path is an outage, for the same reason `0048` keeps machine identities out of the `aal2`
+predicates.
+
+`supabase-envoy` also answers to the network alias `supabase-kong`, which Studio's own
+`SUPABASE_URL` points at for server-side calls. That is Studio talking *outward* and it does not
+change.
+
+#### Worth deciding early
+
+- **Whether the loopback binding survives the proxy.** Publishing both leaves the proxy optional,
+  and an optional control is not one. Unpublish `127.0.0.1:54323` in the same commit that publishes
+  the proxy, or the old door stays open beside the new one.
+- **Whether `routes.studio` flips to `true`.** Not in the same change. The chart's default is
+  currently right because no proxy exists; making it right for a different reason is a second
+  decision, and it is the one that puts a database console on a public hostname.
+- **What the seeded Directory entry says.** `0002` lists Studio at `http://127.0.0.1:54323`, and
+  that URL is wrong the moment the proxy takes the port. The Directory is where people look to find
+  services, so it moves in the same migration that seeds the OAuth client.
+- **Whether this waits for 20 or 21.** It does not. Gating on `Administrator` adds another
+  Administrator-only check in the direction §23 already goes, rather than depending on the role
+  split — and Studio inherits Entra sign-in and MFA for free if and when those land. That is the
+  strongest argument for the OAuth route over any proxy-local credential: it is the only design
+  under which a database console ever gets a second factor.
 
 ---
 
