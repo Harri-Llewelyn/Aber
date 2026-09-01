@@ -597,6 +597,19 @@ class TestGatewayBackupPolicies(GatewayEnrollmentBase):
         self.cur.execute("RESET ROLE;")
 
         as_role(self.cur, AUDITOR_USER, "Auditor")
+        # THE STORAGE SCHEMA REFUSES EVERY DIRECT DELETE BEFORE RLS IS CONSULTED, and without this
+        # line the test proves nothing. `storage.protect_objects_delete` is a BEFORE DELETE trigger
+        # FOR EACH STATEMENT, so it fires once before any row is examined and raises 42501 at
+        # Administrator and Auditor alike -- "Direct deletion from storage tables is not allowed.
+        # Use the Storage API instead." A test that reads that as "the Auditor was denied" would
+        # pass just as happily with the DELETE policy dropped altogether.
+        #
+        # `storage.allow_delete_query` is the trigger's own escape hatch, and it is what the Storage
+        # API sets when it deletes an object properly. Setting it here puts the statement back in
+        # front of RLS, which is the thing under test. Measured: with the hatch set, a role the
+        # policy admits deletes the row and a role it does not leaves it standing; without it,
+        # both raise. LOCAL, so it dies with the transaction rather than leaking into a later test.
+        self.cur.execute("SET LOCAL storage.allow_delete_query = 'true';")
         self.cur.execute(
             "DELETE FROM storage.objects WHERE bucket_id = 'gateway-backups' AND name = %s;", (path,)
         )
