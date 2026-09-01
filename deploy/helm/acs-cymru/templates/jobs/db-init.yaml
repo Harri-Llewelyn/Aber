@@ -156,6 +156,21 @@ spec:
               $PSQL -c 'ALTER ROLE postgres SET search_path TO auth, public, extensions;'
 
               # -------------------------------------------------------------------------------
+              # THE CHAIN IS NOW IN PROGRESS, AND ANYTHING GATED ON IT MUST WAIT.
+              #
+              # 0072 exists to record that. `completed_at` is cleared here and stamped after
+              # seed.sql, and the e2e-validate Job's init container blocks until it is non-null.
+              # Without the clear, a `helm upgrade` would find the PREVIOUS boot's completion still
+              # recorded and start conformance against a chain that is mid-replay -- the same race
+              # this closes, one deployment later.
+              #
+              # `|| true` ONLY BECAUSE OF BOOT ONE: on a database that has never been migrated the
+              # table does not exist yet, because 0072 is what creates it. The stamp at the end is
+              # what the gate actually reads, and that one is not tolerant of an error.
+              # -------------------------------------------------------------------------------
+              $PSQL -c 'UPDATE public.schema_bootstrap SET started_at = now(), completed_at = NULL' >/dev/null 2>&1 || true
+
+              # -------------------------------------------------------------------------------
               # THE MIGRATIONS ARE IN THE IMAGE, at /migrations, copied there by
               # supabase/db-init/Dockerfile. No ConfigMap, no decompression, no scratch volume.
               #
@@ -234,6 +249,13 @@ spec:
                 echo 'Executing seed.sql...'
                 $PSQL -f /seed/seed.sql
               fi
+
+              # THE END OF THE CHAIN, RECORDED. A non-null completed_at means every migration
+              # AND seed.sql succeeded on this boot -- which is what the e2e-validate Job waits for
+              # instead of waiting for 0001's `public.devices` to appear. Deliberately NOT tolerant
+              # of an error: 0072 has certainly run by now, so a failure here is a real one.
+              echo 'Marking the schema bootstrap complete...'
+              $PSQL -c "INSERT INTO public.schema_bootstrap (id, completed_at) VALUES (true, now()) ON CONFLICT (id) DO UPDATE SET completed_at = excluded.completed_at"
 
               echo 'Supabase database initialized successfully.'
           volumeMounts:

@@ -83,6 +83,48 @@ generated vocabulary and SQL statements that must survive verbatim, so the floor
 only thing a squash removes at scale is the migration headers, and in this repository those are the
 reasoning for every schema guard.
 
+### The chain has an end, and now it says so (`0072`)
+
+There is no applied-migrations ledger, so **nothing in the database could distinguish "the chain is
+part-way through" from "the chain has finished"** — and on Kubernetes something needed to.
+
+The e2e-validate Job is a plain manifest and `db-init` is a `post-install` hook, so Helm creates the
+Job **first** and the two run concurrently. The Job's defence was an init container waiting on
+`SELECT 1 FROM public.devices LIMIT 1;`. `0001` creates that table. The probe therefore started
+passing once **one migration of seventy** had run, and kept passing for the other sixty-nine.
+
+On CI run `33503395769` the conformance suite began publishing while the chain was in its fifties:
+
+```
+11:59:43 [ERROR] Error resolving device identity 'devfffffffffffffffffffff':
+         column devices.conformance_policy does not exist        <- 0050 had not run yet
+11:59:43 [WARNING] DIRECTORY UNAVAILABLE: dropping DBIRTH without registering it
+11:59:55 [INFO]  DEPRECATED IDENTITY: device matched by name     <- the chain caught up
+```
+
+Checks 1, 1d, 1e and 1f failed; every check that ran after 11:59:55 passed. **It presented as four
+flaky quarantine bugs**, because on a runner where db-init won the race the whole suite was green.
+
+`public.schema_bootstrap` is one row that db-init clears before the loop and stamps after
+`seed.sql`, and the gate now waits for `completed_at` to be non-null. Three things about it:
+
+- **The clear matters as much as the stamp.** A row left complete by the previous boot would
+  satisfy the gate instantly while a `helm upgrade` replayed the chain — the identical race, one
+  deployment later.
+- **`SELECT 1/count(*) …` is deliberate.** `acs-cymru.waitForPostgres` reads the **exit code**, and
+  a query matching no rows still exits 0 — which is why the old probe could not have expressed "and
+  the chain has finished" whichever table it named. The division makes an empty result an error.
+- **Both targets write it**, though only Kubernetes has the race. Compose orders db-init with
+  `service_completed_successfully` and needs no gate, but a table on one target and not the other is
+  the drift [`check-compose-chart-parity.mjs`](../scripts/check-compose-chart-parity.mjs) exists to
+  catch.
+
+The three alternatives were weighed and rejected in the migration header: waiting on a *late*
+migration's artefact goes stale the moment `0073` lands, reading the Job status through the
+Kubernetes API needs a ServiceAccount and a Role to run one query, and making the Job a hook at a
+heavier weight would turn a failing conformance run into a failed `helm install` — conflating *"the
+stack deployed"* with *"the stack conforms"*.
+
 ### Idempotency is not optional
 
 `supabase-db-init` replays **every** `/migrations/*.sql` on every boot — there is no
