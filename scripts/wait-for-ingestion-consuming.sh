@@ -101,6 +101,7 @@ echo "waiting up to ${TIMEOUT}s for the ingestion daemon to be consuming (mode=$
 
 elapsed=0
 last_up="none"
+last_sub="none"
 last_msgs="none"
 
 while [ "$elapsed" -lt "$TIMEOUT" ]; do
@@ -109,10 +110,11 @@ while [ "$elapsed" -lt "$TIMEOUT" ]; do
   if [ -n "$body" ]; then
     # `$2` on the bare gauge line; the sum of the last field across every labelled counter series.
     last_up="$(printf '%s\n' "$body" | awk '/^acs_ingestion_up /{print $2; found=1} END{if(!found) print "absent"}')"
+    last_sub="$(printf '%s\n' "$body" | awk '/^acs_ingestion_mqtt_connected /{print $2; found=1} END{if(!found) print "absent"}')"
     last_msgs="$(printf '%s\n' "$body" | awk '/^acs_ingestion_messages_total\{/{s+=$NF} END{printf "%d", s+0}')"
 
-    if [ "$last_up" = "1" ] && [ "$last_msgs" -gt 0 ] 2>/dev/null; then
-      echo "ingestion is consuming: acs_ingestion_up=1, sum(acs_ingestion_messages_total)=${last_msgs} after ${elapsed}s"
+    if [ "$last_up" = "1" ] && [ "$last_sub" = "1" ]; then
+      echo "ingestion is subscribed: acs_ingestion_up=1, acs_ingestion_mqtt_connected=1, ${last_msgs} message(s) consumed so far, after ${elapsed}s"
       exit 0
     fi
   fi
@@ -132,16 +134,22 @@ echo "" >&2
 echo "TIMED OUT after ${TIMEOUT}s: the ingestion daemon is not consuming." >&2
 echo "" >&2
 echo "  last acs_ingestion_up:                  ${last_up}" >&2
+echo "  last acs_ingestion_mqtt_connected:      ${last_sub}" >&2
 echo "  last sum(acs_ingestion_messages_total): ${last_msgs}" >&2
 echo "" >&2
 if [ "$last_up" = "none" ]; then
   echo "The metrics endpoint answered nothing at all. The daemon is not serving on ${PORT} --" >&2
   echo "check whether it is still in its init containers, or halted at startup: it refuses to" >&2
   echo "start its MQTT loop without SUPABASE_INGESTION_KEY and says so in its own logs." >&2
-elif [ "$last_msgs" = "0" ]; then
-  echo "The endpoint is up and NOTHING has been consumed. The daemon is running and not" >&2
-  echo "subscribed -- which is the state acs_ingestion_up exists to distinguish from a dead" >&2
-  echo "target. Check the broker credential and the MQTT connection in the daemon's logs." >&2
+elif [ "$last_sub" = "absent" ]; then
+  echo "The endpoint is up and does not export acs_ingestion_mqtt_connected at all. That gauge" >&2
+  echo "arrived with this wait; a daemon image predating it cannot answer, and the gate cannot" >&2
+  echo "tell 'not subscribed' from 'too old to say'. Rebuild the ingestion image." >&2
+else
+  echo "The endpoint is up and the daemon is NOT SUBSCRIBED. It is running and deaf -- which is" >&2
+  echo "the state acs_ingestion_up exists to distinguish from a dead target. Check the broker" >&2
+  echo "credential and the MQTT connection in the daemon's own logs; a refused connection is" >&2
+  echo "logged there as 'Failed to connect to MQTT Broker'." >&2
 fi
 echo "" >&2
 echo "validate.py is NOT run after this failure, deliberately: it would report a block of" >&2

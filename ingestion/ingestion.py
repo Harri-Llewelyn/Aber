@@ -3169,6 +3169,25 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
         )
 
 
+# WHETHER THE DAEMON IS SUBSCRIBED, WHICH NOTHING COULD OBSERVE BEFORE.
+#
+# `acs_ingestion_db_connected` has always answered the same question about PostgreSQL, and the
+# absence of an MQTT equivalent was a real gap rather than an oversight of symmetry: "the process
+# is running" and "the daemon is receiving Sparkplug messages" are different states with an
+# unbounded gap between them, and only the second one means the stack is working.
+#
+# CI needed exactly this and had to infer it. Issue #47's proposed gate waited for
+# `sum(acs_ingestion_messages_total) > 0` on the reasoning that "the simulators publish
+# continuously" -- which was true when it was written and stopped being true when roadmap item 14
+# made the simulator opt-in. On a stack with no publisher the count is unreachable and the wait
+# deadlocks, which is what it did on the Compose job: `acs_ingestion_up=1`, zero messages, 180
+# seconds. The daemon was subscribed the whole time and nothing could say so.
+#
+# SET AFTER `subscribe()` RETURNS, NOT AFTER `connect()`. A connected client that has not
+# subscribed receives nothing, which is precisely the state this exists to distinguish.
+_mqtt_subscribed = False
+
+
 def on_connect(client, userdata, flags, rc, properties=None):
     """
     Subscribe once the broker has accepted the connection.
@@ -3182,11 +3201,14 @@ def on_connect(client, userdata, flags, rc, properties=None):
     because a comparison that silently became False would leave the daemon connected and
     subscribed to nothing.
     """
+    global _mqtt_subscribed
     if rc == 0:
         logger.info("Connected to MQTT Broker successfully.")
         client.subscribe("spBv1.0/#")
+        _mqtt_subscribed = True
         logger.info("Subscribed to 'spBv1.0/#'")
     else:
+        _mqtt_subscribed = False
         logger.error("Failed to connect to MQTT Broker, return code %s", rc)
 
 
@@ -3219,6 +3241,13 @@ def on_disconnect(client, userdata, rc, properties=None):
 
     rc == 0 is a disconnect this daemon asked for, which is not worth a line.
     """
+    # CLEARED FOR EVERY DISCONNECT, INCLUDING THE DELIBERATE ONE. The subscription does not survive
+    # the connection, so `acs_ingestion_mqtt_connected` must not go on claiming it does -- and this
+    # sits ABOVE the `rc == 0` early return, because a clean shutdown is exactly as unsubscribed as
+    # a dropped socket. paho's loop_forever() reconnects on its own and on_connect sets it again.
+    global _mqtt_subscribed
+    _mqtt_subscribed = False
+
     if rc == 0:
         return
 
@@ -3697,6 +3726,8 @@ def start_metrics_endpoint():
                 "acs_ingestion_up": 1,
                 "acs_ingestion_db_connected":
                     1 if (_ts_conn is not None and not _ts_conn.closed) else 0,
+                # The subscription, not the connection. See the note above on_connect().
+                "acs_ingestion_mqtt_connected": 1 if _mqtt_subscribed else 0,
             },
         )
 

@@ -155,6 +155,11 @@ HELP = {
     "acs_ingestion_up": "1 while the daemon is serving this endpoint.",
     "acs_ingestion_db_connected":
         "1 when the historian connection is open. 0 means telemetry is being dropped now.",
+    "acs_ingestion_mqtt_connected":
+        "1 when the daemon is subscribed to spBv1.0/#. THE SUBSCRIPTION, NOT THE CONNECTION: a "
+        "connected client that has not subscribed receives nothing, and that is the state worth "
+        "telling apart. `acs_ingestion_up` is 1 as soon as this endpoint is served, which happens "
+        "first -- so a stack that is up with this at 0 is running and deaf.",
     "acs_ingestion_unmapped_counter_total":
         "An internal counter with no Prometheus mapping. Non-zero means metrics.py's COUNTER_MAP "
         "has fallen behind ingestion.py -- the counter is still being kept, just not named here.",
@@ -185,6 +190,7 @@ HELP = {
 TYPES = {
     "acs_ingestion_up": "gauge",
     "acs_ingestion_db_connected": "gauge",
+    "acs_ingestion_mqtt_connected": "gauge",
     # A LABELLED GAUGE, which is why it arrives through `labelled` rather than through `gauges`.
     # The TYPE is decided here by name, not by which argument a series came in on -- so a gauge
     # that needs a label dimension has somewhere to go without a fourth parameter.
