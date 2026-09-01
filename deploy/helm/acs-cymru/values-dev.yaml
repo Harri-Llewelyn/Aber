@@ -28,6 +28,15 @@ secrets:
   postgresPassword: postgres
   timescalePassword: postgres
 
+  # THE TWO HISTORIAN ROLES (roadmap item 18), required by `acs-cymru.validateSecrets` since
+  # 898bfb3. This fixture did not carry them, so `helm template -f values-dev.yaml` failed at
+  # NOTES.txt for four days and nothing said so -- every CI run was failing at the billing gate
+  # before it reached the step. Distinct values rather than one shared password: the whole point of
+  # the pair is that the FDW mapping and the ingestion daemon authenticate as different roles, and
+  # a fixture that gives them the same secret cannot catch a mix-up between them.
+  ingestWriterPassword: acscymru-ingest-writer
+  fdwReaderPassword: acscymru-fdw-reader
+
   # EXACTLY 16 characters, and AT LEAST 64 characters. The chart asserts both.
   realtimeDbEncKey: supabaserealtime
   realtimeSecretKeyBase: 8f2c1d4b7a9e0356c8b1f4d72e5a90c3b6d8f1a4e7c025d9a3e6b8c1f4d7a0e39
