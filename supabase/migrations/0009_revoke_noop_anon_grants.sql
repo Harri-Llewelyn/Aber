@@ -100,11 +100,35 @@ BEGIN
   FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
   WHERE n.nspname = 'public';
 
+  -- ---------------------------------------------------------------------------------------------
+  -- A DIRECT GRANT, NOT AN EFFECTIVE PRIVILEGE (issue #117)
+  --
+  -- has_function_privilege() answers "can this role execute it", and that is TRUE when the only
+  -- thing granting EXECUTE is PUBLIC -- which is precisely what the revoke loop below is about to
+  -- take away. Asking it here made the sweep COPY the privilege it was removing: PUBLIC's implicit
+  -- EXECUTE on a newly created function was captured as something `authenticated` held, PUBLIC was
+  -- revoked, and `authenticated` was then handed an EXPLICIT grant it never had.
+  --
+  -- It only bit on a FIRST boot, which is why it went unseen. A function created earlier in the
+  -- same boot still carries PUBLIC's grant when the sweep runs; on every later boot 0001's
+  -- `REVOKE ALL ON ALL FUNCTIONS` has already stripped PUBLIC, so the same code kept nothing and
+  -- the schema settled one grant narrower. Eleven trigger bodies -- audit_domain_for,
+  -- stamp_audit_domain, log_role_assignment and the rest -- were `authenticated`-executable on a
+  -- fresh install and not on a restarted one.
+  --
+  -- Reading the ACL directly is the whole fix: aclexplode() lists grants that were actually made
+  -- to the role, and a NULL proacl (the untouched default) yields no rows, which is the right
+  -- answer. A genuine RPC that a migration granted on purpose still matches and is still restored.
+  -- ---------------------------------------------------------------------------------------------
   FOREACH fn IN ARRAY all_fns LOOP
-    IF has_function_privilege('authenticated', fn, 'EXECUTE') THEN
+    IF EXISTS (SELECT 1 FROM pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a
+                WHERE p.oid = fn AND a.grantee = 'authenticated'::regrole
+                  AND a.privilege_type = 'EXECUTE') THEN
       keep_auth := keep_auth || fn;
     END IF;
-    IF has_function_privilege('service_role', fn, 'EXECUTE') THEN
+    IF EXISTS (SELECT 1 FROM pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a
+                WHERE p.oid = fn AND a.grantee = 'service_role'::regrole
+                  AND a.privilege_type = 'EXECUTE') THEN
       keep_svc := keep_svc || fn;
     END IF;
   END LOOP;
