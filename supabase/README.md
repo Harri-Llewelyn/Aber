@@ -1008,9 +1008,19 @@ has `--csv`.
 ### Running it, and the switch that used to mean nothing
 
 The `cold-archiver` service runs `cold_archive --drop --loop` on `COLD_ARCHIVE_INTERVAL_SECONDS`
-(default daily), re-reading `archive.enabled` every pass and doing nothing while it is off. It runs
-on every stack and stays inert until the switch is turned on — which is what makes the switch a
-control rather than a note about a command somebody has to remember.
+(default daily), re-reading `archive.enabled` every pass and doing nothing while it is off. It
+stays inert until the switch is turned on — which is what makes the switch a control rather than a
+note about a command somebody has to remember.
+
+> **Compose only, for now.** This sentence used to read *"it runs on every stack"* and that was
+> never true of Kubernetes: the chart declares no `cold-archiver` workload, and `cold_archive.sql`
+> is not in `sync-helm-chart-files.mjs`'s allow-list, so the manifest table the archiver writes does
+> not exist there either. Nothing is lost by the gap — `retention.sql`'s conflict warning is gated
+> on that table existing, so a Kubernetes stack drops chunks on the ordinary timer exactly as it did
+> before archival shipped. What is wrong is only the claim. **The archive is a Compose feature until
+> the chart carries the workload**, and the reason it took a fortnight to notice is that CI could not
+> run: the file-sync guard that watches these copies had been failing at the billing gate since
+> before archival merged, so four stale chart files sat on `main` unreported.
 
 It includes `--drop`, and that is the safer option rather than the bolder one: the baseline it
 replaces is `retention.sql` dropping chunks on a timer with **no export and no record at all**.
