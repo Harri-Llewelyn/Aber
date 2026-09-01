@@ -114,6 +114,19 @@ spec:
             # is rejected at the socket handshake.
             {{- include "acs-cymru.secretEnv" (dict "name" "API_JWT_SECRET" "secretName" $secretName "key" "SUPABASE_JWT_SECRET") | nindent 12 }}
             {{- include "acs-cymru.secretEnv" (dict "name" "SECRET_KEY_BASE" "secretName" $secretName "key" "REALTIME_SECRET_KEY_BASE") | nindent 12 }}
+            {{/*
+              MANDATORY SINCE realtime v2.102.3 -- `System.fetch_env!`, so the container refuses to
+              boot rather than defaulting, and the failure is a CrashLoopBackOff whose message is an
+              Elixir stack trace ten frames deep. docker-compose.yml gained this when the version was
+              pinned; secret.yaml gained REALTIME_METRICS_JWT_SECRET at the same time and NOTHING
+              CONSUMED IT, so the chart carried the value and never passed it.
+
+              It signs the bearer token realtime's /metrics endpoint requires. Nothing scrapes that
+              endpoint here yet, so the value only has to exist and be secret -- and deliberately is
+              NOT SUPABASE_JWT_SECRET, which would let anyone holding the API signing key mint
+              metrics tokens: a wider grant for no gain.
+            */}}
+            {{- include "acs-cymru.secretEnv" (dict "name" "METRICS_JWT_SECRET" "secretName" $secretName "key" "REALTIME_METRICS_JWT_SECRET") | nindent 12 }}
             {{- include "acs-cymru.secretEnv" (dict "name" "SUPABASE_ANON_KEY" "secretName" $secretName "key" "SUPABASE_ANON_KEY") | nindent 12 }}
             - name: ERL_AFLAGS
               value: "-proto_dist inet_tcp"

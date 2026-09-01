@@ -260,6 +260,21 @@ Only checked when realtime is enabled AND the chart owns the secret.
 {{- if lt (len $base) 64 -}}
 {{- fail (printf "\n\nacs-cymru: secrets.realtimeSecretKeyBase must be AT LEAST 64 characters (got %d).\nsupabase/realtime refuses to boot otherwise. Generate one with:  openssl rand -hex 32\n" (len $base)) -}}
 {{- end -}}
+{{/*
+  THE THIRD SECRET THAT MAKES REALTIME REFUSE TO BOOT, beside the other two by this block's own
+  logic rather than as a new idea. `METRICS_JWT_SECRET` became mandatory in v2.102.3 --
+  `System.fetch_env!`, so the container aborts during boot rather than defaulting. Unset, the pod
+  CrashLoopBackOffs and the only clue is an Elixir stack trace ten frames deep.
+
+  docker-compose.yml gained it when the version was pinned, and secret.yaml gained the value at
+  the same time -- but NOTHING CONSUMED IT. The chart carried the secret and never passed it to
+  the pod. This is what stops that being possible again.
+
+  No length rule: unlike the two above, it only has to exist and be secret.
+*/}}
+{{- if not .Values.secrets.realtimeMetricsJwtSecret -}}
+{{- fail "\n\nacs-cymru: secrets.realtimeMetricsJwtSecret is required (METRICS_JWT_SECRET).\nsupabase/realtime v2.102.3 refuses to boot otherwise. Generate one with:  openssl rand -hex 32\n\nDeliberately NOT secrets.jwtSecret: it signs the bearer token realtime's /metrics endpoint\nrequires, and sharing the API signing key would let anyone holding it mint metrics tokens.\n" -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 
