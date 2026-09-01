@@ -147,7 +147,7 @@ python timescaledb/test_historian_role_grants.py
 # into that gap makes the suite report a block of conformance failures for a cause none of them
 # names -- ten of them, in the run that produced issue #47. This blocks until the daemon has
 # actually consumed something, and fails naming the wait if it never does.
-WAIT_MODE=compose scripts/wait-for-ingestion-consuming.sh
+WAIT_MODE=compose sh scripts/wait-for-ingestion-consuming.sh
 
 set -a && . ./.env && set +a && unset MQTT_HOST DB_HOST DB_PORT
 export MQTT_USER="$MQTT_VALIDATOR_USER" MQTT_PASSWORD="$MQTT_VALIDATOR_PASSWORD"
