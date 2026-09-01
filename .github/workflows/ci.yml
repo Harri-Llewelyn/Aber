@@ -312,6 +312,17 @@ jobs:
       - name: Verify Chart Files Are In Sync With Their Sources
         run: node scripts/sync-helm-chart-files.mjs --check
 
+      # THE SET COMPARISON THE FILE-SYNC CHECK ABOVE CANNOT MAKE. That one asserts the copies the
+      # chart already carries are current; it says nothing about a service the chart never gained.
+      # Six defects in one branch had that second shape, three of them found only by installing the
+      # chart and watching a pod crash ten minutes at a time.
+      #
+      # It runs HERE rather than in k8s-validation because it needs neither a cluster nor helm --
+      # it reads docker-compose.yml and the templates as text, so it costs seconds and fails on a
+      # pull request rather than after a 20-minute install.
+      - name: Verify Compose And The Chart Deploy The Same Services
+        run: node scripts/check-compose-chart-parity.mjs
+
       # THESE THREE RUN BEFORE THE SATELLITE CHECKS BELOW, and the ordering is deliberate
       # rather than tidy. A GitHub Actions job stops at its FIRST failing step, so whichever
       # check runs first is the only one that reports -- and this job is named for the chart.
