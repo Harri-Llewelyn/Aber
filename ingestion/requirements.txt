@@ -26,7 +26,7 @@ supabase
 #
 # It is a large wheel (~40 MB) and it is imported LAZILY, inside the two functions that write and
 # read Parquet, so the ingestion daemon's own start-up path never pays for it.
-pyarrow==18.1.0
+pyarrow==23.0.1
 
 # Reading the cold archive back (roadmap item 3, `cold_archive query`).
 #
