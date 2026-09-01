@@ -598,6 +598,35 @@ deploys flows. The repair is to make that person an `Administrator`. Roadmap §2
 depend on this split — §21's MFA reset is gated on `authz:manage`, and §22's security lane would
 otherwise be hidden from a role that could grant itself the ability to see it.
 
+### The anon sweep runs after the functions exist (`0009`, `0071`)
+
+`0009` revokes EXECUTE from `PUBLIC` and `anon` on every function in `public`, restoring only what
+`authenticated` and `service_role` already held. **It runs at position nine.**
+
+PostgreSQL grants EXECUTE on a new function to `PUBLIC` by default and `anon` inherits it, so every
+function created by a migration numbered above 0009 was anon-executable from the moment it was
+created — the enrolment withdrawal (`0037`), the playback guards (`0056`), the revocation trigger
+(`0063`), the audit-domain stamp (`0070`) and a dozen more.
+
+**A restarted stack self-corrects, which is why this survived sixty migrations.** `CREATE OR REPLACE
+FUNCTION` preserves the existing ACL, so the second boot's pass of `0009` revokes what the first
+boot's pass of a later migration created. The baseline is met from boot two onward, and every
+development machine has restarted often enough to look clean.
+
+**A fresh install is boot one.** `validate.py`'s check 13a requires an anon privilege review to
+return an *empty* set — *"that is what makes a real finding visible instead of hiding it among
+harmless trigger functions"* — and on a first boot it returned twelve. CI builds a database from
+nothing on every run and is the only place that state is ever observed; it had been unable to report
+since before half of those functions existed.
+
+`0071` extracts the sweep as `revoke_anon_function_privileges()` and calls it. **A later migration
+that creates a function must end with the same one-line call**, and `0071`'s self-check fails the
+following boot if it does not — naming the omission at db-init rather than an hour later in an
+end-to-end run whose message is about `anon`.
+
+The durable answer is an event trigger on `CREATE FUNCTION`, which would need no call site at all.
+It is deliberately not taken yet; `0071`'s header records why.
+
 ### `has_role()`
 
 ```sql
