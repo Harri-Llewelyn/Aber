@@ -1040,6 +1040,34 @@ def verify_results():
                     print("✅ 1c. NAME HINT: the device's Asset_Name metric labelled the new row.")
             else:
                 print(f"❌ 1. SUPABASE QUARANTINE FAIL: no quarantined device reported '{UNKNOWN_DEVICE_ID}'.")
+                # WHAT WAS THERE INSTEAD, said at the moment we looked.
+                #
+                # THREE DIFFERENT BUGS PRODUCE THE LINE ABOVE and it distinguishes none of them:
+                # the row was never inserted; the row exists with a different reported_identity;
+                # the row exists and is_quarantined is false. On Kubernetes this check failed while
+                # 1d, 1e and 1f -- the other quarantine paths -- all passed, and the message sent
+                # the reader to the daemon's logs, which had scrolled.
+                #
+                # IT HAS TO BE HERE RATHER THAN IN CI, because the cleanup below runs in a `finally`
+                # and therefore ON FAILURE TOO. Anything that queries afterwards finds nothing and
+                # reads it as the first of those three.
+                try:
+                    probe = supabase_client.table("devices").select(
+                        "name,sparkplug_id,reported_identity,is_quarantined,quarantine_reason"
+                    ).like("name", "VALIDATE%").execute()
+                    rows = probe.data if probe else []
+                    if rows:
+                        print(f"      -> {len(rows)} VALIDATE% device row(s) present:")
+                        for r in rows:
+                            print(
+                                f"         name={r.get('name')!r} sparkplug_id={r.get('sparkplug_id')} "
+                                f"reported_identity={r.get('reported_identity')} "
+                                f"quarantined={r.get('is_quarantined')} reason={r.get('quarantine_reason')}"
+                            )
+                    else:
+                        print("      -> no VALIDATE% device rows at all: the DBIRTH never became a row.")
+                except Exception as probe_err:
+                    print(f"      -> could not read the devices table to say what was there: {probe_err}")
                 passed = False
         except Exception as e:
             print(f"❌ 1. SUPABASE QUARANTINE ERROR: {e}")

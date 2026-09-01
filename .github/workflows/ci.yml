@@ -1989,6 +1989,27 @@ jobs:
             echo "=== $p"; kubectl -n $NS logs "$p" --all-containers --tail 40 || true
           done
 
+          # THE INGESTION DAEMON GETS A LONGER TAIL THAN THE REST, and 40 lines is why this step
+          # could not answer the question it was reached for. validate.py's conformance suite
+          # publishes roughly forty messages and the daemon logs several lines per message, so by
+          # the time the suite fails its first check the evidence for that check has scrolled off.
+          #
+          # That is not a hypothetical cost. `❌ 1. SUPABASE QUARANTINE FAIL` was investigated with
+          # this output and the absence of a `Processing DBIRTH` line for the device read as "the
+          # message never arrived" -- when it only meant "older than forty lines". A truncated log
+          # that looks complete is worse than no log, because it supports a confident wrong answer.
+          echo "=== ingestion daemon, extended"
+          kubectl -n $NS logs deploy/ingestion -c ingestion --tail 400 || true
+
+          # THE DATABASE IS DELIBERATELY NOT QUERIED HERE, and the reason is worth recording so the
+          # next person does not add it. validate.py cleans up its own rows in a `finally`, so it
+          # runs ON FAILURE TOO -- the k3d log shows "Cleaning up validation data... Cleanup
+          # complete." immediately after "END-TO-END VALIDATION FAILED". By the time this step is
+          # reached the evidence is gone, and a `SELECT` here would return zero rows and be read as
+          # "the row was never created" no matter which of the three possible bugs it was.
+          #
+          # The suite itself reports what it found instead, at the moment it looked. See check 1.
+
       - name: Tear Down
         if: always()
         run: k3d cluster delete acs-cymru || true
