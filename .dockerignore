@@ -30,7 +30,17 @@ frontend/coverage
 # `tests` is NOT excluded: tests/Dockerfile copies tests/schemas (the vendored IDTA metamodel schema)
 # and it is 60 KB. Its absence would make the AAS suite skip its schema-conformance assertions -- the
 # ones that caught three real metamodel violations -- while still reporting success.
+#
+# AND `docs/openapi.yaml` IS NOT EXCLUDED EITHER, which is the second time this file has caught
+# somebody out in exactly the way its own header warns about. tests/Dockerfile:61 copies it --
+# test_aas_api.py asserts that every route the service advertises is documented, so the spec is a
+# FIXTURE of the suite and not only a deliverable. Without the negation the build fails as
+# `"/docs/openapi.yaml": not found`, which reads like a deleted file rather than an ignored one.
+#
+# The negation has to come AFTER the `docs` line: Docker applies these in order and the last match
+# wins. Putting it before makes it a no-op that looks correct.
 docs
+!docs/openapi.yaml
 grafana
 simulators
 timescaledb
