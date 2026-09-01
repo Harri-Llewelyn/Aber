@@ -2305,10 +2305,27 @@ jobs:
                   print(f"  ok  {job} -> {t['scrapeUrl']}")
           # Named explicitly rather than counted: a config that silently lost a job would still
           # satisfy "every target listed is up", because the missing one is not listed.
+          #
+          # THE LIST IS THE WHOLE OF prometheus.yml, AND IT IS CHECKED BOTH WAYS. Naming only some
+          # of the jobs left the same hole the explicit list exists to close, one job along:
+          # `supabase-rest` was added by "scrape PostgREST's own metrics" and never added here, so
+          # losing it would have gone unreported exactly as losing an unnamed job always would.
+          # Asserting equality means a job REMOVED from prometheus.yml fails here, and so does one
+          # ADDED without being declared here -- which is the only way this list stays true.
+          #
+          # `envoy` used to be `kong`. Envoy replaced Kong as the Compose gateway in
+          # "feat(gateway): Envoy is the gateway on Compose; Kong retired", which renamed the scrape
+          # job; this assertion kept naming `kong` and did not fail, because the step never ran --
+          # `Migration Chain Replays Cleanly` ahead of it had been red since before that commit
+          # (#117). A guard behind a failing step is not a guard. Kubernetes still fronts with Kong,
+          # but this job is the Compose stack and reads Compose's prometheus.yml.
+          expected = {'ingestion', 'node', 'envoy', 'supabase-rest', 'grafana', 'prometheus'}
           jobs = {t['labels'].get('job') for t in targets}
-          for want in ('ingestion', 'node', 'kong', 'grafana', 'prometheus'):
-              if want not in jobs:
-                  bad.append(f"scrape job '{want}' is absent from prometheus.yml")
+          for want in sorted(expected - jobs):
+              bad.append(f"scrape job '{want}' is absent from prometheus.yml")
+          for extra in sorted(jobs - expected):
+              bad.append(f"scrape job '{extra}' is in prometheus.yml but not declared in this "
+                         f"check -- add it, so that losing it later would be reported")
           for b in bad:
               print(f'::error::{b}')
           sys.exit(1 if bad else 0)
