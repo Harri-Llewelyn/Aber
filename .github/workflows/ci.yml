@@ -1818,6 +1818,23 @@ jobs:
             kubectl -n $NS rollout status "$w" --timeout=10m
           done
 
+      # ROLLED OUT IS NOT CONSUMING, and CI kept treating them as the same state (#47).
+      # `rollout status` returns when the container PROCESS starts; the daemon then connects to the
+      # broker and subscribes, and on a loaded runner that gap has been over two minutes -- most of
+      # it inside the init containers. validate.py published into it and reported ten conformance
+      # failures for a cause none of them named.
+      #
+      # NOT A READINESS PROBE, deliberately: apps/ingestion.yaml argues against one and is right --
+      # readiness would gate scraping, and "running but consuming nothing" is the diagnosis worth
+      # having. `ingestion-metrics` sets publishNotReadyAddresses: true for exactly that reason.
+      # The gate belongs in CI.
+      #
+      # SEQUENCE GAP warnings in the daemon's log during this wait are EXPECTED: the simulators
+      # published throughout its init wait and those messages are gone, so the first delivered
+      # message is a jump. That is #24's detection working, not a regression.
+      - name: Wait For The Ingestion Daemon To Be Consuming
+        run: WAIT_MODE=k8s scripts/wait-for-ingestion-consuming.sh
+
       # M6. The cheap gate, FIRST. `public.telemetry` is a postgres_fdw projection, and a mistake in
       # the foreign server -- most likely the port -- surfaces as a relation-level error from
       # PostgREST, which reads as a schema fault. Without this, validate.py fails deep in its
@@ -2138,6 +2155,18 @@ jobs:
       # them, so this `. ./.env` is load-bearing rather than incidental. It is also why the suite
       # is now WEAKER in CI than locally in one narrow sense: --demo's published credentials can
       # never diverge from the account, so only a real setup exercises that path.
+      # THE SAME GATE AS THE k3d JOB, and applied here rather than exempted (#47). Compose has the
+      # gap in principle: `docker compose up --wait` returns on health, and the ingestion daemon
+      # carries no healthcheck for the reason its Kubernetes manifest gives about readiness. In
+      # practice this job has not flaked, because the runner brings the stack up and the daemon
+      # subscribes while later steps are still running -- but "has not happened yet" is the same
+      # thing every timing bug is true of until the day it is not.
+      #
+      # It costs nothing when the daemon is already consuming: the endpoint answers on the first
+      # poll and the step exits in under a second.
+      - name: Wait For The Ingestion Daemon To Be Consuming
+        run: WAIT_MODE=compose scripts/wait-for-ingestion-consuming.sh
+
       - name: Run End-to-End Validation Script
         run: |
           set -a && . ./.env && set +a

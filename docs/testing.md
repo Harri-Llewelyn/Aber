@@ -141,6 +141,14 @@ python timescaledb/test_worker_pool.py
 python timescaledb/test_historian_role_grants.py
 
 # End-to-end — needs the running stack
+#
+# WAIT FOR THE DAEMON FIRST. `docker compose up --wait` returns on health and the ingestion daemon
+# carries no healthcheck deliberately, so "up" and "subscribed" are different states. Publishing
+# into that gap makes the suite report a block of conformance failures for a cause none of them
+# names -- ten of them, in the run that produced issue #47. This blocks until the daemon has
+# actually consumed something, and fails naming the wait if it never does.
+WAIT_MODE=compose scripts/wait-for-ingestion-consuming.sh
+
 set -a && . ./.env && set +a && unset MQTT_HOST DB_HOST DB_PORT
 export MQTT_USER="$MQTT_VALIDATOR_USER" MQTT_PASSWORD="$MQTT_VALIDATOR_PASSWORD"
 python ingestion/validate.py

@@ -1097,6 +1097,16 @@ def check_message_sequence(group_id, edge_node_id, msg_type, payload, client=Non
         "acs_ingestion_sequence_messages_missed_total", {"edge_node": edge_node_id}, missed
     )
 
+    # EXPECTED IN ONE SITUATION, AND WORTH SAYING SO WHERE THE WARNING IS WRITTEN. A daemon that
+    # has just started -- after a slow rollout, an image pull, or a long init wait -- subscribes to
+    # a stream the simulators have been publishing into the whole time. The first message it sees
+    # carries a seq far ahead of the 0 it expects, so a burst of these is the correct report of
+    # messages that genuinely were missed while nothing was listening.
+    #
+    # It is NOT a regression in that situation, and CI now removes the ambiguity from the other
+    # end: `scripts/wait-for-ingestion-consuming.sh` blocks until this daemon has consumed
+    # something before the conformance suite publishes, so a gap burst during a CI run means what
+    # it says rather than "the suite started too early". See issue #47.
     requested = request_node_rebirth(client, group_id, edge_node_id)
     logger.warning(
         "SEQUENCE GAP: edge node '%s' sent %s with seq %d, expected %d -- %d message(s) lost or "
