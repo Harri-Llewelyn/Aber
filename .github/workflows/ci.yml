@@ -1833,7 +1833,7 @@ jobs:
       # published throughout its init wait and those messages are gone, so the first delivered
       # message is a jump. That is #24's detection working, not a regression.
       - name: Wait For The Ingestion Daemon To Be Consuming
-        run: WAIT_MODE=k8s scripts/wait-for-ingestion-consuming.sh
+        run: WAIT_MODE=k8s sh scripts/wait-for-ingestion-consuming.sh
 
       # M6. The cheap gate, FIRST. `public.telemetry` is a postgres_fdw projection, and a mistake in
       # the foreign server -- most likely the port -- surfaces as a relation-level error from
@@ -2165,7 +2165,7 @@ jobs:
       # It costs nothing when the daemon is already consuming: the endpoint answers on the first
       # poll and the step exits in under a second.
       - name: Wait For The Ingestion Daemon To Be Consuming
-        run: WAIT_MODE=compose scripts/wait-for-ingestion-consuming.sh
+        run: WAIT_MODE=compose sh scripts/wait-for-ingestion-consuming.sh
 
       - name: Run End-to-End Validation Script
         run: |

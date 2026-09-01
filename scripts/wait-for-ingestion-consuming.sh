@@ -56,9 +56,21 @@
 # gap detection working, not a regression -- do not read it as one, and do not "fix" it by
 # relaxing the check.
 #
+# =================================================================================================
+# INVOKED AS `sh scripts/...`, AND THE MODE BIT IS NOT LOAD-BEARING
+#
+# This repository is developed on Windows, where git's `core.fileMode` is off, so a local
+# `chmod +x` records nothing and the file is committed 100644. `scripts/backup-databases.sh` has
+# been 100644 since it was written, which is the evidence rather than the theory.
+#
+# CI ran it as `scripts/wait-for-ingestion-consuming.sh` and both e2e jobs died with
+# `Permission denied` and exit 126 -- a shape that looks nothing like a script defect and sent the
+# reader to the wait logic, which was fine. The index mode is now 755 AND every caller says `sh`,
+# so neither one alone is what makes it work.
+#
 # Usage:
-#   WAIT_MODE=compose scripts/wait-for-ingestion-consuming.sh
-#   WAIT_MODE=k8s NS=acs-cymru scripts/wait-for-ingestion-consuming.sh
+#   WAIT_MODE=compose sh scripts/wait-for-ingestion-consuming.sh
+#   WAIT_MODE=k8s NS=acs-cymru sh scripts/wait-for-ingestion-consuming.sh
 #
 set -eu
 
