@@ -728,6 +728,48 @@ complementary, not alternatives.
 
 A self-check in `0001` fails the boot if a future image reinstates the grants.
 
+#### The sweep was copying the privilege it removed
+
+Narrowing the default ACL fixed the five tables and one of the twelve functions. Eleven trigger
+bodies stayed divergent, because of a second and independent bug in the sweeps themselves
+(`0009`, and `0071`'s extracted `revoke_anon_function_privileges()`):
+
+```sql
+IF has_function_privilege('authenticated', fn, 'EXECUTE') THEN keep_auth := keep_auth || fn; END IF;
+...
+EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC, anon', fn::regprocedure);
+...
+EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO authenticated', fn::regprocedure);
+```
+
+**`has_function_privilege()` answers through `PUBLIC`** — and `PUBLIC` is exactly what the revoke
+loop is about to take away. So the sweep captured PUBLIC's implicit `EXECUTE` as something
+`authenticated` held, revoked `PUBLIC`, and then handed `authenticated` an **explicit grant it never
+had**. The sweep meant to preserve a privilege and instead created one.
+
+This is *not* fixed by the default ACL, because `ALTER DEFAULT PRIVILEGES` cannot suppress
+PostgreSQL's hardwired `EXECUTE`-to-`PUBLIC` on a new function — the point made above. A function
+created earlier in the same boot still carries that grant when the sweep runs. On every later boot
+`0001`'s `REVOKE ALL ON ALL FUNCTIONS` has already stripped `PUBLIC`, the same code keeps nothing,
+and the schema settles one grant narrower. **First boot only, which is why it survived two sweeps
+written specifically to prevent this class of thing.**
+
+The fix reads the ACL directly instead of asking about effective privilege:
+
+```sql
+IF EXISTS (SELECT 1 FROM pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a
+            WHERE p.oid = fn AND a.grantee = 'authenticated'::regrole
+              AND a.privilege_type = 'EXECUTE') THEN
+```
+
+`aclexplode()` lists grants actually made to the role, and a NULL `proacl` — the untouched default —
+yields no rows, which is the right answer. A genuine RPC that a migration granted on purpose still
+matches and is still restored.
+
+**The two fixes are independent and both are needed.** The default ACL stops objects being born
+with explicit grants; the predicate stops the sweep manufacturing one out of `PUBLIC`.
+
+
 ### `has_role()`
 
 ```sql
