@@ -54,7 +54,6 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
 
   // Reads the committed flow from the environment and pushes it to Node-RED's admin API.
   // No service-role key: it makes no privileged database write.
-  "deploy-nodered": ["NODERED_URL", "NODERED_ADMIN_TOKEN", "NODERED_FLOW_JSON"],
 
   // Mints a VIRTUAL gateway's broker credential and reveals it once. The mirror of enroll-gateway:
   // that one has no user and is authorised by a single-use token; this one has a session and is

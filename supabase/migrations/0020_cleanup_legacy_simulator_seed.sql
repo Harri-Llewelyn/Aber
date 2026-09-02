@@ -157,6 +157,7 @@ $$;
 DO $$
 DECLARE
   v_target_device CONSTANT uuid := '22000000-0000-4000-8000-000000000001';
+  v_schema        CONSTANT uuid := 'e3333333-4444-5555-6666-777777777777';
   v_left          INTEGER;
   v_schemas       INTEGER;
 BEGIN
@@ -175,15 +176,25 @@ BEGIN
   END IF;
 
   IF EXISTS (SELECT 1 FROM public.devices WHERE id = v_target_device) THEN
-    -- Through the VIEW, not the table: `device_schemas` is what the exporter reads, and asserting
-    -- on device_submodels alone would pass while the union the consumer actually sees was empty.
-    SELECT count(*) INTO v_schemas
-      FROM public.device_schemas
-     WHERE device_id = v_target_device AND schema_id IS NOT NULL;
-    IF v_schemas < 1 THEN
-      RAISE EXCEPTION
-        '0020 self-check: Sim_CNC_Mill_01 has no schema attached, so an AAS export would carry '
-        'no telemetry or KPI submodel';
+    -- THE ATTACHMENT ASSERTION IS GATED ON THE SCHEMA STILL EXISTING, exactly as the attach block
+    -- above is, and 0073 is why. That migration retires `Simulated_CNC_01_Schema` along with the
+    -- rest of the demonstration seed, so on a stack that was provisioned before the retirement the
+    -- device outlives its schema -- and this check ran BEFORE 0073 in the chain, failing db-init on
+    -- the second boot over a row the chain itself had deliberately removed on the first.
+    --
+    -- Asserted where the schema is present, which is the case it was written for: a database
+    -- mid-upgrade that has 0002's schema and must not lose the attachment to it.
+    IF EXISTS (SELECT 1 FROM public.schemas WHERE id = v_schema) THEN
+      -- Through the VIEW, not the table: `device_schemas` is what the exporter reads, and asserting
+      -- on device_submodels alone would pass while the union the consumer actually sees was empty.
+      SELECT count(*) INTO v_schemas
+        FROM public.device_schemas
+       WHERE device_id = v_target_device AND schema_id IS NOT NULL;
+      IF v_schemas < 1 THEN
+        RAISE EXCEPTION
+          '0020 self-check: Sim_CNC_Mill_01 has no schema attached, so an AAS export would carry '
+          'no telemetry or KPI submodel';
+      END IF;
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM public.device_nameplate WHERE device_id = v_target_device) THEN

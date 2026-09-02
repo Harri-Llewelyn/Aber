@@ -84,7 +84,8 @@
 --
 -- Related: 0001 (the trigger and the table), 0003 (immutability), 0005/0026 (attribution and
 --          causation), 0031 (system_settings), 0041/0043/0044/0062 (the direct writers),
---          0069 (the role split this depends on), README.md §22.
+--          0069 (the role split this depends on), supabase/README.md (Two lanes, and one of them
+--          an engineer cannot read). The roadmap item this came from is retired.
 -- =============================================================================================
 
 SET search_path TO public;

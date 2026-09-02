@@ -11,7 +11,7 @@ management.
 
 > **Design ethos —** *use pre-existing components and standards; minimise custom code.*
 > Where upstream ACS ships bespoke microservices, this fork uses Supabase, TimescaleDB, Grafana and
-> Node-RED. The custom surface is one Python ingestion daemon, twelve edge functions, an i3X server and
+> Node-RED. The custom surface is one Python ingestion daemon, eleven edge functions, an i3X server and
 > a React dashboard.
 
 ---
@@ -40,7 +40,7 @@ flowchart TB
 
     subgraph Processing ["Ingestion & Serverless"]
         ING["Python Ingestion Engine<br/>identity - quarantine - binding"]
-        EF["Edge Functions<br/>approve-quarantine - deploy-nodered - aas-export<br/>aas-api - grafana-userinfo - nodered-userinfo<br/>fplus-directory - grafana-alert-webhook - enroll-gateway<br/>gateway-bundle - revoke-gateway-credential - gateway-credential"]
+        EF["Edge Functions<br/>approve-quarantine - aas-export - aas-api<br/>grafana-userinfo - nodered-userinfo - fplus-directory<br/>grafana-alert-webhook - enroll-gateway - gateway-bundle<br/>revoke-gateway-credential - gateway-credential"]
     end
 
     subgraph Supabase ["Supabase BaaS"]
@@ -122,9 +122,8 @@ identifiers onto the `acs-cymru.local` namespace, `0015` moves the default Spark
 one to say it is the simulator, `0018` pre-registers the demonstrator's metric set with each
 row's standard and published semantic id, `0019` adds the 223P supply-air-flow metric the
 shopfloor simulator needed, `0020` retires the introductory single-device simulator and moves its
-schema and IDTA nameplate onto `Sim_CNC_Mill_01`, `0021` gives each shopfloor cell an icon from a
-closed set, `0022` adds one schema per machine class and attaches it to every simulated device,
-`0023` adds the `platform_alerts` occurrence log Grafana alerting writes into and publishes it for
+schema and IDTA nameplate onto the demonstration mill, `0021` gives each shopfloor cell an icon from
+a closed set, `0023` adds the `platform_alerts` occurrence log Grafana alerting writes into and publishes it for
 Realtime, `0024` adds an optional free-text `description` to devices and gateways, `0025` adds
 physical-gateway enrolment — a `gateway_enrollment_tokens` table reachable only by `service_role`,
 the RPCs that issue and atomically redeem a single-use token, and the `PENDING_ENROLLMENT` /
@@ -138,7 +137,9 @@ historian's storage footprint over `postgres_fdw` and unions it with Supabase's 
 table from `device_alerts` to `platform_alerts`, whose subject is `(entity_type, entity_id)` rather
 than a device, because the platform alert rules cover a gateway and the fleet and neither
 fits a row that must name a machine — `0029` adds `public.platform_health`, the narrow view
-those rules evaluate so the Grafana reader never needs the asset inventory — and `0030` gives that
+those rules evaluate so the Grafana reader never needs the asset inventory, and `0074` adds its
+`expected_publishers` count so that "ingestion has recorded nothing" only alerts when devices exist
+that ought to be publishing — and `0030` gives that
 alert table a **7-day retention window**, pruned nightly by `pg_cron`, whose predicate ages out
 closed and superseded occurrences but never the newest firing row of a fingerprint — and `0031`
 adds `public.system_settings`, the runtime configuration plane an `Administrator` edits from the
@@ -190,7 +191,7 @@ filter as a predicate rather than in the browser**, so the page's row budget is 
 it will actually show: hiding them afterwards had the page list four assets on a stack of
 twenty-six, and render an empty Gateways section on a fleet of four healthy gateways — and `0040`
 **retires the demonstration shopfloor from the seed**, so a fresh install comes up with no assets
-at all and the four-cell floor is something a reader asks for with `npm run provision:gateways`; it
+at all; it
 is the one migration in the chain that must run **exactly once** rather than on every boot, because
 the rows it removes are rows an operator may deliberately want back, and a delete replayed every
 boot would silently undo every provisioning run — which is what `public.one_shot_migrations` is
@@ -304,10 +305,9 @@ Node-RED and Grafana OAuth URLs are derived from `SUPABASE_URL`, and `VITE_SUPAB
 npm run stack:reset -- --yes
 ```
 
-Tears the stack down **with its volumes**, brings it back, waits for the schema to exist rather
-than for ports to answer, and re-provisions the four cell gateways — printing their credentials
-and writing them to `.env.gateways`, because `mosquitto_passwd` stores only a hash and they cannot
-be read back afterwards.
+Tears the stack down **with its volumes**, brings it back, and waits for the schema to exist rather
+than for ports to answer. What comes back is blank: no cells, no gateways, no devices, no schemas
+and an empty Node-RED editor — the state a new install starts in.
 
 Node, not a shell script, so it runs the same on Windows, macOS and Linux
 ([#106](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/106)). **It checks that Docker answers
@@ -372,7 +372,7 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | **[`frontend/`](frontend/README.md)** | React 18 architecture, Vite, Realtime integration, derived state, theming |
 | **[`supabase/`](supabase/README.md)** | Migrations, RLS privilege matrix, triggers, audit immutability, edge functions, Kong |
 | **[`ingestion/`](ingestion/README.md)** | Sparkplug B parsing, identity resolution, gateway binding, TimescaleDB mapping, `validate.py` |
-| **[`simulation/`](simulation/README.md)** | Everything simulated, and none of it automatic: the Node-RED flow, the shopfloor dashboard, the machine alert rules, and how to turn each on |
+| **[`tutorial/`](tutorial/README.md)** | The walkthrough for a blank install: one cell, one gateway, its broker credential, a device, a schema, and the Node-RED flow that publishes as it |
 | **[`i3x/`](i3x/README.md)** | i3X 1.0 server: address-space mapping, subscriptions, connecting a client — including [an MCP host](i3x/README.md#mcp) |
 | **[`deploy/k8s/README.md`](deploy/k8s/README.md)** | Kubernetes runbook: install, upgrade, teardown, hardening, divergence table, releases |
 | [`deploy/helm/acs-cymru/`](deploy/helm/acs-cymru) | The Helm chart; `values.yaml` documents every setting |
@@ -680,26 +680,27 @@ Kubernetes — which is what makes it the real drift control between them.
   with it `auth.sessions`. The dashboard clears the stale tokens and returns to the login screen.
 - **Swagger UI's "Example Value" is documentation, not data.** Press **Execute** and read the
   **Response body** panel.
-- **A fresh install has no cells, no gateways and no devices, and Node-RED opens on a blank
-  canvas.** It used to come up with a four-cell simulated shopfloor seeded by `0002` and a Node-RED
-  publishing under four gateway identities, which meant every install began with assets nobody had
-  asked for and a Digital Thread already describing them. Both halves are now opt-in:
-  `npm run provision:gateways` creates the floor, `NODE_RED_SEED_SIMULATOR=true` seeds the flow, and
-  `npm run stack:reset` does the whole sequence in one command.
-  [`simulation/README.md`](simulation/README.md) is the tutorial. `0040` retires the seed from
-  databases that already have it, once.
-- **Node-RED's editor shows one "Start here" tab and nothing else.** That is the starter flow, not a
-  failed mount — it declares no broker nodes, so nothing connects and nothing publishes. The tab's
-  info panel carries the three steps. Before this, a default stack ran the simulator against
-  gateways that did not exist and ingestion discarded every message as an *"unregistered edge
-  node"* — correct behaviour, and an odd thing to be doing before anyone had asked for it.
+- **A fresh install has no cells, no gateways, no devices and no schemas, and Node-RED opens on an
+  empty editor.** It used to come up with a four-cell simulated shopfloor seeded by `0002` and a
+  Node-RED publishing under four gateway identities, which meant every install began with assets
+  nobody had asked for and a Digital Thread already describing them. All of it is gone rather than
+  opt-in: the demonstration floor, the simulator flow, the provisioning script and the seeded
+  schemas. [`tutorial/README.md`](tutorial/README.md) walks through building one machine by hand
+  instead, which is the same knowledge without the plant. `0040` and `0073` retire the assets and
+  the schemas from databases that already have them.
+- **Node-RED's editor is empty, and that is the seeded state rather than a failed mount.** It
+  declares no broker nodes, so nothing connects and nothing publishes; `node-red-init` writes a
+  marker into `/data` recording that it seeded a blank flow, which is what tells the two cases
+  apart. Before this, a default stack ran a simulator against gateways that did not exist and
+  ingestion discarded every message as an *"unregistered edge node"* — correct behaviour, and an
+  odd thing to be doing before anyone had asked for it.
 - **An unrecognised device appears in the quarantine queue, not on the shopfloor map.** That is the
   zero-touch onboarding path working: a device that announces itself under an id nobody registered
   is held and its telemetry dropped until an `Administrator` approves it. With no seeded assets
   this is now the **first** thing a new user meets rather than a footnote — publish under any
-  well-formed `dev`-prefixed id and it is waiting for you. The demonstrator's own `Sim_` devices
-  are pre-registered by provisioning and so bypass it, which is what makes introducing one
-  unregistered device on purpose a demonstration rather than the default state.
+  well-formed `dev`-prefixed id and it is waiting for you. A device you register in the dashboard
+  first is bound to its gateway and bypasses the queue, which is the other half of the same path
+  and the one the tutorial walks through.
 
 ---
 

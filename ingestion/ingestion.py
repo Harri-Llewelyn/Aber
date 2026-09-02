@@ -3773,7 +3773,24 @@ def main():
 
     if _startup_conn is not None:
         _assert_historian_is_least_privilege(_startup_conn)
-        _startup_conn.close()
+        # AND IT IS KEPT, RATHER THAN CLOSED. This connection used to be opened for the privilege
+        # check and thrown away, leaving `_ts_conn` to be created lazily by the first write.
+        #
+        # THE BUG THAT EXPOSED: `acs_ingestion_db_connected` reads `_ts_conn`, so on a stack where
+        # nothing is publishing there was never a first write, never a connection, and the gauge
+        # read 0 for ever -- firing `Historian Unreachable From Ingestion` against a historian this
+        # very function had just connected to and interrogated. It went unseen while a simulator
+        # published within seconds of every boot. A blank install is the default now, and an idle
+        # stack is a normal state rather than a broken one, so the false alarm became the first
+        # thing a new user sees.
+        #
+        # It is the SAME single writer, opened earlier -- not a second connection and not a pool,
+        # so get_timescaledb_connection()'s one-writer property is unchanged. An idle connection
+        # dropped by the server still reports `closed == 0`; that is the documented gap the caller's
+        # exception handler covers, and it is why `acs_ingestion_db_connect_failures_total` rising
+        # while this gauge reads 1 remains the shape of a server-side drop.
+        global _ts_conn
+        _ts_conn = _startup_conn
     if supabase_client is None:
         logger.critical(
             "CRITICAL SECURITY ERROR: Supabase client is uninitialized! SUPABASE_URL, "

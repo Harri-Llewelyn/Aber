@@ -13,7 +13,7 @@ dependency on validate.py at all". A conformance suite that provisions its own s
 problem in this repository; the AAS one simply had not been moved onto it.
 
 WHAT IT DOES NOT PROVISION, and must not: `metric_catalog`. The metrics below are the platform's
-vocabulary, seeded by 0018 and 0022 with their semantic ids and their `standard` values, and they
+vocabulary, seeded by 0018 with their semantic ids and their `standard` values, and they
 are what the exporter reads to decide provenance -- an ISO 22400 metric becomes a
 KeyPerformanceIndicators submodel, everything else becomes OperationalTelemetry. Inventing metrics
 here would make the suite assert against a catalogue no device could ever publish against.

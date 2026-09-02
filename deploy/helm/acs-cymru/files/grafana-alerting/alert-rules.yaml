@@ -1,13 +1,21 @@
 # Alert rules, file-provisioned -- THE PLATFORM'S OWN.
 #
 # The three MACHINE rules that used to open this file (Thermal Excursion, Emergency Stop Engaged,
-# Low OEE Availability) moved to `simulation/grafana/alerting/shopfloor-alert-rules.yaml` with the
-# rest of the demonstrator. They are not provisioned by default any more; that file says how to
-# enable them and why they went. What is left here evaluates the STACK, which exists whether or not
-# anything is publishing.
+# Low OEE Availability) were retired with the demonstrator they evaluated -- they compared machine
+# telemetry against thresholds on devices no install has any more. What is left here evaluates the
+# STACK, which exists whether or not anything is publishing.
 #
-# NOTE THAT MOVING THEM DID NOT UNLOAD THEM from a Grafana that already had them -- provisioning is
-# additive, as point 2 below says -- so an existing demo stack keeps all three until they are named
+# A RULE ABOUT YOUR OWN MACHINE goes here, in a group of its own. It needs a metric that exists in
+# `metric_catalog`, and check-docs-drift re-arms its catalog agreement the moment one appears.
+#
+# ONE FOLDER, NOT TWO. These rules used to provision into `ACS-Cymru - Alerts`, and Grafana files
+# alert rules in DASHBOARD folders -- so that folder appeared in the dashboard tree holding nine
+# rules and zero dashboards, looking to every operator like a folder somebody forgot to fill in. It
+# had never held a dashboard and never would. They now share the folder the platform dashboards use,
+# which is the whole of the tree.
+#
+# ON AN EXISTING GRAFANA THE OLD FOLDER LINGERS. Provisioning is additive, as point 2 below says --
+# it does not unload what it previously created -- so an existing demo stack keeps all three until they are named
 # in a `deleteRules:` block. That is deliberate: silently stopping a working alert rule is worse
 # than leaving it.
 #
@@ -68,7 +76,7 @@ groups:
   # ===============================================================================================
   - orgId: 1
     name: Platform Conditions
-    folder: ACS-Cymru - Alerts
+    folder: ACS-Cymru - Platform Infrastructure
     # ONE MINUTE, NOT TEN SECONDS. None of these conditions moves faster than that: the staleness
     # threshold behind `gateway_stale` is 90 seconds, an enrolment is measured in hours, and a
     # quarantine queue changes when a person approves something. Evaluating at the machine group's
@@ -434,7 +442,7 @@ groups:
   # ===============================================================================================
   - orgId: 1
     name: Ingestion Pipeline
-    folder: ACS-Cymru - Alerts
+    folder: ACS-Cymru - Platform Infrastructure
     # 1m. These are rates over 5-15 minute windows; evaluating faster re-reads a number that cannot
     # have moved, and the machine group's 10s exists only because someone is standing in front of a
     # fault-injection button.
@@ -450,10 +458,29 @@ groups:
       # `for: 10m` AGAINST A 5m RATE WINDOW. On a plant that is always publishing, ten minutes of
       # nothing is not a quiet period -- it is a fault. Long enough to ride out a broker restart and
       # the daemon's own reconnect, short enough that a shift does not pass unnoticed.
+      #
+      # -------------------------------------------------------------------------------------------
+      # IT IS GATED ON THERE BEING SOMETHING TO CONSUME, WHICH IT WAS NOT.
+      #
+      # "No traffic" and "no traffic FROM A FLEET THAT SHOULD BE PUBLISHING" are different
+      # conditions, and only the second is a fault. This rule tested the first, which was
+      # indistinguishable on a stack that had a demonstration floor publishing from the moment it
+      # booted. A fresh install has no devices at all now, so the daemon correctly consumes nothing,
+      # correctly reports it, and the rule fired on every new stack -- an alert whose first
+      # appearance is on an install nobody has configured yet teaches people to close the panel.
+      #
+      # SO THE SUBJECT IS `expected_publishers`, counted in Postgres: devices that are registered,
+      # not archived, not quarantined, and bound to a gateway. Each clause is a reason a device
+      # legitimately publishes nothing -- an archived device is retired, a quarantined one is held
+      # BY DESIGN with its telemetry dropped, and one bound to no gateway has no edge node to
+      # arrive through. Counting rows instead would make approving a quarantine look like a fix.
+      #
+      # ZERO DEVICES DISABLES THE RULE AND THAT IS THE INTENT, not a gap: with nothing provisioned
+      # there is no claim to make about telemetry. The first device someone registers re-arms it.
       # -------------------------------------------------------------------------------------------
       - uid: acs-ingestion-silent
         title: Ingestion Consuming Nothing
-        condition: C
+        condition: F
         for: 10m
         # NoData IS NOT OK HERE, unlike every platform rule above. An empty frame means the SCRAPE
         # failed -- the daemon is gone, or Prometheus cannot reach it -- and that is strictly worse
@@ -466,9 +493,9 @@ groups:
           entity_type: platform
         annotations:
           summary: >-
-            The ingestion daemon has recorded no Sparkplug messages for 10 minutes. Telemetry is
-            not reaching the historian. Check the broker connection and
-            acs_ingestion_messages_dropped_total.
+            The ingestion daemon has recorded no Sparkplug messages for 10 minutes while devices are
+            registered and expected to publish. Telemetry is not reaching the historian. Check the
+            broker connection and acs_ingestion_messages_dropped_total.
         data:
           - refId: A
             relativeTimeRange:
@@ -483,7 +510,19 @@ groups:
               # sum() ACROSS msg_type, because the series is labelled per message type and a daemon
               # receiving only NDATA is still consuming. instant:true so the reduce below has a
               # single value rather than a range to collapse.
-              expr: sum(rate(acs_ingestion_messages_total[5m]))
+              #
+              # `or vector(0)` BECAUSE THE COUNTER DOES NOT EXIST UNTIL THE FIRST MESSAGE. It is
+              # labelled per msg_type, so there is no series to pre-initialise at zero -- and until
+              # one arrives Prometheus returns an EMPTY result, not a zero. Grafana reads that as
+              # NoData and `noDataState: Alerting` below fires the rule, which is how a stack with
+              # nothing publishing raised a critical alert about ingestion before it had ingested
+              # anything. The gate in F never even ran: NoData short-circuits it.
+              #
+              # THIS DOES NOT WEAKEN THE DEAD-DAEMON CASE, which is what noDataState is really for.
+              # A daemon that has gone away also yields vector(0) here -- and with devices
+              # registered, `$E > 0` holds, so the rule still fires. What changes is only the case
+              # where there is nothing to ingest and therefore nothing to be silent about.
+              expr: sum(rate(acs_ingestion_messages_total[5m])) or vector(0)
               instant: true
           - refId: B
             datasourceUid: __expr__
@@ -495,18 +534,48 @@ groups:
               datasource:
                 type: __expr__
                 uid: __expr__
-          - refId: C
+          - refId: D
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: supabase
+            model:
+              refId: D
+              datasource:
+                type: postgres
+                uid: supabase
+              format: time_series
+              editorMode: code
+              # THROUGH `platform_health`, NOT `public.devices`. `grafana_reader` holds SELECT on
+              # this view and on nothing else -- 0029's self-check asserts it has no privilege on
+              # the inventory, and querying devices here fails as `permission denied for table
+              # devices` with the rule in `error` health, which reads as a broken datasource rather
+              # than as a grant working. 0074 adds the row.
+              rawSql: |
+                SELECT collected_at AS "time",
+                       value        AS expected_publishers
+                  FROM public.platform_health
+                 WHERE condition = 'expected_publishers'
+          - refId: E
             datasourceUid: __expr__
             model:
-              refId: C
-              type: threshold
-              expression: B
-              # BELOW, not above. The alert is the ABSENCE of traffic, which is the inversion that
-              # makes this rule different in kind from every other one in this file.
-              conditions:
-                - evaluator:
-                    type: lt
-                    params: [0.001]
+              refId: E
+              type: reduce
+              reducer: last
+              expression: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+          - refId: F
+            datasourceUid: __expr__
+            model:
+              refId: F
+              type: math
+              # BOTH HALVES, and the second is what makes the first mean something. `$B < 0.001` is
+              # the absence of traffic -- the inversion that makes this rule different in kind from
+              # every other one in this file -- and `$E > 0` is the assertion that somebody should
+              # have been sending some.
+              expression: ($B < 0.001) && ($E > 0)
               datasource:
                 type: __expr__
                 uid: __expr__

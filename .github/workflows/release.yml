@@ -159,7 +159,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Context is the REPOSITORY ROOT: simulation/node_red_flow.json is not reachable
+          # Context is the REPOSITORY ROOT: templates/physical-gateway is not reachable
           # from a narrower context.
           - name: edge-runtime
             dockerfile: supabase/functions/Dockerfile

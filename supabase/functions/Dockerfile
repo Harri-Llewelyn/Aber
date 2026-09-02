@@ -1,6 +1,6 @@
 # Edge functions, baked into an image rather than bind-mounted.
 #
-# WHY. docker-compose.yml mounts ./supabase/functions and ./simulation/node_red_flow.json into the stock
+# WHY. docker-compose.yml mounts ./supabase/functions into the stock
 # supabase/edge-runtime image and assembles the rest in a shell entrypoint. That is right for
 # Compose -- editing a function and restarting one container is the whole development loop -- but
 # it does not survive the move to Kubernetes: there is no repository on a cluster node to mount,
@@ -13,8 +13,8 @@
 #
 # BUILD CONTEXT IS THE REPOSITORY ROOT, not this directory:
 #   docker build -f supabase/functions/Dockerfile -t acs-cymru/edge-runtime:<tag> .
-# node_red_flow.json lives in simulation/ and is the canonical flow deploy-nodered pushes, so it has
-# to be reachable from the context. Building from supabase/functions/ instead fails on that COPY.
+# The physical-gateway bundle template is COPYed from outside this directory and has to be
+# reachable from the context. Building from supabase/functions/ instead fails on that COPY.
 #
 # PINNED to the tag docker-compose.yml runs. The runtime and the functions are versioned together
 # on purpose -- main/index.ts is an allow-list against a specific edge-runtime API.
@@ -30,7 +30,6 @@ RUN rm -f /home/deno/functions/Dockerfile
 
 # The canonical Node-RED flow: the "git" side of the GitOps sync deploy-nodered pushes to the
 # running Node-RED.
-COPY simulation/node_red_flow.json /home/deno/flows/node_red_flow.json
 
 # The physical gateway bundle template -- the files gateway-bundle zips up and hands to an operator.
 # Same delivery reasoning as the flow above: baked in, so which revision of the appliance template a
@@ -48,4 +47,4 @@ COPY templates/physical-gateway /home/deno/templates/physical-gateway
 # declaration is the one place "what may this code reach" is stated.
 #
 # Exec form with a literal script, so the nested quoting survives.
-ENTRYPOINT ["/bin/sh", "-e", "-c", "export NODERED_FLOW_JSON=\"$(cat /home/deno/flows/node_red_flow.json)\"; T=/home/deno/templates/physical-gateway; export GW_BUNDLE_COMPOSE=\"$(cat $T/docker-compose.yml)\"; export GW_BUNDLE_DOCKERFILE=\"$(cat $T/Dockerfile)\"; export GW_BUNDLE_BOOTSTRAP=\"$(cat $T/bootstrap.mjs)\"; export GW_BUNDLE_FLOWS=\"$(cat $T/flows.template.json)\"; export GW_BUNDLE_README=\"$(cat $T/README.md)\"; exec edge-runtime start --main-service /home/deno/functions/main"]
+ENTRYPOINT ["/bin/sh", "-e", "-c", "T=/home/deno/templates/physical-gateway; export GW_BUNDLE_COMPOSE=\"$(cat $T/docker-compose.yml)\"; export GW_BUNDLE_DOCKERFILE=\"$(cat $T/Dockerfile)\"; export GW_BUNDLE_BOOTSTRAP=\"$(cat $T/bootstrap.mjs)\"; export GW_BUNDLE_FLOWS=\"$(cat $T/flows.template.json)\"; export GW_BUNDLE_README=\"$(cat $T/README.md)\"; exec edge-runtime start --main-service /home/deno/functions/main"]

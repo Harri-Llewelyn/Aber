@@ -86,6 +86,22 @@ static_resources:
                       # back on if this list is wrong. That is why it is substituted from the same
                       # variable Kong reads rather than written out again here -- two lists would
                       # be two statements to keep in step.
+                      #
+                      # IT HAS ALREADY FAILED ONCE, in exactly the way a single unenforced statement
+                      # fails. Four literal localhost origins were correct on Compose and silently
+                      # wrong on Kubernetes: the dashboard logged in and then showed empty tables,
+                      # while the gateway reported 200 for every request. Nothing was down and
+                      # nothing logged an error. Check this list against the deployment target
+                      # before blaming a query.
+                      #
+                      # MOVING IT TO A Gateway API HTTPRoute FILTER WAS A ROADMAP ITEM AND WAS
+                      # RETIRED on 2026-09-02. A route-level policy is genuinely harder to get wrong
+                      # than a substituted JSON array, and that was the argument for it. But the two
+                      # reasons it was raised -- Kong 2.8's substitution templates, then CORS having
+                      # no declarative home -- were both removed by other work, and HTTPRoute exists
+                      # on Kubernetes only. Taking it now would state origin policy a SECOND way on
+                      # ONE of two targets, which is the divergence this shared file exists to
+                      # prevent. Revisit if Compose stops being a supported target, not before.
                       # -------------------------------------------------------------------------
                       typed_per_filter_config:
                         envoy.filters.http.cors:

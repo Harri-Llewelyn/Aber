@@ -171,26 +171,18 @@ const generated = {
   MQTT_I3X_PASSWORD: hex(24),
   MQTT_VALIDATOR_PASSWORD: hex(24),
   MQTT_MONITOR_PASSWORD: hex(24),
-  // THE FOUR SIMULATED CELL GATEWAYS, generated here rather than left to `provision:gateways`.
-  //
-  // THE FOUR GATEWAY PASSWORDS ARE NO LONGER MINTED HERE, and the deadlock they existed to break
-  // is gone rather than worked around. The reasoning that put them here was sound at the time:
-  // that script needs a RUNNING stack -- it talks to PostgREST and to the broker container -- but
-  // node-red-init fails closed when a broker node declares a credential pair it cannot find, and
-  // it runs during the very `docker compose up` that would bring that stack up. Leaving them to
-  // provisioning meant the documented quickstart exited 1 on
-  // `service "node-red-init" didn't complete successfully`, naming neither the flow, the variable,
-  // nor the script that would have written it.
+  // NO GATEWAY PASSWORDS ARE MINTED HERE, and the deadlock they once existed to break is gone
+  // rather than worked around. The reasoning that put four of them here was sound at the time:
+  // node-red-init fails closed when a broker node declares a credential pair it cannot find, and it
+  // runs during the very `docker compose up` that would bring up the stack provisioning needs. So
+  // the documented quickstart exited 1 on `service "node-red-init" didn't complete successfully`,
+  // naming neither the flow, the variable, nor the script that would have written it.
   //
   // What made that unavoidable was the FLOW being seeded unconditionally: four broker nodes, four
-  // mandatory credential pairs. The simulator is opt-in, so a default stack seeds a
-  // starter flow with no broker nodes at all -- and minting four passwords here would now create
-  // four broker accounts for four gateways that do not exist, on a stack whose whole point is that
-  // it generates no assets.
-  //
-  // `npm run provision:gateways` mints them against a running stack and writes .env.gateways for
-  // folding back in; `npm run stack:reset` does the whole sequence. See the block on these in
-  // .env.example for which way authority runs afterwards.
+  // mandatory credential pairs. Nothing is seeded now -- the editor opens empty, declares no broker
+  // nodes, and needs no credential to exist. A gateway's account is minted against a row that
+  // already exists, from the dashboard or by the enrolment bundle, which is the only order in which
+  // the username can be known: it is the row's GENERATED sparkplug_id.
   GRAFANA_ADMIN_PASSWORD: hex(12),
   GRAFANA_OAUTH_CLIENT_SECRET: hex(32),
   NODERED_CREDENTIAL_SECRET: hex(32),
@@ -238,18 +230,8 @@ const generated = {
  * so minting one by default would create the most powerful credential in the stack, on the one
  * path that skips every check the rest of it performs.
  *
- * MQTT_SIMULATOR_PASSWORD is the RETIRED single-device simulator's broker account. Migration 0020
- * deletes its gateway row, so resolve_gateway() finds nothing for it and every message it could
- * publish is refused -- yet a password was generated on every `npm run setup` and mosquitto-init
- * created the account on every boot, on both targets. A live broker credential for an edge node
- * that has no asset record is exactly the thing an ACL audit is supposed to turn up.
- *
- * It is EMPTY rather than removed, because the account still has one real use: a Node-RED volume
- * created before the flow was consolidated still holds an `mqtt-broker-config` node that node-red-
- * init points at this pair. Setting a value here re-creates the account for that case;
- * mosquitto-init now skips it when empty, exactly as it already did for the four cell gateways.
  */
-const deliberatelyEmpty = ['NODERED_ADMIN_TOKEN', 'MQTT_SIMULATOR_PASSWORD'];
+const deliberatelyEmpty = ['NODERED_ADMIN_TOKEN'];
 
 const missing = [];
 for (const [key, value] of Object.entries(generated)) {

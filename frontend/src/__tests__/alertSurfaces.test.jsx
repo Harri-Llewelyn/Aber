@@ -159,24 +159,19 @@ describe('grafanaAlertUrl', () => {
    * escaping would otherwise produce a link that silently matched nothing.
    */
   /*
-   * BOTH RULE FILES, and reading only the provisioned one is what broke this. The three MACHINE
-   * rules live in `simulation/grafana/alerting/shopfloor-alert-rules.yaml` -- they evaluate machine
-   * telemetry at a demonstrator's 10-second interval, so they are opt-in with the rest of the
-   * simulator -- and these three titles are exactly those rules. Reading one file misses them.
+   * ONE RULE FILE NOW, AND IT USED TO BE TWO. The three MACHINE rules -- Thermal Excursion,
+   * Emergency Stop Engaged, Low OEE Availability -- lived in the demonstrator's own file and were
+   * retired with it, so reading a second path here is an ENOENT rather than a wider net.
    *
-   * IT IS THE SAME MISS AS check-docs-drift's metric-name check, which had to learn the same thing
-   * in the same commit. Two guards over one pair of files, and only one of them was updated.
-   *
-   * The demonstrator's file is read even though it is NOT PROVISIONED by default: a rule title that
-   * cannot survive a round trip through a query string is broken whether or not it is currently
-   * loaded, and the point of keeping the file in the repository is that enabling it is a copy.
+   * THE TITLES BELOW ARE DELIBERATELY AWKWARD ONES. What this pins is that a rule title survives a
+   * round trip through a query string, so the useful cases are the ones carrying spaces and mixed
+   * case -- not whichever titles happen to be first in the file.
    */
   const ALERT_RULE_FILES = [
     '../../../grafana/provisioning/alerting/alert-rules.yaml',
-    '../../../simulation/grafana/alerting/shopfloor-alert-rules.yaml',
   ]
 
-  it.each(['Thermal Excursion', 'Emergency Stop Engaged', 'Low OEE Availability'])(
+  it.each(['Gateway Stale', 'Quarantine Queue Depth', 'Historian Unreachable From Ingestion'])(
     'round-trips %s from the alert rule files',
     (title) => {
       const rules = ALERT_RULE_FILES

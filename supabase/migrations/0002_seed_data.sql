@@ -2380,14 +2380,11 @@ ON CONFLICT (companion_spec, name) DO UPDATE SET
 -- one that would strand any device already provisioned against the old name. A stale-looking
 -- display string is the cheaper of the two.
 --
--- IT IS ATTACHED TO NOTHING ON A FRESH INSTALL, which is new and is not an oversight. The device
--- it names is no longer seeded (see below); 0020 attaches this schema to `Sim_CNC_Mill_01` when
--- that device exists, and `provision-gateways.mjs` attaches it at creation when a reader opts into
--- the demonstration floor.
-
-INSERT INTO public.schemas VALUES ('e3333333-4444-5555-6666-777777777777', 'Simulated_CNC_01_Schema', 'Default tri-standard schema for the demo CNC: MTConnect observations, ISO 22400 KPIs and OPC UA companion-specification data points.', '{"type": "object", "required": ["Systems/TEMPERATURE", "Controller/EXECUTION", "Controller/EMERGENCY_STOP"], "properties": {"OEE/QUALITY": {"type": "number"}, "Axes/C/ANGLE": {"type": "number"}, "SERIAL_NUMBER": {"type": "string"}, "OEE/AVAILABILITY": {"type": "number"}, "safety_interlock": {"type": "boolean"}, "Axes/DISPLACEMENT": {"type": "number"}, "OEE/EFFECTIVENESS": {"type": "number"}, "max_temp_threshold": {"type": "number"}, "Controller/FIRMWARE": {"type": "string"}, "Systems/TEMPERATURE": {"type": "number"}, "Controller/EXECUTION": {"type": "string"}, "Machine/OperatingMode": {"type": "string"}, "Controller/EMERGENCY_STOP": {"type": "string"}, "MotionDevice/OverridePercent": {"type": "number"}}}', '2026-08-02 05:44:47.407135+00', 'https://acs-cymru.local/semantics/schema/SimulatedCNC01', 'IRI', 1, NULL, 'active', 'Initial release')
-ON CONFLICT (schema_name) DO NOTHING;
-
+-- THE SCHEMA THAT USED TO SIT HERE IS GONE. `Simulated_CNC_01_Schema` was the demonstration
+-- CNC's tri-standard contract, and it was the last piece of the demonstration floor still seeded
+-- into a fresh install. 0073 removes it from databases that already have it, along with 0022's
+-- four class schemas; the whole demonstrator now lives in `tutorial/` as a walkthrough rather
+-- than as rows. A fresh install has no cells, no gateways, no devices and no schemas.
 
 -- -------------------------------------------------------------------------------------------
 -- Factory cells, edge gateways and devices  (0 rows -- and that is the change)
@@ -2411,14 +2408,16 @@ ON CONFLICT (schema_name) DO NOTHING;
 -- pg_cron purge runs as superuser, past any RLS guard. Provisioning creates the demonstration's
 -- four cells by name, and 0040 removes them again only where the floor was their last occupant.
 --
--- WHAT STAYS ABOVE is the tri-standard schema, and 0022's four class schemas stay likewise. A
--- schema is a CONTRACT, not an asset: it costs nothing unattached, and it is what makes putting
--- the floor back a matter of creating rows rather than re-authoring five JSON Schemas.
+-- NO SCHEMAS ARE SEEDED EITHER, which is the change 0073 completes. The argument for keeping them
+-- was that a schema is a CONTRACT rather than an asset -- it costs nothing unattached, and it made
+-- putting the floor back a matter of creating rows rather than re-authoring five JSON Schemas.
+-- That argument stood while the floor was something a script could rebuild. It is not: the
+-- demonstrator is a walkthrough in `tutorial/` now, and a schema nothing references is a contract
+-- for a machine nobody has, sitting in the Schemas table of a stack whose whole point is that it
+-- starts empty. The definitions are not lost -- they are in this file's history and in 0073.
 --
--- THE ATTACHMENT THAT USED TO SIT HERE went with the devices. `provision-gateways.mjs` now writes
--- it, so a provisioned device carries its schema immediately rather than at the next boot -- and
--- 0020 and 0022 still attach on replay, both guarded on the device existing, which is what keeps
--- an already-provisioned stack correct without either file knowing about the other.
+-- THE ATTACHMENT THAT USED TO SIT HERE went with the devices, and 0020 still attaches on replay,
+-- guarded on the device existing, which no-ops on a floor that is not there.
 
 
 -- -------------------------------------------------------------------------------------------

@@ -1,215 +1,137 @@
-# The simulated shopfloor
+# Building your first machine
 
-Everything simulated lives here, and **none of it runs unless you ask for it.**
+**This stack installs blank.** No cells, no gateways, no devices, no schemas, an empty Node-RED
+editor, and Grafana dashboards that describe the platform rather than a shopfloor. The only gateway
+on a fresh install is the **Playback gateway**, which exists because a recorded capture has nowhere
+else to publish from, and which you can ignore until you record one.
 
-That is roadmap §14, and the request behind it was specific: a participant at a demonstration asked
-whether the simulated devices appear on every start, said they polluted the Digital Thread, and
-wanted running them to be a choice. A fresh install now comes up with no cells, no gateways and no
-devices at all.
+This directory is the walkthrough for filling that in: one cell, one gateway, one device, one
+schema, and a Node-RED flow that publishes as it. It is most of the product in about twenty minutes,
+and every step is one you would repeat for real hardware.
 
-Node-RED still runs the **Gateway Simulator** — a self-contained, zero-dependency flow that
-publishes the full Sparkplug B lifecycle so the platform can be exercised end to end with no
-physical hardware. It just has nothing to publish about until the assets exist.
+**There used to be a demonstration floor here** — four cells, four gateways, six devices, and a
+simulator flow that came up publishing on every start. It was retired because it answered the wrong
+question: a reader could watch it work without ever learning how any of it was made, and a
+participant at a demonstration asked, fairly, why a stack they had just installed already had
+somebody else's plant in it. What that floor knew is in this file instead.
 
-| Artefact | Location |
+| You will use | Where |
 | :--- | :--- |
-| Flow definition | [`node_red_flow.json`](node_red_flow.json) |
-| Shopfloor dashboard | [`grafana/dashboards/manufacturing-cells.json`](grafana/dashboards/manufacturing-cells.json) |
-| Machine alert rules | [`grafana/alerting/shopfloor-alert-rules.yaml`](grafana/alerting/shopfloor-alert-rules.yaml) |
-| Topology and credentials | [`../scripts/provision-gateways.mjs`](../scripts/provision-gateways.mjs) |
-| Retirement of the old seed | [`../supabase/migrations/0040_retire_demonstration_seed.sql`](../supabase/migrations/0040_retire_demonstration_seed.sql) |
-| Provisioning script | [`../scripts/node-red-init.mjs`](../scripts/node-red-init.mjs) |
-| Broker config | [`../mosquitto.conf`](../mosquitto.conf), [`../mosquitto.acl`](../mosquitto.acl) |
-| Gateway credential tool | [`../scripts/mosquitto-provision-gateway.mjs`](../scripts/mosquitto-provision-gateway.mjs) |
-| Editor | `http://localhost:1880` |
+| The dashboard | `http://localhost:3000` |
+| The Node-RED editor | `http://localhost:1880` |
+| Grafana | `http://localhost:3002` |
+| Broker config and topic ACL | [`../mosquitto.conf`](../mosquitto.conf), [`../mosquitto.acl`](../mosquitto.acl) |
+| Node-RED provisioning | [`../scripts/node-red-init.mjs`](../scripts/node-red-init.mjs) |
+| Credential tool, physical gateways | [`../scripts/mosquitto-provision-gateway.mjs`](../scripts/mosquitto-provision-gateway.mjs) |
 
 ---
 
-## Turning the demonstrator on
+## The walkthrough
 
-**Four things are opt-in, and they are separate because they fail separately.** Steps 1 and 2 are
-the ones that matter; 3 and 4 are Grafana surfaces you can add whenever.
+### 1. Sign in, and start with the dashboard
 
-The order of 1 and 2 is not arbitrary — see the note under step 2.
+Sign in at `http://localhost:3000` as `admin@acs-cymru.local` (password `acscymru123` on a seeded
+development stack). **Do this before opening Node-RED or Grafana**: both federate to Supabase Auth,
+and GoTrue ships no consent UI, so the dashboard serves one at `/oauth/consent` and needs a session
+of its own first.
 
-### 1. The assets — four cells, four gateways, six devices
+Creating assets needs **Administrator** or **Shopfloor_Manager**. Operator and Auditor get read-only
+views — worth knowing before you wonder why a button is missing rather than broken.
 
-```bash
-npm run provision:gateways
-```
+### 2. Create a cell
 
-This is the only step that **must** happen, and the only one nothing else can do: a gateway row is
-useless without a Mosquitto account, and the account has to be issued against the `sparkplug_id` the
-database generates from the row's pinned UUID. The script creates the cells, the gateways and the
-devices, attaches each device's schema, issues a broker credential per gateway and writes them to
-`.env.gateways` (mode 0600).
+**Cells** tab, then new cell. A cell is a location and nothing more: it groups assets for filtering
+and for the floor view. Name it after somewhere real.
 
-**The passwords are not recoverable** — `mosquitto_passwd` stores a hash. Fold them into `.env` and
-restart Node-RED, or the four brokers will log `Connection failed to broker` with no CONNACK code:
+You can skip this and attach the device to no cell at all. `location_scope = 'site_wide'` is a
+legitimate state for a device that genuinely has no single one — a BMS sensor, an AGV — and it is a
+deliberate assertion rather than missing data.
 
-```bash
-docker compose restart node-red     # after updating .env from .env.gateways
-```
+### 3. Create a gateway
 
-`npm run stack:reset` does all of this for you, including replaying the seed afterwards so the
-Digital Thread's causation demonstration has a subject.
+**Gateways** tab, then new gateway. Tick **Mark as Virtual Gateway** if this is going to be Node-RED
+on the host running the stack rather than an appliance out on the plant.
 
-### 2. The Node-RED flow
+**Copy the Sparkplug ID it issues.** You do not get to choose it: `sparkplug_id` is a generated
+column — `gwy` plus 21 hex characters of the row's UUID — and the broker ACL matches it exactly.
+This is the identity everything downstream keys on.
 
-**Node-RED comes up blank.** The editor opens on a one-node *Start here* tab that declares no broker
-nodes and connects to nothing, so a stack nobody has provisioned publishes nothing at all.
+**Gateways are never auto-created.** Publish an `NBIRTH` under an id with no gateway row and
+ingestion logs *"unregistered edge node"* on a throttle and discards the message. That is correct
+behaviour, and it is quiet by design — so if nothing shows up later, check this first.
 
-```bash
-NODE_RED_SEED_SIMULATOR=true NODE_RED_FORCE_SEED=true \
-  docker compose up -d --force-recreate node-red-init node-red
-```
+### 4. Mint its broker credential
 
-Two flags, doing different jobs: `SEED_SIMULATOR` chooses the demonstrator's flow over the starter
-flow, and `FORCE_SEED` overrides the first-run-only guard on a volume that has already been seeded.
-The flow is user content, so it is seeded once and then left alone — `FORCE_SEED` is what says *yes,
-overwrite my editor changes*. On a genuinely fresh volume the first flag alone is enough.
+Still on the gateway's row: **Generate broker credential**. The password is **revealed once** and
+cannot be read back afterwards, because `mosquitto_passwd` stores only a hash.
 
-**Do step 1 first.** The flow declares four `mqtt-broker` nodes, and `node-red-init` **fails closed**
-when a broker node names a credential pair that is not set — it refuses to start rather than seed a
-connection that cannot authenticate. That is deliberate: the alternative is an empty username, which
-Mosquitto refuses with CONNACK 5 while Node-RED reports only `Connection failed to broker`, naming
-the client id and not the username.
+This is the step that used to require a shell on the host. It goes through the same one-verb
+credential service the enrolment bundle uses, authorised by role rather than by a single-use token,
+because you are holding a session and an appliance is not.
 
-This is also why `npm run setup` no longer mints four gateway passwords. It used to have to: the
-flow was seeded unconditionally, so four credentials were mandatory before a stack existed to
-provision them against — a deadlock that made `docker compose up` exit 1 on
-`service "node-red-init" didn't complete successfully`. With the flow opt-in there are no broker
-nodes by default, so there is nothing to require.
+**A physical gateway takes the other path** — the enrolment bundle, which carries its own credential
+and refuses a virtual gateway outright, since there would be no appliance to install it on. See
+[`../docs/physical-gateways.md`](../docs/physical-gateways.md).
 
-### 3. The Grafana dashboard
+### 5. Author a schema
 
-Not provisioned by default, because its panels hardcode `Sim_CNC_Mill_01` — on an install running
-real plant it named a machine that does not exist, in a folder an operator would reasonably read as
-describing their floor.
+**Schemas** tab, then new schema. A schema is the contract you are holding the machine to: a JSON
+Schema whose `properties` name metrics from `metric_catalog`, which is what gives each one a
+datatype, a unit and a published semantic id.
 
-```bash
-cp simulation/grafana/dashboards/*.json grafana/provisioning/dashboards/shopfloor/
-docker compose restart grafana
-```
+Do this before the device rather than after, for three reasons the platform will not raise at the
+time:
 
-### 4. The machine alert rules
+- A device with no schema is **never** flagged as publishing outside its model. "Publishes beyond
+  its model" and "has no model" are different findings and the platform will not conflate them, so
+  unmodelled detection is simply inert until a schema exists.
+- The AAS export composes one Submodel per attached schema. With none, a device exports a shell
+  carrying its nameplate and nothing else.
+- The Configuration Parameters modal reads the schema's properties, so with none there is nothing
+  for an operator to see.
 
-Thermal Excursion, Emergency Stop Engaged and Low OEE Availability. They evaluate machine telemetry
-at a 10-second interval, which the group's own comment has always admitted is a demonstrator setting
-— *"because someone is standing in front of a fault-injection button"*.
+A property naming a metric the catalog does not carry renders as a bare string and exports with no
+`semanticId`. Check the metric vocabulary before inventing a name.
 
-```bash
-cp simulation/grafana/alerting/*.yaml grafana/provisioning/alerting/
-docker compose restart grafana
-```
+### 6. Create the device
 
-The init step globs `*alert-rules.yaml`, so dropping the file in is all that is needed.
+**Devices** tab, then new device: bound to the gateway from step 3, in the cell from step 2, with
+the schema from step 5 attached. Copy the **Sparkplug ID** it issues — `dev` plus 21 hex characters,
+the same rule as the gateway.
 
-**These are not simulator-specific in their queries**, and that is the honest cost of moving them:
-each groups by `asset_id` and matches whatever publishes the metric, so a real machining centre
-publishing `Systems/TEMPERATURE` is covered by rule 1 exactly as the simulator is. Somebody
-onboarding real plant wants them — they just should not arrive before there is any plant.
+**Or skip this step entirely**, publish under a well-formed `dev`-prefixed id you invent, and let
+the device arrive in the quarantine queue for approval. That is the zero-touch onboarding path, and
+it is the more realistic one for hardware somebody else configured; see
+[Approving a Quarantined Device](#approving-a-quarantined-device) below.
 
-### On Kubernetes
+### 7. Build the flow
 
-Steps 2, 3 and 4 are values flags, because the chart bakes its files in rather than mounting them:
+The Node-RED editor opens empty. What you need is one broker connection and enough of the Sparkplug
+B lifecycle to be recognised:
 
-```bash
-helm upgrade acs-cymru deploy/helm/acs-cymru --reuse-values \
-  --set simulation.nodeRed.enabled=true \
-  --set simulation.grafana.enabled=true
-```
+1. Add an **mqtt-broker** config node pointing at `mosquitto:1883`.
+2. Give it the username and password from step 4. On Compose, set them as an env pair in `.env` and
+   name that pair in the broker node's `acsCredentialsEnv` property — `node-red-init` reconciles env
+   pairs onto broker nodes at init, which is what keeps the secret out of the flow file and out of
+   git.
+3. Publish an **NBIRTH** on `spBv1.0/<group>/NBIRTH/<gateway sparkplug_id>`.
+4. Publish a **DBIRTH** on `spBv1.0/<group>/DBIRTH/<gateway>/<device>` carrying the metrics your
+   schema declares.
+5. Publish **DDATA** on that topic when a value changes, and an **NDATA** heartbeat every 30 s.
 
-Step 1 is unchanged — `npm run provision:gateways -- --target=k8s`.
+[Topic Structure & Lifecycle](#topic-structure--lifecycle) below is the reference for the payload
+shape, and [Broker Topic Authorisation](#broker-topic-authorisation) explains why the topic's
+edge-node segment must be the connecting username and nothing else.
 
-**`simulation.nodeRed.enabled` has the same first-run-only caveat**, and it bites harder here because
-there is no `FORCE_SEED` equivalent to pass on the command line. Flipping it on an install whose PVC
-has already been seeded changes nothing until that volume is re-seeded. That is the guard protecting
-editor changes doing its job, not the flag failing.
+**Transport is reconciled at init rather than at runtime.** `node-red-init` writes host, port and
+TLS into `flows.json` before Node-RED reads it, so a flow authored against one broker and deployed
+against another is corrected on the next start instead of failing at connect time.
 
-### What you get instead if you skip all four
+### What you should see
 
-A blank canvas. No cells, no gateways, no devices, nothing publishing, and a Digital Thread that
-records only what you do next.
-
-The quarantine queue still works, and it is now the **first** thing a new user meets rather than a
-footnote: publish under any well-formed `dev`-prefixed id and the device is held for approval. That
-is the zero-touch onboarding path, and it teaches better than a floor that was already there when
-you arrived.
-
-**Nothing is dropped on the floor in the meantime.** Before this, a default stack ran the simulator
-against four gateway identities that did not exist, so ingestion logged *"unregistered edge node"* on
-a throttle and discarded every message — gateways are never auto-created. Correct behaviour, and an
-odd thing for a stack to be doing before anyone had asked it for anything.
-
----
-
-## Overview
-
-The flow provides a **Gateway Simulator** tab in the Node-RED editor. It publishes `NBIRTH`,
-`DBIRTH`, report-by-exception `DDATA`, `DDEATH`, and a periodic `NDATA` gateway heartbeat (30 s), plus
-interactive test controls (overheat alarm at 95 °C / reset to 42 °C) for exercising alerts and UI
-state transitions.
-
-Every node group carries an on-canvas comment explaining what it does, and — for the two most
-common new-user questions ("how do I add my own device?" and "why doesn't my gateway show as
-online?") — exactly what to do about it. Read those first if you are skimming the flow.
-
----
-
-## Flow Provisioning
-
-> `docker compose up -d` runs `node-red-init`, which copies the flow into Node-RED and configures
-> credentials on startup. **Manual import is not required.**
-
-To inspect, reset, or re-import by hand:
-
-1. Sign in to the dashboard at `http://localhost:3000`, then open `http://localhost:1880` and
-   click **Sign in with ACS-Cymru**. The editor authenticates against Supabase Auth; the dashboard
-   session is needed first because GoTrue ships no consent UI. Import and Deploy need
-   Administrator or Shopfloor_Manager — Operator and Auditor get a read-only editor.
-2. **☰ menu → Import**.
-3. Paste the contents of [`node_red_flow.json`](node_red_flow.json).
-4. **Import**, then **Deploy**.
-
-To force a re-seed over editor changes, set `NODE_RED_FORCE_SEED=true` and restart, or use the
-Directory tab's GitOps sync button.
-
-### Three writes, three lifetimes
-
-`scripts/node-red-init.mjs` makes three writes to the `nodered_data` volume, and collapsing them
-behind one guard broke the stack twice. The *flow* is user content (seed once); *settings.js* and
-the *credentials* are stack configuration that must be reconciled on **every** boot — a volume
-outlives a fix, and the old single guard exited before reaching the repair.
-
-Four failure modes worth knowing, because each is silent:
-
-- **`flowFile` must be declared in `settings.js`.** Node-RED does not fall back to `flows.json` —
-  it falls back to **`flows_<hostname>.json`**, and a container's hostname is a random id. The
-  seeded flow is then simply never read: Node-RED opens a blank canvas. The credentials file is
-  derived from the same basename, so `flows_cred.json` is missed in the same breath and the broker
-  node comes up with no username. One omitted line, two unrelated-looking symptoms.
-- **The image ships `/data/flows.json`**, a two-node placeholder, and Docker pre-populates a fresh
-  named volume from the image's contents — so the file exists before the init script has ever run.
-  Guarding the seed on it meant the repo flow was **never** seeded on a fresh stack while the
-  script announced it was "preserving editor changes" that did not exist. The guard is now
-  `/data/.factoryplus-seeded`, which records what the script *did*.
-- **`_credentialSecret` in `/data/.config.runtime.json` silently defeats the seed.** Node-RED mints
-  that key whenever `settings.js` has no `credentialSecret`, and thereafter prefers it: it fails to
-  decrypt the seeded file, **discards the credentials**, and rewrites the file empty under its own
-  key. Clearing it is gated on *whether there are credentials to lose*, not on the seed path.
-- **`settings.js` is checked by LOADING it, not by grepping it.** Node-RED's own default is 26 KB
-  and mentions `credentialSecret` in a commented-out example, so a substring test reports a file
-  that declares nothing as correctly configured.
-
-A fifth, added when `settings.js` became the security boundary as well:
-
-- **`node-red` and `node-red-init` build from the same image** ([`../node-red/Dockerfile`](../node-red/Dockerfile)).
-  The load check above evaluates a `settings.js` that now requires `passport-oauth2`, so an init
-  container without that module concludes the settings are wrong and rewrites the file —
-  overwriting `settings.js.bak` — on every boot. If the log says `settings.js written` on anything
-  but the first boot, that is the cause. `acsCymruSettingsVersion` is what lets a change to the
-  generated *body* reach a volume whose file already has the right keys.
+The gateway goes `ONLINE` on the Gateways tab within a heartbeat. The device appears on Devices with
+telemetry flowing into TimescaleDB. The Digital Thread records every step you just took — which is
+the argument for doing it by hand: on a fresh stack that log is your own work and nothing else.
 
 ---
 
@@ -342,20 +264,15 @@ for gateways, `dev` for devices) followed by 21 hex characters, 24 in total. The
 one to every gateway and device, derived from its database id, and shows it on that asset's page —
 click it to copy. It never changes, so an asset can be renamed freely without breaking anything.
 
-The ids the shipped flow publishes under are pinned in
-[`scripts/provision-gateways.mjs`](../scripts/provision-gateways.mjs), which owns the demonstrator's
-topology — four cell gateways and six devices. **None of them exists until you run it.**
+**Nothing seeds these ids.** A fresh install has no gateways and no devices, so the pair you publish
+under is the pair the dashboard issued you in steps 3 and 6 — that is the whole reason those steps
+come first. [`0040_retire_demonstration_seed.sql`](../supabase/migrations/0040_retire_demonstration_seed.sql)
+and [`0073_the_shopfloor_ships_empty.sql`](../supabase/migrations/0073_the_shopfloor_ships_empty.sql)
+between them removed the last of the seeded assets and schemas from databases that still had them.
 
-That is new, and it is roadmap §14: the machining cell's pair used to be seeded by
-[`0002_seed_data.sql`](../supabase/migrations/0002_seed_data.sql) as well, so a fresh install came
-up with a shopfloor nobody had asked for. The two reasons for that seed have both expired — the AAS
-conformance suite provisions its own subject now, and demonstration value is exactly what should not
-be automatic — so `0040_retire_demonstration_seed.sql` retires it, once, and provisioning is the
-only thing that creates these rows.
-
-The examples below use the machining cell's pair (`gwy120000000000400080000` and
-`dev220000000000400080000`, `Sim_Gateway_Cell1_Machining` and `Sim_CNC_Mill_01`), so run
-`npm run provision:gateways` first if you have not.
+The examples below use `gwy120000000000400080000` and `dev220000000000400080000` as stand-ins for
+the two ids you copied. Substitute your own throughout — they will not match, and nothing here
+depends on the literal values.
 
 | Order | Type | Topic | Purpose |
 | :-- | :--- | :--- | :--- |
@@ -490,8 +407,8 @@ Five principals replace it, each confined by `mosquitto.acl`:
 | :--- | :--- |
 | `factoryplus_ingestion` | read `spBv1.0/#`; publish **only** `spBv1.0/+/NCMD/+` (rebirth) |
 | `factoryplus_i3x` | read `spBv1.0/#`. Publish nothing — it refuses writes in code (405), and this is that stance where the broker can enforce it |
-| `gwy120000000000400080000` … `gwy150000000000400080000` | the four simulated cell gateways, each confined to its own edge node by the ordinary `%u` pattern. Issued by `npm run provision:gateways` |
-| `gwy110000000000400080000` | `validate.py`, likewise |
+| any `gwy…` account | one per gateway, each confined to its own edge node by the ordinary `%u` pattern. Minted against a row that already exists — from the dashboard for a virtual gateway, by the enrolment bundle for an appliance |
+| `gwy110000000000400080000` | `validate.py`'s own gateway, a fixture it seeds itself |
 | `factoryplus_monitor` | read `$SYS/#` only — the health probes and the metrics exporter. Publishes nothing |
 
 **The two gateway usernames are `sparkplug_id`s and cannot be friendly names.** The ACL pins the
@@ -517,16 +434,18 @@ only honest way to assert the ACL.
 
 ## Onboarding Your Own Device
 
-Edit the **"Build DBIRTH Certificate"** and **"Build DDATA Telemetry"** function nodes (see the
-"ADD YOUR OWN DEVICE" comment node beside them):
+Adding a **second** device to a flow that already works is step 6 and step 7 again, and only three
+things have to agree:
 
 1. Register the device in the **Devices** tab and copy its issued **Sparkplug ID**.
-2. Put that id in the topic's last path segment **and** in the `Asset_ID` metric of both nodes.
-3. Set `Asset_Name` to whatever you want it called. It is a label only.
-4. Replace the metric list with your device's real telemetry (`name` / `datatype` / value field).
+2. Put that id in the topic's last path segment **and** in the `Asset_ID` metric of the nodes that
+   build its `DBIRTH` and its `DDATA`. Those two must match, and the topic is what the broker
+   authorises against.
+3. Set `Asset_Name` to whatever you want it called — it is a label and nothing keys on it.
+4. Give it the metrics its schema declares (`name` / `datatype` / value field).
 5. Deploy.
 
-You can skip step 1 and invent a well-formed id — the device lands in the quarantine queue for
+You can skip step 1 and invent a well-formed id: the device lands in the quarantine queue for
 approval, which is the zero-touch path.
 
 ### If you mistype the ID
@@ -574,10 +493,11 @@ This matters more than it used to: a **registered device bound to a gateway** no
 rejected when they arrive via a different (or unregistered) edge node. Registering the gateway is
 what makes that binding resolvable.
 
-`npm run provision:gateways` creates all four at their pinned ids — `Sim_Gateway_Cell1_Machining` is
-`gwy120000000000400080000` — along with a broker credential for each and the schema attachments the
-Devices page and the AAS export read, so the shipped flow works with no manual setup once it has
-run. Until it has, the shopfloor is empty by design: nothing is seeded any more.
+There is no script that creates gateways for you any more, and that is deliberate rather than a gap:
+a gateway row is useless without the Mosquitto account that goes with it, the account's username is
+the row's GENERATED `sparkplug_id`, and so the row has to exist before the credential can be minted.
+Step 3 and step 4 above are that order, and it is the same order for an appliance — the enrolment
+bundle just performs both on the operator's behalf.
 
 ---
 

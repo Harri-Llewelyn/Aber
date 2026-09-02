@@ -165,14 +165,6 @@ secrets:
   # enforce it, which is the control that cannot be argued with.
   mqttI3xUser: factoryplus_i3x
   mqttI3xPassword: ""
-  # The RETIRED single-device simulator gateway. Migration 0020 deletes its gateway row, so a
-  # message published under this username is now refused by verify_gateway_binding(); the shipped
-  # flow connects as four per-cell gateways whose credentials `scripts/provision-gateways.mjs`
-  # issues. Kept because node-red-init applies it to the legacy `mqtt-broker-config` node, which
-  # survives on a Node-RED PVC created before the flow was consolidated -- dropping the account
-  # would turn a stale flow into a broker that refuses the connection outright.
-  mqttSimulatorUser: gwy100000000000400080000
-  mqttSimulatorPassword: ""
   # ingestion/validate.py's gateway. A FIXTURE -- a production install can leave this empty and
   # set e2e.enabled: false, and no account is created.
   mqttValidatorUser: gwy110000000000400080000
@@ -182,26 +174,11 @@ secrets:
   # load-bearing rather than optional.
   mqttMonitorUser: factoryplus_monitor
   mqttMonitorPassword: ""
-  # THE FOUR SIMULATED CELL GATEWAYS of the `Simulated Shopfloor` flow. One account each:
-  # mosquitto.acl pins the topic's edge-node segment to the connecting username, so four cells
-  # cannot share a connection and there is no shared principal to fall back on.
-  #
-  # NOT OPTIONAL WHILE THE SHIPPED FLOW DECLARES THEM. Each broker node names its pair through
-  # `acsCredentialsEnv`, and node-red-init fails closed on a declared pair it cannot find -- the
-  # init container exits 1 and Node-RED never starts, rather than the simulator quietly not
-  # publishing. Leave them empty only together with a flow that no longer declares them.
-  #
-  # The usernames are the `sparkplug_id`s of gateway rows seeded by migration 0002, matched
-  # verbatim by the ACL. They are frozen: `mqttGwAgvFleet*` now serves Cell 3 — Production KPIs,
-  # and was renamed in place precisely so this account and its telemetry history stayed valid.
-  mqttGwCncMachiningUser: gwy120000000000400080000
-  mqttGwCncMachiningPassword: ""
-  mqttGwRoboticAssemblyUser: gwy130000000000400080000
-  mqttGwRoboticAssemblyPassword: ""
-  mqttGwAgvFleetUser: gwy140000000000400080000
-  mqttGwAgvFleetPassword: ""
-  mqttGwFacilityBmsUser: gwy150000000000400080000
-  mqttGwFacilityBmsPassword: ""
+  # NO GATEWAY ACCOUNTS ARE DECLARED HERE. A gateway's broker credential is minted once its row
+  # exists -- from the dashboard for a virtual gateway, or by the enrolment bundle for a physical
+  # appliance -- so it cannot be a chart value: the username is the row's GENERATED sparkplug_id
+  # and does not exist until somebody creates the row. Adding a pair here is how a user wires a
+  # Node-RED broker node they have built; see tutorial/README.md.
   # The bearer token supabase-functions presents to the gateway-credential sidecar, which is the only
   # thing that may add an account to the broker's password file.
   #
@@ -1177,30 +1154,6 @@ frontend:
 # because a participant at the demonstration asked whether the simulated devices appear on every
 # start and said they polluted the Digital Thread.
 #
-# WHAT THIS FLAG DOES AND DOES NOT COVER. It governs only the two GRAFANA artefacts that name the
-# demonstrator: the Shopfloor Operations dashboard, whose panels hardcode `Sim_CNC_Mill_01`, and
-# the three machine alert rules that run at a 10-second interval because someone is standing in
-# front of a fault-injection button. The ASSETS are not a chart concern at all: they arrive from
-# `scripts/provision-gateways.mjs`, which also issues the broker credential no migration could.
-#
-# So `simulation.grafana.enabled=true` on a cluster where nobody has provisioned gives a dashboard
-# with no series and three rules in NoData -- which is the honest outcome, and the reason this is
-# not defaulted on.
-simulation:
-  # The Node-RED flow. Off, the editor opens on a one-node "Start here" tab that declares no broker
-  # nodes and connects to nothing. On, it seeds the demonstrator's four-gateway simulator -- which
-  # needs the four MQTT_GW_* credential pairs in the chart Secret, because node-red-init FAILS
-  # CLOSED on a broker node whose declared pair is absent.
-  #
-  # THE PVC IS SEEDED FIRST-RUN-ONLY, because the flow is user content. Flipping this on an
-  # existing install therefore changes nothing until the volume is re-seeded; that is the same
-  # NODE_RED_FORCE_SEED guard Compose has, and it is protecting editor changes rather than being
-  # awkward.
-  nodeRed:
-    enabled: false
-  grafana:
-    enabled: false
-
 # ---------------------------------------------------------------------------------------------
 # Observability and exposure
 # ---------------------------------------------------------------------------------------------

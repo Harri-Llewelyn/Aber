@@ -147,7 +147,7 @@ by design, and it is already readable in the shipped bundle.
 
 ### 2.2 Edge runtime: build an image instead of mounting the repo
 
-`supabase-functions` bind-mounts `./supabase/functions` and `./simulation/node_red_flow.json`, then uses a
+`supabase-functions` bind-mounts `./supabase/functions` and `./templates/physical-gateway`, then uses a
 shell entrypoint to read the flow into `NODERED_FLOW_JSON` because an edge-runtime user worker has
 no filesystem access to the mount. There is no repository on a cluster node to mount, and "which
 revision of `aas-export` is running" must be a property of the deployed artefact if a rollback is
@@ -171,7 +171,8 @@ image so the Deployment needs no command override.
 
 ### 2.3 Gateway config: template, don't `sed`
 
-> **Envoy is the gateway on both targets** since roadmap §4, and `supabase-envoy-init` plays the
+> **Envoy is the gateway on both targets** since the gateway migration
+> ([`docs/gateway-migration.md`](gateway-migration.md)), and `supabase-envoy-init` plays the
 > role described here. The Kong reasoning below is kept because the argument is the gateway-agnostic
 > one, and because `supabaseKong.enabled=true` is still the documented revert.
 
@@ -396,7 +397,8 @@ label `realtime-dev`, which is the tenant `SEED_SELF_HOST` creates — but they 
 and the difference matters if either is changed. Kong took the upstream `Host` from the service
 hostname, with the default `preserve_host: false`, so the Service name alone did the work. Envoy
 preserves the downstream `Host` unless told otherwise, so `supabase/envoy.yaml` carries an explicit
-`host_rewrite_literal` for that route (roadmap §4 records it as one of the four translation traps).
+`host_rewrite_literal` for that route ([`docs/gateway-migration.md`](gateway-migration.md) records it
+as one of the four translation traps).
 The Service name is still load-bearing on both — `acs-cymru.validateRealtimeServiceName` refuses an
 install that renames it — and it is still the Kubernetes-native equivalent of the Compose alias.
 

@@ -11,7 +11,7 @@ names itself in the resulting error. All four are carried across from docker-com
   1. RLIMIT_NOFILE must be set. The image's /app/run.sh runs `ulimit -n $RLIMIT_NOFILE` under
      `set -u`, so leaving it unset kills the container on "unbound variable" BEFORE the Elixir app
      starts -- there is no application log to read.
-  2. The `_realtime` schema must pre-exist. Migration 0022 (now folded into 0001) creates it, which
+  2. The `_realtime` schema must pre-exist. An upstream Realtime migration, folded into 0001, creates it -- which
      is why this waits on db-init rather than merely on the database.
   3. The tenant is `realtime-dev`, and SEED_SELF_HOST IGNORES TENANT_NAME. Probing
      /api/tenants/realtime/health returns 404 against a perfectly healthy server.

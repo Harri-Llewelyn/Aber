@@ -23,7 +23,7 @@
 # reaching other subscribers.
 #
 # The three attacks this closes, and why a sparkplug_id is not a secret:
-#   simulation/README.md -> "Broker topic authorisation"
+#   tutorial/README.md -> "Broker Topic Authorisation"
 #
 # ---------------------------------------------------------------------------------------------
 # VERIFIED BEHAVIOUR OF THIS FILE, against eclipse-mosquitto:2.0.20. THE PIN IS NOW 2.0.22, and
@@ -83,7 +83,7 @@
 # gateway at runtime: pin the UUID and the wire identity is known in advance. Every gateway on this
 # stack does exactly that -- `Sim_Gateway_Cell1_Machining` (12000000-…-0001 ->
 # gwy120000000000400080000, seeded by 0002_seed_data.sql and provisioned along with the other three
-# cells by scripts/provision-gateways.mjs) and the validator's gateway (11000000-…-0001 ->
+# cells, now retired) and the validator's gateway (11000000-…-0001 ->
 # gwy110000000000400080000, upserted by ingestion/validate.py).
 #
 # `gwy100000000000400080000` is still in the password file and is NOT in this list on purpose: it

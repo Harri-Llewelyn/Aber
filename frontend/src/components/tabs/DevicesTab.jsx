@@ -1553,7 +1553,7 @@ export function DevicesTab({ showToast, onSelectDevice, onSelectGateway, onSelec
             // real bug rather than a tidy-up. A schema reaches a device by either of two routes: the
             // 1:1 `devices.schema_id`, or a row in `device_submodels` (archived migration 0034, surfaced by
             // api.js as `submodel_schema_ids`). This field read only the first, so every device
-            // migration 0022 attached a class schema to -- which is all six on the demo floor --
+            // the retired class-schema migration attached a schema to -- which was all six on the demo floor --
             // showed "Not set" in the drawer while the table beside it, which has always used
             // schemasForDevice, listed the schema's tags. Two views of one row disagreeing.
             //
