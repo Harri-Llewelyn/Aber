@@ -1844,6 +1844,51 @@ jobs:
           helm test $RELEASE --namespace $NS --timeout 5m
           kubectl -n $NS logs $RELEASE-test-fdw
 
+      # ---------------------------------------------------------------------------------------
+      # THE PROMOTION GATE FOR ROADMAP §4, and the reason it can finally run.
+      #
+      # The chart shipped Envoy disabled because the manual cluster proof could not reach the parts
+      # needing this project's own images: `db-init` and `gateway-credential` are unpublished GHCR
+      # tags, so a hand-installed cluster ran no migrations and deployed no edge functions, and the
+      # authenticated probe's markers cannot be satisfied against empty upstreams. §4 recorded that
+      # remainder as "downstream of CI, not of the chart". This job BUILDS those images and imports
+      # them, so the gap closes here and nowhere else.
+      #
+      # THE SAME COMMAND THE COMPOSE JOB RUNS, deliberately. The script names no gateway concept, so
+      # identical output across both targets is the migration's evidence -- and now both targets are
+      # Envoy, which is what makes a difference between them meaningful rather than expected.
+      #
+      # THE KEY COMES FROM THE CLUSTER'S SECRET, not from .env. Those are the same demo JWTs today,
+      # and reading .env would still be wrong: it would pass on a cluster installed with different
+      # credentials, which is the one condition this check exists to catch.
+      - name: Verify The Live Gateway Surface — Envoy, In-Cluster
+        run: |
+          set -eu
+          kubectl -n $NS port-forward svc/supabase-kong 18080:8000 >/tmp/port-forward.log 2>&1 &
+          PF=$!
+          trap 'kill $PF 2>/dev/null || true' EXIT
+
+          # Wait for the tunnel, not for a 2xx: every gated route answers 401 to an unauthenticated
+          # caller, so `curl -sf` would treat a perfectly healthy gateway as unreachable. A response
+          # code that is not 000 means the connection was made, which is all this needs to know.
+          for _ in $(seq 1 30); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:18080/rest/v1/" || true)
+            [ "$CODE" != "000" ] && break
+            sleep 1
+          done
+          if [ "$CODE" = "000" ]; then
+            echo "::error::port-forward to svc/supabase-kong never accepted a connection"
+            cat /tmp/port-forward.log || true
+            exit 1
+          fi
+          echo "gateway reachable through the port-forward (first response $CODE)"
+
+          SUPABASE_ANON_KEY=$(kubectl -n $NS get secret acs-cymru-secrets             -o jsonpath='{.data.SUPABASE_ANON_KEY}' | base64 -d)
+          export SUPABASE_ANON_KEY
+          test -n "$SUPABASE_ANON_KEY"
+
+          node scripts/check-gateway-surface.mjs --runtime --authenticated http://127.0.0.1:18080
+
       # The same suite, and the same assertions, that e2e-validation runs against Compose. In-cluster
       # it needs no host/port overrides at all -- the Service names ARE the correct configuration,
       # which is the simpler of the two topologies.

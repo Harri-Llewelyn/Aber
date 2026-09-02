@@ -160,20 +160,28 @@ the protocol existing:
 `kong_config` volume; removing it while Kong is still the published gateway leaves the gateway
 serving whatever the volume last held — a stale config that starts cleanly.
 
-### 2.2 Helm — **partly verified**
+### 2.2 Helm — **promoted**
 
-> **What was observed, in a real cluster.** Installed with `supabaseKong.enabled=false` and
-> `supabaseEnvoy.serviceName=supabase-kong`: the `supabase-kong` Service selects
-> `component=supabase-envoy` and gets a live endpoint, so the name adoption the promotion rests on
-> works. The unauthenticated probe reports the same **3 gated / 6 open / 4 exemptions** it reports
-> on Compose. A valid key opens the gate; an unregistered one is refused `401`.
+Envoy is the gateway on Kubernetes. `supabaseEnvoy.enabled: true`, `supabaseKong.enabled: false`,
+`supabaseEnvoy.serviceName: supabase-kong` — the defaults, in `values.yaml`.
+
+> **What closed the last of it: CI, not another manual install.** This section read *partly
+> verified* for as long as the manual proof could not reach anything needing this project's own
+> images. `db-init` and `gateway-credential` are unpublished GHCR tags, so a hand-installed cluster
+> ran no migrations and deployed no edge functions, the authenticated probe's markers had nothing to
+> match against, and Realtime waited forever on a `_realtime` schema `db-init` would have created.
+> The ServiceMonitor could not be scraped (no Prometheus Operator CRDs) and the Ingress could not
+> route (no ingress controller).
 >
-> **What could not be exercised, and why none of it is the chart's fault.** `db-init` and
-> `gateway-credential` are unpublished GHCR tags, so the cluster ran no migrations and deployed no
-> edge functions — the authenticated probe's markers have nothing to match against. Realtime waits
-> forever on a `_realtime` schema `db-init` would have created. The ServiceMonitor cannot be
-> dry-run or scraped (no Prometheus Operator CRDs) and the Ingress cannot route (no ingress
-> controller). All of it is downstream of CI being frozen until September 2026.
+> **The k3d job builds those images and imports them.** So `Verify The Live Gateway Surface — Envoy,
+> In-Cluster` runs the same command the Compose job runs, against a stack with a schema behind it,
+> and the remainder the roadmap called *"downstream of CI, not of the chart"* closes where it always
+> had to.
+>
+> **What had already held, observed rather than translated:** the `supabase-kong` Service selects
+> `component=supabase-envoy` and gets a live endpoint, so the name adoption the promotion rests on
+> works; the unauthenticated probe reports the same **3 gated / 6 open / 4 exemptions** as Compose;
+> a valid key opens the gate and an unregistered one is refused `401`.
 >
 > **Two environment traps, recorded because both cost time.** `values-dev.yaml` asks for
 > `storageClass: local-path`, which is k3s's name — Docker Desktop uses the same
@@ -181,34 +189,33 @@ serving whatever the volume last held — a stale config that starts cleanly.
 > `Pending` until it is overridden. And Windows reserves TCP `54328-54427`, which refuses the
 > obvious port-forward ports with a permissions error rather than an in-use one.
 >
-> **The probe's key must come from the cluster's own Secret**, not from `.env`. Presenting the
-> wrong one produces `401`s that read exactly like a broken gate.
+> **The probe's key must come from the cluster's own Secret**, not from `.env`. Presenting the wrong
+> one produces `401`s that read exactly like a broken gate.
 
-Already drafted, in this branch:
+**Kong is off, not gone.** `supabase/kong.yml`, `templates/supabase/kong.yaml` and the
+`supabaseKong` values block all remain, and `check-gateway-surface.mjs` asserts the config file
+stays while the template can read it. Reverting is `supabaseKong.enabled=true` with
+`supabaseEnvoy.enabled=false`, in one change; the template refuses the halfway state either way
+round, because two Deployments behind one Service is a coin toss per request rather than a
+migration.
 
-- `deploy/helm/acs-cymru/templates/supabase/envoy.yaml` — ConfigMap, Service, Deployment
-- `deploy/helm/acs-cymru/values.yaml` — `supabaseEnvoy`, **disabled by default**
-- `scripts/sync-helm-chart-files.mjs` — mirrors `supabase/envoy.yaml` into `files/envoy/`
+**The pod-label work is done**, and it is worth saying so plainly because an earlier draft of this
+document listed it as outstanding for weeks:
 
-**The promotion is two values**, because Kubernetes has no Service aliasing and fifteen files carry
-`http://supabase-kong:8000`:
-
-```yaml
-supabaseKong.enabled: false
-supabaseEnvoy.serviceName: supabase-kong    # the replacement adopts the name
-```
-
-Rendered and verified: the `supabase-kong` Service's selector resolves to the `supabase-envoy` pod
-labels, port 8000 is preserved, and no Kong Deployment remains. The template **fails the render** if
-both are enabled under that name — two Deployments behind one Service is a coin toss per request,
-and the probe would report whichever it happened to reach.
-
-Still to do, and **neither is covered by adopting the Service name**:
-
-| File | Change | Why the name trick does not help |
+| File | State | Why the Service-name trick did not cover it |
 |---|---|---|
-| `templates/networkpolicy.yaml` | 12 rules: `supabase-kong` → `supabase-envoy` | NetworkPolicy selects **pod labels**, not Service names. Miss one and that flow is denied — a failure that looks like the upstream being down |
-| `templates/obs/servicemonitors.yaml` | `component` → `supabase-envoy`, `path: /metrics` → `/stats/prometheus`, port → `9901` | ServiceMonitor selects pod labels too. A path carried over unchanged scrapes 404 **while reporting the target up** — an unmeasured gateway that reads as an idle one |
+| `templates/networkpolicy.yaml` | done — selects through `acs-cymru.gatewayComponent` | NetworkPolicy selects **pod labels**, not Service names. Miss one and that flow is denied — a failure that looks like the upstream being down |
+| `templates/obs/servicemonitors.yaml` | done — `component: supabase-envoy`, `path: /stats/prometheus`, port `9901` | ServiceMonitor selects pod labels too. A path carried over unchanged scrapes 404 **while reporting the target up** — an unmeasured gateway that reads as an idle one |
+
+No rendered manifest carries `component: supabase-kong` as a pod selector; six carry
+`supabase-envoy`.
+
+**One thing the promotion broke, and the guard that now catches it.** `values-prod.yaml.example`
+asked to autoscale `supabase-kong`. With Kong disabled, `hpas.yaml` rendered **no HPA and no error**
+— the gateway pinned at one replica where the file plainly asked for two to six. That is issue #31's
+symptom arriving through a third door: not an unknown name, not a missing dispatch entry, but a
+known name for something no longer deployed. `hpas.yaml` now refuses it, and names `supabase-envoy`
+in the message.
 
 **The metric names change entirely** (`kong_http_status` → `envoy_http_downstream_rq_xx`). Checked:
 no Grafana dashboard or alert rule uses the `kong_*` series — they appear only in comments in
@@ -250,7 +257,7 @@ without a LoadBalancer provider. `kubectl patch svc mosquitto-external -n acs -p
 | `docs/kubernetes-architecture.md` | §7 (Ingress) and §3 reference Kong by name |
 | `README.md` | the image-tag table pins `kong:3.9.3` — `check-docs-drift.mjs` asserts it against `docker-compose.yml` and will fail until both change |
 | `scripts/check-gateway-surface.mjs` | the **static** mode parses `kong.yml`'s indentation and becomes meaningless. Retire it and keep `--runtime`; the inventory (`EXPECTED`) is the specification and stays |
-| `README.md` roadmap §4 | retire the item, renumber, and record what actually happened — including the fifth-exemption question below |
+| `README.md` roadmap §4 | done — the item is retired and 4 added to `RETIRED` in `check-docs-drift.mjs`. **Not renumbered:** the roadmap lists only what is not built, gaps are the record of what shipped, and §4 is cited from more code than any other retired number. The fifth-exemption question below survives the retirement and is recorded in `envoy.yaml` |
 
 ### 2.4 The open decision this does not settle
 

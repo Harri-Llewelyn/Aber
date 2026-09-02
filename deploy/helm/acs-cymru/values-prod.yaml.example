@@ -72,8 +72,9 @@ secrets:
   #
   # ROTATION IS NOT AUTOMATIC EVEN WITH ESO. Most of these are read into a pod's environment at
   # START, so a refreshed Secret reaches nothing until the pod restarts. Two need more than that:
-  #   * Kong's API keys are substituted into its config by an initContainer, so rotating them needs
-  #     `kubectl rollout restart deployment/supabase-kong`.
+  #   * The gateway's API keys are substituted into its config by an initContainer, so rotating
+  #     them needs `kubectl rollout restart deployment/supabase-envoy`. The Service is still named
+  #     supabase-kong -- Envoy adopted the name at promotion so no consumer had to change.
   #   * The Grafana and Node-RED OAuth client secrets are HASHED INTO auth.oauth_clients by the
   #     db-init hook, so rotating either needs a `helm upgrade` to re-run it -- and both halves must
   #     move together or the OAuth handshake fails with `invalid_credentials`.
@@ -238,7 +239,9 @@ networkPolicy:
   # THE THREE PORTS ARE THE THREE REAL METRICS ENDPOINTS -- see templates/obs/servicemonitors.yaml
   # for why there is no fourth:
   #   3000  grafana, natively
-  #   8100  supabase-kong's status listener (requires supabaseKong.metrics.enabled)
+  #   9901  supabase-envoy's admin listener (requires supabaseEnvoy.metrics.enabled). Envoy serves
+  #         /ready AND /stats/prometheus from this one port; Kong split them across two, which is
+  #         why this used to read 8100.
   #   9234  the mosquitto exporter sidecar (requires mosquitto.metrics.enabled)
   #
   # CHANGE THE NAMESPACE to wherever your Prometheus runs. `monitoring` is the convention;
@@ -263,7 +266,7 @@ networkPolicy:
           - protocol: TCP
             port: 3000
           - protocol: TCP
-            port: 8100
+            port: 9901
           - protocol: TCP
             port: 9234
 
@@ -323,8 +326,8 @@ mosquitto:
 # core Kubernetes type, so with them absent `helm install` fails with `no matches for kind
 # "ServiceMonitor"` rather than skipping the objects.
 #
-# The per-component switches are what make the targets real: Kong serves no metrics until its
-# status listener is on (see supabaseKong below), and Mosquitto needs the sidecar above. Grafana
+# The per-component switches are what make the targets real: Envoy serves no metrics until its
+# admin listener is on (see supabaseEnvoy below), and Mosquitto needs the sidecar above. Grafana
 # needs neither -- it serves /metrics natively.
 # ---------------------------------------------------------------------------------------------
 telemetry:
@@ -367,7 +370,10 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 6
   targetCPUUtilizationPercentage: 70
-  components: [supabase-rest, supabase-kong, supabase-functions, frontend]
+  # `supabase-envoy`, not `supabase-kong`: the gateway changed at roadmap §4 and the Deployment
+  # name changed with it, even though the Service did not. Naming a disabled workload here is now
+  # refused by hpas.yaml rather than rendering nothing -- which is how this line was caught.
+  components: [supabase-rest, supabase-envoy, supabase-functions, frontend]
 
 # THE ONLY RECOVERY PATH THIS STACK HAS: local-path is node-local with no replication, and neither
 # database is replicated. A logical dump recovers to the last nightly run and no finer -- for a real
@@ -390,18 +396,20 @@ backup:
 # Multi-replica for the stateless tier, so the PDBs above have something to protect.
 #
 # NOTE THESE ARE THE ONLY DEFINITIONS OF THESE KEYS IN THIS FILE. A duplicate top-level key in YAML
-# does not merge and does not warn -- the last one wins outright, so a second `supabaseKong:` block
+# does not merge and does not warn -- the last one wins outright, so a second `supabaseEnvoy:` block
 # elsewhere would silently discard everything set here, or vice versa. Keep each component in one
-# place; that is why Kong's metrics switch is here rather than beside the telemetry block it serves.
+# place; that is why the gateway's metrics switch is here rather than beside the telemetry block it
+# serves.
 supabaseRest:      { replicas: 2 }
 supabaseFunctions: { replicas: 2 }
 frontend:          { replicas: 3 }
 
-supabaseKong:
+supabaseEnvoy:
   replicas: 2
   metrics:
     # THE SINGLE MOST VALUABLE SCRAPE IN THE STACK. Every REST, Auth, Storage, Realtime and edge
-    # function request passes through Kong, and none of those components exposes metrics of its own
-    # -- PostgREST 12.2.0 has no metrics endpoint at all, its admin server being health-only. This
-    # one target therefore covers the whole HTTP tier, labelled per service.
+    # function request passes through the gateway, and it is the only place they can be counted
+    # together and labelled per upstream. PostgREST has since grown metrics of its own and is
+    # scraped separately, which narrows this target's claim without displacing it: Auth, Storage,
+    # Realtime and the edge runtime are still visible here and nowhere else.
     enabled: true

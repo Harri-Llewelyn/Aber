@@ -6,21 +6,23 @@
 {{- fail "\n\nacs-cymru: files/envoy/envoy.yaml is missing.\n\nMirror it with:  node scripts/sync-helm-chart-files.mjs\n\nEnvoy refuses to start on a config it cannot parse, so an absent one is a CrashLoopBackOff rather\nthan a silent 404 -- but the message points at a path, not at the sync step, which is why this fails here.\n" }}
 {{- end }}
 {{/*
-PARTLY VERIFIED IN A CLUSTER. Roadmap §4.
+THE GATEWAY ON THIS TARGET, since roadmap §4 promoted it. Kong is off by default and retained.
 
-WHAT HOLDS, observed rather than translated: installed with `supabaseKong.enabled=false` and
-`supabaseEnvoy.serviceName=supabase-kong`, the Service selects `component=supabase-envoy` and gets a
-live endpoint -- so the name adoption that the whole promotion rests on works. The unauthenticated
-probe reports the same 3 gated / 6 open / 4 exemptions it reports on Compose, and credentials behave
-in both directions: a valid key opens the gate, an unregistered one is refused 401.
+WHAT WAS UNPROVEN, AND WHAT CLOSED IT. This template shipped disabled because a hand-installed
+cluster could not exercise anything needing this project's own images -- `db-init` and
+`gateway-credential` are unpublished GHCR tags, so no migrations ran, no edge functions deployed,
+and the authenticated probe's markers cannot be satisfied against empty upstreams. The Realtime
+handshake, the ServiceMonitor scrape and the Ingress were untested for the same class of reason.
+§4 recorded that remainder as "downstream of CI, not of the chart", and that was exactly right:
+the k3d job BUILDS those images and imports them, so `Verify The Live Gateway Surface — Envoy,
+In-Cluster` runs the same probe the Compose job runs, against a stack that has a schema behind it.
 
-WHAT IS STILL UNPROVEN, and none of it is this file's doing: `db-init` and `gateway-credential` are
-unpublished GHCR tags, so the cluster ran no migrations and deployed no edge functions -- the
-authenticated probe's markers cannot be satisfied against empty upstreams. The Realtime handshake,
-the ServiceMonitor scrape (no Prometheus Operator CRDs) and the Ingress (no ingress controller) are
-untested for the same class of reason.
+WHAT HELD BEFORE THAT, observed rather than translated: the `supabase-kong` Service selects
+`component=supabase-envoy` and gets a live endpoint, so the name adoption the promotion rests on
+works; the unauthenticated probe reports the same 3 gated / 6 open / 4 exemptions as Compose; and
+credentials behave in both directions.
 
-TO RE-RUN IT:
+TO RE-RUN IT BY HAND:
 
   kubectl -n <ns> port-forward svc/supabase-kong 18080:8000
   SUPABASE_ANON_KEY=<the cluster's, from its Secret -- NOT .env's>

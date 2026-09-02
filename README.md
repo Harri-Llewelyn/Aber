@@ -705,7 +705,7 @@ Kubernetes — which is what makes it the real drift control between them.
 
 ## Roadmap & Future Extensions
 
-Fifteen extensions, none of them speculative: every one names the code it would build on, because
+Fourteen extensions, none of them speculative: every one names the code it would build on, because
 the value of writing them down is that a reader can tell how far away each is — and several turned
 out to be much closer than the request for them assumed, which is stated here rather than left to be
 discovered later.
@@ -741,7 +741,8 @@ below a removal would silently redirect all of them without erroring. A number c
 identifier, not a position. Where code refers to work that has since shipped, the citation names the
 documentation rather than a roadmap number.
 
-**Items 1-5 are this repository's own**, ordered by how much of each already exists, as are 20-25 —
+**Items 1-3 and 5 are this repository's own**, ordered by how much of each already exists, as are
+20-25 —
 20 was first because both 21 and 22 depended on the role split it makes: 21 had nowhere to put an
 Administrator-only control without it, and 22 would have hidden a lane from a role that could still
 grant itself the ability to see it. **That split shipped as `0069` and 22 shipped behind it as
@@ -862,89 +863,10 @@ wrong on Kubernetes, presenting as a dashboard that logged in and then showed em
 gateway reported 200 for every request. A declarative route-level policy is harder to get wrong than
 a substituted JSON array.
 
-**Do not start this before §4's Kubernetes half.** The chart still deploys Kong; changing how
-Kubernetes expresses CORS while the gateway underneath it is still being replaced means two moving
-parts in the layer that has no fallback.
-
----
-
-### 4 · Kong → Envoy: done on Compose, drafted for Kubernetes
-
-**Builds on:** [`supabase/envoy.yaml`](supabase/envoy.yaml) · `supabase-envoy-init` ·
-[`templates/supabase/envoy.yaml`](deploy/helm/acs-cymru/templates/supabase/envoy.yaml) ·
-[`scripts/check-gateway-surface.mjs`](scripts/check-gateway-surface.mjs) ·
-[`docs/gateway-migration.md`](docs/gateway-migration.md)
-
-**Compose is migrated. Kubernetes is not, and the gap is deliberate.** `supabase-envoy` publishes
-54321 and answers to `supabase-kong` through a network alias; Kong, `supabase-kong-init` and the
-`kong_config` volume are gone from `docker-compose.yml`. The chart still deploys Kong by default,
-because its Envoy templates are **verified in part, not in full** — which is also why
-`supabase/kong.yml` is still in the repository. It is read by nothing on Compose and by the chart on
-Kubernetes, and the template-hygiene check asserts exactly that pair rather than the tempting
-one-liner "kong.yml is gone".
-
-**Why it happened now rather than later.** This entry used to close with "not urgent — a
-divergence-from-upstream question, not a security one". That was true and is no longer the whole
-story: the `sb_publishable_*` / `sb_secret_*` keys §5 has a deadline for are a **gateway feature**.
-They are not JWTs, and nothing downstream ever sees one — the gateway matches the key as a string
-and synthesises the `Authorization: Bearer <JWT>` the upstreams require. Upstream ships that
-translation in Envoy only. So §5 ran through here, and the deadline came with it.
-
-**The negative assertions came first, as this entry always said they must.**
-`check-gateway-surface.mjs` already asserted the declared surface — but by *parsing kong.yml*, which
-would have been rewritten alongside the thing it was guarding. It grew a `--runtime` mode that
-probes a live gateway and asserts only what is observable: a gated route is refused before its
-upstream sees it, an open one gets through. It names no gateway concept, so the same command reads
-against Kong and Envoy, and identical output across both was the migration's steering signal.
-
-**One pass was not enough, and finding that out is the part worth recording.** The unauthenticated
-probe was green on Envoy the whole time `hide_credentials` was stripping the apikey from the header
-and not from the query string — a form Kong accepts and then removes. PostgREST read the leftover as
-a **column filter** and answered `PGRST100` where Kong answered `200`. No probe that sends no
-credential can see that, so `--authenticated` now presents a valid key by header and by query, and
-an unregistered one, and asserts that **on a route which hides credentials the two forms are
-indistinguishable upstream**. Both passes run in CI.
-
-**Four translation traps, each of which produces a stack that looks fine**, are recorded in
-`envoy.yaml` beside the routes they affect: route order is semantic in Envoy and is not in Kong;
-`key_in_query` is load bearing for Realtime, which cannot set a header on a browser handshake;
-Realtime reads its tenant from the Host *label*, so `host_rewrite_literal` is doing real work; and
-the Directory routes must arrive as `/fplus-directory/…` because the runtime picks its worker from
-the first path segment.
-
-**Already done, and recorded here because this list previously said otherwise:** the chart's
-NetworkPolicy and ServiceMonitor both select through `acs-cymru.gatewayComponent`, so the pod-label
-problem — a ServiceMonitor carried over unchanged scrapes 404 *while reporting the target up* — is
-closed rather than pending. The entry led with it for weeks, which is the failure this section's own
-preamble exists to prevent: a reader planning this item's completion would have re-done finished work
-while the genuine remainder sat underneath it.
-
-**What remains, and none of it is Compose:**
-
-- **Finishing the proof.** It has now been installed into a real cluster, and the load-bearing part
-  holds: the `supabase-kong` Service selects `component=supabase-envoy`, and the unauthenticated
-  probe passes in-cluster with the same 3 gated / 6 open / 4 exemptions Compose reports. Credential
-  handling is right in both directions — a valid key opens the gate, an unregistered one is refused
-  401. What is NOT proven is everything needing the stack's own images: `db-init` and
-  `gateway-credential` are unpublished GHCR tags, so no migrations ran, no edge functions were
-  deployed, and Realtime waits forever on a schema nothing creates. That also leaves the Realtime
-  handshake, the ServiceMonitor scrape (no Prometheus Operator CRDs) and the Ingress itself (no
-  ingress controller) untested. All of it is downstream of CI, not of the chart.
-- **`helm lint` is not verification, and this migration produced the proof**: deleting `kong.yml`
-  left the chart's default render failing on a missing file, and lint stayed green through it.
-  Rendering caught worse — the API's Ingress route was gated on `supabaseKong.enabled`, so
-  promoting removed it entirely and every call would have 404'd at the controller.
-- **The fifth exemption**, below.
-
-**A fifth exemption is still an open question, and it should be answered rather than drift in.**
-`aas-api` serves the IDTA REST surface to exactly the class of client that has no Supabase apikey
-and no way to acquire one — an ERP, a PLM, an AAS browser — which is the argument that already
-exempted the Factory+ Directory and both userinfo endpoints. It was deliberately not taken as part
-of a translation: `/functions/v1/aas-api/description` falls under the gated catch-all and stays
-gated, with the route to open it written out in a comment in `envoy.yaml`. Taking it fails the probe
-until the inventory gains a row, which is the intended order — the inventory is the review, and the
-gateway follows it. Note the asymmetry if it is taken: only `/description` belongs outside the gate;
-every other `aas-api` route authenticates the caller itself and fails closed.
+**§4 is no longer in the way.** This entry used to open by saying not to start before §4's
+Kubernetes half, because changing how Kubernetes expresses CORS while the gateway underneath was
+still being replaced meant two moving parts in the layer that has no fallback. Envoy is now the
+gateway on both targets, so the route-level policy this describes has one place to live.
 
 ---
 

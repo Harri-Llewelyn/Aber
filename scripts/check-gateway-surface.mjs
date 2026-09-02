@@ -637,8 +637,13 @@ const template = read(ENVOY_TEMPLATE);
   }
 
   // The converse, and it is the half that actually bites. supabase/kong.yml is mirrored into the
-  // chart and read by templates/supabase/kong.yaml; removing it is a broken `helm install`, not a
-  // tidy-up.
+  // chart and read by templates/supabase/kong.yaml.
+  //
+  // KONG IS NOW OFF BY DEFAULT ON KUBERNETES TOO (roadmap §4), and this assertion did NOT relax
+  // with it. The template is still there and still reads the mirror, so `supabaseKong.enabled=true`
+  // -- the documented revert -- is a broken `helm install` the moment this file goes. A retained
+  // config for a disabled component looks like dead weight to anyone tidying, which is exactly when
+  // an assertion earns its keep. It can go when the template does, and not before.
   let present = true;
   try {
     read('supabase/kong.yml');
@@ -647,12 +652,13 @@ const template = read(ENVOY_TEMPLATE);
   }
   if (!present) {
     fail(
-      'supabase/kong.yml is missing, but deploy/helm still deploys Kong by default and reads a '
-      + 'mirror of it. `helm install` fails on the absent file. Restore it, or migrate the chart '
-      + 'to Envoy in the same change -- see docs/gateway-migration.md.'
+      'supabase/kong.yml is missing, but templates/supabase/kong.yaml still reads a mirror of it. '
+      + 'Kong is off by default since roadmap §4 promoted Envoy, so nothing fails until somebody '
+      + 'takes the documented revert -- and then `helm install` fails on the absent file. Restore '
+      + 'it, or delete the Kong template in the same change -- see docs/gateway-migration.md.'
     );
   } else {
-    pass('supabase/kong.yml is retained for the Kubernetes target, which has not migrated yet');
+    pass("supabase/kong.yml is retained for the chart Kong template, which is the revert path");
   }
 }
 

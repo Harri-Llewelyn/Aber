@@ -515,31 +515,31 @@ supabaseRest:
     limits: { memory: 512Mi }
 
 # -----------------------------------------------------------------------------------------------
-# Envoy -- roadmap §4's replacement for Kong. PARTLY VERIFIED IN A CLUSTER.
+# THE GATEWAY ON KUBERNETES, as it has been on Compose since Kong was retired there. Roadmap §4.
 #
-# DISABLED BY DEFAULT, and that is not caution for its own sake. Installed into a real cluster, the
-# load-bearing mechanism holds: the `supabase-kong` Service selects `component=supabase-envoy`, the
-# unauthenticated probe reports the same posture it does on Compose, and a valid key opens the gate
-# while an unregistered one is refused. What could NOT be exercised is everything that needs this
-# project's own images -- `db-init` and `gateway-credential` are unpublished GHCR tags, so no
-# migrations ran and no edge functions were deployed. See docs/gateway-migration.md.
+# WHAT CHANGED, AND WHY NOW. This was `enabled: false` while the manual cluster proof could not
+# reach the parts needing this project's own images: `db-init` and `gateway-credential` are
+# unpublished GHCR tags, so a hand-installed cluster ran no migrations, deployed no edge functions,
+# and left Realtime waiting on a schema nothing creates. The roadmap recorded that remainder as
+# "downstream of CI, not of the chart" -- and it was exactly right. The k3d job BUILDS those images
+# and imports them, so every gap in the manual proof is one CI closes by construction, and the
+# gateway-surface probe now runs there against a stack that actually has a schema behind it.
 #
-# SIDE BY SIDE FIRST. With `enabled: true` and the default serviceName, Envoy answers on
-# `supabase-envoy:8000` while Kong keeps `supabase-kong:8000`, so the two can be probed against
-# each other in-cluster exactly as they are on Compose.
+# THE NAME IS THE MIGRATION. Kubernetes has no Service aliasing, so Envoy adopting `supabase-kong`
+# is what moves the gateway without editing the fifteen files that carry
+# `http://supabase-kong:8000`. The template refuses the state where both are enabled under that
+# name -- two Deployments behind one Service is a coin toss per request, not a migration.
 #
-# PROMOTION IS TWO VALUES, in one change:
+# KONG IS STILL HERE, off rather than deleted, and `supabase/kong.yml` with it. Reverting is
+# `supabaseKong.enabled=true` plus `supabaseEnvoy.enabled=false`, in one change; the guard in
+# templates/supabase/envoy.yaml refuses the halfway state either way round.
 #
-#     supabaseKong.enabled: false
-#     supabaseEnvoy.serviceName: supabase-kong
-#
-# Kubernetes has no Service aliasing, so the replacement adopting the NAME is what moves the
-# gateway without editing the fifteen files that carry `http://supabase-kong:8000`. The template
-# refuses the state where both are enabled under that name -- two Deployments behind one Service is
-# a coin toss per request, not a migration.
+# TO RUN THE TWO SIDE BY SIDE, which is how this was migrated and how a doubt should be settled:
+# set `supabaseKong.enabled=true` and `supabaseEnvoy.serviceName=supabase-envoy`, and probe each in
+# turn. See docs/gateway-migration.md.
 # -----------------------------------------------------------------------------------------------
 supabaseEnvoy:
-  enabled: false
+  enabled: true
   image:
     repository: envoyproxy/envoy
     # PINNED, as every image here is. The v3 config API is stable across 1.3x, but a moving tag
@@ -549,8 +549,9 @@ supabaseEnvoy:
     pullPolicy: IfNotPresent
   replicas: 1
   logLevel: info
-  # `supabase-envoy` while both run; `supabase-kong` at promotion. See the note above.
-  serviceName: supabase-envoy
+  # THE PROMOTED NAME. `supabase-envoy` is what to set while running both side by side; every
+  # in-cluster consumer addresses `supabase-kong:8000` and none of them had to learn a new one.
+  serviceName: supabase-kong
   metrics:
     enabled: true
     # ENVOY'S ADMIN LISTENER, which serves /ready AND /stats/prometheus. Kong split those across
@@ -560,8 +561,12 @@ supabaseEnvoy:
     # listeners and dump the running config -- including the substituted API keys.
     port: 9901
 
+# SUPERSEDED BY supabaseEnvoy, and kept rather than deleted. Upstream ships the `sb_publishable_*`
+# / `sb_secret_*` key translation (§5) in Envoy only, which is what turned this from a
+# divergence-from-upstream question into one with a deadline. Set this true and
+# `supabaseEnvoy.enabled` false, in one change, to go back.
 supabaseKong:
-  enabled: true
+  enabled: false
   image:
     repository: kong
     # NO `-alpine` SUFFIX, AND IT IS NOT AN OVERSIGHT. Kong stopped publishing alpine variants

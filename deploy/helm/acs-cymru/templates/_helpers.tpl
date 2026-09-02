@@ -406,6 +406,7 @@ matches these keys -- so the set exists once and the two cannot drift apart.
 {{- define "acs-cymru.autoscalableWorkloads" -}}
 supabase-rest: PostgREST is stateless and holds a connection pool per replica
 supabase-kong: the gateway is configured declaratively and holds no state between requests
+supabase-envoy: the same, and the gateway this chart actually deploys since roadmap §4 -- both names stay listed so a side-by-side migration can scale either one
 supabase-functions: the edge runtime is a request router whose workers are per-request isolates
 frontend: NGINX serving static files
 {{- end -}}
