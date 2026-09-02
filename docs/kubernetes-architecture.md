@@ -169,7 +169,11 @@ image so the Deployment needs no command override.
 
 `deno_cache` stays a Compose-only volume; on Kubernetes an `emptyDir` covers it.
 
-### 2.3 Kong config: template, don't `sed`
+### 2.3 Gateway config: template, don't `sed`
+
+> **Envoy is the gateway on both targets** since roadmap §4, and `supabase-envoy-init` plays the
+> role described here. The Kong reasoning below is kept because the argument is the gateway-agnostic
+> one, and because `supabaseKong.enabled=true` is still the documented revert.
 
 `supabase-kong-init` exists because Compose has no templating. It originally existed because Kong
 2.8 could not read environment variables from declarative config either; **on 3.x it can**
@@ -331,8 +335,8 @@ auth bug:
 
 **`SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are JWTs *signed by* `SUPABASE_JWT_SECRET`.**
 A Helm template that generates a random `SUPABASE_JWT_SECRET` on install (the obvious convenience)
-silently invalidates both pre-minted keys, and every request through Kong's `key-auth` then fails
-against a stack that otherwise looks healthy. The three are a **set**: either all three are
+silently invalidates both pre-minted keys, and every request through the gateway's key check then
+fails against a stack that otherwise looks healthy. The three are a **set**: either all three are
 supplied by the operator, or all three are generated together by a pre-install Job that mints the
 JWTs from the generated secret. **Supplied** is the choice here: `values.yaml` refuses to install if
 they are absent (`fail` in a helper), and `values-dev.yaml` carries the `.env.example` demo values
@@ -387,11 +391,14 @@ Realtime resolves its tenant from the **leading hostname label** of the `Host` h
 Compose gives it the network alias `realtime-dev.supabase-realtime` and `kong.yml` addresses it as
 such. Kubernetes has no per-Service aliases of that shape.
 
-**Name the Service `realtime-dev`.** Kong (with the default `preserve_host: false`) sets the
-upstream `Host` header from the service hostname, so an upstream URL of
-`http://realtime-dev:4000/socket/` yields `Host: realtime-dev` — leading label `realtime-dev`, which
-is the tenant `SEED_SELF_HOST` creates. This is the Kubernetes-native equivalent of the Compose
-alias and costs nothing.
+**Name the Service `realtime-dev`.** Both gateways end up sending `Host: realtime-dev` — leading
+label `realtime-dev`, which is the tenant `SEED_SELF_HOST` creates — but they get there differently,
+and the difference matters if either is changed. Kong took the upstream `Host` from the service
+hostname, with the default `preserve_host: false`, so the Service name alone did the work. Envoy
+preserves the downstream `Host` unless told otherwise, so `supabase/envoy.yaml` carries an explicit
+`host_rewrite_literal` for that route (roadmap §4 records it as one of the four translation traps).
+The Service name is still load-bearing on both — `acs-cymru.validateRealtimeServiceName` refuses an
+install that renames it — and it is still the Kubernetes-native equivalent of the Compose alias.
 
 The Service is a separate template file from its Deployment, because the *name* is the architectural
 decision and the workload behind it is ordinary.

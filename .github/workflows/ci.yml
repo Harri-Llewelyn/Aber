@@ -467,7 +467,7 @@ jobs:
           helm template acs-cymru deploy/helm/acs-cymru \
             -f deploy/helm/acs-cymru/values-dev.yaml \
             --set telemetry.serviceMonitor.enabled=true \
-            --set supabaseKong.metrics.enabled=true \
+            --set supabaseEnvoy.metrics.enabled=true \
             --set mosquitto.metrics.enabled=true > /tmp/sm.yaml
           python3 - <<'PY'
           import sys, yaml
@@ -624,23 +624,32 @@ jobs:
               -f "$DEV" --set autoscaling.enabled=true --set "autoscaling.components[0]=$c"
           done
 
+          # PERMITTED BUT NOT DEPLOYED IS ALSO A REFUSAL, and it is the newest of them. Roadmap §4
+          # turned supabaseKong.enabled off, and the allow-list still names `supabase-kong` so a
+          # side-by-side migration can scale either gateway. Before this guard that combination
+          # rendered NO HPA AND NO ERROR -- issue #31's symptom through a third door -- and
+          # values-prod.yaml.example was carrying it: a gateway pinned at one replica where the
+          # file asked for two to six.
+          expect_failure "autoscaling a permitted but disabled component" "workload is DISABLED" \
+            -f "$DEV" --set autoscaling.enabled=true --set autoscaling.components[0]=supabase-kong
+
           # THE ALLOW-LIST MUST STILL LET THE FOUR THROUGH, asserted here because every case above
           # is a refusal -- a guard that refused EVERYTHING would satisfy all of them and break the
           # feature completely. Rendered in one go, expecting exactly four HPAs.
           HPAS=$(helm template acs-cymru deploy/helm/acs-cymru -f "$DEV" \
                    --set autoscaling.enabled=true \
                    --set autoscaling.components[0]=supabase-rest \
-                   --set autoscaling.components[1]=supabase-kong \
+                   --set autoscaling.components[1]=supabase-envoy \
                    --set autoscaling.components[2]=supabase-functions \
                    --set autoscaling.components[3]=frontend \
                  | grep -c '^kind: HorizontalPodAutoscaler' || true)
           if [ "$HPAS" != "4" ]; then
-            echo "::error::expected 4 HorizontalPodAutoscalers for the four permitted components,"
+            echo "::error::expected 4 HorizontalPodAutoscalers for the four deployed components,"
             echo "::error::rendered $HPAS. The allow-list added in issue #31 refuses anything it"
             echo "::error::does not name, so an over-tight list breaks autoscaling outright."
             exit 1
           fi
-          echo "  ok: the four permitted components render an HPA each"
+          echo "  ok: the four deployed components render an HPA each"
 
           # A nightly backup that writes nowhere is worse than none, because it looks like one.
           expect_failure "backup to s3 with no bucket" "backup.s3.bucket is empty" \
@@ -828,6 +837,16 @@ jobs:
           if dnsprotos != {'UDP', 'TCP'}:
               errors.append(f"DNS egress must allow both UDP and TCP 53; got {dnsprotos or 'nothing'}")
 
+          # THE GATEWAY IS NAMED BY THE RENDER, NOT BY THIS LIST. NetworkPolicy selects POD labels,
+          # and roadmap §4 changed those from `supabase-kong` to `supabase-envoy` while the SERVICE
+          # kept the old name -- so the two flows below are the only entries here whose component
+          # name moves with the gateway. Hard-coding either one reports MISSING against a policy
+          # that is perfectly correct, which is exactly what happened at promotion. Derived so the
+          # same assertion reads against either gateway, as check-gateway-surface.mjs does.
+          seen = {f[0] for f in egress} | {f[1] for f in egress}
+          GATEWAY = 'supabase-envoy' if 'supabase-envoy' in seen else 'supabase-kong'
+          print(f"  gateway component in the rendered policies: {GATEWAY}")
+
           # The flows whose absence is silent and expensive.
           REQUIRED = [
               # pg_net posts DIRECTLY to Node-RED -- webhook_endpoints seeds
@@ -835,12 +854,12 @@ jobs:
               # no ordering and no DLQ. Block it and every quarantine notification is dropped with
               # nothing logging it.
               ('supabase-db', 'node-red', 1880, 'pg_net quarantine webhook (no retries/DLQ)'),
-              ('supabase-db', 'supabase-kong', 8000, 'pg_net to edge functions'),
+              ('supabase-db', GATEWAY, 8000, 'pg_net to edge functions'),
               # M2/M6: public.telemetry is a postgres_fdw projection.
               ('supabase-db', 'timescaledb', 5432, 'postgres_fdw'),
               ('ingestion', 'mosquitto', 1883, 'the spBv1.0/# subscription'),
               ('ingestion', 'timescaledb', 5432, 'telemetry writes'),
-              ('supabase-kong', 'realtime', 4000, 'the WebSocket change feed'),
+              (GATEWAY, 'realtime', 4000, 'the WebSocket change feed'),
           ]
           for src, dst, port, why in REQUIRED:
               if (src, dst, port) not in egress:
@@ -1844,6 +1863,51 @@ jobs:
           helm test $RELEASE --namespace $NS --timeout 5m
           kubectl -n $NS logs $RELEASE-test-fdw
 
+      # ---------------------------------------------------------------------------------------
+      # THE PROMOTION GATE FOR ROADMAP §4, and the reason it can finally run.
+      #
+      # The chart shipped Envoy disabled because the manual cluster proof could not reach the parts
+      # needing this project's own images: `db-init` and `gateway-credential` are unpublished GHCR
+      # tags, so a hand-installed cluster ran no migrations and deployed no edge functions, and the
+      # authenticated probe's markers cannot be satisfied against empty upstreams. §4 recorded that
+      # remainder as "downstream of CI, not of the chart". This job BUILDS those images and imports
+      # them, so the gap closes here and nowhere else.
+      #
+      # THE SAME COMMAND THE COMPOSE JOB RUNS, deliberately. The script names no gateway concept, so
+      # identical output across both targets is the migration's evidence -- and now both targets are
+      # Envoy, which is what makes a difference between them meaningful rather than expected.
+      #
+      # THE KEY COMES FROM THE CLUSTER'S SECRET, not from .env. Those are the same demo JWTs today,
+      # and reading .env would still be wrong: it would pass on a cluster installed with different
+      # credentials, which is the one condition this check exists to catch.
+      - name: Verify The Live Gateway Surface — Envoy, In-Cluster
+        run: |
+          set -eu
+          kubectl -n $NS port-forward svc/supabase-kong 18080:8000 >/tmp/port-forward.log 2>&1 &
+          PF=$!
+          trap 'kill $PF 2>/dev/null || true' EXIT
+
+          # Wait for the tunnel, not for a 2xx: every gated route answers 401 to an unauthenticated
+          # caller, so `curl -sf` would treat a perfectly healthy gateway as unreachable. A response
+          # code that is not 000 means the connection was made, which is all this needs to know.
+          for _ in $(seq 1 30); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:18080/rest/v1/" || true)
+            [ "$CODE" != "000" ] && break
+            sleep 1
+          done
+          if [ "$CODE" = "000" ]; then
+            echo "::error::port-forward to svc/supabase-kong never accepted a connection"
+            cat /tmp/port-forward.log || true
+            exit 1
+          fi
+          echo "gateway reachable through the port-forward (first response $CODE)"
+
+          SUPABASE_ANON_KEY=$(kubectl -n $NS get secret acs-cymru-secrets             -o jsonpath='{.data.SUPABASE_ANON_KEY}' | base64 -d)
+          export SUPABASE_ANON_KEY
+          test -n "$SUPABASE_ANON_KEY"
+
+          node scripts/check-gateway-surface.mjs --runtime --authenticated http://127.0.0.1:18080
+
       # The same suite, and the same assertions, that e2e-validation runs against Compose. In-cluster
       # it needs no host/port overrides at all -- the Service names ARE the correct configuration,
       # which is the simpler of the two topologies.
@@ -1945,7 +2009,7 @@ jobs:
             echo "--- response ---"; printf '%s\n' "$RESP" | head -20
             echo "--- curl stderr ---"; head -5 "$ERR"
             kubectl -n $NS logs deployment/supabase-realtime --tail 60 || true
-            kubectl -n $NS logs deployment/supabase-kong --tail 40 || true
+            kubectl -n $NS logs deployment/supabase-envoy --tail 40 || true
             kubectl -n kube-system logs -l app.kubernetes.io/name=traefik --tail 40 || true
             exit 1
           fi
@@ -2144,10 +2208,10 @@ jobs:
             2>"$ERR" || true)
 
           if ! printf '%s' "$RESP" | grep -q "101 Switching Protocols"; then
-            echo "::error::Realtime did not complete the WebSocket upgrade through Kong"
+            echo "::error::Realtime did not complete the WebSocket upgrade through the gateway"
             echo "--- response headers ---"; printf '%s\n' "$RESP" | head -20
             echo "--- curl stderr ---";      head -5 "$ERR"
-            docker compose logs --tail 50 supabase-realtime supabase-kong
+            docker compose logs --tail 50 supabase-realtime supabase-envoy
             exit 1
           fi
           echo "Realtime completed the WebSocket upgrade through Kong (101 Switching Protocols)."

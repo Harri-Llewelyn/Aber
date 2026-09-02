@@ -443,7 +443,17 @@ static_resources:
           - lb_endpoints:
               - endpoint:
                   address:
-                    socket_address: { address: supabase-realtime, port_value: 4000 }
+                    # THE ADDRESS AND THE HOST HEADER ARE DIFFERENT FACTS, and this one is
+                    # target-specific. Compose dials the container `supabase-realtime`; Kubernetes
+                    # has no such Service -- the chart names it `realtime-dev`, because Realtime
+                    # reads its tenant from the leading Host label and the Service name is the
+                    # Kubernetes-native way to supply it. Hard-coded here, this cluster resolved
+                    # nothing on Kubernetes and every handshake answered `503 no healthy upstream`
+                    # from Envoy itself -- which reads as Realtime being down rather than as a
+                    # name that does not exist. __REALTIME_UPSTREAM_HOST__ is NOT reusable for it:
+                    # that carries the Host header, which must keep the `realtime-dev` LEADING
+                    # LABEL on both targets whatever the address happens to be.
+                    socket_address: { address: __REALTIME_UPSTREAM_ADDRESS__, port_value: 4000 }
 
     - name: storage-v1
       type: STRICT_DNS

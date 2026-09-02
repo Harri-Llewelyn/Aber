@@ -56,6 +56,7 @@ generated or trusted.
 {{- $enabledOf := dict
       "supabase-rest" .Values.supabaseRest.enabled
       "supabase-kong" .Values.supabaseKong.enabled
+      "supabase-envoy" .Values.supabaseEnvoy.enabled
       "supabase-functions" .Values.supabaseFunctions.enabled
       "frontend" .Values.frontend.enabled
 -}}
@@ -64,6 +65,25 @@ generated or trusted.
 {{- fail (printf "\n\nacs-cymru: the HPA dispatch table and the autoscaling allow-list disagree.\n\n  allow-list (_helpers.tpl): %v\n  dispatch table (hpas.yaml): %v\n\nA name in the allow-list but not the table passes validation and then renders no HPA, silently --\nwhich is the failure issue #31 removed. Add it to both, or to neither.\n" (sortAlpha $allowed) (sortAlpha (keys $enabledOf))) -}}
 {{- end -}}
 {{- range .Values.autoscaling.components }}
+{{/*
+  ASKED FOR AND TURNED OFF IS AN ERROR, not a no-op. This used to be a bare `if`, so a component in
+  the allow-list whose workload was disabled rendered NO HPA AND NO ERROR -- issue #31's exact
+  symptom, arriving through a third door: not an unknown name, not a missing dispatch entry, but a
+  known name for something that is not deployed.
+
+  NARROWED TO NAMES THIS TABLE ACTUALLY CARRIES. A first cut used a bare `not (index ...)`, which is
+  also true for a name the table has never heard of -- so it fired for every single-writer workload
+  and swallowed `acs-cymru.validateAutoscaling`'s message, which is the one that says WHY ingestion
+  or mosquitto cannot scale. Refusing with a less useful reason is its own regression: CI asserts
+  that a refused single-writer names "SINGLE-WRITER workload", and it was right to.
+
+  It was not hypothetical. Promoting Envoy (roadmap §4) turned `supabaseKong.enabled` off while
+  values-prod.yaml.example still asked to autoscale `supabase-kong`, and the render answered with a
+  gateway pinned at one replica where the file plainly asked for two to six. Nothing said so.
+*/}}
+{{- if and (hasKey $enabledOf .) (not (index $enabledOf .)) }}
+{{- fail (printf "\n\nacs-cymru: autoscaling.components includes %q, but that workload is DISABLED.\n\nAn HPA cannot scale a Deployment the chart does not render, so this would have produced no\nHorizontalPodAutoscaler and no error -- the component would sit at its fixed replica count while\nthe values file said it scaled. Refused rather than ignored, because the symptom only appears\nunder load.\n\nEither enable it, or take it out of autoscaling.components. If you have just promoted Envoy over\nKong, the name you want is supabase-envoy.\n" .) }}
+{{- end }}
 {{- if index $enabledOf . }}
 ---
 apiVersion: autoscaling/v2
