@@ -467,7 +467,7 @@ jobs:
           helm template acs-cymru deploy/helm/acs-cymru \
             -f deploy/helm/acs-cymru/values-dev.yaml \
             --set telemetry.serviceMonitor.enabled=true \
-            --set supabaseKong.metrics.enabled=true \
+            --set supabaseEnvoy.metrics.enabled=true \
             --set mosquitto.metrics.enabled=true > /tmp/sm.yaml
           python3 - <<'PY'
           import sys, yaml
@@ -837,6 +837,16 @@ jobs:
           if dnsprotos != {'UDP', 'TCP'}:
               errors.append(f"DNS egress must allow both UDP and TCP 53; got {dnsprotos or 'nothing'}")
 
+          # THE GATEWAY IS NAMED BY THE RENDER, NOT BY THIS LIST. NetworkPolicy selects POD labels,
+          # and roadmap §4 changed those from `supabase-kong` to `supabase-envoy` while the SERVICE
+          # kept the old name -- so the two flows below are the only entries here whose component
+          # name moves with the gateway. Hard-coding either one reports MISSING against a policy
+          # that is perfectly correct, which is exactly what happened at promotion. Derived so the
+          # same assertion reads against either gateway, as check-gateway-surface.mjs does.
+          seen = {f[0] for f in egress} | {f[1] for f in egress}
+          GATEWAY = 'supabase-envoy' if 'supabase-envoy' in seen else 'supabase-kong'
+          print(f"  gateway component in the rendered policies: {GATEWAY}")
+
           # The flows whose absence is silent and expensive.
           REQUIRED = [
               # pg_net posts DIRECTLY to Node-RED -- webhook_endpoints seeds
@@ -844,12 +854,12 @@ jobs:
               # no ordering and no DLQ. Block it and every quarantine notification is dropped with
               # nothing logging it.
               ('supabase-db', 'node-red', 1880, 'pg_net quarantine webhook (no retries/DLQ)'),
-              ('supabase-db', 'supabase-kong', 8000, 'pg_net to edge functions'),
+              ('supabase-db', GATEWAY, 8000, 'pg_net to edge functions'),
               # M2/M6: public.telemetry is a postgres_fdw projection.
               ('supabase-db', 'timescaledb', 5432, 'postgres_fdw'),
               ('ingestion', 'mosquitto', 1883, 'the spBv1.0/# subscription'),
               ('ingestion', 'timescaledb', 5432, 'telemetry writes'),
-              ('supabase-kong', 'realtime', 4000, 'the WebSocket change feed'),
+              (GATEWAY, 'realtime', 4000, 'the WebSocket change feed'),
           ]
           for src, dst, port, why in REQUIRED:
               if (src, dst, port) not in egress:
@@ -1999,7 +2009,7 @@ jobs:
             echo "--- response ---"; printf '%s\n' "$RESP" | head -20
             echo "--- curl stderr ---"; head -5 "$ERR"
             kubectl -n $NS logs deployment/supabase-realtime --tail 60 || true
-            kubectl -n $NS logs deployment/supabase-kong --tail 40 || true
+            kubectl -n $NS logs deployment/supabase-envoy --tail 40 || true
             kubectl -n kube-system logs -l app.kubernetes.io/name=traefik --tail 40 || true
             exit 1
           fi
@@ -2198,10 +2208,10 @@ jobs:
             2>"$ERR" || true)
 
           if ! printf '%s' "$RESP" | grep -q "101 Switching Protocols"; then
-            echo "::error::Realtime did not complete the WebSocket upgrade through Kong"
+            echo "::error::Realtime did not complete the WebSocket upgrade through the gateway"
             echo "--- response headers ---"; printf '%s\n' "$RESP" | head -20
             echo "--- curl stderr ---";      head -5 "$ERR"
-            docker compose logs --tail 50 supabase-realtime supabase-kong
+            docker compose logs --tail 50 supabase-realtime supabase-envoy
             exit 1
           fi
           echo "Realtime completed the WebSocket upgrade through Kong (101 Switching Protocols)."
