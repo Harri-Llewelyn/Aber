@@ -28,8 +28,8 @@ vi.mock('../lib/supabaseClient', () => {
       rpc: vi.fn().mockResolvedValue({
         data: { events: [], purged_assets: 0, truncated: false }, error: null
       }),
-      // '/api/v1/gitops/deploy-flow' routes through an Edge Function rather than
-      // PostgREST, so the mock needs this surface too.
+      // '/api/v1/devices/aas-export' routes through an Edge Function rather than PostgREST,
+      // so the mock needs this surface too.
       functions: {
         invoke: vi.fn().mockResolvedValue({ data: {}, error: null })
       }
@@ -73,8 +73,7 @@ describe('API Path Coverage Test', () => {
     '/api/v1/devices/aas-export',
     '/api/v1/links',
     '/api/v1/schemas/validate',
-    '/api/v1/schemas',
-    '/api/v1/gitops/deploy-flow'
+    '/api/v1/schemas'
   ];
 
   const putPaths = [

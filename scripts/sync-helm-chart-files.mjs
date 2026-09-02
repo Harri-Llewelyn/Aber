@@ -143,20 +143,10 @@ const MIRRORS = [
     why: 'Broker config, topic ACL and the optional MQTTS listener; repository-managed policy, mounted read-only on both targets',
   },
   {
-    // MOVED OUT OF THE REPOSITORY ROOT into simulation/, with the walkthrough and the demonstration
-    // dashboard. The MIRROR path is unchanged -- the chart still reads
-    // files/node-red/node_red_flow.json -- because what moved is where the source lives, not what
-    // the chart is handed.
-    source: 'simulation',
-    dest: 'node-red',
-    match: (name) => name === 'node_red_flow.json',
-    why: 'The canonical flow node-red-init seeds and deploy-nodered pushes',
-  },
-  {
     source: 'scripts',
     dest: 'node-red-scripts',
     match: (name) => name === 'node-red-init.mjs',
-    why: 'Provisions /data -- settings.js, the credentials and the seeded flow. Runs as an initContainer',
+    why: 'Provisions /data -- settings.js, the credentials and a blank flow. Runs as an initContainer',
   },
   {
     source: 'scripts',
@@ -232,26 +222,6 @@ const MIRRORS = [
     dest: 'grafana-dashboards-platform',
     match: (name) => name.endsWith('.json'),
     why: 'Platform Infrastructure folder -- stack and ingestion health',
-  },
-  {
-    // IN simulation/, along with the flow and the walkthrough. It is still
-    // MIRRORED unconditionally -- the chart decides at render time whether to build a ConfigMap
-    // from it, gated on `simulation.grafana.enabled`, and a missing file would fail that render
-    // instead of turning the dashboard off. Same arrangement as mosquitto-tls.conf above.
-    source: join('simulation', 'grafana', 'dashboards'),
-    dest: 'grafana-dashboards-shopfloor',
-    match: (name) => name.endsWith('.json'),
-    why: 'Shopfloor Operations folder -- manufacturing cells and telemetry, opt-in with the demonstrator',
-  },
-  {
-    // The demonstrator's three MACHINE alert rules, split out of grafana/provisioning/alerting/
-    // by §14. A SEPARATE mirror rather than a second file in `grafana-alerting`, because that
-    // ConfigMap is unconditional and this content is not: merging them would put the rules on
-    // every install and leave the flag with nothing to switch.
-    source: join('simulation', 'grafana', 'alerting'),
-    dest: 'grafana-alerting-simulation',
-    match: (name) => name.endsWith('.yaml'),
-    why: "The demonstrator's machine alert rules, added to the alerting ConfigMap when simulation.grafana.enabled",
   },
 ];
 

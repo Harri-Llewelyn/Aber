@@ -37,7 +37,6 @@ python ingestion/test_capture_worker.py
 python -m pytest ingestion/test_cold_archive.py
 python i3x/test_i3x_service.py
 python supabase/functions/approve-quarantine/test_approve_quarantine.py
-python supabase/functions/deploy-nodered/test_deploy_nodered.py
 python supabase/functions/nodered-userinfo/test_nodered_userinfo.py
 python supabase/functions/aas-export/test_aas_export.py
 python supabase/functions/aas-api/test_aas_api.py

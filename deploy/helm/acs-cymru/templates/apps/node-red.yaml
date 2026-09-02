@@ -2,10 +2,9 @@
 {{- $component := "node-red" -}}
 {{- $secretName := include "acs-cymru.secretName" . -}}
 {{- $fullname := include "acs-cymru.fullname" . -}}
-{{- $flow := .Files.Get "files/node-red/node_red_flow.json" -}}
 {{- $initScript := .Files.Get "files/node-red-scripts/node-red-init.mjs" -}}
-{{- if or (not $flow) (not $initScript) }}
-{{- fail "\n\nacs-cymru: files/node-red/node_red_flow.json and/or files/node-red-scripts/node-red-init.mjs are missing.\n\nMirror them with:  node scripts/sync-helm-chart-files.mjs\n\nWithout the init script Node-RED comes up with NO settings.js -- which means no adminAuth, no\nhttpNodeAuth, and the editor plus the /flows admin API plus POST /hooks/quarantine all open to\nanyone who can reach port 1880.\n" }}
+{{- if not $initScript }}
+{{- fail "acs-cymru: files/node-red-scripts/node-red-init.mjs is missing. Mirror it with: node scripts/sync-helm-chart-files.mjs -- without the init script Node-RED comes up with NO settings.js, which means no adminAuth, no httpNodeAuth, and the editor plus the /flows admin API plus POST /hooks/quarantine all open to anyone who can reach port 1880." }}
 {{- end }}
 ---
 apiVersion: v1
@@ -15,9 +14,6 @@ metadata:
   labels:
     {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
 data:
-  # Mounted at /seed/flows.json -- the path node-red-init.mjs defaults to (NODE_RED_SEED_FLOW).
-  flows.json: |
-{{ $flow | indent 4 }}
   node-red-init.mjs: |
 {{ $initScript | indent 4 }}
 ---
@@ -44,9 +40,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  # THE NAME IS `node-red`, matching the Compose service name: the deploy-nodered edge function
-  # reaches it as http://node-red:1880/flows, and webhook_endpoints seeds
-  # http://node-red:1880/hooks/quarantine as the pg_net target. Neither changes between targets.
+  # THE NAME IS `node-red`, matching the Compose service name: webhook_endpoints seeds
+  # http://node-red:1880/hooks/quarantine as the pg_net target, and that address does not change
+  # between targets. (The deploy-nodered function reached the same Service at /flows until it was
+  # retired with the demonstrator.)
   name: node-red
   labels:
     {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}
@@ -81,9 +78,9 @@ spec:
       labels:
         {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 8 }}
       annotations:
-        # Roll when the seeded flow or the init script changes. node-red-init only RE-seeds the flow
-        # when forceSeed is set, so this mostly makes a settings.js regeneration take effect.
-        checksum/seed: {{ printf "%s%s" $flow $initScript | sha256sum }}
+        # Roll when the init script changes. No flow is seeded, and node-red-init only rewrites
+        # flows.json when forceSeed is set, so this makes a settings.js regeneration take effect.
+        checksum/seed: {{ $initScript | sha256sum }}
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
@@ -137,54 +134,18 @@ spec:
             */}}
             {{- include "acs-cymru.noderedAuthEnv" . | nindent 12 }}
             {{- /*
-              THE SIMULATOR IS OPT-IN, and this is the Kubernetes half of the same
-              switch `NODE_RED_SEED_SIMULATOR` gives Compose. Unset, node-red-init seeds a one-node
-              "Start here" flow declaring no broker nodes, so a fresh install publishes nothing and
-              generates no assets -- matching a database that now seeds none either.
+              NO FLOW IS SEEDED AND NO BROKER CREDENTIAL IS PASSED. node-red-init writes a blank
+              flows.json, so a fresh install publishes nothing, declares no broker nodes and needs
+              no credential to exist for a gateway nobody has created.
 
-              THE FLOW ConfigMap IS STILL MOUNTED EITHER WAY, and that is deliberate. It costs one
-              projected volume, it is what `NODE_RED_SEED_SIMULATOR=true` plus a pod restart then
-              reads, and gating the MOUNT as well would turn a values flip into a values flip that
-              also has to be right about which volumes exist.
-
-              It shares `simulation.grafana.enabled`'s parent key rather than inventing a second
-              top-level flag: one `simulation:` block, one thing being switched on.
-            */}}
-            - name: NODE_RED_SEED_SIMULATOR
-              value: {{ .Values.simulation.nodeRed.enabled | quote }}
-            # node-red-init also writes the broker credentials into flows_cred.json, so it needs
-            # these two on top of the auth block.
-            {{- /*
-              A GATEWAY CREDENTIAL, not a shared platform account: mosquitto.acl's
-              `pattern readwrite spBv1.0/+/+/%u/#` pins the topic's edge-node segment to the
-              username, so it must be a gateway's generated `sparkplug_id`. A friendly name here
-              authenticates fine and then has every publish silently dropped by the broker.
-
-              THIS PAIR IS THE LEGACY FALLBACK. node-red-init applies it only to a
-              `mqtt-broker-config` node, which no longer exists in the shipped flow -- the
-              consolidated `Simulated Shopfloor` tab carries one broker per cell gateway, each
-              naming its own credential pair. It is still passed because a Node-RED PVC created
-              before that consolidation still holds the old flow.
-            */}}
-            {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_SIMULATOR_USER") | nindent 12 }}
-            {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_SIMULATOR_PASSWORD") | nindent 12 }}
-            {{- /*
-              AND THE PAIRS THE SHIPPED FLOW ACTUALLY DECLARES, one per cell gateway.
-
-              node-red-init reads `acsCredentialsEnv` off each broker node and FAILS CLOSED when the
-              named pair is absent -- deliberately, because the alternative is seeding an empty
+              A USER BUILDING A FLOW mints its credential from the dashboard and adds the pair to
+              the chart Secret under the names their broker node's `acsCredentialsEnv` declares.
+              node-red-init reconciles env pairs onto broker nodes at init and FAILS CLOSED when a
+              declared pair is absent -- deliberately, because the alternative is seeding an empty
               username, which the broker refuses with CONNACK 5 while Node-RED reports only
               "Connection failed to broker: <clientId>@<url>", naming the client id rather than the
               username and reading identically to a wrong host.
-
-              So an install missing these does not get a quiet simulator: this init container exits 1
-              and Node-RED never starts. Passed to the INIT container only -- the runtime reads the
-              credentials from flows_cred.json, which this writes.
             */}}
-            {{- range $p := list "GW_CNC_MACHINING" "GW_ROBOTIC_ASSEMBLY" "GW_AGV_FLEET" "GW_FACILITY_BMS" }}
-            {{- include "acs-cymru.secretEnv" (dict "name" (printf "MQTT_%s_USER" $p) "secretName" $secretName "key" (printf "MQTT_%s_USER" $p)) | nindent 12 }}
-            {{- include "acs-cymru.secretEnv" (dict "name" (printf "MQTT_%s_PASSWORD" $p) "secretName" $secretName "key" (printf "MQTT_%s_PASSWORD" $p)) | nindent 12 }}
-            {{- end }}
             {{/*
               The broker's transport, from the same helper the ingestion daemon uses.
 

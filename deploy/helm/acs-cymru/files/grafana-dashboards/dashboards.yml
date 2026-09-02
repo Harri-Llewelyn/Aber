@@ -1,18 +1,24 @@
-# TWO PROVIDERS, TWO FOLDERS, and the split is by AUDIENCE rather than by topic.
+# ONE PROVIDER, ONE FOLDER.
 #
-# A platform engineer asking "is ingestion keeping up" and a production engineer asking "what is
-# cell 1 doing" were sharing one dashboard, which meant neither could scan it. Grafana's file
-# provisioner creates a folder per provider, so separating them is a provisioning concern rather
-# than a dashboard one.
+# There were two, split by audience: a platform engineer asking "is ingestion keeping up" and a
+# production engineer asking "what is cell 1 doing" were sharing one dashboard, which meant neither
+# could scan it. The second folder held the demonstrator's `manufacturing-cells.json`, whose panels
+# hardcoded `Sim_CNC_Mill_01` -- a machine that exists on no install running real plant. The
+# demonstration floor has been retired, so that folder had nothing left to provision and a folder
+# Grafana creates empty is a question every operator asks once.
 #
-# EACH PROVIDER NEEDS ITS OWN `path`, AND THE PATHS MUST NOT NEST. A provider scans its directory
-# recursively, so pointing one at `dashboards/` and another at `dashboards/shopfloor/` would file
-# every shopfloor dashboard under BOTH folders -- Grafana would create duplicates and the second
-# provider's copy would win on a race. Siblings, always.
+# WHAT PROVISIONS A SECOND FOLDER NOW is adding a provider here, siblings and never nested: a
+# provider scans its directory recursively, so pointing one at `dashboards/` and another at
+# `dashboards/<sub>/` files every dashboard under BOTH folders -- Grafana creates duplicates and
+# the second provider's copy wins on a race.
 #
 # `foldersFromFilesStructure` is deliberately NOT used. It derives folder names from directory
-# names, which would give "platform" and "shopfloor" rather than the names below, and it cannot
-# express two differently-named folders from one provider anyway.
+# names, which would give "platform" rather than the name below, and it cannot express two
+# differently-named folders from one provider anyway.
+#
+# THE ALERT RULES ARE NOT PROVISIONED HERE, but they land in the SAME FOLDER. Grafana files alert
+# rules in dashboard folders, so grafana/provisioning/alerting/ names this folder by title and the
+# tree stays one folder deep. Renaming the folder below means renaming it there too.
 apiVersion: 1
 
 providers:
@@ -21,28 +27,9 @@ providers:
     folder: 'ACS-Cymru - Platform Infrastructure'
     type: file
     disableDeletion: false
-    # 30s, matching the previous single provider. Provisioned dashboards are reconciled from disk,
-    # so an edit made in the UI is overwritten on the next sweep -- which is the intended
-    # behaviour: the file is the source of truth and the UI is a viewer.
+    # 30s. Provisioned dashboards are reconciled from disk, so an edit made in the UI is
+    # overwritten on the next sweep -- which is the intended behaviour: the file is the source of
+    # truth and the UI is a viewer.
     updateIntervalSeconds: 30
     options:
       path: /etc/grafana/provisioning/dashboards/platform
-
-  # THIS PROVIDER LEGITIMATELY HAS NOTHING TO PROVISION on a default install, and that is not a
-  # fault to be fixed by deleting it. `manufacturing-cells.json` lives in
-  # `simulation/grafana/dashboards/` because its panels hardcode `Sim_CNC_Mill_01` -- a machine that
-  # does not exist on an install running real plant, in a folder an operator would reasonably read
-  # as describing their floor. A reader who wants it copies it back in; see the README in the
-  # directory below, which is also what keeps that directory present in a fresh clone.
-  #
-  # The provider stays declared either way. Grafana creates the folder empty and says nothing, which
-  # is the correct outcome -- and it means enabling the demonstrator is a copy rather than a copy
-  # plus an edit to this file.
-  - name: 'acs-cymru-shopfloor'
-    orgId: 1
-    folder: 'ACS-Cymru - Shopfloor Operations'
-    type: file
-    disableDeletion: false
-    updateIntervalSeconds: 30
-    options:
-      path: /etc/grafana/provisioning/dashboards/shopfloor

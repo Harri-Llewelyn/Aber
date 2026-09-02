@@ -66,7 +66,8 @@
 --
 -- Related: 0038 (`gateway_holds_a_credential()`), 0046 (the principal pattern), 0048 (machine
 --          principals are not users), 0052 (`is_simulated`), 0055 (captures, and the storage arm
---          this mirrors), supabase/storage-policies.sql, README.md item 17 §5.
+--          this mirrors), supabase/storage-policies.sql, ingestion/README.md (Playback from the
+--          dashboard). The roadmap item this came from is retired and its substance moved there.
 -- =============================================================================================
 
 SET search_path TO public;

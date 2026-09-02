@@ -13,7 +13,11 @@
 --
 -- WHAT STAYS, and it is most of the demonstration's value:
 --
---   * THE SCHEMAS. `Simulated_CNC_01_Schema` and the four class schemas 0022 defines are
+--   * THE SCHEMAS -- UNTIL 0073, WHICH RETIRED THEM TOO. This entry was right while
+--     `provision-gateways.mjs` existed to rebuild the floor; that script is gone and the
+--     demonstrator is a walkthrough in `tutorial/` now. The reasoning below is kept as the record
+--     of why they outlived the assets by one release.
+--     `Simulated_CNC_01_Schema` and the four class schemas 0022 defined are
 --     contracts, not assets. They cost nothing when unattached, they are what makes provisioning
 --     the floor again a matter of creating rows rather than re-authoring five JSON Schemas, and
 --     `prevent_active_schema_mutation()` makes an `active` schema effectively immutable anyway --
@@ -25,10 +29,11 @@
 --   * Historical telemetry in TimescaleDB, which is a different database reached over
 --     postgres_fdw, is keyed by `sparkplug_id`, and ages out under its own retention policy.
 --
--- WHERE THE FLOOR LIVES NOW: `scripts/provision-gateways.mjs`, which already created every one of
--- these rows when absent and is the only thing that CAN own them end to end, because a gateway
--- row is useless without the Mosquitto account it issues alongside. This migration does not
--- remove the topology from the repository; it removes it from the DEFAULT.
+-- WHERE THE FLOOR LIVED NEXT: `scripts/provision-gateways.mjs`, which created every one of these
+-- rows when absent and was the only thing that COULD own them end to end, because a gateway row is
+-- useless without the Mosquitto account it issues alongside. That script has since been retired
+-- with the rest of the demonstrator -- `tutorial/README.md` walks a reader through building one
+-- machine by hand instead, which is the same knowledge without the four-cell floor.
 --
 -- ---------------------------------------------------------------------------------------------
 -- WHY A MIGRATION AND NOT JUST AN EDIT TO 0002 -- 0020's argument, unchanged

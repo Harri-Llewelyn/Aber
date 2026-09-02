@@ -17,12 +17,11 @@ directory carries all of it.
 | :--- | :--- |
 | `backups/` | Full logical dumps from `scripts/backup-databases.sh` — `auth.users` bcrypt hashes, OAuth client secret hashes, every audit row |
 | `.env` | All 24 generated credentials, including `SUPABASE_SERVICE_ROLE_KEY` and `SUPABASE_JWT_SECRET` |
-| `.env.gateways` | Per-gateway broker passwords written by `npm run provision:gateways` |
 | `mosquitto_certs` volume | The internal CA **private key**. Distributed to every physical gateway's trust store — re-minting it takes the fleet offline silently |
 | `frontend/dist/` | A built bundle carrying whichever `VITE_*` values were baked at build time |
 
 ```bash
-rm -rf backups/ .env .env.gateways frontend/dist/
+rm -rf backups/ .env frontend/dist/
 npm run setup                           # regenerate .env for the recipient
 ```
 

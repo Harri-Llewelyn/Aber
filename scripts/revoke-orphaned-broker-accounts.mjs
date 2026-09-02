@@ -46,7 +46,7 @@
  *   node scripts/revoke-orphaned-broker-accounts.mjs --yes           # rotate them
  *   node scripts/revoke-orphaned-broker-accounts.mjs --target=k8s    # read the Secret, not the file
  *
- * Requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY, as provision-gateways.mjs does.
+ * Requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.
  */
 import { execFileSync } from 'node:child_process';
 
@@ -92,7 +92,7 @@ async function rest(pathname, init = {}) {
 }
 
 /**
- * The broker's account list, read the way `provision-gateways.mjs` reads it.
+ * The broker's account list, read the way `mosquitto-provision-gateway.mjs` writes it.
  *
  * DELIBERATELY THE SAME TWO MECHANISMS and no third: on Compose the password file inside the
  * container, on Kubernetes the Secret the sidecar mounts. A script that invented its own way to

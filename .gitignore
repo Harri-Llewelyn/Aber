@@ -1,9 +1,6 @@
 # Environment variables
 .env
 !.env.example
-# Written by `npm run provision:gateways -- --env-out=…`. Holds per-gateway broker passwords that
-# mosquitto_passwd cannot read back, so it is a real secret and never a committed artefact.
-.env.gateways
 
 # Python
 __pycache__/
@@ -73,18 +70,3 @@ Thumbs.db
 .idea/
 CLAUDE.md
 
-# ---------------------------------------------------------------------------------------------
-# The demonstrator's Grafana artefacts, ENABLED BY COPYING.
-#
-# `simulation/grafana/` is the source of truth for the Shopfloor Operations dashboard and the three
-# machine alert rules. Neither is provisioned by default: the dashboard hardcodes `Sim_CNC_Mill_01`
-# and the rules evaluate machine telemetry, so on an install with no assets both describe a floor
-# that is not there. A reader who wants them copies them into the provisioning directories --
-# `grafana/provisioning/dashboards/shopfloor/README.md` gives the two commands.
-#
-# THE COPIES ARE IGNORED so that enabling the demonstrator on one machine does not commit a second
-# copy of each file back into the repository, where they would then drift from the originals with
-# nothing to compare them against. On Kubernetes there is no copy at all -- the chart bakes both in
-# and gates them on `simulation.grafana.enabled`.
-grafana/provisioning/dashboards/shopfloor/*.json
-grafana/provisioning/alerting/shopfloor-alert-rules.yaml

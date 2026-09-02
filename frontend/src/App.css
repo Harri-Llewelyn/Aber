@@ -2505,6 +2505,19 @@ tbody tr:hover { background: var(--bg-glass); }
 .alert-pill-item-link:hover { background: var(--bg-glass); }
 .alert-pill-item-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
+/* NO UNDERLINE, AND THE COLOUR CARRIES THE AFFORDANCE INSTEAD.
+   Two variants render this class: a <button> for an alert that navigates to an asset page, and an
+   <a> for a platform-wide one that opens the rule in Grafana. Only the anchor picked up the
+   browser's default underline, so one row in a list of otherwise identical rows was struck through
+   at every line -- the name, the summary and the meta -- which reads as emphasis or as strike-out
+   long before it reads as a link.
+   The app signals "this goes somewhere" with accent text everywhere else (.endpoint-open on the
+   Directory page is the same rule), so the anchor's TITLE takes the accent and the underline goes.
+   The summary and meta keep their muted colours: the row is the hit target, and colouring all
+   three would make the panel three shades of blue. */
+.alert-pill-item-link { text-decoration: none; }
+a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
+
 /* A row with nowhere to navigate keeps the same geometry, so the list does not shift when one
    alert's sparkplug_id happens not to resolve to a device. */
 .alert-pill-item > .alert-pill-dot { margin-left: 12px; margin-top: 15px; }

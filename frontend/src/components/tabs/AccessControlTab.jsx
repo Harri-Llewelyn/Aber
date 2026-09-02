@@ -30,8 +30,8 @@ import { gatewayType, gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone 
  *
  * =================================================================================================
  * THE GAP THIS CLOSES, in the words of Machine Identities in supabase/README.md: "the only way to see what credentials exist today is
- * to read `.env` and `.env.gateways` on the machine that generated them, which is a file, not a
- * view — and a file that the hand-off checklist explicitly tells you to delete."
+ * to read `.env` on the machine that generated them, which is a file, not a view — and a file that
+ * the hand-off checklist explicitly tells you to delete."
  *
  * =================================================================================================
  * WHAT IT DELIBERATELY DOES NOT CLAIM, WHICH IS THE HARDEST PART OF THE PAGE
@@ -41,11 +41,11 @@ import { gatewayType, gatewayTypeLabel, gatewayTypeDescription, gatewayTypeTone 
  * LIST verb would hand whoever holds one bearer token the whole account table, which is precisely
  * the drift its header forbids.
  *
- * So this shows what the PLATFORM issued and recorded. The difference shows up immediately on a
- * demonstration stack: `npm run provision:gateways` mints four working credentials through a script,
- * and `record_gateway_credential_issued()` cannot be called on its behalf because `has_role()`
- * resolves through `auth.uid()`, which is NULL for the service-role key. Those four gateways read
- * `No platform record` here and connect perfectly well.
+ * So this shows what the PLATFORM issued and recorded. The difference shows up wherever a
+ * credential was minted outside a dashboard session -- `scripts/mosquitto-provision-gateway.mjs` on
+ * the host, for instance, where `record_gateway_credential_issued()` cannot be called on its behalf
+ * because `has_role()` resolves through `auth.uid()`, which is NULL for the service-role key. Such
+ * a gateway reads `No platform record` here and connects perfectly well.
  *
  * THAT IS WHY THE STATE IS NAMED FOR THE RECORD AND NOT FOR THE CREDENTIAL. "No credential" would
  * be a claim about the broker; "No platform record" is a claim about this database, which is the
@@ -204,8 +204,9 @@ export function AccessControlTab({ showToast }) {
             <div>
               <strong>This is not an inventory of the broker.</strong> Mosquitto’s account file can
               only be added to, never read back, so a gateway showing <em>No platform record</em> may
-              still hold a working credential — the ones <code>npm run provision:gateways</code>
-              {' '}creates are issued outside the dashboard and leave no record here.
+              still hold a working credential — one minted on the host with{' '}
+              <code>scripts/mosquitto-provision-gateway.mjs</code> is issued outside the dashboard
+              and leaves no record here.
             </div>
           </div>
 
@@ -230,8 +231,8 @@ export function AccessControlTab({ showToast }) {
             <tbody>
               {visible.length === 0 && (
                 <tr><td colSpan={5} style={{ color: 'var(--text-muted)', padding: '14px' }}>
-                  No gateways registered. Create one on the Gateways tab, or run{' '}
-                  <code>npm run provision:gateways</code> for the demonstration shopfloor.
+                  No gateways registered. Create one on the Gateways tab —{' '}
+                  <code>tutorial/README.md</code> walks through it.
                 </td></tr>
               )}
               {visible.map(g => {

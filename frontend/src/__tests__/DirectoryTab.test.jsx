@@ -2,7 +2,6 @@ import React from 'react'
 import { render, screen, waitFor, fireEvent, act, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { DirectoryTab, isBrowsableEndpoint } from '../components/tabs/DirectoryTab'
-import { PERMISSION_UUIDS } from '../constants'
 import { api } from '../api'
 
 vi.mock('../api', () => ({
@@ -41,18 +40,30 @@ const SERVICES = [
   svc('TimescaleDB Telemetry Store', 'TIME_SERIES_DB', 'postgres://localhost:5433')
 ]
 
-async function renderTab(hasPermission) {
+async function renderTab() {
   const showToast = vi.fn()
-  render(<DirectoryTab showToast={showToast} hasPermission={hasPermission} />)
-  await waitFor(() => {
-    expect(screen.getByRole('button', { name: /Sync Edge Flows via GitOps/i })).toBeInTheDocument()
-  })
+  render(<DirectoryTab showToast={showToast} />)
   // The table renders a tick after the first poll resolves; every test below reads it.
   await waitFor(() => expect(document.querySelector('tbody tr')).toBeTruthy())
   return { showToast }
 }
 
-describe('DirectoryTab GitOps sync guard', () => {
+/**
+ * THE PANEL THIS SUITE USED TO GUARD IS GONE, and these are the assertions that outlived it.
+ *
+ * The Directory page carried an "Edge GitOps Deployment Manager" whose button posted to
+ * `/api/v1/gitops/deploy-flow`, which invoked the `deploy-nodered` edge function, which
+ * overwrote the running flows with `node_red_flow.json` as committed. The demonstrator
+ * retirement removed the flow AND the function, so what was left was a button that could only
+ * ever report a failure -- and five tests here that would have kept passing against it, because
+ * they mocked the edge function they were meant to be reaching.
+ *
+ * WHAT IS KEPT rather than deleted with it: the page must still make no claim about what
+ * Node-RED is running. That was never a property of the button -- it is a property of the page,
+ * which has no way to observe the editor, and it is the assertion most likely to be undone by
+ * somebody adding a status badge back.
+ */
+describe('DirectoryTab claims nothing it cannot observe', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     api.get.mockResolvedValue(SERVICES)
@@ -61,7 +72,7 @@ describe('DirectoryTab GitOps sync guard', () => {
   // The card used to render a hardcoded SYNCED / a8f3e4b status. Nothing in the
   // stack can observe what Node-RED is running, so any such claim is fabricated.
   it('claims no deployment status', async () => {
-    await renderTab(vi.fn().mockReturnValue(true))
+    await renderTab()
 
     expect(screen.queryByText(/SYNCED/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/a8f3e4b/)).not.toBeInTheDocument()
@@ -69,64 +80,14 @@ describe('DirectoryTab GitOps sync guard', () => {
     expect(api.get).not.toHaveBeenCalledWith(expect.stringContaining('/gitops/status'))
   })
 
-  // The Edge Function enforces Administrator/Shopfloor_Manager server-side, and
-  // gitops:manage is seeded to exactly those two roles. Gating on gateway:manage
-  // would hand edge-flow deployment to anyone who can register a gateway.
-  it('gates the sync button on gitops:manage, not gateway:manage', async () => {
-    const hasPermission = vi.fn((uuid) => uuid === PERMISSION_UUIDS.GATEWAY_MANAGE)
-    await renderTab(hasPermission)
+  // The retirement, asserted from the page rather than from the source: no control offers a
+  // deploy, and nothing posts to the route the removed edge function served.
+  it('offers no edge-flow deployment', async () => {
+    await renderTab()
 
-    expect(screen.getByRole('button', { name: /Sync Edge Flows via GitOps/i })).toBeDisabled()
-    expect(hasPermission).toHaveBeenCalledWith(PERMISSION_UUIDS.GITOPS_MANAGE)
-  })
-
-  it('enables the sync button for a holder of gitops:manage', async () => {
-    const hasPermission = vi.fn((uuid) => uuid === PERMISSION_UUIDS.GITOPS_MANAGE)
-    await renderTab(hasPermission)
-
-    expect(screen.getByRole('button', { name: /Sync Edge Flows via GitOps/i })).not.toBeDisabled()
-  })
-
-  // The deployment is a full replace of every running flow, so a single stray
-  // click must not reach the Edge Function.
-  it('does not deploy until the confirmation is accepted', async () => {
-    const hasPermission = vi.fn().mockReturnValue(true)
-    await renderTab(hasPermission)
-
-    fireEvent.click(screen.getByRole('button', { name: /Sync Edge Flows via GitOps/i }))
-
-    expect(await screen.findByText(/permanently lost/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Sync Edge Flows via GitOps/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/Edge GitOps Deployment Manager/i)).not.toBeInTheDocument()
     expect(api.post).not.toHaveBeenCalled()
-  })
-
-  it('cancelling the confirmation deploys nothing', async () => {
-    const hasPermission = vi.fn().mockReturnValue(true)
-    await renderTab(hasPermission)
-
-    fireEvent.click(screen.getByRole('button', { name: /Sync Edge Flows via GitOps/i }))
-    fireEvent.click(await screen.findByRole('button', { name: /^Cancel$/i }))
-
-    await waitFor(() => {
-      expect(screen.queryByText(/permanently lost/i)).not.toBeInTheDocument()
-    })
-    expect(api.post).not.toHaveBeenCalled()
-  })
-
-  it('deploys only after the confirmation is accepted', async () => {
-    const hasPermission = vi.fn().mockReturnValue(true)
-    api.post.mockResolvedValue({ status: 'DEPLOYED', message: 'Deployed 26 Node-RED nodes' })
-    const { showToast } = await renderTab(hasPermission)
-
-    fireEvent.click(screen.getByRole('button', { name: /Sync Edge Flows via GitOps/i }))
-    fireEvent.click(await screen.findByRole('button', { name: /^Confirm$/i }))
-
-    await waitFor(() => {
-      expect(api.post).toHaveBeenCalledWith(
-        '/api/v1/gitops/deploy-flow',
-        expect.objectContaining({ commit_message: expect.any(String) })
-      )
-    })
-    expect(showToast).toHaveBeenCalledWith(expect.any(String), 'success')
   })
 })
 
@@ -153,7 +114,7 @@ describe('DirectoryTab service groups', () => {
     [...card(title).querySelectorAll('tbody tr td:first-child')].map(td => td.textContent)
 
   it('renders one table per category rather than one list of everything', async () => {
-    await renderTab(vi.fn().mockReturnValue(true))
+    await renderTab()
 
     for (const title of [APPS, INGEST, DATA]) {
       expect(card(title)).toBeTruthy()
@@ -164,7 +125,7 @@ describe('DirectoryTab service groups', () => {
 
   // The point of the change: a service is found by what it IS, not by where the alphabet put it.
   it('files each service under its category', async () => {
-    await renderTab(vi.fn().mockReturnValue(true))
+    await renderTab()
 
     expect(namesIn(APPS)).toEqual([
       'Grafana Dashboards',
@@ -191,7 +152,7 @@ describe('DirectoryTab service groups', () => {
   // missing from the directory is worse than one under a vague heading.
   it('still lists a service whose type belongs to no category', async () => {
     api.get.mockResolvedValue([...SERVICES, svc('Some Future Broker', 'AMQP_BROKER', 'amqp://localhost:5672')])
-    await renderTab(vi.fn().mockReturnValue(true))
+    await renderTab()
 
     expect(namesIn('Other Registered Services')).toEqual(['Some Future Broker'])
   })
@@ -200,7 +161,7 @@ describe('DirectoryTab service groups', () => {
   // a stack with a missing piece rather than as a stack that never had one.
   it('renders no card for a category nothing registered into', async () => {
     api.get.mockResolvedValue(SERVICES.filter(s => s.service_type === 'MQTT_BROKER'))
-    await renderTab(vi.fn().mockReturnValue(true))
+    await renderTab()
 
     expect(screen.queryByRole('heading', { name: new RegExp(APPS) })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: /Other Registered Services/ })).not.toBeInTheDocument()
@@ -208,7 +169,7 @@ describe('DirectoryTab service groups', () => {
   })
 
   it('counts each category on its own heading', async () => {
-    await renderTab(vi.fn().mockReturnValue(true))
+    await renderTab()
 
     expect(screen.getByRole('heading', { name: new RegExp(APPS) }).textContent).toContain('4')
     expect(screen.getByRole('heading', { name: new RegExp(INGEST) }).textContent).toContain('3')
@@ -216,7 +177,7 @@ describe('DirectoryTab service groups', () => {
   })
 
   it('opens a browsable endpoint in a new tab, with the opener not reachable from it', async () => {
-    await renderTab(vi.fn().mockReturnValue(true))
+    await renderTab()
 
     // The eight http fixtures. The other four are mqtt:// and postgres:// and are copy buttons
     // below -- this used to assert every row was a link, which is what made the broker address
@@ -242,7 +203,7 @@ describe('DirectoryTab service groups', () => {
    */
   describe('endpoints that a browser cannot open', () => {
     it('renders them as copy buttons rather than links', async () => {
-      await renderTab(vi.fn().mockReturnValue(true))
+      await renderTab()
 
       const unopenable = SERVICES.filter(s => !isBrowsableEndpoint(s.endpoint_url))
       expect(unopenable.length).toBeGreaterThan(0)
@@ -263,7 +224,7 @@ describe('DirectoryTab service groups', () => {
         value: { writeText }, configurable: true, writable: true
       })
       try {
-        const { showToast } = await renderTab(vi.fn().mockReturnValue(true))
+        const { showToast } = await renderTab()
 
         fireEvent.click(screen.getByText('mqtt://localhost:1883').closest('button'))
 
@@ -324,7 +285,7 @@ describe('DirectoryTab service groups', () => {
    * are fine -- the same fabrication as the old green pill, in a quieter font.
    */
   it('shows an observed service as ACTIVE', async () => {
-    await renderTab(vi.fn().mockReturnValue(true))
+    await renderTab()
     expect(screen.getAllByText('ACTIVE').length).toBeGreaterThan(0)
   })
 
@@ -333,7 +294,7 @@ describe('DirectoryTab service groups', () => {
       { ...svc('Grafana Dashboards', 'MONITORING', 'http://localhost:3002'),
         status: 'DOWN', last_heartbeat: null }
     ])
-    await renderTab(vi.fn().mockReturnValue(true))
+    await renderTab()
     expect(screen.getByText('DOWN')).toBeInTheDocument()
   })
 
@@ -345,7 +306,7 @@ describe('DirectoryTab service groups', () => {
       { ...svc('Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323'),
         status: 'UNKNOWN', last_heartbeat: null }
     ])
-    await renderTab(vi.fn().mockReturnValue(true))
+    await renderTab()
 
     expect(screen.getByText(/not observed/i)).toBeInTheDocument()
     expect(screen.queryByText('ACTIVE')).not.toBeInTheDocument()
@@ -360,7 +321,7 @@ describe('DirectoryTab service groups', () => {
       { ...svc('Supabase Studio', 'GRAPHICAL_UI', 'http://127.0.0.1:54323'),
         status: 'UNKNOWN', last_heartbeat: null }
     ])
-    await renderTab(vi.fn().mockReturnValue(true))
+    await renderTab()
 
     expect(screen.getByTitle(/browser address/i)).toBeInTheDocument()
   })
@@ -373,7 +334,7 @@ describe('DirectoryTab service groups', () => {
       { ...svc('Grafana Dashboards', 'MONITORING', 'http://localhost:3002'),
         status: 'DOWN', last_heartbeat: HEARTBEAT }
     ])
-    await renderTab(vi.fn().mockReturnValue(true))
+    await renderTab()
 
     const badge = screen.getByText('DOWN')
     expect(badge.getAttribute('title')).not.toMatch(/\d{2}:\d{2}/)
@@ -386,7 +347,7 @@ describe('DirectoryTab service groups', () => {
       { ...svc('A', 'MONITORING', 'http://localhost:1'), status: 'DOWN', last_heartbeat: null },
       { ...svc('B', 'MONITORING', 'http://localhost:2'), status: 'UNKNOWN', last_heartbeat: null }
     ])
-    await renderTab(vi.fn().mockReturnValue(true))
+    await renderTab()
 
     expect(screen.getByText('DOWN')).toBeInTheDocument()
     expect(screen.getByText(/not observed/i)).toBeInTheDocument()
@@ -394,7 +355,7 @@ describe('DirectoryTab service groups', () => {
 
   it('still lists what is deployed and how to reach it', async () => {
     // What the page honestly IS, asserted so removing the two columns cannot quietly hollow it out.
-    await renderTab(vi.fn().mockReturnValue(true))
+    await renderTab()
 
     for (const svc of SERVICES) {
       expect(screen.getByText(svc.service_name)).toBeInTheDocument()
@@ -405,7 +366,7 @@ describe('DirectoryTab service groups', () => {
   it('says so when nothing is registered at all', async () => {
     api.get.mockResolvedValue([])
     const showToast = vi.fn()
-    render(<DirectoryTab showToast={showToast} hasPermission={vi.fn().mockReturnValue(true)} />)
+    render(<DirectoryTab showToast={showToast} />)
 
     expect(await screen.findByText(/No services are registered/)).toBeInTheDocument()
   })
@@ -428,19 +389,20 @@ describe('DirectoryTab refresh', () => {
   afterEach(() => { vi.useRealTimers() })
 
   it('carries no filter bar, no search, no type picker and no Refresh button', async () => {
-    await renderTab(vi.fn().mockReturnValue(true))
+    await renderTab()
 
     expect(document.querySelector('.filter-bar')).toBeNull()
     expect(document.querySelector('.page-actions')).toBeNull()
     expect(screen.queryByPlaceholderText(/Search services/)).not.toBeInTheDocument()
     expect(screen.queryByTitle(/Show only one kind of service/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Refresh Directory/i })).not.toBeInTheDocument()
-    // The GitOps sync button is the only CONTROL left on the page. The endpoint cells are also
-    // buttons now -- one per row a browser cannot open -- so this counts what is not an endpoint
-    // rather than every button, which would otherwise re-fail whenever a fixture changed scheme.
+    // NO CONTROLS AT ALL now that the GitOps sync button has gone with the flow it deployed --
+    // the page is a read-only directory. The endpoint cells are still buttons, one per row a
+    // browser cannot open, so this counts what is not an endpoint rather than every button,
+    // which would otherwise re-fail whenever a fixture changed scheme.
     const buttons = screen.getAllByRole('button')
       .filter(b => !b.classList.contains('endpoint-action'))
-    expect(buttons).toHaveLength(1)
+    expect(buttons).toHaveLength(0)
   })
 
   // The poll is a setTimeout chain (see usePolling), so a fresh response only reaches the
@@ -452,7 +414,7 @@ describe('DirectoryTab refresh', () => {
      * data that a re-registration genuinely changes. Rewritten rather than deleted, because the
      * behaviour under test -- the table refreshes itself with no button -- is unaffected.
      */
-    await renderTab(vi.fn().mockReturnValue(true))
+    await renderTab()
     expect(api.get).toHaveBeenCalledTimes(1)
 
     const moved = 'mqtt://broker.plant.local:8883'

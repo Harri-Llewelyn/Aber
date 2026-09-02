@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // =================================================================================================
-// Tear the local stack down to nothing and bring it back provisioned.
+// Tear the local stack down to nothing and bring it back blank.
 //
 // WHY THIS EXISTS. `digital_thread` is append-only against every application role, so there is no
 // way to clear demo noise from it short of dropping the volume -- and dropping the volume means
@@ -50,23 +50,23 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, basename, join } from 'node:path';
-import { foldGatewayCredentials } from './lib/env-fold.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-const USAGE = `Usage: npm run stack:reset -- --yes [--skip-gateways] [--timeout=SECONDS]
+const USAGE = `Usage: npm run stack:reset -- --yes [--timeout=SECONDS]
 
 Destroys and rebuilds the local Docker Compose stack:
 
   1. docker compose down -v          (DROPS EVERY VOLUME -- all telemetry, all audit history)
   2. docker compose up -d
   3. wait for the telemetry hypertable, then for migrations and seeds to have been applied
-  4. provision-gateways.mjs          (unless --skip-gateways)
-  5. fold the new credentials into .env and re-seed Node-RED with them
-  6. print the demo accounts and the gateway credentials
+  4. print the seeded accounts
+
+WHAT COMES BACK IS BLANK -- no cells, no gateways, no devices, no schemas, and an empty Node-RED
+editor. That is the same state a new install comes up in, and tutorial/README.md walks through
+building the first machine by hand.
 
   --yes             required; there is no interactive prompt
-  --skip-gateways   stop after the stack is healthy
   --timeout=N       seconds to wait for readiness (default 600)
 
   --discard-cold-archive
@@ -79,12 +79,10 @@ Destroys and rebuilds the local Docker Compose stack:
 
 // --- arguments ------------------------------------------------------------------------------
 let confirmed = false;
-let skipGateways = false;
 let timeoutSeconds = Number(process.env.STACK_RESET_TIMEOUT || 600);
 
 for (const arg of process.argv.slice(2)) {
   if (arg === '--yes') confirmed = true;
-  else if (arg === '--skip-gateways') skipGateways = true;
   // Read directly where it is used rather than into a variable here: it is a confirmation for one
   // guard, not a mode the rest of the script branches on.
   else if (arg === '--discard-cold-archive') { /* see the cold archive guard below */ }
@@ -200,9 +198,9 @@ if (capture('docker', ['version', '--format', '{{.Server.Version}}']) === null) 
 // --- 0b. cold-archived telemetry is the one thing a reset cannot re-derive -------------------
 //
 // EVERY OTHER VOLUME THIS DESTROYS HOLDS SOMETHING THAT CAN COME BACK. Telemetry is re-published by
-// the simulator, the audit trail is re-seeded, gateway credentials are re-provisioned, 3D models
-// can be re-uploaded and captures re-recorded. That is what makes `down -v` a reasonable thing to
-// offer at all.
+// the audit trail is re-seeded, broker credentials are re-minted from the dashboard, 3D models can
+// be re-uploaded and captures re-recorded. That is what makes `down -v` a reasonable thing to offer
+// at all.
 //
 // Cold-archived telemetry is different in kind, and it is the difference `storage-init.mjs` already
 // writes on the bucket: "an object here is the ONLY remaining copy". Those chunks were dropped from
@@ -273,10 +271,6 @@ run('docker', ['compose', 'up', '-d']);
 // Stopping it here costs nothing, because step 5 force-recreates it anyway with the new credentials.
 // The simulator has no reason to be publishing at any point before the fleet it publishes as exists.
 // -------------------------------------------------------------------------------------------------
-if (!skipGateways) {
-  step('Holding the simulator until the fleet exists');
-  run('docker', ['compose', 'stop', 'node-red'], { allowFailure: true });
-}
 
 // --- 3. readiness -------------------------------------------------------------------------------
 // WAIT FOR OBJECTS, NOT FOR PORTS. The postgres entrypoint runs its initdb scripts against a
@@ -341,131 +335,13 @@ await waitFor('the demo accounts', () =>
 // the rebuild there is no floor at this point, the seed correctly writes nothing, and the shell
 // version waited 600 seconds for a row that could not appear before timing out the whole reset.
 //
-// THE SCRIPT ALREADY KNEW THIS AND SAID SO IN THE WRONG PLACE. Step 5's own comment reads "REPLAY
-// THE SEED, BECAUSE STEP 4 RAN BEFORE THERE WAS ANYTHING TO SEED IT ONTO" -- an accurate account of
-// why this cannot be true yet, sitting one step below a hard wait for it. The two contradicted each
-// other, and the wait is the half that was wrong.
-//
-// So it is checked here only if a floor survived (`--skip-gateways` on a stack somebody had already
-// provisioned, say), and verified for real after the seed is replayed in step 5.
-const CAUSATION_DEMO = `SELECT EXISTS (
-   SELECT 1 FROM public.digital_thread
-    WHERE causation_id IS NOT NULL
-    GROUP BY causation_id
-   HAVING count(*) FILTER (WHERE entity_type = 'gateways') > 0
-      AND count(*) FILTER (WHERE entity_type = 'devices')  > 1)`;
-
-/** The gateway seed.sql's demonstration is written about — provision-gateways.mjs pins this id. */
-const FLOOR_GATEWAY = "SELECT 1 FROM public.gateways WHERE id = '12000000-0000-4000-8000-000000000001'";
-
-if (psql(SUPABASE, FLOOR_GATEWAY) === '1') {
-  await waitFor('the Digital Thread causation demo', () => psql(SUPABASE, CAUSATION_DEMO) === 't');
-} else {
-  console.log('    the Digital Thread causation demo: no floor yet — checked after provisioning');
-}
+// THE CAUSATION DEMONSTRATION IS GONE WITH THE FLOOR, and so is the wait for it. seed.sql only
+// commissions Cell 1 when the machining gateway exists, and nothing seeds that gateway any more,
+// so the act it demonstrated never happens. Waiting for it here would hang until the timeout on
+// every single run -- which is the failure the old conditional was written to dodge, now settled
+// by there being no condition left to test.
 
 await waitFor("PostgREST's database", () => psql(SUPABASE, 'SELECT 1') === '1');
-
-// --- 5. gateways ---------------------------------------------------------------------------------
-if (skipGateways) {
-  step('Skipping gateway provisioning (--skip-gateways)');
-} else {
-  step('Provisioning cell gateways');
-  // Writes the credentials to .env.gateways as well as printing them. They are NOT recoverable
-  // afterwards -- mosquitto_passwd stores only a hash -- so a run whose output scrolled away
-  // would mean re-provisioning to find out what it had set.
-  //
-  // INVOKED AS `node scripts/...`, NOT `npm run`. On Windows `npm` is a `.cmd` shim, which needs
-  // `shell: true` to spawn -- and a shell is the dependency this port exists to drop. The target is
-  // a Node script either way, so calling it directly removes a layer rather than working around one.
-  run(process.execPath, [join(ROOT, 'scripts', 'provision-gateways.mjs'), '--env-out=.env.gateways']);
-
-  const gatewayEnvPath = join(ROOT, '.env.gateways');
-  if (existsSync(gatewayEnvPath)) {
-    // ---------------------------------------------------------------------------------------------
-    // FOLD THEM INTO .env, WHICH IS THE STEP THAT WAS MISSING AND THE ONE THAT BITES.
-    //
-    // `down -v` destroys the Mosquitto password volume, so provisioning issues NEW credentials --
-    // while .env still holds the previous set. Compose passes .env to node-red-init, which seeds
-    // Node-RED with passwords the broker no longer knows. Nothing fails during the reset: it reports
-    // success, and four gateways then log
-    //
-    //     Connection failed to broker: node-red-cnc@mqtt://mosquitto:1883
-    //
-    // with no CONNACK code. Leaving this to be done by hand made a clean-slate script that does not
-    // actually leave you with a working stack, which is the one thing it exists for.
-    //
-    // REPLACED IN PLACE AND APPENDED ONLY WHEN NEW, matching the awk this replaces. A duplicate
-    // assignment is read differently by docker compose and by a shell that sources the file, so
-    // appending unconditionally would leave the two disagreeing about which credential is live.
-    // ---------------------------------------------------------------------------------------------
-    step('Folding gateway credentials into .env');
-
-    const { text, replaced, added } = foldGatewayCredentials(
-      readFileSync(join(ROOT, '.env'), 'utf8'),
-      readFileSync(gatewayEnvPath, 'utf8')
-    );
-    writeFileSync(join(ROOT, '.env'), text, { mode: 0o600 });
-
-    // COUNTED OUT LOUD, because "0 replaced" is the shape of the failure this step exists to
-    // prevent and it is otherwise indistinguishable from success. A rename in either file would
-    // leave every credential appended rather than replaced, and the stack would come up with
-    // Node-RED holding passwords the broker does not know.
-    console.log(`    .env updated from .env.gateways — ${replaced.length} replaced, ${added.length} added`);
-    if (replaced.length === 0 && added.length === 0) {
-      console.log('    WARNING: no MQTT_GW_* keys were found in .env.gateways. Node-RED will keep');
-      console.log('    the credentials it already has, which the rebuilt broker no longer knows.');
-    }
-
-    // Node-RED was started before those credentials existed, so it is holding the old ones -- and
-    // it is also started with NO SIMULATOR FLOW AT ALL, which is the default. Both
-    // flags are needed and they do different things: SEED_SIMULATOR chooses the demonstrator's flow
-    // over the starter flow, FORCE_SEED overrides the first-run-only guard on a volume that has
-    // already been seeded once. Either alone leaves the reset without a publishing simulator.
-    //
-    // PASSED AS AN ENVIRONMENT OBJECT, not as a `VAR=x cmd` prefix -- that syntax is POSIX shell and
-    // is a parse error in PowerShell and cmd, which is the second half of #106.
-    step('Seeding Node-RED with the simulator flow and the new credentials');
-    run('docker', ['compose', 'up', '-d', '--force-recreate', 'node-red-init', 'node-red'],
-      { env: { NODE_RED_SEED_SIMULATOR: 'true', NODE_RED_FORCE_SEED: 'true' } });
-  }
-
-  // -----------------------------------------------------------------------------------------
-  // AND REPLAY THE SEED, BECAUSE STEP 4 RAN BEFORE THERE WAS ANYTHING TO SEED IT ONTO.
-  //
-  // seed.sql commits one multi-entity act -- commissioning Cell 1 -- so the Digital Thread drawer
-  // has a causation group to show. Its subject is the machining gateway and three of its devices,
-  // which USED TO BE seeded by 0002 and therefore always existed by the time seed.sql ran. The
-  // floor is opt-in now, and provisioning is step 5: at step 4 the UPDATEs match no rows,
-  // write nothing, and the demonstration is simply absent.
-  //
-  // It is not a failure -- seed.sql distinguishes "no floor" from "floor but no group" and skips
-  // with a notice -- but it does mean a reset would finish with the one thing this script exists
-  // to leave you: a working stack, minus the feature its own summary describes. Replaying db-init
-  // is the whole fix, because every migration and the seed are idempotent by construction and 0040
-  // has already recorded itself as applied, so this is the second boot the seed was written for.
-  //
-  // ALLOWED TO FAIL, as it was under `>/dev/null 2>&1 || true`: the stack is already usable at this
-  // point, and refusing to print the summary because a demonstration detail did not replay would
-  // withhold the credentials the operator actually needs.
-  // -----------------------------------------------------------------------------------------
-  step('Replaying the seed now the floor exists');
-  run('docker', ['compose', 'up', '-d', '--force-recreate', 'supabase-db-init'], { allowFailure: true });
-  capture('docker', ['wait', 'acs-cymru_supabase_db_init']);
-
-  // AND VERIFIED HERE, WHICH IS THE ONLY PLACE IT CAN BE. This is the check step 4 used to make
-  // before the floor existed; now it runs after the replay that gives it something to find.
-  //
-  // NOT FATAL, deliberately. By this point the stack is up, provisioned and usable, and the thing
-  // being checked is a demonstration detail. Failing the whole reset over it would withhold the
-  // gateway credentials the operator actually needs -- and those cannot be read back from the
-  // broker. The summary below already distinguishes the two cases, so a warning here plus an
-  // accurate summary is the honest combination.
-  if (psql(SUPABASE, CAUSATION_DEMO) !== 't') {
-    console.log('    WARNING: the Digital Thread causation demo did not appear.');
-    console.log('    The stack is usable. `docker compose logs supabase-db-init` says why seed.sql skipped it.');
-  }
-}
 
 // --- 6. summary ----------------------------------------------------------------------------------
 step('Ready');
@@ -488,42 +364,19 @@ Interfaces
 Sign in to the dashboard FIRST -- Node-RED and Grafana federate to Supabase Auth and the consent
 step needs that session.`);
 
-if (!skipGateways && existsSync(join(ROOT, '.env.gateways'))) {
-  console.log('\nGateway credentials were written to .env.gateways (mode 0600, gitignored).');
-  console.log('They cannot be read back from the broker -- keep that file or re-provision.');
-}
 
-// THE AUDIT TRAIL IS NO LONGER EMPTY AFTER A RESET, and saying so would be the exact kind of stale
-// claim this repository treats as worse than no claim: a reader cannot tell it is stale and will act
-// on it. seed.sql deliberately commits one multi-entity act -- commissioning Cell 1 -- so the
-// Digital Thread drawer has a causation group to show, and gateway provisioning writes a dozen rows
-// of its own after that.
+// THE AUDIT TRAIL IS EMPTY AFTER A RESET, and this says so rather than pointing at a
+// demonstration that no longer exists. seed.sql used to commit one multi-entity act --
+// commissioning Cell 1 -- so the Digital Thread drawer had a causation group to show on a fresh
+// stack. It only did that when the machining gateway existed, and nothing seeds one now.
 //
-// THE COUNT IS QUERIED RATHER THAN WRITTEN DOWN, for the same reason. A literal here would be wrong
-// the first time somebody adds a device to Cell 1, and nothing would catch it.
-//
-// AND THE WHOLE PARAGRAPH IS CONDITIONAL ON THAT QUERY FINDING SOMETHING. It used to fall back to a
-// hardcoded 4 when the query returned nothing, which was a reasonable default while the floor was
-// seeded and became a fabricated number the moment `--skip-gateways` was passed: a summary telling
-// the reader to click a marker on a gateway that does not exist on their stack.
-const demoRows = Number(psql(SUPABASE, `SELECT count(*) FROM public.digital_thread
-    WHERE causation_id = (
-      SELECT causation_id FROM public.digital_thread
-       WHERE causation_id IS NOT NULL
-       GROUP BY causation_id
-      HAVING count(*) FILTER (WHERE entity_type = 'gateways') > 0
-         AND count(*) FILTER (WHERE entity_type = 'devices')  > 1
-       ORDER BY causation_id DESC LIMIT 1)`) ?? 0);
-
-if (Number.isFinite(demoRows) && demoRows > 0) {
-  console.log(`\nThe Digital Thread opens on one seeded act: commissioning Cell 1 wrote ${demoRows} audit rows in a`);
-  console.log('SINGLE transaction, which is what gives the Same transaction control in the event drawer');
-  console.log('something to show. Open Digital Thread and click the newest marker on');
-  console.log('Sim_Gateway_Cell1_Machining.');
-  console.log('\nEvery row after those records a real change.');
-} else {
-  console.log('\nThe shopfloor is EMPTY, which is the default: no cells, no gateways,');
-  console.log('no devices, and a Digital Thread describing only what you do next. Run');
-  console.log('`npm run provision:gateways` for the four-cell demonstration floor, or follow');
-  console.log('simulation/README.md to build one machine by hand.');
-}
+// NOTHING IS QUERIED HERE ANY MORE. The old block counted the rows of that act so the number
+// could never go stale; with no act to count, a query would return zero on every run and the
+// branch that handled zero is the only one left.
+console.log('\nThe shopfloor is EMPTY, and that is the finished state rather than a step before');
+console.log('provisioning: no cells, no gateways, no devices and no schemas. The only gateway on');
+console.log('the stack is the Playback gateway, which exists because recorded captures have');
+console.log('nowhere else to publish from. Node-RED opens on an empty editor.');
+console.log('\nThe Digital Thread describes only what you do next. Follow tutorial/README.md to');
+console.log('build one machine by hand: a cell, a gateway, its broker credential, a device and a');
+console.log('schema, then a flow that publishes as it.');

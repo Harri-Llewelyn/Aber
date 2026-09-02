@@ -240,7 +240,7 @@ END $$;
 -- comparing against a constant -- which is what `metric_catalog` has carried since 0002
 -- ('Configured maximum temperature threshold (local extension)') and what nothing has ever read.
 -- The CNC subflow now declares it at birth, so it must be MODELLED or every mill is immediately
--- flagged as publishing outside its schema, and the "zero unmodelled metrics" property 0022
+-- flagged as publishing outside its schema, and the "zero unmodelled metrics" property 0022 (now retired by 0073)
 -- establishes is lost on the first boot.
 --
 -- WIDENING AN ACTIVE SCHEMA IN PLACE, WHICH IS NORMALLY REFUSED. prevent_active_schema_mutation()
@@ -250,7 +250,8 @@ END $$;
 -- "migrations ... rewrite seeded schemas by name on every boot". This runs as the owner.
 --
 -- That exemption is for correcting a SEEDED schema within its own release, which is what this is:
--- 0022 shipped the schema and this adds a metric to the same simulated devices in the same branch.
+-- 0022 shipped the schema and this added a metric to the same simulated devices in the same branch.
+-- Both the schema and those devices have since been retired (0040, 0073); this is kept as history.
 -- An operator-authored schema is a different matter and is versioned through publish_schema_version().
 -- ---------------------------------------------------------------------------------------------
 DO $$

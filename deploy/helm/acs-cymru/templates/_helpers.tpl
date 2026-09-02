@@ -537,7 +537,7 @@ Skipped when `existingSecret` is set -- the values are then not the chart's to s
 */}}
 {{- define "acs-cymru.validateMqttPrincipals" -}}
 {{- if not .Values.secrets.existingSecret -}}
-{{- range $field := list "mqttSimulatorUser" "mqttValidatorUser" -}}
+{{- range $field := list "mqttValidatorUser" -}}
 {{- $v := get $.Values.secrets $field -}}
 {{- if not (regexMatch "^gwy[0-9a-f]{21}$" $v) -}}
 {{- fail (printf "\n\nacs-cymru: secrets.%s is %q, which is not a gateway sparkplug_id.\n\nIt must be 'gwy' followed by exactly 21 lowercase hex characters. mosquitto.acl confines each\nclient to `spBv1.0/+/+/%%u/#`, and ingestion's verify_gateway_binding() requires that same topic\nsegment to be the gateway row's GENERATED sparkplug_id -- so any other value AUTHENTICATES FINE\nand then has every published message silently dropped by the broker, with nothing logged at\neither end.\n\nThe id is derived from the row's pinned UUID: 'gwy' + the first 21 hex characters of it.\n  10000000-0000-4000-8000-000000000001 -> gwy100000000000400080000  (Virtual_Gateway_NodeRED)\n  11000000-0000-4000-8000-000000000001 -> gwy110000000000400080000  (validate.py's gateway)\n" $field $v) -}}
@@ -922,7 +922,7 @@ Consumers (ingestion, i3x, node-red, the validator Job) each take only THEIR OWN
 deliberately not used there: the point of the split is that no workload holds another's credential.
 */}}
 {{- define "acs-cymru.mqttPrincipals" -}}
-INGESTION I3X SIMULATOR VALIDATOR MONITOR GW_CNC_MACHINING GW_ROBOTIC_ASSEMBLY GW_AGV_FLEET GW_FACILITY_BMS
+INGESTION I3X VALIDATOR MONITOR
 {{- end -}}
 
 {{- define "acs-cymru.mqttPrincipalEnv" -}}
@@ -945,9 +945,9 @@ only clue. It is the single most destructive character available in this script.
 
 An EMPTY password skips that account rather than writing an empty one. `mqttValidatorPassword` is
 the case that matters: the validator is a fixture, so a production install leaves it unset and
-should simply not have the account, not fail to boot over a credential it never wanted. The four
-`mqttGw*Password` values are fixtures in the same sense -- a plant that has retired the simulated
-shopfloor leaves them unset, and no account is created.
+should simply not have the account, not fail to boot over a credential it never wanted. Gateway
+accounts are not here at all: they are minted against a row that already exists, so they arrive
+through the gateway-credential service rather than through values.
 */}}
 {{- define "acs-cymru.mqttPrincipalUpserts" -}}
 for p in {{ include "acs-cymru.mqttPrincipals" . }}; do

@@ -166,7 +166,7 @@ Judging a payload against a schema the payload nominates reverses that rule, and
 misbehaving device opt itself out by declaring something permissive.
 
 The reader understands `type`, `enum`, `minimum`, `maximum`, `pattern` and `additionalProperties`.
-It did not until roadmap item 7 — it read `type` alone, so the rest sat in stored schemas doing
+It did not until the schema-conformance work — it read `type` alone, so the rest sat in stored schemas doing
 nothing. `exclusiveMinimum` / `exclusiveMaximum` are still **not** read: Draft 4 spells them as
 booleans modifying `minimum`, Draft 6+ as numbers replacing it, and guessing the dialect would move
 a boundary in whichever direction the guess was wrong. An unread facet reports nothing; a misread
@@ -382,8 +382,8 @@ and [`capture_worker.py`](capture_worker.py) is that behaviour:
 credential, so a capture costs no new broker connection — `observe()` appends to a buffer when a job
 is active and the topic matches. A separate capture service would need its own broker account *and*
 would split the `seq` stream, since `_last_seq` is keyed `(group, edge_node)`, making the daemon's
-own gap detection fire permanently. That is roadmap item 1's `$share` finding arriving from the
-other direction.
+own gap detection fire permanently. That is [the single-writer ceiling](#the-single-writer-ceiling)'s
+`$share` finding arriving from the other direction.
 
 **Two tables, because a job and an artefact are different things.** `capture_jobs` records an act
 that happened once; `captures` holds the artefact — subject, storage path, size, note and manifest —
@@ -985,6 +985,60 @@ responses.
 on a cache miss — and protobuf decode happen *before* the clock starts, on the same thread. So a
 ceiling derived from this series is an **upper bound**: the real one is lower.
 
+### The single-writer ceiling
+
+**This was a roadmap item — *horizontal ingestion scaling* — and it was retired on 2026-09-02
+because the instrument above closed it.** The entry used to quote the ceiling out of
+`get_timescaledb_connection()`'s docstring, which is an assertion rather than a measurement. There
+is now a number:
+
+| | |
+|---|---|
+| mean write | **~4.1 ms** (0.0744 s over 18 writes, measured 2026-08-21) |
+| p90 | **12.6 ms**, via `histogram_quantile` |
+| implied single-thread ceiling | **~240 msg/s**, and this is an *upper* bound |
+| fleet rate when measured | **~0.95 msg/s** |
+
+An upper bound for the reason the section above gives: device resolution and protobuf decode occupy
+the same thread before the clock starts. Even so, the headroom is **two orders of magnitude**. The
+constraint is real and it is documented here rather than tracked as pending work, because at 0.4% of
+the measured ceiling there is nothing to action.
+
+**`$share` is not the way out, and this is the part worth keeping.** The roadmap entry called an
+MQTT 5 shared subscription "the honest path" and said the daemon was already shaped for it. Tested
+against the live broker — two subscribers in one share group, 20 seconds of fleet traffic — that is
+wrong:
+
+```
+worker A: 11 msgs    worker B: 11 msgs
+seen by BOTH: DDATA/gwy12.../dev22...  DDATA/gwy12.../dev23...
+              DDATA/gwy12.../dev27...  DDATA/gwy13.../dev24...
+only A: NDATA/gwy13..., NDATA/gwy15...
+only B: NDATA/gwy12..., NDATA/gwy14..., DDATA/gwy15.../dev26...
+```
+
+Round-robin **per message, with no edge-node affinity** — and Sparkplug state is per edge node. Two
+in-memory tables are keyed `(group_id, edge_node_id)` and both break:
+
+- **`_alias_map`.** A birth certificate is *one message*, so it reaches *one worker*. Above,
+  `gwy12...`'s NDATA went only to B while its devices' DDATA went to both, so worker A would resolve
+  alias-only metrics against an empty table — the failure already documented at the declaration:
+  *"ingests nothing at all from an alias-optimised gateway, and reports no error while doing it."*
+- **`_last_seq`.** Each worker sees a fraction of the sequence numbers, so gap detection fires
+  permanently. `request_node_rebirth()` does not rescue it: the rebirth is also one message and
+  lands on one worker.
+
+So the blocker is **the data path, not the rebirth path**. What it would actually take is either
+shared state for those two tables — a round trip on the hottest path, which is the thing the work
+existed to make faster — or partitioning the topic space by edge node, which is not what `$share`
+does and fights dynamic enrolment, since gateways arrive with single-use tokens and a static
+partition cannot know them.
+
+**One prerequisite that turned out not to exist**, recorded because it is the part everyone expects
+to be hard: the daemon speaks MQTT 3.1.1 (`mqtt.Client()` with paho 1.6.1's v1 callbacks) and
+`$share` is an MQTT 5 feature — but Mosquitto 2.0.22 honours shared subscriptions for 3.1.1 clients
+regardless, verified above. **No protocol upgrade and no callback migration would be needed.**
+
 ## Testing
 
 ### Unit tests (no stack required)
@@ -1084,5 +1138,5 @@ still runs, because its assertions are worth reporting either way.
 ## Related
 
 - [`../supabase/README.md`](../supabase/README.md) — schema, RLS, triggers, edge functions
-- [`../simulation/README.md`](../simulation/README.md) — Node-RED flow and broker topics
+- [`../tutorial/README.md`](../tutorial/README.md) — building a gateway, a device and the flow that publishes as it
 - [`../mosquitto.acl`](../mosquitto.acl) — per-gateway topic confinement

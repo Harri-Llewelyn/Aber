@@ -716,7 +716,7 @@ function Dashboard({ session, onSignOut }) {
           )}
           {tab === 'schemas'        && <SchemasTab showToast={showToast} hasPermission={hasPermission} onSelectSchema={showDevicesForSchema} onSelectDevice={showDevice} initialSchemaId={selectedSchemaId} pendingVocabularyEntry={pendingVocabularyEntry} onConsumeVocabularyEntry={() => setPendingVocabularyEntry(null)} />}
           {tab === 'vocabulary'     && <VocabularyTab hasPermission={hasPermission} onUseEntry={entry => { setPendingVocabularyEntry(entry); setTab('schemas') }} />}
-          {tab === 'directory'      && <DirectoryTab showToast={showToast} hasPermission={hasPermission} />}
+          {tab === 'directory'      && <DirectoryTab showToast={showToast} />}
           {/* The role is re-checked here for the same reason Access Control's is: routing can put
               `tab` on a value the nav never offered. `userRole` is passed on rather than a boolean,
               because the page distinguishes read-only Auditor from the two roles that can record. */}

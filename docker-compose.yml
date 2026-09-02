@@ -27,8 +27,7 @@ x-nodered-auth-env: &nodered-auth-env
   NODERED_OAUTH_CALLBACK_URL: ${NODERED_PUBLIC_URL:-http://localhost:1880}/auth/strategy/callback
 
   # --- Machine auth ---------------------------------------------------------------------------
-  # Verifies the Supabase access token deploy-nodered forwards. The same secret Kong, PostgREST,
-  # Realtime and GoTrue sign and verify with.
+  # The same secret Kong, PostgREST, Realtime and GoTrue sign and verify with.
   SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET}
   SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
   # Verifies the 60-second token dispatch_device_quarantine_webhook() mints per event. A SIGNING
@@ -956,17 +955,14 @@ services:
       SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL:-}
     volumes:
       - ./supabase/functions:/home/deno/functions:ro
-      # The canonical Node-RED flow - the "git" side of the GitOps sync that
-      # deploy-nodered pushes to the running Node-RED.
-      - ./simulation/node_red_flow.json:/home/deno/flows/node_red_flow.json:ro
       # The physical gateway bundle template gateway-bundle zips and serves. Read in the entrypoint
-      # below for the same reason as the flow -- an edge worker cannot see this mount.
+      # below because an edge worker has no filesystem access to this mount.
       - ./templates/physical-gateway:/home/deno/templates/physical-gateway:ro
       # Persist fetched remote modules so functions don't re-download on restart.
       - deno_cache:/root/.cache/deno
     # An edge-runtime user worker has no filesystem access to these mounts, so the
-    # flow is handed to it through the environment instead: main/index.ts forwards
-    # every env var to each worker it spawns. Reading the file here (in the plain
+    # bundle template is handed to it through the environment instead: main/index.ts forwards
+    # every env var to each worker it spawns. Reading the files here (in the plain
     # container shell, before edge-runtime starts) sidesteps the worker sandbox
     # without nesting a mountpoint inside the read-only functions mount, which
     # would create a stray 0-byte file in the repository.
@@ -975,7 +971,6 @@ services:
       - -e
       - -c
       - |
-        export NODERED_FLOW_JSON="$$(cat /home/deno/flows/node_red_flow.json)"
         # The bundle template, one variable per file. Static names, because FUNCTION_REGISTRY in
         # main/index.ts is an allow-list of variable NAMES and a dynamic set could not be declared
         # there. Kept in step with supabase/functions/Dockerfile's ENTRYPOINT, which does the same
@@ -1185,27 +1180,14 @@ services:
       MQTT_INGESTION_PASSWORD: ${MQTT_INGESTION_PASSWORD}
       MQTT_I3X_USER: ${MQTT_I3X_USER:-factoryplus_i3x}
       MQTT_I3X_PASSWORD: ${MQTT_I3X_PASSWORD}
-      MQTT_SIMULATOR_USER: ${MQTT_SIMULATOR_USER:-gwy100000000000400080000}
-      MQTT_SIMULATOR_PASSWORD: ${MQTT_SIMULATOR_PASSWORD}
       MQTT_VALIDATOR_USER: ${MQTT_VALIDATOR_USER:-gwy110000000000400080000}
       MQTT_VALIDATOR_PASSWORD: ${MQTT_VALIDATOR_PASSWORD}
       MQTT_MONITOR_USER: ${MQTT_MONITOR_USER:-factoryplus_monitor}
       MQTT_MONITOR_PASSWORD: ${MQTT_MONITOR_PASSWORD}
-      # THE FOUR SIMULATED CELL GATEWAYS, seeded here rather than by `provision:gateways`.
-      #
-      # The broker is the only place these accounts can exist, and node-red-init -- which runs in
-      # this same `up` -- fails closed without them. Provisioning cannot fill that gap because it
-      # needs the stack it is blocking. An EMPTY password skips the account rather than creating an
-      # empty one, so a production install that does not want the simulator simply leaves them
-      # unset. Same rule, same reasoning, as the chart's `acs-cymru.mqttPrincipalUpserts`.
-      MQTT_GW_CNC_MACHINING_USER: ${MQTT_GW_CNC_MACHINING_USER:-gwy120000000000400080000}
-      MQTT_GW_CNC_MACHINING_PASSWORD: ${MQTT_GW_CNC_MACHINING_PASSWORD:-}
-      MQTT_GW_ROBOTIC_ASSEMBLY_USER: ${MQTT_GW_ROBOTIC_ASSEMBLY_USER:-gwy130000000000400080000}
-      MQTT_GW_ROBOTIC_ASSEMBLY_PASSWORD: ${MQTT_GW_ROBOTIC_ASSEMBLY_PASSWORD:-}
-      MQTT_GW_AGV_FLEET_USER: ${MQTT_GW_AGV_FLEET_USER:-gwy140000000000400080000}
-      MQTT_GW_AGV_FLEET_PASSWORD: ${MQTT_GW_AGV_FLEET_PASSWORD:-}
-      MQTT_GW_FACILITY_BMS_USER: ${MQTT_GW_FACILITY_BMS_USER:-gwy150000000000400080000}
-      MQTT_GW_FACILITY_BMS_PASSWORD: ${MQTT_GW_FACILITY_BMS_PASSWORD:-}
+      # NO GATEWAY ACCOUNTS ARE SEEDED HERE. A gateway's broker credential is minted once its row
+      # exists -- from the dashboard (Gateways tab, Generate broker credential) for a virtual
+      # gateway, or by the enrolment bundle for a physical appliance. This service creates the
+      # PLATFORM principals only: the ones that come from .env and are rewritten on every run.
     volumes:
       - mosquitto_data:/mosquitto/config
       # THE POLICY FILES MOVED TO /policy, AND mosquitto.conf IS NOW ASSEMBLED RATHER THAN
@@ -1239,21 +1221,8 @@ services:
         mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_INGESTION_USER\" \"$$MQTT_INGESTION_PASSWORD\";
       fi;
       mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_I3X_USER\" \"$$MQTT_I3X_PASSWORD\";
-      if [ -n \"$$MQTT_SIMULATOR_PASSWORD\" ]; then
-        mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_SIMULATOR_USER\" \"$$MQTT_SIMULATOR_PASSWORD\";
-        echo \"Created the LEGACY simulator account '$$MQTT_SIMULATOR_USER' -- its gateway row was deleted by migration 0020, so nothing on a current stack publishes under it.\";
-      fi;
       mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_VALIDATOR_USER\" \"$$MQTT_VALIDATOR_PASSWORD\";
       mosquitto_passwd -b /mosquitto/config/password_file \"$$MQTT_MONITOR_USER\" \"$$MQTT_MONITOR_PASSWORD\";
-      for p in GW_CNC_MACHINING GW_ROBOTIC_ASSEMBLY GW_AGV_FLEET GW_FACILITY_BMS; do
-        eval user=\"\\$$MQTT_$${p}_USER\";
-        eval pass=\"\\$$MQTT_$${p}_PASSWORD\";
-        if [ -n \"$$pass\" ]; then
-          mosquitto_passwd -b /mosquitto/config/password_file \"$$user\" \"$$pass\";
-        else
-          echo \"MQTT_$${p}_PASSWORD is empty -- not creating an account for '$$user'.\";
-        fi;
-      done;
       chmod 644 /mosquitto/config/password_file;
       echo \"Mosquitto password file initialized with $$(grep -c : /mosquitto/config/password_file) account(s)\";
       "
@@ -1719,62 +1688,29 @@ services:
     user: "0"
     environment:
       <<: *nodered-auth-env
-      # LEGACY FALLBACK ONLY. This was the credential of the single-device simulator, whose gateway
-      # row migration 0020 deletes -- so nothing the shipped flow publishes uses it any more. It is
-      # still passed because node-red-init applies it to a `mqtt-broker-config` node, which exists
-      # only on a Node-RED volume created before the flow was consolidated. Every broker node in
-      # the current flow names its own pair through `acsCredentialsEnv`; see below.
-      MQTT_USER: ${MQTT_SIMULATOR_USER:-gwy100000000000400080000}
-      MQTT_PASSWORD: ${MQTT_SIMULATOR_PASSWORD}
       # ---------------------------------------------------------------------------------------
-      # ONE CREDENTIAL PAIR PER CELL GATEWAY, because mosquitto.acl pins the topic's edge-node
-      # segment to the connecting username -- four cells cannot share a connection.
+      # NO FLOW IS SEEDED, AND NO BROKER CREDENTIAL IS PASSED. The editor opens empty.
       #
-      # Each broker node in node_red_flow.json names its pair in `acsCredentialsEnv`, and
-      # node-red-init fails closed when a declared pair is absent rather than seeding an empty
-      # username (which the broker refuses with CONNACK 5 while Node-RED reports only
-      # "Connection failed to broker").
+      # This container used to seed a demonstrator flow declaring four `mqtt-broker` nodes, and a
+      # broker node is what makes a broker CREDENTIAL mandatory -- node-red-init fails closed when
+      # a declared pair is absent. Four mandatory pairs for four gateways nobody had created is
+      # what forced `npm run setup` to mint passwords eagerly, which setup.mjs called a deadlock.
+      # No seeded flow means no broker nodes, no credential requirement, and no accounts in the
+      # broker for rows nobody created.
       #
-      # THE PASSWORDS ARE EMPTY UNTIL SOMEBODY PROVISIONS, which is a reversal. `npm run setup` used
-      # to mint them because this container blocked the very stack provisioning needs -- a genuine
-      # deadlock, created by seeding a flow with four broker nodes onto a stack with no gateways.
-      # With the simulator opt-in there are no broker nodes by default, so there is no credential to
-      # require and no account for mosquitto-init to create.
-      #
-      #   npm run provision:gateways -- --env-out=.env.gateways
-      #
-      # Then fold that file into .env, or mosquitto-init puts the old password back on the next
-      # start: .env is authoritative for these accounts, exactly as values are on Kubernetes.
-      #
-      # THE USERNAMES DEFAULT TO THE PROVISIONED sparkplug_ids rather than to empty. An empty
-      # username is the failure this whole block exists to prevent, so it is not the fallback --
-      # and these are deterministic, because provisioning pins the UUIDs they derive from.
+      # A USER BUILDING A FLOW MINTS ITS CREDENTIAL FROM THE DASHBOARD -- Gateways tab, Generate
+      # broker credential -- and sets the pair here as the `acsCredentialsEnv` names their broker
+      # node declares. node-red-init reconciles env pairs onto broker nodes at init; see
+      # tutorial/README.md, which walks the whole path.
       # ---------------------------------------------------------------------------------------
-      MQTT_GW_CNC_MACHINING_USER: ${MQTT_GW_CNC_MACHINING_USER:-gwy120000000000400080000}
-      MQTT_GW_CNC_MACHINING_PASSWORD: ${MQTT_GW_CNC_MACHINING_PASSWORD:-}
-      MQTT_GW_ROBOTIC_ASSEMBLY_USER: ${MQTT_GW_ROBOTIC_ASSEMBLY_USER:-gwy130000000000400080000}
-      MQTT_GW_ROBOTIC_ASSEMBLY_PASSWORD: ${MQTT_GW_ROBOTIC_ASSEMBLY_PASSWORD:-}
-      MQTT_GW_AGV_FLEET_USER: ${MQTT_GW_AGV_FLEET_USER:-gwy140000000000400080000}
-      MQTT_GW_AGV_FLEET_PASSWORD: ${MQTT_GW_AGV_FLEET_PASSWORD:-}
-      MQTT_GW_FACILITY_BMS_USER: ${MQTT_GW_FACILITY_BMS_USER:-gwy150000000000400080000}
-      MQTT_GW_FACILITY_BMS_PASSWORD: ${MQTT_GW_FACILITY_BMS_PASSWORD:-}
-      # Seeding is first-run only, so editor changes survive `docker compose up`.
-      # Set to true for a deliberate reset back to the repo's flow.
-      NODE_RED_FORCE_SEED: ${NODE_RED_FORCE_SEED:-false}
-      # THE SIMULATOR IS OPT-IN. Unset, node-red-init seeds a one-node "Start here"
-      # flow that declares no broker nodes and connects to nothing, so a fresh stack generates no
-      # assets and publishes nothing. `npm run stack:reset` sets this; so does anyone who wants the
-      # demonstration shopfloor, alongside NODE_RED_FORCE_SEED=true if the volume already exists --
-      # the flow is user content and is seeded first-run-only.
-      NODE_RED_SEED_SIMULATOR: ${NODE_RED_SEED_SIMULATOR:-false}
       # ---------------------------------------------------------------------------------------
-      # THE SIMULATED GATEWAYS' TRANSPORT, and until now the one MQTT client on this target that
-      # the TLS switch did not reach.
+      # THE MQTT TRANSPORT for any broker node a user adds, and until recently the one MQTT client
+      # on this target that the TLS switch did not reach.
       #
       # node-red-init.mjs has always known how to do this -- it reconciles every `mqtt-broker`
       # node onto TLS, attaches the CA, and fails closed when the file is missing. It simply never
       # received the variables here, so `MQTT_TLS_ENABLED=true` moved the ingestion daemon and the
-      # i3X server onto 8883 and left the simulated gateways publishing in clear on 1883 --
+      # i3X server onto 8883 and left Node-RED's broker nodes publishing in clear on 1883 --
       # silently, because nothing was configured wrongly, the switch just did not arrive.
       #
       # The chart has covered all three since the option existed
@@ -1786,7 +1722,6 @@ services:
       MQTT_TLS_CA_FILE: ${MQTT_TLS_CA_FILE:-}
     volumes:
       - nodered_data:/data
-      - ./simulation/node_red_flow.json:/seed/flows.json:ro
       # READ-ONLY, AND FOR ca.crt ALONE. mosquitto-tls-init leaves ca.crt world-readable and
       # ca.key root-owned at 0600, so a container that does not run as root can read the root of
       # trust and not the key that signs with it -- the same property the gateway-credential
@@ -2015,12 +1950,10 @@ services:
           echo 'SUPABASE_ANON_KEY must be set -- it is what gets the alert webhook past Kong key-auth. Run: node scripts/setup.mjs' >&2
           exit 1
         fi
-        # GLOBBED ON THE SUFFIX, not named outright. `shopfloor-alert-rules.yaml` is the
-        # demonstrator's three machine rules. They live in simulation/ and are NOT provisioned
-        # by default -- a reader enables them by copying the file in here. Copying
-        # by explicit name would have silently ignored it, and the symptom would be an alert rule
-        # that is present in the repository, present in the provisioning directory, and absent
-        # from Grafana.
+        # GLOBBED ON THE SUFFIX so a rules file added to grafana/provisioning/alerting/ is picked
+        # up without editing this line. The symptom of naming files outright is an alert rule that
+        # is present in the repository, present in the provisioning directory, and absent from
+        # Grafana.
         cp /tmp/alerting-template/policies.yaml /tmp/alerting-template/*alert-rules.yaml \
            /etc/grafana/provisioning/alerting/
         sed -e "s|__GRAFANA_ALERT_WEBHOOK_SECRET__|$$GRAFANA_ALERT_WEBHOOK_SECRET|g" \

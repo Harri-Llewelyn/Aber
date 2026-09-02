@@ -62,7 +62,7 @@ const gateway = {
 /**
  * The device carries its schema through `submodel_schema_ids` and NOT through `schema_id`.
  *
- * That is the shape migration 0022 produces for every device on the demo floor, and it is the exact
+ * That is the shape the retired class-schema migration produced for every device on the demo floor, and the exact
  * shape the drawer used to render as "Not set" -- so the fixture is chosen to be the broken case
  * rather than the convenient one.
  */
@@ -187,7 +187,7 @@ describe('the device drawer resolves a schema by either route', () => {
 
   it('finds a schema attached through device_submodels, not only through schema_id', async () => {
     // The fixture carries schema_id: null and submodel_schema_ids: ['sch-machining'] -- the shape
-    // migration 0022 produces. The field read `selectedDevice.schema_id` alone and rendered
+    // the retired class-schema migration produced. The field read `selectedDevice.schema_id` alone and rendered
     // "Not set" for every device on the demo floor, while the table beside it listed the schema's
     // tags from the same row. Two views of one device disagreeing.
     renderDevices()

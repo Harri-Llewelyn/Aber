@@ -605,7 +605,7 @@ direction. Three permissions moved:
 | :--- | :--- | :--- |
 | `authz:manage` | who has access | **nowhere yet** — see below |
 | `schema:manage` | what contract ingestion validates against | the write policies on `schemas`, `metric_catalog` and `metric_groups` |
-| `gitops:manage` | what gets deployed to the edge | `ALLOWED_ROLES` in [`deploy-nodered`](functions/deploy-nodered/index.ts) **and** `PERMISSION_MAP` in [`nodered-userinfo`](functions/nodered-userinfo/index.ts) |
+| `gitops:manage` | what gets deployed to the edge | `PERMISSION_MAP` in [`nodered-userinfo`](functions/nodered-userinfo/index.ts) |
 
 A manager keeps devices, cells, gateways, links, quarantine approval, telemetry, archives and the
 digital thread, and goes on **reading** every table above: publishing a schema is a platform act,
@@ -620,12 +620,16 @@ policies moved in the same migration as the grant, and
 [`test_role_permission_split.py`](migrations/test_role_permission_split.py) presents a real manager
 session to each of the three tables rather than asserting the grant table twice.
 
-**`gitops:manage` needed two doors closed, not one.** The Directory page's Sync button goes through
-`deploy-nodered`; the Node-RED editor deploys directly, and `nodered-userinfo` is what tells
-Node-RED which permission tier a session gets. Narrowing only the first would have produced a
-manager who cannot press the button and can still deploy — worse than leaving both open, because it
-reads as a control. A manager keeps `read` there: the editor still opens and the running flow is
-still inspectable, which is most of what that page is for when the shopfloor is misbehaving.
+**`gitops:manage` needed two doors closed, not one — and there is only one door now.** The Directory
+page's Sync button went through `deploy-nodered`, which pushed the flow committed to the repository;
+the Node-RED editor deploys directly, and `nodered-userinfo` is what tells Node-RED which permission
+tier a session gets. Narrowing only the first would have produced a manager who cannot press the
+button and can still deploy — worse than leaving both open, because it reads as a control.
+
+**`deploy-nodered` has since been retired with the demonstrator**, because the flow it deployed was
+the demonstrator's and a blank install commits none. So `nodered-userinfo` is now the sole enforcement
+point for this permission. A manager keeps `read` there: the editor still opens and the running flow
+is still inspectable, which is most of what that page is for when the shopfloor is misbehaving.
 
 **`authz:manage` gates nothing today, and that is the point of doing this first.** `user_roles` and
 `role_permissions` carry a SELECT policy each and no other, so **no authenticated caller —
@@ -636,9 +640,10 @@ first role-assignment surface is where `authz:manage` starts meaning something, 
 into a schema where the two roles already differ rather than one where they do not.
 
 **It is a breaking change** for a deployment where a `Shopfloor_Manager` publishes schemas or
-deploys flows. The repair is to make that person an `Administrator`. Roadmap §21 and §22 both
-depend on this split — §21's MFA reset is gated on `authz:manage`, and §22's security lane would
-otherwise be hidden from a role that could grant itself the ability to see it.
+deploys flows. The repair is to make that person an `Administrator`. Roadmap §5 (multi-factor
+authentication) and the audit-domain work both depended on this split — the MFA reset is gated on
+`authz:manage`, and the security lane would otherwise have been hidden from a role that could grant
+itself the ability to see it. The second of those shipped as `0070`.
 
 ### The anon sweep runs after the functions exist (`0009`, `0071`)
 
@@ -1258,7 +1263,9 @@ further work. The round trip closes rather than being one-way.
 row"* (`0025`, provisioning), *"this connector runs on the app host"* (`GatewaysTab.jsx`), and
 *"(Cloud / Server-Simulated)"* (the checkbox, which contradicts the second) — while **every**
 behaviour branching on it is about a fourth thing: whether there is a machine out on the plant
-network. Roadmap §15 makes that argument; the bill arrived separately, as
+network. That was a roadmap item, retired into
+[`deployment`, and the word it is replacing](#deployment-and-the-word-it-is-replacing-0064) below;
+the bill arrived separately, as
 `gateway_holds_a_credential()` being the wrong predicate three times in `0056`, `0062` and `0063`.
 
 `0064` adds **`deployment`** (`'host'` | `'remote'`), the axis the code actually uses, plus the
@@ -1321,7 +1328,7 @@ account, publish, `DELETE` the row, and it went on publishing — with nothing q
 there so revocation cannot CREATE an account by rotating one that never existed, and by that
 definition a simulator gateway holds nothing."* Revocation goes through an **add-only** credential
 service, so asking it to rotate an account that does not exist provisions one. What was wrong is the
-second half — a simulator gateway holds exactly what `provision-gateways.mjs` issued it.
+second half — a simulator gateway holds exactly what was minted for it on the host.
 
 So `0063` swaps both the trigger and the pg_cron sweep onto `gateway_has_broker_credential()`, which
 admits a virtual gateway **only when a `CREDENTIAL_ISSUED` row exists**. That closes the leak and
@@ -1331,9 +1338,10 @@ leak for one junk account per gateway ever deleted.
 
 **Two things SQL cannot reach, and both are on the host:**
 
-- **Credentials issued before `0062`** have no record, so the predicate skips them. A re-run of
-  `npm run provision:gateways` backfills one for any gateway whose broker account exists — recorded
-  as a claim by `scripts/provision-gateways.mjs (backfill)`, because nobody witnessed that mint.
+- **Credentials issued before `0062`** have no record, so the predicate skips them. The backfill
+  that recorded them belonged to `provision-gateways.mjs`, which is retired with the demonstrator;
+  a gateway in this state is re-recorded by minting it a fresh credential through the dashboard,
+  which is an act with a person behind it and needs no claim on anyone's behalf.
 - **Accounts whose gateway row is gone** cannot fire a trigger at all.
   `scripts/revoke-orphaned-broker-accounts.mjs` reads the password file, subtracts every gateway row
   (archived included — those belong to the trigger and the sweep), and rotates what is left through
@@ -1473,10 +1481,9 @@ All fail closed: missing or unrecognised role ⇒ `403`.
 | Function | Roles | Notes |
 | :--- | :--- | :--- |
 | [`approve-quarantine`](functions/approve-quarantine) | `Administrator`, `Shopfloor_Manager` | Calls the atomic approval RPC |
-| [`deploy-nodered`](functions/deploy-nodered) | `Administrator` | Deploys **only** the committed flow. `gitops:manage` is Administrator-only (`0069`), and this is the only place it is enforced |
 | [`aas-export`](functions/aas-export) | + `Operator`, `Auditor` | Export is a read |
 | [`grafana-userinfo`](functions/grafana-userinfo) | any mapped role | OIDC userinfo for Grafana SSO |
-| [`nodered-userinfo`](functions/nodered-userinfo) | any mapped role | The same lookup in Node-RED's permission vocabulary. Only `Administrator` maps to `*`; the editor is the second door onto `gitops:manage` and narrowed with `deploy-nodered` |
+| [`nodered-userinfo`](functions/nodered-userinfo) | any mapped role | The same lookup in Node-RED's permission vocabulary. Only `Administrator` maps to `*`; since `deploy-nodered` was retired this is the sole enforcement point for `gitops:manage` |
 | [`fplus-directory`](functions/fplus-directory) | any authenticated user | Factory+ Directory adapter — see below |
 | [`grafana-alert-webhook`](functions/grafana-alert-webhook) | **no Supabase role at all** | Records a Grafana alert in `platform_alerts` — see below |
 
@@ -1723,8 +1730,8 @@ whole routing and authentication surface against a reviewed inventory — which 
 routes they carry, which are gated, and which are open under which exemption. It exists because
 `validate.py` asserts the 401s that *should* happen and **nothing can assert the absence of a route
 nobody wrote**: a route added here and gated nowhere fails no test that probes. It was written
-against the surface rather than against Kong, so it is also the specification a move to Envoy
-(roadmap §5) has to satisfy.
+against the surface rather than against Kong, so it is also the specification the move to Envoy
+([`docs/gateway-migration.md`](../docs/gateway-migration.md)) had to satisfy.
 
 > This table said **two** routes until that check was written, and had done since the userinfo and
 > Directory exemptions were added. Every one of the four was argued for carefully in the
@@ -2047,7 +2054,6 @@ Every vocabulary must satisfy all nine, and CI checks five of them:
 python supabase/migrations/test_user_roles_rls.py
 python supabase/migrations/test_schema_versioning.py
 python supabase/functions/approve-quarantine/test_approve_quarantine.py
-python supabase/functions/deploy-nodered/test_deploy_nodered.py
 python supabase/functions/aas-export/test_aas_export.py
 ```
 

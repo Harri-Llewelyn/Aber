@@ -1,6 +1,6 @@
 # Gateway migration: Kong → Envoy
 
-Roadmap §4. This document is the protocol for proving the two gateways are equivalent, and the plan
+This document is the protocol for proving the two gateways are equivalent, and the plan
 for promoting Envoy once they are.
 
 **Status.** Compose is **migrated** — Envoy publishes 54321 and Kong is retired there. The Helm half
@@ -13,8 +13,9 @@ authenticated probe has nothing to reach. Kubernetes still defaults to Kong. See
 and — the part that turns a preference into a deadline — the **new `sb_publishable_*` /
 `sb_secret_*` API keys are a gateway feature**. They are not JWTs, and no component downstream ever
 sees one: the gateway matches the key as a string and synthesises the `Authorization: Bearer <JWT>`
-the upstreams require. Upstream ships that translation in Envoy only. So roadmap §5's key migration,
-whose end date is set by someone else, runs through this work.
+the upstreams require. Upstream ships that translation in Envoy only. So roadmap §1's key migration,
+whose end date is set by someone else, runs through this work -- and since this work is done, that
+item is unblocked on both targets.
 
 ---
 
@@ -257,7 +258,7 @@ without a LoadBalancer provider. `kubectl patch svc mosquitto-external -n acs -p
 | `docs/kubernetes-architecture.md` | §7 (Ingress) and §3 reference Kong by name |
 | `README.md` | the image-tag table pins `kong:3.9.3` — `check-docs-drift.mjs` asserts it against `docker-compose.yml` and will fail until both change |
 | `scripts/check-gateway-surface.mjs` | the **static** mode parses `kong.yml`'s indentation and becomes meaningless. Retire it and keep `--runtime`; the inventory (`EXPECTED`) is the specification and stays |
-| `README.md` roadmap §4 | done — the item is retired and 4 added to `RETIRED` in `check-docs-drift.mjs`. **Not renumbered:** the roadmap lists only what is not built, gaps are the record of what shipped, and §4 is cited from more code than any other retired number. The fifth-exemption question below survives the retirement and is recorded in `envoy.yaml` |
+| the roadmap entry | done — retired. It has since moved to [`docs/roadmap.md`](roadmap.md), which was renumbered 1-12 on 2026-09-02 once the numbers stopped being cited from code; the gapped scheme this row described is gone. The fifth-exemption question below survives the retirement and is recorded in `envoy.yaml` |
 
 ### 2.4 The open decision this does not settle
 

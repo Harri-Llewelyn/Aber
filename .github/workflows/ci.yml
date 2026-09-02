@@ -1459,7 +1459,6 @@ jobs:
           SUPABASE_DB_PASSWORD: postgres
         run: |
           python supabase/functions/approve-quarantine/test_approve_quarantine.py
-          python supabase/functions/deploy-nodered/test_deploy_nodered.py
           # Node-RED's authorization: an unmapped or revoked role must yield NO `permissions`
           # key, because settings.js keys its refusal on the key's absence.
           python supabase/functions/nodered-userinfo/test_nodered_userinfo.py
@@ -1613,8 +1612,11 @@ jobs:
       #   consumer holds ACTIVE forever. `seq` is the only evidence, which is why a gap requests
       #   a rebirth rather than merely logging.
       #
-      # The edge half runs in frontend-build (nodeRedRbe.test.js): nothing else in this repository
-      # imports node_red_flow.json's function nodes, so nothing else can notice them regressing.
+      # THE EDGE HALF NO LONGER HAS A SUBJECT. It ran in frontend-build as nodeRedRbe.test.js,
+      # evaluating the demonstrator flow's function bodies because nothing else imported them. The
+      # flow was retired with the demonstrator and the suite went with it; what is tested here is
+      # the DAEMON's side of report-by-exception, which is the half that has to keep working
+      # whatever an edge node publishes.
       - name: Run Report-by-Exception Telemetry Tests
         run: |
           python ingestion/test_rbe_telemetry.py
@@ -1748,8 +1750,8 @@ jobs:
           V: ${{ steps.appversion.outputs.version }}
         run: |
           set -eu
-          # Context is the REPOSITORY ROOT for these two: simulation/node_red_flow.json and sparkplug_b.proto
-          # both live there.
+          # Context is the REPOSITORY ROOT for these two: templates/physical-gateway and
+          # sparkplug_b.proto both live there.
           docker build -f supabase/functions/Dockerfile -t "$IMG_NS/edge-runtime:$V" .
           docker build -f Dockerfile                    -t "$IMG_NS/ingestion:$V" .
           docker build -f node-red/Dockerfile           -t "$IMG_NS/node-red:$V" node-red

@@ -197,7 +197,7 @@ Re-issue when:
 The **Re-issue Bundle** action is deliberately absent once a gateway is `ONLINE`: re-issuing then
 would invalidate the credential a working appliance is using, which is destructive dressed up as a
 convenience. To rotate a live gateway's credential, use
-`npm run provision:gateways -- --rotate` or re-enrol on purpose.
+`node scripts/mosquitto-provision-gateway.mjs <sparkplug_id>` or re-enrol on purpose.
 
 ### A refused enrolment cannot tell you why
 

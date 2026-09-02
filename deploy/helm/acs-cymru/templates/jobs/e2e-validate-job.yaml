@@ -156,6 +156,36 @@ spec:
         {{- if .Values.i3xService.enabled }}
         {{- include "acs-cymru.waitFor" (dict "ctx" . "name" "wait-for-i3x" "image" "curlimages/curl:8.10.1" "command" "curl -sf -o /dev/null http://i3x-service:8090/v1/info" "describe" "i3x-service (checks 12-12f read its address space)") | nindent 8 }}
         {{- end }}
+        {{/*
+          AND THE INGESTION DAEMON LAST, ON ITS OWN METRIC RATHER THAN ON ITS POD.
+
+          THIS IS THE ONE THAT WAS MISSING, and CI run 33606772340 on `main` is what it cost:
+          twelve checks failed at once -- quarantine, birth parameters, birth-metric observation,
+          unmodelled detection, telemetry, rename safety, label propagation, every alias check and
+          the rebirth NCMD -- while i3X, the Directory, Node-RED and the Digital Thread all passed.
+          That split is the signature: everything that needed the daemon to have CONSUMED something
+          failed, and everything that read the database directly passed. The daemon's log told the
+          rest -- it logged `Subscribed to 'spBv1.0/#'` at 08:13:48, and validate.py had published
+          its entire scenario between 08:10:55 and then. Sparkplug fixtures go out at QoS 0, so
+          those messages were not queued for a late subscriber; they were simply gone.
+
+          The daemon is held behind its own wait on the telemetry hypertable, so on a slow node it
+          reaches the broker minutes after this Job is created. Nothing ordered the two.
+
+          THE CI WORKFLOW'S OWN "WAIT FOR THE INGESTION DAEMON TO BE CONSUMING" STEP DOES NOT COVER
+          THIS, for the reason the block above already gives about Node-RED and i3X: this is a plain
+          Job created at install time, so a workflow step runs CONCURRENTLY with it. On that run the
+          step passed at 08:13:51, five seconds after the suite had already failed and reported.
+
+          `acs_ingestion_mqtt_connected`, NOT `acs_ingestion_up`. `up` says the process is alive,
+          which it is throughout the failure; the subscription is the thing being waited on. Read
+          from the headless metrics Service, which sets `publishNotReadyAddresses` precisely so an
+          unhealthy daemon can still be scraped -- exactly the state this probe has to observe
+          rather than be hidden from.
+        */}}
+        {{- if .Values.ingestion.enabled }}
+        {{- include "acs-cymru.waitFor" (dict "ctx" . "name" "wait-for-ingestion" "command" "wget -q -O - http://ingestion-metrics:9108/metrics 2>/dev/null | grep -q '^acs_ingestion_mqtt_connected 1'" "describe" "the ingestion daemon to be subscribed to spBv1.0/# (every check that asserts on consumed telemetry)") | nindent 8 }}
+        {{- end }}
       containers:
         - name: validate
           # The test-runner image: the ingestion image plus jsonschema and the AAS suite. Built from
