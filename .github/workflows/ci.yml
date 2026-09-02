@@ -624,23 +624,32 @@ jobs:
               -f "$DEV" --set autoscaling.enabled=true --set "autoscaling.components[0]=$c"
           done
 
+          # PERMITTED BUT NOT DEPLOYED IS ALSO A REFUSAL, and it is the newest of them. Roadmap §4
+          # turned supabaseKong.enabled off, and the allow-list still names `supabase-kong` so a
+          # side-by-side migration can scale either gateway. Before this guard that combination
+          # rendered NO HPA AND NO ERROR -- issue #31's symptom through a third door -- and
+          # values-prod.yaml.example was carrying it: a gateway pinned at one replica where the
+          # file asked for two to six.
+          expect_failure "autoscaling a permitted but disabled component" "workload is DISABLED" \
+            -f "$DEV" --set autoscaling.enabled=true --set autoscaling.components[0]=supabase-kong
+
           # THE ALLOW-LIST MUST STILL LET THE FOUR THROUGH, asserted here because every case above
           # is a refusal -- a guard that refused EVERYTHING would satisfy all of them and break the
           # feature completely. Rendered in one go, expecting exactly four HPAs.
           HPAS=$(helm template acs-cymru deploy/helm/acs-cymru -f "$DEV" \
                    --set autoscaling.enabled=true \
                    --set autoscaling.components[0]=supabase-rest \
-                   --set autoscaling.components[1]=supabase-kong \
+                   --set autoscaling.components[1]=supabase-envoy \
                    --set autoscaling.components[2]=supabase-functions \
                    --set autoscaling.components[3]=frontend \
                  | grep -c '^kind: HorizontalPodAutoscaler' || true)
           if [ "$HPAS" != "4" ]; then
-            echo "::error::expected 4 HorizontalPodAutoscalers for the four permitted components,"
+            echo "::error::expected 4 HorizontalPodAutoscalers for the four deployed components,"
             echo "::error::rendered $HPAS. The allow-list added in issue #31 refuses anything it"
             echo "::error::does not name, so an over-tight list breaks autoscaling outright."
             exit 1
           fi
-          echo "  ok: the four permitted components render an HPA each"
+          echo "  ok: the four deployed components render an HPA each"
 
           # A nightly backup that writes nowhere is worse than none, because it looks like one.
           expect_failure "backup to s3 with no bucket" "backup.s3.bucket is empty" \
