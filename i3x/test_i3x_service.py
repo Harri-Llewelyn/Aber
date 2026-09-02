@@ -746,7 +746,7 @@ if __name__ == "__main__":
 
 class TestAddressSpaceCache(unittest.TestCase):
     """
-    The short-TTL address-space cache (roadmap item 4).
+    The short-TTL address-space cache.
 
     THE ONLY TEST HERE THAT IS ABOUT SECURITY RATHER THAN SPEED is
     `test_two_tokens_never_share_an_entry`, and it is the reason the others exist at all. The

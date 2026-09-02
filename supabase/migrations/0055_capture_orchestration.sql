@@ -13,7 +13,7 @@
 -- appends to a buffer while a job is active and the topic matches. A separate capture service would
 -- need its own broker account AND would split the `seq` stream: `_last_seq` is keyed
 -- `(group, edge_node)`, so a second subscriber makes the daemon's own gap detection fire
--- permanently. That is roadmap item 1's `$share` finding arriving from the other direction, and it
+-- permanently. Shared subscriptions do not help here, for the same reason from the other side, and it
 -- is why "a capture daemon principal with read-only access to the topic tree" is a principal this
 -- design does not create.
 --
@@ -23,7 +23,7 @@
 -- `capture_jobs` records an ACT that happened once: who asked, when it started, how far it got, why
 -- it failed. `captures` records the ARTIFACT that exists now. They are separate because a capture
 -- UPLOADED THROUGH THE BROWSER NEVER HAD A JOB -- there is no act to point at -- and because
--- roadmap item 17's playback half needs `playback_jobs.capture_id` to reference something that both
+-- the playback half needs `playback_jobs.capture_id` to reference something that both
 -- paths produce. Folding the artifact into the job row would leave two ways to name a capture, a
 -- job id for recorded ones and a storage path for uploaded ones, which is the kind of split that
 -- ends up handled in four places and wrongly in one.
@@ -233,7 +233,7 @@ ALTER TABLE public.capture_jobs ADD CONSTRAINT capture_jobs_caps_are_bounded
 -- interface. An index over a constant expression is how Postgres spells "at most one row matching
 -- this predicate".
 --
--- PENDING IS INSIDE THE PREDICATE AS WELL AS RECORDING, which the roadmap entry did not say. A job
+-- PENDING IS INSIDE THE PREDICATE AS WELL AS RECORDING, which is easy to miss. A job
 -- the daemon has not claimed yet still occupies the single card, and leaving it out would let two
 -- tabs queue two jobs that then run one after the other -- which is concurrency arriving by the
 -- back door, a second later.

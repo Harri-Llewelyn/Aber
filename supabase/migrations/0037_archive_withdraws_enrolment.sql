@@ -194,7 +194,7 @@ REVOKE ALL ON FUNCTION public.consume_gateway_enrollment_token(text) FROM PUBLIC
 -- `trg_gateways_digital_thread`, and `digital_thread` is append-only to every application role and
 -- cannot be pruned. Committed, this self-check appended a handful of rows to the audit trail ON
 -- EVERY BOOT -- which is the failure class this repository names twice elsewhere: 0005's heartbeat
--- problem, and roadmap item 17's warning against "a row per progress tick into an append-only table
+-- problem, and the warning against "a row per progress tick into an append-only table
 -- no application role can prune".
 --
 -- Measured before the fix: replaying 0037 and 0038 once added 9 rows, and `migration` had become

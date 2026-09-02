@@ -512,8 +512,8 @@ export function AccessControlTab({ showToast }) {
                           {tokenStatusLabel(status)}
                         </span>
                       </td>
-                      {/* THE COMMAND, NOT A BUTTON. Minting stays on the host deliberately (roadmap
-                          §13): these tokens cannot be revoked, so issuing one should cost more than
+                      {/* THE COMMAND, NOT A BUTTON. Minting stays on the host deliberately:
+                          these tokens cannot be revoked, so issuing one should cost more than
                           a click. What the page can do is remove the part that is error-prone --
                           transcribing a UUID -- so the whole line is copyable.
 

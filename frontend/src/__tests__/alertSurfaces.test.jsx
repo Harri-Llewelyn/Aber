@@ -159,11 +159,10 @@ describe('grafanaAlertUrl', () => {
    * escaping would otherwise produce a link that silently matched nothing.
    */
   /*
-   * BOTH RULE FILES, and reading only the provisioned one is what broke this. Roadmap §14 moved the
-   * three MACHINE rules into `simulation/grafana/alerting/shopfloor-alert-rules.yaml` -- they
-   * evaluate machine telemetry at a demonstrator's 10-second interval, so they are opt-in with the
-   * rest of the simulator -- and these three titles are exactly those rules. The assertion went on
-   * naming a file they had left.
+   * BOTH RULE FILES, and reading only the provisioned one is what broke this. The three MACHINE
+   * rules live in `simulation/grafana/alerting/shopfloor-alert-rules.yaml` -- they evaluate machine
+   * telemetry at a demonstrator's 10-second interval, so they are opt-in with the rest of the
+   * simulator -- and these three titles are exactly those rules. Reading one file misses them.
    *
    * IT IS THE SAME MISS AS check-docs-drift's metric-name check, which had to learn the same thing
    * in the same commit. Two guards over one pair of files, and only one of them was updated.

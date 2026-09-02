@@ -370,8 +370,8 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 6
   targetCPUUtilizationPercentage: 70
-  # `supabase-envoy`, not `supabase-kong`: the gateway changed at roadmap §4 and the Deployment
-  # name changed with it, even though the Service did not. Naming a disabled workload here is now
+  # `supabase-envoy`, not `supabase-kong`: the gateway Deployment carries the Envoy name
+  # even though the Service does not. Naming a disabled workload here is now
   # refused by hpas.yaml rather than rendering nothing -- which is how this line was caught.
   components: [supabase-rest, supabase-envoy, supabase-functions, frontend]
 

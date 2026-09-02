@@ -265,7 +265,7 @@ describe('GatewaysTab filters', () => {
   })
 
   it('separates gateways by the type the column reports', async () => {
-    // The filter asked "physical or virtual" until roadmap 15, and `virtual` meant three things at
+    // The filter asked "physical or virtual" once, and `virtual` meant three things at
     // once. It then asked where the connector RUNS -- better, but still not the question the Type
     // column answers: a simulated gateway is host-run, so "On this host" returned it alongside the
     // real connectors and no option separated them. It filters on the derived type now, through

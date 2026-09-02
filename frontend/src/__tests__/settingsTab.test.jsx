@@ -1,5 +1,5 @@
 /**
- * The Settings page (roadmap item 7).
+ * The Settings page.
  *
  * WHAT THESE TESTS ARE ACTUALLY FOR. "An admin can type in a box and click Save" is the easy half
  * and only one test below covers it. The rest defend three things that are easy to break and whose

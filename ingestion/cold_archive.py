@@ -2,7 +2,7 @@
 """
 Cold telemetry archival — export a chunk, verify it, and only then let it be dropped.
 
-Roadmap item 3. Run on demand or from a scheduler:
+Run on demand or from a scheduler:
 
     python -m cold_archive --dry-run     # what would be exported, and nothing else
     python -m cold_archive               # export, verify, record; drop nothing

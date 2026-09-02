@@ -2394,7 +2394,7 @@ ON CONFLICT (schema_name) DO NOTHING;
 -- -------------------------------------------------------------------------------------------
 -- NO ASSETS ARE SEEDED. A fresh install comes up with an empty shopfloor, and the demonstration
 -- floor -- four cells, four `Sim_Gateway_*` gateways, six `Sim_*` devices -- is something a
--- reader ASKS for by running `npm run provision:gateways`. See roadmap §14 and
+-- reader ASKS for by running `npm run provision:gateways`. See
 -- `0040_retire_demonstration_seed.sql`, which removes the rows this block used to write from
 -- databases that already have them; deleting the statements here alone would have built a fresh
 -- database correctly and left every existing one seeded with nothing to explain where from.

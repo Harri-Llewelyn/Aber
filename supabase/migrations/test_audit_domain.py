@@ -131,7 +131,7 @@ class TheClassifier(AuditDomainFixture):
         """
         THE RULE IS AUTHORITY, NOT SUBJECT MATTER, and this is the case that separates them.
 
-        README §22 named CREDENTIAL_ISSUED as a row a Shopfloor_Manager should not read. But 0041
+        CREDENTIAL_ISSUED reads like a row a Shopfloor_Manager should not read. But 0041
         admits a Shopfloor_Manager to issue_virtual_gateway_credential(), so filing it as security
         would mean a Manager mints a broker credential and the record of their own act disappears.
         An empty lane is only honest when the rows in it belong to somebody else.

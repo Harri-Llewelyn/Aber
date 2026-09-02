@@ -1096,7 +1096,7 @@ describe('the playback card', () => {
   })
 
   /**
-   * DROP, STORE, PUBLISH -- the loop item 17 §6 invites by keeping the format hand-editable.
+   * DROP, STORE, PUBLISH -- the loop a hand-editable capture format invites.
    * The subject is GUESSED from the identities in the file and offered, never filed silently.
    */
   it('guesses the subject from the file and goes on to the playback dialog', async () => {

@@ -127,7 +127,7 @@ spec:
             - name: DB_NAME
               value: {{ .Values.timescaledb.database | quote }}
             {{- /*
-              ROADMAP ITEM 18 -- WHICH ROLE THIS DAEMON HOLDS ON THE HISTORIAN.
+              WHICH ROLE THIS DAEMON HOLDS ON THE HISTORIAN.
 
               It connected as the admin user, which is superuser there: the process most exposed to
               the plant network could DROP the hypertable and rewrite any observation, while the
@@ -160,8 +160,8 @@ spec:
             */}}
             {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_USER" "secretName" $secretName "key" "MQTT_INGESTION_USER") | nindent 12 }}
             {{- include "acs-cymru.secretEnv" (dict "name" "MQTT_PASSWORD" "secretName" $secretName "key" "MQTT_INGESTION_PASSWORD") | nindent 12 }}
-            # Through Kong, in-cluster. THE DAEMON IS NO LONGER A SERVICE-ROLE CLIENT (roadmap
-            # item 16): that key bypasses RLS entirely and sat in the process most exposed to the
+            # Through Kong, in-cluster. THE DAEMON IS NOT A SERVICE-ROLE CLIENT: that key
+            # bypasses RLS entirely and would sit in the process most exposed to the
             # plant network. It registers discovered devices, sets is_quarantined and stamps
             # gateway heartbeats through the SECURITY DEFINER gates in migration 0047, as the
             # Service_Ingestor principal seeded by 0046.

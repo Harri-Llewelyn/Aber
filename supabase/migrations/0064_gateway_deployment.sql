@@ -9,7 +9,7 @@
 -- WHY, IN ONE SENTENCE: `is_virtual` carries three incompatible definitions and every behaviour
 -- that branches on it is about a fourth thing.
 --
--- Roadmap §15 sets this out in full and the evidence has since arrived on its own:
+-- The evidence for that is spread across the schema:
 --
 --   * `0025` and provision-gateways.mjs read it as "no physical edge appliance behind this row".
 --   * `GatewaysTab.jsx` reads it as "this connector runs on the app host".
@@ -53,9 +53,8 @@
 -- ---------------------------------------------------------------------------------------------
 -- THE RENAME IS NOT IN THIS FILE, DELIBERATELY
 --
--- §15: "a rename smuggled in beside a feature is a rename nobody reviews". `is_virtual` still
--- exists, still means what it meant, and still has 126 references across 47 files -- the roadmap
--- prices it at 68 across 28, which was true when written and is corrected there in this change.
+-- A RENAME SMUGGLED IN BESIDE A FEATURE IS A RENAME NOBODY REVIEWS. `is_virtual` still exists,
+-- still means what it meant, and still has 126 references across 47 files.
 -- Retiring it is its own branch, and it needs this column to exist first.
 --
 -- UNTIL THEN THE TWO MUST NOT DRIFT, which is what `sync_gateway_deployment()` is for. It is
@@ -85,9 +84,9 @@ COMMENT ON COLUMN public.gateways.deployment IS
   'Where this gateway''s connector runs: ''host'' (inside this stack) or ''remote'' (an edge '
   'appliance on the plant network). This is the axis every behaviour branching on is_virtual was '
   'actually about -- bundles, flow backups, enrolment. Kept in step with is_virtual by '
-  'sync_gateway_deployment() until that column is retired (roadmap 15).';
+  'sync_gateway_deployment() until that column is retired.';
 
--- The backfill, and the mapping is the one §15 derives: `is_virtual` was already being used to mean
+-- The backfill, and the mapping follows from the definitions above: `is_virtual` was already used to mean
 -- "no appliance out there", which is `host`.
 UPDATE public.gateways
    SET deployment = CASE WHEN is_virtual THEN 'host' ELSE 'remote' END
@@ -106,7 +105,7 @@ ALTER TABLE public.gateways DROP CONSTRAINT IF EXISTS gateways_deployment_valid;
 ALTER TABLE public.gateways ADD  CONSTRAINT gateways_deployment_valid
   CHECK (deployment = ANY (ARRAY['host'::text, 'remote'::text]));
 
--- THE CROSS-COLUMN RULE §15 NAMES. A simulator is a process this stack runs; a "remote simulator"
+-- THE CROSS-COLUMN RULE. A simulator is a process this stack runs; a "remote simulator"
 -- would be a box on the plant network pretending to be a machine, which nothing here can provision,
 -- observe or reason about. Stated where a reader will find it, and relaxed in one line if it ever
 -- turns out to be wanted -- which is the whole argument for two columns rather than an enum.
@@ -171,7 +170,7 @@ END $$;
 
 COMMENT ON FUNCTION public.sync_gateway_deployment() IS
   'Keeps gateways.deployment and gateways.is_virtual in agreement while both exist. Transitional: '
-  'it goes when is_virtual does (roadmap 15). deployment wins when a caller names it; a caller '
+  'it goes when is_virtual does. deployment wins when a caller names it; a caller '
   'naming both and disagreeing is refused.';
 
 DROP TRIGGER IF EXISTS trg_gateways_sync_deployment ON public.gateways;
@@ -186,8 +185,8 @@ EXECUTE FUNCTION public.sync_gateway_deployment();
 -- ---------------------------------------------------------------------------------------------
 -- `public.gateway_status` is `SELECT g.*`, which PostgreSQL freezes at creation time: a column
 -- added afterwards is invisible through the view and NOTHING ERRORS. `check-docs-drift.mjs`
--- enforces this for every migration adding a `gateways` column, and §15 predicted this change would
--- have to satisfy it twice -- once here and once when `is_virtual` goes.
+-- enforces this for every migration adding a `gateways` column, and this change has to satisfy it
+-- twice -- once here and once when `is_virtual` goes.
 -- ---------------------------------------------------------------------------------------------
 SELECT public.ensure_gateway_status_view();
 

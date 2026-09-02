@@ -1,5 +1,5 @@
 /**
- * The cold telemetry catalogue, as the page needs it (roadmap item 3).
+ * The cold telemetry catalogue, as the page needs it.
  *
  * =================================================================================================
  * THE STATE IS DERIVED IN SQL, NOT HERE, and this file deliberately does not recompute it.

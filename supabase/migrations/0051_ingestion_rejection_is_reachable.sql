@@ -24,7 +24,7 @@
 --
 -- HOW IT WAS FOUND, since "nobody noticed" deserves an explanation. The live simulated fleet does
 -- not violate its own schemas, so the call site is never reached on an ordinary stack. It surfaced
--- while exercising broker capture and playback (roadmap item 11): replaying one machine class's
+-- while exercising broker capture and playback: replaying one machine class's
 -- metrics under another's identity produced the first real violations this deployment has seen,
 -- and the error appeared within two seconds.
 --

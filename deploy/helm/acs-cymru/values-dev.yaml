@@ -28,7 +28,7 @@ secrets:
   postgresPassword: postgres
   timescalePassword: postgres
 
-  # THE TWO HISTORIAN ROLES (roadmap item 18), required by `acs-cymru.validateSecrets` since
+  # THE TWO HISTORIAN ROLES, required by `acs-cymru.validateSecrets` since
   # 898bfb3. This fixture did not carry them, so `helm template -f values-dev.yaml` failed at
   # NOTES.txt for four days and nothing said so -- every CI run was failing at the billing gate
   # before it reached the step. Distinct values rather than one shared password: the whole point of

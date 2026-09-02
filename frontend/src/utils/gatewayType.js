@@ -4,9 +4,9 @@
  * =================================================================================================
  * ONE COLUMN, FOUR VALUES, AND THE SCHEMA STILL HOLDS TWO FACTS
  *
- * `gateways` carries `deployment` ('host' | 'remote') and `is_simulated`, deliberately separate --
- * roadmap 15's argument, kept in 0064: folding them into one enum welds two independent facts
- * together and makes a simulator on a separate load-generation box unrepresentable. What makes a
+ * `gateways` carries `deployment` ('host' | 'remote') and `is_simulated`, deliberately separate,
+ * as 0064 has it: folding them into one enum welds two independent facts together and makes a
+ * simulator on a separate load-generation box unrepresentable. What makes a
  * SINGLE control honest anyway is the cross-column CHECK beside them,
  * `CHECK (NOT is_simulated OR deployment = 'host')`, which leaves exactly three legal combinations.
  *

@@ -10,7 +10,7 @@
 # -------------------------------------------------------------------------------------------------
 # WHAT THIS IS FOR, AND WHAT IT IS NOT YET
 #
-# Roadmap §4. It runs BESIDE Kong on a second port so the two can be probed against each other --
+# It runs BESIDE Kong on a second port so the two can be probed against each other --
 # `check-gateway-surface.mjs --runtime` against 54321 and against 54331 must report the same
 # posture before Envoy becomes primary. It is not wired into `docker-compose.yml`; it arrives
 # through `docker-compose.envoy.yml`.

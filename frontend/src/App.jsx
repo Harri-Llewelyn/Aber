@@ -99,8 +99,8 @@ export const TABS = [
   { id: 'archives',       label: 'Archives',          icon: <IconArchive size={15} />, permission: PERMISSION_UUIDS.ARCHIVE_MANAGE },
   // NOT "Archives", WHICH IS THE TAB DIRECTLY ABOVE. That one means ENTITY archives -- archived
   // cells, gateways and devices, with a Restore button and an auto-purge timer. This is telemetry
-  // tiered to Parquet on object storage, with no restore and no timer. Roadmap item 3 asked for the
-  // collision to be settled before the page was built rather than by whoever got there second.
+  // tiered to Parquet on object storage, with no restore and no timer. The two share only the
+  // English word, and the labels keep them apart deliberately.
   //
   // THE SAME THREE ROLES `cold_storage_rows()` RETURNS ROWS TO, and the function checks them in its
   // own body rather than relying on this: the catalogue names object keys, and the bucket policy

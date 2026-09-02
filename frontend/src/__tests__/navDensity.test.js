@@ -11,7 +11,7 @@ import { navDensity, TABS } from '../App'
  * Asserting it through the DOM would have meant checking it only once that page shipped, which is
  * the moment it starts being relied on and the worst moment to find the threshold wrong.
  *
- * THE TWELFTH PAGE HAS NOW SHIPPED: broker capture (roadmap item 17), which the note below used to
+ * THE TWELFTH PAGE HAS NOW SHIPPED: broker capture, which the note below used to
  * name as the page that never arrived. The band is live for an Administrator, and writing the test
  * first paid off in the way it was meant to -- only the session with every tab reaches `tight`, so
  * a threshold that was one out would have been visible to the person least likely to report it.

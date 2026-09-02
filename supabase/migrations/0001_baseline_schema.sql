@@ -159,7 +159,7 @@ CREATE SCHEMA IF NOT EXISTS timescale;
 --
 -- Recorded by the architecture audit of 2026-08-27 (F3).
 -- ---------------------------------------------------------------------------------------------
--- The FDW's own credential (roadmap item 18), resolved before it is used.
+-- The FDW's own credential, resolved before it is used.
 --
 -- TWO SEPARATE "NOT SET" CASES, AND ONLY ONE OF THEM IS VISIBLE TO `\if`:
 --
@@ -219,7 +219,7 @@ CREATE SERVER timescaledb_server
 -- about -- and a read-only role's password is a smaller thing to park there.
 --
 -- `fdw_reader` (timescaledb/roles.sql) has SELECT on the six objects Supabase projects and no
--- write of any kind. See roadmap item 18.
+-- write of any kind. See Historian roles in README.md.
 --
 -- WHY THE ADMIN MAPPING IS LEFT ALONE. `postgres` here is the SUPABASE superuser, and its mapping
 -- is what a human debugging the FDW connects through. Narrowing it would mean an operator with

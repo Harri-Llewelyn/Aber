@@ -158,17 +158,21 @@ the frontend run, and `test_i3x_service.py` covers the sync-acknowledgement and 
 the CESMII conformance suite skips. See [`ingestion/README.md`](../ingestion/README.md#testing) and
 [`i3x/README.md`](../i3x/README.md).
 
-CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs five jobs:
+CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs six jobs:
 
 | Job | Covers |
 | :--- | :--- |
+| **changes** | Classifies the diff, so a documentation-only change skips the two end-to-end stacks |
 | **frontend-build** | Vitest, the mirrored-logic drift guards, production bundle |
 | **helm-chart** | `helm lint`, render, API-schema validation, chart guard rails |
 | **edge-function-auth-test** | Auth ladders and RLS against a real Postgres |
 | **e2e-validation** | Full Docker Compose stack, `validate.py`, live AAS export |
 | **k8s-validation** | k3d cluster, `helm test`, the same suites in-cluster, ingress assertions |
 
-**The last two are the real drift control between deployment targets.** `validate.py` is
+**The last two are the real drift control between deployment targets**, and they are the two
+`changes` gates: eighteen of the workflow's twenty-two minutes are spent here, and a change that
+touches only documentation cannot alter what either asserts. The gate fails open, so a diff range
+it cannot compute runs them anyway. `validate.py` is
 topology-agnostic and runs against both; if both pass, the wiring agrees where it matters.
 
 ## Keeping the pinned versions current

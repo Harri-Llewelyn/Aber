@@ -412,7 +412,7 @@ class SequenceGapTestCase(unittest.TestCase):
 
 
 # =================================================================================================
-# The historian write latency histogram (roadmap item 2's measurement half)
+# The historian write latency histogram
 #
 # WHY THIS IS TESTED HARDER THAN THE COUNTERS. A counter that renders wrongly is obviously wrong --
 # a wrong number in a place a human reads. A histogram that renders wrongly still LOOKS like a

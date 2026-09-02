@@ -1,7 +1,7 @@
 -- =============================================================================================
 -- 0050 · `devices.conformance_policy` — the switch that lets a violation drop a metric.
 -- =============================================================================================
--- Roadmap item 7. The daemon has evaluated every DDATA metric against its device's attached
+-- The daemon has evaluated every DDATA metric against its device's attached
 -- schemas since 0026, and has never rejected one: `record_ingestion_rejection()` records an
 -- observation, and `SCHEMA_CACHE_TTL_SECONDS` justifies its staleness window by observing that it
 -- "cannot cause a wrong DROP, because nothing is dropped for non-conformance". This column is what

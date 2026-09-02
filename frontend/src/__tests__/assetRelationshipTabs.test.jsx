@@ -1007,7 +1007,7 @@ describe('OverviewTab shopfloor map', () => {
   })
 
   /*
-   * DEFERRED COMMIT (roadmap item 8, migration 0033).
+   * DEFERRED COMMIT (migration 0033).
    *
    * Staging buys atomicity and a single causation_id, and it costs three things the immediate
    * writes never had to think about. Each of these is one of them.

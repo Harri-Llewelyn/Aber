@@ -51,7 +51,7 @@
 
 SELECT set_config('acs_cymru.bi_reader_password', :'bi_reader_password', false);
 
--- The two roles added for roadmap item 18. DEFAULTED TO EMPTY so this file still runs against a
+-- The two least-privilege historian roles. DEFAULTED TO EMPTY so this file still runs against a
 -- caller that has not been taught to pass them -- the Helm maintenance Job and any operator running
 -- it by hand -- and each role then skips itself rather than being created with a blank password.
 \if :{?ingest_writer_password}
@@ -286,7 +286,7 @@ END $$;
 -- SELECT IS NOT OPTIONAL AND THAT SURPRISED ME. Both statements carry an ON CONFLICT clause --
 -- `DO UPDATE` on assets, `DO NOTHING` on telemetry -- and inferring the arbiter index requires
 -- SELECT on the target. With INSERT and UPDATE alone, `permission denied for table assets`. So
--- this role is APPEND-ONLY, not write-only, and the roadmap entry that specified "INSERT on
+-- this role is APPEND-ONLY, not write-only, and the tempting specification of "INSERT on
 -- telemetry, INSERT/UPDATE on assets, nothing else" was wrong about the minimum.
 --
 -- The distinction that matters is preserved regardless: it can add rows and it cannot change or
@@ -336,7 +336,7 @@ BEGIN
   EXECUTE format('GRANT INSERT, UPDATE, SELECT ON public.assets TO %I', v_role);
   EXECUTE format('GRANT INSERT, SELECT ON public.telemetry TO %I', v_role);
 
-  -- COLD ARCHIVAL (roadmap item 3). The exporter runs as this role and writes the manifest, so it
+  -- COLD ARCHIVAL. The exporter runs as this role and writes the manifest, so it
   -- needs INSERT and UPDATE there -- but note what it still does NOT get: DELETE on the manifest,
   -- and nothing at all on telemetry beyond the INSERT above. The revokes below still stand.
   --

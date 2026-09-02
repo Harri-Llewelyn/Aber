@@ -5,7 +5,7 @@
 -- at all and the four-cell floor becomes something a reader ASKS for.
 --
 -- The request came out of a demonstration: a participant asked whether the simulated devices
--- appear on every start, and said they polluted the Digital Thread. See roadmap §14.
+-- appear on every start, and said they polluted the Digital Thread.
 --
 -- WHAT GOES: the four `Sim_Gateway_*` rows and the six `Sim_*` devices that
 -- `0002_seed_data.sql` used to seed, their birth parameters, and the cells they were the only

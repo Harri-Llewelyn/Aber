@@ -2,15 +2,14 @@
 -- 0046 · `Service_Ingestor`, the identity the ingestion daemon will hold.
 -- See Machine Identities in supabase/README.md.
 -- =============================================================================================
--- §13 specified three identity profiles and shipped the mechanism for two. This is the third, and
--- §13's own text flagged it as different in kind: "`Service_Ingestor` is the genuinely new one --
--- and note it does not describe the current daemon, which holds the service-role key and writes
--- telemetry directly."
+-- THE THIRD OF THREE IDENTITY PROFILES, and the one that is different in kind: `Service_Ingestor`
+-- does not describe the daemon as it was, which held the service-role key and wrote telemetry
+-- directly.
 --
 -- THIS MIGRATION CHANGES NOTHING ABOUT THE RUNNING DAEMON. It creates an identity and nothing
--- holds it yet. That is deliberate, and it is the answer to §16's third open question -- "what
--- happens to a deployed daemon mid-upgrade, since the credential it holds is in its environment
--- and the RPCs it would need do not exist until the migration runs." The sequence is: this
+-- holds it yet. That is deliberate, and it is what makes the upgrade safe: a deployed daemon
+-- holds a credential in its environment, and the RPCs it would need do not exist until the
+-- migration runs. The sequence is: this
 -- identity, then the write RPCs, then the daemon calling them while still holding the service key,
 -- and only then the credential swap. At every step a deployed daemon keeps working, because
 -- nothing it depends on is removed until after it has stopped depending on it.
@@ -20,7 +19,7 @@
 --
 -- Both would work, and the Postgres role is arguably tighter -- table privileges instead of RLS,
 -- no PostgREST hop, no token to expire. It was rejected for what it cannot do rather than for what
--- it costs: a Postgres role is invisible to everything §13 built. It does not appear in
+-- it costs: a Postgres role is invisible to the machine-identity surface. It does not appear in
 -- `list_service_principals()` (0042), no token against it can be recorded by
 -- `record_service_token_issued()` (0043), and the Access Control page cannot show it. The stack
 -- would then have two trust paths for machine identity, one auditable from the dashboard and one

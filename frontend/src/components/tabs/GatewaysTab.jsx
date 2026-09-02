@@ -965,7 +965,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
            * a lifecycle a remote appliance passes through, and a host-run gateway has none -- there
            * is no appliance to wait for, so there is no state in which minting is premature or too
            * late. The two RPCs behind these buttons are mirror images on the same axis, which is
-           * the argument roadmap 15 makes for the column being named for it.
+           * why the column is named for that axis.
            *
            * NOT SHOWN ON AN ARCHIVED GATEWAY, matching the bundle action and 0041's own refusal.
            * 0037 found that a bundle downloaded before archiving stayed redeemable afterwards and
@@ -985,7 +985,7 @@ export function GatewaysTab({ showToast, onViewThread, onSelectCell, onSelectDev
               sparkplug_id: selected.sparkplug_id
             }),
             // NAMED BY THE CONDITION THE ACTION IS GATED ON, which is `deployment === 'host'`. It
-            // said "this virtual gateway", a word roadmap 15 retired precisely because it meant
+            // said "this virtual gateway", a word this codebase does not use because it meant
             // three things at once -- and the one it meant HERE is the one this tooltip needs: no
             // appliance, so the credential is minted in the browser instead of on the box.
             title: 'Mint this host-run gateway a broker account and show the password once. A Remote gateway enrols itself instead, and its credential never reaches a browser.'

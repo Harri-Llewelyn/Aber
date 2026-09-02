@@ -311,8 +311,8 @@ const compare = (mirror, label, jsValue, sqlValue) => {
 // does not have. Too mean and a capability disappears for the one class of user least able to
 // diagnose why.
 //
-// README §20 named this pair as the one nothing checked, at the point where both privileged roles
-// were spelled `Object.values(PERMISSION_UUIDS)` and the seed granted both the same thirteen.
+// NOTHING USED TO CHECK THIS PAIR, at the point where both privileged roles were spelled
+// `Object.values(PERMISSION_UUIDS)` and the seed granted both the same thirteen.
 // 0069 made them differ, so the mirror now has something to be wrong about.
 //
 // THE SQL SIDE IS REPLAYED, NOT READ FROM ONE FILE, for the same reason `lastDefinition` exists:

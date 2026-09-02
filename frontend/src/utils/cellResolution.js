@@ -233,7 +233,7 @@ export const UNASSIGNED_GATEWAY_SITE_WIDE = 'gateway_site_wide'
  * or HOST-RUN gateway can never supply a cell by inheritance, so each of its devices has to be
  * filed individually. Telling an operator to "assign the gateway a cell" when the gateway is a
  * host-run proxy is advice that cannot be taken -- which is why this asks where the connector runs
- * rather than what `is_virtual` used to mean (roadmap 15).
+ * rather than what `is_virtual` used to mean.
  */
 export function unassignedReason(device, gateway) {
   if (!isUnassigned(device, gateway)) return null

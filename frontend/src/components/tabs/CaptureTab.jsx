@@ -454,8 +454,8 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
 
             {/* PUBLISH A FILE STRAIGHT FROM DISK, WHICH IS A DIFFERENT ERRAND FROM THE PANEL'S DROP
                 ZONE. That one stores a capture against a subject. This one is the end of a loop the
-                design already invites: item 17 §6 keeps the capture format as JSON *specifically*
-                so it can be hand-edited, so download-edit-play is a first-class workflow and it was
+                design already invites: the capture format is JSON *specifically* so it can be
+                hand-edited, so download-edit-play is a first-class workflow and it was
                 the one path that still went through three separate screens.
 
                 IT CANNOT SKIP THE STORING STEP, and pretending otherwise would be the wrong

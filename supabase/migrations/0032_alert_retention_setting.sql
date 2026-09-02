@@ -6,7 +6,7 @@
 -- Idempotent: db-init replays every /migrations/*.sql on every boot.
 --
 -- ---------------------------------------------------------------------------------------------
--- WHY THIS ONE FIRST, of everything roadmap item 7 could surface.
+-- WHY THIS ONE FIRST, of everything the Settings page could surface.
 --
 -- THE POINT IS READING IT, NOT ONLY SETTING IT. `0030` put the window in the default argument of
 -- `prune_platform_alerts()`, so an administrator asking "how long do we keep alerts" has to open a

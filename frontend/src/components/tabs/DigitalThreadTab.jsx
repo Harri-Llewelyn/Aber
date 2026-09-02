@@ -1283,7 +1283,7 @@ export function DigitalThreadTab({ initialEntity, onClearEntity, showToast }) {
               Every attributed change to a cell, gateway or device, in the order it happened and
               with what caused it. Append-only and unprunable by any application role — which is
               what makes it evidence rather than a log. It records asset lifecycle, not privileged
-              acts: a role grant leaves no row here (roadmap item 22).
+              acts: a role grant leaves no row here.
             </p>
 
         <div className="filter-bar">

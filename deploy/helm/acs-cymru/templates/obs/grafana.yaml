@@ -69,8 +69,8 @@ dashboards.yml declares one provider per folder and each provider points at its 
 so one ConfigMap cannot serve both without nesting the paths, which would file every shopfloor
 dashboard under both folders.
 
-CONDITIONAL SINCE ROADMAP §14. `manufacturing-cells.json` hardcodes `Sim_CNC_Mill_01`, and the
-simulated shopfloor it describes is now opt-in -- so shipping this dashboard unconditionally meant
+CONDITIONAL, BECAUSE ITS SUBJECT IS. `manufacturing-cells.json` hardcodes `Sim_CNC_Mill_01`, and
+the simulated shopfloor it describes is opt-in -- so shipping this dashboard unconditionally means
 every install, including one running real plant, got a Shopfloor Operations folder whose panels
 name a machine that does not exist there.
 

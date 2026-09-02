@@ -29,7 +29,7 @@ providers:
       path: /etc/grafana/provisioning/dashboards/platform
 
   # THIS PROVIDER LEGITIMATELY HAS NOTHING TO PROVISION on a default install, and that is not a
-  # fault to be fixed by deleting it. Roadmap §14 moved `manufacturing-cells.json` into
+  # fault to be fixed by deleting it. `manufacturing-cells.json` lives in
   # `simulation/grafana/dashboards/` because its panels hardcode `Sim_CNC_Mill_01` -- a machine that
   # does not exist on an install running real plant, in a folder an operator would reasonably read
   # as describing their floor. A reader who wants it copies it back in; see the README in the

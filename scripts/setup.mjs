@@ -183,7 +183,7 @@ const generated = {
   // nor the script that would have written it.
   //
   // What made that unavoidable was the FLOW being seeded unconditionally: four broker nodes, four
-  // mandatory credential pairs. Roadmap §14 makes the simulator opt-in, so a default stack seeds a
+  // mandatory credential pairs. The simulator is opt-in, so a default stack seeds a
   // starter flow with no broker nodes at all -- and minting four passwords here would now create
   // four broker accounts for four gateways that do not exist, on a stack whose whole point is that
   // it generates no assets.

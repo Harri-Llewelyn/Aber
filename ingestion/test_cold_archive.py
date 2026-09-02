@@ -1,5 +1,5 @@
 """
-Cold telemetry archival — the parts that can be asserted without a stack (roadmap item 3).
+Cold telemetry archival — the parts that can be asserted without a stack.
 
 WHAT IS WORTH PINNING HERE, given that the export path itself needs a historian, object storage and
 a chunk to be meaningful. Those were exercised end to end by hand and the safety properties live in

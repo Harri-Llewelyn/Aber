@@ -53,7 +53,7 @@
 -- and bundling a rename beside a feature is how a rename becomes unreviewable.
 --
 -- Nothing here flips `is_simulated` on the three seeded `Sim_` gateways. They are `false` today and
--- stay `false`: setting them is the §14 decision about what a demonstration fixture is for, and the
+-- stay `false`: setting them is a decision about what a demonstration fixture is for, and the
 -- constraint below prices it honestly rather than making it silently.
 --
 -- IDEMPOTENT. ADD COLUMN IF NOT EXISTS, DROP-then-ADD for the constraints, CREATE OR REPLACE for
@@ -82,7 +82,7 @@ COMMENT ON COLUMN public.gateways.is_shadow IS
   'for real machines rather than machines. Implies is_simulated (a CHECK enforces it), and takes '
   'precedence over it in device_locations: the readings are genuine, so "replayed" is more '
   'informative than "synthetic". Devices INHERIT this through gateway_id and carry no flag of '
-  'their own (see 0052 and roadmap item 15).';
+  'their own (see 0052).';
 
 
 -- ---------------------------------------------------------------------------------------------
@@ -103,7 +103,7 @@ ALTER TABLE public.gateways ADD CONSTRAINT gateways_shadow_is_simulated
 -- by the CASE, and the Cells page would show a cell whose own gateway row says otherwise. Making
 -- it unsayable is one line; detecting it later is a support conversation.
 --
--- IT COVERS BOTH FLAGS, which is §14's decision being taken rather than deferred. Item 15 prices
+-- IT COVERS BOTH FLAGS, which is that decision being taken rather than deferred. 0064 prices
 -- it honestly -- "an onboarding simulator GAINS from being visibly not-real, while a demonstration
 -- fixture LOSES, because a shopfloor map showing an empty plant beside one Simulated bucket
 -- demonstrates less than four populated cells did" -- and the answer taken here is the first: a
@@ -238,7 +238,7 @@ BEGIN
           '0059 self-check: devices.is_shadow exists. Whether a device is a replay lane is '
           'inherited from its gateway and must not be stored twice -- a CHECK cannot span two '
           'tables, so keeping a device-level copy honest needs a trigger on devices for insert and '
-          're-parenting AND one on gateways for the flip. See 0052''s header and roadmap item 15.';
+          're-parenting AND one on gateways for the flip. See 0052''s header.';
     END IF;
 
     -- Resolve a hypothetical row through the view's own CASE. Written as a query against no table

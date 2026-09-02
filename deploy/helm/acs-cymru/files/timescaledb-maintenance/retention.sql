@@ -159,7 +159,7 @@ BEGIN
         'before it is dropped.', v_retain, v_compress;
     END IF;
 
-    -- COLD ARCHIVAL AND A DROP POLICY ARE A DATA-LOSS COMBINATION (roadmap item 3).
+    -- COLD ARCHIVAL AND A DROP POLICY ARE A DATA-LOSS COMBINATION.
     --
     -- This policy deletes chunks on a timer and records nothing. The archiver exports a chunk,
     -- verifies the object and only then drops it. Run both and the timer wins the race for

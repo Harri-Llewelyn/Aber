@@ -362,8 +362,8 @@ BEGIN
         --
         -- BOUNDED BY A WATERMARK, NOT BY A TIME WINDOW, and the difference is not academic. This
         -- read `recorded_at > now() - interval '1 minute'`, which is a guess at "rows this batch
-        -- just wrote" and holds only while nothing else has touched these devices lately. Roadmap
-        -- §14 made that assumption false: the demonstration floor is opt-in now, so the documented
+        -- just wrote" and holds only while nothing else has touched these devices lately. That
+        -- assumption is false: the demonstration floor is opt-in, so the documented
         -- way to get one is `npm run provision:gateways` followed by a restart -- which means
         -- db-init reaches this check seconds after six devices were CREATED, with their INSERT and
         -- placement rows still inside the window and each carrying its own causation_id.

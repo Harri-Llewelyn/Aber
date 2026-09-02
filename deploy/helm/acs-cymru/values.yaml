@@ -238,7 +238,7 @@ secrets:
   # and `telemetry_latest`. Setting it here rotates the password on the next install or upgrade.
   biReaderPassword: ""
 
-  # --- Historian least privilege (roadmap item 18) ---------------------------------------------
+  # --- Historian least privilege ---------------------------------------------
   #
   # EMPTY MEANS NO ROLE for both, matching biReaderPassword above: timescaledb/roles.sql skips a
   # role rather than creating it with a blank password, so an upgrade that sets neither changes
@@ -515,13 +515,13 @@ supabaseRest:
     limits: { memory: 512Mi }
 
 # -----------------------------------------------------------------------------------------------
-# THE GATEWAY ON KUBERNETES, as it has been on Compose since Kong was retired there. Roadmap §4.
+# THE GATEWAY ON KUBERNETES, as it is on Compose.
 #
-# WHAT CHANGED, AND WHY NOW. This was `enabled: false` while the manual cluster proof could not
+# WHAT MADE IT DEPLOYABLE. This was `enabled: false` while the manual cluster proof could not
 # reach the parts needing this project's own images: `db-init` and `gateway-credential` are
 # unpublished GHCR tags, so a hand-installed cluster ran no migrations, deployed no edge functions,
-# and left Realtime waiting on a schema nothing creates. The roadmap recorded that remainder as
-# "downstream of CI, not of the chart" -- and it was exactly right. The k3d job BUILDS those images
+# and left Realtime waiting on a schema nothing creates. That remainder was downstream of CI
+# rather than of the chart. The k3d job BUILDS those images
 # and imports them, so every gap in the manual proof is one CI closes by construction, and the
 # gateway-surface probe now runs there against a stack that actually has a schema behind it.
 #
@@ -562,7 +562,7 @@ supabaseEnvoy:
     port: 9901
 
 # SUPERSEDED BY supabaseEnvoy, and kept rather than deleted. Upstream ships the `sb_publishable_*`
-# / `sb_secret_*` key translation (§5) in Envoy only, which is what turned this from a
+# / `sb_secret_*` key translation in Envoy only, which is what turned this from a
 # divergence-from-upstream question into one with a deadline. Set this true and
 # `supabaseEnvoy.enabled` false, in one change, to go back.
 supabaseKong:
@@ -972,7 +972,7 @@ mosquitto:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { memory: 256Mi }
 
-# The broker playback worker (roadmap item 17 §5). Publishes a stored capture back into the stack
+# The broker playback worker. Publishes a stored capture back into the stack
 # as a simulated gateway.
 #
 # NO `image` OF ITS OWN, DELIBERATELY. It runs from `ingestion.image` under a different command,
@@ -1172,7 +1172,7 @@ frontend:
 # ---------------------------------------------------------------------------------------------
 # The demonstrator
 # ---------------------------------------------------------------------------------------------
-# THE SIMULATED SHOPFLOOR IS OPT-IN (roadmap §14). A fresh install has no cells, no gateways and no
+# THE SIMULATED SHOPFLOOR IS OPT-IN. A fresh install has no cells, no gateways and no
 # devices -- `0040_retire_demonstration_seed.sql` retired the seed that used to create them --
 # because a participant at the demonstration asked whether the simulated devices appear on every
 # start and said they polluted the Digital Thread.

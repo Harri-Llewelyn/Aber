@@ -267,7 +267,7 @@ describe('gateway document links', () => {
 
 
 /**
- * The Playback gateway is hidden from the fleet list by default (roadmap item 17).
+ * The Playback gateway is hidden from the fleet list by default.
  *
  * It is one seeded row that connects to no machine, and almost every action on it has been
  * withdrawn -- so in a list of real connectors it reads as a gateway that is permanently offline,
@@ -314,8 +314,7 @@ describe('the playback gateway is filtered out by default', () => {
      * THE REGRESSION THIS GUARDS. A shadow gateway IS simulated -- gateways_shadow_is_simulated
      * requires it -- so a Type filter that matched on the flag rather than on the derived type
      * would quietly bring the Playback gateway back under "Simulated". That is the "one word
-     * meaning three things" problem returning by the back door, which roadmap 15 spent a migration
-     * removing.
+     * meaning three things" problem returning by the back door, which 0064 removed.
      */
     api.get.mockImplementation(routeGet([gateway(), playbackRow()]))
     render(<GatewaysTab showToast={vi.fn()} hasPermission={() => true} initialSearchFilter="" onClearFilter={vi.fn()} />)

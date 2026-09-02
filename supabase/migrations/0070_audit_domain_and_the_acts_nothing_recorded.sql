@@ -46,10 +46,10 @@
 -- exists to prevent.
 --
 -- ---------------------------------------------------------------------------------------------
--- THE RULE IS AUTHORITY, NOT SUBJECT MATTER, AND README §22 SAID OTHERWISE
+-- THE RULE IS AUTHORITY, NOT SUBJECT MATTER, AND THE OBVIOUS READING SAYS OTHERWISE
 --
--- That entry names `CREDENTIAL_ISSUED` alongside `TOKEN_MINTED` as rows a Shopfloor_Manager should
--- not read. Followed literally it contradicts the entry's own sequencing argument -- *"who may
+-- It is tempting to file `CREDENTIAL_ISSUED` alongside `TOKEN_MINTED` as rows a Shopfloor_Manager
+-- should not read. Followed literally that contradicts the sequencing argument -- *"who may
 -- perform a privileged act" and "who may read that it happened" become the same set* -- because
 -- `0041` admits a Shopfloor_Manager to `issue_virtual_gateway_credential()`. A Manager would mint a
 -- broker credential and watch the record of it vanish, which is not an honest empty lane: those
@@ -255,7 +255,7 @@ CREATE TRIGGER trg_system_settings_digital_thread_update
   )
   EXECUTE FUNCTION public.log_digital_thread_event();
 
--- `schemas` is the third act §22 names, and it lands in the security lane by the classifier's
+-- `schemas` is the third such act, and it lands in the security lane by the classifier's
 -- fall-through rather than by being listed: publishing a schema decides what ingestion accepts as
 -- conformant, and `0069` made `schema:manage` Administrator-only. The fail-closed arm getting this
 -- right on its own is the argument for having it.

@@ -163,8 +163,8 @@ describe('byte formatting', () => {
 describe('state vocabulary', () => {
 
   it('calls the end state On cold storage rather than Archived', () => {
-    // "Archived" is the Archives page's word for an entity lifecycle state. Reusing it here is the
-    // collision roadmap item 3 asked to be settled before this page was built.
+    // "Archived" is the Archives page's word for an entity lifecycle state. Reusing it here would
+    // collide with that, which is why this page does not.
     expect(coldStateLabel('archived')).toBe('On cold storage')
   })
 })

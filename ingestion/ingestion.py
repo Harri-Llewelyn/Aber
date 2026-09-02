@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from logging_config import get_logger
 import metrics
 from metrics import start_metrics_server
-# Roadmap item 17. Imports capture.py for the file format, so the daemon and the CLI cannot produce
+# Imports capture.py for the file format, so the daemon and the CLI cannot produce
 # capture files that differ -- and so the encoding-preservation that cost a debugging session to
 # discover is shared rather than reimplemented.
 import capture_worker
@@ -769,7 +769,7 @@ def labelled_snapshot() -> dict:
 # THIS IS THE MEASUREMENT THE SINGLE-WRITER CEILING IS ASSERTED WITHOUT. get_timescaledb_connection()
 # states the ceiling in a docstring; nobody has ever measured it. Fitting the instrument BEFORE
 # anything moves is the whole point -- a latency number taken after a rewrite has nothing to be
-# compared against, which is the wrong way round from how the roadmap first put it.
+# compared against.
 #
 # BUCKETS SPAN THE THREE REGIMES THIS PATH ACTUALLY HAS, rather than being copied from
 # prometheus_client's defaults: sub-millisecond to a few milliseconds is a healthy local insert,
@@ -3178,8 +3178,8 @@ def process_ddata(wire_id: str, gateway_wire_id: str, payload, group_id: str = N
 #
 # CI needed exactly this and had to infer it. Issue #47's proposed gate waited for
 # `sum(acs_ingestion_messages_total) > 0` on the reasoning that "the simulators publish
-# continuously" -- which was true when it was written and stopped being true when roadmap item 14
-# made the simulator opt-in. On a stack with no publisher the count is unreachable and the wait
+# continuously" -- which was true when it was written and is not true now that the simulator is
+# opt-in. On a stack with no publisher the count is unreachable and the wait
 # deadlocks, which is what it did on the Compose job: `acs_ingestion_up=1`, zero messages, 180
 # seconds. The daemon was subscribed the whole time and nothing could say so.
 #

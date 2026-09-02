@@ -13,7 +13,7 @@ down -- so the live checks need no broker, no simulator publishing a DBIRTH, and
 approval, and no demo data either.
 
 IT USED TO TARGET `Sim_CNC_Mill_01`, registered by migration 0002 and given its schema and nameplate
-by 0020. That made a CONFORMANCE Job depend on DEMONSTRATION data, which roadmap §14 removes -- and
+by 0020. That made a CONFORMANCE Job depend on DEMONSTRATION data the seed no longer creates -- and
 0020 exists partly because the same coupling bit once before, when the suite's previous subject
 quietly stopped receiving a DBIRTH while the suite went on naming it and reporting success.
 

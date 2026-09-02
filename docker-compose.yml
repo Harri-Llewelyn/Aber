@@ -137,7 +137,7 @@ services:
       PGPASSWORD: ${DB_PASSWORD}
       TS_DBNAME: ${DB_NAME:-postgres}
       TS_USER: ${DB_USER:-postgres}
-      # Roadmap item 18. EMPTY MEANS NO ROLE -- roles.sql skips each one rather than creating it
+      # EMPTY MEANS NO ROLE -- roles.sql skips each one rather than creating it
       # with a blank password, so a deployment that has not set these keeps booting unchanged.
       INGEST_WRITER_PASSWORD: ${INGEST_WRITER_PASSWORD:?INGEST_WRITER_PASSWORD is required; run `npm run setup`}
       FDW_READER_PASSWORD: ${FDW_READER_PASSWORD:?FDW_READER_PASSWORD is required; run `npm run setup`}
@@ -307,7 +307,7 @@ services:
       TS_DBNAME: ${DB_NAME:-postgres}
       TS_USER: ${DB_USER:-postgres}
       TS_PASSWORD: ${DB_PASSWORD:-postgres}
-      # What the FDW's PUBLIC user mapping authenticates as (roadmap item 18). BLANK FALLS BACK to
+      # What the FDW's PUBLIC user mapping authenticates as. BLANK FALLS BACK to
       # the admin pair above, resolved inside 0001 -- so a deployment that has not created
       # fdw_reader keeps its read path working across the upgrade that introduces this.
       TS_FDW_USER: ${TS_FDW_USER:-fdw_reader}
@@ -822,7 +822,7 @@ services:
         echo 'Rendered Envoy gateway config with API key consumers.'
 
   # ---------------------------------------------------------------------------------------------
-  # THE API GATEWAY.  Envoy since roadmap §4; Kong until then.
+  # THE API GATEWAY. Envoy.
   #
   # WHY IT ANSWERS TO `supabase-kong`. The alias below is not nostalgia: `http://supabase-kong:8000`
   # is carried by Studio, the edge runtime, the ingestion daemon, i3X, Node-RED's token and userinfo
@@ -1527,7 +1527,7 @@ services:
       supabase-envoy:
         condition: service_healthy
 
-  # Cold telemetry archival (roadmap item 3): exports chunks past the retention threshold to
+  # Cold telemetry archival: exports chunks past the retention threshold to
   # Parquet on object storage, verifies each one, and only then drops the raw rows.
   #
   # THE SAME IMAGE AS `ingestion`, UNDER A DIFFERENT COMMAND, for the reason `playback` below
@@ -1537,8 +1537,8 @@ services:
   # WHY A SERVICE AT ALL, WHEN THE EXPORTER IS A CLI. `archive.enabled` is a switch on the Settings
   # page, and until this existed it armed a mechanism nothing ran: an operator turned it on, opened
   # the Cold Storage page, and saw nothing -- because the only way to export was to remember a
-  # command. A switch that does nothing is worse than no switch, and the roadmap asked for "a
-  # scheduled maintenance task" from the start.
+  # command. A switch that does nothing is worse than no switch, and archival is a scheduled
+  # maintenance task rather than something an operator has to remember.
   #
   # IT RE-READS THE SETTING EVERY PASS AND IS INERT WHILE IT IS OFF, so this runs on every stack and
   # does nothing until somebody asks for it. No compose profile and no second file: the database
@@ -1588,15 +1588,15 @@ services:
       timescaledb:
         condition: service_healthy
 
-  # Broker playback (roadmap item 17 §5): publishes a stored capture back into the stack.
+  # Broker playback: publishes a stored capture back into the stack.
   #
   # THE SAME IMAGE AS `ingestion`, UNDER A DIFFERENT COMMAND, AND THAT IS NOT A SHORTCUT. What
   # playback genuinely needs that is new is a separate PROCESS holding a separate Supabase principal
   # and its own broker credentials -- none of which an image boundary provides. It publishes using
   # `capture.py`'s own plan_playback(), which is already in this image, so a second image would be
   # this one minus two files plus a second build, a second tag to keep in step, and a second entry
-  # in check-image-tag-parity.mjs. The roadmap priced an image; the image turned out to be the part
-  # that was free.
+  # in check-image-tag-parity.mjs. The separate process is the part that costs something; the
+  # image is not.
   #
   # WHAT IS NOT SHARED IS EVERYTHING THAT MATTERS. This service holds no historian credential, no
   # ingestion MQTT account and no SUPABASE_INGESTION_KEY. Its Supabase identity is Service_Playback
@@ -1761,7 +1761,7 @@ services:
       # Seeding is first-run only, so editor changes survive `docker compose up`.
       # Set to true for a deliberate reset back to the repo's flow.
       NODE_RED_FORCE_SEED: ${NODE_RED_FORCE_SEED:-false}
-      # THE SIMULATOR IS OPT-IN (roadmap §14). Unset, node-red-init seeds a one-node "Start here"
+      # THE SIMULATOR IS OPT-IN. Unset, node-red-init seeds a one-node "Start here"
       # flow that declares no broker nodes and connects to nothing, so a fresh stack generates no
       # assets and publishes nothing. `npm run stack:reset` sets this; so does anyone who wants the
       # demonstration shopfloor, alongside NODE_RED_FORCE_SEED=true if the volume already exists --
@@ -2016,8 +2016,8 @@ services:
           exit 1
         fi
         # GLOBBED ON THE SUFFIX, not named outright. `shopfloor-alert-rules.yaml` is the
-        # demonstrator's three machine rules, which roadmap §14 moved into simulation/ and does
-        # NOT provision by default -- a reader enables them by copying the file in here. Copying
+        # demonstrator's three machine rules. They live in simulation/ and are NOT provisioned
+        # by default -- a reader enables them by copying the file in here. Copying
         # by explicit name would have silently ignored it, and the symptom would be an alert rule
         # that is present in the repository, present in the provisioning directory, and absent
         # from Grafana.

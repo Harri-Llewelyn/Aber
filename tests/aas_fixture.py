@@ -3,7 +3,7 @@ The AAS conformance suites' own subject, provisioned at pinned ids.
 
 WHY THIS EXISTS. Both AAS suites used to export `Sim_CNC_Mill_01` -- a device seeded by
 `0002_seed_data.sql` as part of the demonstration shopfloor. That coupled a conformance suite to
-demo data, and roadmap §14 removes the demo data. It has also bitten once already:
+demo data, and the seed no longer creates it. It has also bitten once already:
 `0020_cleanup_legacy_simulator_seed.sql` exists partly because the suite's previous subject,
 `Simulated_CNC_01`, quietly stopped receiving a DBIRTH while the suite went on naming it.
 

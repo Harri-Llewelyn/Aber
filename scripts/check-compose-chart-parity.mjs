@@ -19,7 +19,7 @@
  * chart, ten minutes at a time, one pod per CI round. Nothing compared the two targets as SETS.
  *
  * THIS DOES NOT CATCH ALL SIX. It catches the class the others miss: a service that exists on one
- * target and nowhere on the other. `cold-archiver` is the standing example -- roadmap item 3 shipped
+ * target and nowhere on the other. `cold-archiver` is the standing example -- it ships
  * on Compose, the chart has no workload for it, and the only reason anybody noticed is that
  * `0068`'s self-check made db-init fail loudly. A subsystem that failed QUIETLY would still be
  * undiscovered.
@@ -96,8 +96,8 @@ const SHAPED_DIFFERENTLY = {
 
 /** Chart components with no Compose service. */
 const CHART_ONLY = {
-  'supabase-kong': 'Compose migrated to Envoy (roadmap §4); the chart still deploys Kong by default until its Envoy templates are fully verified. This entry retires with that migration',
-  'backup': 'the chart\'s tier-1 backup CronJob. Compose does the same job with scripts/backup-databases.sh on the host, which is a script rather than a service -- see roadmap §24',
+  'supabase-kong': 'Compose migrated to Envoy; the chart still deploys Kong by default until its Envoy templates are fully verified. This entry retires with that migration',
+  'backup': 'the chart\'s tier-1 backup CronJob. Compose does the same job with scripts/backup-databases.sh on the host, which is a script rather than a service',
   'e2e-validate': 'a Helm test Job wrapping validate.py. On Compose CI runs the script directly, so there is nothing to declare as a service',
   'e2e-aas-export': 'a Helm test Job, for the same reason as e2e-validate',
   'test-fdw': 'a Helm test Job asserting the postgres_fdw cross-database path, which Compose exercises from validate.py'
@@ -110,7 +110,7 @@ const CHART_ONLY = {
  * permission to stop noticing.
  */
 const KNOWN_GAPS = {
-  'cold-archiver': 'roadmap item 3 shipped on Compose only. The chart applies cold_archive.sql so the manifest exists and db-init succeeds, but no workload exports or drops -- the catalogue is permanently empty on Kubernetes. See supabase/README.md "Cold telemetry archival"'
+  'cold-archiver': 'cold telemetry archival ships on Compose only. The chart applies cold_archive.sql so the manifest exists and db-init succeeds, but no workload exports or drops -- the catalogue is permanently empty on Kubernetes. See supabase/README.md "Cold telemetry archival"'
 };
 
 // -------------------------------------------------------------------------------------------------
