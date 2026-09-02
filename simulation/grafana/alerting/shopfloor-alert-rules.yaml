@@ -3,7 +3,7 @@
 # =============================================================================================
 # WHY THESE LIVE HERE AND NOT IN grafana/provisioning/alerting/
 #
-# Roadmap §14 made the simulated shopfloor opt-in, and these three rules are part of it rather
+# The simulated shopfloor is opt-in, and these three rules are part of it rather
 # than part of the platform. Two things say so:
 #
 #   * THE INTERVAL IS A DEMONSTRATOR SETTING and the group's own comment has always admitted it:
@@ -38,7 +38,7 @@
 #      badge and refuses edits. Edit the file and restart.
 #   2. DELETING A RULE FROM A FILE DOES NOT DELETE IT FROM GRAFANA. Provisioning is additive;
 #      removal needs a `deleteRules:` block naming the uid. THIS MATTERS MORE THAN USUAL RIGHT
-#      NOW: a stack that ran before §14 already has these three rules loaded, and moving the file
+#      NOW: a stack that ran before the split already has these three rules loaded, and moving the file
 #      out of the provisioning directory does NOT remove them. They stay, still evaluating, still
 #      correct -- which is the right outcome for an existing demo stack and is not what "not
 #      provisioned by default" would lead you to expect.

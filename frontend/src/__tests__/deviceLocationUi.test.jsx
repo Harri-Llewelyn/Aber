@@ -475,7 +475,7 @@ describe('approving a quarantined device', () => {
 
 
 /**
- * Shadow devices on the Devices page (roadmap item 17, migration 0060).
+ * Shadow devices on the Devices page (migration 0060).
  *
  * `ensure_shadow_devices()` mints one per device a capture recorded, at the moment a playback
  * starts -- so a stack that has never replayed has none, and the first playback would otherwise

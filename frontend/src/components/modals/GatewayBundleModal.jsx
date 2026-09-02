@@ -22,7 +22,7 @@ const normalise = (value) => (value || '').trim().replace(/\s+/g, ' ').toLowerCa
 /**
  * The setup step for a REMOTE gateway: one dialog.
  *
- * "Remote", not "physical" -- roadmap 15's vocabulary, and the word the Type column, the filter and
+ * "Remote", not "physical" -- the word the Type column, the filter and
  * the create form all use. It is also the accurate one for what this dialog does: the bundle exists
  * because the connector runs on hardware this stack cannot reach, which is a fact about DEPLOYMENT.
  * Whether that hardware is a physical panel PC or a VM in somebody's cloud was never the question,

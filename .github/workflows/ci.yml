@@ -12,8 +12,8 @@ jobs:
   # do not run for a change that cannot affect them.
   #
   # A JOB-LEVEL FILTER, NOT `paths-ignore` ON THE TRIGGER, and the difference matters. Skipping
-  # the whole workflow for a docs-only change would also skip `check-docs-drift.mjs`, the roadmap
-  # numbering assertions and the link checks -- every guard the documentation actually has. The
+  # the whole workflow for a docs-only change would also skip `check-docs-drift.mjs` and
+  # the link checks -- every guard the documentation actually has. The
   # cheap jobs therefore still run on everything; only the two end-to-end stacks are gated.
   #
   # IT FAILS OPEN. A range this cannot compute -- a first push to a branch, a force-push, a
@@ -323,8 +323,8 @@ jobs:
       # kong.yml fronts nine services, gates four with key-auth, and leaves six routes open across
       # four deliberate exemptions. A route added here and gated nowhere passes every other check in
       # this file. So does a translation that quietly widened an exemption -- which is precisely the
-      # risk roadmap §5 (Kong -> Envoy) names when it says "any migration needs the negative
-      # assertions first". This is them, and it is deliberately written against the SURFACE rather
+      # risk in replacing the gateway: the negative assertions have to exist before the swap, not
+      # after it. This is them, and it is deliberately written against the SURFACE rather
       # than against Kong, so it survives the gateway being replaced.
       #
       # Each of the eleven assertions was verified by breaking it: an unreviewed route, key-auth
@@ -498,15 +498,15 @@ jobs:
       # do not names the config file rather than the list.
       #
       # KUBERNETES ONLY, SINCE THE ENVOY MIGRATION. This step used to read `KONG_PLUGINS` out of
-      # docker-compose.yml as well, and that variable is correctly gone: roadmap §4 removed Kong,
-      # `supabase-kong-init` and the `kong_config` volume from Compose, which now runs Envoy. The
+      # docker-compose.yml as well, and that variable is correctly gone: Compose runs Envoy and
+      # declares no Kong, no `supabase-kong-init` and no `kong_config` volume. The
       # check went on demanding it and failed with "could not find KONG_PLUGINS (compose)" -- a
       # guard reporting the absence of the thing whose absence was the deliverable.
       #
       # SO WHY IS THE STEP STILL HERE AT ALL. Because the chart still deploys Kong by default, and
-      # §4 says why `supabase/kong.yml` stays in the repository: "It is read by nothing on Compose
-      # and by the chart on Kubernetes, and the template-hygiene check asserts exactly that pair
-      # rather than the tempting one-liner 'kong.yml is gone'." The same reasoning applies to the
+      # `supabase/kong.yml` stays in the repository for a reason worth restating: it is read by
+      # nothing on Compose and by the chart on Kubernetes, and the template-hygiene check asserts
+      # exactly that pair rather than the tempting one-liner "kong.yml is gone". The same applies to the
       # plugin list. This step retires with the chart's Kong, not before it.
       - name: Verify The Chart's Kong Plugin List Covers Everything kong.yml References
         run: |
@@ -523,8 +523,8 @@ jobs:
 
           compose = open('docker-compose.yml', encoding='utf-8').read()
           if 'KONG_PLUGINS' in compose:
-              print('::error::docker-compose.yml declares KONG_PLUGINS again. Compose runs Envoy '
-                    'since roadmap §4; if Kong is genuinely back, restore the two-target comparison '
+              print('::error::docker-compose.yml declares KONG_PLUGINS again. Compose runs Envoy'
+                    '; if Kong is genuinely back, restore the two-target comparison '
                     'this step used to make rather than leaving one target unchecked.')
               sys.exit(1)
 
@@ -710,8 +710,8 @@ jobs:
               -f "$DEV" --set autoscaling.enabled=true --set "autoscaling.components[0]=$c"
           done
 
-          # PERMITTED BUT NOT DEPLOYED IS ALSO A REFUSAL, and it is the newest of them. Roadmap §4
-          # turned supabaseKong.enabled off, and the allow-list still names `supabase-kong` so a
+          # PERMITTED BUT NOT DEPLOYED IS ALSO A REFUSAL, and it is the newest of them.
+          # `supabaseKong.enabled` is off, and the allow-list still names `supabase-kong` so a
           # side-by-side migration can scale either gateway. Before this guard that combination
           # rendered NO HPA AND NO ERROR -- issue #31's symptom through a third door -- and
           # values-prod.yaml.example was carrying it: a gateway pinned at one replica where the
@@ -924,8 +924,8 @@ jobs:
               errors.append(f"DNS egress must allow both UDP and TCP 53; got {dnsprotos or 'nothing'}")
 
           # THE GATEWAY IS NAMED BY THE RENDER, NOT BY THIS LIST. NetworkPolicy selects POD labels,
-          # and roadmap §4 changed those from `supabase-kong` to `supabase-envoy` while the SERVICE
-          # kept the old name -- so the two flows below are the only entries here whose component
+          # the gateway's POD labels read `supabase-envoy` while its SERVICE kept the older
+          # `supabase-kong` name -- so the two flows below are the only entries here whose component
           # name moves with the gateway. Hard-coding either one reports MISSING against a policy
           # that is perfectly correct, which is exactly what happened at promotion. Derived so the
           # same assertion reads against either gateway, as check-gateway-surface.mjs does.
@@ -1955,13 +1955,13 @@ jobs:
           kubectl -n $NS logs $RELEASE-test-fdw
 
       # ---------------------------------------------------------------------------------------
-      # THE PROMOTION GATE FOR ROADMAP §4, and the reason it can finally run.
+      # THE PROMOTION GATE FOR ENVOY ON KUBERNETES, and the reason it can run.
       #
       # The chart shipped Envoy disabled because the manual cluster proof could not reach the parts
       # needing this project's own images: `db-init` and `gateway-credential` are unpublished GHCR
       # tags, so a hand-installed cluster ran no migrations and deployed no edge functions, and the
-      # authenticated probe's markers cannot be satisfied against empty upstreams. §4 recorded that
-      # remainder as "downstream of CI, not of the chart". This job BUILDS those images and imports
+      # authenticated probe's markers cannot be satisfied against empty upstreams. That remainder
+      # was downstream of CI, not of the chart. This job BUILDS those images and imports
       # them, so the gap closes here and nowhere else.
       #
       # THE SAME COMMAND THE COMPOSE JOB RUNS, deliberately. The script names no gateway concept, so
@@ -2033,9 +2033,9 @@ jobs:
       # It does not and never did: validate.py seeds its own gateway at a pinned UUID and creates
       # its own VALIDATE_* devices at runtime, and touches the demo device nowhere.
       #
-      # THE AAS SUITE NOW DOES THE SAME (roadmap §14). Its subject used to be seeded outright --
+      # THE AAS SUITE NOW DOES THE SAME. Its subject used to be seeded outright --
       # 0002 registered Sim_CNC_Mill_01 and 0020 gave it a schema and a nameplate -- which made a
-      # CONFORMANCE suite depend on DEMO DATA that §14 removes. It provisions its own through
+      # CONFORMANCE suite depend on DEMO DATA the seed no longer creates. It provisions its own through
       # tests/aas_fixture.py and tears it down afterwards, so it has no data dependency on the
       # seed OR on validate.py. What remains is the reason the initContainer itself gives: do not
       # run a conformance suite against a stack whose conformance run did not pass.
@@ -2406,7 +2406,7 @@ jobs:
       # It is here rather than in the lint job because it needs a stack, and it runs AFTER
       # validate.py deliberately: validate.py asserts that the intended surface behaves, this
       # asserts that the surface is still the intended one. A run where both pass is the
-      # before-and-after evidence roadmap §4's migration is steered by.
+      # before-and-after evidence a gateway change is steered by.
       # BOTH PASSES. The unauthenticated one sends no key, so it cannot see what the gateway does
       # WITH one -- and that is not hypothetical: the first Envoy translation passed every
       # unauthenticated assertion while forwarding the apikey out of the query string to PostgREST,

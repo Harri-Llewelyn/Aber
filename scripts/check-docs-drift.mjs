@@ -357,9 +357,9 @@ function edgeFunctionNames() {
 // check easier to satisfy the more documentation exists, and `supabase/migrations/archive/README.md`
 // alone mentions enough prefixes to pass it vacuously.
 //
-// SO THE SET IS NAMED, NOT GLOBBED. It was README alone until the roadmap stopped carrying built
-// items: retiring an entry moves its substance into the documentation, and the schema half of that
-// lands in supabase/README.md, which is where the migrations it cites are actually explained. A
+// SO THE SET IS NAMED, NOT GLOBBED. It was README alone until built work started moving out of
+// it: when a roadmap entry retires, its substance moves into the documentation, and the schema
+// half of that lands in supabase/README.md, where the migrations it cites are actually explained. A
 // check reading only the root README would then report a migration as undocumented while its
 // documentation sits one directory down -- and the repair for that would be to copy migration
 // numbers back into the front page purely to satisfy a checker, which is the tail wagging the dog.
@@ -374,7 +374,7 @@ function edgeFunctionNames() {
     .map((f) => f.slice(0, 4))
     .filter((v, i, a) => a.indexOf(v) === i)
     .sort();
-  const DOCS = ['README.md', 'supabase/README.md'];
+  const DOCS = ['README.md', 'supabase/README.md', 'docs/roadmap.md'];
   const corpus = DOCS.map(read).join(' ');
   const missing = migs.filter((m) => !corpus.includes(m));
   if (missing.length) fail(`no doc mentions migration(s): ${missing.join(', ')}`);
@@ -629,8 +629,8 @@ function edgeFunctionNames() {
       the daemon reaching it proves nothing if a stranger can too. This list can check that a
       redeclaration was INTENDED and not that it was COMPLETE.`,
     'public.is_ingestion_caller': `0047 admits the Service_Ingestor principal OR a caller still
-      presenting the service-role key; 0048 removes the second arm, which is what completes roadmap
-      item 16. The transitional arm existed so that a daemon deployed before the credential swap
+      presenting the service-role key; 0048 removes the second arm, which completes the credential
+      swap. The transitional arm existed so that a daemon deployed before that swap
       kept working, and 0047 says removing it should be one line "so that it is a decision rather
       than a refactor". 0048 is that decision -- nothing hands the daemon a service-role key any
       more, on either Compose or Kubernetes, so the arm only widened the gates. 0048's self-check
@@ -645,7 +645,7 @@ function edgeFunctionNames() {
     // -------------------------------------------------------------------------------------------
     // SIX OF THESE ARE ONE CHANGE. 0065 moves every SQL predicate off `gateways.is_virtual` and on
     // to `deployment` (0064), because that word carries three incompatible definitions and every
-    // behaviour branching on it is about a fourth -- roadmap 15, and three defects that each cost a
+    // behaviour branching on it is about a fourth -- as three defects showed, each costing a
     // migration to fix locally: 0056, 0062 and 0063.
     //
     // REPRODUCTION IS FORCED RATHER THAN CHOSEN HERE: CREATE OR REPLACE FUNCTION takes a whole
@@ -664,8 +664,8 @@ function edgeFunctionNames() {
       host-run gateway with a CREDENTIAL_ISSUED row, minus revocation.`,
     'public.authorize_virtual_gateway_credential': `0041 declares it; 0065 swaps its one predicate.
       The function keeps its name deliberately -- it is cited from the frontend and from 0041's own
-      header, and renaming an RPC is a client-visible change that belongs with the frontend half of
-      roadmap 15 rather than smuggled into a body swap.`,
+      header, and renaming an RPC is a client-visible change that belongs in its own commit rather
+      than smuggled into a body swap.`,
     'public.issue_gateway_enrollment_token': `0025 declares it; 0065 swaps the check that refuses a
       gateway with no appliance to carry a bundle to. The clearest case for the whole item: the
       question was always "is there a machine out there", and \`is_virtual\` was three other claims
@@ -940,125 +940,54 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
-// 10c. The roadmap is an ascending list of unique numbers, and all of it is inside the section.
+// 10c. The roadmap is a file of its own, and the README points at it.
 //
-// NOT CONTIGUOUS ANY MORE, AND THE CHANGE IS THE POINT. The roadmap lists only what is NOT built:
-// an item that ships is deleted from it and its substance moves into the documentation, so the
-// presence of a number answers "is this done?" without anyone reading a status word.
+// IT USED TO LIVE IN THE README, and this check used to assert a great deal more: that item
+// headings were strictly ascending and unique, that none sat outside the section, that retired
+// numbers were never reused, and that an English count word in the opening sentence -- "Fourteen
+// extensions," -- matched the number of headings below it. Four invariants a person had to update
+// in lockstep every time an item shipped, in a section that was 62% of the file.
 //
-// Deleting used to mean renumbering everything below it, and that does not survive contact with
-// this repository. The remaining entries are named by dozens of comments in migrations, scripts and
-// components, all explaining why that code is the way it is, and shifting a number would silently
-// redirect every one of them without erroring -- a citation is an identifier, not a position. So
-// retired numbers are left as gaps and never reused, and this check asserts ASCENDING and UNIQUE
-// rather than 1..N. A duplicate or an out-of-order entry is still a real error; a gap is not.
+// Those assertions existed because roadmap numbers were ADDRESSES: source comments cited them by
+// number, so deleting an item and renumbering the rest silently redirected every citation without
+// erroring. Nothing cites them any more -- the comments state what the code does instead -- so the
+// numbers are labels for reading order and the whole apparatus went with them.
 //
-// THE FAILURE THIS EXISTS FOR HAS ALREADY HAPPENED. Splitting the legacy-API-key work into its own
-// entry appended it to the END OF THE FILE rather than to the end of its section, so it landed
-// after `## Contributing`: correctly numbered, fully written, and outside the roadmap. It read as
-// "item 8 is missing" to someone scrolling the section, and nothing here noticed -- the link check
-// passed, the prose was intact, and no count was wrong. A heading under the wrong parent is
-// invisible to every check that looks at content rather than at structure.
-//
-// Three assertions, because the three ways this drifts are independent: an item outside the
-// section, a gap or duplicate in the numbering, and a count sentence left behind by a retirement.
+// WHAT IS LEFT IS THE FAILURE THAT ACTUALLY HAPPENED. Splitting an entry once appended it to the
+// end of the FILE rather than the end of its section, so it landed after `## Contributing`:
+// correctly written, correctly numbered, and invisible to a reader scrolling the roadmap. The same
+// mistake now leaves an item behind in the README, so that is what this looks for -- plus the
+// pointer itself, because a roadmap nothing links to is a roadmap nobody opens. Check 1 already
+// proves the link resolves; this proves it is there to resolve.
 // -------------------------------------------------------------------------------------------------
 {
   const readme = read('README.md');
-  const lines = readme.split('\n');
+  const roadmap = 'docs/roadmap.md';
 
-  const sectionStart = lines.findIndex((l) => /^## Roadmap/.test(l));
-  if (sectionStart < 0) {
-    fail('README.md has no "## Roadmap" section heading');
+  const stranded = readme.split('\n')
+    .map((l, i) => [i + 1, l])
+    .filter(([, l]) => /^#{2,4} \d+ · /.test(l));
+
+  if (stranded.length) {
+    fail(
+      `${stranded.length} numbered roadmap item(s) are still in README.md:\n` +
+        stranded.map(([n, l]) => `        line ${n}: ${l.trim()}`).join('\n') +
+        `\n      The roadmap lives in ${roadmap}. Move them there rather than leaving the list\n` +
+        '      split across two files, which is how an entry stops being read.'
+    );
+  } else if (!existsSync(join(REPO, roadmap))) {
+    fail(`${roadmap} is missing, and README.md's roadmap section points at it.`);
+  } else if (!readme.includes(roadmap)) {
+    fail(
+      `README.md does not link to ${roadmap}. The section was moved out of the README on the ` +
+        'understanding that the README still names where it went.'
+    );
   } else {
-    // The section runs to the next `## ` heading, or to the end of the file.
-    let sectionEnd = lines.length;
-    for (let i = sectionStart + 1; i < lines.length; i += 1) {
-      if (/^## /.test(lines[i])) { sectionEnd = i; break; }
-    }
-
-    const items = [];
-    const strays = [];
-    lines.forEach((line, i) => {
-      const m = /^### (\d+) · /.exec(line);
-      if (!m) return;
-      if (i > sectionStart && i < sectionEnd) items.push(Number(m[1]));
-      else strays.push(`line ${i + 1}: ${line.trim()}`);
-    });
-
-    if (strays.length) {
-      fail(
-        `${strays.length} numbered roadmap item(s) sit OUTSIDE the "## Roadmap" section:\n` +
-          strays.map((s) => `        ${s}`).join('\n') +
-          '\n      They are in the file and not in the roadmap, which reads to a person as the item\n' +
-          '      being missing. Move them above the next "## " heading.'
-      );
-    }
-
-    // RETIRED NUMBERS, DECLARED RATHER THAN INFERRED. A gap can be spotted between two surviving
-    // entries, but 16 was the last item and left no gap to notice -- inferring would silently
-    // under-report exactly the numbers most likely to be reused by someone appending to the end.
-    // Reuse is the failure this guards: every one of these is still cited from code, pointing at
-    // documentation for work that shipped, and a new entry answering to the same number would make
-    // those citations read as open work.
-    // 9 is NOT here. The AAS item was retired long before this practice and the list was
-    // renumbered around it at the time, so 9 is a live entry today -- it was reused legitimately,
-    // under the old convention, and listing it would fail the check against a correct README.
-    // 4 joined them when Envoy became the gateway on Kubernetes as well as on Compose. It is
-    // cited from ci.yml, docker-compose.yml, hpas.yaml, values.yaml, both envoy.yaml files and
-    // docs/gateway-migration.md -- more citations than any other retired number, which is exactly
-    // why reuse would be worse here than a gap.
-    // 3 joined them when cold telemetry archival shipped. Its remaining clause -- rendering
-    // archived ranges in a dashboard -- was declined rather than deferred, and the reasoning is in
-    // supabase/README.md; an item with nothing outstanding does not belong in a list of what is not
-    // built, however much of it was reasoned about.
-    const RETIRED = [3, 4, 6, 7, 11, 13, 15, 16, 17, 18];
-    const reused = items.filter((n) => RETIRED.includes(n));
-    if (reused.length) {
-      fail(
-        `roadmap item(s) ${reused.join(', ')} reuse a retired number. Retired numbers are never ` +
-          `reused -- code still cites them for work that shipped, and a new entry under the same ` +
-          `number makes those citations read as open work. Append a fresh number instead.`
-      );
-    }
-
-    const ascending = items.every((n, i) => i === 0 || n > items[i - 1]);
-    const duplicates = items.filter((n, i) => items.indexOf(n) !== i);
-    if (!ascending || duplicates.length) {
-      fail(
-        `the roadmap items are numbered ${items.join(', ') || '(none)'} -- expected strictly ` +
-          `ascending and unique. Gaps are fine and mean a built item was retired; a repeat or an ` +
-          `out-of-order entry means two entries answer to one number.`
-      );
-    } else if (!strays.length) {
-      // The count claim in the section's opening sentence, written as a word.
-      //
-      // EXTENDED PAST THE CURRENT COUNT, for the same reason the edge-function check is: a list
-      // that stops exactly at today's number fails on the next item added, and it fails with a
-      // message saying the README is wrong while the README is correct. The roadmap reached
-      // sixteen and this stopped at fifteen, which is precisely that.
-      const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight',
-        'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
-        'seventeen', 'eighteen', 'nineteen', 'twenty', 'twenty-one', 'twenty-two',
-        'twenty-three', 'twenty-four', 'twenty-five'];
-      const claim = /^(\w+) extensions,/im.exec(lines.slice(sectionStart, sectionEnd).join('\n'));
-      const claimed = claim ? WORDS.indexOf(claim[1].toLowerCase()) : -1;
-      if (claimed < 0) {
-        fail(
-          'the roadmap section does not open with a "<Word> extensions," count claim, which this ' +
-            'check reads to catch a retirement that renumbered without recounting.'
-        );
-      } else if (claimed !== items.length) {
-        fail(
-          `README.md claims "${claim[1]} extensions" but the roadmap lists ${items.length}.`
-        );
-      } else {
-        pass(
-          `the roadmap lists ${items.length} ascending, uniquely numbered items, all inside its ` +
-            `section, and reuses none of the ${RETIRED.length} retired number(s) ` +
-            `(${RETIRED.join(', ')})`
-        );
-      }
+    const items = read(roadmap).split('\n').filter((l) => /^## \d+ · /.test(l));
+    if (!items.length) {
+      fail(`${roadmap} lists no items -- expected headings of the form "## <n> · <title>".`);
+    } else {
+      pass(`the roadmap is ${roadmap} (${items.length} items), linked from README.md`);
     }
   }
 }
@@ -1201,7 +1130,7 @@ function edgeFunctionNames() {
 // direction is safe, since it only ever makes the check MORE willing to call something reachable.
 //
 // It reports zero today -- including `devices.asset_type` and `cells.grafana_url`, which the
-// roadmap entry that commissioned this listed as candidates on evidence that had since gone stale.
+// two columns most often nominated as candidates, on evidence that had gone stale.
 // That is the point: the invariant holds now, and the ordinary way to break it is to add a column
 // and never wire it up, or to remove the last consumer of one and leave the column behind.
 // -------------------------------------------------------------------------------------------------
@@ -1525,14 +1454,13 @@ function edgeFunctionNames() {
 // and six devices the provisioning script creates, so that a row existed wherever the migrations
 // had run -- the Kubernetes path never runs a Compose-side script, and the AAS conformance suite
 // targeted `Sim_CNC_Mill_01` by name. Both halves of that argument have since expired: the suite
-// provisions its own subject through tests/aas_fixture.py, and roadmap §14 makes the floor opt-in
-// because it appeared on every start and, in the words of the person who asked, polluted the
-// Digital Thread.
+// provisions its own subject through tests/aas_fixture.py, and the floor is opt-in because it
+// appeared on every start and, in the words of the person who asked, polluted the Digital Thread.
 //
 // So provisioning is now the SOLE owner, and the agreements that matter are:
 //
 //   1. 0002 MUST NOT carry the floor any more. A re-seeded row would come back on every boot
-//      underneath a retirement that reported success, which is the failure §14 exists to remove
+//      underneath a retirement that reported success, which is the failure an opt-in floor removes
 //      and would look exactly like it had not been done.
 //   2. 0040 MUST retire every row provisioning owns. A gateway added to the script and missed
 //      there survives the retirement -- one asset on an otherwise empty shopfloor, with nothing
@@ -1577,12 +1505,12 @@ function edgeFunctionNames() {
     if (reseeded.length) {
       fail(
         `0002_seed_data.sql seeds ${reseeded.join(', ')} again.\n` +
-          '      Roadmap §14 retired the demonstration floor from the seed so a fresh install comes\n' +
+          '      The demonstration floor is not seeded, so a fresh install comes\n' +
           '      up empty. A row seeded here returns on EVERY boot, underneath 0040, which would\n' +
           '      report a successful retirement of assets that are back before anyone looks.'
       );
     } else {
-      pass('0002_seed_data.sql seeds none of the demonstration floor (roadmap §14)');
+      pass('0002_seed_data.sql seeds none of the demonstration floor');
     }
 
     // 12b. THE RETIREMENT MUST COVER ALL OF IT.
@@ -1695,7 +1623,7 @@ function edgeFunctionNames() {
   //
   // Checked against the WHOLE device list rather than the first entry, so re-ordering the topology
   // is not a failure. What matters is that the name resolves to something the migrations create.
-  // THE ASSERTION IS INVERTED FROM WHAT IT WAS, and the inversion is roadmap §14.
+  // THE ASSERTION IS INVERTED FROM WHAT IT WAS, and the inversion is the floor becoming opt-in.
   //
   // It used to require that the AAS suite target one of the SEEDED devices -- because it did, and a
   // rename would have emptied the suite rather than failing it. The suites now provision their own
@@ -1726,7 +1654,7 @@ function edgeFunctionNames() {
       }
     } else if (seededNames.includes(target[1])) {
       fail(
-        `${file} defaults AAS_TEST_DEVICE to '${target[1]}', a SEEDED device. Roadmap §14 removes ` +
+        `${file} defaults AAS_TEST_DEVICE to '${target[1]}', a SEEDED device. Nothing guarantees ` +
           'the seed; a conformance suite pointed at it empties itself rather than failing.\n' +
           '      Leave the default empty and let tests/aas_fixture.py provision the subject.'
       );
@@ -1770,8 +1698,8 @@ function edgeFunctionNames() {
 // how a guard stops being trusted.
 // -------------------------------------------------------------------------------------------------
 {
-  // BOTH RULE FILES, and reading only the first would have quietly emptied this check. Roadmap §14
-  // split the three MACHINE rules out into simulation/ -- and those are the only rules that name a
+  // BOTH RULE FILES, and reading only the first would have quietly emptied this check. The three
+  // MACHINE rules live in simulation/ -- and those are the only rules that name a
   // metric at all, because the platform and ingestion groups count rows and read views. Pointed at
   // the provisioning directory alone it finds zero metric names and reports the absence as a shape
   // change rather than as what it is: the rules moved. (It did exactly that, once, on the commit

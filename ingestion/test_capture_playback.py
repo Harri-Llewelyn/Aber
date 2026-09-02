@@ -53,7 +53,7 @@ sys.path.insert(0, INGESTION_DIR)
 # generated protobuf module registers its descriptors a second time and raises.
 # =============================================================================================
 #
-# DROPPING THE STUB IS NO LONGER ENOUGH, AND THE REASON IS ROADMAP ITEM 17. `capture` used to be
+# DROPPING THE STUB IS NOT ENOUGH, AND THE REASON IS THE IMPORT GRAPH. `capture` used to be
 # reachable only from this file, so deleting `sparkplug_b_pb2` and importing it fresh was the whole
 # dance. ingestion.py now imports `capture_worker`, which imports `capture` -- so by the time this
 # file runs, a sibling that imported the daemon has ALREADY loaded `capture` bound to the stub, and

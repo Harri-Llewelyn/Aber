@@ -88,7 +88,7 @@ scrape_configs:
   # -----------------------------------------------------------------------------------------------
   # The API gateway's admin listener.
   #
-  # BOTH THE PORT AND THE PATH MOVED WITH THE GATEWAY (roadmap §4). Kong served `/metrics` on a
+  # BOTH THE PORT AND THE PATH MOVED WITH THE GATEWAY. Kong served `/metrics` on a
   # dedicated status listener (:8100) that existed only when KONG_STATUS_LISTEN was set; Envoy
   # serves the scrape at `/stats/prometheus` on its ADMIN listener (:9901), which also answers the
   # container's healthcheck. Carrying the old path over would scrape a 404 while Prometheus

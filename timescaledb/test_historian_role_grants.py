@@ -1,5 +1,5 @@
 """
-Integration tests for `ingest_writer` and `fdw_reader` -- roadmap item 18.
+Integration tests for `ingest_writer` and `fdw_reader`.
 
 RUNS AGAINST THE HISTORIAN, NOT SUPABASE, for the same reason test_bi_reader_grants.py does: these
 roles exist on the standalone TimescaleDB instance, and a grant issued on the Supabase side would
@@ -28,7 +28,7 @@ own.
 
 THE GRANT LIST IS NOT WHAT YOU WOULD GUESS, and the tests encode the measurement rather than the
 guess. `ingest_writer` needs SELECT on both tables, not just INSERT -- every statement the daemon
-issues carries an ON CONFLICT clause, and inferring the arbiter index reads the target. The roadmap
+issues carries an ON CONFLICT clause, and inferring the arbiter index reads the target. The grant list
 entry that specified this feature got it wrong; a probe role got it right.
 
 THE HYPERTABLE IS THE SUBTLE ONE. `telemetry` is a hypertable, so rows land in chunks. If a grant

@@ -17,7 +17,7 @@ psycopg2-binary==2.9.10
 # that, on every pull request.
 protobuf==5.29.6
 supabase
-# Parquet, for cold telemetry archival (roadmap item 3, ingestion/cold_archive.py).
+# Parquet, for cold telemetry archival (ingestion/cold_archive.py).
 #
 # THE FORMAT IS THE POINT, not the library. Item 3 asks for "vendor-neutral Apache Parquet"
 # precisely so a decade of plant history is not readable only by the stack that wrote it -- DuckDB,
@@ -28,7 +28,7 @@ supabase
 # read Parquet, so the ingestion daemon's own start-up path never pays for it.
 pyarrow==23.0.1
 
-# Reading the cold archive back (roadmap item 3, `cold_archive query`).
+# Reading the cold archive back (`cold_archive query`).
 #
 # WHY NOT JUST pyarrow, WHICH IS ALREADY HERE. pyarrow reads a Parquet file; DuckDB queries a SET of
 # them with SQL -- joins, aggregates, predicate pushdown and Hive partition awareness -- which is

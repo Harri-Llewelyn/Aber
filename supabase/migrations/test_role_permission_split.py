@@ -372,10 +372,10 @@ class ReadingSurvived(RoleSplitFixture):
 
     def test_manager_still_reads_the_digital_thread(self):
         """
-        `digital_thread:read` is NOT one of the three, and the distinction matters: README §22
-        proposes splitting that table into asset and security domains and taking the security
-        lane away from this role. That is a different item with a different argument, and it
-        must not arrive by accident here.
+        `digital_thread:read` is NOT one of the three, and the distinction matters: 0070 splits
+        that table into asset and security domains and takes the security lane away from this
+        role. That is a separate change with its own argument, and it must not arrive by
+        accident here.
         """
         with self.conn.cursor() as cur:
             as_user(cur, MANAGER_ID)

@@ -27,7 +27,7 @@
 --                     gitops:manage   what gets deployed to the edge
 --
 -- IT IS A BREAKING CHANGE for a deployment where a Shopfloor_Manager does schema or GitOps work,
--- and it is stated as one in README §20 rather than described as a hardening. The repair is to
+-- and it is stated as one rather than described as a hardening. The repair is to
 -- make that person an Administrator.
 --
 -- ---------------------------------------------------------------------------------------------
@@ -52,9 +52,9 @@
 --
 -- `authz:manage` has no policy and no control. `public.user_roles` and `public.role_permissions`
 -- carry a SELECT policy each and nothing else, so no authenticated caller -- Administrator
--- included -- can write either through PostgREST today. README §20 used to say a Shopfloor_Manager
--- "can promote themselves to Administrator through the Access Control tab"; there is no such
--- control and no write path for one to use. THE ESCALATION IS LATENT, NOT LIVE: it arrives with
+-- included -- can write either through PostgREST today. A Shopfloor_Manager cannot promote
+-- themselves to Administrator through the Access Control tab: there is no such control and no
+-- write path for one to use. THE ESCALATION IS LATENT, NOT LIVE: it arrives with
 -- the first role-assignment control, which is why the split is a PREREQUISITE for building that
 -- control rather than a patch on an open hole. The README is corrected to say so.
 --
@@ -71,7 +71,7 @@
 -- ledger would be ceremony over a DELETE that is already idempotent.
 --
 -- Related: 0002 (the grants), 0001 (the policies and the RBAC tables), 0042/0044 (the four
---          Administrator-only policies this follows), README.md §20, §21, §22.
+--          Administrator-only policies this follows), 0070 (the audit-domain split behind it).
 -- =============================================================================================
 
 SET search_path TO public;

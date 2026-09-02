@@ -1,7 +1,7 @@
 -- =============================================================================================
 -- Migration: 0068_cold_storage.sql
 -- Cold telemetry archival — the dashboard's half, and the settings the exporter reads
--- (roadmap item 3)
+--
 -- =============================================================================================
 --
 -- Idempotent: db-init replays every /migrations/*.sql on every boot.

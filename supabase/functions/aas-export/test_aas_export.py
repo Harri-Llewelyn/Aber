@@ -55,7 +55,7 @@ DEMO_PASSWORD = os.getenv("AAS_TEST_PASSWORD", "acscymru123")
 # THE SUITE PROVISIONS ITS OWN SUBJECT, and this is the point of it rather than a detail.
 #
 # It used to be `Sim_CNC_Mill_01`, seeded by 0002 as part of the demonstration shopfloor -- so a
-# CONFORMANCE suite depended on DEMO DATA, which roadmap §14 removes. That coupling has already bitten
+# CONFORMANCE suite depended on DEMO DATA the seed no longer creates. That coupling has already bitten
 # once: 0020 exists partly because the previous subject, `Simulated_CNC_01`, quietly stopped receiving
 # a DBIRTH while this suite went on naming it and reporting success.
 #

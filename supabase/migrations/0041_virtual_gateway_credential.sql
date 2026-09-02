@@ -4,7 +4,7 @@
 -- The authority half of "Generate broker credential" for a VIRTUAL gateway, so the last workflow
 -- that requires shell access to put a gateway on the broker can be retired. See Machine
 -- Identities in supabase/README.md, and the
--- step §14 named as the one thing missing from a hand-built simulator.
+-- step a hand-built simulator would otherwise be missing.
 --
 -- ---------------------------------------------------------------------------------------------
 -- THE PROBLEM THIS SOLVES, WHICH IS NARROW AND SPECIFIC
@@ -61,7 +61,7 @@
 --     `gateway_holds_a_credential()` is `NOT is_virtual AND enrolled_at IS NOT NULL` -- so a
 --     virtual gateway is outside its scope by definition. Bringing it in is a separate decision
 --     with a separate failure mode (rotating an account a running host-side connector is holding),
---     and it belongs with the rest of §13 rather than smuggled in beside a button.
+--     and it belongs with the rest of the machine-identity work rather than beside a button.
 -- =============================================================================================
 
 SET search_path TO public;

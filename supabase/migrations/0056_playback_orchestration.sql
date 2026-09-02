@@ -263,8 +263,8 @@ CREATE POLICY "playback_jobs_select_privileged" ON public.playback_jobs
 -- ---------------------------------------------------------------------------------------------
 -- 4b. Does this gateway hold a broker credential the platform issued?
 -- ---------------------------------------------------------------------------------------------
--- `gateway_holds_a_credential()` IS NOT THE PREDICATE FOR THIS, AND THE ROADMAP SAID IT WAS. Item
--- 17 §5 names it directly. It is:
+-- `gateway_holds_a_credential()` IS NOT THE PREDICATE FOR THIS, however directly it reads as
+-- though it were. It is:
 --
 --     SELECT NOT g.is_virtual AND g.enrolled_at IS NOT NULL
 --
@@ -405,7 +405,7 @@ BEGIN
     -- and the worker refuses for itself when it does not. It proves the credential EXISTS, which is
     -- what turns "the broker will reject this" into an answer available before the job is queued.
     --
-    -- `gateway_has_broker_credential()`, NOT `gateway_holds_a_credential()` which item 17 §5 names:
+    -- `gateway_has_broker_credential()`, NOT the similarly named `gateway_holds_a_credential()`:
     -- that one means "physical and enrolled" and excludes every virtual gateway by definition. See
     -- section 4b above -- this was measured, not argued.
     IF NOT public.gateway_has_broker_credential(v_gateway) THEN

@@ -12,7 +12,7 @@
  *
  * AND A FOURTH QUESTION, WHICH IS NEW: *WHICH* FLOW. This used to seed the demonstrator's
  * simulator unconditionally, so a stack that had generated no assets still came up publishing
- * under four gateway identities that did not exist. Roadmap §14 makes the simulator opt-in
+ * under four gateway identities that did not exist. The simulator is opt-in
  * (NODE_RED_SEED_SIMULATOR=true); by default this seeds a one-node "Start here" flow that points
  * at the tutorial and connects to nothing.
  *
@@ -53,7 +53,7 @@ const mqttUser = process.env.MQTT_USER || 'gwy100000000000400080000';
 const mqttPassword = process.env.MQTT_PASSWORD;
 const forceSeed = /^(1|true|yes)$/i.test(process.env.NODE_RED_FORCE_SEED || '');
 
-// THE SIMULATOR IS OPT-IN (roadmap §14). Unset, this script seeds the starter flow below instead
+// THE SIMULATOR IS OPT-IN. Unset, this script seeds the starter flow below instead
 // of the demonstrator's, and the difference is not cosmetic: the simulator flow declares four
 // `mqtt-broker` nodes, and a broker node is what makes a broker CREDENTIAL mandatory. Seeding it on
 // a stack nobody has provisioned therefore forces four passwords to exist for four gateways that do
@@ -1090,7 +1090,7 @@ for (const [nodeId, credential] of brokerCredentials) {
   await credentials.add(nodeId, credential);
 }
 // ZERO IS A LEGITIMATE COUNT and is said differently, rather than printed as an empty list after a
-// trailing colon. The starter flow declares no broker nodes at all (roadmap §14), so "seeding
+// trailing colon. The starter flow declares no broker nodes at all, so "seeding
 // credentials for 0 broker node(s): " is the ordinary output of a working blank canvas -- and it
 // reads exactly like a lookup that returned nothing, which is the one impression this script's
 // logging is otherwise careful never to give.

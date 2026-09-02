@@ -320,7 +320,7 @@ ON CONFLICT (user_id, role_id) DO NOTHING;
 -- dashboard.
 --
 -- ---------------------------------------------------------------------------------------------
--- ITS SUBJECT IS NO LONGER GUARANTEED TO EXIST, WHICH IS THE POINT OF ROADMAP §14.
+-- ITS SUBJECT IS NOT GUARANTEED TO EXIST, BECAUSE THE SIMULATED FLOOR IS OPT-IN.
 --
 -- These ids used to be seeded by `0002_seed_data.sql` on every boot, so the demonstration always
 -- had something to demonstrate on. `0040_retire_demonstration_seed.sql` retires that seed: a

@@ -77,7 +77,7 @@ generated or trusted.
   or mosquitto cannot scale. Refusing with a less useful reason is its own regression: CI asserts
   that a refused single-writer names "SINGLE-WRITER workload", and it was right to.
 
-  It was not hypothetical. Promoting Envoy (roadmap §4) turned `supabaseKong.enabled` off while
+  It was not hypothetical. Promoting Envoy turned `supabaseKong.enabled` off while
   values-prod.yaml.example still asked to autoscale `supabase-kong`, and the render answered with a
   gateway pinned at one replica where the file plainly asked for two to six. Nothing said so.
 */}}

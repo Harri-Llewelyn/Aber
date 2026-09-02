@@ -2778,7 +2778,7 @@ components:
           nullable: true
           readOnly: true
           description: Receipt time of the last node-level Sparkplug B message. NULL means none has ever arrived.
-        deployment: { type: string, enum: [host, remote], description: "Where this gateway's connector runs. Replaced is_virtual, which meant three different things (roadmap 15)." }
+        deployment: { type: string, enum: [host, remote], description: "Where this gateway's connector runs. Replaced is_virtual, which meant three different things." }
         is_archived: { type: boolean, default: false }
         archived_at: { type: string, format: date-time, nullable: true }
         auto_delete_at: { type: string, format: date-time, nullable: true }

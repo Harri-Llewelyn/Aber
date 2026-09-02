@@ -67,7 +67,7 @@ const rootDir = path.resolve(__dirname, '..');
  * (`shadow > simulated > site_wide > explicit > inherited > unassigned`), so nothing lands in the
  * Unassigned queue and no cell is missing from anywhere.
  *
- * WHAT THIS COSTS IS THE DEMONSTRATION, and roadmap 15 priced it before taking the decision: a
+ * WHAT THIS COSTS IS THE DEMONSTRATION, and the trade was taken deliberately: a
  * shopfloor map showing one Simulated bucket demonstrates less than four populated cells did. What
  * it buys is a map that does not show a plant which is not there, which is the more expensive of
  * the two mistakes. `locationScope: 'site_wide'` survives for the BMS because it is an assertion
@@ -428,7 +428,7 @@ async function ensureGateway(spec) {
     //
     // This wrote `is_virtual: false` once, asserting the opposite: four simulated gateways claiming
     // to be physical hardware, on the same shopfloor map as real plant with nothing distinguishing
-    // them. It became `is_virtual: true`, and became this when roadmap 15 retired that word -- the
+    // them. It became `is_virtual: true`, and became this when that word was retired -- the
     // claim it was making all along was about where the connector runs.
     deployment: 'host',
     // AND SIMULATED, which is the whole claim this fixture makes about itself: these readings are

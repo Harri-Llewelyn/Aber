@@ -58,7 +58,7 @@
  *   node scripts/check-gateway-surface.mjs --runtime --authenticated [baseUrl]   # needs SUPABASE_ANON_KEY
  *
  * The base URL is the first non-flag argument, or SUPABASE_URL. Running it twice against two
- * gateways and diffing the output is the equivalence test roadmap §4 is steered by.
+ * gateways and diffing the output is the equivalence test a gateway change is steered by.
  *
  * No dependencies: this runs in CI before any `npm install`, and the runtime modes speak HTTP
  * through `node:http` rather than fetch -- see the note on probeOnce for the Windows exit
@@ -626,7 +626,7 @@ const template = read(ENVOY_TEMPLATE);
   // not caught until the render was actually exercised.
   //
   // So the claim worth asserting is the narrower true one: COMPOSE no longer reads it. That flips
-  // to "gone" when the Helm half of roadmap §4 lands, and this comment is the reminder.
+  // to "gone" when the chart stops deploying Kong, and this comment is the reminder.
   const compose = read(COMPOSE_FILE);
   if (/kong\.yml/.test(compose)) {
     fail(
@@ -640,7 +640,7 @@ const template = read(ENVOY_TEMPLATE);
   // The converse, and it is the half that actually bites. supabase/kong.yml is mirrored into the
   // chart and read by templates/supabase/kong.yaml.
   //
-  // KONG IS NOW OFF BY DEFAULT ON KUBERNETES TOO (roadmap §4), and this assertion did NOT relax
+  // KONG IS NOW OFF BY DEFAULT ON KUBERNETES TOO, and this assertion did NOT relax
   // with it. The template is still there and still reads the mirror, so `supabaseKong.enabled=true`
   // -- the documented revert -- is a broken `helm install` the moment this file goes. A retained
   // config for a disabled component looks like dead weight to anyone tidying, which is exactly when
@@ -654,7 +654,7 @@ const template = read(ENVOY_TEMPLATE);
   if (!present) {
     fail(
       'supabase/kong.yml is missing, but templates/supabase/kong.yaml still reads a mirror of it. '
-      + 'Kong is off by default since roadmap §4 promoted Envoy, so nothing fails until somebody '
+      + 'Kong is off by default and Envoy is the gateway, so nothing fails until somebody '
       + 'takes the documented revert -- and then `helm install` fails on the absent file. Restore '
       + 'it, or delete the Kong template in the same change -- see docs/gateway-migration.md.'
     );

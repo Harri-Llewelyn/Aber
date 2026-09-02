@@ -1,4 +1,4 @@
-# Alert rules, file-provisioned -- THE PLATFORM'S OWN, since roadmap §14.
+# Alert rules, file-provisioned -- THE PLATFORM'S OWN.
 #
 # The three MACHINE rules that used to open this file (Thermal Excursion, Emergency Stop Engaged,
 # Low OEE Availability) moved to `simulation/grafana/alerting/shopfloor-alert-rules.yaml` with the
@@ -86,7 +86,7 @@ groups:
       #
       # `for: 5m` ON TOP OF THAT 90 SECONDS. A gateway that misses a couple of heartbeats across a
       # broker reconnect is ordinary and self-heals; one that has been quiet for five minutes has
-      # not. Automated edge gateway telemetry -- still on the roadmap -- would make this sharper by having
+      # not. Automated edge gateway telemetry, which this stack does not collect, would make this sharper by having
       # the appliance report its own health,
       # at which point silence and unhealthy stop being the same signal.
       # -----------------------------------------------------------------------------------------

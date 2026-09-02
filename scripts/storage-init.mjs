@@ -148,7 +148,7 @@ const CAPTURE_FILE_SIZE_LIMIT = Number.parseInt(
 );
 
 /**
- * Cold telemetry objects (roadmap item 3).
+ * Cold telemetry objects.
  *
  * 1 GiB, an order of magnitude above a capture, because the unit is a whole TimescaleDB chunk
  * rather than a window somebody chose -- by default a week of every metric from every device on

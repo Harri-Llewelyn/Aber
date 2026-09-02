@@ -15,8 +15,8 @@ THERE IS NO SECOND SUBSCRIBER, AND THERE MUST NOT BE. The daemon already holds `
 credential, so a capture costs no new broker connection -- `observe()` appends to a buffer when a
 job is active and the topic matches. A separate capture service would need its own broker account
 AND would split the `seq` stream: `_last_seq` in ingestion.py is keyed `(group, edge_node)`, so a
-second consumer of the same topics makes the daemon's own gap detection fire permanently. That is
-roadmap item 1's `$share` finding arriving from the other direction.
+second consumer of the same topics makes the daemon's own gap detection fire permanently. Shared
+subscriptions do not help here for the same reason, from the other direction.
 
 =================================================================================================
 THE SHAPE OF THE LOOP

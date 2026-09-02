@@ -223,7 +223,7 @@ $$;
 --
 -- SCOPED TO THE SIX PINNED IDS ABOVE, WHICH IT WAS NOT. It used to scan every device whose name
 -- matched `Sim\_%`, which was equivalent while the only such devices were seeded by 0002 and
--- attached by the block above. It stopped being equivalent when roadmap §14 retired that seed:
+-- attached by the block above. It stopped being equivalent when that seed was retired:
 -- `Sim_` becomes a naming CONVENTION a reader follows for their own simulated assets, and the
 -- first device somebody creates in the UI and calls `Sim_MyMachine` has no schema for a minute or
 -- two -- which is a normal intermediate state, not a broken migration.

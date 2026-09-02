@@ -1,6 +1,6 @@
 -- =============================================================================================
 -- Cold telemetry archival — the manifest, and the invariant that makes dropping a chunk safe
--- (roadmap item 3)
+--
 --
 -- Reconciled on every boot by timescaledb-maintenance, like retention.sql and aggregates.sql.
 -- Idempotent by construction: every object here is CREATE ... IF NOT EXISTS or CREATE OR REPLACE.

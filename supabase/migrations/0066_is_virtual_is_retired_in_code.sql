@@ -8,7 +8,7 @@
 -- ---------------------------------------------------------------------------------------------
 -- THIS MIGRATION DROPS NOTHING, AND THAT IS THE POINT OF IT
 --
--- Roadmap §15's rename is complete in code: `0064` added `deployment`, `0065` moved every SQL
+-- The rename is complete in code: `0064` added `deployment`, `0065` moved every SQL
 -- predicate onto it, and the frontend, the edge functions and provisioning followed. Nothing in
 -- this repository READS `gateways.is_virtual` any more.
 --
@@ -51,14 +51,13 @@
 -- reader who finds `is_virtual = false` on a host-run gateway created next year would reasonably
 -- believe it. `sync_gateway_deployment()` keeps it accurate for nothing more than that.
 --
--- Related: 0064 (the column that replaced it), 0065 (the predicates), 0036 (the reason it stays),
---          README.md -- roadmap §15, retired.
+-- Related: 0064 (the column that replaced it), 0065 (the predicates), 0036 (the reason it stays).
 -- =============================================================================================
 
 SET search_path TO public;
 
 COMMENT ON COLUMN public.gateways.is_virtual IS
-  'RETIRED (roadmap 15). Nothing reads this column: `deployment` (0064) carries the question it was '
+  'RETIRED. Nothing reads this column: `deployment` (0064) carries the question it was '
   'being asked -- where the connector runs -- with one meaning instead of three. It is still '
   'written, by sync_gateway_deployment(), so it cannot drift into being wrong; it is not dropped '
   'because 0036 names it in a function signature and calls that function in its own self-check, and '

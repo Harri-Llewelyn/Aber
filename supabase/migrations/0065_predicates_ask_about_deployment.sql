@@ -9,7 +9,7 @@
 -- WHY THE SQL LAYER FIRST, AND SEPARATELY
 --
 -- `0064` added `deployment` ('host' | 'remote') because `is_virtual` carries three incompatible
--- definitions -- roadmap §15 makes that case. This migration moves the six functions that read the
+-- definitions, set out in that migration's header. This migration moves the six functions that read the
 -- old column onto the new one, and it goes first because THE SQL LAYER IS WHERE THE AMBIGUITY HAS
 -- ACTUALLY COST SOMETHING:
 --

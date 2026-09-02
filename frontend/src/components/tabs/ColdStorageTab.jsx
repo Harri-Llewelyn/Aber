@@ -13,16 +13,15 @@ import {
 } from '../../utils/coldStorage'
 
 /**
- * Cold Storage — telemetry that has been tiered out of the hypertable (roadmap item 3).
+ * Cold Storage — telemetry that has been tiered out of the hypertable.
  *
  * =================================================================================================
  * NOT "ARCHIVES", AND THE NAME WAS SETTLED BEFORE THIS PAGE EXISTED.
  *
  * `ArchivesTab.jsx` means ENTITY archives -- archived cells, gateways and devices -- and carries a
  * Restore button and an auto-purge timer. This is chunk tiering: Parquet objects on storage, with
- * no restore and no timer. The roadmap named the collision and asked for it to be settled "before
- * the page is built rather than by whoever gets there second", because the two share only the
- * English word and putting them together would put a Restore control beside rows it cannot restore.
+ * no restore and no timer. The two are kept apart deliberately: they share only the English
+ * word, and putting them together would put a Restore control beside rows it cannot restore.
  *
  * =================================================================================================
  * WHAT THIS PAGE IS FOR, WHICH IS NARROWER THAN "SHOW THE MANIFEST"
@@ -33,7 +32,7 @@ import {
  *
  * IT IS READ-ONLY, DELIBERATELY. Exporting and dropping are done by `python -m cold_archive`, and
  * a button here would put an irreversible act one click from a table -- the same reasoning that
- * keeps minting off the Access Control page (roadmap §13): "these tokens cannot be revoked, so
+ * keeps minting off the Access Control page: "these tokens cannot be revoked, so
  * issuing one should cost more than a click." Dropping a chunk is the stronger case.
  */
 /** The roles `cold_storage_rows()` returns rows to — kept in step with the function's own WHERE. */

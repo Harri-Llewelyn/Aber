@@ -74,7 +74,7 @@ Thumbs.db
 CLAUDE.md
 
 # ---------------------------------------------------------------------------------------------
-# The demonstrator's Grafana artefacts, ENABLED BY COPYING (roadmap §14).
+# The demonstrator's Grafana artefacts, ENABLED BY COPYING.
 #
 # `simulation/grafana/` is the source of truth for the Shopfloor Operations dashboard and the three
 # machine alert rules. Neither is provisioned by default: the dashboard hardcodes `Sim_CNC_Mill_01`

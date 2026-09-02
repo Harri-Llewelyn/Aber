@@ -96,7 +96,7 @@ def parts(topic):
 
 
 class SubjectMatching(unittest.TestCase):
-    """Which messages belong to the capture, which is the whole of §2's alias argument."""
+    """Which messages belong to the capture, which is the whole of the alias argument."""
 
     def test_a_gateway_capture_takes_everything_on_its_edge_node(self):
         j = job()

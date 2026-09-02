@@ -61,7 +61,7 @@ const MIRRORS = [
       name === 'aggregates.sql' ||
       name === 'storage.sql' ||
       // ADDED LATE, AND THE DELAY IS THE ARGUMENT FOR THIS LIST BEING EXPLICIT. `cold_archive.sql`
-      // shipped with roadmap item 3 and was never added here, so the chart carried no manifest
+      // shipped with cold telemetry archival and was never added here, so the chart carried no manifest
       // table -- and `0068`'s self-check probes it over the FDW, which meant db-init FAILED on
       // Kubernetes and the whole target could not install. Not a missing feature: a broken
       // deployment path, unreported for a fortnight because CI was down.
@@ -97,16 +97,16 @@ const MIRRORS = [
     match: (name) => name === 'kong.yml',
     why:
       'STILL MIRRORED, AND ONLY FOR KUBERNETES. Compose no longer reads it -- Envoy is the gateway '
-      + 'there (roadmap §4) -- but the chart still deploys Kong by default, because its Envoy '
+      + 'there -- but the chart still deploys Kong by default, because its Envoy '
       + 'templates have never run in a cluster. Deleting this file breaks helm install outright, '
-      + 'which is how it was found. It goes when the Helm half of §4 lands',
+      + 'which is how it was found. It goes when the chart stops deploying Kong',
   },
   {
     source: 'supabase',
     dest: 'envoy',
     match: (name) => name === 'envoy.yaml',
     why:
-      'The Envoy translation of kong.yml (roadmap §4). Mirrored for the SAME reason kong.yml is: '
+      'The Envoy translation of kong.yml. Mirrored for the SAME reason kong.yml is: '
       + 'one file serves both targets, and a route added for Compose and forgotten on Kubernetes '
       + 'is a gateway that behaves differently between environments',
   },
@@ -144,7 +144,7 @@ const MIRRORS = [
   },
   {
     // MOVED OUT OF THE REPOSITORY ROOT into simulation/, with the walkthrough and the demonstration
-    // dashboard, by roadmap §14. The MIRROR path is unchanged -- the chart still reads
+    // dashboard. The MIRROR path is unchanged -- the chart still reads
     // files/node-red/node_red_flow.json -- because what moved is where the source lives, not what
     // the chart is handed.
     source: 'simulation',
@@ -215,8 +215,8 @@ const MIRRORS = [
     // ConfigMap. A contact point holds a bearer token; the rules and the policy do not.
     source: join('grafana', 'provisioning', 'alerting'),
     dest: 'grafana-alerting',
-    // NAMED, NOT GLOBBED, and the glob was a real bug rather than a tidier spelling. Roadmap §14
-    // made the demonstrator's machine rules opt-in by COPYING `shopfloor-alert-rules.yaml` into
+    // NAMED, NOT GLOBBED, and the glob was a real bug rather than a tidier spelling. The
+    // demonstrator's machine rules are opt-in by COPYING `shopfloor-alert-rules.yaml` into
     // this directory -- so on any machine where somebody had enabled them, a `*.yaml` match swept
     // that copy into the chart's UNCONDITIONAL alerting ConfigMap. The rules would then ship to
     // every cluster regardless of `simulation.grafana.enabled`, and the flag would have nothing to
@@ -234,7 +234,7 @@ const MIRRORS = [
     why: 'Platform Infrastructure folder -- stack and ingestion health',
   },
   {
-    // MOVED INTO simulation/ BY ROADMAP §14, along with the flow and the walkthrough. It is still
+    // IN simulation/, along with the flow and the walkthrough. It is still
     // MIRRORED unconditionally -- the chart decides at render time whether to build a ConfigMap
     // from it, gated on `simulation.grafana.enabled`, and a missing file would fail that render
     // instead of turning the dashboard off. Same arrangement as mosquitto-tls.conf above.

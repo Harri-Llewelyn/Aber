@@ -131,7 +131,7 @@ export function credentialStateExplanation(state, gateway) {
  * mint, because there is no appliance to mint it on; an archived one gets neither, which is 0041's
  * refusal and 0037's reason.
  *
- * This read `is_virtual` until roadmap 15 retired it. The question was always about where the
+ * This read `is_virtual`, which is no longer a column. The question was always about where the
  * connector runs -- `authorize_virtual_gateway_credential()` and `issue_gateway_enrollment_token()`
  * are mirror images of each other on exactly that axis -- and `deployment` is that question with
  * one meaning instead of three.

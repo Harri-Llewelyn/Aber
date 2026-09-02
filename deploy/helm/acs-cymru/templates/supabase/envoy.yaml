@@ -6,14 +6,14 @@
 {{- fail "\n\nacs-cymru: files/envoy/envoy.yaml is missing.\n\nMirror it with:  node scripts/sync-helm-chart-files.mjs\n\nEnvoy refuses to start on a config it cannot parse, so an absent one is a CrashLoopBackOff rather\nthan a silent 404 -- but the message points at a path, not at the sync step, which is why this fails here.\n" }}
 {{- end }}
 {{/*
-THE GATEWAY ON THIS TARGET, since roadmap §4 promoted it. Kong is off by default and retained.
+THE GATEWAY ON THIS TARGET. Kong is off by default and retained.
 
 WHAT WAS UNPROVEN, AND WHAT CLOSED IT. This template shipped disabled because a hand-installed
 cluster could not exercise anything needing this project's own images -- `db-init` and
 `gateway-credential` are unpublished GHCR tags, so no migrations ran, no edge functions deployed,
 and the authenticated probe's markers cannot be satisfied against empty upstreams. The Realtime
 handshake, the ServiceMonitor scrape and the Ingress were untested for the same class of reason.
-§4 recorded that remainder as "downstream of CI, not of the chart", and that was exactly right:
+That remainder was downstream of CI, not of the chart:
 the k3d job BUILDS those images and imports them, so `Verify The Live Gateway Surface — Envoy,
 In-Cluster` runs the same probe the Compose job runs, against a stack that has a schema behind it.
 

@@ -31,7 +31,8 @@
 --
 -- Three rules the daemon currently enforces IN PYTHON move into SQL here, and they are the reason
 -- this file is worth more than a permissions exercise. A rule enforced by the caller is only as
--- good as the caller, and the whole point of §16 is to stop trusting that process so much.
+-- good as the caller, and the whole point of the narrow principal is to stop trusting that
+-- process so much.
 --
 --   1. RESERVED GATEWAY STATUSES. `RESERVED_GATEWAY_STATUSES` in ingestion.py refuses to let a
 --      gateway assert PENDING_ENROLLMENT, AWAITING_BIRTH or STALE about itself, because all three
@@ -73,7 +74,7 @@ SET search_path TO public;
 -- ---------------------------------------------------------------------------------------------
 -- GRANTED TO `authenticated`, NOT ONLY TO `service_role`, and that difference is the entire point.
 -- 0026 could grant to `service_role` alone because the daemon held that key and nothing else was
--- ever going to call it. After §16 the daemon authenticates as `Service_Ingestor` -- an ordinary
+-- ever going to call it. The daemon now authenticates as `Service_Ingestor` -- an ordinary
 -- `authenticated` principal holding `Operator` -- so the grant has to admit `authenticated` or the
 -- narrow credential cannot call its own functions.
 --
@@ -83,8 +84,8 @@ SET search_path TO public;
 --
 -- `service_role` is admitted too, and ONLY for the transition. A daemon deployed before the
 -- credential swap presents the service key, which carries no `sub` claim and therefore no
--- `auth.uid()`. Dropping that arm is the last commit of §16, and it is deliberately one line so
--- that it is a decision rather than a refactor.
+-- `auth.uid()`. Dropping that arm is the last step of the swap, and it is deliberately one line
+-- so that it is a decision rather than a refactor.
 CREATE OR REPLACE FUNCTION public.is_ingestion_caller()
     RETURNS boolean
     LANGUAGE sql STABLE

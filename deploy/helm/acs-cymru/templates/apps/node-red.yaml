@@ -137,7 +137,7 @@ spec:
             */}}
             {{- include "acs-cymru.noderedAuthEnv" . | nindent 12 }}
             {{- /*
-              THE SIMULATOR IS OPT-IN (roadmap §14), and this is the Kubernetes half of the same
+              THE SIMULATOR IS OPT-IN, and this is the Kubernetes half of the same
               switch `NODE_RED_SEED_SIMULATOR` gives Compose. Unset, node-red-init seeds a one-node
               "Start here" flow declaring no broker nodes, so a fresh install publishes nothing and
               generates no assets -- matching a database that now seeds none either.

@@ -81,13 +81,12 @@ const TARGET_SPECIFIC = new Map([
     'alpine',
     'Compose: supabase-envoy-init, which substitutes the API keys and the CORS origins into ' +
       'envoy.yaml. Kubernetes: the same work is an initContainer on the gateway Deployment, using ' +
-      'the gateway image rather than a second one. (It said supabase-kong-init until roadmap §4 ' +
-      'promoted Envoy; the arrangement is unchanged, the service name is not.)',
+      'the gateway image rather than a second one.',
   ],
   [
     'kong',
-    'KUBERNETES ONLY, AND ONLY WHEN ASKED FOR. Roadmap §4 promoted Envoy to the primary gateway ' +
-      'on Compose, so Kong is gone from docker-compose.yml entirely -- but the chart keeps it ' +
+    'KUBERNETES ONLY, AND ONLY WHEN ASKED FOR. Envoy is the gateway on Compose, so Kong is gone ' +
+      'from docker-compose.yml entirely -- but the chart keeps it ' +
       'behind `supabaseKong.enabled` so a cluster can roll back to the gateway it was installed ' +
       'with, and _helpers.tpl fails the render if both are enabled under one Service name. ' +
       'Retiring the pin means deleting that rollback, which is a separate decision from ' +

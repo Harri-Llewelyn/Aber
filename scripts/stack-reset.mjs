@@ -337,7 +337,7 @@ await waitFor('the demo accounts', () =>
 //
 //     IF NOT EXISTS (SELECT 1 FROM public.gateways WHERE id = '1200...0001') THEN ... RETURN
 //
-// `down -v` removes the floor every single time, and roadmap §14 made re-creating it OPT-IN. So on
+// `down -v` removes the floor every single time, and re-creating it is OPT-IN. So on
 // the rebuild there is no floor at this point, the seed correctly writes nothing, and the shell
 // version waited 600 seconds for a row that could not appear before timing out the whole reset.
 //
@@ -418,7 +418,7 @@ if (skipGateways) {
     }
 
     // Node-RED was started before those credentials existed, so it is holding the old ones -- and
-    // before §14 it was also started with NO SIMULATOR FLOW AT ALL, which is the default now. Both
+    // it is also started with NO SIMULATOR FLOW AT ALL, which is the default. Both
     // flags are needed and they do different things: SEED_SIMULATOR chooses the demonstrator's flow
     // over the starter flow, FORCE_SEED overrides the first-run-only guard on a volume that has
     // already been seeded once. Either alone leaves the reset without a publishing simulator.
@@ -435,8 +435,8 @@ if (skipGateways) {
   //
   // seed.sql commits one multi-entity act -- commissioning Cell 1 -- so the Digital Thread drawer
   // has a causation group to show. Its subject is the machining gateway and three of its devices,
-  // which USED TO BE seeded by 0002 and therefore always existed by the time seed.sql ran. Roadmap
-  // §14 made the floor opt-in, and provisioning is step 5: at step 4 the UPDATEs match no rows,
+  // which USED TO BE seeded by 0002 and therefore always existed by the time seed.sql ran. The
+  // floor is opt-in now, and provisioning is step 5: at step 4 the UPDATEs match no rows,
   // write nothing, and the demonstration is simply absent.
   //
   // It is not a failure -- seed.sql distinguishes "no floor" from "floor but no group" and skips
@@ -522,7 +522,7 @@ if (Number.isFinite(demoRows) && demoRows > 0) {
   console.log('Sim_Gateway_Cell1_Machining.');
   console.log('\nEvery row after those records a real change.');
 } else {
-  console.log('\nThe shopfloor is EMPTY, which is the default since roadmap §14: no cells, no gateways,');
+  console.log('\nThe shopfloor is EMPTY, which is the default: no cells, no gateways,');
   console.log('no devices, and a Digital Thread describing only what you do next. Run');
   console.log('`npm run provision:gateways` for the four-cell demonstration floor, or follow');
   console.log('simulation/README.md to build one machine by hand.');

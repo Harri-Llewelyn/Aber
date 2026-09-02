@@ -322,7 +322,7 @@ END $$;
 -- =============================================================================================
 
 -- ---------------------------------------------------------------------------------------------
--- TWO CHANGES FROM THE BUCKET ABOVE, BOTH REQUIRED BY THE CAPTURE PAGE (0055, roadmap item 17).
+-- TWO CHANGES FROM THE BUCKET ABOVE, BOTH REQUIRED BY THE CAPTURE PAGE (0055).
 --
 -- 1. THE PREFIX RULE ADMITS DEVICES AS WELL AS GATEWAYS. Captures are filed by the SUBJECT
 --    RECORDED, and the page records from a gateway OR from a single device. The rule is
@@ -336,7 +336,7 @@ END $$;
 --    would be uploaded, refused with 42501, caught, logged, and lost. That is 0051's defect
 --    exactly: the symptom is a capture that never appears rather than an error anybody sees.
 --
---    THE ROADMAP ENTRY CALLED THIS "a SECURITY DEFINER function in 0047's shape", AND IT CANNOT BE.
+--    A SECURITY DEFINER FUNCTION IN 0047'S SHAPE IS THE OBVIOUS MOVE, AND IT CANNOT WORK HERE.
 --    A capture's bytes go through the Storage REST API, not through Postgres; no SQL function can
 --    carry a 50 MiB body into a bucket. The row in `storage.objects` is written by storage-api
 --    under the caller's own JWT, so the only place this authority can live is a policy arm. The
@@ -344,9 +344,9 @@ END $$;
 --    `captures` are written -- but the bucket needs this.
 --
 --    UPDATE IS INCLUDED AND INSERT ALONE IS NOT ENOUGH, which is a deliberate widening beyond what
---    item 17 §1 proposed. Each subject has exactly ONE capture object, at a path derived from its
+--    would be the obvious design. Each subject has exactly ONE capture object, at a path derived from its
 --    sparkplug id, so a re-record overwrites that key -- and storage-js spells overwrite as
---    `upsert: true`, which needs both. The alternative §1 preferred, deleting browser-side before
+--    `upsert: true`, which needs both. The alternative, deleting browser-side before
 --    the job starts, keeps the daemon at INSERT and costs more than it saves: it destroys the old
 --    capture before the new one exists, so a recording that then fails leaves nothing, and it needs
 --    a browser present at exactly the right moment or the bucket accumulates orphans no policy
@@ -496,7 +496,7 @@ BEGIN
       'broker-captures: the ingestion daemon appears in % of the 3 policies it needs (SELECT, '
       'INSERT, UPDATE). Recording is a server-side act performed by the daemon, which holds '
       'Operator and would otherwise have every upload refused with 42501 -- caught, logged, and '
-      'seen only as a capture that never appears. See 0055 and roadmap item 17.', v_daemon_writes;
+      'seen only as a capture that never appears. See 0055.', v_daemon_writes;
   END IF;
 
   -- EVERY ONE OF THOSE ARMS MUST BE SCOPED TO THE ACTIVE JOB. A bare `is_ingestion_caller()` is
@@ -572,7 +572,7 @@ END $$;
 
 
 -- ---------------------------------------------------------------------------------------------
--- telemetry-archive -- cold telemetry chunks as Parquet (roadmap item 3)
+-- telemetry-archive -- cold telemetry chunks as Parquet
 -- ---------------------------------------------------------------------------------------------
 -- THE ONE BUCKET WHOSE OBJECTS ARE NOT COPIES OF ANYTHING. A flow backup describes an appliance
 -- that still exists; a capture records traffic the plant produced and still holds. An object here

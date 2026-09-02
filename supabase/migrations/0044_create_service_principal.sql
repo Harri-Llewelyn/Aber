@@ -30,10 +30,10 @@
 -- ---------------------------------------------------------------------------------------------
 -- THE ROLE IS CHOSEN FROM THE FOUR THAT EXIST, WHICH IS THE WHOLE MODEL
 --
--- §13 draws the line and it is the right one: "this is not a fine-grained access control engine.
--- The role set is fixed at four, the policies name them literally throughout the schema, and 0002
--- grants permissions to roles by id. Profiles are chosen from a list; nothing here builds a
--- permission graph."
+-- THIS IS NOT A FINE-GRAINED ACCESS CONTROL ENGINE, and the line is drawn deliberately. The role
+-- set is fixed at four, the policies name them literally throughout the schema, and 0002 grants
+-- permissions to roles by id. Profiles are chosen from a list; nothing here builds a permission
+-- graph.
 --
 -- So this takes a role NAME and resolves it, refusing anything not in `roles`. It does not create
 -- roles, grant permissions, or accept a permission list.
