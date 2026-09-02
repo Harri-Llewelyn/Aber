@@ -545,6 +545,7 @@ const CHART_ENVOY = 'deploy/helm/acs-cymru/templates/supabase/envoy.yaml';
 /** Substituted by BOTH targets. All three lists below must agree. */
 const TEMPLATE_PLACEHOLDERS = [
   '__CORS_ORIGINS__',
+  '__REALTIME_UPSTREAM_ADDRESS__',
   '__REALTIME_UPSTREAM_HOST__',
   '__SUPABASE_ANON_KEY__',
   '__SUPABASE_SERVICE_ROLE_KEY__',

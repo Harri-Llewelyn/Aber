@@ -748,6 +748,9 @@ services:
       # A HOST, NOT A URL, unlike the Kong variable it replaces: Envoy splits the concern -- the
       # cluster carries the address, this carries only the Host header rewrite.
       REALTIME_UPSTREAM_HOST: ${REALTIME_UPSTREAM_HOST:-realtime-dev.supabase-realtime}
+      # The name Envoy DIALS, as distinct from the Host header it sends. On Compose that is the
+      # container; the chart supplies its own Service name instead.
+      REALTIME_UPSTREAM_ADDRESS: ${REALTIME_UPSTREAM_ADDRESS:-supabase-realtime}
       # THE BROWSER ORIGINS the gateway will echo an Access-Control-Allow-Origin for.
       #
       # This is the whole origin policy for the stack: the edge functions deliberately declare
@@ -802,6 +805,7 @@ services:
         sed -e "s|__SUPABASE_ANON_KEY__|$$SUPABASE_ANON_KEY|g" \
             -e "s|__SUPABASE_SERVICE_ROLE_KEY__|$$SUPABASE_SERVICE_ROLE_KEY|g" \
             -e "s|__REALTIME_UPSTREAM_HOST__|$$REALTIME_UPSTREAM_HOST|g" \
+            -e "s|__REALTIME_UPSTREAM_ADDRESS__|$$REALTIME_UPSTREAM_ADDRESS|g" \
             -e "s|__CORS_ORIGINS__|$$CORS_MATCHERS|g" \
             /template/envoy.yaml > /config/envoy.yaml
 

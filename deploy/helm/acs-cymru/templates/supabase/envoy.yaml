@@ -161,6 +161,7 @@ spec:
               sed -e "s|__SUPABASE_ANON_KEY__|$SUPABASE_ANON_KEY|g" \
                   -e "s|__SUPABASE_SERVICE_ROLE_KEY__|$SUPABASE_SERVICE_ROLE_KEY|g" \
                   -e "s|__REALTIME_UPSTREAM_HOST__|$REALTIME_UPSTREAM_HOST|g" \
+                  -e "s|__REALTIME_UPSTREAM_ADDRESS__|$REALTIME_UPSTREAM_ADDRESS|g" \
                   -e "s|__CORS_ORIGINS__|$CORS_MATCHERS|g" \
                   /template/envoy.yaml > /config/envoy.yaml
 
@@ -186,6 +187,11 @@ spec:
             # Kong's initContainer builds a full URL because Kong routes on one. Envoy splits the
             # concern: the cluster carries the address, this carries only the Host header.
             - name: REALTIME_UPSTREAM_HOST
+              value: {{ .Values.realtime.serviceName | quote }}
+            # AND THE ADDRESS, which on this target is the same string and on Compose is not.
+            # The template used to hard-code Compose's container name, so this cluster resolved
+            # nothing here and Realtime answered 503 through a gateway that was otherwise right.
+            - name: REALTIME_UPSTREAM_ADDRESS
               value: {{ .Values.realtime.serviceName | quote }}
             # THE SAME HELPER THE INGRESS HOSTS COME FROM, so an origin cannot name a hostname the
             # chart does not serve. Identical to Kong's KONG_CORS_ORIGINS for the same reason:
