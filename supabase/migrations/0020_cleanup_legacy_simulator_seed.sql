@@ -82,8 +82,8 @@ BEGIN
     GET DIAGNOSTICS v_attached = ROW_COUNT;
 
     -- The 1:1 fallback arm as well as the join row. `device_schemas` unions the two, so either
-    -- alone is sufficient for the exporter -- but a device provisioned by provision-gateways.mjs
-    -- carries neither, and setting both means the attachment survives an operator detaching one.
+    -- alone is sufficient for the exporter -- but a device created through the UI carries
+    -- neither, and setting both means the attachment survives an operator detaching one.
     --
     -- IS DISTINCT FROM, so a boot that changes nothing writes nothing. log_digital_thread_event()
     -- has had a change guard since 0005 and would suppress the audit row anyway; this makes the

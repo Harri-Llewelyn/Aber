@@ -854,6 +854,14 @@ class TestBackfill(SchemaVersioningTestCase):
         valid state, which is a test reporting its own assumption rather than a defect. What the
         backfill actually promises is v1 and a change description; the status is only constrained
         to the extent that an archived seed must have a successor to have been archived BY.
+
+        SKIPPED ON A FRESH INSTALL, WHICH IS NOT THE SAME AS PASSING. 0073 retired the last of
+        these rows -- `Simulated_CNC_01_Schema` -- so a stack built from these migrations today has
+        no seeded schema for the backfill to have acted on, and this asserts nothing. It still
+        earns its place on a database that predates 0073, where those rows are exactly what an
+        upgrade must not have left half-versioned; that stack is the one this test is for. It is
+        skipped rather than deleted for that reason, and skipped rather than passed so the
+        difference is legible in the run.
         """
         self.cur.execute(
             """
@@ -866,7 +874,12 @@ class TestBackfill(SchemaVersioningTestCase):
             """
         )
         rows = self.cur.fetchall()
-        self.assertGreater(len(rows), 0, "no seeded schemas found -- migrations 0002/0033 missing?")
+        if not rows:
+            self.skipTest(
+                "no seeded schemas present -- 0073 retired them, so a stack built from these "
+                "migrations has nothing for the 0037 backfill to have acted on. This test asserts "
+                "on a database that predates 0073."
+            )
         for name, version, status, change_description, has_successor in rows:
             self.assertEqual(version, 1, f"{name} should have backfilled to v1")
             self.assertEqual(

@@ -2389,9 +2389,10 @@ ON CONFLICT (companion_spec, name) DO UPDATE SET
 -- -------------------------------------------------------------------------------------------
 -- Factory cells, edge gateways and devices  (0 rows -- and that is the change)
 -- -------------------------------------------------------------------------------------------
--- NO ASSETS ARE SEEDED. A fresh install comes up with an empty shopfloor, and the demonstration
--- floor -- four cells, four `Sim_Gateway_*` gateways, six `Sim_*` devices -- is something a
--- reader ASKS for by running `npm run provision:gateways`. See
+-- NO ASSETS ARE SEEDED. A fresh install comes up with an empty shopfloor. The demonstration floor
+-- -- four cells, four `Sim_Gateway_*` gateways, six `Sim_*` devices -- was opt-in for a while,
+-- behind `npm run provision:gateways`, and is now retired outright: `tutorial/` walks a reader
+-- through building one machine instead. See
 -- `0040_retire_demonstration_seed.sql`, which removes the rows this block used to write from
 -- databases that already have them; deleting the statements here alone would have built a fresh
 -- database correctly and left every existing one seeded with nothing to explain where from.

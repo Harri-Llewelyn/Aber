@@ -135,8 +135,8 @@ export function CellsTab({ showToast, onSelectDevice, onSelectGateway, onViewThr
       await api.post(`/api/v1/cells/${archiveTarget.cell_id}/archive`, { auto_delete_days: days })
       // Already closed after the request rather than before it, which is what lets ArchiveModal
       // hold its Archiving… state for the whole round trip. Left alone deliberately -- the two
-      // places that DID dismiss on the click (ArchivesTab.purge, DirectoryTab's GitOps sync) were
-      // the ones that had to move.
+      // place that DID dismiss on the click (ArchivesTab.purge) was the one that had to move.
+      // DirectoryTab's GitOps sync was the other, and it is gone with the flow it deployed.
       setArchiveTarget(null); loadAll(); showToast(`Cell '${archiveTarget.cell_name}' archived (Out of Commission)`, 'success')
     } catch (e) { showToast(e.message, 'error') }
   }

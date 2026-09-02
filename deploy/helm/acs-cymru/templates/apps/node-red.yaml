@@ -40,9 +40,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  # THE NAME IS `node-red`, matching the Compose service name: the deploy-nodered edge function
-  # reaches it as http://node-red:1880/flows, and webhook_endpoints seeds
-  # http://node-red:1880/hooks/quarantine as the pg_net target. Neither changes between targets.
+  # THE NAME IS `node-red`, matching the Compose service name: webhook_endpoints seeds
+  # http://node-red:1880/hooks/quarantine as the pg_net target, and that address does not change
+  # between targets. (The deploy-nodered function reached the same Service at /flows until it was
+  # retired with the demonstrator.)
   name: node-red
   labels:
     {{- include "acs-cymru.componentLabels" (dict "ctx" . "component" $component) | nindent 4 }}

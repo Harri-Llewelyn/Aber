@@ -28,17 +28,18 @@ COPY supabase/functions /home/deno/functions
 # root is exactly the sort of thing a future runtime's directory scan trips over.
 RUN rm -f /home/deno/functions/Dockerfile
 
-# The canonical Node-RED flow: the "git" side of the GitOps sync deploy-nodered pushes to the
-# running Node-RED.
-
+# The canonical Node-RED flow WAS COPIED HERE -- the "git" side of the GitOps sync that
+# deploy-nodered pushed to the running Node-RED. Both are retired with the demonstrator: the flow
+# was the demonstration floor's, and the function could deploy nothing else.
+#
 # The physical gateway bundle template -- the files gateway-bundle zips up and hands to an operator.
 # Same delivery reasoning as the flow above: baked in, so which revision of the appliance template a
 # release ships is a property of the artefact rather than of whatever is on a cluster node's disk.
 COPY templates/physical-gateway /home/deno/templates/physical-gateway
 
 # A user worker has NO FILESYSTEM ACCESS to anything in this image -- edge-runtime sandboxes it,
-# and main/index.ts forwards only environment variables to each worker it spawns. So the flow and
-# the bundle templates are read here, in the plain container shell before edge-runtime starts, and
+# and main/index.ts forwards only environment variables to each worker it spawns. So the bundle
+# templates are read here, in the plain container shell before edge-runtime starts, and
 # handed on through the environment. This is the same arrangement docker-compose.yml's entrypoint
 # uses, moved into the image so the Kubernetes Deployment needs no command override at all.
 #

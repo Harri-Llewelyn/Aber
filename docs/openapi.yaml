@@ -2260,45 +2260,6 @@ paths:
         '401': { description: Missing or invalid Authorization header. }
         '404': { description: No element at that path. }
 
-  /functions/v1/deploy-nodered:
-    post:
-      tags: [Edge Functions]
-      summary: Deploy edge flows to Node-RED (GitOps sync)
-      description: |
-        The repository is the source of truth: this deploys the canonical `node_red_flow.json`
-        committed to the repo, and nothing else.
-
-        **A flow array in the request body is refused with `400`.** A `function` node runs
-        arbitrary JavaScript inside the Node-RED container, which holds the MQTT credential
-        and can reach Mosquitto, Supabase and TimescaleDB — accepting a caller's flow would be
-        remote code execution on the edge host.
-
-        Requires `Administrator` or `Shopfloor_Manager`. The caller's own access token is
-        forwarded to Node-RED's admin API, which re-derives their role from `user_roles`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                commit_message: { type: string, example: Manual GitOps Flow Sync from Dashboard UI }
-      responses:
-        '200':
-          description: Deployed.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status: { type: string, example: DEPLOYED }
-                  nodes_deployed: { type: integer }
-                  source: { type: string }
-        '400': { description: An inline flow array was sent; only the committed flow is deployable. }
-        '401': { description: Missing Authorization header. }
-        '403': { description: 'Forbidden: insufficient privileges.' }
-        '502': { description: Node-RED rejected the deployment (including a 401 from its admin auth). }
-
   /functions/v1/fplus-directory:
     get:
       tags: [Directory]

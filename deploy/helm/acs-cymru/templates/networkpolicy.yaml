@@ -72,7 +72,6 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "supabase-studio"    "to" "supabase-meta"      "port" 8080 "why" "the Database pages")
   (dict "from" "supabase-studio"    "to" $gw      "port" 8000 "why" "server-side API calls")
   (dict "from" "supabase-functions" "to" $gw      "port" 8000 "why" "functions call back through the gateway")
-  (dict "from" "supabase-functions" "to" "node-red"           "port" 1880 "why" "deploy-nodered pushes to the admin API")
   (dict "from" "supabase-functions" "to" "mosquitto"          "port" (int .Values.gatewayCredential.port) "why" "enroll-gateway mints a gateway's broker credential -- THE ONLY EDGE INTO CREDENTIAL ISSUANCE, and the first of its two layers of protection (the bearer token is the second). The target is `mosquitto` because the issuing service is a SIDECAR in the broker's pod: it shares the PID namespace to SIGHUP the broker, so its port is on those pods even though a separate Service addresses it. Anything else able to reach it could mint an account for any edge node, which mosquitto.acl's %u confinement turns into the ability to publish Sparkplug telemetry as that gateway")
 
   (dict "from" "ingestion"          "to" "mosquitto"          "port" $brokerPort "why" "the spBv1.0/# subscription")
@@ -95,6 +94,7 @@ TWO ENVIRONMENT-SPECIFIC KNOBS, both in values, because neither can be inferred:
   (dict "from" "e2e-validate"       "to" "mosquitto"          "port" 1883 "why" "publishes Sparkplug fixtures")
   (dict "from" "e2e-validate"       "to" $gw      "port" 8000 "why" "seeds through PostgREST")
   (dict "from" "e2e-validate"       "to" "node-red"           "port" 1880 "why" "check 7 probes all three auth surfaces")
+  (dict "from" "e2e-validate"       "to" "ingestion"          "port" 9108 "why" "its wait-for-ingestion initContainer reads acs_ingestion_mqtt_connected off the metrics endpoint -- without it the suite publishes before the daemon has subscribed and QoS 0 drops the fixtures")
   (dict "from" "e2e-aas-export"     "to" $gw      "port" 8000 "why" "invokes aas-export and signs in")
 
   (dict "from" "backup"             "to" "supabase-db"        "port" 5432 "why" "pg_dump")

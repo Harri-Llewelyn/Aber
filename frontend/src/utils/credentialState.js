@@ -18,12 +18,13 @@
  *   * `credential_revoked_at`  archive or delete rotated it to an unrecorded password (0038)
  *   * a CREDENTIAL_ISSUED row  someone minted one for a host-run gateway through the UI (0041)
  *
- * AND CREDENTIALS EXIST THAT NONE OF THOSE RECORD. `scripts/provision-gateways.mjs` issues one per
- * demonstration gateway by calling `mosquitto-provision-gateway.mjs` directly, and
- * `record_gateway_credential_issued()` cannot be called on its behalf: `has_role()` resolves
- * through `auth.uid()`, which is NULL for the service-role key. That refusal is correct -- the row
- * records a PERSON's act and a script has no person -- but it means a freshly provisioned demo
- * floor has four working accounts the platform has no record of.
+ * AND CREDENTIALS EXIST THAT NONE OF THOSE RECORD. `scripts/mosquitto-provision-gateway.mjs`
+ * mints an account on the broker directly, and `record_gateway_credential_issued()` cannot be
+ * called on its behalf: `has_role()` resolves through `auth.uid()`, which is NULL for the
+ * service-role key. That refusal is correct -- the row records a PERSON's act and a script has no
+ * person -- but it means an account minted from the host works while the platform holds no record
+ * of it. (The demonstration floor's four gateways were the case that made this visible; the
+ * script that provisioned them is retired, and the host path it called is not.)
  *
  * THAT CASE THEREFORE GETS ITS OWN STATE RATHER THAN BEING FOLDED INTO "none". `unrecorded` says
  * "the platform did not issue one and cannot tell whether the broker holds one", which is true.
@@ -117,8 +118,9 @@ export function credentialStateExplanation(state, gateway) {
         + 'appliance at first boot, not here.';
     default:
       return 'The platform has not issued a credential for this gateway. That does not mean the '
-        + 'broker holds none — accounts created by `npm run provision:gateways` are issued '
-        + 'outside the dashboard and leave no record here.';
+        + 'broker holds none — an account minted on the host with '
+        + '`scripts/mosquitto-provision-gateway.mjs` is issued outside the dashboard and leaves '
+        + 'no record here.';
   }
 }
 

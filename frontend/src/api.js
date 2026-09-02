@@ -2177,18 +2177,6 @@ const apiMethods = {
       return { schema_uuid: item.id || '', ...item };
     }
 
-    if (path.startsWith('/api/v1/gitops/deploy-flow')) {
-      const { data, error } = await supabase.functions.invoke('deploy-nodered', { body });
-      if (error) {
-        // Replace supabase-js's generic non-2xx message with the server's own.
-        throw new Error(await edgeFunctionErrorMessage(error, 'GitOps flow deployment failed'));
-      }
-      return {
-        status: data?.status || 'SUCCESS',
-        message: data?.message || 'GitOps edge deployment flow sync triggered successfully',
-      };
-    }
-
     if (path.startsWith('/api/v1/devices/aas-export')) {
       // The whole document is composed server-side: the shell needs
       // the service role to read asset_config and the full metric_catalog, and composing it in the

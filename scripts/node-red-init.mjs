@@ -853,7 +853,8 @@ function storedBrokerCredential(nodeId = BROKER_NODE_ID) {
  * "Connection failed to broker: <clientId>@<url>" -- which names the CLIENT ID, not the username,
  * and is the same line a wrong host produces.
  *
- * `provision-gateways.mjs` emits exactly these variable names.
+ * The credential tooling emits exactly these variable names, so a pair set in `.env` is picked up
+ * by naming it here and nowhere else.
  *
  * The legacy node keeps reading MQTT_USER / MQTT_PASSWORD with no declaration, so a flow authored
  * before this existed still provisions unchanged.

@@ -148,16 +148,16 @@ by design, and it is already readable in the shipped bundle.
 ### 2.2 Edge runtime: build an image instead of mounting the repo
 
 `supabase-functions` bind-mounts `./supabase/functions` and `./templates/physical-gateway`, then uses a
-shell entrypoint to read the flow into `NODERED_FLOW_JSON` because an edge-runtime user worker has
-no filesystem access to the mount. There is no repository on a cluster node to mount, and "which
+shell entrypoint to read the bundle templates into `GW_BUNDLE_*` because an edge-runtime user worker
+has no filesystem access to the mount. There is no repository on a cluster node to mount, and "which
 revision of `aas-export` is running" must be a property of the deployed artefact if a rollback is
 to roll the functions back.
 
 `supabase/functions/Dockerfile` now bakes both, with the same entrypoint export moved into the
 image so the Deployment needs no command override.
 
-- **The build context is the repository root**, not `supabase/functions/` — `node_red_flow.json`
-  lives at the root and has to be reachable. `docker build -f supabase/functions/Dockerfile .`
+- **The build context is the repository root**, not `supabase/functions/` — `templates/physical-gateway`
+  lives outside this directory and has to be reachable. `docker build -f supabase/functions/Dockerfile .`
 - **`.dockerignore` added at the root and in `frontend/`.** The root context now includes the whole
   repository, so this is no longer optional; `frontend/.dockerignore` excludes `node_modules`,
   where the host's tree can carry platform-specific binaries the alpine builder cannot execute. It
@@ -708,8 +708,9 @@ Service, so one would have no consumer and would only add a second way for the p
   one image value for both.
 - `chown -R 1000:1000 /data` in the init entrypoint → `podSecurityContext.fsGroup: 1000`. Kubernetes
   does this natively on volume mount; drop the chown from the Kubernetes path.
-- `node_red_flow.json` and `node-red-init.mjs` (`/seed`) → ConfigMap. The flow is ~19 KB, well
-  inside the 1 MB limit.
+- `node-red-init.mjs` (`/seed`) → ConfigMap. It went alone once the demonstrator's
+  `node_red_flow.json` was retired: the editor now comes up empty, and the init script seeds no
+  flow.
 - The `NODERED_*` env block is the `x-nodered-auth-env` anchor → a named template in `_helpers.tpl`,
   included by both containers. Preserve the anchor's guarantee explicitly: **a value present in one
   container and absent from the other makes `settings.js` look wrong on every boot and get rewritten

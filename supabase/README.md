@@ -1328,7 +1328,7 @@ account, publish, `DELETE` the row, and it went on publishing — with nothing q
 there so revocation cannot CREATE an account by rotating one that never existed, and by that
 definition a simulator gateway holds nothing."* Revocation goes through an **add-only** credential
 service, so asking it to rotate an account that does not exist provisions one. What was wrong is the
-second half — a simulator gateway holds exactly what `provision-gateways.mjs` issued it.
+second half — a simulator gateway holds exactly what was minted for it on the host.
 
 So `0063` swaps both the trigger and the pg_cron sweep onto `gateway_has_broker_credential()`, which
 admits a virtual gateway **only when a `CREDENTIAL_ISSUED` row exists**. That closes the leak and
@@ -1338,9 +1338,10 @@ leak for one junk account per gateway ever deleted.
 
 **Two things SQL cannot reach, and both are on the host:**
 
-- **Credentials issued before `0062`** have no record, so the predicate skips them. A re-run of
-  `npm run provision:gateways` backfills one for any gateway whose broker account exists — recorded
-  as a claim by `scripts/provision-gateways.mjs (backfill)`, because nobody witnessed that mint.
+- **Credentials issued before `0062`** have no record, so the predicate skips them. The backfill
+  that recorded them belonged to `provision-gateways.mjs`, which is retired with the demonstrator;
+  a gateway in this state is re-recorded by minting it a fresh credential through the dashboard,
+  which is an act with a person behind it and needs no claim on anyone's behalf.
 - **Accounts whose gateway row is gone** cannot fire a trigger at all.
   `scripts/revoke-orphaned-broker-accounts.mjs` reads the password file, subtracts every gateway row
   (archived included — those belong to the trigger and the sweep), and rotates what is left through

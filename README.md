@@ -222,8 +222,9 @@ for — plus demo accounts (`supabase/seed.sql`).
 the consent step needs your dashboard session — going straight to either shows a "sign in required"
 prompt rather than a login form. In Node-RED, click **Sign in with ACS-Cymru**; Administrator can
 deploy, every other role gets a read-only editor. Deploying a flow is `gitops:manage`, which
-`0069` made Administrator-only — and the editor is the second door onto it, so it narrowed with
-the Directory page's Sync button rather than after it.
+`0069` made Administrator-only. The editor used to be the *second* door onto that permission; since
+the Directory page's Sync button and the `deploy-nodered` function were retired with the
+demonstrator, it is the only one.
 
 **Demo accounts** — seeded by [`supabase/seed.sql`](supabase/seed.sql), password `acscymru123`:
 

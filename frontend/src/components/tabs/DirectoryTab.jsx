@@ -1,10 +1,9 @@
 import React, { useState, useCallback } from 'react'
 import { api } from '../../api'
-import { PERMISSION_UUIDS, POLL_INTERVAL_MS } from '../../constants'
+import { POLL_INTERVAL_MS } from '../../constants'
 import { usePolling } from '../../hooks/usePolling'
 import { describeAuthFailure } from '../../utils/sessionError'
-import { ConfirmModal } from '../modals/ConfirmModal'
-import { IconGitBranch, IconRefreshCw, IconExternalLink, IconCopy, IconCheck } from '../common/Icons'
+import { IconExternalLink, IconCopy, IconCheck } from '../common/Icons'
 import { copyText } from '../common/CopyableId'
 
 /**
@@ -280,10 +279,9 @@ function ServiceTable({ rows, onNotify }) {
   )
 }
 
-export function DirectoryTab({ showToast, hasPermission }) {
+export function DirectoryTab({ showToast }) {
   const [services, setServices] = useState([])
   const [loading, setLoading]   = useState(true)
-  const [confirmSync, setConfirmSync] = useState(false)
 
   const loadAll = useCallback(async (signal) => {
     try {
@@ -298,8 +296,9 @@ export function DirectoryTab({ showToast, hasPermission }) {
 
   /**
    * The page's only refresh. The manual "Refresh Directory" button is gone: it re-ran exactly
-   * this call, next to a table that now reloads on its own, and read as a control over the
-   * GitOps panel it sat under.
+   * this call next to a table that now reloads on its own, and it read as a control over the
+   * GitOps panel that used to sit above it -- which has itself since gone, with the flow it
+   * deployed.
    *
    * POLL_INTERVAL_MS, not refreshInterval(). That helper slows to the 60s reconciliation
    * interval when Realtime is on, which is correct ONLY for a tab that also holds a channel
@@ -310,71 +309,18 @@ export function DirectoryTab({ showToast, hasPermission }) {
    */
   usePolling(loadAll, POLL_INTERVAL_MS)
 
-  const triggerGitopsSync = async () => {
-    try {
-      const res = await api.post('/api/v1/gitops/deploy-flow', { commit_message: 'Manual GitOps Flow Sync from Dashboard UI' })
-      // Dismissed on success only. This deploy pushes a whole flow set to Node-RED and is the
-      // slowest action on the page; closing on the click meant the operator watched an idle
-      // screen with no way to tell the push from a no-op. On failure the dialog stays put, with
-      // the error toast beside it, so the retry is one click rather than a re-navigation.
-      setConfirmSync(false)
-      showToast(res.message, 'success')
-      loadAll().catch(() => {})
-    } catch (e) {
-      // Deploy runs through an Edge Function, which validates the session server-side.
-      showToast(await describeAuthFailure(e, 'GitOps flow deployment failed'), 'error')
-    }
-  }
-
-  // gitops:manage, not gateway:manage -- deploying edge flows is its own
-  // privilege. Seeded to Administrator and Shopfloor_Manager only, which is the
-  // same pair the deploy-nodered Edge Function enforces server-side.
-  const canManageGitops = hasPermission(PERMISSION_UUIDS.GITOPS_MANAGE)
-
   const groups = groupServices(services)
 
   return (
     <>
-      {/* Heading and description removed: the top bar names the page, and the sections below
-          -- the GitOps panel and the service groups -- already say what each of them is. */}
+      {/* Heading and description removed: the top bar names the page, and the service groups
+          below already say what each of them is.
 
-      {/* No deployment status is shown: nothing here can observe what Node-RED is
-          actually running, and a badge asserting a state it has not checked is
-          worse than no badge. The button is a one-way push of the repo flow. */}
-      <div style={{ marginBottom: '24px', background: 'var(--bg-glass)', border: '1px solid var(--border-hover)', borderRadius: 'var(--radius)', padding: '20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px', fontWeight: 600 }}>
-            <IconGitBranch size={18} /> Edge GitOps Deployment Manager
-          </div>
-          {/* Administrator alone since 0069, and the tooltip has to say so: deploy-nodered's own
-              ALLOWED_ROLES was narrowed with the permission, so a Shopfloor_Manager told to expect
-              access here would meet a 403 rather than a disabled button. */}
-          <button
-            className={`btn btn-primary ${!canManageGitops ? 'btn-disabled' : ''}`}
-            disabled={!canManageGitops}
-            onClick={() => canManageGitops && setConfirmSync(true)}
-            title={!canManageGitops ? 'Requires Administrator' : 'Overwrite the running Node-RED flows with the repository flow'}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-          >
-            <IconRefreshCw size={14} /> Sync Edge Flows via GitOps
-          </button>
-        </div>
-      </div>
-
-      {/* Destructive: a full deployment replaces every flow in the running
-          Node-RED, so anything edited at :1880 and not committed is lost. */}
-      {confirmSync && (
-        <ConfirmModal
-          message={
-            'This replaces ALL flows running in Node-RED with the flow committed to the repository ' +
-            '(node_red_flow.json). Any changes made in the Node-RED editor that are not in the ' +
-            'repository will be permanently lost. Continue?'
-          }
-          pendingLabel="Syncing…"
-          onConfirm={triggerGitopsSync}
-          onCancel={() => setConfirmSync(false)}
-        />
-      )}
+          THE GITOPS PANEL IS GONE, not hidden. Its button deployed `node_red_flow.json` through
+          the `deploy-nodered` edge function, and the demonstrator retirement removed both -- so
+          the control would have posted to a function that no longer exists and reported a
+          deployment failure. `gitops:manage` itself survives: `nodered-userinfo` is now the only
+          thing that enforces it, mapping the permission onto the Node-RED editor's own tier. */}
 
       {/* The search box and type picker went with the filter bar. They were solving the flat
           list's problem -- twelve unordered rows are hard to scan -- and the grouping solves it

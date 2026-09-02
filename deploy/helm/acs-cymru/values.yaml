@@ -582,9 +582,9 @@ supabaseKong:
 supabaseFunctions:
   enabled: true
   image:
-    # BUILT FROM supabase/functions/Dockerfile, not pulled: the functions and
-    # node_red_flow.json are baked in, because there is no repository on a cluster node to mount
-    # and a rollback must roll the functions back with the image.
+    # BUILT FROM supabase/functions/Dockerfile, not pulled: the functions and the physical
+    # gateway bundle template are baked in, because there is no repository on a cluster node to
+    # mount and a rollback must roll the functions back with the image.
     #   docker build -f supabase/functions/Dockerfile -t <repo>:<tag> .
     #
     # PUBLISHED, so this installs from a registry with no local build. The build command above is

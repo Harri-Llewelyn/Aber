@@ -108,7 +108,7 @@ const password = suppliedPassword || generatePassword();
 // is what keeps a hand-typed password from ending a quoted argument there. It is defence in depth
 // on the hashing path and the actual boundary on the other, which is why it is asserted once here
 // rather than argued about per call site. Nothing this repository generates could trip it --
-// provision-gateways.mjs mints base64url -- but a hand-typed password could.
+// This script mints base64url, which cannot contain one -- but a hand-typed password could.
 try {
   assertSafePassword(password);
 } catch (err) {

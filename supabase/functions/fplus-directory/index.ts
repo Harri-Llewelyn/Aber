@@ -213,7 +213,8 @@ export default async function handler(req: Request): Promise<Response> {
         address: { group_id: gateway.sparkplug_group, node_id: gateway.sparkplug_id },
         online: gateway.status === "ONLINE",
         last_change: gateway.last_heartbeat,
-        // The edge node itself declares no schema -- see the NBIRTH note in node_red_flow.json
+        // The edge node itself declares no schema: an NBIRTH carries the node's own metrics,
+        // not a device model, so there is nothing here to name a schema with.
         // for why claiming Factory+'s component schema would be a false assertion.
         schemas: [],
         devices: entries,
