@@ -24,6 +24,14 @@ python ingestion/test_telemetry_batching.py
 python ingestion/test_capture_playback.py
 # The daemon-side recording engine -- subject matching, the caps, and the manifest
 python ingestion/test_capture_worker.py
+# The startup recovery loop. `depends_on` orders `docker compose up` and nothing else, so when the
+# Docker daemon brings `restart: always` containers back it can start ingestion before the
+# historian -- measured at 453ms on a development stack. The daemon then reached its MQTT loop
+# having done none of the startup work that needed a database, and retried none of it: the
+# historian gauge read 0 for ever on a quiet stack, and capture reconciliation never ran, which
+# leaves every future capture refused with nothing to point at. Both are asserted here, along with
+# the race the loop opens by connecting with its lock released.
+python ingestion/test_startup_healer.py
 # How the playback worker resolves the broker passwords it holds (0078), and the precedence rule
 # that matters: a DELIVERED credential beats one in the environment. The broker keeps one password
 # per username, so a value in `.env` is not an alternative to the delivered one -- it is an older
