@@ -1,18 +1,48 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# LF IN THE INDEX AND LF IN THE WORKING TREE, ON EVERY PLATFORM.
+#
+# `text=auto` alone normalises to LF in the index and then converts BACK to CRLF when checking
+# out on Windows (git's system gitconfig ships core.autocrlf=true). That is the right default for
+# a repository whose files are opened by Windows editors. It is the wrong one here, because
+# almost nothing in this repository is read on the host: the .sql is applied by Postgres in a
+# container, the .conf and .acl are mounted into mosquitto, the .py and .mjs run in Linux images,
+# and the .yaml is rendered by Helm into a cluster. `eol=lf` makes the working tree match the
+# index, so a Windows checkout and a Linux checkout are the same bytes.
+#
+# THE DEFECT THIS FIXES IS NOT COSMETIC, and it is not caught by any test.
+#
+# Postgres stores a function's body VERBATIM, CRs included. A migration checked out with CRLF
+# gives every function it declares a `prosrc` holding \r at the end of every line -- measurably:
+#
+#   CREATE FUNCTION ... AS $$\r\nBEGIN\r\n  RETURN 1;\r\nEND;\r\n$$   ->  prosrc is 28 bytes
+#   CREATE FUNCTION ... AS $$\nBEGIN\n  RETURN 1;\nEND;\n$$           ->  prosrc is 24 bytes
+#
+# So the same migration applied from a Windows checkout and from a Linux checkout produces two
+# DIFFERENT DATABASES. Both work. Every test passes on both. But `pg_dump --schema-only` of the
+# two differs by over 1,500 lines across the 90 functions in the chain, which means the schema
+# digest that scripts/verify-schema-equivalence.mjs compares is a property of WHO CHECKED THE
+# REPOSITORY OUT rather than of the migrations -- and the one guard able to prove a migration
+# change is safe cannot be trusted across platforms. It also means a Windows-authored baseline
+# and a Linux-authored one can never be shown equal, which is exactly the comparison a squash
+# rests on.
+#
+# `text=auto` is kept alongside `eol=lf` rather than replaced by it: `auto` is what still runs
+# git's binary detection, so an unlisted binary file is left alone instead of being corrupted.
+* text=auto eol=lf
 
-# Shell scripts MUST keep LF in the working tree, on every platform. With core.autocrlf=true a
-# Windows checkout would otherwise get CRLF, and `sh` reads the trailing \r as part of the command
-# -- the error is `$'\r': command not found`, which names the shell rather than the line endings.
-# These scripts also run inside containers, where the same file is mounted directly.
+# Shell scripts, called out because the failure is so much louder than the rule.
+#
+# `sh` reads a trailing \r as part of the command and reports `$'\r': command not found`, which
+# names the shell rather than the line endings. These also run inside containers, where the file
+# is mounted directly. This line is now implied by the `eol=lf` above and is kept as the one
+# example of what that setting prevents.
 *.sh text eol=lf
 
-# Compressed archives are BYTES, and `* text=auto` above must not be allowed to guess at them.
+# Compressed archives are BYTES, and the rule above must not be allowed to guess at them.
 #
 # The chart carries the migration chain as one gzip per file (see the header of
 # templates/jobs/db-init.yaml). `text=auto` applies git's binary HEURISTIC to those, and a heuristic
-# is the wrong instrument here: misclassify one archive of twenty-one and a Windows checkout
-# CRLF-normalises it, every 0x0d byte in the deflate stream becomes 0x0d0a, and the file stops
+# is the wrong instrument here: misclassify one archive of twenty-one and a checkout
+# line-ending-normalises it, every 0x0d byte in the deflate stream changes, and the file stops
 # decompressing. That surfaces at deploy time as db-init failing to gunzip -- which is a database
 # with no schema, reported as a dozen unrelated service faults.
 #
