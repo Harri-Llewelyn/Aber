@@ -30,6 +30,18 @@ import { groupedNav } from '../../navigation'
  * IT ALSO EXPANDS ON FOCUS, and that is not a bonus feature -- it is what makes the rail usable
  * without a mouse. Hover alone would leave a keyboard user tabbing through thirteen buttons whose
  * labels are transparent, and a touch panel has no hover state at all.
+ *
+ * WHICH IS WHAT MADE IT STICK OPEN AFTER A CLICK. Clicking a nav item focuses that button, so the
+ * rail was still "focused" once the pointer left and stayed expanded over the page the click had
+ * just navigated to -- with nothing to close it but clicking somewhere else. Blurring on click
+ * would fix the symptom and break the keyboard case, since a keyboard user activates the same
+ * button with Enter and would be thrown out of the rail every time they used it.
+ *
+ * THE TEST IS WHETHER THE POINTER IS ALREADY HERE. Hover covers the mouse completely, so a focus
+ * event arriving WHILE HOVERED is a click and needs to do nothing -- the rail is open already and
+ * will close when the mouse leaves. A focus event arriving while NOT hovered is a Tab, and is the
+ * only case focus-expansion exists for. No blur hack, no pointer-tracking ref, and the two inputs
+ * stop fighting over one piece of state.
  */
 export function Sidebar({ tabs, currentTab, onNavigate }) {
   const [hovered, setHovered] = useState(false)
@@ -45,7 +57,10 @@ export function Sidebar({ tabs, currentTab, onNavigate }) {
       onMouseLeave={() => setHovered(false)}
       // `focusin`/`focusout` rather than focus/blur: these bubble, so one handler on the container
       // covers every button inside it. React's onFocus/onBlur are already the bubbling pair.
-      onFocus={() => setFocused(true)}
+      //
+      // Ignored while the pointer is here -- see the header. That focus came from a click, and the
+      // click is about to navigate.
+      onFocus={() => { if (!hovered) setFocused(true) }}
       onBlur={() => setFocused(false)}
       data-expanded={expanded ? 'true' : 'false'}
     >
@@ -54,16 +69,10 @@ export function Sidebar({ tabs, currentTab, onNavigate }) {
       <nav className="sidebar-panel" aria-label="Primary">
         {groups.map((group, index) => (
           <div className="sidebar-group" key={group.id}>
-            {/* THE SEPARATOR IS DRAWN IN BOTH STATES AND THE HEADING IN ONE. Collapsed, the line
-                between groups is the entire grouping -- a heading rendered as three transparent
-                pixels of text would only add a gap that looks like a rendering fault. */}
+            {/* THE SEPARATOR IS THE WHOLE OF THE GROUPING, in both states. It used to be joined by a
+                caption -- see NAV_GROUPS for why that went -- and a divider on its own says the one
+                thing a reader needs from a rail of thirteen icons: these belong together. */}
             {index > 0 && <div className="sidebar-divider" role="presentation" />}
-            {/* aria-hidden: the heading is decoration for the eye. The group is not a landmark and
-                the pages inside it are not children of it in any structural sense, so announcing
-                "Assets" before each of four buttons would be four repetitions of nothing. */}
-            {group.label && (
-              <div className="sidebar-group-label" aria-hidden="true">{group.label}</div>
-            )}
 
             {group.tabs.map(t => (
               <button

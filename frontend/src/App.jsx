@@ -37,6 +37,7 @@ const OAUTH_CONSENT_PATH = '/oauth/consent'
 
 import {
   IconFactory,
+  IconKeyboard,
   IconSun,
   IconMoon,
   IconUser,
@@ -51,6 +52,7 @@ import { Toast } from './components/common/Toast'
 import { AlertPill } from './components/common/AlertPill'
 import { usePlatformAlerts } from './hooks/usePlatformAlerts'
 import { BugReportModal } from './components/modals/BugReportModal'
+import { ShortcutsModal } from './components/modals/ShortcutsModal'
 
 // Lazy-load Tab components
 const OverviewTab      = lazy(() => import('./components/tabs/OverviewTab').then(m => ({ default: m.OverviewTab })))
@@ -402,6 +404,7 @@ function Dashboard({ session, onSignOut }) {
   // vocabularies it already holds and opens its Add Metric form.
   const [pendingVocabularyEntry, setPendingVocabularyEntry] = useState(null)
   const [showBugReport, setShowBugReport] = useState(false)
+  const [showShortcuts, setShowShortcuts] = useState(false)
 
   const { tab, setTab, handleNavClick } = useAppRouting(
     setSelectedDeviceFilter, setSelectedGatewayFilter, setSelectedSchemaFilter, setSelectedCellFilter,
@@ -465,6 +468,32 @@ function Dashboard({ session, onSignOut }) {
     if (current && !tabIsVisible(current, hasPermission, userRole)) setTab('overview')
   }, [tab, loadingPerms, userRole, hasPermission, setTab])
 
+  /*
+   * `?` OPENS THE SHORTCUTS LIST, which is the convention and is also the only way this particular
+   * dialog is not absurd: a list of keyboard shortcuts reachable solely by mouse asks the reader to
+   * do the thing it exists to help them stop doing. The button in the bar is what makes it
+   * discoverable; this is what makes it worth having found.
+   *
+   * IT MUST NOT FIRE WHILE SOMEBODY IS TYPING, and that is the whole difficulty with binding a
+   * PRINTABLE character. Every other shortcut in this app carries a modifier or is a key with no
+   * text meaning, so none of them has to ask this question -- but `?` is a character a user can
+   * legitimately want in a search box, a schema description or a bug report. So the handler stands
+   * down for any editable target, including `contenteditable`, and for any keystroke carrying a
+   * modifier, which is somebody reaching for a browser shortcut rather than for this one.
+   */
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== '?' || e.ctrlKey || e.metaKey || e.altKey) return
+      const el = e.target
+      const tag = el?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return
+      e.preventDefault()
+      setShowShortcuts(true)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
   useQuarantineAlerts(showToast)
 
   // Grafana's firing alerts, delivered through platform_alerts. Lifted to App rather than owned by a
@@ -505,8 +534,23 @@ function Dashboard({ session, onSignOut }) {
         strip than a list: one control whose width is fixed, however many pages exist.
       */}
       <header className="topbar">
-        <div className="topbar-brand">
-          <div className="brand-icon" title="ACS Cymru Platform Logo"><IconFactory size={18} /></div>
+        {/* A BUTTON, BECAUSE IT NAVIGATES. Clicking the mark to get home is a convention old enough
+            that its absence reads as a broken link rather than as a decision -- people click it,
+            nothing happens, and they conclude the header is decorative.
+
+            `handleNavClick`, not `setTab`, and the difference is the same one the rail relies on:
+            it clears the cross-page filters a drill-down handed over. Clicking the logo means
+            "start again", which is exactly when a stale device filter would be most confusing.
+
+            A real <button> rather than a div with an onClick, so it is reachable by Tab, announces
+            itself, and takes Enter and Space without any of that being reimplemented here. */}
+        <button
+          className="topbar-brand"
+          onClick={() => handleNavClick('overview')}
+          title="ACS Cymru — go to the Overview page"
+          aria-label="ACS Cymru, go to the Overview page"
+        >
+          <div className="brand-icon"><IconFactory size={18} /></div>
           <div className="brand-text">
             {/* Titled because .brand-name truncates: it is the region that yields space when the
                 search box and the session controls have taken theirs.
@@ -526,7 +570,7 @@ function Dashboard({ session, onSignOut }) {
             </div>
             <div className="brand-sub">Shopfloor to Digital Twin Pipeline</div>
           </div>
-        </div>
+        </button>
 
         {/* THE CENTRE OF THE BAR, where the thirteen tabs were.
 
@@ -572,6 +616,25 @@ function Dashboard({ session, onSignOut }) {
             onSelectDevice={showDevice}
             onSelectGateway={showGateway}
           />
+
+          {/* THE THIRD CONTROL IN THE BAR, AND IT BREAKS THE RULE ABOVE ON PURPOSE. That rule is
+              that only things whose VALUE CHANGES stay out here; a shortcuts key is as standing as
+              the theme toggle, which was moved into the account menu on exactly that argument.
+
+              What earns it the place is that it is a SIGNPOST rather than a preference. The two
+              items behind the account menu are set once and forgotten, so hiding them costs one
+              click on a rare day. This is the opposite: its whole value is being seen by somebody
+              who does not yet know the keyboard does anything, and a discovery aid nobody discovers
+              is just a file. Beside the alert glyph rather than after the avatar, because the
+              avatar must stay the last thing in the bar -- it is the fixed corner people aim at. */}
+          <button
+            className="topbar-icon-button"
+            onClick={() => setShowShortcuts(true)}
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts (?)"
+          >
+            <IconKeyboard size={15} />
+          </button>
 
           <UserMenu
             persona={persona}
@@ -644,6 +707,7 @@ function Dashboard({ session, onSignOut }) {
 
       {toast && <Toast msg={toast.msg} type={toast.type} onDone={clearToast} />}
       {showBugReport && <BugReportModal onClose={() => setShowBugReport(false)} showToast={showToast} persona={persona} activeTab={tab} />}
+      {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
     </div>
   )
 }

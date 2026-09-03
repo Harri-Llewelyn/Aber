@@ -37,16 +37,27 @@ describe('the groups', () => {
     }
   })
 
-  it('leads with Overview alone and unlabelled', () => {
+  it('leads with Overview alone', () => {
     // The landing page, and the one page that answers "how is everything right now" rather than
-    // belonging to a subject. A heading over a group of one names nothing.
-    expect(NAV_GROUPS[0].label).toBeNull()
+    // belonging to a subject.
     expect(TABS.filter(t => t.group === NAV_GROUPS[0].id).map(t => t.id)).toEqual(['overview'])
   })
 
-  it('names every other group', () => {
-    for (const group of NAV_GROUPS.slice(1)) {
-      expect(group.label, `the "${group.id}" group has no heading`).toBeTruthy()
+  /**
+   * THE GROUPS CARRY NO CAPTION, and their absence is a decision rather than an oversight.
+   *
+   * They were rendered as headings -- Assets, Modelling, History, Administration -- and each had to
+   * hold its box in the COLLAPSED rail so the items below it did not jump on hover. So the resting
+   * state, which is the state the rail is in almost all of the time, carried four blank strips whose
+   * only purpose was to be somewhere for text to appear later. The separator alone says the one
+   * thing a reader needs from a rail of icons.
+   *
+   * Asserted as an absence because a `label` reintroduced here would render nothing -- the Sidebar
+   * no longer reads one -- which is the worst of both: data that looks live and is not.
+   */
+  it('carries no caption to render', () => {
+    for (const group of NAV_GROUPS) {
+      expect(group.label, `the "${group.id}" group declares a caption nothing renders`).toBeUndefined()
     }
   })
 

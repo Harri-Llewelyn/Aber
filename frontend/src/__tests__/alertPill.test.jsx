@@ -39,12 +39,33 @@ const pill = () => screen.getByRole('button', { name: /firing alerts?$/i })
 
 describe('AlertPill', () => {
   describe('the healthy state', () => {
-    it('still renders, and says zero rather than saying nothing', () => {
+    /**
+     * STILL RENDERS, AND THAT IS THE HALF THAT MATTERS. The control used to say `0 Alerts`; it now
+     * says nothing in words at all. What it must NOT do is disappear -- an element that is absent
+     * when healthy is indistinguishable from one that is broken, and a wall display with no alert
+     * control could equally mean nothing is wrong or that Grafana has been down since Tuesday.
+     *
+     * The standing glyph is the positive statement that replaced the standing sentence.
+     */
+    it('still renders when nothing is firing, so silence is distinguishable from absence', () => {
       render(<AlertPill alerts={[]} />)
       const button = screen.getByRole('button', { name: /no firing alerts/i })
       expect(button).toBeInTheDocument()
-      expect(screen.getByText('0')).toBeInTheDocument()
-      expect(screen.getByText('Alerts')).toBeInTheDocument()
+      // The glyph carries it. There is exactly one <svg> in the resting control.
+      expect(button.querySelector('svg')).toBeTruthy()
+    })
+
+    /**
+     * NO ZERO, AND NO WORD. `0 Alerts` was ~62px of bar spent on the least interesting sentence the
+     * application can say, restated on every page for the whole of a normal day. The healthy shield
+     * already means zero, so the digit was saying it twice.
+     */
+    it('prints no digit and no label when the count is zero', () => {
+      render(<AlertPill alerts={[]} />)
+      const button = screen.getByRole('button', { name: /no firing alerts/i })
+      expect(button).toHaveTextContent('')
+      expect(screen.queryByText('0')).toBeNull()
+      expect(screen.queryByText(/^Alerts?$/)).toBeNull()
     })
 
     it('takes the quiet treatment, not the firing one', () => {
@@ -71,15 +92,27 @@ describe('AlertPill', () => {
   })
 
   describe('the firing states', () => {
-    it('shows the count and the word, not colour alone', () => {
+    /**
+     * THE DIGIT COMES BACK EXACTLY WHEN IT CARRIES INFORMATION, and this is the one part of the
+     * reduction worth arguing about. Dropping the count entirely would have been simpler and would
+     * have left colour as the only signal -- but "something is wrong" and "twelve things are wrong"
+     * are different operational situations on a shopfloor, and no hue distinguishes them. An
+     * operator would have to open the panel to find out whether to walk over.
+     *
+     * Zero is the one count that needs no digit, because the healthy shield already says it.
+     */
+    it('shows the count once there is one, since colour cannot say how many', () => {
       render(<AlertPill alerts={[alert(), alert({ id: 'a2', fingerprint: 'fp-2' })]} />)
       expect(screen.getByText('2')).toBeInTheDocument()
-      expect(screen.getByText('Alerts')).toBeInTheDocument()
+      // The word is gone in every state, not only the healthy one.
+      expect(screen.queryByText(/^Alerts?$/)).toBeNull()
     })
 
-    it('singularises one alert', () => {
+    it('still singularises for a screen reader, which has no glyph to read', () => {
+      // The visible control lost its word; the accessible name did not, and must not. "1" alone is
+      // not a sentence, and this string is the whole of what the button announces.
       render(<AlertPill alerts={[alert()]} />)
-      expect(screen.getByText('Alert')).toBeInTheDocument()
+      expect(screen.getByText('1')).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /^1 firing alert$/ })).toBeInTheDocument()
     })
 

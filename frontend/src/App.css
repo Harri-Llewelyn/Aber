@@ -308,7 +308,24 @@ html, body, #root {
   flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
+  /* It became a <button> when it became the way back to Overview, so everything a button brings
+     with it has to be taken back off: the chrome, the centred text, the inherited-nothing font. */
+  padding: 4px 6px;
+  margin-left: -6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: var(--transition);
 }
+
+/* A hover state is not decoration here, it is the only thing that says the mark is clickable. A
+   logo that navigates and does not respond to a pointer is indistinguishable from one that does
+   not, which is how people conclude a header is decorative and stop trying. */
+.topbar-brand:hover { background: var(--bg-glass); }
+.topbar-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .brand-icon {
   width: 28px;
@@ -369,6 +386,30 @@ html, body, #root {
   gap: 10px;
   flex: 1 1 0;
 }
+
+/* ===== A bare icon control in the bar =====
+   The shortcuts key, and the shape anything else added here should take. 28px square to match the
+   account avatar exactly -- the right-hand group is three controls now, and three sizes would read
+   as three unrelated things rather than as a row. Square rather than round: the avatar's circle is
+   what marks it as the identity control, and borrowing it here would blur that. */
+.topbar-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.topbar-icon-button:hover { color: var(--accent); border-color: var(--accent); }
+.topbar-icon-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ===== Account avatar and menu =====
    Replaces the icon + email + role badge + Sign Out button that used to sit side by side in the bar,
@@ -566,30 +607,6 @@ html, body, #root {
   margin: 8px 2px;
   flex-shrink: 0;
 }
-
-/* THE HEADING KEEPS ITS BOX IN BOTH STATES and only its text fades. Collapsing the box instead
-   would shift every item below it downward on hover -- which is exactly the reflow the overlay
-   exists to avoid, moved inside the panel. Collapsed, the reserved strip reads as breathing room
-   above each group, which is what a heading would be doing there anyway. */
-.sidebar-group-label {
-  height: 23px;
-  display: flex;
-  align-items: flex-end;
-  padding: 0 9px 4px;
-  /* THE FLOOR OF THE TYPE SCALE, not a size chosen for this element -- see the scale at the top of
-     this file. A group heading is exactly the "dense chrome" tier the 11px step exists for, and
-     the 10px this would be in most design systems is the size that tier was raised FROM. */
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  white-space: nowrap;
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
-
-.sidebar-expanded .sidebar-group-label { opacity: 1; }
 
 .sidebar-item {
   display: flex;
@@ -799,7 +816,9 @@ html, body, #root {
   /* The alert count keeps its NUMBER and loses only the word. Dropping the label costs ~40px and
      leaves a shape and a figure -- whereas dropping the pill would hide the only changing thing in
      the bar at exactly the widths a kiosk display uses. */
-  .alert-pill-label { display: none; }
+  /* Nothing left to shed. The pill lost its word entirely when it became a glyph, so the band
+     that used to drop it has nothing to do -- and the count it keeps is a single digit that was
+     never the thing costing width. */
 }
 
 @media (max-width: 1099px) {
@@ -2569,19 +2588,23 @@ tbody tr:hover { background: var(--bg-glass); }
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 4px 9px;
+  padding: 0 6px;
+  /* 28px, the same as the shortcuts button and the account avatar. The three controls on the right
+     are now one row of one size rather than a 78px pill flanked by two circles. */
+  height: 28px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.3px;
   cursor: pointer;
   border: 1px solid transparent;
   background: none;
   font-family: 'Outfit', sans-serif;
-  /* A FIXED FLOOR, so the pill does not resize the bar as the count crosses 9 or clears to 0. The
-     three states carry three different words and glyphs; without this the account button beside it
-     would step sideways every time an alarm arrived. */
-  min-width: 78px;
+  /* A FIXED FLOOR, so the bar does not resize as the count arrives, clears, or crosses 9. It was
+     78px when the control read `0 Alerts`; the word is gone and only the glyph plus at most two
+     digits remain, but the reason for a floor did not change -- without it the account button
+     beside it steps sideways every time an alarm fires. */
+  min-width: 34px;
   justify-content: center;
 }
 
@@ -4164,4 +4187,70 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .auth-theme-toggle:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* ===== Keyboard shortcuts dialog =====
+   A definition list in all but markup: a column of keys against a column of prose. The keys column
+   is fixed rather than sized to its content, so the descriptions start on one line down the whole
+   dialog -- with `auto` the widest row ("Shift + Tab") sets the column and every other description
+   is pushed away from the key it belongs to. */
+.shortcut-group { margin-top: var(--stack); }
+.shortcut-group:first-of-type { margin-top: 12px; }
+
+.shortcut-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.shortcut-row {
+  display: grid;
+  grid-template-columns: 132px 1fr;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 0;
+}
+
+.shortcut-keys {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+/* A real <kbd>. The element exists for exactly this and carries the meaning to a screen reader
+   without a role having to be invented for it -- the monospace stack is what makes it look like a
+   key, and the border is what makes it look like one you can press. */
+.shortcut-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  /* A hair of depth on the underside. A flat outline reads as a chip -- a tag, something to click
+     -- and these are neither: they are a picture of a key. */
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--bg-glass);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.shortcut-join {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.shortcut-description {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.45;
 }

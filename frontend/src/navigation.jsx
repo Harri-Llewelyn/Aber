@@ -61,16 +61,26 @@ import {
  *   What it shares with Capture and Cold Storage is the tense: all three answer questions about
  *   what already happened.
  *
- * `label` is rendered only when the rail is expanded. Collapsed, the separator between groups is
- * the whole of the grouping -- which is why the separator is drawn in both states and the heading
- * in only one.
+ * THE GROUPS ARE NOT CAPTIONED IN THE RAIL, and the names above are for whoever edits this file.
+ * They were rendered as headings and are not any more, because a heading has to earn its line and
+ * these did not: four words that never change, above four lists whose members already say what they
+ * are. `Cells / Gateways / Devices / Archives` is legible as a group of related things from the
+ * separator alone, and a reader who needs the word "Assets" to see that is not helped by it.
+ *
+ * The cost of the captions was not only their own height. They had to hold their box in the
+ * collapsed state so the items below them did not jump on hover, which meant the resting rail --
+ * the state it is in almost all of the time -- carried four blank 23px strips whose only purpose was
+ * to be somewhere for text to appear later.
+ *
+ * SO THE SEPARATOR IS NOW THE WHOLE OF THE GROUPING, in both states, which is what it already was
+ * in the one that matters.
  */
 export const NAV_GROUPS = [
-  { id: 'home',    label: null },
-  { id: 'assets',  label: 'Assets' },
-  { id: 'model',   label: 'Modelling' },
-  { id: 'history', label: 'History' },
-  { id: 'admin',   label: 'Administration' }
+  { id: 'home' },
+  { id: 'assets' },
+  { id: 'model' },
+  { id: 'history' },
+  { id: 'admin' }
 ]
 
 export const TABS = [

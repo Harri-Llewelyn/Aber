@@ -159,31 +159,103 @@ describe('Merged navigation shell', () => {
   /**
    * The decluttered bar.
    *
-   * TWO CONTROLS ON THE RIGHT, and the count is the assertion. The bar held five: the alert pill, a
-   * Live/Polling chip, a theme toggle, Report Bug and the account pill. Four of them never changed
+   * THREE CONTROLS ON THE RIGHT, and the count is the assertion. The bar held five: the alert pill,
+   * a Live/Polling chip, a theme toggle, Report Bug and the account pill. Four of them never changed
    * value -- the Live chip was read off a build flag, so it was a lit green dot that could not go out
    * -- and a row of controls that never change teaches the eye to stop reading it. Which is a problem
    * when one of them is the alarm.
    *
-   * Asserted as an upper bound rather than by naming what is present, because the failure this guards
-   * against is ACCRETION: the next standing indicator added here is added by somebody who has not
-   * read the reasoning, and naming the survivors would not catch it.
+   * THE THIRD IS THE SHORTCUTS KEY, AND IT IS A DELIBERATE EXCEPTION TO THAT RULE rather than a
+   * relaxation of it. The rule keeps out standing PREFERENCES: a theme is set once and forgotten, so
+   * hiding it behind the account menu costs one click on a rare day. A discovery aid is the inverse
+   * -- its entire value is being seen by somebody who does not yet know the keyboard does anything,
+   * and one that nobody discovers is a file rather than a feature.
+   *
+   * Asserted as an exact count rather than an upper bound, because the failure this guards against is
+   * ACCRETION: the next standing indicator is added by somebody who has not read the reasoning, and
+   * naming only the survivors would not catch it. A fourth control here should have to argue for
+   * itself in this comment first.
    */
-  it('keeps only the changing control and the account door in the bar', async () => {
+  it('keeps the bar to the changing control, the shortcuts key and the account door', async () => {
     await renderShell()
 
     const right = topbar().querySelector('.topbar-right')
     expect(right).toBeTruthy()
     const controls = [...right.querySelectorAll('button')]
-    expect(controls).toHaveLength(2)
+    expect(controls).toHaveLength(3)
 
-    // The one whose VALUE moves, and the door to everything else.
+    // The one whose VALUE moves, the signpost, and the door to everything else.
     expect(right.querySelector('.alert-pill')).toBeTruthy()
+    expect(within(right).getByRole('button', { name: /keyboard shortcuts/i })).toBeTruthy()
     expect(right.querySelector('.user-avatar')).toBeTruthy()
 
     // The Live/Polling chip is gone. It reported a build flag, not the socket's health.
     expect(document.querySelector('.topbar-status')).toBeNull()
     expect(document.querySelector('.pulse-dot')).toBeNull()
+  })
+
+  /**
+   * The mark is the way home.
+   *
+   * Clicking a product logo to return to the landing page is a convention old enough that its
+   * ABSENCE reads as a broken link rather than as a decision -- people click it, nothing happens,
+   * and they conclude the header is decorative. It is a real <button> so that it is reachable by
+   * Tab and takes Enter without any of that being reimplemented.
+   */
+  it('takes the brand mark home, as a real button rather than a clickable div', async () => {
+    await renderShell()
+
+    const brand = topbar().querySelector('.topbar-brand')
+    expect(brand.tagName).toBe('BUTTON')
+    expect(brand.getAttribute('aria-label')).toMatch(/overview/i)
+
+    // Leave Overview, then click the mark to come back.
+    fireEvent.click(screen.getByRole('button', { name: /^Devices$/ }))
+    await waitFor(() => expect(window.location.pathname).toBe('/devices'))
+
+    fireEvent.click(brand)
+    await waitFor(() => expect(window.location.pathname).toBe('/overview'))
+  })
+
+  /**
+   * The shortcuts dialog, and the key that opens it.
+   *
+   * A list of keyboard shortcuts reachable only by mouse asks the reader to do the thing it exists
+   * to help them stop doing, so `?` opens it too. That binding is the awkward one in this app -- it
+   * is the only PRINTABLE character bound anywhere, and every other shortcut carries a modifier or
+   * is a key with no text meaning. So it has to stand down inside a text field, which is asserted
+   * here rather than trusted: getting it wrong means a user cannot type a question mark into the
+   * search box, a schema description or a bug report.
+   */
+  describe('the shortcuts dialog', () => {
+
+    it('opens from the bar', async () => {
+      await renderShell()
+      fireEvent.click(screen.getByRole('button', { name: /keyboard shortcuts/i }))
+      expect(screen.getByRole('dialog', { name: /keyboard shortcuts/i })).toBeTruthy()
+    })
+
+    it('opens on ?, and closes on Escape', async () => {
+      await renderShell()
+      fireEvent.keyDown(document.body, { key: '?' })
+      expect(screen.getByRole('dialog', { name: /keyboard shortcuts/i })).toBeTruthy()
+
+      fireEvent.keyDown(document, { key: 'Escape' })
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: /keyboard shortcuts/i })).toBeNull())
+    })
+
+    it('does not open while a question mark is being typed into a field', async () => {
+      await renderShell()
+      const search = screen.getByRole('combobox')
+      fireEvent.keyDown(search, { key: '?' })
+      expect(screen.queryByRole('dialog', { name: /keyboard shortcuts/i })).toBeNull()
+    })
+
+    it('stands down for a modified keystroke, which is somebody reaching past this app', async () => {
+      await renderShell()
+      fireEvent.keyDown(document.body, { key: '?', ctrlKey: true })
+      expect(screen.queryByRole('dialog', { name: /keyboard shortcuts/i })).toBeNull()
+    })
   })
 
   it('moves the theme toggle and Report Bug behind the account button, not out of the app', async () => {
@@ -439,11 +511,16 @@ describe('Merged navigation shell', () => {
    * figure. Hiding the pill instead would remove the only changing element in the header at exactly
    * the widths a shopfloor kiosk runs at.
    */
-  it('narrows the alert counter without hiding it', () => {
-    const narrow = APP_CSS.match(/@media \(max-width: 1399px\) \{([\s\S]*?)\n\}/)[1]
-    expect(narrow).toMatch(/\.alert-pill-label\s*\{\s*display:\s*none/)
-    expect(narrow).not.toMatch(/\.alert-pill\s*\{\s*display:\s*none/)
-    expect(narrow).not.toMatch(/\.alert-pill-count\s*\{\s*display:\s*none/)
+  it('never hides the alert control at any width', () => {
+    // IT HAS NOTHING LEFT TO SHED, which is what changed. The control used to drop its WORD below
+    // 1400px and keep its number; it is now a glyph plus at most two digits at every width, so the
+    // band that narrowed it has no work to do. What it must never do -- at any width, in any band --
+    // is disappear, because an absent alert control and a healthy one would look identical.
+    for (const band of [1399, 1099]) {
+      const rules = APP_CSS.match(new RegExp(`@media \\(max-width: ${band}px\\) \\{([\\s\\S]*?)\\n\\}`))[1]
+      expect(rules).not.toMatch(/\.alert-pill[\s\S]*?display:\s*none/)
+    }
+    expect(APP_CSS).not.toMatch(/\.alert-pill-label/)
   })
 
   /**
