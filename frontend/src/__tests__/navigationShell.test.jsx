@@ -498,14 +498,36 @@ describe('Merged navigation shell', () => {
  */
 describe('shopfloor grid across viewports', () => {
   const gridRule = APP_CSS.match(/\n\.shopfloor-grid \{([\s\S]*?)\n\}/)[1]
-  const minWidth = Number(gridRule.match(/minmax\((\d+)px/)[1])
+  const minWidth = Number(gridRule.match(/minmax\(min\((\d+)px/)[1])
   const gap = Number(gridRule.match(/gap:\s*(\d+)px/)[1])
-  // .content is the grid's container: full viewport width less its own horizontal padding.
-  const contentPad = Number(APP_CSS.match(/\n\.content \{([\s\S]*?)\n\}/)[1].match(/padding:\s*\d+px (\d+)px/)[1])
+
+  /*
+   * WHAT THE GRID'S CONTAINER ACTUALLY MEASURES, and this model has been wrong twice.
+   *
+   * It was the viewport less `.content`'s own horizontal padding. Then navigation became a rail,
+   * and 52px of every row stopped belonging to the page -- the counts happened to survive that, so
+   * nothing failed and the model was quietly describing a layout that no longer existed. Then the
+   * padding became a token, so reading it off the `.content` rule stopped working at all.
+   *
+   * Every term is read from the stylesheet rather than written down here, because a number copied
+   * into a test is a number that stops tracking the thing it was copied from -- which is precisely
+   * how this drifted the first time.
+   */
+  const block = (re) => APP_CSS.match(re)[1]
+
+  const rail = Number(block(/\n\.sidebar \{([\s\S]*?)\n\}/).match(/flex:\s*0 0 (\d+)px/)[1])
+  const inset = Number(block(/:root, \[data-theme="dark"\] \{([\s\S]*?)\n\}/).match(/--inset:\s*(\d+)px/)[1])
+  // The reserved scrollbar track. `scrollbar-gutter: stable` holds it open on every page, so it is
+  // part of the width arithmetic rather than something that appears when a page grows -- which is
+  // the whole reason it was made stable.
+  const gutter = Number(block(/::-webkit-scrollbar \{([^}]*)\}/).match(/width:\s*(\d+)px/)[1])
 
   const columnsAt = (viewport) => {
-    const available = viewport - contentPad * 2
-    return Math.floor((available + gap) / (minWidth + gap))
+    const available = viewport - rail - inset * 2 - gutter
+    // `minmax(min(280px, 100%), 1fr)`: the track never exceeds the container, so a container
+    // narrower than the tile yields one full-width column rather than an overflow.
+    const track = Math.min(minWidth, available)
+    return Math.floor((available + gap) / (track + gap))
   }
 
   it('fills six columns at 1920x1080, the primary target', () => {
@@ -517,7 +539,7 @@ describe('shopfloor grid across viewports', () => {
     expect(cols).toBe(4)
     // The check that matters: whatever the count, the row still fits.
     const used = cols * minWidth + (cols - 1) * gap
-    expect(used).toBeLessThanOrEqual(1366 - contentPad * 2)
+    expect(used).toBeLessThanOrEqual(1366 - rail - inset * 2 - gutter)
   })
 
   it('keeps at least one column at every width down to a phone', () => {
@@ -531,6 +553,18 @@ describe('shopfloor grid across viewports', () => {
   it('uses auto-fill so one cell does not stretch across the row', () => {
     expect(gridRule).toMatch(/auto-fill/)
     expect(gridRule).not.toMatch(/auto-fit/)
+  })
+
+  /**
+   * THE TRACK MUST BE CAPPED AT THE CONTAINER, which a bare `minmax(280px, 1fr)` is not.
+   *
+   * A grid track whose minimum exceeds its container does not shrink, it overflows -- and once the
+   * rail took 52px out of the row, the narrowest viewport this suite checks fell under 280px. The
+   * failure is a horizontal scrollbar on the one page that must never have one, at the one width
+   * where nobody is looking.
+   */
+  it('caps the tile at the container width so it cannot overflow', () => {
+    expect(gridRule).toMatch(/minmax\(min\(\d+px,\s*100%\)/)
   })
 })
 

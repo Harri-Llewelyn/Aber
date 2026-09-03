@@ -428,7 +428,7 @@ export function CaptureTab({ showToast, userRole, onSelectSchema }) {
             identity, and everything downstream reads that. As one banner among the capture rows it
             was the quieter of the two, which is backwards.
             ==================================================================================== */}
-        <div className="card" style={{ marginBottom: '24px' }}>
+        <div className="card" style={{ marginBottom: 'var(--stack)' }}>
           {/* "Playback", not "Broker Playback". The page is Capture, the description says broker in
               its first line, and a two-word title where one will do is a word the reader has to
               skip on every visit. Same for the card below. */}

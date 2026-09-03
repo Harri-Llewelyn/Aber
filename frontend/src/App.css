@@ -71,6 +71,30 @@
      silently falls back to the bare generic and drops JetBrains Mono. Structural, not colour, so
      the light theme does not restate it. */
   --font-mono:    'JetBrains Mono', monospace;
+  /* ===== Spacing =====
+     THE INSET FROM A CONTAINER'S EDGE TO ITS CONTENT, and there were four of them: the page used
+     24px, a card 20px, the filter bar and the context panel 14px, and a table cell 16px. Four
+     values for one relationship is not a scale, it is an accumulation -- each was chosen against
+     whatever was beside it at the time, and nothing said they should agree.
+
+     THE SURVIVOR IS 16px, AND IT IS THE ONE THAT WAS ALREADY RIGHT. `th`/`td` have used it since
+     the type scale was raised, and a table is the densest thing this app draws, so it is the value
+     that has actually been read at a metre on a shopfloor terminal. The page and the card were the
+     outliers; they now agree with it, which is why a card's title starts at the same distance from
+     its own edge as a cell's text does from the card's.
+
+     --inset-tight IS FOR CHROME THAT IS ALREADY ON A PANEL. A filter bar inside a card and the
+     context panel's own header are nested one level further in, so repeating the full inset reads
+     as a box inside a box. It is a step down rather than a second opinion.
+
+     VERTICAL IS DELIBERATELY NOT A TOKEN. Horizontal inset is one relationship repeated everywhere;
+     vertical rhythm is a different question per element -- a card header holds a 34px button, a
+     table row holds text -- and one number for both would be a scale in name only. */
+  --inset:        16px;
+  --inset-tight:  12px;
+  /* Between stacked blocks: card to card, banner to card. Was 24px inline on three pages, 16px in
+     the directory's rule and 12px inline on Access Control, for the same relationship. */
+  --stack:        16px;
   --radius:       12px;
   --radius-sm:    8px;
   --shadow:       0 4px 24px rgba(0, 0, 0, 0.5);
@@ -791,7 +815,21 @@ html, body, #root {
      widen this item rather than scrolling inside it, and push the rail off the screen. */
   min-width: 0;
   overflow-y: auto;
-  padding: 18px 24px 24px;
+  /* THE VARIABLE RIGHT-HAND MARGIN, AND WHERE IT CAME FROM. The custom scrollbar is 6px wide and
+     is taken OUT of this element's content box, so a page long enough to scroll drew its cards 6px
+     narrower than one that was not -- and the gap on the right therefore changed as you navigated,
+     which is exactly what it looked like: Schemas inset further than Vocabulary for no reason
+     either page could explain.
+
+     `stable` reserves the track whether or not it is occupied, so the right edge is now the same
+     on every page. It costs 6px permanently on the pages that do not scroll, which is a worse deal
+     than it sounds only if you have not seen the alternative -- a layout that moves under you is
+     more expensive than one that is 6px narrower.
+
+     Browsers without support (Safari before 18.2) ignore it and get today's behaviour, which is
+     the right way round for a progressive enhancement. */
+  scrollbar-gutter: stable;
+  padding: 12px var(--inset) var(--inset);
 }
 
 /* ===== Page Action Row =====
@@ -856,7 +894,7 @@ html, body, #root {
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  padding: 16px 20px;
+  padding: 12px var(--inset);
   border-bottom: 1px solid var(--border);
 }
 
@@ -870,9 +908,10 @@ html, body, #root {
    carry their own padding -- so prose or a control row placed directly in a card sits flush against
    the border and reads as a rendering fault. The Capture page was the first to need it and found
    this the way you would expect: it looked wrong.
-   The same 16px 20px as `.card-header`, so the header's text and the body's line up. */
+   The same inset as `.card-header`, so the header's text and the body's line up -- and the same as
+   a table cell's, so a card with a header, a body and a table has one left edge rather than three. */
 .card-body {
-  padding: 16px 20px;
+  padding: 12px var(--inset);
 }
 
 /* A filter bar inside a card, rather than at page level between cards.
@@ -907,8 +946,8 @@ html, body, #root {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  margin-bottom: 16px;
-  padding: 12px 14px;
+  margin-bottom: var(--stack);
+  padding: 10px var(--inset-tight);
   background: var(--bg-glass);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1206,7 +1245,7 @@ tbody tr:hover { background: var(--bg-glass); }
   display: flex;
   gap: 10px;
   align-items: flex-start;
-  margin: 12px 20px 0;
+  margin: 12px var(--inset) 0;
   padding: 10px 12px;
   border-radius: 6px;
   border: 1px solid var(--border);
@@ -1381,7 +1420,7 @@ tbody tr:hover { background: var(--bg-glass); }
 
 /* Between the category cards. Deliberately not `.card + .card`: several pages stack cards that
    are meant to sit tight against each other. */
-.directory-group + .directory-group { margin-top: 16px; }
+.directory-group + .directory-group { margin-top: var(--stack); }
 
 /* ===== Copyable identifiers =====
    Sparkplug ids are opaque 24-character strings that engineers have to transcribe into
@@ -1879,8 +1918,10 @@ tbody tr:hover { background: var(--bg-glass); }
 }
 
 /* ===== Empty State ===== */
+/* 60px of vertical was a third of a 768px viewport spent saying there is nothing here. The message
+   is the same at 36px and the page below it is reachable without scrolling. */
 .empty-state {
-  padding: 60px 20px;
+  padding: 36px var(--inset);
   text-align: center;
   color: var(--text-dim);
 }
@@ -2004,7 +2045,7 @@ tbody tr:hover { background: var(--bg-glass); }
   border-radius: var(--radius);
   overflow: hidden;
   box-shadow: var(--shadow);
-  margin-bottom: 28px;
+  margin-bottom: var(--stack);
 }
 
 .shopfloor-map-bg {
@@ -2057,7 +2098,13 @@ tbody tr:hover { background: var(--bg-glass); }
    what makes this read as a plan of a floor rather than as however many cards happen to exist. */
 .shopfloor-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  /* `min(280px, 100%)` RATHER THAN A BARE 280px, and the rail is what forced it. A grid track with
+     a fixed minimum larger than its container does not shrink -- it overflows -- and at 360px the
+     container is now 360 less the rail, the page inset and the scrollbar gutter, which is under
+     280. The idiom caps the track at the container's own width, so the narrowest case degrades to
+     one full-width column instead of a horizontal scrollbar. It changes nothing at any width where
+     280px already fitted. */
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
   gap: 12px;
   align-items: start;
 }
@@ -2963,7 +3010,7 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
-  padding: 12px 14px;
+  padding: 10px var(--inset-tight);
   border-bottom: 1px solid var(--border);
   background: var(--bg-glass);
   flex-shrink: 0;
@@ -3013,7 +3060,7 @@ a.alert-pill-item-link .alert-pill-item-name { color: var(--accent); }
 /* Scrolls independently of the page. A device with twenty metadata rows must not make the panel
    taller than the viewport, or the actions at its foot become unreachable. */
 .context-panel-body {
-  padding: 12px 14px 14px;
+  padding: 10px var(--inset-tight) 12px;
   overflow-y: auto;
   flex: 1;
 }
@@ -3227,7 +3274,7 @@ tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 }
 
 .vocab-description {
-  padding: 12px 20px 0;
+  padding: 12px var(--inset) 0;
   font-size: 12px;
   color: var(--text-muted);
   /* Same reasoning as .vocab-subtitle: the notes are one or two lines each, not paragraphs. */

@@ -62,7 +62,7 @@ export function ColdStorageTab({ showToast, userRole }) {
   if (loading) {
     return (
       <div className="page-layout"><div className="page-main">
-        <div className="card" style={{ padding: '16px' }}>
+        <div className="card" style={{ padding: '12px var(--inset)' }}>
           <div className="loading-wrap"><div className="spinner" /> Loading the cold storage catalogue…</div>
         </div>
       </div></div>

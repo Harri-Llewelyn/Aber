@@ -783,7 +783,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
           read or version a schema that already exists, and those were below ~600 rows of metric
           groups. The page now opens on its subject and keeps the raw material underneath it. */}
 
-      <div className="card" style={{ marginBottom: '24px' }}>
+      <div className="card" style={{ marginBottom: 'var(--stack)' }}>
         <div className="card-header">
           {/* FILTERED OF TOTAL, not a bare count. A narrowed registry would otherwise read as a
               short one, which is the wrong thing to believe about a version history. */}
@@ -896,7 +896,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
              that always has rows in it rendering as a blank table reads as a failed load rather
              than as a filter doing its job -- and "there are no schemas" is a far more alarming
              thing to believe than "none match this search". */
-          <div className="empty-state" style={{ padding: '24px 20px' }}>
+          <div className="empty-state" style={{ padding: '20px var(--inset)' }}>
             <div className="empty-icon"><IconFileCode size={36} /></div>
             <div className="empty-text">
               {schemas.length === 0
@@ -984,7 +984,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         )}
       </div>
 
-      <div className="card" style={{ marginBottom: '24px' }}>
+      <div className="card" style={{ marginBottom: 'var(--stack)' }}>
         {/* `.card-header`, not `.section-header`: the card has no padding of its own, so a plain
             section header would sit flush against its borders. */}
         <div className="card-header">
@@ -1034,7 +1034,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         </div>{/* .card-body */}
 
         {showAddMetric && (
-          <div style={{ margin: '16px 20px', padding: '12px', background: 'var(--bg-glass)', borderRadius: 'var(--radius)' }}>
+          <div style={{ margin: '12px var(--inset)', padding: '10px 12px', background: 'var(--bg-glass)', borderRadius: 'var(--radius)' }}>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
               {/* Chosen first because it decides what every control to its right offers. */}
               <div className="form-group" style={{ margin: 0, flex: '0 1 150px' }}>
@@ -1342,7 +1342,7 @@ export function SchemasTab({ showToast, hasPermission, onSelectSchema, onSelectD
         )}
 
         {loading ? <div className="loading-wrap"><div className="spinner" /> Loading catalog…</div> : catalogGroups.length === 0 ? (
-          <div className="empty-state" style={{ padding: '24px 20px' }}>
+          <div className="empty-state" style={{ padding: '20px var(--inset)' }}>
             <div className="empty-text">
               {catalogSearch
                 ? <>No metric matches <strong>{catalogSearch}</strong>.</>
