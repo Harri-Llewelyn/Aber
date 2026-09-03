@@ -35,7 +35,7 @@ RUN rm -f /home/deno/functions/Dockerfile
 # The physical gateway bundle template -- the files gateway-bundle zips up and hands to an operator.
 # Same delivery reasoning as the flow above: baked in, so which revision of the appliance template a
 # release ships is a property of the artefact rather than of whatever is on a cluster node's disk.
-COPY templates/physical-gateway /home/deno/templates/physical-gateway
+COPY gateway-bundle-template /home/deno/gateway-bundle-template
 
 # A user worker has NO FILESYSTEM ACCESS to anything in this image -- edge-runtime sandboxes it,
 # and main/index.ts forwards only environment variables to each worker it spawns. So the bundle
@@ -48,4 +48,4 @@ COPY templates/physical-gateway /home/deno/templates/physical-gateway
 # declaration is the one place "what may this code reach" is stated.
 #
 # Exec form with a literal script, so the nested quoting survives.
-ENTRYPOINT ["/bin/sh", "-e", "-c", "T=/home/deno/templates/physical-gateway; export GW_BUNDLE_COMPOSE=\"$(cat $T/docker-compose.yml)\"; export GW_BUNDLE_DOCKERFILE=\"$(cat $T/Dockerfile)\"; export GW_BUNDLE_BOOTSTRAP=\"$(cat $T/bootstrap.mjs)\"; export GW_BUNDLE_FLOWS=\"$(cat $T/flows.template.json)\"; export GW_BUNDLE_README=\"$(cat $T/README.md)\"; exec edge-runtime start --main-service /home/deno/functions/main"]
+ENTRYPOINT ["/bin/sh", "-e", "-c", "T=/home/deno/gateway-bundle-template; export GW_BUNDLE_COMPOSE=\"$(cat $T/docker-compose.yml)\"; export GW_BUNDLE_DOCKERFILE=\"$(cat $T/Dockerfile)\"; export GW_BUNDLE_BOOTSTRAP=\"$(cat $T/bootstrap.mjs)\"; export GW_BUNDLE_FLOWS=\"$(cat $T/flows.template.json)\"; export GW_BUNDLE_README=\"$(cat $T/README.md)\"; exec edge-runtime start --main-service /home/deno/functions/main"]

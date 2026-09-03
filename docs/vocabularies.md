@@ -315,7 +315,7 @@ can be named.
 4. Exporter: a `Nameplate` submodel in `supabase/functions/aas-export/`, `semanticId` = the template
    id, omitted entirely when the device has no nameplate data — the same rule the 3D model submodel
    already follows.
-5. Tests against the vendored IDTA schema in `tests/schemas/`.
+5. Tests against the vendored IDTA schema in `test-harness/schemas/`.
 
 One latent bug worth noting but not necessarily fixing now: a `semantic_id_type = 'ModelReference'`
 would also be emitted as `ExternalReference`, which would be wrong. Nothing sets it today.

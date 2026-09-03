@@ -1763,7 +1763,7 @@ so a whole-file scan would flag the documentation of the rule as a violation of 
 
 **The edge functions are delivered differently too.** Compose bind-mounts `functions/` for hot-reload;
 Kubernetes bakes them into an image (`functions/Dockerfile`, built with the **repository root** as
-context because `gateway-bundle` COPYs `templates/physical-gateway/`, which sits outside
+context because `gateway-bundle` COPYs `gateway-bundle-template/`, which sits outside
 `supabase/functions/`). Baking is what makes "which revision of
 `aas-export` is running" a property of the deployed artefact, so a rollback rolls the functions back.
 

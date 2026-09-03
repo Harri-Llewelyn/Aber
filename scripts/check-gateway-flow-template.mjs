@@ -55,8 +55,8 @@ const ok = [];
 const fail = (m) => problems.push(m);
 const pass = (m) => ok.push(m);
 
-const TEMPLATE = 'templates/physical-gateway/flows.template.json';
-const BOOTSTRAP = 'templates/physical-gateway/bootstrap.mjs';
+const TEMPLATE = 'gateway-bundle-template/flows.template.json';
+const BOOTSTRAP = 'gateway-bundle-template/bootstrap.mjs';
 
 const raw = read(TEMPLATE);
 let flow;

@@ -1,6 +1,6 @@
 # Build-context exclusions for the images built from the REPOSITORY ROOT:
 #   ingestion/Dockerfile            -> ingestion daemon
-#   supabase/functions/Dockerfile   -> edge runtime (needs templates/physical-gateway)
+#   supabase/functions/Dockerfile   -> edge runtime (needs gateway-bundle-template)
 #   tests/Dockerfile                -> conformance test runner
 #
 # ONE .dockerignore SERVES ALL THREE, so an exclusion added for one image can break another. That

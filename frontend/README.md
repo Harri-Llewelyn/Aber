@@ -67,7 +67,7 @@ last definition of each function**, because migrations are replayed on every boo
 guard was reading the dead one.
 
 A ninth mirror — `modelledMetrics()` — is behaviour rather than a literal, so it has a **fixture
-contract** instead: `tests/fixtures/modelled-metrics.json`, asserted by four implementations in
+contract** instead: `test-harness/fixtures/modelled-metrics.json`, asserted by four implementations in
 three languages. See [Migrated design notes](#migrated-design-notes) for what that fixture caught.
 
 ### Permission gating

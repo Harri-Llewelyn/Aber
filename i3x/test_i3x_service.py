@@ -32,7 +32,7 @@ import i3x_service  # noqa: E402
 from subscriptions import SubscriptionError, SubscriptionRegistry  # noqa: E402
 
 MODELLED_METRICS_FIXTURE = (
-    Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "modelled-metrics.json"
+    Path(__file__).resolve().parents[1] / "test-harness" / "fixtures" / "modelled-metrics.json"
 )
 
 
@@ -583,7 +583,7 @@ class ModelledMetricsContractTest(unittest.TestCase):
     `modelledMetrics()` in frontend/src/utils/deviceTags.js, `modelled_metrics()` in
     ingestion/validate.py and `modelledMetrics()` in supabase/functions/aas-export/index.ts answer
     the same question -- which metrics a schema models. None can import another, so
-    `tests/fixtures/modelled-metrics.json` is the seam, and each asserts it in its own runner.
+    `test-harness/fixtures/modelled-metrics.json` is the seam, and each asserts it in its own runner.
 
     This copy's own docstring said "this is the third, and all three must agree" while agreeing
     with nothing that was checked. That is the failure mode a fixture exists to end: the aas-export

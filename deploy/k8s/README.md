@@ -398,7 +398,7 @@ kubectl -n acs-cymru logs job/acs-cymru-e2e-validate
   Note its live checks **skip themselves and report success** when the device is absent, which is
   why CI asserts on the absence of the skip line rather than on the Job's exit status.
 
-Both need the **`acs-cymru/test-runner`** image (`tests/Dockerfile`). It extends the ingestion image
+Both need the **`acs-cymru/test-runner`** image (`test-harness/Dockerfile`). It extends the ingestion image
 with `jsonschema` and the AAS suite; jsonschema is deliberately *not* in the production ingestion
 image, and without it the schema-conformance tests — the ones that caught three real IDTA metamodel
 violations — skip themselves while the suite still reports success.
@@ -461,7 +461,7 @@ NS=ghcr.io/harri-llewelyn/acs-cymru
 V=$(grep -E '^appVersion:' deploy/helm/acs-cymru/Chart.yaml | head -1 \
     | sed -E 's/^appVersion:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
 
-# Edge functions — context is the REPOSITORY ROOT, because templates/physical-gateway is outside supabase/functions/
+# Edge functions — context is the REPOSITORY ROOT, because gateway-bundle-template is outside supabase/functions/
 docker build -f supabase/functions/Dockerfile   -t $NS/edge-runtime:$V .
 
 # Ingestion daemon — also repository root; ingestion/Dockerfile compiles sparkplug_b.proto with protoc
@@ -505,7 +505,7 @@ docker build -f supabase/db-init/Dockerfile      -t $NS/db-init:$V supabase
 # that first: it adds jsonschema and the AAS suite in a repo-shaped layout. jsonschema is deliberately
 # NOT in the production ingestion image, and without it the schema-conformance tests skip themselves
 # while the suite still reports success.
-docker build -f tests/Dockerfile --build-arg INGESTION_IMAGE=$NS/ingestion:$V \
+docker build -f test-harness/Dockerfile --build-arg INGESTION_IMAGE=$NS/ingestion:$V \
                                                 -t $NS/test-runner:$V .
 
 for i in edge-runtime ingestion node-red frontend test-runner i3x-service; do

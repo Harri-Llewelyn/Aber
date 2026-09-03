@@ -1564,7 +1564,7 @@ jobs:
           python ingestion/test_payload_conformance.py
 
       # The Python half of the modelled-metrics contract; the JavaScript half runs in
-      # frontend-build. Both assert tests/fixtures/modelled-metrics.json, because the rule is
+      # frontend-build. Both assert test-harness/fixtures/modelled-metrics.json, because the rule is
       # BEHAVIOUR and neither language can import the other -- grepping both files for `required`
       # would prove they spell it, not that they agree about a schema whose `required` is a string.
       # Writing the pair found a live divergence: for `properties: ['A','B']` the JS returned the
@@ -1750,7 +1750,7 @@ jobs:
           V: ${{ steps.appversion.outputs.version }}
         run: |
           set -eu
-          # Context is the REPOSITORY ROOT for these two: templates/physical-gateway and
+          # Context is the REPOSITORY ROOT for these two: gateway-bundle-template and
           # sparkplug_b.proto both live there.
           docker build -f supabase/functions/Dockerfile -t "$IMG_NS/edge-runtime:$V" .
           docker build -f ingestion/Dockerfile          -t "$IMG_NS/ingestion:$V" .
@@ -1772,7 +1772,7 @@ jobs:
           # The conformance runner: the ingestion image plus jsonschema and the AAS suite. Built
           # after ingestion because it extends it, and told WHICH ingestion -- the Dockerfile's ARG
           # default is a convenience for a bare `docker build`, not something to rely on here.
-          docker build -f tests/Dockerfile \
+          docker build -f test-harness/Dockerfile \
             --build-arg "INGESTION_IMAGE=$IMG_NS/ingestion:$V" -t "$IMG_NS/test-runner:$V" .
 
       - name: Import Images Into k3d
@@ -2038,7 +2038,7 @@ jobs:
       # THE AAS SUITE NOW DOES THE SAME. Its subject used to be seeded outright --
       # 0002 registered Sim_CNC_Mill_01 and 0020 gave it a schema and a nameplate -- which made a
       # CONFORMANCE suite depend on DEMO DATA the seed no longer creates. It provisions its own through
-      # tests/aas_fixture.py and tears it down afterwards, so it has no data dependency on the
+      # test-harness/aas_fixture.py and tears it down afterwards, so it has no data dependency on the
       # seed OR on validate.py. What remains is the reason the initContainer itself gives: do not
       # run a conformance suite against a stack whose conformance run did not pass.
       - name: In-Cluster Conformance — AAS V3 Export
@@ -2070,7 +2070,7 @@ jobs:
           # The suite announces the skip on stderr, so assert its ABSENCE.
           if grep -q 'live checks skipped' /tmp/aas.log; then
             echo "::error::the AAS suite SKIPPED its live checks -- it verified the offline parity checks only."
-            echo "::error::The suite provisions its own subject through tests/aas_fixture.py, so this means"
+            echo "::error::The suite provisions its own subject through test-harness/aas_fixture.py, so this means"
             echo "::error::the stack was not reachable, or provisioning was refused -- check the log above for"
             echo "::error::a 'could not provision the fixture' line naming the HTTP status."
             exit 1
@@ -2586,7 +2586,7 @@ jobs:
       # running stack and validates the emitted document. The same file runs in
       # edge-function-auth-test, where these checks skip themselves for want of a stack.
       #
-      # Its subject is provisioned by the suite itself (tests/aas_fixture.py), which is what
+      # Its subject is provisioned by the suite itself (test-harness/aas_fixture.py), which is what
       # its IDTA nameplate -- so it needs no simulator to have published and no operator to have
       # approved anything. This step used to be ordered after validate.py on the stated grounds
       # that validate.py approved the demo device and recorded its birth parameters; it does

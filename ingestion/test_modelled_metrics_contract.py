@@ -3,7 +3,7 @@ The Python half of the modelled-metrics contract.
 
 `frontend/src/__tests__/modelledMetricsContract.test.js` asserts the same fixture against the
 JavaScript mirror in `frontend/src/utils/deviceTags.js`. Neither language can import the other, so
-`tests/fixtures/modelled-metrics.json` is the seam: changing one implementation fails its own suite
+`test-harness/fixtures/modelled-metrics.json` is the seam: changing one implementation fails its own suite
 until the fixture is updated, and updating the fixture then fails the other. That is the drift
 signal, and it is behavioural -- grepping both files for the word `required` would prove only that
 they both spell it, not that they agree about a schema whose `required` is a string.
@@ -44,7 +44,7 @@ import validate  # noqa: E402
 
 FIXTURE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "tests", "fixtures", "modelled-metrics.json",
+    "test-harness", "fixtures", "modelled-metrics.json",
 )
 
 

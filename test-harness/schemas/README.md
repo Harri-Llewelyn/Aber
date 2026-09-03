@@ -16,7 +16,7 @@ Industrial Digital Twin Association's specification repository:
 It is a downloaded artefact, not source. Refresh it with:
 
 ```bash
-curl -o tests/schemas/AAS_V3_0_JSON_Schema.json \
+curl -o test-harness/schemas/AAS_V3_0_JSON_Schema.json \
   https://raw.githubusercontent.com/admin-shell-io/aas-specs/master/schemas/json/aas.json
 ```
 

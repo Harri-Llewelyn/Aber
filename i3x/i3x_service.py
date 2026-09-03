@@ -341,7 +341,7 @@ def _modelled_metrics(schema_definition) -> set:
     `schema_definition` is free-form JSONB and hand-written schemas carry either, which is why
     `modelledMetrics()` in deviceTags.js reads both.
 
-    ONE OF FOUR IMPLEMENTATIONS, all held to `tests/fixtures/modelled-metrics.json` -- with
+    ONE OF FOUR IMPLEMENTATIONS, all held to `test-harness/fixtures/modelled-metrics.json` -- with
     deviceTags.js, `modelled_metrics()` in ingestion/validate.py, and `modelledMetrics()` in
     supabase/functions/aas-export/index.ts. This one is asserted by
     `ModelledMetricsContractTest` in test_i3x_service.py.

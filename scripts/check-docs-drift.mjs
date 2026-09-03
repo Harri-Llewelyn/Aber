@@ -1106,7 +1106,7 @@ function edgeFunctionNames() {
   };
   for (const d of [
     'frontend/src', 'supabase/functions', 'ingestion', 'i3x', 'timescaledb',
-    'scripts', 'grafana', 'node-red', 'tests', 'docs',
+    'scripts', 'grafana', 'node-red', 'test-harness', 'docs',
   ]) {
     walkInto(d);
   }

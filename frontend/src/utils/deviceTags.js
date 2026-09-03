@@ -24,7 +24,7 @@ import { deriveMetricGroup } from './metricGroup'
  * difference decides whether a device gets flagged. See unmodelledMetrics().
  *
  * MIRRORED BY `modelled_metrics()` IN `ingestion/validate.py`, and the two are held together by
- * `tests/fixtures/modelled-metrics.json` -- see `__tests__/modelledMetricsContract.test.js`.
+ * `test-harness/fixtures/modelled-metrics.json` -- see `__tests__/modelledMetricsContract.test.js`.
  */
 export function modelledMetrics(schema) {
   const def = schema?.schema_definition

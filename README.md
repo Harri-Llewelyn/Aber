@@ -337,7 +337,7 @@ docker build -f ingestion/Dockerfile          -t acs-cymru/ingestion:0.1.0 .    
 docker build -f node-red/Dockerfile           -t acs-cymru/node-red:0.1.0 node-red
 docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
                                               -t acs-cymru/frontend:0.1.0 frontend
-docker build -f tests/Dockerfile              -t acs-cymru/test-runner:0.1.0 .    # conformance suites
+docker build -f test-harness/Dockerfile       -t acs-cymru/test-runner:0.1.0 .    # conformance suites
 
 node scripts/sync-helm-chart-files.mjs        # mirror repo config into the chart
 
@@ -381,10 +381,11 @@ Serves seven subdomains on one Ingress (`app.`, `api.`, `nodered.`, `grafana.`, 
 | [`docs/incidents.md`](docs/incidents.md) | Faults whose FIX LOOKS ARBITRARY without the story. Read before "tidying" a guard that seems redundant |
 | [`docs/upgrades.md`](docs/upgrades.md) | What survives an upgrade and why nothing needs reconfiguring — plus the three places that is not the whole truth |
 | [`docs/openapi.yaml`](docs/openapi.yaml) · [`docs/i3x-openapi.yaml`](docs/i3x-openapi.yaml) | REST and i3X specifications, rendered by Swagger UI |
-| [`supabase/migrations/archive/`](supabase/migrations/archive) | The 38 pre-beta migrations, preserved for their reasoning. Never executed |
+| [`supabase/migrations/archive/`](supabase/migrations/archive) | The 99 superseded migrations, preserved for their reasoning. Never executed |
 | [`grafana/`](grafana) · [`timescaledb/`](timescaledb) | Provisioning; hypertable schema, retention and rollup reconciliation, the read-only BI role |
 | [`scripts/`](scripts) | Setup, seeding, vocabulary generation, chart-file sync, drift guards, database backup/restore, gateway provisioning, stack reset, AAS push |
-| [`tests/`](tests) | Vendored IDTA AAS schema, conformance test-runner image |
+| [`test-harness/`](test-harness) | Vendored IDTA AAS schema, conformance test-runner image |
+| [`gateway-bundle-template/`](gateway-bundle-template) | The appliance files `gateway-bundle` serves to a physical gateway: Compose file, Dockerfile, bootstrap and flow template |
 
 ---
 

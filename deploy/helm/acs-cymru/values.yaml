@@ -1256,12 +1256,12 @@ ingress:
 e2e:
   enabled: false
   image:
-    # BUILT FROM tests/Dockerfile with the REPOSITORY ROOT as context. It extends the ingestion
+    # BUILT FROM test-harness/Dockerfile with the REPOSITORY ROOT as context. It extends the ingestion
     # image (which already has psycopg2, paho and a protoc-generated sparkplug_b_pb2) with
     # jsonschema and the AAS suite -- jsonschema is deliberately NOT in the production ingestion
     # image, and without it the schema-conformance tests skip themselves while still reporting
     # success.
-    #   docker build -f tests/Dockerfile -t <repo>:<tag> .
+    #   docker build -f test-harness/Dockerfile -t <repo>:<tag> .
     #
     # PUBLISHED -- see supabaseFunctions.image for what the empty tag means. It is published for
     # the same reason it exists: a conformance suite that only runs where the repository is

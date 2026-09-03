@@ -2,7 +2,7 @@
  * The JavaScript half of the modelled-metrics contract.
  *
  * `ingestion/test_modelled_metrics_contract.py` asserts the same fixture against the Python
- * mirror. Neither language can import the other, so the fixture in `tests/fixtures/` is the seam:
+ * mirror. Neither language can import the other, so the fixture in `test-harness/fixtures/` is the seam:
  * a change to one implementation fails its own suite until the fixture is updated, and updating
  * the fixture then fails the other — which is the drift signal. Guarding this by grepping both
  * files for the word `required` would prove they spell it, not that they agree.
@@ -16,7 +16,7 @@ import { dirname, join } from 'node:path'
 import { modelledMetrics } from '../utils/deviceTags'
 
 const FIXTURE = join(
-  dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'tests', 'fixtures', 'modelled-metrics.json'
+  dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'test-harness', 'fixtures', 'modelled-metrics.json'
 )
 const fixture = JSON.parse(readFileSync(FIXTURE, 'utf8'))
 

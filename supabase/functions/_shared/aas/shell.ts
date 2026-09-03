@@ -231,7 +231,7 @@ export function file(idShort: string, value: string, contentType: string, descri
 /**
  * The metric names one schema models: `properties` keys plus `required` entries.
  *
- * THE FOURTH OF FOUR IMPLEMENTATIONS, and the fixture in tests/fixtures/modelled-metrics.json is
+ * THE FOURTH OF FOUR IMPLEMENTATIONS, and the fixture in test-harness/fixtures/modelled-metrics.json is
  * what keeps them in step -- `frontend/src/utils/deviceTags.js`, `ingestion/validate.py` and
  * `i3x/i3x_service.py` are the others. It moved here from aas-export/index.ts when aas-api began
  * sharing this mapping; test_aas_export.py extracts it BY REGEX from this file and executes it, so

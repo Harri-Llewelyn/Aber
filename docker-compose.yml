@@ -957,7 +957,7 @@ services:
       - ./supabase/functions:/home/deno/functions:ro
       # The physical gateway bundle template gateway-bundle zips and serves. Read in the entrypoint
       # below because an edge worker has no filesystem access to this mount.
-      - ./templates/physical-gateway:/home/deno/templates/physical-gateway:ro
+      - ./gateway-bundle-template:/home/deno/gateway-bundle-template:ro
       # Persist fetched remote modules so functions don't re-download on restart.
       - deno_cache:/root/.cache/deno
     # An edge-runtime user worker has no filesystem access to these mounts, so the
@@ -975,7 +975,7 @@ services:
         # main/index.ts is an allow-list of variable NAMES and a dynamic set could not be declared
         # there. Kept in step with supabase/functions/Dockerfile's ENTRYPOINT, which does the same
         # for the Kubernetes target.
-        T=/home/deno/templates/physical-gateway
+        T=/home/deno/gateway-bundle-template
         export GW_BUNDLE_COMPOSE="$$(cat $$T/docker-compose.yml)"
         export GW_BUNDLE_DOCKERFILE="$$(cat $$T/Dockerfile)"
         export GW_BUNDLE_BOOTSTRAP="$$(cat $$T/bootstrap.mjs)"
