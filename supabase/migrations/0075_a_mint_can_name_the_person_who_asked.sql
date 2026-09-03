@@ -139,6 +139,21 @@ BEGIN
       USING ERRCODE = 'invalid_parameter_value';
   END IF;
 
+  -- A REVOKED PRINCIPAL CANNOT BE ISSUED A NEW TOKEN. `auth_pre_request()` refuses anything naming
+  -- one (0076), so without this the page would sign a credential, record it, return it once, and
+  -- have it refused on its first request -- with the operator having followed the page to get
+  -- there. Refusing at the point of issue is the only place that reads as a decision rather than
+  -- as a fault.
+  --
+  -- A FORWARD REFERENCE, AND IT IS SAFE FOR ONE STATED REASON: PL/pgSQL resolves a call at
+  -- EXECUTION time, not at CREATE time, and this repository replays the whole migration chain in
+  -- filename order on every boot. 0076 defines this helper and the table behind it, so by the time
+  -- anything can call this function both exist. It is written this way rather than by redeclaring
+  -- record_service_token_issued() in 0076 because that would put a second copy of every guard in
+  -- this body -- the ceiling, the human-account refusal, the roles snapshot -- with no test that
+  -- would notice the two drifting.
+  PERFORM public.assert_principal_not_revoked(p_principal_id);
+
   -- ---------------------------------------------------------------------------------------------
   -- THE ACTOR IS RE-CHECKED HERE, NOT TRUSTED.
   --

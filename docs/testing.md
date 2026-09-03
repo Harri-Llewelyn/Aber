@@ -122,6 +122,12 @@ python supabase/migrations/test_credential_revocation.py
 # before every request in the caller's role, so a false refusal is not a failing feature, it is the
 # whole API down. No claims, unparseable claims and a token with no jti must all be served.
 python supabase/migrations/test_service_token_revocation.py
+# Principal revocation (0076): the subject arm of the same hook. THE FIRST ASSERTIONS ARE THAT THE
+# FLAG DOES SOMETHING -- 0043 rejected deleting the auth.users row because the subject is never
+# looked up, and a flag nothing reads fails identically. Also covers the arm-ordering trap: the
+# subject arm is checked first so its message wins, and its uuid cast must fall THROUGH to the
+# token arm rather than return, or a junk `sub` would bypass the token denylist.
+python supabase/migrations/test_service_principal_revocation.py
 # The `deployment` constraints, and the view that has to be rebuilt when a gateways column moves
 # (0064, 0066). Its transitional half went when is_virtual did -- see the suite's own header.
 python supabase/migrations/test_gateway_deployment.py

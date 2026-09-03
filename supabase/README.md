@@ -1545,6 +1545,35 @@ keys from the environment, so a token minted for either is valid and unread —
 `isMintableFromPage()` is the rule, and those two keep `npm run keys:rotate`, which is what actually
 changes what those processes present.
 
+#### `0076` revokes the identity, which reaches further than revoking its tokens
+
+`revoke_service_principal()` flags a principal and `auth_pre_request()` then refuses every token
+naming it — **including ones this stack has no `TOKEN_MINTED` row for, and any issued afterwards**.
+Withdrawing tokens one at a time from the inventory dialog cannot do either: it reaches exactly the
+recorded jtis, and the next mint works.
+
+**A flag nothing reads would have been the same defect `0043` already rejected.** That migration
+ruled out deleting the `auth.users` row because *"the signature is validated and the subject never
+looked up"* — and writing `revoked_at` somewhere has precisely that failure available to it. The
+flag is enforced at the same choke point as the token denylist, keyed on the `sub` claim, which is
+what makes it a revocation rather than an annotation.
+
+**It cascades, and that is what makes reinstatement safe.** Revoking also denylists each outstanding
+token individually — redundant for PostgREST, since the subject arm already refuses them, and not
+redundant for the audit trail or for `reinstate_service_principal()`. Lifting the flag restores the
+**identity**, not the credentials that were live when it was withdrawn; `revoke_service_token()` has
+no inverse, so those stay refused and a new token must be minted.
+
+**A person's account is refused outright.** `sub` is on every JWT, so a row naming a human would
+lock them out of PostgREST through a control built for machines — and out of the request that would
+undo it. `is_machine_principal()` is the guard.
+
+**The arm order is about the message.** Both arms refuse the request, so the outcome is identical;
+the subject arm runs first because after a cascade both match, and *"this identity has been
+revoked"* explains the mint refusal that follows, where *"this token has been revoked"* invites a
+replacement request that will also fail. Its uuid cast falls **through** to the token arm rather
+than returning — otherwise a token carrying a junk `sub` would bypass the token denylist entirely.
+
 Built by `0041`–`0044`, `0074`, `0075`, `supabase/functions/gateway-credential`,
 `supabase/functions/mint-service-token`,
 [`AccessControlTab.jsx`](../frontend/src/components/tabs/AccessControlTab.jsx),

@@ -5,6 +5,7 @@ import { GatewayBundleModal } from '../modals/GatewayBundleModal'
 import { GatewayCredentialModal } from '../modals/GatewayCredentialModal'
 import { ServiceTokenModal } from '../modals/ServiceTokenModal'
 import { ServiceTokenInventoryModal } from '../modals/ServiceTokenInventoryModal'
+import { ServicePrincipalRevocationModal } from '../modals/ServicePrincipalRevocationModal'
 import { IconArchive, IconDownload, IconLock, IconRefreshCw, IconShieldAlert } from '../common/Icons'
 import {
   CREDENTIAL_STATES,
@@ -82,6 +83,11 @@ export function AccessControlTab({ showToast }) {
   // tokenStatus() degrades to the pre-0074 reading on an empty set rather than claiming
   // everything is live.
   const [revokedJtis, setRevokedJtis] = useState(() => new Set())
+  // Principal id -> its `revoked_service_principals` row (0076). A MAP, not a Set: the row carries
+  // when and why, and both are shown.
+  const [revokedPrincipals, setRevokedPrincipals] = useState(() => new Map())
+  // { principal, name, revocation, activeTokens } while the withdraw/reinstate dialog is open.
+  const [revokeIdentity, setRevokeIdentity] = useState(null)
   // ITS OWN ERROR, not folded into loadError. The two reads have DIFFERENT authority -- gateway
   // credentials accept Shopfloor_Manager, service principals are Administrator-only (0042) -- so a
   // single error state would blame the whole page for a refusal that applies to one section.
@@ -116,6 +122,12 @@ export function AccessControlTab({ showToast }) {
     api.listRevokedServiceTokens()
       .then(setRevokedJtis)
       .catch(() => setRevokedJtis(new Set()))
+
+    // The fourth read (0076). Its own, for the same reason as the third: different table,
+    // different authority, and an identity list that renders beats one blanked by a refusal.
+    api.listRevokedServicePrincipals()
+      .then(setRevokedPrincipals)
+      .catch(() => setRevokedPrincipals(new Map()))
   }, [])
 
   useEffect(() => { load(true) }, [load])
@@ -474,6 +486,7 @@ export function AccessControlTab({ showToast }) {
                   // `Date.now()` is spelled out because the third argument cannot be reached past
                   // a defaulted second one.
                   const status = tokenStatus(tokens.get(p.principal_id), Date.now(), revokedJtis)
+                  const revocation = revokedPrincipals.get(p.principal_id) || null
                   return (
                     <tr key={p.principal_id}>
                       {/* THE PURPOSE IS A TOOLTIP NOW. It is three lines of background on a row whose
@@ -514,6 +527,21 @@ export function AccessControlTab({ showToast }) {
                               predicate it selected on. */}
                           {p.can_sign_in === false && (
                             <span className="badge badge-ok" style={{ fontSize: '11px' }}>CANNOT SIGN IN</span>
+                          )}
+                          {/* BESIDE THE ROLES, NOT IN THE TOKEN COLUMN, because it is a fact about
+                              the IDENTITY rather than about its credentials -- and it outranks
+                              them: a revoked principal is refused whatever its tokens say, so a
+                              reader scanning the roles needs to see it here. */}
+                          {revocation && (
+                            <span
+                              className="badge badge-danger"
+                              style={{ fontSize: '11px', cursor: 'help' }}
+                              title={`Withdrawn ${new Date(revocation.revoked_at).toLocaleString()}`
+                                + (revocation.reason ? ` — ${revocation.reason}` : '')
+                                + '. Every token naming this identity is refused by the API, including any issued afterwards.'}
+                            >
+                              REVOKED
+                            </span>
                           )}
                         </div>
                       </td>
@@ -593,13 +621,44 @@ export function AccessControlTab({ showToast }) {
                       <td>
                         {isMintableFromPage(meta) ? (
                           <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                            <button
-                              className="btn btn-ghost"
-                              onClick={() => setMintFor({ principal: p, name: meta.name })}
-                              title="Sign a token for this identity and show it once. Recorded in the Digital Thread before it is returned, and revocable against the API afterwards."
-                            >
-                              <IconLock size={13} /> Issue Token
-                            </button>
+                            {/* MINTING IS NOT OFFERED FOR A WITHDRAWN IDENTITY, and the swap is not
+                                cosmetic: record_service_token_issued() refuses one outright (0076),
+                                so the button would sign nothing and return an error. Reinstating is
+                                the action that is actually available, so it is the one shown. */}
+                            {revocation ? (
+                              <button
+                                className="btn btn-ghost"
+                                onClick={() => setRevokeIdentity({
+                                  principal: p, name: meta.name, revocation, activeTokens: status.outstanding,
+                                })}
+                                title="This identity is withdrawn and cannot be issued a token. Reinstate it first — its previous tokens stay withdrawn."
+                              >
+                                Reinstate
+                              </button>
+                            ) : (
+                              <button
+                                className="btn btn-ghost"
+                                onClick={() => setMintFor({ principal: p, name: meta.name })}
+                                title="Sign a token for this identity and show it once. Recorded in the Digital Thread before it is returned, and revocable against the API afterwards."
+                              >
+                                <IconLock size={13} /> Issue Token
+                              </button>
+                            )}
+                            {/* WITHDRAWING IS OFFERED WHEREVER MINTING IS, which is the pairing that
+                                keeps the page honest: a control that hands out credentials and no
+                                control that takes the identity back is the asymmetry roadmap item 3
+                                refused to ship in the first place. */}
+                            {!revocation && (
+                              <button
+                                className="btn btn-ghost"
+                                onClick={() => setRevokeIdentity({
+                                  principal: p, name: meta.name, revocation: null, activeTokens: status.outstanding,
+                                })}
+                                title="Withdraw this identity. Every token naming it is refused by the API, including any issued afterwards — which is what makes this different from withdrawing tokens one at a time."
+                              >
+                                Withdraw
+                              </button>
+                            )}
                             {/* KEPT BESIDE IT, NOT REPLACED. `mint-mcp-token.mjs` survives as
                                 break-glass for the reason item 3 gives: a stack whose only
                                 Administrator cannot sign in still needs a way to mint. What
@@ -769,6 +828,18 @@ export function AccessControlTab({ showToast }) {
           principalName={tokensFor.name}
           status={tokensFor.status}
           onClose={() => setTokensFor(null)}
+          onChanged={load}
+          showToast={showToast}
+        />
+      )}
+
+      {revokeIdentity && (
+        <ServicePrincipalRevocationModal
+          principal={revokeIdentity.principal}
+          principalName={revokeIdentity.name}
+          revocation={revokeIdentity.revocation}
+          activeTokens={revokeIdentity.activeTokens}
+          onClose={() => setRevokeIdentity(null)}
           onChanged={load}
           showToast={showToast}
         />

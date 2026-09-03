@@ -689,6 +689,49 @@ paths:
                     revoked_by:   { type: string, format: uuid, description: The Administrator who withdrew it. }
         '403': { description: Role is neither Administrator nor Auditor. }
 
+  /rest/v1/revoked_service_principals:
+    get:
+      tags: [Audit]
+      summary: List withdrawn service principals
+      description: |
+        Service principals `auth_pre_request()` refuses by **subject** (`0076`). Every token naming
+        one is refused — including tokens this stack has no `TOKEN_MINTED` row for, and any issued
+        afterwards. That reach is what distinguishes it from withdrawing tokens one at a time.
+
+        **Not self-pruning**, unlike `/rest/v1/revoked_service_tokens`. A token row can go once the
+        token expires, because the signature check refuses it from then on; a principal has no
+        expiry and stays until `reinstate_service_principal()` removes the row. So an empty list
+        here really does mean "none withdrawn".
+
+        **Reinstating restores the identity, not its credentials.** Revocation denylists each
+        outstanding token individually, and `revoke_service_token()` has no inverse — so tokens
+        withdrawn alongside a principal stay withdrawn and a new one must be minted.
+
+        A person's account can never appear here: `revoke_service_principal()` refuses anything
+        that can sign in, because `sub` is on every JWT and a row naming a human would refuse the
+        very request that would undo it.
+
+        Read is `Administrator` and `Auditor`; `anon` is granted nothing.
+      parameters:
+        - { name: principal_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>` to check one identity.' }
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+      responses:
+        '200':
+          description: Withdrawn service principals.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    principal_id: { type: string, format: uuid }
+                    revoked_at:   { type: string, format: date-time }
+                    revoked_by:   { type: string, format: uuid, description: The Administrator who withdrew it. }
+                    reason:       { type: string, nullable: true, description: Free text supplied at revocation. }
+        '403': { description: Role is neither Administrator nor Auditor. }
+
   # ------------------------------------------------------------ Registry ----
   /rest/v1/asset_config:
     get:

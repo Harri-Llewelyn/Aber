@@ -788,6 +788,55 @@ const apiMethods = {
   },
 
   /**
+   * The service principals `auth_pre_request()` is refusing by subject (0076), keyed by id.
+   *
+   * A MAP RATHER THAN A SET, unlike the token denylist, because the row carries facts the page
+   * shows: when it was withdrawn and why. A token's denylist row has nothing a reader wants that
+   * the mint row does not already carry.
+   *
+   * NOT SELF-PRUNING, so an empty map really does mean "none revoked" -- where the token equivalent
+   * only means "none currently being refused". Same swallow-to-empty on a refusal, for the same
+   * reason: an Auditor can read this and a Shopfloor_Manager cannot, and the identities are worth
+   * more than a section blanked by the newest of four reads.
+   */
+  listRevokedServicePrincipals: async () => {
+    const { data, error } = await supabase
+      .from('revoked_service_principals')
+      .select('principal_id,revoked_at,revoked_by,reason');
+
+    if (error) return new Map();
+    return new Map((data || []).map(r => [r.principal_id, r]));
+  },
+
+  /**
+   * Withdraw a whole identity: every token naming it is refused, including ones issued later.
+   *
+   * IT CASCADES, and the caller must say so. The RPC also denylists each outstanding token
+   * individually -- redundant for PostgREST, and what makes reinstatement safe, since lifting the
+   * principal flag then does not hand those credentials back.
+   */
+  revokeServicePrincipal: async (principalId, reason) => {
+    const { data, error } = await supabase.rpc('revoke_service_principal', {
+      p_principal_id: principalId,
+      p_reason: reason || null,
+    });
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  /**
+   * Lift the flag. RESTORES THE IDENTITY, NOT ITS CREDENTIALS -- the tokens revoked alongside it
+   * stay revoked, because revoke_service_token() has no inverse. A new token must be minted.
+   */
+  reinstateServicePrincipal: async (principalId) => {
+    const { data, error } = await supabase.rpc('reinstate_service_principal', {
+      p_principal_id: principalId,
+    });
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  /**
    * Create a machine identity that cannot sign in.
    *
    * THROUGH THE RPC, AS THE CALLER. `create_service_principal()` (0044) is SECURITY DEFINER and

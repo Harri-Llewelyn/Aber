@@ -618,6 +618,12 @@ function edgeFunctionNames() {
     // argument alongside it would make a four-argument call ambiguous -- so the last declaration
     // winning is exactly what is wanted here, and the baseline's copy is the one being replaced.
     'public.record_service_token_issued': '0075 adds p_actor_id; the baseline holds the pre-0075 form',
+    // 0074 creates it with one arm -- the token denylist -- and 0076 rewrites it to add a second,
+    // the principal denylist keyed on the `sub` claim. Rewritten rather than extended because the
+    // arm ORDER is load-bearing: the subject check runs first so its message wins once a principal
+    // revocation has cascaded to its tokens and both arms match. The last declaration winning is
+    // exactly what is wanted, and 0074 is left intact as the record of what shipped first.
+    'public.auth_pre_request': '0076 adds the principal arm; 0074 holds the token-only form',
   };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })

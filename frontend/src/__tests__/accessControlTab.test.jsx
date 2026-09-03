@@ -12,6 +12,9 @@ vi.mock('../api', () => ({
     listServiceTokens: vi.fn(),
     listRevokedServiceTokens: vi.fn(),
     revokeServiceToken: vi.fn(),
+    listRevokedServicePrincipals: vi.fn(),
+    revokeServicePrincipal: vi.fn(),
+    reinstateServicePrincipal: vi.fn(),
   }
 }))
 
@@ -25,6 +28,11 @@ vi.mock('../components/modals/GatewayBundleModal', () => ({
 }))
 vi.mock('../components/modals/ServiceTokenModal', () => ({
   ServiceTokenModal: ({ principalName }) => <div data-testid="token-modal">{principalName}</div>
+}))
+vi.mock('../components/modals/ServicePrincipalRevocationModal', () => ({
+  ServicePrincipalRevocationModal: ({ principalName, revocation }) => (
+    <div data-testid="identity-modal">{revocation ? 'reinstate' : 'withdraw'}:{principalName}</div>
+  )
 }))
 vi.mock('../components/modals/ServiceTokenInventoryModal', () => ({
   ServiceTokenInventoryModal: ({ principalName, status }) => (
@@ -63,6 +71,7 @@ beforeEach(() => {
   // Empty by default, which is both the common case and the reading a caller who cannot see the
   // denylist gets. Tests that care about a withdrawal override it.
   api.listRevokedServiceTokens.mockResolvedValue(new Set())
+  api.listRevokedServicePrincipals.mockResolvedValue(new Map())
 })
 
 describe('AccessControlTab', () => {
@@ -310,6 +319,48 @@ describe('AccessControlTab', () => {
 
     await waitFor(() => expect(screen.getByText('No token on record')).toBeTruthy())
     expect(screen.queryByRole('button', { name: /No token on record/i })).toBeNull()
+  })
+
+  /**
+   * WITHDRAW SITS BESIDE ISSUE, because a page that hands out credentials with no control that
+   * takes the identity back is the asymmetry roadmap item 3 refused to ship in the first place.
+   */
+  it('offers Withdraw beside Issue Token for a live identity', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /Issue Token/i })).toBeTruthy())
+    expect(screen.getByRole('button', { name: /^Withdraw$/i })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Reinstate/i })).toBeNull()
+  })
+
+  /**
+   * MINTING IS NOT OFFERED FOR A WITHDRAWN IDENTITY, and the swap is not cosmetic:
+   * record_service_token_issued() refuses one outright (0076), so the button would sign nothing
+   * and return an error. Reinstating is the action actually available.
+   */
+  it('replaces Issue Token with Reinstate once the identity is withdrawn', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listRevokedServicePrincipals.mockResolvedValue(new Map([[
+      MCP_PRINCIPAL.principal_id,
+      { principal_id: MCP_PRINCIPAL.principal_id, revoked_at: '2026-09-03T12:00:00Z', reason: 'leaked' }
+    ]]))
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('REVOKED')).toBeTruthy())
+    expect(screen.queryByRole('button', { name: /Issue Token/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Withdraw$/i })).toBeNull()
+    expect(screen.getByRole('button', { name: /Reinstate/i })).toBeTruthy()
+  })
+
+  it('opens the dialog in the direction the identity needs', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Withdraw$/i })).toBeTruthy())
+    screen.getByRole('button', { name: /^Withdraw$/i }).click()
+    await waitFor(() => expect(screen.getByTestId('identity-modal').textContent)
+      .toBe('withdraw:MCP read-only client'))
   })
 
   it('shows the broker principals and marks which one can publish', async () => {
