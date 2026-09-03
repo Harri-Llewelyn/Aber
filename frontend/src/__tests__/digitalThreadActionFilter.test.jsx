@@ -81,7 +81,7 @@ describe('the action filter offers every action the database can record', () => 
 
     expect(values).toEqual([
       '', 'INSERT', 'UPDATE', 'DELETE', 'SCHEMA_REJECTION', 'CREDENTIAL_ISSUED', 'TOKEN_MINTED',
-      'ROLE_GRANTED', 'ROLE_REVOKED'
+      'TOKEN_REVOKED', 'ROLE_GRANTED', 'ROLE_REVOKED'
     ])
   })
 

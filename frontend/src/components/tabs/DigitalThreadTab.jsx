@@ -193,7 +193,11 @@ export function classifyEvent(event, diff) {
   // granted a way to reach this stack. It is not `creation` -- no row was created, and the thing
   // that WAS created lives outside the database entirely -- and not `critical`, which is reserved
   // for lifecycle events. Who may do what is precisely what governance means.
-  if (action === 'TOKEN_MINTED') return 'governance'
+  // TOKEN_REVOKED (0074) is the same kind of fact arriving from the other direction, and it is
+  // named here rather than left to the `audit_domain === 'security'` line above for the reason
+  // that line already gives: fixtures and older page states supply rows without the column, and a
+  // credential withdrawal is not an event to classify by accident.
+  if (action === 'TOKEN_MINTED' || action === 'TOKEN_REVOKED') return 'governance'
   // The same argument, arriving from `user_roles` (0070). A revocation is not `critical`: that
   // marker is for an asset's lifecycle, and nothing on the shopfloor ended here.
   if (action === 'ROLE_GRANTED' || action === 'ROLE_REVOKED') return 'governance'
@@ -674,7 +678,12 @@ function EventDiff({ event, diff }) {
           : action === 'DELETE' ? 'Final properties'
             : action === 'SCHEMA_REJECTION' ? 'Rejected payload'
               : action === 'TOKEN_MINTED' ? 'Token issued'
-                : 'Changed properties'}
+                // TWO-SIDED, UNLIKE TOKEN_MINTED, and that is not an oversight. 0074 carries the
+                // original mint in `old_data` precisely so the row stays readable after the
+                // denylist entry is pruned -- which happens the moment the token expires. So there
+                // IS a prior state here, and it is the thing being withdrawn.
+                : action === 'TOKEN_REVOKED' ? 'Token withdrawn'
+                  : 'Changed properties'}
       </div>
 
       {diff.length === 0 ? (
@@ -694,7 +703,8 @@ function EventDiff({ event, diff }) {
                 : action === 'INSERT' ? 'Created'
                   : action === 'SCHEMA_REJECTION' ? 'Observed'
                     : action === 'TOKEN_MINTED' ? 'Issued'
-                      : 'New'}</th>
+                      : action === 'TOKEN_REVOKED' ? 'Revoked'
+                        : 'New'}</th>
             </tr>
           </thead>
           <tbody>

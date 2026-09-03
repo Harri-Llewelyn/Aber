@@ -117,6 +117,11 @@ python supabase/migrations/test_credential_recorder.py
 # Rolls back for a second reason: net.http_post queues inside the transaction, so the rotation
 # requests these tests provoke are un-queued rather than sent.
 python supabase/migrations/test_credential_revocation.py
+# Service-token revocation (0074): the denylist, and the PostgREST db-pre-request hook that reads
+# it. THE FAIL-OPEN TESTS ARE THE POINT and come first in the file -- auth_pre_request() runs
+# before every request in the caller's role, so a false refusal is not a failing feature, it is the
+# whole API down. No claims, unparseable claims and a token with no jti must all be served.
+python supabase/migrations/test_service_token_revocation.py
 # The `deployment` constraints, and the view that has to be rebuilt when a gateways column moves
 # (0064, 0066). Its transitional half went when is_virtual did -- see the suite's own header.
 python supabase/migrations/test_gateway_deployment.py

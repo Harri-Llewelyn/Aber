@@ -513,10 +513,20 @@ export function AccessControlTab({ showToast }) {
                           {tokenStatusLabel(status)}
                         </span>
                       </td>
-                      {/* THE COMMAND, NOT A BUTTON. Minting stays on the host deliberately:
-                          these tokens cannot be revoked, so issuing one should cost more than
-                          a click. What the page can do is remove the part that is error-prone --
-                          transcribing a UUID -- so the whole line is copyable.
+                      {/* THE COMMAND, NOT A BUTTON — AND THE REASON HAS NOW HALF EXPIRED.
+                          Minting stayed on the host because these tokens could not be revoked, so
+                          issuing one should cost more than a click. 0074 removed that premise:
+                          `revoke_service_token()` withdraws a jti and `auth_pre_request()` refuses
+                          it on every PostgREST request thereafter. Roadmap item 3 is explicit that
+                          this is the order the work goes in — *"Build revocation first and the same
+                          RPC stops being a hazard"* — so a mint button is now reachable rather than
+                          refused, and it is simply not built yet.
+
+                          IT STAYS A COMMAND UNTIL THEN, deliberately: a page that offered minting
+                          while the revocation it depends on had no control of its own would be the
+                          same failure in a new place. What the page can do meanwhile is remove the
+                          part that is error-prone — transcribing a UUID — so the whole line is
+                          copyable.
 
                           IT IS PER-PRINCIPAL, AND IT USED NOT TO BE. Every row rendered
                           `mint-mcp-token.mjs --principal <id>`, which is wrong for two of the three

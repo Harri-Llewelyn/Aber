@@ -649,6 +649,46 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/DigitalThreadEntry' } }
         '403': { description: Role lacks Digital Thread read access. }
 
+  /rest/v1/revoked_service_tokens:
+    get:
+      tags: [Audit]
+      summary: List revoked service tokens still inside their lifetime
+      description: |
+        The denylist `auth_pre_request()` consults before every PostgREST request (`0074`). A
+        service token whose `jti` appears here is refused with `42501` until it expires.
+
+        **Operational, not audit.** Rows are pruned once the token they name has expired, because
+        the signature check refuses it from then on — so this is *not* the history of revocations.
+        That is the `TOKEN_REVOKED` entry in `/rest/v1/digital_thread`, which is append-only and
+        carries the original mint in `old_data` so it stays readable after the row here is gone.
+
+        **Revocation reaches PostgREST only.** `supabase-storage`, `supabase-realtime`, the edge
+        runtime and Studio each verify `SUPABASE_JWT_SECRET` for themselves and consult no
+        denylist, so a listed token still satisfies those four until it expires.
+
+        Read is `Administrator` and `Auditor`; `anon` is granted nothing.
+      parameters:
+        - { name: jti, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>` to check one token.' }
+        - { name: principal_id, in: query, schema: { type: string }, description: 'e.g. `eq.<uuid>` for one identity''s withdrawn tokens.' }
+        - $ref: '#/components/parameters/Select'
+        - $ref: '#/components/parameters/Order'
+      responses:
+        '200':
+          description: Unexpired revoked tokens.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    jti:          { type: string, description: The token identifier the denylist matches on. }
+                    principal_id: { type: string, format: uuid }
+                    expires_at:   { type: string, format: date-time, description: The token's own expiry. The row is pruned past it. }
+                    revoked_at:   { type: string, format: date-time }
+                    revoked_by:   { type: string, format: uuid, description: The Administrator who withdrew it. }
+        '403': { description: Role is neither Administrator nor Auditor. }
+
   # ------------------------------------------------------------ Registry ----
   /rest/v1/asset_config:
     get:

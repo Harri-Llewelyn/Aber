@@ -199,14 +199,24 @@ export function roleReach(roles) {
  * What tokens are OUTSTANDING for a principal, which is not the same as what was last minted.
  *
  * =================================================================================================
- * A RE-MINT DOES NOT REPLACE ANYTHING. `scripts/mint-mcp-token.mjs` signs a new JWT; it does not
- * invalidate the previous one, and it could not -- PostgREST validates the signature and consults
- * no table, so the only way to stop a token working is to let it expire or to rotate
- * SUPABASE_JWT_SECRET, which invalidates every token in the stack including the anon key.
+ * A RE-MINT DOES NOT REPLACE ANYTHING. `scripts/mint-mcp-token.mjs` signs a new JWT and does not
+ * invalidate the previous one. So "the latest mint" is the wrong question and would UNDERSTATE the
+ * exposure: two mints a week apart are two live credentials, and reading only the newer one reports
+ * half of what is out there. What matters is how many are unexpired, and when the first of them
+ * lapses.
  *
- * So "the latest mint" is the wrong question and would UNDERSTATE the exposure: two mints a week
- * apart are two live credentials, and reading only the newer one reports half of what is out
- * there. What matters is how many are unexpired, and when the first of them lapses.
+ * THE SECOND HALF OF THIS NOTE USED TO SAY REVOCATION WAS IMPOSSIBLE, AND 0074 MADE THAT FALSE.
+ * It read: *"it could not -- PostgREST validates the signature and consults no table, so the only
+ * way to stop a token working is to let it expire or to rotate SUPABASE_JWT_SECRET."* That was
+ * exactly right until PostgREST was given a `db-pre-request` hook to consult: `auth_pre_request()`
+ * now refuses any request whose JWT carries a revoked `jti`, and `revoke_service_token()` is how a
+ * jti gets there.
+ *
+ * WHAT HAS NOT CHANGED IS WHY THIS FUNCTION COUNTS THE WAY IT DOES. Revocation is a deliberate act
+ * on one token; until somebody performs it, every unexpired mint is live. And revocation reaches
+ * PostgREST ONLY -- storage, realtime, the edge runtime and Studio each verify the JWT secret for
+ * themselves and consult no denylist -- so an outstanding count is still the honest measure of
+ * exposure rather than a formality.
  * =================================================================================================
  */
 export const TOKEN_STATES = { ACTIVE: 'active', EXPIRED: 'expired', NONE: 'none' }
@@ -282,7 +292,13 @@ export function tokenStatusDetail(status, now = Date.now()) {
   const days = Math.max(0, Math.ceil((status.earliestExpiry - now) / DAY_MS))
   const when = new Date(status.earliestExpiry).toLocaleDateString()
   return status.outstanding === 1
-    ? `Expires ${when} — in ${days} day${days === 1 ? '' : 's'}. It cannot be revoked before then.`
+    // "REVOCABLE", NOT "CANNOT BE REVOKED", which is what these two lines said until 0074 gave
+    // PostgREST a denylist to consult. The qualifier is not padding: revocation goes through
+    // `auth_pre_request()`, which only PostgREST runs, so a withdrawn token still reaches storage,
+    // realtime, the edge runtime and Studio. Saying "revoked" flat would overstate it in the one
+    // direction an operator would act on.
+    ? `Expires ${when} — in ${days} day${days === 1 ? '' : 's'}. Revocable against the API before `
+      + 'then; storage, realtime and the edge functions check the signature only.'
     : `Earliest expires ${when} — in ${days} day${days === 1 ? '' : 's'}. Minting again adds a `
-      + 'credential rather than replacing one; none can be revoked before it lapses.';
+      + 'credential rather than replacing one; each is revoked separately, and only against the API.';
 }
