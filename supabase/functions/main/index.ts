@@ -68,14 +68,14 @@ const FUNCTION_REGISTRY: Record<string, string[]> = {
   // discovered.
   "gateway-credential": ["MQTT_CREDENTIAL_SERVICE_URL", "MQTT_CREDENTIAL_SERVICE_TOKEN"],
 
-  // Signs a long-lived JWT for a service principal and reveals it once (roadmap item 3).
+  // Signs a long-lived JWT for a service principal and reveals it once (the retired revocable-tokens roadmap item).
   //
   // JWT_SECRET IS THE ENTRY, AND IT IS THE WIDEST SECRET IN THIS MAP. It signs anything -- a
   // `service_role` token included -- and such a token is accepted by storage, realtime, the edge
   // runtime and Studio, none of which consult 0074's denylist. So this worker is the only one here
   // that could, if it stopped checking its caller, produce a credential nobody can withdraw.
   //
-  // THAT IS WHY IT IS SIGNED HERE RATHER THAN IN THE DATABASE, which is where roadmap item 3
+  // THAT IS WHY IT IS SIGNED HERE RATHER THAN IN THE DATABASE, which is where the retired revocable-tokens roadmap item
   // proposed putting it. The runtime already holds this key; the database holds nothing that can
   // sign a Supabase token, and moving the key there would turn every path to SQL execution into a
   // path to an unrevocable god credential. The key stays put and the mint comes to it.

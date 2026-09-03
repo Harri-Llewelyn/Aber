@@ -3,8 +3,9 @@
 --
 -- Revocation for the long-lived service tokens 0043 has been recording since the day it shipped.
 --
--- ROADMAP ITEM 3, AND ONLY THE HALF THAT MAKES THE OTHER HALF SAFE. That item is explicit about
--- the order: *"Revocation is the item and the buttons are its consequence."* A mint button was
+-- THE REVOCABLE-TOKENS ROADMAP ITEM, AND ONLY THE HALF THAT MAKES THE OTHER HALF SAFE. That item
+-- has since shipped and left the list, so it is named rather than numbered here -- its number was
+-- reused the moment it went. It was explicit about the order: *"Revocation is the item and the buttons are its consequence."* A mint button was
 -- designed and refused once already, and the refusal is quoted there because it is the whole
 -- design constraint -- *"technically neat, and it would have made an unrevocable credential a
 -- button press with a tidy audit trail of a thing nobody can undo. Solving the wrong half well is
@@ -211,7 +212,7 @@ DECLARE
   v_expires   timestamptz;
   v_id        bigint;
 BEGIN
-  -- ADMINISTRATOR ALONE, which is the sixth policy in the direction roadmap item 3 describes:
+  -- ADMINISTRATOR ALONE, which is the sixth policy in the direction the retired revocable-tokens roadmap item describes:
   -- `system_settings` for read and for write, `list_service_principals()` and
   -- `create_service_principal()` are the five that already separate Administrator from
   -- Shopfloor_Manager by hand. Withdrawing a credential is an access-control act, not an

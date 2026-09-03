@@ -6,14 +6,29 @@ THE FAIL-OPEN TESTS COME FIRST, AND THAT ORDERING IS THE POINT OF THIS FILE.
 
 `auth_pre_request()` runs before EVERY PostgREST request, in the caller's role. If it raises when
 it should not, the entire API is down -- the correct direction for a security control and a total
-outage all the same. Roadmap item 3 names the three cases that have to be proven before anything
+outage all the same. The retired revocable-tokens roadmap item names the three cases that have to be proven before anything
 depends on it: an empty denylist, a token carrying no `jti` at all, and the function missing
 entirely.
 
 Two of those are asserted here. THE THIRD -- the function missing -- IS NOT A DATABASE TEST: it is
 a question about what PostgREST does when `PGRST_DB_PRE_REQUEST` names something that does not
-exist, and it is answered by starting PostgREST that way. It is recorded here rather than left
-out, so the gap is visible to whoever wires the environment variable up.
+exist, and it is answered by starting PostgREST that way.
+
+IT HAS NOW BEEN MEASURED, and the answer is worse than the roadmap assumed. A throwaway
+postgrest/postgrest:v14.12 was started against this database naming a function that does not exist:
+
+    /live                200
+    /ready               200
+    GET /gateways        404  {"code":"42883","message":"function ... does not exist"}
+
+PostgREST does NOT refuse to boot. The schema cache loads, the container reports running, and both
+admin probes report healthy while every data request fails -- as a 404, so a monitor watching for
+5xx sees nothing and a Kubernetes readiness probe keeps the pod in service. A typo in that
+environment variable is therefore a total outage that nothing detects.
+
+THE CONTROL FOR IT IS STATIC, in `scripts/check-docs-drift.mjs`: the name is asserted to be
+identical on both targets and to be declared by a migration. A runtime probe cannot help -- by the
+time one could run, the outage has already started.
 
 =================================================================================================
 SELF-SEEDED, NOT THE DEMO PERSONAS. CI's RLS job applies the migrations and deliberately not
@@ -224,7 +239,7 @@ class ServiceTokenRevocation(unittest.TestCase):
     def test_an_empty_denylist_serves_a_token_that_has_one(self):
         """
         THE EMPTY DENYLIST, which is the state of every stack that has never revoked anything --
-        i.e. all of them, until the day this matters. Roadmap item 3 names it first.
+        i.e. all of them, until the day this matters. The retired revocable-tokens roadmap item names it first.
         """
         with self.conn.cursor() as cur:
             cur.execute("DELETE FROM public.revoked_service_tokens;")
@@ -313,7 +328,7 @@ class ServiceTokenRevocation(unittest.TestCase):
 
     def test_a_manager_cannot_revoke(self):
         """
-        Administrator alone -- the sixth policy in the direction roadmap item 3 describes.
+        Administrator alone -- the sixth policy in the direction the retired revocable-tokens roadmap item describes.
         Withdrawing a credential is an access-control act, not an operational one.
         """
         with self.conn.cursor() as cur:

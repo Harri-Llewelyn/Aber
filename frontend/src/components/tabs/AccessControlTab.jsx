@@ -601,7 +601,7 @@ export function AccessControlTab({ showToast }) {
                           Minting stayed on the host because these tokens could not be revoked, so
                           issuing one should cost more than a click. 0074 removed that premise —
                           `revoke_service_token()` withdraws a jti and `auth_pre_request()` refuses
-                          it on every PostgREST request after — and roadmap item 3 is explicit that
+                          it on every PostgREST request after — and the retired revocable-tokens roadmap item is explicit that
                           this is the order: *"Build revocation first and the same RPC stops being a
                           hazard."*
 
@@ -646,7 +646,7 @@ export function AccessControlTab({ showToast }) {
                             )}
                             {/* WITHDRAWING IS OFFERED WHEREVER MINTING IS, which is the pairing that
                                 keeps the page honest: a control that hands out credentials and no
-                                control that takes the identity back is the asymmetry roadmap item 3
+                                control that takes the identity back is the asymmetry the retired revocable-tokens roadmap item
                                 refused to ship in the first place. */}
                             {!revocation && (
                               <button

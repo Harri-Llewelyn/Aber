@@ -17,8 +17,9 @@ const DEFAULT_TTL = 30
  * =================================================================================================
  * THIS BUTTON WAS REFUSED ONCE, AND WHAT CHANGED IS NOT THE UI
  *
- * Roadmap item 3 records the refusal and quotes the reason: *"technically neat, and it would have
- * made an unrevocable credential a button press with a tidy audit trail of a thing nobody can undo.
+ * The revocable-tokens roadmap item -- since shipped, so named rather than numbered -- recorded the
+ * refusal and quoted the reason: *"technically neat, and it would have made an unrevocable
+ * credential a button press with a tidy audit trail of a thing nobody can undo.
  * Solving the wrong half well is worse than not solving it, because the clean implementation reads
  * as safety."* The objection was never effort, and it was never the screen. It was that the product
  * would be handing out credentials it had no way to withdraw.

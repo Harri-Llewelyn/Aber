@@ -1306,6 +1306,65 @@ function edgeFunctionNames() {
 }
 
 // -------------------------------------------------------------------------------------------------
+// 11c-bis. PGRST_DB_PRE_REQUEST names a function that actually exists, on both targets.
+//
+// MEASURED, NOT ASSUMED, AND THE MEASUREMENT IS WHY THIS CHECK EXISTS. A throwaway
+// postgrest/postgrest:v14.12 was started against this database with
+// `PGRST_DB_PRE_REQUEST=public.this_function_does_not_exist`. It did NOT fail to boot: the schema
+// cache loaded, the container reported running, and BOTH admin probes answered 200 --
+// `/live` 200, `/ready` 200 -- while every data request failed:
+//
+//     404  {"code":"42883","message":"function public.this_function_does_not_exist() does not exist"}
+//
+// So a typo here is a TOTAL API OUTAGE THAT EVERY HEALTH CHECK CALLS HEALTHY, and it presents as
+// 404 rather than 5xx -- so a monitor watching for server errors sees nothing, and on Kubernetes
+// the readiness probe keeps the pod in service. The retired revocable-tokens roadmap item asked for "the function missing
+// entirely" to be tested before anything depended on the hook; this is the answer, and it is worse
+// than the item assumed.
+//
+// A RUNTIME PROBE CANNOT BE THE CONTROL, because by the time it could run the outage has already
+// started. The realistic failure is a misspelling in a compose file or a chart, which is a static
+// fact -- so it is caught here, at check time, in the two places the name is written.
+// -------------------------------------------------------------------------------------------------
+{
+  const compose = read('docker-compose.yml');
+  const chart = read('deploy/helm/acs-cymru/templates/supabase/rest.yaml');
+
+  const composeName = compose.match(/PGRST_DB_PRE_REQUEST:\s*([A-Za-z0-9_.]+)/)?.[1];
+  const chartName = chart.match(/name:\s*PGRST_DB_PRE_REQUEST\s*\n\s*value:\s*([A-Za-z0-9_.]+)/)?.[1];
+
+  if (!composeName || !chartName) {
+    fail(
+      'PGRST_DB_PRE_REQUEST is not set on both targets ' +
+        `(compose: ${composeName || 'absent'}, chart: ${chartName || 'absent'}). It is the choke ` +
+        'point 0074 and 0076 revoke through; unset on one target, that target enforces no revocation ' +
+        'at all and says nothing about it.'
+    );
+  } else if (composeName !== chartName) {
+    fail(`PGRST_DB_PRE_REQUEST differs: compose says ${composeName}, the chart says ${chartName}.`);
+  } else {
+    // Declared anywhere in the applied chain. The bare name is enough: a function that is dropped
+    // and recreated still has to appear in a CREATE, and this is looking for the typo case.
+    const bare = composeName.replace(/^public\./, '');
+    const declared = readdirSync(join(REPO, 'supabase/migrations'), { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith('.sql'))
+      .some((e) => new RegExp(
+        `CREATE\\s+OR\\s+REPLACE\\s+FUNCTION\\s+(public\\.)?${bare}\\s*\\(`, 'i'
+      ).test(read(`supabase/migrations/${e.name}`)));
+
+    if (!declared) {
+      fail(
+        `PGRST_DB_PRE_REQUEST names ${composeName}, which no migration declares. PostgREST does ` +
+          'NOT fail to boot on this -- it answers 404 (42883) to every request while /live and ' +
+          '/ready both report 200, so the outage is invisible to every health check.'
+      );
+    } else {
+      pass(`PGRST_DB_PRE_REQUEST names ${composeName} on both targets, and a migration declares it`);
+    }
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
 // 11d. The Access Control page describes every DATABASE principal a migration seeds.
 //
 // THE BROKER HALF HAD A CHECK AND THIS HALF DID NOT, which is how two of the three shipped

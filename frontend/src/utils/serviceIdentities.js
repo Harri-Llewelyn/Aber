@@ -208,7 +208,7 @@ const MCP_MINT_PREFIX = 'node scripts/mint-mcp-token.mjs'
  * unrevocable-in-practice credential for a privileged account. A button offered on every row
  * reintroduces that exactly.
  *
- * Roadmap item 3 reaches the same answer from the other direction, under "Worth deciding early":
+ * The retired revocable-tokens roadmap item reaches the same answer from the other direction, under "Worth deciding early":
  * *"Surfacing them read-only and leaving rotation to `npm run keys:rotate` keeps the one control
  * that has a recovery path attached to it."*
  *

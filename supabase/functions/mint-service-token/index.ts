@@ -4,9 +4,10 @@
  * =================================================================================================
  * WHY THIS IS A FUNCTION AND NOT AN RPC, WHICH IS THE WHOLE DESIGN
  *
- * Roadmap item 3 sketches this as a SECURITY DEFINER RPC signing with pgjwt, on the reasoning that
- * it needs "no new dependency and no secret leaving the database". pgjwt IS installed. The premise
- * under it is false: SUPABASE_JWT_SECRET is not in that database and never has been.
+ * The revocable-tokens roadmap item -- since shipped, so named rather than numbered -- sketched
+ * this as a SECURITY DEFINER RPC signing with pgjwt, on the reasoning that it needs "no new
+ * dependency and no secret leaving the database". pgjwt IS installed. The premise under it is
+ * false: SUPABASE_JWT_SECRET is not in that database and never has been.
  *
  * Putting it there would work, and it is the one thing that must not happen. That key signs
  * ANYTHING -- including a `service_role` token, which is accepted by storage, realtime, the edge
@@ -59,9 +60,9 @@ import { corsHeaders } from "../_shared/cors.ts";
 // (see _shared/roles.ts, which measured it on v1.74.2).
 import { isUuid } from "../approve-quarantine/isUuid.ts";
 
-// ADMINISTRATOR ALONE. Roadmap item 3: minting is an access-control act, and gating it here adds a
-// sixth Administrator-only decision in the direction the database already goes -- it does not wait
-// on the role split, which has shipped anyway (0069, 0070).
+// ADMINISTRATOR ALONE. Minting is an access-control act, and gating it here adds a sixth
+// Administrator-only decision in the direction the database already goes -- it did not wait on the
+// role split, which has shipped anyway (0069, 0070).
 const ALLOWED_ROLES = ["Administrator"];
 
 // Mirrors public.service_token_max_days(). THE DATABASE IS STILL THE AUTHORITY: this is a fast

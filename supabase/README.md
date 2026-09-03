@@ -696,7 +696,7 @@ first role-assignment surface is where `authz:manage` starts meaning something, 
 into a schema where the two roles already differ rather than one where they do not.
 
 **It is a breaking change** for a deployment where a `Shopfloor_Manager` publishes schemas or
-deploys flows. The repair is to make that person an `Administrator`. Roadmap §5 (multi-factor
+deploys flows. The repair is to make that person an `Administrator`. Roadmap §4 (multi-factor
 authentication) and the audit-domain work both depended on this split — the MFA reset is gated on
 `authz:manage`, and the security lane would otherwise have been hidden from a role that could grant
 itself the ability to see it. The second of those shipped as `0070`.
@@ -1527,7 +1527,7 @@ policy at all. `0074` adds `revoked_service_tokens`, `auth_pre_request()` and
 this is about — the MCP reader and `Service_Ingestor` reach PostgREST and nothing else — but the
 expiry is still the only bound that reaches every service, which is why the 90-day ceiling stays.
 
-**`0075` is the mint, and it is deliberately not an RPC.** Roadmap item 3 sketched a
+**`0075` is the mint, and it is deliberately not an RPC.** The retired revocable-tokens roadmap item sketched a
 `SECURITY DEFINER` function signing with `pgjwt`, on the reasoning that it needed "no secret leaving
 the database". The extension is installed; the premise is not true — `SUPABASE_JWT_SECRET` is not in
 this database, and `vault` holds four secrets, none of them that one. Putting it there would let any
@@ -1567,6 +1567,25 @@ no inverse, so those stay refused and a new token must be minted.
 **A person's account is refused outright.** `sub` is on every JWT, so a row naming a human would
 lock them out of PostgREST through a control built for machines — and out of the request that would
 undo it. `is_machine_principal()` is the guard.
+
+#### A missing hook is a total outage that every health check calls healthy
+
+Worth knowing before anyone edits `PGRST_DB_PRE_REQUEST`. Measured against
+`postgrest/postgrest:v14.12` by starting one that named a function which does not exist:
+
+| Signal | Result |
+| :--- | :--- |
+| Boot | **Succeeds.** Schema cache loads, container runs. |
+| `/live`, `/ready` on the admin server | **200** |
+| Every data request | **404**, `{"code":"42883","message":"function … does not exist"}` |
+
+So a typo in that variable takes the whole API down, reports healthy on both probes, and surfaces
+as **404 rather than 5xx** — invisible to a monitor watching for server errors, and on Kubernetes
+the readiness probe keeps the pod in service.
+
+`scripts/check-docs-drift.mjs` is the control: it asserts the name is identical on Compose and the
+chart, and that a migration declares it. That has to be a **static** check — by the time a runtime
+probe could notice, the outage has already begun.
 
 **The arm order is about the message.** Both arms refuse the request, so the outcome is identical;
 the subject arm runs first because after a cascade both match, and *"this identity has been

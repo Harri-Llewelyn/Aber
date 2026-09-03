@@ -17,28 +17,39 @@ instead — and `scripts/check-docs-drift.mjs` dropped the four invariants that 
 numbers are labels for reading order, they run 1-14 with no gaps, and **a renumber costs one grep**
 (`§[0-9]`, `roadmap item [0-9]`) across the repository for the prose that still cites them.
 
-**Ordered by subject rather than by age**, in four groups. **1-8 are the platform's own**, led by
+**Ordered by subject rather than by age**, in four groups. **1-7 are the platform's own**, led by
 the one item somebody else sets the deadline for and then by the credential and operations chain:
-2 is Administrator-only from the start and deliberately does not wait for 4, and 3 adds a sixth
-Administrator-only policy in the same direction rather than depending on the role split. **The role
-split those three would otherwise have queued behind has already shipped**, as `0069` and `0070`,
-which is why 4 is now Entra sign-in alone and 5 no longer waits on it. **7 arrived from a change
-being REFUSED** rather than from an audit or a request — it is what has to exist before an
-`Operator` can be granted anything else. **8 is the newest**, and is the only item here whose
-subject is the BROKER credential plane rather than the database one; it sits at the end of the
-chain because 3 explicitly scopes that plane out, and because its strongest argument is a gap
-(a revoked gateway that is already connected keeps publishing) rather than a feature. **9-12 arrive
-from feature requests** — 9, 10 and 12 from GitHub issues
+2 is Administrator-only from the start and deliberately does not wait for 3. **The role split those
+would otherwise have queued behind has already shipped**, as `0069` and `0070`, which is why 3 is
+now Entra sign-in alone and 4 no longer waits on it. **6 arrived from a change being REFUSED**
+rather than from an audit or a request — it is what has to exist before an `Operator` can be granted
+anything else. **7 is the only item here whose subject is the BROKER credential plane** rather than
+the database one; it sits at the end of the chain because the database plane's own credential work
+has now shipped and explicitly scoped that plane out, and because its strongest argument is a gap
+(a revoked gateway that is already connected keeps publishing) rather than a feature. **8-11 arrive
+from feature requests** — 8, 9 and 11 from GitHub issues
 [#64](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/64),
 [#63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63) and
-[#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66); 11 was not filed, and is sequenced
-*after* 10 because it removes what 10 replaces. **13 is documentation**, and is the one item whose
+[#66](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/66); 10 was not filed, and is sequenced
+*after* 9 because it removes what 9 replaces. **12 is documentation**, and is the one item whose
 remaining work is mostly writing; it arrives from
 [#39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39).
-[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) is built. **14 is the platform's own
+[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) is built. **13 is the platform's own
 and sits last anyway**, because its subject is the transport under every other item rather than any
-one chain — and because reading it before 8 and 10 invites starting it in the wrong order, which is
+one chain — and because reading it before 7 and 9 invites starting it in the wrong order, which is
 the one thing it asks not to happen.
+
+**Revocable service tokens shipped and left this list**, which is what an item shipping looks like.
+It was 3 until `0074`–`0076`; everything above 3 moved down by one. Its substance is in
+[The Access Control page states what is outstanding](../supabase/README.md#the-access-control-page-states-what-is-outstanding),
+which now carries the four things the entry argued: the `db-pre-request` choke point that made
+revocation possible at all, why the mint signs in an edge function rather than in the database
+(`SUPABASE_JWT_SECRET` is not there, and putting it there would make every path to SQL a path to an
+unrevocable `service_role` token), why revoking a principal reaches further than revoking its
+tokens, and what none of it reaches — storage, realtime, the edge runtime and Studio verify the
+signature for themselves. **The one measurement worth carrying forward** is that a missing
+`PGRST_DB_PRE_REQUEST` function is a total outage which `/live` and `/ready` both report as
+healthy, answering 404 rather than 5xx; `check-docs-drift.mjs` is the guard.
 
 **When an item ships, check what cited it as a blocker.** This list has already aged in the one
 direction nobody watches for: an entry correctly marked blocked, whose blocker then cleared as a
@@ -242,8 +253,8 @@ unauthenticated MCP server as a working endpoint, not merely as an open one.
 That is the right outcome, and the reason is worth recording because the endpoint is tempting. It
 runs as the owner, so it reads `digital_thread`, `auth.users` and the Vault, and it sits outside
 every control this repository built for that exact question: `0034`'s read-only principal holds
-`Operator` and nothing else *precisely* so a model cannot see the audit trail, and §3's revocation
-acts at PostgREST, which Studio does not go through. The model-facing surface this stack intends is
+`Operator` and nothing else *precisely* so a model cannot see the audit trail, and service-token
+revocation acts at PostgREST, which Studio does not go through. The model-facing surface this stack intends is
 the i3X one, where RLS is in the path. A developer-facing MCP is recoverable later by exempting the
 route and giving it a credential of its own — on its own argument, not as a side effect of how
 Studio happens to be published.
@@ -287,145 +298,15 @@ change.
   that URL is wrong the moment the proxy takes the port. The Directory is where people look to find
   services, so it moves in the same migration that seeds the OAuth client.
 - **Whether this waits for 20 or 21.** It does not. Gating on `Administrator` adds another
-  Administrator-only check in the direction §3 already goes, rather than depending on the role
+  Administrator-only check in the direction the token and principal revocation controls already go,
+  rather than depending on the role
   split — and Studio inherits Entra sign-in and MFA for free if and when those land. That is the
   strongest argument for the OAuth route over any proxy-local credential: it is the only design
   under which a database console ever gets a second factor.
 
 ---
 
-## 3 · Revocable service tokens, and the mint that becomes safe once they exist
-
-**Builds on:** `create_service_principal()`
-([0044](../supabase/migrations/archive/0044_create_service_principal.sql)) ·
-`record_service_token_issued()` and `service_token_max_days()`
-([0043](../supabase/migrations/archive/0043_record_service_token_issued.sql)) ·
-[`scripts/mint-mcp-token.mjs`](../scripts/mint-mcp-token.mjs) ·
-[`scripts/rotate-service-keys.mjs`](../scripts/rotate-service-keys.mjs) ·
-[`AccessControlTab.jsx`](../frontend/src/components/tabs/AccessControlTab.jsx) ·
-`PGRST_DB_PRE_REQUEST`, which is unset
-
-Mint and revoke a service principal's tokens from the Access Control page, Administrator-only, so
-the last credential workflow that requires a shell on the host stops requiring one. **Revocation is
-the item and the buttons are its consequence**, in that order, for a reason that is already written
-down.
-
-### The CLI step is standing in for a control, not for a missing screen
-
-Half of this is built. [`0044`](../supabase/migrations/archive/0044_create_service_principal.sql) already lets
-an Administrator create a machine identity from the page, and
-[`supabase/README.md`](../supabase/README.md#the-access-control-page-states-what-is-outstanding)
-describes it doing so. What is left on the host is minting a **token** for one.
-
-That button was designed and refused, and the refusal is the whole design constraint here. `pgjwt`
-is installed and `extensions.sign()` exists, so a `SECURITY DEFINER` RPC could mint one today with
-no new dependency and no secret leaving the database — and the argument against it was not effort:
-
-> *"technically neat, and it would have made an unrevocable credential a button press with a tidy
-> audit trail of a thing nobody can undo. **Solving the wrong half well is worse than not solving
-> it, because the clean implementation reads as safety.** So minting stays on the host."*
-
-So building the mint first removes the friction and keeps the missing control, and the page then
-hands out unrevocable credentials pleasantly. Build revocation first and the same RPC stops being a
-hazard: it is then the ordinary shape this stack already uses for `gateway-credential` — the
-database decides, the row is written before the secret is returned, and the secret is revealed once.
-
-### A fourth revocation design, and the key it needs has been recorded all along
-
-[`0043`](../supabase/migrations/archive/0043_record_service_token_issued.sql) surveys three ways of adding
-revocation and none works: deleting the `auth.users` row does nothing because the signature is
-validated and the subject never looked up; removing the role does nothing because the relations the
-i3X address space is assembled from are `FOR SELECT TO authenticated USING (true)`; and a
-`revoked_at` predicate would have to be added to **every RLS policy in the schema**.
-
-The fourth is not considered there. **PostgREST's `db-pre-request` names a function run before every
-request, in the caller's role, which can `RAISE` and abort it** — the single choke point the third
-design lacked, and it touches no policy at all. `postgrest/postgrest:v14.12` supports it and
-`PGRST_DB_PRE_REQUEST` is unset on both targets, so nothing is being displaced.
-
-**And the identifier is already in the inventory.** `mint-mcp-token.mjs` stamps a `jti` from
-`randomUUID()` and hands it to `record_service_token_issued(p_jti)`; `rotate-service-keys.mjs` does
-the same for the ingestion and playback keys. Every token this item would revoke has been recording
-the exact key a denylist needs, for an inventory that could not act on it.
-
-### What it does not reach belongs on the page, not in a comment
-
-A revocation covering most of the stack is the same failure as the tidy mint: it reads as safety.
-The four services holding `SUPABASE_JWT_SECRET` alongside PostgREST each verify independently, and
-a pre-request function is invisible to all of them.
-
-| Reached | Not reached |
-| :--- | :--- |
-| PostgREST — every table RLS guards, which is the whole `public` schema | `supabase-storage` · `supabase-realtime` · the edge runtime, which boots `VERIFY_JWT="false"` so each function authorises itself · Studio |
-
-**That is complete coverage for what this item is actually about, and the entry should say why
-rather than leave the gap looking accidental.** The MCP reader and `Service_Ingestor` reach
-PostgREST and nothing else, so for a machine principal the choke point is the only door. For a
-person's session it is not — and a person's session is already revocable through GoTrue's refresh
-tokens, which is a different mechanism for a different problem. The edge functions are reachable
-later if wanted: several already call the database, so it is one added check rather than a redesign.
-
-### Fail-closed is the risk, and the negative tests come before the feature
-
-A function that runs before every PostgREST request is a single point of failure by construction. If
-it raises when it should not, the entire API is down — which is the correct direction for a security
-control and an outage all the same. Three cases have to be tested before anything depends on it: an
-empty denylist, a token carrying no `jti` at all, and the function missing entirely.
-
-The cost is one indexed lookup per request. Keeping only **unexpired** revoked jtis bounds the table
-and makes it self-pruning: a revoked token past its own `exp` is already refused by the signature
-check.
-
-### Two credential planes, and only one of them is in scope
-
-The broker plane is not this item, and the reason is specific rather than a boundary drawn for
-tidiness. Gateway accounts are already mintable from the dashboard
-([0041](../supabase/migrations/archive/0041_virtual_gateway_credential.sql)) and already revoked on archive or
-delete ([0038](../supabase/migrations/archive/0038_revoke_gateway_credentials.sql),
-[0063](../supabase/migrations/archive/0063_virtual_gateways_get_revoked.sql)).
-
-**The five platform principals cannot be given the same controls, and a first attempt would look
-like it worked.** `factoryplus_ingestion`, `factoryplus_i3x`, `factoryplus_monitor`, the validator
-and the legacy simulator account come from `.env`, and `mosquitto-init` says what it does with them:
-*"THE PLATFORM PRINCIPALS ARE REWRITTEN ON EVERY RUN — they come from .env and must follow it."* A
-revocation performed in the UI would be undone by the next `docker compose up`, silently, on a page
-whose entire job is to state what is outstanding.
-
-Worth recording while the subject is open: **a broker password has no expiry at all.** `0062` says
-so deliberately — *"it is bounded by revocation (`0038`), not by a countdown"* — which is the right
-answer for an account confined by `mosquitto.acl` and the wrong one to discover by assuming the
-90-day ceiling covers everything.
-
-### Administrator-only, which anticipates item 4 rather than waiting for it
-
-`system_settings` for read and for write, `list_service_principals()` and
-`create_service_principal()` are the **five policies** §4 cites as the database already separating
-`Administrator` from `Shopfloor_Manager` by hand, against 58 sites that check the pair. Gating this
-on `Administrator` alone adds a sixth in the same direction, so it does not need §4 to land first
-and does not contradict it when it does.
-
-It touches the audit domains in one line: a revocation writes `TOKEN_REVOKED` beside
-`TOKEN_MINTED`, and `audit_domain_for()` already files everything on `service_principals` under
-`security` — so the row lands in the right lane with no change at all, and what is left is one more
-entry in `DIGITAL_THREAD_ACTIONS`. See
-[Two lanes, and one of them an engineer cannot read](../supabase/README.md#two-lanes-and-one-of-them-an-engineer-cannot-read-0070).
-
-### Worth deciding early
-
-- **Whether revoking a principal deletes its `auth.users` row or flags it.** Flagging it and
-  revoking its outstanding tokens is the recommendation: deleting orphans the `digital_thread`
-  attribution, and the history of a revoked principal is the part most worth keeping.
-- **Whether the ingestion and playback keys are revocable from the page.** They carry jtis, so
-  mechanically they are — and revoking one stops ingestion until somebody rotates the key and
-  recreates the container. Surfacing them read-only and leaving rotation to `npm run keys:rotate`
-  keeps the one control that has a recovery path attached to it.
-- **Whether `mint-mcp-token.mjs` survives.** It should, as break-glass, for the same reason §5
-  documents the service-role factor delete: a stack whose only Administrator cannot sign in still
-  needs a way to mint. What changes is that it stops being the only way.
-
----
-
-## 4 · Microsoft Entra ID sign-in, and a role model worth mapping onto
+## 3 · Microsoft Entra ID sign-in, and a role model worth mapping onto
 
 **Builds on:** `custom_access_token_hook()` and `handle_new_user()` in
 [`supabase/migrations/0001_baseline_schema.sql`](../supabase/migrations/0001_baseline_schema.sql) ·
@@ -489,7 +370,7 @@ work. The repair is to make that person an Administrator.
 
 ### What is left of this item is Entra itself
 
-Everything below is unbuilt. The role split was sequenced first because §5 and the audit-domain
+Everything below is unbuilt. The role split was sequenced first because §4 and the audit-domain
 work both depended on it and neither depended on Entra. The second of those has since shipped as
 `0070`.
 
@@ -579,7 +460,7 @@ claims to enable, and the group-object-ID to role table. It lives in `docs/`, wh
 
 ---
 
-## 5 · Multi-factor authentication, and what happens when the phone is lost
+## 4 · Multi-factor authentication, and what happens when the phone is lost
 
 **Builds on:** GoTrue v2.189.0's factor API · `has_role()` and the `aal` claim ·
 [`AccessControlTab.jsx`](../frontend/src/components/tabs/AccessControlTab.jsx) · the immutable audit in
@@ -666,7 +547,7 @@ principal writes is an outage, not a hardening.
 
 ---
 
-## 6 · A backup an operator can take without a shell
+## 5 · A backup an operator can take without a shell
 
 **Builds on:** [`scripts/backup-databases.sh`](../scripts/backup-databases.sh) ·
 [`scripts/restore-databases.sh`](../scripts/restore-databases.sh) ·
@@ -773,7 +654,7 @@ than offer it.
 
 ---
 
-## 7 · Machine principals with their own authority, instead of borrowing a person's role
+## 6 · Machine principals with their own authority, instead of borrowing a person's role
 
 **Builds on:** `is_machine_principal()` ([`0048`](../supabase/migrations/archive/0048_machine_principals_are_not_users.sql),
 the predicate is [`0042`](../supabase/migrations/archive/0042_list_service_principals.sql)'s) ·
@@ -853,7 +734,7 @@ inventory and live telemetry. Cannot read the audit trail."* That sentence is th
 
 ---
 
-## 8 · The broker's Dynamic Security plugin, and the two things a file cannot do
+## 7 · The broker's Dynamic Security plugin, and the two things a file cannot do
 
 **Builds on:** [`mosquitto/mosquitto.acl`](../mosquitto/mosquitto.acl) ·
 [`mosquitto/mosquitto.conf`](../mosquitto/mosquitto.conf) ·
@@ -921,7 +802,8 @@ to close.**
 state; `mosquitto-init` regenerates the platform principals from `.env` on every run
 (*"THE PLATFORM PRINCIPALS ARE REWRITTEN ON EVERY RUN — they come from .env and must follow it"*).
 Boot would have to **reconcile idempotently rather than rewrite**, and the failure mode inverts:
-instead of §3's *"a revocation performed in the UI would be undone by the next `docker compose up`"*,
+instead of the database plane's *"a revocation performed in the UI would be undone by the next
+`docker compose up`"*,
 the risk becomes broker state that drifts from `.env` and is never corrected. On Kubernetes it is
 worse — the ACL and config arrive as read-only ConfigMaps, and mutable state needs a PVC the broker
 does not currently have.
@@ -948,7 +830,7 @@ does not currently have.
 
 ---
 
-## 9 · The Directory's MQTT half, and the one lookup it still lacks
+## 8 · The Directory's MQTT half, and the one lookup it still lacks
 
 **Builds on:** [`supabase/functions/fplus-directory/index.ts`](../supabase/functions/fplus-directory/index.ts) ·
 `directory_services` (`0001`) · `gateways.sparkplug_group` (`0008`) · `relocate_devices()` (`0033`) ·
@@ -988,7 +870,7 @@ carry the qualification, or the interoperability claim becomes false the moment 
 
 ---
 
-## 10 · GitOps edge sync, and the review step a bucket cannot give a flow
+## 9 · GitOps edge sync, and the review step a bucket cannot give a flow
 
 **Builds on:** the `gateway-backups` bucket in
 [`scripts/storage-init.mjs`](../scripts/storage-init.mjs) ·
@@ -1048,7 +930,7 @@ connection into it.
 
 ### The approval gate is the missing thing, and Git already is one
 
-**The gap §11 names is that a stored flow is *unreviewed*** — no pull request, no revision history,
+**The gap §10 names is that a stored flow is *unreviewed*** — no pull request, no revision history,
 no diff. That is the real complaint, and it is worth stating that Git answers it directly rather than
 being merely the transport: *pending approval* is an open pull request, *approved* is a merge, and
 *undo* is a revert commit. Anything that models those three states in the database beside a stored
@@ -1059,7 +941,7 @@ systems that will disagree.
 and already refuses `flows_cred.json` **by shape rather than by filename**; what changes is its
 destination — a branch and a pull request in the gateway's source repository instead of an object in
 a private bucket. The upload is then the backup and the proposed deployment in one artefact, which
-also removes the awkward sequencing between this item and §11: the bucket stops being load-bearing at
+also removes the awkward sequencing between this item and §10: the bucket stops being load-bearing at
 the moment the first flow lands in a repository, not before.
 
 **`gitops:manage` finally gets a second enforcement point.** It is currently enforced in exactly one
@@ -1098,7 +980,7 @@ merge strategy rather than an overwrite, and that is a different piece of work.
 ### A third credential plane arrives with this item, and it should be named now
 
 **The appliance needs a way to authenticate to the repository**, which is neither the broker plane
-(§8) nor the database one (§3). It should be **per gateway and read-only** — a shared key across the
+(§7) nor the database one. It should be **per gateway and read-only** — a shared key across the
 fleet makes one compromised appliance a fleet-wide read, and a writable one lets an appliance author
 what it will later be asked to deploy. `enroll-gateway` already mints a per-gateway broker credential
 at bundle time and is the natural place to issue this one, which also means revocation has a home
@@ -1115,7 +997,7 @@ The enrolment token's single-use semantics and the once-only guard in `bootstrap
 ACL's `%u` confinement, which is what stops one gateway forging another's telemetry and is enforced
 independently of anything here; `flows_cred.json`, which must not leave the appliance in a backup, a
 commit or a diff; and the `gateway-backups` bucket's privacy setting, which stays exactly as it is
-until §11 sequences its removal — a `flows.json` describes the plant's edge topology, and it is not
+until §10 sequences its removal — a `flows.json` describes the plant's edge topology, and it is not
 dead weight until the pull half replaces what it does.
 
 ### Worth deciding early
@@ -1128,7 +1010,7 @@ verification makes it a smaller question than it looks.
 and independent history; one repository with a branch per gateway gives a fleet-wide diff and one
 place to review. The deploy key granularity is the deciding constraint, not the ergonomics.
 
-**Where `target_branch` lives** — deferred to §11, which owns the links-store question, but this item
+**Where `target_branch` lives** — deferred to §10, which owns the links-store question, but this item
 is what makes it load-bearing rather than cosmetic.
 
 **The actor kind for the audit row.** Logging the revision hash into `digital_thread` needs one: rows
@@ -1138,7 +1020,7 @@ own timer is a fourth kind of actor and should say so rather than borrow `servic
 
 ---
 
-## 11 · Retiring the flow-backup bucket, and pointing at repositories instead
+## 10 · Retiring the flow-backup bucket, and pointing at repositories instead
 
 **Builds on:** [`frontend/src/components/common/FlowBackupUploader.jsx`](../frontend/src/components/common/FlowBackupUploader.jsx) ·
 the `gateway-backups` bucket in [`scripts/storage-init.mjs`](../scripts/storage-init.mjs) ·
@@ -1146,7 +1028,7 @@ the `gateway-backups` bucket in [`scripts/storage-init.mjs`](../scripts/storage-
 [`EntityLinksModal.jsx`](../frontend/src/components/modals/EntityLinksModal.jsx) and its tag vocabulary ·
 `digital_thread` (`0005`) · **not yet filed as an issue**
 
-**The other end of §10, and it should be sequenced against it rather than planned beside it.** §10
+**The other end of §9, and it should be sequenced against it rather than planned beside it.** §9
 adds the pull; this removes what the push made necessary. Doing the removal first would leave a
 physical gateway with no copy of its flow anywhere, which is the exact loss `FlowBackupUploader`
 exists to prevent — its header states the case plainly: the appliance is the only copy, and a failed
@@ -1183,7 +1065,7 @@ against the same column.
 
 ---
 
-## 12 · An ISA-95 Unified Namespace bridge
+## 11 · An ISA-95 Unified Namespace bridge
 
 **Builds on:** the DDATA path in [`ingestion/ingestion.py`](../ingestion/ingestion.py) ·
 `public.device_locations` (`0001`) · `cells` (`0001`, `0021`) · `devices.location_scope` ·
@@ -1221,7 +1103,7 @@ currently prevent.
 
 ---
 
-## 13 · Contextual help, and where the documentation actually lives
+## 12 · Contextual help, and where the documentation actually lives
 
 **Builds on:** [`frontend/src/App.jsx`](../frontend/src/App.jsx)'s top bar and
 [`frontend/src/navigation.jsx`](../frontend/src/navigation.jsx) ·
@@ -1299,7 +1181,7 @@ destination cannot say: what a page is FOR, what its controls do, and what its s
 
 ---
 
-## 14 · The transport between services, and the two targets that disagree about it
+## 13 · The transport between services, and the two targets that disagree about it
 
 **Builds on:** [`networkpolicy.yaml`](../deploy/helm/acs-cymru/templates/networkpolicy.yaml) ·
 [`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) ·
@@ -1402,7 +1284,7 @@ issued by the CA that already exists reaches most of the same place on both targ
 Compose stops being a supported target**, which is the same condition `envoy.yaml` attaches to
 HTTPRoute, and for the same reason.
 
-### The gateway link's upgrade is client certificates, and it is sequenced behind §8
+### The gateway link's upgrade is client certificates, and it is sequenced behind §7
 
 `mosquitto-tls.conf` states the current position and its cost explicitly: password authentication over
 TLS, `require_certificate false`, because turning it on means `use_identity_as_username` replaces the
@@ -1416,9 +1298,9 @@ the enrolment model that exists rather than replacing it. The gain is that a gat
 being a bearer secret that can be replayed by anything that reads it.
 
 **The cost is revocation, and it is why this waits.** Mosquitto's `crlfile` is awkward and needs a
-reload to take effect — which is precisely the gap §8 exists to close, and §8's own strongest argument
+reload to take effect — which is precisely the gap §7 exists to close, and §7's own strongest argument
 is already that *a revoked gateway which is already connected keeps publishing*. Client certificates
-make that sharper, not softer. **This is the intended direction; it should not start before §8.**
+make that sharper, not softer. **This is the intended direction; it should not start before §7.**
 
 ### What this must not touch
 

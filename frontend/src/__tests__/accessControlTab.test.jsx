@@ -323,7 +323,7 @@ describe('AccessControlTab', () => {
 
   /**
    * WITHDRAW SITS BESIDE ISSUE, because a page that hands out credentials with no control that
-   * takes the identity back is the asymmetry roadmap item 3 refused to ship in the first place.
+   * takes the identity back is the asymmetry the retired revocable-tokens roadmap item refused to ship in the first place.
    */
   it('offers Withdraw beside Issue Token for a live identity', async () => {
     api.listGatewayCredentials.mockResolvedValue([])
