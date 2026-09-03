@@ -431,6 +431,30 @@ describe('AccessControlTab', () => {
   })
 
   /**
+   * THE COPY CONTROL IS STYLED AS A BUTTON, WHICH IS A LEGIBILITY REQUIREMENT RATHER THAN A TASTE.
+   *
+   * `.copyable-id` is deliberately understated -- no background, transparent border, icon hidden
+   * until hover -- because that is right for an identifier inside a dense cell, where the VALUE is
+   * what is being read. With a fixed "Copy Command" label there is no value to read and the element
+   * IS the affordance, and the understated treatment was reported as hard to read in dark mode.
+   *
+   * `.btn-ghost` paints --text-primary on --bg-glass with a real border, and that is the pairing
+   * themeContrast.test.js already measures against AA and APCA in BOTH themes -- so asserting the
+   * class here is what ties this control to that guarantee. Reverting it to the understated form
+   * would take the contrast cover away silently, which is how the first version got through.
+   */
+  it('renders the copy control as a ghost button, not as an understated identifier', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
+
+    const copy = screen.getByLabelText(/mint-mcp-token\.mjs --principal/)
+    expect(copy.className).toMatch(/btn-ghost/)
+    expect(copy.className).not.toMatch(/copyable-id/)
+  })
+
+  /**
    * `digital_thread:read` is a separate permission from listing principals. A caller without it
    * must still see the identities -- blanking the section over a missing history would hide the
    * very thing the page exists to show.

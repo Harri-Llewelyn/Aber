@@ -63,7 +63,26 @@ export async function copyText(text) {
  * THE ARIA LABEL STILL NAMES THE VALUE, deliberately. A screen-reader user pressing "Copy Command"
  * should learn WHICH command, and that is the one place the full text still belongs.
  */
-export default function CopyableId({ value, label = 'identifier', title, onNotify, className = '', display }) {
+/**
+ * `variant="button"` MAKES IT LOOK LIKE THE CONTROL IT SITS BESIDE, and that is a legibility fix
+ * rather than a cosmetic one.
+ *
+ * `.copyable-id` is deliberately understated: `background: none`, a transparent border, and an icon
+ * at `opacity: 0` until hover, so a table dense with identifiers is not peppered with chrome. That
+ * is right for an id inside a cell, where the VALUE is the thing being read and the affordance is
+ * secondary.
+ *
+ * It is wrong for a fixed label. With `display` set there is no value to read -- the whole element
+ * IS the affordance -- and an understated button carrying prose reads as low-contrast text in dark
+ * mode, which is exactly how it was reported. `.btn-ghost` paints `--text-primary` on `--bg-glass`
+ * with a real border, which is the pairing `themeContrast.test.js` already measures in both themes.
+ *
+ * THE ICON CLASS IS DROPPED IN THIS VARIANT, NOT KEPT. `.copyable-id-icon` is `opacity: 0` and is
+ * revealed only by `.copyable-id:hover` -- a selector that no longer matches once the base class is
+ * gone, so keeping it would leave the icon permanently invisible.
+ */
+export default function CopyableId({ value, label = 'identifier', title, onNotify, className = '', display, variant }) {
+  const asButton = variant === 'button'
   const [state, setState] = useState(null) // 'copied' | 'failed'
   const timer = useRef(null)
 
@@ -95,14 +114,19 @@ export default function CopyableId({ value, label = 'identifier', title, onNotif
       onClick={handleCopy}
       // `mono` only when showing the value itself. A fixed label like "Copy Command" is prose and
       // reads worse in a monospace face beside the buttons it sits next to.
-      className={`copyable-id ${display ? '' : 'mono'} ${className}`.trim()}
+      className={(asButton
+        ? `btn btn-ghost ${className}`
+        : `copyable-id ${display ? '' : 'mono'} ${className}`).trim()}
       title={title || `Click to copy this ${label}`}
       aria-label={`Copy ${label} ${value}`}
     >
-      <span className="copyable-id-value">{display || value}</span>
-      {state === 'copied'
+      {asButton
+        ? (state === 'copied' ? <IconCheck size={13} /> : <IconCopy size={13} />)
+        : null}
+      <span className={asButton ? undefined : 'copyable-id-value'}>{display || value}</span>
+      {!asButton && (state === 'copied'
         ? <IconCheck size={12} className="copyable-id-icon" />
-        : <IconCopy size={12} className="copyable-id-icon" />}
+        : <IconCopy size={12} className="copyable-id-icon" />)}
       {state === 'failed' && <span className="copyable-id-error">copy blocked</span>}
     </button>
   )

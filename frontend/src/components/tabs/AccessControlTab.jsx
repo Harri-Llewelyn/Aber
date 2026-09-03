@@ -558,6 +558,7 @@ export function AccessControlTab({ showToast }) {
                               value={meta.mintCommand.replace('{id}', p.principal_id)}
                               label="mint command"
                               display="Copy Command"
+                              variant="button"
                               title={`Copy \`${meta.mintCommand.replace('{id}', p.principal_id)}\` — the break-glass path, which works when nobody can sign in to this page.`}
                               onNotify={showToast}
                             />
@@ -567,6 +568,7 @@ export function AccessControlTab({ showToast }) {
                             value={meta.mintCommand.replace('{id}', p.principal_id)}
                             label="rotate command"
                             display="Copy Command"
+                            variant="button"
                             // THE TOOLTIP CARRIES THE DISTINCTION NOW THAT THE LABEL CANNOT.
                             // Both rows read "Copy Command", so the command itself is named here --
                             // and it is `npm run keys:rotate`, not the MCP mint, which is the whole
