@@ -419,10 +419,15 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByText('Service_Ingestor')).toBeTruthy())
     const rowOf = (name) => screen.getByText(name).closest('tr')
 
-    expect(within(rowOf('Service_Ingestor')).getByText('npm run keys:rotate')).toBeTruthy()
-    expect(within(rowOf('Service_Ingestor')).queryByText(/mint-mcp-token/)).toBeNull()
-    // The MCP client is the one this command IS right for, so it keeps it.
-    expect(within(rowOf('MCP read-only client')).getByText(/mint-mcp-token\.mjs --principal/)).toBeTruthy()
+    // ASSERTED ON WHAT WOULD BE COPIED, NOT ON WHAT IS DRAWN. Both rows now render the same
+    // "Copy Command" label -- the full command was ~70 characters and was taking more width than
+    // the four columns carrying the actual answer -- so the command survives in the accessible
+    // name, which is also the thing an operator ends up with on their clipboard. Asserting the
+    // visible text here would only re-assert the label.
+    expect(within(rowOf('Service_Ingestor')).getByLabelText(/npm run keys:rotate/)).toBeTruthy()
+    expect(within(rowOf('Service_Ingestor')).queryByLabelText(/mint-mcp-token/)).toBeNull()
+    // The MCP client is the one that command IS right for, so it keeps it.
+    expect(within(rowOf('MCP read-only client')).getByLabelText(/mint-mcp-token\.mjs --principal/)).toBeTruthy()
   })
 
   /**

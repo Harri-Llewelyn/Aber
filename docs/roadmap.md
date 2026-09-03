@@ -14,10 +14,10 @@ addresses: source comments cited them, so deleting an entry and closing the gap 
 every citation without erroring, and the list was therefore left gapped as the record of what
 shipped. Moving the roadmap out of `README.md` ended that — the comments state what the code does
 instead — and `scripts/check-docs-drift.mjs` dropped the four invariants that enforced it. The
-numbers are labels for reading order, they run 1-12 with no gaps, and **a renumber costs one grep**
+numbers are labels for reading order, they run 1-14 with no gaps, and **a renumber costs one grep**
 (`§[0-9]`, `roadmap item [0-9]`) across the repository for the prose that still cites them.
 
-**Ordered by subject rather than by age**, in three groups. **1-8 are the platform's own**, led by
+**Ordered by subject rather than by age**, in four groups. **1-8 are the platform's own**, led by
 the one item somebody else sets the deadline for and then by the credential and operations chain:
 2 is Administrator-only from the start and deliberately does not wait for 4, and 3 adds a sixth
 Administrator-only policy in the same direction rather than depending on the role split. **The role
@@ -35,7 +35,10 @@ from feature requests** — 9, 10 and 12 from GitHub issues
 *after* 10 because it removes what 10 replaces. **13 is documentation**, and is the one item whose
 remaining work is mostly writing; it arrives from
 [#39](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/39).
-[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) is built.
+[#58](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/58) is built. **14 is the platform's own
+and sits last anyway**, because its subject is the transport under every other item rather than any
+one chain — and because reading it before 8 and 10 invites starting it in the wrong order, which is
+the one thing it asks not to happen.
 
 **When an item ships, check what cited it as a blocker.** This list has already aged in the one
 direction nobody watches for: an entry correctly marked blocked, whose blocker then cleared as a
@@ -985,14 +988,19 @@ carry the qualification, or the interoperability claim becomes false the moment 
 
 ---
 
-## 10 · GitOps edge sync
+## 10 · GitOps edge sync, and the review step a bucket cannot give a flow
 
 **Builds on:** the `gateway-backups` bucket in
-[`scripts/storage-init.mjs`](../scripts/storage-init.mjs) · `digital_thread` (`0005`, `0026`) ·
+[`scripts/storage-init.mjs`](../scripts/storage-init.mjs) ·
+[`FlowBackupUploader.jsx`](../frontend/src/components/common/FlowBackupUploader.jsx) ·
+[`gateway-bundle-template/bootstrap.mjs`](../gateway-bundle-template/bootstrap.mjs) and the flow hash
+its heartbeat already reports · `digital_thread` (`0005`, `0026`) ·
 [`nodered-userinfo`](../supabase/functions/nodered-userinfo/index.ts), which is now the only place
 `gitops:manage` is enforced · [issue #63](https://github.com/Harri-Llewelyn/ACS-Cymru/issues/63)
 
-**The push half existed and has been retired, which makes this item larger than it was.** A
+### The push half existed and has been retired, which makes this item larger than it was
+
+A
 `deploy-nodered` edge function deployed **only** `node_red_flow.json` as committed to the repository,
 refusing an inline flow array in the request body with a 400 and a stated reason — a Node-RED
 `function` node is arbitrary JavaScript inside a container that holds the MQTT credential. Its
@@ -1005,7 +1013,9 @@ the honest option; rebuilding it is now part of this item rather than a thing to
 worth keeping from it** is the refusal: whatever replaces it must deploy only what is committed, or
 it becomes a remote-code-execution endpoint with a friendly name.
 
-**The storage claim needs correcting before anything is planned against it.** The issue describes
+### The storage claim needs correcting before anything is planned against it
+
+The issue describes
 "manual zip backups inside Supabase Storage". The `gateway-backups` bucket holds `flows.json` — JSON,
 5 MiB cap, private, keyed `<sparkplug_id>/` — and it is a backup taken **from** an appliance, not the
 channel a deployment travels down. Nothing about it sits on the deploy path, so replacing it is not
@@ -1013,20 +1023,118 @@ where this item starts. Its privacy setting is the one thing to preserve if it i
 `flows.json` describes the plant's edge topology, broker addresses and device ids, and a public bucket
 bypasses `storage-policies.sql` entirely.
 
-**The pull half is still the half carrying the security argument, and is the better place to start.**
-The retired design pushed inbound to `:1880`, which means something must be able to reach the edge
-node's admin API, and reconciliation happened only when a human pressed deploy. A sidecar that polls
-`git pull` and calls Node-RED's local reload API inverts both: outbound-only from the edge, and
-self-healing on a timer rather than on attention. Drift detection is the same mechanism read backwards
-— compare the running flow against the committed revision.
+### Pull, and the reason that is a decision rather than a preference
 
-**Two details the issue does not settle.** Node-RED holds MQTT credentials in its *credential store*,
-encrypted separately and deliberately not in the flow file; a puller that overwrites flows
-without accounting for that disconnects the gateway it has just reconciled. And logging the revision
-hash into `digital_thread` needs an actor — rows from the daemon and the edge functions are attributed
-through the `request.headers` GUC, and the trigger accepts only `ingestion` / `service` / `migration`,
-never `user`. A sidecar reconciling on its own timer is a fourth kind of actor and should say so
-rather than borrow `service`.
+**The retired design pushed inbound to `:1880`, and an inbound path per gateway is the thing this
+architecture exists to avoid.** The bundle README states the rule for a different subject and it
+generalises exactly: `node_exporter` runs on the appliance and is *never* scraped from the centre,
+because gateways enrol dynamically so no static inventory can address them, and the centre reaching
+into plants is the property being refused. A deploy channel that dials the edge asks for that path
+back, permanently, for every appliance. It also asks for the editor credential to be re-centralised —
+`bootstrap.mjs` generates that password on the appliance, prints it once and keeps only its bcrypt
+hash, and anything pushing to the admin API needs it back in a fleet-wide store.
+
+**So a sidecar on the appliance polls `git pull` and calls Node-RED's local reload API.** Outbound-only
+from the edge, and self-healing on a timer rather than on attention. This is also the answer to any
+proposal to place a general-purpose orchestrator or job runner in the plant: a component that executes
+whatever the centre queues for it is a strictly larger surface than the `deploy-nodered` endpoint that
+was refused for exactly that reason, and it earns nothing the puller does not already have.
+
+**Drift detection is the same mechanism read backwards, and half of it is already built.** The
+heartbeat already reports a **flow hash** — recorded by `bootstrap` at enrolment and carried in the
+same 30-second message as uptime and load. Comparing that against the committed head of the gateway's
+tracked branch is the whole of drift detection, and it needs no new telemetry from the edge and no
+connection into it.
+
+### The approval gate is the missing thing, and Git already is one
+
+**The gap §11 names is that a stored flow is *unreviewed*** — no pull request, no revision history,
+no diff. That is the real complaint, and it is worth stating that Git answers it directly rather than
+being merely the transport: *pending approval* is an open pull request, *approved* is a merge, and
+*undo* is a revert commit. Anything that models those three states in the database beside a stored
+blob rebuilds a worse version of what the forge already does, and splits the audit record across two
+systems that will disagree.
+
+**So the upload becomes a commit.** `FlowBackupUploader` already takes `flows.json` from an operator
+and already refuses `flows_cred.json` **by shape rather than by filename**; what changes is its
+destination — a branch and a pull request in the gateway's source repository instead of an object in
+a private bucket. The upload is then the backup and the proposed deployment in one artefact, which
+also removes the awkward sequencing between this item and §11: the bucket stops being load-bearing at
+the moment the first flow lands in a repository, not before.
+
+**`gitops:manage` finally gets a second enforcement point.** It is currently enforced in exactly one
+place — `nodered-userinfo`'s `ALLOWED_ROLES`, as `0069` records — and the merge is the control it was
+named for. **Authoring a proposal and approving one are different privileges** and should not collapse
+into one: proposing is the write that `storage-policies.sql` already grants Administrator and
+Shopfloor_Manager, approving is `gitops:manage`.
+
+### A Git page, and the one thing it must not become
+
+**What it should show, per gateway:** the tracked repository and branch, the open pull requests
+against it, the commit history with the deployed revision marked, and the gateway's own reported flow
+hash beside the committed head — which is drift, stated as a fact the appliance sent rather than as
+something the centre inferred. A revert control, and an approve control gated on `gitops:manage`.
+
+**A revert must be a new commit and never a force-push.** A force-push rewrites history a gateway may
+already have pulled, and the sidecar cannot distinguish that from a legitimate advance — it would
+reconcile to the rewritten head and report success, having silently deployed something no pull request
+ever showed. A revert commit is visible, reviewable and itself revertible.
+
+**The page must not become an editor.** Nothing on it should author or edit flow JSON, and nothing
+should accept a blob that reaches an appliance without passing the same merge. That is the refusal
+worth keeping from `deploy-nodered`, restated for a UI: **deploy only what is committed**, or it is a
+remote-code-execution endpoint with a friendly name and a nicer table.
+
+### The credential store is the hazard that can invalidate the shape
+
+**Node-RED keys credentials by node id**, and holds them in `flows_cred.json`, encrypted separately
+and deliberately not in the flow file. A flow round-tripped through export, repository and pull can
+come back with the broker node re-created under a new id; the credential then keys to a node that no
+longer exists, the sidecar reconciles successfully, and the gateway drops off the broker immediately
+afterwards. **This constrains the design more than the transport does and should be proved before
+anything else is built** — if a round trip cannot preserve credential binding, the puller needs a
+merge strategy rather than an overwrite, and that is a different piece of work.
+
+### A third credential plane arrives with this item, and it should be named now
+
+**The appliance needs a way to authenticate to the repository**, which is neither the broker plane
+(§8) nor the database one (§3). It should be **per gateway and read-only** — a shared key across the
+fleet makes one compromised appliance a fleet-wide read, and a writable one lets an appliance author
+what it will later be asked to deploy. `enroll-gateway` already mints a per-gateway broker credential
+at bundle time and is the natural place to issue this one, which also means revocation has a home
+alongside the credential it sits beside.
+
+**Verifying the commit is what makes the transport untrusted-safe.** If the sidecar checks a signature
+over the revision it is about to apply, the forge and the network between are no longer things that
+have to be trusted — a much stronger position than TLS to the host alone, and the one that makes a
+hosted forge an acceptable answer to the question below.
+
+### What this must not touch
+
+The enrolment token's single-use semantics and the once-only guard in `bootstrap.mjs`; the broker
+ACL's `%u` confinement, which is what stops one gateway forging another's telemetry and is enforced
+independently of anything here; `flows_cred.json`, which must not leave the appliance in a backup, a
+commit or a diff; and the `gateway-backups` bucket's privacy setting, which stays exactly as it is
+until §11 sequences its removal — a `flows.json` describes the plant's edge topology, and it is not
+dead weight until the pull half replaces what it does.
+
+### Worth deciding early
+
+**The forge.** Self-hosted or hosted, and for an on-premises deployment on a private domain that is
+the same question `deploy/k8s/internal-ca.yaml` already answers for certificates. Commit signature
+verification makes it a smaller question than it looks.
+
+**One repository or one per gateway.** A repository per gateway gives clean per-appliance deploy keys
+and independent history; one repository with a branch per gateway gives a fleet-wide diff and one
+place to review. The deploy key granularity is the deciding constraint, not the ergonomics.
+
+**Where `target_branch` lives** — deferred to §11, which owns the links-store question, but this item
+is what makes it load-bearing rather than cosmetic.
+
+**The actor kind for the audit row.** Logging the revision hash into `digital_thread` needs one: rows
+from the daemon and the edge functions are attributed through the `request.headers` GUC, and the
+trigger accepts only `ingestion` / `service` / `migration`, never `user`. A sidecar reconciling on its
+own timer is a fourth kind of actor and should say so rather than borrow `service`.
 
 ---
 
@@ -1188,5 +1296,153 @@ destination cannot say: what a page is FOR, what its controls do, and what its s
   what to put there are the same moment, and "no gateways yet" is where a reader is most receptive.
 - **Whether it survives translation.** Nothing here is localised today, and a help corpus is the
   first thing that would make that expensive.
+
+---
+
+## 14 · The transport between services, and the two targets that disagree about it
+
+**Builds on:** [`networkpolicy.yaml`](../deploy/helm/acs-cymru/templates/networkpolicy.yaml) ·
+[`deploy/k8s/internal-ca.yaml`](../deploy/k8s/internal-ca.yaml) ·
+[`mosquitto/mosquitto-tls.conf`](../mosquitto/mosquitto-tls.conf) ·
+`mosquitto.tls.internalClients` in [`values.yaml`](../deploy/helm/acs-cymru/values.yaml) and the
+client-TLS block in [`.env.example`](../.env.example) ·
+[`_helpers.tpl`](../deploy/helm/acs-cymru/templates/_helpers.tpl)'s DSN helper ·
+[`datasources.template.yml`](../grafana/provisioning/datasources/datasources.template.yml) ·
+[`check-compose-chart-parity.mjs`](../scripts/check-compose-chart-parity.mjs) ·
+**not yet filed as an issue**
+
+### What is already built, so that it is not re-argued
+
+Default-deny NetworkPolicy on Kubernetes, with **both directions generated from one edge list** and a
+CI check asserting the pairs are symmetric. An internal CA whose root deliberately lives outside the
+chart. TLS on the Ingress and on the broker's 8883 listener with a TLS 1.2 floor. The broker ACL's
+`%u` confinement. The `apikey` gate and the single statement of origin policy in `envoy.yaml`. And a
+principle worth quoting because the rest of this item leans on it: **there is deliberately no "skip
+verification" setting anywhere in this stack**, on the grounds that TLS which does not verify is
+indistinguishable from an interception. None of that is in question here.
+
+### The gap is that NetworkPolicy answers *who*, and nothing answers *what is on the wire*
+
+**Every internal hop is plaintext, and four files say so by name.** `sslmode=disable` is written into
+GoTrue's DSN on Compose, into the PostgREST authenticator DSN the chart's `dsn` helper builds, and
+into **both** Grafana datasources on both targets. PostgREST on 3000, GoTrue on 9999, storage on 5000,
+functions on 9000 and `pg_net`'s quarantine call to `node-red:1880` are all HTTP.
+
+**That is a different question from the one the policy layer answers, and it is easy to mistake one
+for the other.** A NetworkPolicy makes a path reachable only from the right pod label; it says nothing
+about what is legible to something that has already landed on a pod at either end of an allowed edge,
+or on the CNI between them. On the Postgres links what is legible is scoped role credentials and every
+row in the platform. **The most valuable link in the stack is the one with the weakest transport**, and
+the reason is historical rather than considered: these DSNs were written before there was a CA to
+issue against, and nothing has revisited them since `internal-ca.yaml` landed.
+
+### The cheapest real move is a switch that already exists and defaults off
+
+`mosquitto.tls.internalClients` moves the ingestion daemon, i3X and Node-RED to 8883 **together** —
+one switch for all three deliberately, because they share a trust domain and a partial migration
+would only create a configuration nobody tests. All three **fail closed** if the CA is unreadable.
+The NetworkPolicy edge list already derives `$brokerPort` from the same flag, so the policy follows
+it without editing. Compose has the equivalent in `MQTT_TLS_ENABLED` / `MQTT_TLS_CA_FILE`.
+
+**It is off by default on both targets, and the default is the whole of the work.** Turning it on is
+not a feature; deciding it is the supported posture, and moving the documentation and CI to match, is.
+
+### Postgres is the link worth taking next, and it is the one with real cost
+
+The internal CA already issues leaves, so the certificates are not the problem — the DSNs and the
+naming are. `require` gets encryption without solving verification; `verify-full` is the target and
+needs the certificate to name the service the client dials, which on Compose is a container name and
+on Kubernetes a Service DNS name. **Compose has no cert-manager**, so this is the point where the two
+targets need separate mechanisms for the same property, which is exactly the divergence the rest of
+this repository spends its effort preventing.
+
+### The two targets disagree about security posture, and nothing compares them
+
+`check-compose-chart-parity.mjs` exists because work landed on Compose and the chart did not follow,
+six times in one branch — and it now compares the two targets **as sets of services**. It does not
+compare their posture, and on posture they are not close: **the whole default-deny layer is
+Kubernetes-only**, and Compose has no equivalent and no seam for one. That is a defensible position —
+a single-host Compose stack has a Docker network rather than a cluster — but it is currently an
+undocumented one, and "Compose is a supported target" is stated elsewhere in the repository as a
+constraint on other decisions. **What is missing is the statement of what Compose is and is not
+expected to enforce**, so that a control present on one target and absent on the other is a recorded
+decision rather than a discovery.
+
+### The two database ports are published for a reason that does not require publishing them
+
+Compose binds `5433:5432` and `${SUPABASE_DB_PORT:-54322}:5432` on all interfaces. The reason is
+recorded in `deploy/k8s/README.md` and in CI, and it is **collision avoidance with a local Postgres**
+— the *number* is what matters, and `127.0.0.1:5433:5432` avoids the collision identically while
+taking two databases off the host's network.
+
+**The precedent for that is already in the same file, twice, with the argument written out.** Studio
+is bound to `127.0.0.1` because "the only way to reach it from elsewhere is an SSH tunnel, which is
+the correct amount of friction for a tool that can drop a table", and Prometheus the same way. A raw
+Postgres port is the tool that can drop a table. The comment beside the remaining published ports
+states the rule the stack means to follow — everything else is published because it **authenticates**
+(Grafana, the frontend, Node-RED) or is **a protocol endpoint that has to be reachable** (the broker)
+— and the two databases satisfy neither clause. This is the smallest change in this item and the
+largest reduction in exposed surface.
+
+### Plaintext 1883 is deliberate today and should have an end state
+
+The listener stays open because in-network services speak to the broker over the Docker network, and
+the NetworkPolicy comment correctly explains that a fleet migrates gateway by gateway, so a window
+where both ports are in use is the normal state rather than an edge case. **What is missing is that
+the window has an end.** `mosquitto.external.plaintext` already gates the external half; once
+`internalClients` is on, nothing on either target needs 1883, and the default should say so.
+
+### A service mesh is the complete answer and is the wrong size
+
+Automatic mTLS on every HTTP hop, with identity-based authorisation that pod-label selectors only
+approximate, is genuinely what the first section asks for. It is also a second control plane, a proxy
+in every pod, and a second identity system beside the CA this deployment already runs — **and it does
+nothing for Compose**, so it would widen the divergence above rather than close it. Per-service TLS
+issued by the CA that already exists reaches most of the same place on both targets. **Revisit if
+Compose stops being a supported target**, which is the same condition `envoy.yaml` attaches to
+HTTPRoute, and for the same reason.
+
+### The gateway link's upgrade is client certificates, and it is sequenced behind §8
+
+`mosquitto-tls.conf` states the current position and its cost explicitly: password authentication over
+TLS, `require_certificate false`, because turning it on means `use_identity_as_username` replaces the
+password file "at which point the ACL's `%u` no longer matches the sparkplug_id the provisioning
+script writes."
+
+**That objection has an answer: issue the client certificate with `CN = <sparkplug_id>`, and `%u`
+matches again** — `mosquitto.acl` needs no change at all. `enroll-gateway` already mints a per-gateway
+credential and already writes the CA into the bundle, so returning a signed client certificate fits
+the enrolment model that exists rather than replacing it. The gain is that a gateway's identity stops
+being a bearer secret that can be replayed by anything that reads it.
+
+**The cost is revocation, and it is why this waits.** Mosquitto's `crlfile` is awkward and needs a
+reload to take effect — which is precisely the gap §8 exists to close, and §8's own strongest argument
+is already that *a revoked gateway which is already connected keeps publishing*. Client certificates
+make that sharper, not softer. **This is the intended direction; it should not start before §8.**
+
+### What this must not touch
+
+The `%u` confinement in `mosquitto.acl`, which is enforced independently of transport and is not
+improved by any of this. The origin policy's single home in `envoy.yaml` — encrypting a hop is not a
+reason to state CORS a second way. The internal CA root's residence outside the chart. The
+fail-closed behaviour of every TLS client here, and the absence of a skip-verification setting: a
+switch added "temporarily" to get past a naming problem during this work is the one change that would
+leave the stack worse than it started.
+
+### Worth deciding early
+
+- **Whether Compose is in scope for the posture, or only for the transport.** Encrypting hops is
+  achievable on both targets; a policy layer is not. Saying so plainly is better than a chart that is
+  hardened and a Compose stack that is assumed to be.
+- **`require` or `verify-full` for Postgres.** `require` is a week's less work and stops a passive
+  reader; only `verify-full` stops an active one, and the difference is entirely in the certificate
+  naming, not in the client configuration.
+- **Whether `internalClients` and the loopback bindings flip in the same change.** They should not.
+  One is a transport migration with a fail-closed mode; the other is two lines and no runtime risk,
+  and bundling them means the risky half gates the free half.
+- **Where the posture statement lives.** `check-compose-chart-parity.mjs` compares the targets and
+  prints known gaps on every run precisely so a gap nobody is looking at cannot hide — which makes it
+  the natural home for "Compose does not have a policy layer, and here is what stands in for it",
+  rather than a paragraph in a README that nothing checks.
 
 ---

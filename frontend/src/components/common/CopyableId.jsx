@@ -46,7 +46,24 @@ export async function copyText(text) {
  * announced as an action. Feedback is inline and self-contained -- an optional `onNotify`
  * lets a parent that already has a toast surface the result more prominently.
  */
-export default function CopyableId({ value, label = 'identifier', title, onNotify, className = '' }) {
+/**
+ * `display` SHOWS SOMETHING SHORTER THAN WHAT IT COPIES, for values too long to belong in a column.
+ *
+ * The Access Control page is the case it was added for: a mint command runs to ~70 characters, and
+ * rendering it in full gave one column more width than the four that carry the actual answer --
+ * what the identity is, what it holds, what that reaches, and what stands against it. The command
+ * is a thing you copy, not a thing you read.
+ *
+ * WHAT DOES NOT CHANGE IS THE CLIPBOARD PATH. `value` is still what gets copied, `copyText`'s
+ * execCommand fallback still matters (the dashboard is served over plain HTTP, so
+ * `navigator.clipboard` is undefined for anyone reaching it by IP), and the failed state is still
+ * surfaced rather than swallowed. A bespoke button in the page would have re-implemented all three,
+ * and the third is the one that gets forgotten.
+ *
+ * THE ARIA LABEL STILL NAMES THE VALUE, deliberately. A screen-reader user pressing "Copy Command"
+ * should learn WHICH command, and that is the one place the full text still belongs.
+ */
+export default function CopyableId({ value, label = 'identifier', title, onNotify, className = '', display }) {
   const [state, setState] = useState(null) // 'copied' | 'failed'
   const timer = useRef(null)
 
@@ -76,11 +93,13 @@ export default function CopyableId({ value, label = 'identifier', title, onNotif
     <button
       type="button"
       onClick={handleCopy}
-      className={`copyable-id mono ${className}`}
+      // `mono` only when showing the value itself. A fixed label like "Copy Command" is prose and
+      // reads worse in a monospace face beside the buttons it sits next to.
+      className={`copyable-id ${display ? '' : 'mono'} ${className}`.trim()}
       title={title || `Click to copy this ${label}`}
       aria-label={`Copy ${label} ${value}`}
     >
-      <span className="copyable-id-value">{value}</span>
+      <span className="copyable-id-value">{display || value}</span>
       {state === 'copied'
         ? <IconCheck size={12} className="copyable-id-icon" />
         : <IconCopy size={12} className="copyable-id-icon" />}

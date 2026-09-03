@@ -557,15 +557,22 @@ export function AccessControlTab({ showToast }) {
                             <CopyableId
                               value={meta.mintCommand.replace('{id}', p.principal_id)}
                               label="mint command"
-                              title="Copy the host command. Still the break-glass path: it works when nobody can sign in to this page."
+                              display="Copy Command"
+                              title={`Copy \`${meta.mintCommand.replace('{id}', p.principal_id)}\` — the break-glass path, which works when nobody can sign in to this page.`}
                               onNotify={showToast}
                             />
                           </div>
                         ) : (
                           <CopyableId
                             value={meta.mintCommand.replace('{id}', p.principal_id)}
-                            label="mint command"
-                            title={'Copy the command. This identity\'s key lives in .env and is read at boot, so rotating it — not minting a new token — is what changes what the process presents. It records the issue before writing, and names the containers to restart.'}
+                            label="rotate command"
+                            display="Copy Command"
+                            // THE TOOLTIP CARRIES THE DISTINCTION NOW THAT THE LABEL CANNOT.
+                            // Both rows read "Copy Command", so the command itself is named here --
+                            // and it is `npm run keys:rotate`, not the MCP mint, which is the whole
+                            // reason this column is per-principal. An operator who copies without
+                            // hovering still gets the right command; one who hovers learns why.
+                            title={`Copy \`${meta.mintCommand.replace('{id}', p.principal_id)}\` — this identity's key lives in .env and is read at boot, so ROTATING it, not minting a new token, is what changes what the process presents. It records the issue before writing, and names the containers to restart.`}
                             onNotify={showToast}
                           />
                         )}
