@@ -3,6 +3,7 @@ import { api } from '../../api'
 import CopyableId from '../common/CopyableId'
 import { GatewayBundleModal } from '../modals/GatewayBundleModal'
 import { GatewayCredentialModal } from '../modals/GatewayCredentialModal'
+import { ServiceTokenModal } from '../modals/ServiceTokenModal'
 import { IconArchive, IconDownload, IconLock, IconRefreshCw, IconShieldAlert } from '../common/Icons'
 import {
   CREDENTIAL_STATES,
@@ -16,6 +17,7 @@ import {
   BROKER_PRINCIPALS,
   GATEWAY_ACL_PATTERN,
   describePrincipal,
+  isMintableFromPage,
   roleReach,
   tokenStatus,
   tokenStatusDetail,
@@ -66,6 +68,10 @@ export function AccessControlTab({ showToast }) {
   const [credentialForGw, setCredentialForGw] = useState(null)
   const [principals, setPrincipals] = useState([])
   const [tokens, setTokens] = useState(() => new Map())
+  // { principal, name } while the mint dialog is open. The NAME is carried rather than re-derived
+  // in the modal: describePrincipal() lives here, and a modal that looked it up again would be a
+  // second place for an undocumented principal to be labelled differently.
+  const [mintFor, setMintFor] = useState(null)
   // ITS OWN ERROR, not folded into loadError. The two reads have DIFFERENT authority -- gateway
   // credentials accept Shopfloor_Manager, service principals are Administrator-only (0042) -- so a
   // single error state would blame the whole page for a refusal that applies to one section.
@@ -513,39 +519,56 @@ export function AccessControlTab({ showToast }) {
                           {tokenStatusLabel(status)}
                         </span>
                       </td>
-                      {/* THE COMMAND, NOT A BUTTON — AND THE REASON HAS NOW HALF EXPIRED.
+                      {/* A BUTTON WHERE A TOKEN IS ACTUALLY READ, AND THE COMMAND EVERYWHERE ELSE.
                           Minting stayed on the host because these tokens could not be revoked, so
-                          issuing one should cost more than a click. 0074 removed that premise:
+                          issuing one should cost more than a click. 0074 removed that premise —
                           `revoke_service_token()` withdraws a jti and `auth_pre_request()` refuses
-                          it on every PostgREST request thereafter. Roadmap item 3 is explicit that
-                          this is the order the work goes in — *"Build revocation first and the same
-                          RPC stops being a hazard"* — so a mint button is now reachable rather than
-                          refused, and it is simply not built yet.
+                          it on every PostgREST request after — and roadmap item 3 is explicit that
+                          this is the order: *"Build revocation first and the same RPC stops being a
+                          hazard."*
 
-                          IT STAYS A COMMAND UNTIL THEN, deliberately: a page that offered minting
-                          while the revocation it depends on had no control of its own would be the
-                          same failure in a new place. What the page can do meanwhile is remove the
-                          part that is error-prone — transcribing a UUID — so the whole line is
-                          copyable.
-
-                          IT IS PER-PRINCIPAL, AND IT USED NOT TO BE. Every row rendered
+                          IT IS PER-PRINCIPAL, AND IT USED NOT TO BE. Every row once rendered
                           `mint-mcp-token.mjs --principal <id>`, which is wrong for two of the three
-                          this stack ships with -- and wrong in the direction that does damage. That
+                          this stack ships with — and wrong in the direction that does damage. That
                           script WOULD sign a token for Service_Ingestor: same subject, same secret,
                           entirely valid. No worker would ever read it, because the daemon takes its
-                          key from the environment. The result is a second unrevocable credential
-                          for a privileged identity, issued by an operator who was following the
-                          page, and nothing fixed. It also contradicted the coverage note directly
-                          below it, which named the right commands all along. */}
+                          key from the environment. The result is a second privileged credential,
+                          issued by an operator who was following the page, and nothing fixed.
+
+                          THE BUTTON INHERITS THAT DISTINCTION RATHER THAN DISCARDING IT. Offering
+                          it on every row would reintroduce the same mistake through a nicer
+                          control, so `isMintableFromPage()` decides — see its header — and the two
+                          environment-key identities keep the rotate command that actually changes
+                          what their process presents. */}
                       <td>
-                        <CopyableId
-                          value={meta.mintCommand.replace('{id}', p.principal_id)}
-                          label="mint command"
-                          title={meta.mintCommand.startsWith('npm run keys:rotate')
-                            ? 'Copy the command. This identity\'s key lives in .env and is read at boot, so rotating it — not minting a new token — is what changes what the process presents. It records the issue before writing, and names the containers to restart.'
-                            : 'Copy the command. It runs on the host that has .env, records the issue in the Digital Thread, and only then prints the token.'}
-                          onNotify={showToast}
-                        />
+                        {isMintableFromPage(meta) ? (
+                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                            <button
+                              className="btn btn-ghost"
+                              onClick={() => setMintFor({ principal: p, name: meta.name })}
+                              title="Sign a token for this identity and show it once. Recorded in the Digital Thread before it is returned, and revocable against the API afterwards."
+                            >
+                              <IconLock size={13} /> Issue Token
+                            </button>
+                            {/* KEPT BESIDE IT, NOT REPLACED. `mint-mcp-token.mjs` survives as
+                                break-glass for the reason item 3 gives: a stack whose only
+                                Administrator cannot sign in still needs a way to mint. What
+                                changed is that it stopped being the only way. */}
+                            <CopyableId
+                              value={meta.mintCommand.replace('{id}', p.principal_id)}
+                              label="mint command"
+                              title="Copy the host command. Still the break-glass path: it works when nobody can sign in to this page."
+                              onNotify={showToast}
+                            />
+                          </div>
+                        ) : (
+                          <CopyableId
+                            value={meta.mintCommand.replace('{id}', p.principal_id)}
+                            label="mint command"
+                            title={'Copy the command. This identity\'s key lives in .env and is read at boot, so rotating it — not minting a new token — is what changes what the process presents. It records the issue before writing, and names the containers to restart.'}
+                            onNotify={showToast}
+                          />
+                        )}
                       </td>
                     </tr>
                   )
@@ -661,6 +684,20 @@ export function AccessControlTab({ showToast }) {
           gateway={bundleForGw}
           confirmFirst={bundleForGw.confirmFirst}
           onClose={afterAction}
+          showToast={showToast}
+        />
+      )}
+
+      {/* NOT `afterAction`, WHICH THE TWO GATEWAY MODALS USE. That helper closes the dialog and
+          reloads the credential inventory; this one has to reload the TOKEN inventory instead, so
+          the new mint appears in the row's status badge rather than the operator wondering whether
+          it worked. `load()` refreshes all three reads, which is cheap and avoids a second code
+          path that could drift from it. */}
+      {mintFor && (
+        <ServiceTokenModal
+          principal={mintFor.principal}
+          principalName={mintFor.name}
+          onClose={() => { setMintFor(null); load() }}
           showToast={showToast}
         />
       )}

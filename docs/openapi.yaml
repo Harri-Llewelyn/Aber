@@ -1767,6 +1767,99 @@ paths:
             The broker credential service is unreachable or refused. Nothing was changed — no
             account was created and no audit row written.
 
+  /functions/v1/mint-service-token:
+    post:
+      tags: [Edge Functions]
+      summary: Sign a long-lived token for a service principal and reveal it once
+      description: |
+        Signs an HS256 JWT naming a **service principal** as its subject, records the issue, and
+        returns the token. It is shown once and is not recoverable: nothing in the stack keeps a
+        copy, and the signature is reproducible only from `JWT_SECRET`.
+
+        **Why this is a function and not an RPC.** `pgjwt` is installed, so a `SECURITY DEFINER`
+        RPC could sign in-database — but `SUPABASE_JWT_SECRET` is *not* in that database, and
+        putting it there is the thing to avoid. That key signs anything, `service_role` included,
+        and such a token is accepted by storage, realtime, the edge runtime and Studio, none of
+        which consult the revocation denylist. The edge runtime already holds the key for signing,
+        so the key stays put and the mint comes to it.
+
+        **Minting ADDS a credential; it does not replace one.** This is the opposite of
+        `/functions/v1/gateway-credential`, where the broker holds one password per username. Two
+        mints a week apart are two live tokens, each revoked separately.
+
+        Requires `Administrator`. The check is made twice on purpose: here, and again inside
+        `record_service_token_issued()`, which re-reads `user_roles` before it will attribute a
+        mint — so authorisation does not rest solely on a check made in the component that also
+        holds the signing key.
+
+        **The row is written before the token is returned, and a failure to record withholds it.**
+        `revoke_service_token()` refuses a `jti` with no `TOKEN_MINTED` row, so an unrecorded token
+        would be one nobody could ever withdraw. That is the one case where this endpoint discards
+        a valid credential rather than returning it.
+
+        > **Revocation reaches PostgREST only.** `revoke_service_token()` denylists the `jti` and
+        > `auth_pre_request()` refuses it on every subsequent API request — but storage, realtime,
+        > the edge runtime and Studio verify the signature independently. For those four the expiry
+        > is still the only bound, which is why the ceiling is 90 days and shorter is better.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [principal_id]
+              properties:
+                principal_id:
+                  type: string
+                  format: uuid
+                  description: >-
+                    The service principal to sign for. Must be an `auth.users` row that cannot
+                    sign in; a person's account is refused, because a long-lived token for one
+                    would be a standing escalation of that person's session.
+                days:
+                  type: integer
+                  minimum: 1
+                  maximum: 90
+                  default: 30
+                  description: TTL in whole days, bounded by `service_token_max_days()`.
+      responses:
+        '200':
+          description: The token, plus the identifiers needed to revoke it later.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: The signed JWT. Shown once; nothing keeps a copy.
+                  jti:
+                    type: string
+                    format: uuid
+                    description: >-
+                      The handle for revoking this token. Recorded in `digital_thread` — unlike the
+                      token itself — so it survives the dialog being closed.
+                  principal_id: { type: string, format: uuid }
+                  expires_at:   { type: string, format: date-time }
+                  audit_row_id:
+                    type: integer
+                    format: int64
+                    description: The `digital_thread` row recording the mint.
+                  revocation_scope:
+                    type: string
+                    enum: [postgrest]
+                    description: >-
+                      What a later revocation would actually reach. Returned rather than assumed by
+                      the caller, so a page cannot claim coverage this stack does not have.
+        '400':
+          description: >-
+            `principal_id` malformed or absent, `days` out of range, or the principal refused —
+            it can sign in, does not exist, or the mint could not be recorded. In the last case no
+            token is returned even though one was signed.
+        '401': { description: Missing or invalid Authorization header. }
+        '403': { description: 'Forbidden: requires Administrator.' }
+        '500': { description: '`JWT_SECRET` is not set, so this worker cannot sign.' }
+
   /functions/v1/revoke-gateway-credential:
     post:
       tags: [Edge Functions]

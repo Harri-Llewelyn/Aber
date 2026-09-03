@@ -611,7 +611,14 @@ function edgeFunctionNames() {
    * when that day comes -- and an empty map means the check now fails on the FIRST redeclaration
    * rather than on the twelfth.
    */
-  const INTENDED_REDECLARATIONS = {};
+  const INTENDED_REDECLARATIONS = {
+    // 0075 gives it a fifth argument, `p_actor_id`, so a token minted from the Access Control page
+    // records the Administrator who asked rather than the 'service' attribution 0043 pinned when
+    // every caller was a host script. It DROPs the four-argument form first -- a defaulted fifth
+    // argument alongside it would make a four-argument call ambiguous -- so the last declaration
+    // winning is exactly what is wanted here, and the baseline's copy is the one being replaced.
+    'public.record_service_token_issued': '0075 adds p_actor_id; the baseline holds the pre-0075 form',
+  };
 
   const files = readdirSync(join(REPO, dir), { withFileTypes: true })
     .filter((e) => e.isFile() && /^\d+_.*\.sql$/.test(e.name))

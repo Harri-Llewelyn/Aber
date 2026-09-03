@@ -866,6 +866,62 @@ const apiMethods = {
   },
 
   /**
+   * Sign a long-lived token for a service principal and get it back ONCE.
+   *
+   * SAME SHAPE AS mintGatewayCredential ABOVE, and for the same reasons: a raw fetch rather than
+   * `functions.invoke()` so both minting paths read alike, the CALLER's token rather than the anon
+   * key, and `details` preferred over `error` because the database's own sentence is the one an
+   * operator can act on ("... can sign in, so it is a person's account").
+   *
+   * WHAT COMES BACK IS UNRECOVERABLE. Nothing stores the token -- the signature is reproducible
+   * only from JWT_SECRET, which lives in the edge runtime and nowhere a browser can reach -- so a
+   * caller that drops this value must mint again. Unlike a broker credential, minting again does
+   * NOT replace the previous one: both are valid until they expire or are revoked, which is why
+   * the modal says so and why revoking is a separate act.
+   *
+   * @param {string} principalId the service principal to sign for
+   * @param {number} [days] TTL, bounded by service_token_max_days() at both tiers
+   */
+  mintServiceToken: async (principalId, days) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/mint-service-token`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        // The CALLER's token, and here it is load-bearing twice over: the function resolves the
+        // caller's role from it, and record_service_token_issued() re-checks that same id before
+        // it will write an attributed row. The anon key would fail both.
+        Authorization: `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(days ? { principal_id: principalId, days } : { principal_id: principalId })
+    });
+
+    let body = null;
+    try { body = await res.json(); } catch { /* non-JSON body */ }
+
+    if (!res.ok) {
+      throw new Error(body?.details || body?.error || `Could not mint a token (${res.status})`);
+    }
+
+    return body;
+  },
+
+  /**
+   * Withdraw a minted token, so PostgREST refuses it from the next request onward.
+   *
+   * NOT A COMPLETE REVOCATION, AND THE CALLER MUST SAY SO. `auth_pre_request()` is a PostgREST
+   * hook (0074); storage, realtime, the edge runtime and Studio each verify the JWT signature for
+   * themselves and consult no denylist, so a withdrawn token still satisfies those four until it
+   * expires. The RPC records the same scope on its audit row.
+   */
+  revokeServiceToken: async (jti) => {
+    const { data, error } = await supabase.rpc('revoke_service_token', { p_jti: jti });
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  /**
    * Flow backups for one gateway, newest first.
    *
    * Storage `list()` is scoped to the gateway's own prefix, which is where RLS confines writes

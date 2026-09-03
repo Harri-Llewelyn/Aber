@@ -186,6 +186,44 @@ export function describePrincipal(principalId) {
   }
 }
 
+/** The mint command that signs a token a client will actually present. */
+const MCP_MINT_PREFIX = 'node scripts/mint-mcp-token.mjs'
+
+/**
+ * Whether the Access Control page should offer to mint a token for this principal.
+ *
+ * =================================================================================================
+ * NOT EVERY SERVICE PRINCIPAL, AND THE EXCLUSION IS THE WHOLE REASON THIS FUNCTION EXISTS.
+ *
+ * `Service_Ingestor` and `Service_Playback` take their keys from the ENVIRONMENT -- the daemon and
+ * the playback worker read `SUPABASE_INGESTION_KEY` and `SUPABASE_PLAYBACK_KEY` at boot. A token
+ * minted for either is a perfectly valid credential that no process will ever read, so the mint
+ * changes nothing except that another privileged credential now exists. Their `mintCommand` says
+ * `npm run keys:rotate` for exactly that reason, and the note beside it in KNOWN_PRINCIPALS spells
+ * out why `mint-mcp-token.mjs` is the wrong tool for them.
+ *
+ * THIS IS THE SAME MISTAKE THE mintCommand COLUMN WAS BUILT TO PREVENT, arriving through a button
+ * instead of a copied line. Every row once rendered the MCP command; an operator following the page
+ * would mint for the ingestion identity, nothing would change, and the stack would carry a second
+ * unrevocable-in-practice credential for a privileged account. A button offered on every row
+ * reintroduces that exactly.
+ *
+ * Roadmap item 3 reaches the same answer from the other direction, under "Worth deciding early":
+ * *"Surfacing them read-only and leaving rotation to `npm run keys:rotate` keeps the one control
+ * that has a recovery path attached to it."*
+ *
+ * =================================================================================================
+ * KEYED ON THE MINT COMMAND RATHER THAN ON A LIST OF IDS, so a principal
+ * `create_service_principal()` creates at runtime is INCLUDED without anybody adding it here. Such
+ * a principal falls through to `describePrincipal()`'s default, whose `mintCommand` is the MCP one
+ * -- and that default is right about it for the reason recorded there: a principal nobody has
+ * documented is most likely one made at runtime, and this is exactly how a token for one is issued.
+ */
+export function isMintableFromPage(meta) {
+  return !!meta && typeof meta.mintCommand === 'string'
+    && meta.mintCommand.startsWith(MCP_MINT_PREFIX)
+}
+
 export function roleReach(roles) {
   if (!roles || roles.length === 0) {
     // A principal with NO role reaches nothing through RLS -- every policy names a role -- but it

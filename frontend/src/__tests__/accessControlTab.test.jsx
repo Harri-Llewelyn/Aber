@@ -17,6 +17,9 @@ vi.mock('../components/modals/GatewayCredentialModal', () => ({
 vi.mock('../components/modals/GatewayBundleModal', () => ({
   GatewayBundleModal: () => <div data-testid="bundle-modal" />
 }))
+vi.mock('../components/modals/ServiceTokenModal', () => ({
+  ServiceTokenModal: ({ principalName }) => <div data-testid="token-modal">{principalName}</div>
+}))
 
 const provisioned = {
   id: '12000000-0000-4000-8000-000000000001',
@@ -181,6 +184,64 @@ describe('AccessControlTab', () => {
     await waitFor(() => expect(screen.getByText('Service_Ingestor')).toBeTruthy())
     expect(screen.getByText('Service_Playback')).toBeTruthy()
     expect(screen.queryByText(/Undocumented principal/i)).toBeNull()
+  })
+
+  /**
+   * THE MINT BUTTON IS OFFERED WHERE A TOKEN IS ACTUALLY READ, AND NOWHERE ELSE.
+   *
+   * This is the same distinction the per-principal mintCommand column was built for, arriving
+   * through a control instead of a copied line. `mint-mcp-token.mjs` would happily sign a token for
+   * Service_Ingestor -- same subject, same secret, entirely valid -- and no worker would ever read
+   * it, because the daemon takes its key from the environment. A button on that row means an
+   * operator following the page issues a privileged credential that fixes nothing.
+   *
+   * Asserted per row rather than by counting buttons: a global count would pass if the button
+   * appeared on the WRONG row and vanished from the right one.
+   */
+  it('offers Issue Token for an MCP-style principal and not for the two environment keys', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listServicePrincipals.mockResolvedValue([
+      MCP_PRINCIPAL,
+      { principal_id: 'b0000000-0000-4000-8000-000000000002', roles: ['Operator'], created_at: null, can_sign_in: false },
+      { principal_id: 'b0000000-0000-4000-8000-000000000003', roles: ['Operator'], created_at: null, can_sign_in: false }
+    ])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
+
+    const rowFor = (name) => screen.getByText(name).closest('tr')
+    expect(within(rowFor('MCP read-only client')).queryByRole('button', { name: /Issue Token/i })).toBeTruthy()
+    expect(within(rowFor('Service_Ingestor')).queryByRole('button', { name: /Issue Token/i })).toBeNull()
+    expect(within(rowFor('Service_Playback')).queryByRole('button', { name: /Issue Token/i })).toBeNull()
+  })
+
+  /**
+   * A principal `create_service_principal()` made at runtime HAS no entry in KNOWN_PRINCIPALS and
+   * must still be mintable -- describePrincipal()'s fallback names the MCP command for it, and the
+   * button follows that rather than a hardcoded list of ids. Keyed the other way round, adding a
+   * runtime principal would mean editing the frontend before anybody could issue it a token.
+   */
+  it('offers Issue Token for an undocumented principal, because the fallback mint command is the MCP one', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    api.listServicePrincipals.mockResolvedValue([
+      { principal_id: 'c0000000-0000-4000-8000-000000000009', roles: [], created_at: null, can_sign_in: false }
+    ])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText(/Undocumented principal/i)).toBeTruthy())
+    expect(screen.getByRole('button', { name: /Issue Token/i })).toBeTruthy()
+  })
+
+  it('opens the token dialog for the principal whose button was pressed', async () => {
+    api.listGatewayCredentials.mockResolvedValue([])
+    render(<AccessControlTab showToast={vi.fn()} />)
+
+    await waitFor(() => expect(screen.getByText('MCP read-only client')).toBeTruthy())
+    screen.getByRole('button', { name: /Issue Token/i }).click()
+
+    // The NAME is carried into the modal rather than looked up again there, so asserting it here
+    // is asserting that the right row opened the dialog.
+    await waitFor(() => expect(screen.getByTestId('token-modal').textContent).toBe('MCP read-only client'))
   })
 
   it('shows the broker principals and marks which one can publish', async () => {

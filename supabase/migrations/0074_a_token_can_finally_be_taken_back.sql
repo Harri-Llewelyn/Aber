@@ -99,6 +99,11 @@ ALTER TABLE public.revoked_service_tokens ENABLE ROW LEVEL SECURITY;
 -- under. There is deliberately NO insert, update or delete policy: the only writer is
 -- revoke_service_token() below, which is SECURITY DEFINER, so a policy granting write here would
 -- widen the surface without enabling anything the RPC does not already do properly.
+-- DROP THEN CREATE, because every migration here is REPLAYED ON EVERY BOOT and `CREATE POLICY`
+-- has no `IF NOT EXISTS`. Without this, the second `docker compose up` fails db-init with
+-- `policy "..." already exists` -- which takes the whole stack down, since every service that
+-- depends on db-init completing never starts. The same shape appears throughout 0069 and 0001.
+DROP POLICY IF EXISTS revoked_service_tokens_select_privileged ON public.revoked_service_tokens;
 CREATE POLICY revoked_service_tokens_select_privileged
   ON public.revoked_service_tokens
   FOR SELECT TO authenticated

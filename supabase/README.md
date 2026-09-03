@@ -1495,16 +1495,58 @@ overlap. Rotating a ten-year one left ten years.
 
 ### The Access Control page states what is outstanding
 
-Since nothing can be revoked, knowing how many unexpired tokens exist and when the first lapses
-*is* the safety story — an inventory question, which is what the page is for. It lists every gateway
-with what the platform knows about its broker credential, lists the machine identities on both
-planes, lets an Administrator create one, and shows what tokens stand against it.
+The page lists every gateway with what the platform knows about its broker credential, lists the
+machine identities on both planes, lets an Administrator create one, mints tokens for the identities
+that read one, and shows what stands against each.
 
 `tokenStatus()` counts **every** unexpired mint rather than reading the latest, because a re-mint
 adds a live credential rather than replacing one — reporting the newer of two would state half the
 exposure on the one page whose job is to state all of it.
 
-Built by `0041`–`0044`, `supabase/functions/gateway-credential`,
+#### Tokens became revocable in `0074`, and the mint followed in `0075`
+
+This section used to open *"Since nothing can be revoked, knowing how many unexpired tokens exist
+and when the first lapses **is** the safety story."* That was the honest position for as long as it
+held, and it no longer does.
+
+`0043` surveyed three revocation designs and found none workable: deleting the `auth.users` row does
+nothing (the signature is validated and the subject never looked up), removing the role does nothing
+that matters (the relations the i3X address space is assembled from are
+`FOR SELECT TO authenticated USING (true)`), and a `revoked_at` predicate would have to be added to
+every RLS policy in the schema. **The fourth design is PostgREST's `db-pre-request`** — a function
+run in the caller's role before every request, which can `RAISE` and abort it, and which touches no
+policy at all. `0074` adds `revoked_service_tokens`, `auth_pre_request()` and
+`revoke_service_token()`; `PGRST_DB_PRE_REQUEST` names the hook on both targets.
+
+**The key it needs had been recorded since `0043`.** Both host scripts stamp a `jti` and hand it to
+`record_service_token_issued()`, for an inventory that could not act on it.
+
+**Revocation reaches PostgREST and nothing else, and the page says so.** `supabase-storage`,
+`supabase-realtime`, the edge runtime (which boots `VERIFY_JWT="false"`) and Studio each verify
+`SUPABASE_JWT_SECRET` for themselves and consult no denylist. That is complete coverage for what
+this is about — the MCP reader and `Service_Ingestor` reach PostgREST and nothing else — but the
+expiry is still the only bound that reaches every service, which is why the 90-day ceiling stays.
+
+**`0075` is the mint, and it is deliberately not an RPC.** Roadmap item 3 sketched a
+`SECURITY DEFINER` function signing with `pgjwt`, on the reasoning that it needed "no secret leaving
+the database". The extension is installed; the premise is not true — `SUPABASE_JWT_SECRET` is not in
+this database, and `vault` holds four secrets, none of them that one. Putting it there would let any
+path to SQL execution mint a `service_role` token, which is valid at the four services above and
+which `0074` cannot revoke. So the signing lives in
+[`mint-service-token`](functions/mint-service-token/index.ts), which already holds `JWT_SECRET`, and
+`0075`'s change to the database is narrower: `record_service_token_issued()` gains `p_actor_id`, so a
+mint from the page names the Administrator who asked instead of the `'service'` attribution `0043`
+pinned when every caller was a host script. The actor is **re-checked** against `user_roles` there
+rather than believed, so authorisation does not rest solely on a check made inside the component
+that holds the signing key.
+
+**The button is not offered on every row.** `Service_Ingestor` and `Service_Playback` read their
+keys from the environment, so a token minted for either is valid and unread —
+`isMintableFromPage()` is the rule, and those two keep `npm run keys:rotate`, which is what actually
+changes what those processes present.
+
+Built by `0041`–`0044`, `0074`, `0075`, `supabase/functions/gateway-credential`,
+`supabase/functions/mint-service-token`,
 [`AccessControlTab.jsx`](../frontend/src/components/tabs/AccessControlTab.jsx),
 [`credentialState.js`](../frontend/src/utils/credentialState.js) and
 [`serviceIdentities.js`](../frontend/src/utils/serviceIdentities.js).
