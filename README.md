@@ -333,7 +333,7 @@ Full runbook in [`deploy/k8s/README.md`](deploy/k8s/README.md). The short versio
 ```bash
 # Five images are built from this repository and are on no registry.
 docker build -f supabase/functions/Dockerfile -t acs-cymru/edge-runtime:0.1.0 .   # context: repo root
-docker build -f Dockerfile                    -t acs-cymru/ingestion:0.1.0 .      # context: repo root
+docker build -f ingestion/Dockerfile          -t acs-cymru/ingestion:0.1.0 .      # context: repo root
 docker build -f node-red/Dockerfile           -t acs-cymru/node-red:0.1.0 node-red
 docker build -f frontend/Dockerfile --build-arg VITE_RUNTIME_CONFIG=true \
                                               -t acs-cymru/frontend:0.1.0 frontend
@@ -417,9 +417,9 @@ live services went unlisted: the tag it named (`alpine:3.24`) still existed, so 
 | `mosquitto-init` | `acs-cymru_mosquitto_init` | `eclipse-mosquitto:2.0.22` | — |
 | `mosquitto` | `acs-cymru_mosquitto` | `eclipse-mosquitto:2.0.22` | `1883`, `9001` |
 | `frontend` | `acs-cymru_frontend` | `./frontend/Dockerfile` | `3000:3000` |
-| `ingestion` | `acs-cymru_ingestion` | `./Dockerfile` | `9108:9108` |
-| `playback` | `acs-cymru_playback` | `./Dockerfile` (same image as `ingestion`, different command) | — |
-| `cold-archiver` | `acs-cymru_cold_archiver` | `./Dockerfile` (same image as `ingestion`, different command) | — |
+| `ingestion` | `acs-cymru_ingestion` | `./ingestion/Dockerfile` | `9108:9108` |
+| `playback` | `acs-cymru_playback` | `./ingestion/Dockerfile` (same image as `ingestion`, different command) | — |
+| `cold-archiver` | `acs-cymru_cold_archiver` | `./ingestion/Dockerfile` (same image as `ingestion`, different command) | — |
 | `i3x-service` | `acs-cymru_i3x` | `./i3x/Dockerfile` | `8090:8090` |
 | `gateway-credential` | `acs-cymru_gateway_credential` | `./gateway-credential/Dockerfile` | — |
 | `node-red-init` | `acs-cymru_node_red_init` | `./node-red/Dockerfile` | — |

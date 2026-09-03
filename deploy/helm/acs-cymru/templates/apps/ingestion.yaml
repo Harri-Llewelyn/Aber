@@ -106,8 +106,9 @@ spec:
             limits: { memory: 128Mi }
       containers:
         - name: ingestion
-          # BUILT FROM the repository-root Dockerfile (it compiles sparkplug_b.proto with protoc at
-          # build time), not pulled:  docker build -f Dockerfile -t <repo>:<tag> .
+          # BUILT FROM ingestion/Dockerfile with the REPOSITORY ROOT as context (it compiles
+          # sparkplug_b.proto with protoc at build time, and the .proto is at the root), not
+          # pulled:  docker build -f ingestion/Dockerfile -t <repo>:<tag> .
           image: {{ include "acs-cymru.image" (dict "image" .Values.ingestion.image "ctx" $) | quote }}
           imagePullPolicy: {{ .Values.ingestion.image.pullPolicy }}
           env:

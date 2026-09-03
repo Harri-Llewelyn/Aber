@@ -300,12 +300,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Context is the REPOSITORY ROOT: the Dockerfile compiles sparkplug_b.proto with protoc and
-      # the .proto lives there.
+      # Context is the REPOSITORY ROOT: ingestion/Dockerfile compiles sparkplug_b.proto with protoc
+      # and the .proto lives there.
       - name: Build ingestion
         run: |
           set -eu
-          docker build -f Dockerfile -t "$IMAGE_NAMESPACE/ingestion:$V" \
+          docker build -f ingestion/Dockerfile -t "$IMAGE_NAMESPACE/ingestion:$V" \
             --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
             --label "org.opencontainers.image.revision=${{ github.sha }}" \
             --label "org.opencontainers.image.version=$V" \

@@ -1391,7 +1391,7 @@ services:
     container_name: acs-cymru_ingestion
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: ingestion/Dockerfile
     restart: always
     # PUBLISHED SO IT CAN BE SCRAPED, and there is nothing here to scrape it with -- this stack
     # ships no Prometheus, and Grafana holds two Postgres datasources and no others. The port is
@@ -1528,7 +1528,7 @@ services:
     container_name: acs-cymru_cold_archiver
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: ingestion/Dockerfile
     restart: always
     command: ["python", "-m", "cold_archive", "--drop", "--loop", "${COLD_ARCHIVE_INTERVAL_SECONDS:-86400}"]
     environment:
@@ -1576,7 +1576,7 @@ services:
     container_name: acs-cymru_playback
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: ingestion/Dockerfile
     command: ["python", "playback_worker.py"]
     restart: always
     environment:

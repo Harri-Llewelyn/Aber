@@ -984,8 +984,9 @@ ingestion:
   dbUser: "ingest_writer"
   enabled: true
   image:
-    # BUILT FROM the repository-root Dockerfile, not pulled:
-    #   docker build -f Dockerfile -t <repo>:<tag> .
+    # BUILT FROM ingestion/Dockerfile, not pulled. Context is the REPOSITORY ROOT, because the
+    # image compiles sparkplug_b.proto and the .proto lives there:
+    #   docker build -f ingestion/Dockerfile -t <repo>:<tag> .
     #
     # PUBLISHED -- see supabaseFunctions.image for what the empty tag means.
     repository: ghcr.io/harri-llewelyn/acs-cymru/ingestion

@@ -464,8 +464,8 @@ V=$(grep -E '^appVersion:' deploy/helm/acs-cymru/Chart.yaml | head -1 \
 # Edge functions — context is the REPOSITORY ROOT, because templates/physical-gateway is outside supabase/functions/
 docker build -f supabase/functions/Dockerfile   -t $NS/edge-runtime:$V .
 
-# Ingestion daemon — also repository root; the Dockerfile compiles sparkplug_b.proto with protoc
-docker build -f Dockerfile                      -t $NS/ingestion:$V .
+# Ingestion daemon — also repository root; ingestion/Dockerfile compiles sparkplug_b.proto with protoc
+docker build -f ingestion/Dockerfile            -t $NS/ingestion:$V .
 
 # Node-RED — a CUSTOM image is required, not a convenience: settings.js lives on the data volume
 # and Node resolves require() from the requiring file's location, so passport-oauth2 has to be

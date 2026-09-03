@@ -1753,7 +1753,7 @@ jobs:
           # Context is the REPOSITORY ROOT for these two: templates/physical-gateway and
           # sparkplug_b.proto both live there.
           docker build -f supabase/functions/Dockerfile -t "$IMG_NS/edge-runtime:$V" .
-          docker build -f Dockerfile                    -t "$IMG_NS/ingestion:$V" .
+          docker build -f ingestion/Dockerfile          -t "$IMG_NS/ingestion:$V" .
           docker build -f node-red/Dockerfile           -t "$IMG_NS/node-red:$V" node-red
           # i3X server -- repository root again, for sparkplug_b.proto.
           docker build -f i3x/Dockerfile                -t "$IMG_NS/i3x-service:$V" .

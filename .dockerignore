@@ -1,5 +1,5 @@
 # Build-context exclusions for the images built from the REPOSITORY ROOT:
-#   Dockerfile                      -> ingestion daemon
+#   ingestion/Dockerfile            -> ingestion daemon
 #   supabase/functions/Dockerfile   -> edge runtime (needs templates/physical-gateway)
 #   tests/Dockerfile                -> conformance test runner
 #
